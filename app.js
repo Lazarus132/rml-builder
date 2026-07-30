@@ -816,6 +816,12 @@ function generateCode() {
       .map(part => toPascalCase(part, "Namespace"))
       .join(".") || "YourModNamespace";
   const hasControllers = controllers.length > 0;
+  const immediateSaveControllers =
+    controllers.filter(
+      entry =>
+        entry.node.saveMode ===
+        "on-change"
+    );
   const runtimeEntries = entries.filter(
     entry => entry.node.reaction !== "stored"
   );
@@ -825,6 +831,12 @@ function generateCode() {
   const startupEntries = runtimeEntries.filter(entry =>
     reactionIncludesStartup(entry.node.reaction)
   );
+  const immediateSaveGuide =
+    immediateSaveControllers.length > 0
+      ? ` * Immediate navigation saving requires an RML build that provides
+ * ConfigurationVisibilityControllerSaveMode.
+`
+      : "";
   const guide = metadata.includeGuide
     ? `// RML configuration template version: 1.5
 
@@ -839,6 +851,8 @@ function generateCode() {
  * explicitly enabled for them in the builder.
  * Each navigation enum independently chooses whether its selected page is
  * saved by Save Settings or immediately when the selection changes.
+${immediateSaveGuide} * The normal Save Settings mode uses the interface default and does not require
+ * the newer immediate-save API.
  * Replace the TODO comments in the generated Apply... methods with mod logic.
  */
 
@@ -982,16 +996,12 @@ ${changedBranches}
           )})`
       )
       .join(" ||\n            ");
-    const controllerSaveModes = controllers
+    const controllerSaveModes = immediateSaveControllers
       .map(entry => {
         const field = toPascalCase(
           entry.node.fieldName,
           "ActivePage"
         );
-        const mode =
-          entry.node.saveMode === "on-change"
-            ? "OnSelectionChanged"
-            : "OnSaveSettings";
 
         return `        if (ReferenceEquals(
                 key,
@@ -999,10 +1009,25 @@ ${changedBranches}
         {
             return
                 ConfigurationVisibilityControllerSaveMode
-                    .${mode};
+                    .OnSelectionChanged;
         }`;
       })
       .join("\n\n");
+    const controllerSaveModeBlock =
+      immediateSaveControllers.length > 0
+        ? `
+    public ConfigurationVisibilityControllerSaveMode
+        GetConfigurationVisibilityControllerSaveMode(
+            ModConfigurationKey key)
+    {
+${controllerSaveModes}
+
+        return
+            ConfigurationVisibilityControllerSaveMode
+                .OnSaveSettings;
+    }
+`
+        : "";
     visibilityBlock = `
     public bool IsConfigurationKeyVisible(
         ModConfiguration configuration,
@@ -1023,17 +1048,7 @@ ${keyBranches}
         return
             ${controllerChecks};
     }
-
-    public ConfigurationVisibilityControllerSaveMode
-        GetConfigurationVisibilityControllerSaveMode(
-            ModConfigurationKey key)
-    {
-${controllerSaveModes}
-
-        return
-            ConfigurationVisibilityControllerSaveMode
-                .OnSaveSettings;
-    }
+${controllerSaveModeBlock}
 `;
   }
 
@@ -1906,13 +1921,14 @@ function controllerInspectorMarkup(node) {
         )}
         ${optionMarkup(
           "on-change",
-          "Save immediately when the section changes",
+          "Save immediately (requires newer RML API)",
           node.saveMode || "on-save"
         )}
       </select>
       <small>
-        Immediate mode saves only this section enum. Other edited settings
-        remain drafts until Save Settings.
+        Immediate mode saves only this section enum and requires an RML build
+        containing ConfigurationVisibilityControllerSaveMode. Other edited
+        settings remain drafts until Save Settings.
       </small>
     </label>
     ${reactionSelectMarkup(node.reaction)}
