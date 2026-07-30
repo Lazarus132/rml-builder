@@ -833,7 +833,8 @@ function generateCode() {
  * explicitly enabled for them in the builder.
  * Whether navigation selections are persisted immediately or with Save
  * Settings is controlled globally by the user's RML Launcher preference.
- * Replace the TODO comments in the generated Apply... methods with mod logic.
+ * Keep the generated Apply... methods intact. Replace only each TODO-marked
+ * discard statement with a call to the mod-specific logic.
  */
 
 `
@@ -893,8 +894,7 @@ function generateCode() {
             _configuration.GetValue(
                 ${field});
 
-        // TODO: Apply this saved value to the mod.
-        _ = value;
+        _ = value; // TODO: Replace only this line with mod-specific logic.
     }`;
       })
       .join("\n\n");
