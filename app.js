@@ -2,6 +2,8 @@
 
 const STORAGE_KEY = "rml-configuration-builder-standalone-v1";
 const ROOT_CONTAINER = "root";
+const DRAG_SCROLL_EDGE = 110;
+const DRAG_SCROLL_MAX_SPEED = 22;
 
 const TYPE_DEFINITIONS = [
   { type: "bool", label: "Boolean", group: "Core", badge: "BOOL" },
@@ -160,6 +162,10 @@ const state = {
 
 const elements = {};
 
+let dragScrollActive = false;
+let dragPointerY = null;
+let dragScrollFrame = null;
+
 function makeSampleSetting(
   id,
   valueType,
@@ -304,6 +310,36 @@ function findNode(nodes, id) {
       }
     }
   }
+  return null;
+}
+
+function findNodeContainerId(
+  nodes,
+  nodeId,
+  currentContainerId = ROOT_CONTAINER
+) {
+  for (const node of nodes) {
+    if (node.id === nodeId) {
+      return currentContainerId;
+    }
+
+    if (node.kind !== "controller") {
+      continue;
+    }
+
+    for (const option of node.options) {
+      const containerId = findNodeContainerId(
+        option.children,
+        nodeId,
+        option.id
+      );
+
+      if (containerId !== null) {
+        return containerId;
+      }
+    }
+  }
+
   return null;
 }
 
@@ -1303,12 +1339,14 @@ function renderPalette() {
       addPaletteItem(button.dataset.palette, state.activeContainerId);
     });
     button.addEventListener("dragstart", event => {
+      beginDragScrolling(event);
       event.dataTransfer.setData(
         "application/x-rml-palette",
         button.dataset.palette
       );
       event.dataTransfer.effectAllowed = "copy";
     });
+    button.addEventListener("dragend", finishDragInteraction);
   });
 }
 
@@ -1344,18 +1382,24 @@ function nodeCardMarkup(node) {
     body = `<div class="controller-options">
       ${node.options
         .map(
-          option => `<section class="option-lane">
+          option => `<section
+            class="option-lane${
+              state.activeContainerId === option.id
+                ? " active-container"
+                : ""
+            }${
+              state.dragOverContainer === option.id
+                ? " drag-over"
+                : ""
+            }"
+            data-container="${escapeHtml(option.id)}">
             <header class="option-heading">
               <span>${escapeHtml(option.name)}</span>
               <small>${option.children.length} item${
                 option.children.length === 1 ? "" : "s"
               }</small>
             </header>
-            <div
-              class="drop-zone${
-                state.dragOverContainer === option.id ? " drag-over" : ""
-              }"
-              data-container="${escapeHtml(option.id)}">
+            <div class="drop-zone">
               ${
                 option.children.length
                   ? option.children.map(nodeCardMarkup).join("")
@@ -1396,12 +1440,112 @@ function allowContainerDrop(container, event) {
   )
     ? "move"
     : "copy";
-  document.querySelectorAll(".drop-zone, .builder-canvas").forEach(zone => {
+  document.querySelectorAll(".option-lane, .builder-canvas").forEach(zone => {
     zone.classList.toggle(
       "drag-over",
       (zone.dataset.container || ROOT_CONTAINER) === container
     );
   });
+}
+
+function clearDragFeedback() {
+  state.dragOverContainer = null;
+  document
+    .querySelectorAll(".option-lane.drag-over, .builder-canvas.drag-over")
+    .forEach(zone => zone.classList.remove("drag-over"));
+}
+
+function beginDragScrolling(event) {
+  dragScrollActive = true;
+  dragPointerY =
+    Number.isFinite(event?.clientY)
+      ? event.clientY
+      : null;
+
+  if (dragScrollFrame === null) {
+    dragScrollFrame =
+      window.requestAnimationFrame(runDragScrolling);
+  }
+}
+
+function updateDragScrolling(event) {
+  if (!dragScrollActive) {
+    return;
+  }
+
+  dragPointerY = event.clientY;
+}
+
+function runDragScrolling() {
+  dragScrollFrame = null;
+
+  if (!dragScrollActive) {
+    return;
+  }
+
+  if (dragPointerY !== null) {
+    const viewportHeight =
+      window.innerHeight ||
+      document.documentElement.clientHeight;
+
+    let scrollAmount = 0;
+
+    if (dragPointerY < DRAG_SCROLL_EDGE) {
+      const intensity =
+        (DRAG_SCROLL_EDGE - Math.max(0, dragPointerY)) /
+        DRAG_SCROLL_EDGE;
+
+      scrollAmount =
+        -Math.ceil(
+          DRAG_SCROLL_MAX_SPEED *
+          intensity
+        );
+    } else if (
+      dragPointerY >
+      viewportHeight - DRAG_SCROLL_EDGE
+    ) {
+      const intensity =
+        (
+          dragPointerY -
+          (viewportHeight - DRAG_SCROLL_EDGE)
+        ) /
+        DRAG_SCROLL_EDGE;
+
+      scrollAmount =
+        Math.ceil(
+          DRAG_SCROLL_MAX_SPEED *
+          Math.min(1, intensity)
+        );
+    }
+
+    if (scrollAmount !== 0) {
+      window.scrollBy(
+        0,
+        scrollAmount
+      );
+    }
+  }
+
+  dragScrollFrame =
+    window.requestAnimationFrame(runDragScrolling);
+}
+
+function stopDragScrolling() {
+  dragScrollActive = false;
+  dragPointerY = null;
+
+  if (dragScrollFrame !== null) {
+    window.cancelAnimationFrame(
+      dragScrollFrame
+    );
+
+    dragScrollFrame = null;
+  }
+}
+
+function finishDragInteraction() {
+  stopDragScrolling();
+  clearDragFeedback();
 }
 
 function handleDrop(containerId, event) {
@@ -1411,7 +1555,7 @@ function handleDrop(containerId, event) {
     "application/x-rml-palette"
   );
   const nodeId = event.dataTransfer.getData("application/x-rml-node");
-  state.dragOverContainer = null;
+  finishDragInteraction();
   if (paletteType) {
     addPaletteItem(paletteType, containerId);
     return;
@@ -1447,17 +1591,30 @@ function bindCanvasInteractions() {
   document.querySelectorAll("[data-node-id]").forEach(card => {
     card.addEventListener("click", event => {
       event.stopPropagation();
-      state.selectedId = card.dataset.nodeId;
+      const nodeId =
+        card.dataset.nodeId;
+
+      state.selectedId =
+        nodeId;
+
+      state.activeContainerId =
+        findNodeContainerId(
+          state.nodes,
+          nodeId
+        ) ?? ROOT_CONTAINER;
+
       renderAll();
     });
     card.addEventListener("dragstart", event => {
       event.stopPropagation();
+      beginDragScrolling(event);
       event.dataTransfer.setData(
         "application/x-rml-node",
         card.dataset.nodeId
       );
       event.dataTransfer.effectAllowed = "move";
     });
+    card.addEventListener("dragend", finishDragInteraction);
   });
   document.querySelectorAll("[data-delete-node]").forEach(button => {
     button.addEventListener("click", event => {
@@ -1480,10 +1637,7 @@ function bindCanvasInteractions() {
     zone.addEventListener("click", event => {
       event.stopPropagation();
       state.activeContainerId = containerId;
-      elements.activeContainerName.textContent = findContainerName(
-        state.nodes,
-        containerId
-      );
+      renderCanvas();
     });
     zone.addEventListener("dragover", event =>
       allowContainerDrop(containerId, event)
@@ -1494,6 +1648,13 @@ function bindCanvasInteractions() {
     zone.addEventListener("dragleave", event => {
       if (!zone.contains(event.relatedTarget)) {
         zone.classList.remove("drag-over");
+
+        if (
+          state.dragOverContainer ===
+          containerId
+        ) {
+          state.dragOverContainer = null;
+        }
       }
     });
   });
@@ -1508,13 +1669,18 @@ function bindCanvasInteractions() {
     elements.activeContainerName.textContent = "Root";
   };
   elements.builderCanvas.ondragover = event => {
-    if (event.target === elements.builderCanvas) {
+    if (!event.target.closest("[data-container]")) {
       allowContainerDrop(ROOT_CONTAINER, event);
     }
   };
   elements.builderCanvas.ondrop = event => {
-    if (event.target === elements.builderCanvas) {
+    if (!event.target.closest("[data-container]")) {
       handleDrop(ROOT_CONTAINER, event);
+    }
+  };
+  elements.builderCanvas.ondragleave = event => {
+    if (!elements.builderCanvas.contains(event.relatedTarget)) {
+      clearDragFeedback();
     }
   };
 }
@@ -2187,12 +2353,32 @@ function initialize() {
     addPaletteItem("controller", state.activeContainerId)
   );
   structureButton.addEventListener("dragstart", event => {
+    beginDragScrolling(event);
     event.dataTransfer.setData(
       "application/x-rml-palette",
       "controller"
     );
     event.dataTransfer.effectAllowed = "copy";
   });
+  structureButton.addEventListener("dragend", finishDragInteraction);
+
+  document.addEventListener(
+    "dragover",
+    updateDragScrolling,
+    true
+  );
+
+  document.addEventListener(
+    "drop",
+    finishDragInteraction,
+    true
+  );
+
+  document.addEventListener(
+    "dragend",
+    finishDragInteraction,
+    true
+  );
 
   document
     .getElementById("load-example")
