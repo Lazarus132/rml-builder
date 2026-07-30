@@ -42,7 +42,6 @@ const SAMPLE_NODES = [
     description: "Selects the visible settings page.",
     enumName: "SettingsPage",
     defaultOption: "General",
-    saveMode: "on-save",
     reaction: "stored",
     options: [
       {
@@ -445,7 +444,6 @@ function makeController() {
     description: "Selects the visible settings section.",
     enumName: `SettingsPage${suffix}`,
     defaultOption: "General",
-    saveMode: "on-save",
     reaction: "stored",
     options: [
       { id: createId("option"), name: "General", children: [] },
@@ -510,10 +508,6 @@ function normalizeNodes(nodes) {
     if (node.kind === "controller") {
       return {
         ...node,
-        saveMode:
-          node.saveMode === "on-change"
-            ? "on-change"
-            : "on-save",
         options: node.options.map(option => ({
           ...option,
           children: normalizeNodes(option.children)
@@ -816,12 +810,6 @@ function generateCode() {
       .map(part => toPascalCase(part, "Namespace"))
       .join(".") || "YourModNamespace";
   const hasControllers = controllers.length > 0;
-  const immediateSaveControllers =
-    controllers.filter(
-      entry =>
-        entry.node.saveMode ===
-        "on-change"
-    );
   const runtimeEntries = entries.filter(
     entry => entry.node.reaction !== "stored"
   );
@@ -831,12 +819,6 @@ function generateCode() {
   const startupEntries = runtimeEntries.filter(entry =>
     reactionIncludesStartup(entry.node.reaction)
   );
-  const immediateSaveGuide =
-    immediateSaveControllers.length > 0
-      ? ` * Immediate navigation saving requires an RML build that provides
- * ConfigurationVisibilityControllerSaveMode.
-`
-      : "";
   const guide = metadata.includeGuide
     ? `// RML configuration template version: 1.5
 
@@ -849,10 +831,8 @@ function generateCode() {
  * Numeric scalar settings use a slider when a maximum is provided.
  * Navigation enums only control RML visibility unless a runtime reaction was
  * explicitly enabled for them in the builder.
- * Each navigation enum independently chooses whether its selected page is
- * saved by Save Settings or immediately when the selection changes.
-${immediateSaveGuide} * The normal Save Settings mode uses the interface default and does not require
- * the newer immediate-save API.
+ * Whether navigation selections are persisted immediately or with Save
+ * Settings is controlled globally by the user's RML Launcher preference.
  * Replace the TODO comments in the generated Apply... methods with mod logic.
  */
 
@@ -996,38 +976,6 @@ ${changedBranches}
           )})`
       )
       .join(" ||\n            ");
-    const controllerSaveModes = immediateSaveControllers
-      .map(entry => {
-        const field = toPascalCase(
-          entry.node.fieldName,
-          "ActivePage"
-        );
-
-        return `        if (ReferenceEquals(
-                key,
-                ${field}))
-        {
-            return
-                ConfigurationVisibilityControllerSaveMode
-                    .OnSelectionChanged;
-        }`;
-      })
-      .join("\n\n");
-    const controllerSaveModeBlock =
-      immediateSaveControllers.length > 0
-        ? `
-    public ConfigurationVisibilityControllerSaveMode
-        GetConfigurationVisibilityControllerSaveMode(
-            ModConfigurationKey key)
-    {
-${controllerSaveModes}
-
-        return
-            ConfigurationVisibilityControllerSaveMode
-                .OnSaveSettings;
-    }
-`
-        : "";
     visibilityBlock = `
     public bool IsConfigurationKeyVisible(
         ModConfiguration configuration,
@@ -1048,7 +996,6 @@ ${keyBranches}
         return
             ${controllerChecks};
     }
-${controllerSaveModeBlock}
 `;
   }
 
@@ -1910,26 +1857,6 @@ function controllerInspectorMarkup(node) {
     <label>
       Default section
       <select data-field="defaultOption">${defaults}</select>
-    </label>
-    <label>
-      Navigation selection persistence
-      <select data-field="saveMode">
-        ${optionMarkup(
-          "on-save",
-          "Save with Save Settings",
-          node.saveMode || "on-save"
-        )}
-        ${optionMarkup(
-          "on-change",
-          "Save immediately (requires newer RML API)",
-          node.saveMode || "on-save"
-        )}
-      </select>
-      <small>
-        Immediate mode saves only this section enum and requires an RML build
-        containing ConfigurationVisibilityControllerSaveMode. Other edited
-        settings remain drafts until Save Settings.
-      </small>
     </label>
     ${reactionSelectMarkup(node.reaction)}
   </div>`;
