@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta
+    name="description"
+    content="Build copy-ready ResoniteModLoader configuration code visually.">
+  <title>RML Configuration Builder</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="shortcut icon" href="./favicon.svg">
+  <link rel="icon" href="./favicon.svg">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand-mark" aria-hidden="true">
+      <span></span>
+      <span></span>
+    </div>
+    <div class="brand-copy">
+      <small>Resonite Mod Loader</small>
+      <h1>Configuration Builder</h1>
+    </div>
+    <div class="local-state">
+      <span></span>
+      Draft saved locally
+    </div>
+    <div class="top-actions">
+      <button id="load-example" class="button secondary" type="button">
+        Load example
+      </button>
+      <button id="new-blank" class="button secondary" type="button">
+        New blank
+      </button>
+      <button id="download-code" class="button secondary" type="button">
+        Download .cs
+      </button>
+      <button id="copy-code" class="button primary" type="button">
+        Copy C#
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <section class="identity panel">
+      <div class="panel-title">
+        <span><small>Step 1</small> Mod identity</span>
+      </div>
+      <div class="identity-grid">
+        <label>
+          Mod name
+          <input id="mod-name" autocomplete="off">
+        </label>
+        <label>
+          Author
+          <input id="author" autocomplete="off">
+        </label>
+        <label>
+          Version
+          <input id="version" autocomplete="off">
+        </label>
+        <label>
+          Namespace
+          <input id="namespace-name" autocomplete="off">
+        </label>
+        <label>
+          C# class
+          <input id="class-name" autocomplete="off">
+        </label>
+        <label>
+          Mod description
+          <input id="mod-description" autocomplete="off">
+        </label>
+      </div>
+    </section>
+
+    <section class="workspace">
+      <aside class="palette panel">
+        <div class="panel-title">
+          <span><small>Step 2</small> Add controls</span>
+          <b id="item-count">0</b>
+        </div>
+        <p class="help">
+          Click to add to the selected drop zone, or drag a type directly into
+          a section.
+        </p>
+
+        <div id="palette-content"></div>
+
+        <div class="palette-group structure">
+          <h2>Structure</h2>
+          <button
+            class="palette-item controller-item"
+            type="button"
+            draggable="true"
+            data-palette="controller">
+            <span>§</span>
+            <strong>Section enum</strong>
+            <b>＋</b>
+          </button>
+          <p>
+            Creates an enum controller whose values become visible settings
+            pages. Section enums can be nested.
+          </p>
+        </div>
+      </aside>
+
+      <section class="canvas panel">
+        <div class="panel-title canvas-title">
+          <span><small>Step 3</small> Configuration outline</span>
+          <em>Adding to: <strong id="active-container-name">Root</strong></em>
+        </div>
+        <div id="builder-canvas" class="builder-canvas"></div>
+      </section>
+
+      <aside class="inspector panel">
+        <div class="panel-title">
+          <span><small>Step 4</small> Properties</span>
+        </div>
+        <div id="inspector-content"></div>
+      </aside>
+    </section>
+
+    <section class="code-panel panel">
+      <div class="code-toolbar">
+        <div>
+          <small>Step 5</small>
+          <h2>Generated C#</h2>
+          <span id="code-summary"></span>
+        </div>
+        <label class="guide-toggle">
+          <input id="include-guide" type="checkbox">
+          Include guidance comments
+        </label>
+        <button id="download-code-bottom" class="button secondary" type="button">
+          Download .cs
+        </button>
+        <button id="copy-code-bottom" class="button primary" type="button">
+          Copy C#
+        </button>
+      </div>
+      <div id="diagnostics" class="diagnostics" hidden></div>
+      <pre><code id="generated-code"></code></pre>
+    </section>
+  </main>
+
+  <footer>
+    <strong>RML Configuration Builder</strong>
+    <span>
+      Runs entirely in this browser. No source code or configuration data is
+      uploaded.
+    </span>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
