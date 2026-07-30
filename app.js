@@ -42,6 +42,7 @@ const SAMPLE_NODES = [
     description: "Selects the visible settings page.",
     enumName: "SettingsPage",
     defaultOption: "General",
+    saveMode: "on-save",
     reaction: "stored",
     options: [
       {
@@ -444,6 +445,7 @@ function makeController() {
     description: "Selects the visible settings section.",
     enumName: `SettingsPage${suffix}`,
     defaultOption: "General",
+    saveMode: "on-save",
     reaction: "stored",
     options: [
       { id: createId("option"), name: "General", children: [] },
@@ -457,6 +459,103 @@ function componentCount(type) {
   if (type.endsWith("3")) return 3;
   if (type.endsWith("4")) return 4;
   return 1;
+}
+
+function isScalarNumericType(type) {
+  return ["int", "float", "double"].includes(type);
+}
+
+function isVectorType(type) {
+  return /^(int|float|double)[234]$/.test(type);
+}
+
+function numericComponentType(type) {
+  if (type.startsWith("int")) return "int";
+  if (type.startsWith("float")) return "float";
+  if (type.startsWith("double")) return "double";
+  return null;
+}
+
+function supportsSlider(setting) {
+  return (
+    setting.kind === "setting" &&
+    isScalarNumericType(setting.valueType)
+  );
+}
+
+function allowedValidatorModes(type) {
+  const modes = ["none", "custom"];
+  if (type === "float" || type === "double") {
+    modes.push("finite");
+  }
+  if (isScalarNumericType(type)) {
+    modes.push("range");
+  }
+  if (type === "Uri") {
+    modes.push("absolute-uri", "http-uri");
+  }
+  return modes;
+}
+
+function normalizeNodes(nodes) {
+  return nodes.map(node => {
+    if (node.kind === "controller") {
+      return {
+        ...node,
+        saveMode:
+          node.saveMode === "on-change"
+            ? "on-change"
+            : "on-save",
+        options: node.options.map(option => ({
+          ...option,
+          children: normalizeNodes(option.children)
+        }))
+      };
+    }
+
+    return {
+      ...node,
+      useSlider:
+        supportsSlider(node) &&
+        Boolean(node.useSlider),
+      validatorMode: allowedValidatorModes(
+        node.valueType
+      ).includes(node.validatorMode)
+        ? node.validatorMode
+        : "none"
+    };
+  });
+}
+
+function isIntegerLiteral(value) {
+  return /^[+-]?\d+$/.test(String(value).trim());
+}
+
+function isFloatLiteral(value) {
+  return /^[+-]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:[eE][+-]?\d+)?[fF]?$/.test(
+    String(value).trim()
+  );
+}
+
+function isDoubleLiteral(value) {
+  return /^[+-]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:[eE][+-]?\d+)?[dD]?$/.test(
+    String(value).trim()
+  );
+}
+
+function isValidNumericLiteral(value, type) {
+  if (type === "int") return isIntegerLiteral(value);
+  if (type === "float") return isFloatLiteral(value);
+  if (type === "double") return isDoubleLiteral(value);
+  return false;
+}
+
+function numericLiteralNumber(value) {
+  return Number(
+    String(value)
+      .trim()
+      .replace(/[fFdD]$/, "")
+  );
 }
 
 function typedNumber(value, type) {
@@ -568,10 +667,14 @@ function validatorExpression(setting) {
 }
 
 function hasOptionalArguments(setting) {
+  const useSlider =
+    supportsSlider(setting) &&
+    setting.useSlider;
+
   return (
     setting.hidden ||
     setting.validatorMode !== "none" ||
-    setting.useSlider
+    useSlider
   );
 }
 
@@ -587,10 +690,22 @@ function settingDeclaration(setting, path) {
     `() => ${defaultExpression(setting)}`
   ];
   if (hasOptionalArguments(setting)) {
+    const useSlider =
+      supportsSlider(setting) &&
+      setting.useSlider;
+
     args.push(setting.hidden ? "true" : "false");
     args.push(validatorExpression(setting));
-    args.push(setting.useSlider ? sliderNumber(setting.minimum) : "null");
-    args.push(setting.useSlider ? sliderNumber(setting.maximum) : "null");
+    args.push(
+      useSlider
+        ? sliderNumber(setting.minimum)
+        : "null"
+    );
+    args.push(
+      useSlider
+        ? sliderNumber(setting.maximum)
+        : "null"
+    );
   }
   const pathComment =
     path.length > 0
@@ -712,6 +827,8 @@ function generateCode() {
  * Numeric scalar settings use a slider when a maximum is provided.
  * Navigation enums only control RML visibility unless a runtime reaction was
  * explicitly enabled for them in the builder.
+ * Each navigation enum independently chooses whether its selected page is
+ * saved by Save Settings or immediately when the selection changes.
  * Replace the TODO comments in the generated Apply... methods with mod logic.
  */
 
@@ -855,6 +972,27 @@ ${changedBranches}
           )})`
       )
       .join(" ||\n            ");
+    const controllerSaveModes = controllers
+      .map(entry => {
+        const field = toPascalCase(
+          entry.node.fieldName,
+          "ActivePage"
+        );
+        const mode =
+          entry.node.saveMode === "on-change"
+            ? "OnSelectionChanged"
+            : "OnSaveSettings";
+
+        return `        if (ReferenceEquals(
+                key,
+                ${field}))
+        {
+            return
+                ConfigurationVisibilityControllerSaveMode
+                    .${mode};
+        }`;
+      })
+      .join("\n\n");
     visibilityBlock = `
     public bool IsConfigurationKeyVisible(
         ModConfiguration configuration,
@@ -874,6 +1012,17 @@ ${keyBranches}
     {
         return
             ${controllerChecks};
+    }
+
+    public ConfigurationVisibilityControllerSaveMode
+        GetConfigurationVisibilityControllerSaveMode(
+            ModConfigurationKey key)
+    {
+${controllerSaveModes}
+
+        return
+            ConfigurationVisibilityControllerSaveMode
+                .OnSaveSettings;
     }
 `;
   }
@@ -942,18 +1091,114 @@ function getDiagnostics() {
         optionNames.add(safeName);
       }
     } else {
+      const componentType =
+        numericComponentType(
+          node.valueType
+        );
+
+      if (
+        isScalarNumericType(
+          node.valueType
+        ) &&
+        !isValidNumericLiteral(
+          node.defaultValue,
+          node.valueType
+        )
+      ) {
+        errors.push(
+          `${field}: default value is not a valid ${node.valueType} literal.`
+        );
+      }
+
+      if (isVectorType(node.valueType)) {
+        const components =
+          node.defaultValue
+            .split(",")
+            .map(value => value.trim());
+        const expected =
+          componentCount(
+            node.valueType
+          );
+
+        if (
+          components.length !== expected ||
+          components.some(
+            value =>
+              !isValidNumericLiteral(
+                value,
+                componentType
+              )
+          )
+        ) {
+          errors.push(
+            `${field}: ${node.valueType} requires exactly ${expected} valid ${componentType} values.`
+          );
+        }
+      }
+
+      if (
+        node.valueType === "bool" &&
+        !["true", "false"].includes(
+          node.defaultValue
+            .trim()
+            .toLowerCase()
+        )
+      ) {
+        errors.push(
+          `${field}: bool must be true or false.`
+        );
+      }
+
       if (node.valueType === "enum") {
         const enumName = toPascalCase(node.enumName, "SettingOption");
         enumNames.set(enumName, (enumNames.get(enumName) || 0) + 1);
         if (node.enumOptions.length < 1) {
           errors.push(`${field}: enum needs at least one option.`);
         }
+        if (
+          !node.enumOptions.some(
+            option =>
+              toPascalCase(option) ===
+              toPascalCase(
+                node.defaultValue
+              )
+          )
+        ) {
+          errors.push(
+            `${field}: select an existing enum default value.`
+          );
+        }
       }
+
+      const usesRange =
+        (supportsSlider(node) &&
+          node.useSlider) ||
+        node.validatorMode === "range";
+
       if (
-        node.useSlider &&
-        Number(node.minimum) >= Number(node.maximum)
+        usesRange &&
+        (!isValidNumericLiteral(
+          node.minimum,
+          node.valueType
+        ) ||
+          !isValidNumericLiteral(
+            node.maximum,
+            node.valueType
+          ))
       ) {
-        errors.push(`${field}: slider maximum must exceed its minimum.`);
+        errors.push(
+          `${field}: minimum and maximum must be valid ${node.valueType} values.`
+        );
+      } else if (
+        usesRange &&
+        numericLiteralNumber(
+          node.minimum
+        ) >=
+          numericLiteralNumber(
+            node.maximum
+          )
+      ) {
+        errors.push(`${field}: maximum must exceed its minimum.`);
       }
       if (
         node.validatorMode === "custom" &&
@@ -993,18 +1238,26 @@ function restore() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (!saved) {
-      state.nodes = clone(SAMPLE_NODES);
+      state.nodes =
+        normalizeNodes(
+          clone(SAMPLE_NODES)
+        );
       return;
     }
     const parsed = JSON.parse(saved);
     state.metadata = { ...DEFAULT_METADATA, ...(parsed.metadata || {}) };
-    state.nodes = Array.isArray(parsed.nodes)
-      ? parsed.nodes
-      : clone(SAMPLE_NODES);
+    state.nodes = normalizeNodes(
+      Array.isArray(parsed.nodes)
+        ? parsed.nodes
+        : clone(SAMPLE_NODES)
+    );
   } catch (error) {
     console.warn("Could not restore the local builder draft.", error);
     state.metadata = { ...DEFAULT_METADATA };
-    state.nodes = clone(SAMPLE_NODES);
+    state.nodes =
+      normalizeNodes(
+        clone(SAMPLE_NODES)
+      );
   }
 }
 
@@ -1272,20 +1525,26 @@ function bindCanvasInteractions() {
       }
     });
   });
-  elements.builderCanvas.addEventListener("click", () => {
+  /*
+   * The root canvas survives renderCanvas(). Assigning these handlers replaces
+   * the previous render's handlers instead of accumulating another set on
+   * every rebuild. Nested zones and cards are recreated with innerHTML and can
+   * safely use addEventListener above.
+   */
+  elements.builderCanvas.onclick = () => {
     state.activeContainerId = ROOT_CONTAINER;
     elements.activeContainerName.textContent = "Root";
-  });
-  elements.builderCanvas.addEventListener("dragover", event => {
+  };
+  elements.builderCanvas.ondragover = event => {
     if (event.target === elements.builderCanvas) {
       allowContainerDrop(ROOT_CONTAINER, event);
     }
-  });
-  elements.builderCanvas.addEventListener("drop", event => {
+  };
+  elements.builderCanvas.ondrop = event => {
     if (event.target === elements.builderCanvas) {
       handleDrop(ROOT_CONTAINER, event);
     }
-  });
+  };
 }
 
 function renderCanvas() {
@@ -1342,8 +1601,132 @@ function reactionSelectMarkup(value) {
   </label>`;
 }
 
+function numericFieldMarkup(
+  label,
+  value,
+  dataField,
+  numericType
+) {
+  const step =
+    numericType === "int"
+      ? "1"
+      : "any";
+  const inputMode =
+    numericType === "int"
+      ? "numeric"
+      : "decimal";
+
+  return `<label>
+    ${escapeHtml(label)}
+    <input
+      type="number"
+      step="${step}"
+      inputmode="${inputMode}"
+      value="${escapeHtml(value)}"
+      data-field="${escapeHtml(
+        dataField
+      )}">
+  </label>`;
+}
+
+function defaultValueMarkup(node) {
+  if (node.valueType === "bool") {
+    const normalized =
+      node.defaultValue
+        .trim()
+        .toLowerCase() === "false"
+        ? "false"
+        : "true";
+
+    return `<label>
+      Default value
+      <select data-field="defaultValue">
+        ${optionMarkup(
+          "true",
+          "true",
+          normalized
+        )}
+        ${optionMarkup(
+          "false",
+          "false",
+          normalized
+        )}
+      </select>
+    </label>`;
+  }
+
+  if (node.valueType === "enum") {
+    return `<label>
+      Default value
+      <select data-field="defaultValue">
+        ${node.enumOptions
+          .map(option =>
+            optionMarkup(
+              option,
+              option,
+              node.defaultValue
+            )
+          )
+          .join("")}
+      </select>
+    </label>`;
+  }
+
+  if (
+    isScalarNumericType(
+      node.valueType
+    )
+  ) {
+    return numericFieldMarkup(
+      "Default value",
+      node.defaultValue,
+      "defaultValue",
+      node.valueType
+    );
+  }
+
+  if (isVectorType(node.valueType)) {
+    const componentType =
+      numericComponentType(
+        node.valueType
+      );
+    const count =
+      componentCount(
+        node.valueType
+      );
+
+    return `<label>
+      Default value
+      <input
+        type="text"
+        inputmode="${
+          componentType === "int"
+            ? "numeric"
+            : "decimal"
+        }"
+        value="${escapeHtml(
+          node.defaultValue
+        )}"
+        data-field="defaultValue"
+        placeholder="${Array(
+          count
+        ).fill("0").join(", ")}">
+      <small>Exactly ${count} comma-separated ${componentType} values.</small>
+    </label>`;
+  }
+
+  return fieldMarkup(
+    "Default value",
+    node.defaultValue,
+    "defaultValue"
+  );
+}
+
 function settingInspectorMarkup(node) {
-  const scalarNumeric = ["int", "float", "double"].includes(node.valueType);
+  const scalarNumeric =
+    isScalarNumericType(
+      node.valueType
+    );
   const enumFields =
     node.valueType === "enum"
       ? `<fieldset>
@@ -1357,6 +1740,10 @@ function settingInspectorMarkup(node) {
           </label>
         </fieldset>`
       : "";
+  const showRangeFields =
+    scalarNumeric &&
+    (node.useSlider ||
+      node.validatorMode === "range");
   const sliderFields = scalarNumeric
     ? `<div class="toggle-row">
         <span>
@@ -1368,10 +1755,20 @@ function settingInspectorMarkup(node) {
         }>
       </div>
       ${
-        node.useSlider
+        showRangeFields
           ? `<div class="split-fields">
-              ${fieldMarkup("Minimum", node.minimum, "minimum")}
-              ${fieldMarkup("Maximum", node.maximum, "maximum")}
+              ${numericFieldMarkup(
+                "Minimum",
+                node.minimum,
+                "minimum",
+                node.valueType
+              )}
+              ${numericFieldMarkup(
+                "Maximum",
+                node.maximum,
+                "maximum",
+                node.valueType
+              )}
             </div>`
           : ""
       }`
@@ -1396,7 +1793,7 @@ function settingInspectorMarkup(node) {
         node.description
       )}</textarea>
     </label>
-    ${fieldMarkup("Default value", node.defaultValue, "defaultValue")}
+    ${defaultValueMarkup(node)}
     ${enumFields}
     <div class="toggle-row">
       <span>
@@ -1478,6 +1875,25 @@ function controllerInspectorMarkup(node) {
       Default section
       <select data-field="defaultOption">${defaults}</select>
     </label>
+    <label>
+      Navigation selection persistence
+      <select data-field="saveMode">
+        ${optionMarkup(
+          "on-save",
+          "Save with Save Settings",
+          node.saveMode || "on-save"
+        )}
+        ${optionMarkup(
+          "on-change",
+          "Save immediately when the section changes",
+          node.saveMode || "on-save"
+        )}
+      </select>
+      <small>
+        Immediate mode saves only this section enum. Other edited settings
+        remain drafts until Save Settings.
+      </small>
+    </label>
     ${reactionSelectMarkup(node.reaction)}
   </div>`;
 }
@@ -1520,6 +1936,16 @@ function bindInspectorInteractions() {
         persist();
       }
     });
+
+    if (
+      input.dataset.field ===
+      "enumOptions"
+    ) {
+      input.addEventListener(
+        "change",
+        renderAll
+      );
+    }
   });
   form.querySelector("[data-inspector-delete]")?.addEventListener(
     "click",
@@ -1714,7 +2140,10 @@ function downloadGeneratedCode() {
 
 function loadExample() {
   state.metadata = { ...DEFAULT_METADATA };
-  state.nodes = clone(SAMPLE_NODES);
+  state.nodes =
+    normalizeNodes(
+      clone(SAMPLE_NODES)
+    );
   state.selectedId = "controller-main";
   state.activeContainerId = ROOT_CONTAINER;
   renderMetadata();
