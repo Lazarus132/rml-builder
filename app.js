@@ -483,6 +483,14 @@ function supportsSlider(setting) {
   );
 }
 
+function usesSlider(setting) {
+  return (
+    supportsSlider(setting) &&
+    (setting.useSlider ||
+      setting.validatorMode === "range")
+  );
+}
+
 function allowedValidatorModes(type) {
   const modes = ["none", "custom"];
   if (type === "float" || type === "double") {
@@ -513,16 +521,20 @@ function normalizeNodes(nodes) {
       };
     }
 
+    const validatorMode =
+      allowedValidatorModes(
+        node.valueType
+      ).includes(node.validatorMode)
+        ? node.validatorMode
+        : "none";
+
     return {
       ...node,
       useSlider:
         supportsSlider(node) &&
-        Boolean(node.useSlider),
-      validatorMode: allowedValidatorModes(
-        node.valueType
-      ).includes(node.validatorMode)
-        ? node.validatorMode
-        : "none"
+        (validatorMode === "range" ||
+          Boolean(node.useSlider)),
+      validatorMode
     };
   });
 }
@@ -668,8 +680,7 @@ function validatorExpression(setting) {
 
 function hasOptionalArguments(setting) {
   const useSlider =
-    supportsSlider(setting) &&
-    setting.useSlider;
+    usesSlider(setting);
 
   return (
     setting.hidden ||
@@ -691,8 +702,7 @@ function settingDeclaration(setting, path) {
   ];
   if (hasOptionalArguments(setting)) {
     const useSlider =
-      supportsSlider(setting) &&
-      setting.useSlider;
+      usesSlider(setting);
 
     args.push(setting.hidden ? "true" : "false");
     args.push(validatorExpression(setting));
@@ -1742,16 +1752,27 @@ function settingInspectorMarkup(node) {
       : "";
   const showRangeFields =
     scalarNumeric &&
-    (node.useSlider ||
-      node.validatorMode === "range");
+    usesSlider(node);
+  const sliderRequiredByValidator =
+    node.validatorMode === "range";
   const sliderFields = scalarNumeric
     ? `<div class="toggle-row">
         <span>
           <strong>Use slider</strong>
-          <small>A maximum enables the scalar numeric slider.</small>
+          <small>${
+            sliderRequiredByValidator
+              ? "Required by the numeric range validator."
+              : "A maximum enables the scalar numeric slider."
+          }</small>
         </span>
         <input type="checkbox" data-field="useSlider"${
-          node.useSlider ? " checked" : ""
+          usesSlider(node)
+            ? " checked"
+            : ""
+        }${
+          sliderRequiredByValidator
+            ? " disabled"
+            : ""
         }>
       </div>
       ${
@@ -1901,6 +1922,33 @@ function controllerInspectorMarkup(node) {
 function changeSelectedNode(field, value) {
   const id = state.selectedId;
   state.nodes = updateNode(state.nodes, id, node => {
+    if (
+      node.kind === "setting" &&
+      field === "validatorMode"
+    ) {
+      return {
+        ...node,
+        validatorMode: value,
+        useSlider:
+          value === "range"
+            ? true
+            : node.useSlider
+      };
+    }
+
+    if (
+      node.kind === "setting" &&
+      field === "useSlider"
+    ) {
+      return {
+        ...node,
+        useSlider:
+          node.validatorMode === "range"
+            ? true
+            : Boolean(value)
+      };
+    }
+
     if (field === "enumOptions" && node.kind === "setting") {
       return {
         ...node,
