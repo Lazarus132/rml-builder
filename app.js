@@ -428,6 +428,12 @@ function colorChannelsToPreview(
     0.0722 * clampedBlue;
 
   return {
+    channels: [
+      red,
+      green,
+      blue,
+      alpha
+    ],
     hex,
     cssColor:
       `rgba(${Math.round(redByte)}, ` +
@@ -507,6 +513,7 @@ function colorXPreview(
   }
 
   return {
+    channels: null,
     hex: "#7f7f7f",
     cssColor:
       "rgba(127, 127, 127, 1)",
@@ -573,8 +580,75 @@ function colorChannelLiteral(
     .replace(/\.$/, "")}f`;
 }
 
+function colorExpressionWithAlpha(
+  expression,
+  alphaByte
+) {
+  const value =
+    String(expression)
+      .trim();
+  const alphaLiteral =
+    colorChannelLiteral(
+      alphaByte
+    );
+  const named =
+    value.match(
+      /^colorX\.([A-Za-z_][A-Za-z0-9_]*)$/
+    );
+
+  if (
+    named &&
+    COLORX_NAMED_PREVIEWS[named[1]]
+  ) {
+    const [red, green, blue] =
+      COLORX_NAMED_PREVIEWS[
+        named[1]
+      ].channels;
+
+    return (
+      "(colorX)new color(" +
+      `${numberColorLiteral(red)}, ` +
+      `${numberColorLiteral(green)}, ` +
+      `${numberColorLiteral(blue)}, ` +
+      `${alphaLiteral})`
+    );
+  }
+
+  const number =
+    "([+-]?(?:(?:\\d+(?:\\.\\d*)?)|(?:\\.\\d+))(?:[eE][+-]?\\d+)?)[fFdD]?";
+  const constructor =
+    value.match(
+      new RegExp(
+        `^(?:new\\s+colorX|\\(\\s*colorX\\s*\\)\\s*new\\s+color)\\s*\\(\\s*${number}\\s*,\\s*${number}\\s*,\\s*${number}(?:\\s*,\\s*${number})?\\s*\\)$`
+      )
+    );
+
+  if (!constructor) {
+    return value;
+  }
+
+  return (
+    "(colorX)new color(" +
+    `${numberColorLiteral(constructor[1])}, ` +
+    `${numberColorLiteral(constructor[2])}, ` +
+    `${numberColorLiteral(constructor[3])}, ` +
+    `${alphaLiteral})`
+  );
+}
+
+function numberColorLiteral(
+  value
+) {
+  const normalized =
+    String(value)
+      .replace(/[fFdD]$/, "");
+
+  return `${normalized}f`;
+}
+
 function colorHexExpression(
-  hex
+  hex,
+  alphaByte = 255
 ) {
   const normalized =
     String(hex)
@@ -603,7 +677,9 @@ function colorHexExpression(
     `${colorChannelLiteral(red)}, ` +
     `${colorChannelLiteral(green)}, ` +
     `${colorChannelLiteral(blue)}, ` +
-    "1f)"
+    `${colorChannelLiteral(
+      alphaByte
+    )})`
   );
 }
 
@@ -2343,6 +2419,23 @@ function colorDefaultValueMarkup(
     colorXPreview(
       node.defaultValue
     );
+  const alphaByte =
+    preview.channels
+      ? clamp(
+          Math.round(
+            preview.channels[3] *
+              255
+          ),
+          0,
+          255
+        )
+      : 255;
+  const alphaPercent =
+    Math.round(
+      alphaByte /
+        255 *
+        100
+    );
 
   return `<fieldset class="color-default-editor">
     <legend>Default color</legend>
@@ -2373,6 +2466,32 @@ function colorDefaultValueMarkup(
           aria-label="Choose default color">
       </span>
     </label>
+    <label class="color-alpha-control">
+      <span class="color-alpha-heading">
+        <span>Alpha</span>
+        <output data-color-alpha-output>${
+          preview.custom
+            ? "Unavailable for custom expression"
+            : `${alphaByte} · ${alphaPercent}%`
+        }</output>
+      </span>
+      <input
+        class="color-alpha-slider"
+        type="range"
+        min="0"
+        max="255"
+        step="1"
+        value="${alphaByte}"
+        data-color-alpha
+        style="--alpha-color: ${escapeHtml(
+          preview.hex
+        )}"
+        aria-label="Default color alpha"${
+          preview.custom
+            ? " disabled"
+            : ""
+        }>
+    </label>
     <label>
       C# colorX expression
       <input
@@ -2381,7 +2500,7 @@ function colorDefaultValueMarkup(
         )}"
         data-field="defaultValue"
         autocomplete="off">
-      <small>The picker writes a standard RGB color. Keep this field for named colors, alpha, HDR values or custom colorX expressions.</small>
+      <small>The picker writes standard RGB and the alpha slider writes opacity. Keep this field for named colors, HDR values or custom colorX expressions.</small>
     </label>
   </fieldset>`;
 }
@@ -2684,6 +2803,14 @@ function updateColorPreview(
     form.querySelector(
       "[data-color-preview]"
     );
+  const alphaInput =
+    form.querySelector(
+      "[data-color-alpha]"
+    );
+  const alphaOutput =
+    form.querySelector(
+      "[data-color-alpha-output]"
+    );
 
   if (
     !picker ||
@@ -2699,6 +2826,43 @@ function updateColorPreview(
 
   picker.value =
     preview.hex;
+
+  if (alphaInput) {
+    alphaInput.style.setProperty(
+      "--alpha-color",
+      preview.hex
+    );
+    alphaInput.disabled =
+      preview.custom;
+
+    if (preview.channels) {
+      const alphaByte =
+        clamp(
+          Math.round(
+            preview.channels[3] *
+              255
+          ),
+          0,
+          255
+        );
+
+      alphaInput.value =
+        String(alphaByte);
+
+      if (alphaOutput) {
+        alphaOutput.textContent =
+          `${alphaByte} · ` +
+          `${Math.round(
+            alphaByte /
+              255 *
+              100
+          )}%`;
+      }
+    } else if (alphaOutput) {
+      alphaOutput.textContent =
+        "Unavailable for custom expression";
+    }
+  }
 
   previewElement.style.setProperty(
     "--preview-color",
@@ -2781,13 +2945,22 @@ function bindInspectorInteractions() {
     form.querySelector(
       "[data-color-picker]"
     );
+  const colorAlpha =
+    form.querySelector(
+      "[data-color-alpha]"
+    );
 
   colorPicker?.addEventListener(
     "input",
     () => {
       const expression =
         colorHexExpression(
-          colorPicker.value
+          colorPicker.value,
+          colorAlpha
+            ? Number(
+                colorAlpha.value
+              )
+            : 255
         );
 
       changeSelectedNode(
@@ -2804,6 +2977,43 @@ function bindInspectorInteractions() {
         expressionInput.value =
           expression;
       }
+
+      updateColorPreview(
+        form,
+        expression
+      );
+
+      updateInspectorOutput();
+    }
+  );
+
+  colorAlpha?.addEventListener(
+    "input",
+    () => {
+      const expressionInput =
+        form.querySelector(
+          '[data-field="defaultValue"]'
+        );
+
+      if (!expressionInput) {
+        return;
+      }
+
+      const expression =
+        colorExpressionWithAlpha(
+          expressionInput.value,
+          Number(
+            colorAlpha.value
+          )
+        );
+
+      changeSelectedNode(
+        "defaultValue",
+        expression
+      );
+
+      expressionInput.value =
+        expression;
 
       updateColorPreview(
         form,
