@@ -246,7 +246,12 @@ function toCamelCase(value) {
 }
 
 function escapeCSharp(value) {
-  return String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return String(value)
+    .replace(/\\/g, "\\\\")
+    .replace(/\r\n|\r|\n/g, "\\n")
+    .replace(/\t/g, "\\t")
+    .replace(/\0/g, "\\0")
+    .replace(/"/g, '\\"');
 }
 
 function escapeHtml(value) {
@@ -1308,7 +1313,7 @@ ${keyBranches}
 namespace ${namespaceName};
 
 ${enums ? `${enums}\n\n` : ""}/// <summary>
-/// ${metadata.description.replace(/\r?\n/g, " ")}
+/// ${metadata.description.replace(/\r\n|\r|\n/g, " ")}
 /// </summary>
 public sealed class ${className}
     : ResoniteMod${interfaceSuffix}
