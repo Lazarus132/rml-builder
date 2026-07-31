@@ -441,31 +441,6 @@ function colorXPreview(
   };
 }
 
-function normalizeColorHex(
-  value
-) {
-  let hex =
-    String(value)
-      .trim()
-      .replace(/^#/, "");
-
-  if (/^[0-9a-fA-F]{3}$/.test(hex)) {
-    hex =
-      hex
-        .split("")
-        .map(character =>
-          character + character
-        )
-        .join("");
-  }
-
-  if (!/^[0-9a-fA-F]{6}$/.test(hex)) {
-    return null;
-  }
-
-  return `#${hex.toLowerCase()}`;
-}
-
 function colorChannelLiteral(
   byteValue
 ) {
@@ -2147,20 +2122,6 @@ function colorDefaultValueMarkup(
       </span>
     </label>
     <label>
-      Hex RGB
-      <input
-        class="color-hex-input"
-        value="${escapeHtml(
-          preview.hex.toUpperCase()
-        )}"
-        data-color-hex
-        maxlength="7"
-        placeholder="#RRGGBB"
-        autocomplete="off"
-        spellcheck="false">
-      <small>Enter #RGB or #RRGGBB. This creates a standard RGB color with full alpha.</small>
-    </label>
-    <label>
       C# colorX expression
       <input
         value="${escapeHtml(
@@ -2467,10 +2428,6 @@ function updateColorPreview(
     form.querySelector(
       "[data-color-picker]"
     );
-  const hexInput =
-    form.querySelector(
-      "[data-color-hex]"
-    );
   const previewElement =
     form.querySelector(
       "[data-color-preview]"
@@ -2513,12 +2470,6 @@ function updateColorPreview(
   if (label) {
     label.textContent =
       preview.label;
-  }
-
-  if (hexInput) {
-    hexInput.value =
-      preview.hex.toUpperCase();
-    hexInput.setCustomValidity("");
   }
 }
 
@@ -2608,90 +2559,6 @@ function bindInspectorInteractions() {
       );
 
       updateInspectorOutput();
-    }
-  );
-
-  const colorHexInput =
-    form.querySelector(
-      "[data-color-hex]"
-    );
-
-  colorHexInput?.addEventListener(
-    "input",
-    () => {
-      const normalizedHex =
-        normalizeColorHex(
-          colorHexInput.value
-        );
-
-      if (!normalizedHex) {
-        colorHexInput.setCustomValidity(
-          "Enter a color as #RGB or #RRGGBB."
-        );
-        return;
-      }
-
-      colorHexInput.setCustomValidity("");
-
-      const expression =
-        colorHexExpression(
-          normalizedHex
-        );
-
-      changeSelectedNode(
-        "defaultValue",
-        expression
-      );
-
-      if (colorPicker) {
-        colorPicker.value =
-          normalizedHex;
-      }
-
-      const expressionInput =
-        form.querySelector(
-          '[data-field="defaultValue"]'
-        );
-
-      if (expressionInput) {
-        expressionInput.value =
-          expression;
-      }
-
-      updateColorPreview(
-        form,
-        expression
-      );
-
-      updateInspectorOutput();
-    }
-  );
-
-  colorHexInput?.addEventListener(
-    "change",
-    () => {
-      if (
-        normalizeColorHex(
-          colorHexInput.value
-        )
-      ) {
-        return;
-      }
-
-      const selectedNode =
-        findNode(
-          state.nodes,
-          state.selectedId
-        );
-      const preview =
-        colorXPreview(
-          selectedNode?.defaultValue ??
-            "colorX.White"
-        );
-
-      colorHexInput.value =
-        preview.hex.toUpperCase();
-      colorHexInput.setCustomValidity("");
     }
   );
 

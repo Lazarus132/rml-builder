@@ -866,12 +866,6 @@ fieldset legend {
     var(--preview-color);
 }
 
-.color-hex-input {
-  font-family: Consolas, monospace;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
 .option-editor {
   display: grid;
   grid-template-columns: 1fr 32px;
