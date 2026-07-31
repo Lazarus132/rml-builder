@@ -4,6 +4,20 @@ const STORAGE_KEY = "rml-configuration-builder-standalone-v1";
 const ROOT_CONTAINER = "root";
 const DRAG_SCROLL_EDGE = 110;
 const DRAG_SCROLL_MAX_SPEED = 22;
+const VECTOR_COMPONENT_NAMES = ["X", "Y", "Z", "W"];
+
+const COLORX_NAMED_PREVIEWS = {
+  White: { channels: [1, 1, 1, 1], label: "White" },
+  Black: { channels: [0, 0, 0, 1], label: "Black" },
+  Red: { channels: [1, 0, 0, 1], label: "Red" },
+  Green: { channels: [0, 1, 0, 1], label: "Green" },
+  Blue: { channels: [0, 0, 1, 1], label: "Blue" },
+  Yellow: { channels: [1, 1, 0, 1], label: "Yellow" },
+  Cyan: { channels: [0, 1, 1, 1], label: "Cyan" },
+  Magenta: { channels: [1, 0, 1, 1], label: "Magenta" },
+  Gray: { channels: [0.5, 0.5, 0.5, 1], label: "Gray" },
+  Clear: { channels: [0, 0, 0, 0], label: "Clear" }
+};
 
 const TYPE_DEFINITIONS = [
   { type: "bool", label: "Boolean", group: "Core", badge: "BOOL" },
@@ -242,6 +256,260 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+function clamp(value, minimum, maximum) {
+  return Math.min(
+    maximum,
+    Math.max(
+      minimum,
+      value
+    )
+  );
+}
+
+function numericInputValue(value) {
+  return String(value)
+    .trim()
+    .replace(/[fFdD]$/, "");
+}
+
+function vectorComponentValues(
+  value,
+  count
+) {
+  const parts =
+    String(value)
+      .split(",")
+      .map(part =>
+        numericInputValue(part)
+      );
+
+  while (parts.length < count) {
+    parts.push("0");
+  }
+
+  return parts
+    .slice(0, count)
+    .map(part =>
+      part || "0"
+    );
+}
+
+function colorByteToHex(value) {
+  return clamp(
+    Math.round(value),
+    0,
+    255
+  )
+    .toString(16)
+    .padStart(2, "0");
+}
+
+function colorChannelsToPreview(
+  channels,
+  label
+) {
+  const [red, green, blue, alpha] =
+    channels;
+
+  const clampedRed =
+    clamp(red, 0, 1);
+  const clampedGreen =
+    clamp(green, 0, 1);
+  const clampedBlue =
+    clamp(blue, 0, 1);
+  const clampedAlpha =
+    clamp(alpha, 0, 1);
+
+  const redByte =
+    clampedRed * 255;
+  const greenByte =
+    clampedGreen * 255;
+  const blueByte =
+    clampedBlue * 255;
+
+  const hex =
+    `#${colorByteToHex(redByte)}` +
+    `${colorByteToHex(greenByte)}` +
+    `${colorByteToHex(blueByte)}`;
+
+  const outsideStandardRange =
+    channels.some(
+      (value, index) =>
+        index < 3 &&
+        (value < 0 || value > 1)
+    );
+  const luminance =
+    0.2126 * clampedRed +
+    0.7152 * clampedGreen +
+    0.0722 * clampedBlue;
+
+  return {
+    hex,
+    cssColor:
+      `rgba(${Math.round(redByte)}, ` +
+      `${Math.round(greenByte)}, ` +
+      `${Math.round(blueByte)}, ` +
+      `${clampedAlpha})`,
+    textColor:
+      luminance > 0.62 &&
+      clampedAlpha > 0.55
+        ? "#17131d"
+        : "#ffffff",
+    label:
+      outsideStandardRange
+        ? `${label} · HDR preview clamped`
+        : clampedAlpha < 1
+          ? `${label} · Alpha ${clampedAlpha.toFixed(3)}`
+          : label,
+    custom: false
+  };
+}
+
+function colorXPreview(
+  expression
+) {
+  const value =
+    String(expression)
+      .trim();
+
+  const named =
+    value.match(
+      /^colorX\.([A-Za-z_][A-Za-z0-9_]*)$/
+    );
+
+  if (
+    named &&
+    COLORX_NAMED_PREVIEWS[named[1]]
+  ) {
+    const preview =
+      COLORX_NAMED_PREVIEWS[named[1]];
+
+    return colorChannelsToPreview(
+      preview.channels,
+      preview.label
+    );
+  }
+
+  const number =
+    "([+-]?(?:(?:\\d+(?:\\.\\d*)?)|(?:\\.\\d+))(?:[eE][+-]?\\d+)?)[fFdD]?";
+
+  const constructor =
+    value.match(
+      new RegExp(
+        `^new\\s+colorX\\s*\\(\\s*${number}\\s*,\\s*${number}\\s*,\\s*${number}(?:\\s*,\\s*${number})?\\s*\\)$`
+      )
+    );
+
+  if (constructor) {
+    const channels = [
+      Number(constructor[1]),
+      Number(constructor[2]),
+      Number(constructor[3]),
+      constructor[4] === undefined
+        ? 1
+        : Number(constructor[4])
+    ];
+
+    if (
+      channels.every(
+        Number.isFinite
+      )
+    ) {
+      return colorChannelsToPreview(
+        channels,
+        "Custom colorX"
+      );
+    }
+  }
+
+  return {
+    hex: "#7f7f7f",
+    cssColor:
+      "rgba(127, 127, 127, 1)",
+    textColor:
+      "#ffffff",
+    label:
+      "Custom C# expression",
+    custom: true
+  };
+}
+
+function normalizeColorHex(
+  value
+) {
+  let hex =
+    String(value)
+      .trim()
+      .replace(/^#/, "");
+
+  if (/^[0-9a-fA-F]{3}$/.test(hex)) {
+    hex =
+      hex
+        .split("")
+        .map(character =>
+          character + character
+        )
+        .join("");
+  }
+
+  if (!/^[0-9a-fA-F]{6}$/.test(hex)) {
+    return null;
+  }
+
+  return `#${hex.toLowerCase()}`;
+}
+
+function colorChannelLiteral(
+  byteValue
+) {
+  if (byteValue === 0) {
+    return "0f";
+  }
+
+  if (byteValue === 255) {
+    return "1f";
+  }
+
+  return `${(byteValue / 255)
+    .toFixed(6)
+    .replace(/0+$/, "")
+    .replace(/\.$/, "")}f`;
+}
+
+function colorHexExpression(
+  hex
+) {
+  const normalized =
+    String(hex)
+      .replace(/^#/, "")
+      .padEnd(6, "0")
+      .slice(0, 6);
+
+  const red =
+    Number.parseInt(
+      normalized.slice(0, 2),
+      16
+    );
+  const green =
+    Number.parseInt(
+      normalized.slice(2, 4),
+      16
+    );
+  const blue =
+    Number.parseInt(
+      normalized.slice(4, 6),
+      16
+    );
+
+  return (
+    "new colorX(" +
+    `${colorChannelLiteral(red)}, ` +
+    `${colorChannelLiteral(green)}, ` +
+    `${colorChannelLiteral(blue)}, ` +
+    "1f)"
+  );
 }
 
 function defaultForType(type) {
@@ -1760,11 +2028,144 @@ function numericFieldMarkup(
       type="number"
       step="${step}"
       inputmode="${inputMode}"
-      value="${escapeHtml(value)}"
+      value="${escapeHtml(
+        numericInputValue(value)
+      )}"
       data-field="${escapeHtml(
         dataField
       )}">
   </label>`;
+}
+
+function vectorComponentFieldMarkup(
+  label,
+  value,
+  index,
+  numericType
+) {
+  const step =
+    numericType === "int"
+      ? "1"
+      : "any";
+  const inputMode =
+    numericType === "int"
+      ? "numeric"
+      : "decimal";
+
+  return `<label class="vector-component">
+    ${escapeHtml(label)}
+    <input
+      type="number"
+      step="${step}"
+      inputmode="${inputMode}"
+      value="${escapeHtml(
+        numericInputValue(value)
+      )}"
+      data-vector-index="${index}"
+      aria-label="${escapeHtml(
+        `${label} component`
+      )}">
+  </label>`;
+}
+
+function vectorDefaultValueMarkup(
+  node
+) {
+  const componentType =
+    numericComponentType(
+      node.valueType
+    );
+  const count =
+    componentCount(
+      node.valueType
+    );
+  const values =
+    vectorComponentValues(
+      node.defaultValue,
+      count
+    );
+
+  return `<fieldset class="vector-default-editor">
+    <legend>Default value</legend>
+    <div class="vector-fields vector-fields-${count}">
+      ${values
+        .map(
+          (value, index) =>
+            vectorComponentFieldMarkup(
+              VECTOR_COMPONENT_NAMES[index],
+              value,
+              index,
+              componentType
+            )
+        )
+        .join("")}
+    </div>
+    <small>Separate ${componentType} fields for the ${count} vector components.</small>
+  </fieldset>`;
+}
+
+function colorDefaultValueMarkup(
+  node
+) {
+  const preview =
+    colorXPreview(
+      node.defaultValue
+    );
+
+  return `<fieldset class="color-default-editor">
+    <legend>Default color</legend>
+    <label class="color-picker-control">
+      Color picker
+      <span
+        class="color-picker-button${
+          preview.custom
+            ? " custom-expression"
+            : ""
+        }"
+        data-color-preview
+        style="--preview-color: ${escapeHtml(
+          preview.cssColor
+        )}; --preview-text: ${escapeHtml(
+          preview.textColor
+        )}">
+        <strong data-color-preview-label>${escapeHtml(
+          preview.label
+        )}</strong>
+        <small>Click anywhere to choose a color</small>
+        <input
+          type="color"
+          value="${escapeHtml(
+            preview.hex
+          )}"
+          data-color-picker
+          aria-label="Choose default color">
+      </span>
+    </label>
+    <label>
+      Hex RGB
+      <input
+        class="color-hex-input"
+        value="${escapeHtml(
+          preview.hex.toUpperCase()
+        )}"
+        data-color-hex
+        maxlength="7"
+        placeholder="#RRGGBB"
+        autocomplete="off"
+        spellcheck="false">
+      <small>Enter #RGB or #RRGGBB. This creates a standard RGB color with full alpha.</small>
+    </label>
+    <label>
+      C# colorX expression
+      <input
+        value="${escapeHtml(
+          node.defaultValue
+        )}"
+        data-field="defaultValue"
+        autocomplete="off">
+      <small>The picker writes a standard RGB color. Keep this field for named colors, alpha, HDR values or custom colorX expressions.</small>
+    </label>
+  </fieldset>`;
 }
 
 function defaultValueMarkup(node) {
@@ -1824,33 +2225,15 @@ function defaultValueMarkup(node) {
   }
 
   if (isVectorType(node.valueType)) {
-    const componentType =
-      numericComponentType(
-        node.valueType
-      );
-    const count =
-      componentCount(
-        node.valueType
-      );
+    return vectorDefaultValueMarkup(
+      node
+    );
+  }
 
-    return `<label>
-      Default value
-      <input
-        type="text"
-        inputmode="${
-          componentType === "int"
-            ? "numeric"
-            : "decimal"
-        }"
-        value="${escapeHtml(
-          node.defaultValue
-        )}"
-        data-field="defaultValue"
-        placeholder="${Array(
-          count
-        ).fill("0").join(", ")}">
-      <small>Exactly ${count} comma-separated ${componentType} values.</small>
-    </label>`;
+  if (node.valueType === "colorX") {
+    return colorDefaultValueMarkup(
+      node
+    );
   }
 
   return fieldMarkup(
@@ -2071,6 +2454,75 @@ function changeSelectedNode(field, value) {
   });
 }
 
+function updateColorPreview(
+  form,
+  expression
+) {
+  const picker =
+    form.querySelector(
+      "[data-color-picker]"
+    );
+  const hexInput =
+    form.querySelector(
+      "[data-color-hex]"
+    );
+  const previewElement =
+    form.querySelector(
+      "[data-color-preview]"
+    );
+
+  if (
+    !picker ||
+    !previewElement
+  ) {
+    return;
+  }
+
+  const preview =
+    colorXPreview(
+      expression
+    );
+
+  picker.value =
+    preview.hex;
+
+  previewElement.style.setProperty(
+    "--preview-color",
+    preview.cssColor
+  );
+  previewElement.style.setProperty(
+    "--preview-text",
+    preview.textColor
+  );
+
+  previewElement.classList.toggle(
+    "custom-expression",
+    preview.custom
+  );
+
+  const label =
+    previewElement.querySelector(
+      "[data-color-preview-label]"
+    );
+
+  if (label) {
+    label.textContent =
+      preview.label;
+  }
+
+  if (hexInput) {
+    hexInput.value =
+      preview.hex.toUpperCase();
+    hexInput.setCustomValidity("");
+  }
+}
+
+function updateInspectorOutput() {
+  renderCanvas();
+  updateGeneratedOutput();
+  persist();
+}
+
 function bindInspectorInteractions() {
   const form = elements.inspectorContent.querySelector("[data-inspector-id]");
   if (!form) return;
@@ -2082,15 +2534,27 @@ function bindInspectorInteractions() {
     input.addEventListener(eventName, () => {
       const value = input.type === "checkbox" ? input.checked : input.value;
       changeSelectedNode(input.dataset.field, value);
+
+      if (
+        input.dataset.field ===
+          "defaultValue" &&
+        form.querySelector(
+          "[data-color-picker]"
+        )
+      ) {
+        updateColorPreview(
+          form,
+          value
+        );
+      }
+
       if (
         input.dataset.field === "useSlider" ||
         input.dataset.field === "validatorMode"
       ) {
         renderAll();
       } else {
-        renderCanvas();
-        updateGeneratedOutput();
-        persist();
+        updateInspectorOutput();
       }
     });
 
@@ -2104,6 +2568,164 @@ function bindInspectorInteractions() {
       );
     }
   });
+
+  const colorPicker =
+    form.querySelector(
+      "[data-color-picker]"
+    );
+
+  colorPicker?.addEventListener(
+    "input",
+    () => {
+      const expression =
+        colorHexExpression(
+          colorPicker.value
+        );
+
+      changeSelectedNode(
+        "defaultValue",
+        expression
+      );
+
+      const expressionInput =
+        form.querySelector(
+          '[data-field="defaultValue"]'
+        );
+
+      if (expressionInput) {
+        expressionInput.value =
+          expression;
+      }
+
+      updateColorPreview(
+        form,
+        expression
+      );
+
+      updateInspectorOutput();
+    }
+  );
+
+  const colorHexInput =
+    form.querySelector(
+      "[data-color-hex]"
+    );
+
+  colorHexInput?.addEventListener(
+    "input",
+    () => {
+      const normalizedHex =
+        normalizeColorHex(
+          colorHexInput.value
+        );
+
+      if (!normalizedHex) {
+        colorHexInput.setCustomValidity(
+          "Enter a color as #RGB or #RRGGBB."
+        );
+        return;
+      }
+
+      colorHexInput.setCustomValidity("");
+
+      const expression =
+        colorHexExpression(
+          normalizedHex
+        );
+
+      changeSelectedNode(
+        "defaultValue",
+        expression
+      );
+
+      if (colorPicker) {
+        colorPicker.value =
+          normalizedHex;
+      }
+
+      const expressionInput =
+        form.querySelector(
+          '[data-field="defaultValue"]'
+        );
+
+      if (expressionInput) {
+        expressionInput.value =
+          expression;
+      }
+
+      updateColorPreview(
+        form,
+        expression
+      );
+
+      updateInspectorOutput();
+    }
+  );
+
+  colorHexInput?.addEventListener(
+    "change",
+    () => {
+      if (
+        normalizeColorHex(
+          colorHexInput.value
+        )
+      ) {
+        return;
+      }
+
+      const selectedNode =
+        findNode(
+          state.nodes,
+          state.selectedId
+        );
+      const preview =
+        colorXPreview(
+          selectedNode?.defaultValue ??
+            "colorX.White"
+        );
+
+      colorHexInput.value =
+        preview.hex.toUpperCase();
+      colorHexInput.setCustomValidity("");
+    }
+  );
+
+  const vectorInputs =
+    Array.from(
+      form.querySelectorAll(
+        "[data-vector-index]"
+      )
+    ).sort(
+      (left, right) =>
+        Number(
+          left.dataset.vectorIndex
+        ) -
+        Number(
+          right.dataset.vectorIndex
+        )
+    );
+
+  vectorInputs.forEach(input => {
+    input.addEventListener(
+      "input",
+      () => {
+        const defaultValue =
+          vectorInputs
+            .map(component =>
+              component.value
+            )
+            .join(", ");
+
+        changeSelectedNode(
+          "defaultValue",
+          defaultValue
+        );
+
+        updateInspectorOutput();
+      }
+    );
+  });
+
   form.querySelector("[data-inspector-delete]")?.addEventListener(
     "click",
     () => {
