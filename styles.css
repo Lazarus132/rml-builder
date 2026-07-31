@@ -161,6 +161,16 @@ button {
   background: linear-gradient(145deg, #ab7cff, #8058dc);
   color: white;
   box-shadow: 0 8px 24px rgba(118, 74, 205, 0.24);
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.button.primary:hover:not(:disabled) {
+  background: linear-gradient(145deg, #ae81ff, #855dde);
+  border-color: rgba(190, 163, 245, 0.3);
+  box-shadow: 0 9px 25px rgba(118, 74, 205, 0.3);
 }
 
 main,
@@ -971,6 +981,248 @@ footer strong {
   color: var(--muted);
 }
 
+.export-dialog {
+  width: min(620px, calc(100vw - 32px));
+  max-height: min(780px, calc(100vh - 32px));
+  padding: 0;
+  overflow: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background:
+    radial-gradient(
+      circle at 15% 0,
+      rgba(128, 78, 212, 0.18),
+      transparent 25rem
+    ),
+    var(--panel);
+  color: var(--text);
+  box-shadow: 0 28px 100px rgba(0, 0, 0, 0.68);
+}
+
+.export-dialog::backdrop {
+  background: rgba(4, 3, 8, 0.78);
+  backdrop-filter: blur(6px);
+}
+
+.export-dialog-header,
+.export-dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 17px 19px;
+}
+
+.export-dialog-header {
+  border-bottom: 1px solid var(--line);
+}
+
+.export-dialog-header small {
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.export-dialog-header h2 {
+  margin: 4px 0 0;
+  font-size: 18px;
+}
+
+.dialog-close {
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-raised);
+  color: var(--muted);
+  font-size: 23px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.dialog-close:hover {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+
+.export-dialog-body {
+  display: grid;
+  gap: 18px;
+  padding: 19px;
+}
+
+.export-dialog [hidden] {
+  display: none !important;
+}
+
+.export-project-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.export-path-field,
+.export-select-field {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.export-path-field input,
+.export-select-field select {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  outline: none;
+  background: var(--panel-deep);
+  color: var(--text);
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.export-select-field select {
+  cursor: pointer;
+}
+
+.export-path-field input:focus,
+.export-select-field select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.export-path-field input[aria-invalid="true"] {
+  border-color: var(--red);
+  box-shadow: 0 0 0 3px rgba(255, 113, 136, 0.1);
+}
+
+.export-path-field small,
+.export-hint {
+  color: var(--faint);
+  font-size: 9px;
+  font-weight: 400;
+  line-height: 1.55;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.export-path-field code {
+  color: #ceb8ff;
+}
+
+.export-compatibility-hint {
+  margin: -7px 0 0;
+  padding: 10px 11px;
+  border: 1px solid rgba(255, 209, 129, 0.22);
+  border-radius: 7px;
+  background: rgba(255, 209, 129, 0.06);
+  color: #e2c992;
+  font-size: 9px;
+  line-height: 1.55;
+}
+
+.export-compatibility-hint strong {
+  color: #f0dda9;
+}
+
+.export-compatibility-hint code {
+  color: #ceb8ff;
+}
+
+.export-selection {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.export-selection legend {
+  grid-column: 1 / -1;
+  margin-bottom: 7px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.export-option {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 11px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel-deep);
+  cursor: pointer;
+}
+
+.export-option:has(input:checked) {
+  border-color: rgba(164, 118, 255, 0.58);
+  background: var(--accent-soft);
+}
+
+.export-option input {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+}
+
+.export-option span {
+  min-width: 0;
+}
+
+.export-option strong,
+.export-option small {
+  display: block;
+}
+
+.export-option strong {
+  font-size: 11px;
+}
+
+.export-option small {
+  overflow: hidden;
+  margin-top: 4px;
+  color: var(--faint);
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.export-hint {
+  min-height: 15px;
+  margin: -7px 0 0;
+}
+
+.export-copy-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 2px;
+  border-top: 1px solid var(--line);
+}
+
+.export-dialog-actions {
+  justify-content: flex-end;
+  border-top: 1px solid var(--line);
+  background: rgba(13, 12, 19, 0.72);
+}
+
 @media (max-width: 1180px) {
   .identity-grid {
     grid-template-columns: repeat(3, 1fr);
@@ -1031,5 +1283,13 @@ footer strong {
   footer {
     flex-direction: column;
     gap: 6px;
+  }
+
+  .export-selection {
+    grid-template-columns: 1fr;
+  }
+
+  .export-project-grid {
+    grid-template-columns: 1fr;
   }
 }

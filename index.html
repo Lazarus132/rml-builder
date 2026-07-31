@@ -32,11 +32,8 @@
       <button id="new-blank" class="button secondary" type="button">
         New blank
       </button>
-      <button id="download-code" class="button secondary" type="button">
-        Download .cs
-      </button>
-      <button id="copy-code" class="button primary" type="button">
-        Copy C#
+      <button id="download-code" class="button primary" type="button">
+        Export…
       </button>
     </div>
   </header>
@@ -134,7 +131,7 @@
           Include guidance comments
         </label>
         <button id="download-code-bottom" class="button secondary" type="button">
-          Download .cs
+          Export…
         </button>
         <button id="copy-code-bottom" class="button primary" type="button">
           Copy C#
@@ -152,6 +149,110 @@
       uploaded.
     </span>
   </footer>
+
+  <dialog
+    id="export-dialog"
+    class="export-dialog"
+    aria-labelledby="export-dialog-title">
+    <div class="export-dialog-header">
+      <div>
+        <small>Project export</small>
+        <h2 id="export-dialog-title">Download or copy</h2>
+      </div>
+      <button
+        id="export-close"
+        class="dialog-close"
+        type="button"
+        aria-label="Close export dialog">
+        ×
+      </button>
+    </div>
+
+    <div class="export-dialog-body">
+      <div class="export-project-grid">
+        <label class="export-select-field">
+          Path preset
+          <select id="export-platform">
+            <option value="windows">Windows / Steam</option>
+            <option value="linux">Linux / Steam</option>
+            <option value="linux-flatpak">Linux / Flatpak Steam</option>
+            <option value="macos">macOS / Steam layout</option>
+            <option value="custom">Custom path</option>
+          </select>
+        </label>
+      </div>
+
+      <p id="export-compatibility-hint" class="export-compatibility-hint">
+        Project target: <strong>.NET 10</strong>, matching the current Resonite
+        runtime and current RML releases.
+      </p>
+
+      <label class="export-path-field">
+        Resonite installation path
+        <input
+          id="export-resonite-path"
+          type="text"
+          autocomplete="off"
+          spellcheck="false">
+        <small>
+          Used for the local assembly references in the generated project.
+          MSBuild variables such as <code>$(HOME)</code> are supported. You can
+          still override <code>ResonitePath</code> when building.
+        </small>
+      </label>
+
+      <fieldset class="export-selection">
+        <legend>Files to download</legend>
+
+        <label class="export-option">
+          <input id="export-include-cs" type="checkbox">
+          <span>
+            <strong>C# source</strong>
+            <small id="export-cs-filename">YourMod.cs</small>
+          </span>
+        </label>
+
+        <label class="export-option">
+          <input id="export-include-csproj" type="checkbox">
+          <span>
+            <strong>Project file</strong>
+            <small id="export-csproj-filename">YourMod.csproj</small>
+          </span>
+        </label>
+      </fieldset>
+
+      <p id="export-download-hint" class="export-hint">
+        Both selected files will be bundled into one ZIP archive.
+      </p>
+
+      <div class="export-copy-row" aria-label="Copy generated files">
+        <button
+          id="export-copy-cs"
+          class="button secondary"
+          type="button">
+          Copy C#
+        </button>
+        <button
+          id="export-copy-csproj"
+          class="button secondary"
+          type="button">
+          Copy .csproj
+        </button>
+      </div>
+    </div>
+
+    <div class="export-dialog-actions">
+      <button id="export-cancel" class="button secondary" type="button">
+        Cancel
+      </button>
+      <button
+        id="export-download-selected"
+        class="button primary"
+        type="button">
+        Download ZIP
+      </button>
+    </div>
+  </dialog>
 
   <script src="app.js"></script>
 </body>

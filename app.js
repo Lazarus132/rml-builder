@@ -49,6 +49,24 @@ const DEFAULT_METADATA = {
   includeGuide: true
 };
 
+const EXPORT_PLATFORM_PRESETS = {
+  windows:
+    "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Resonite\\",
+  linux:
+    "$(HOME)/.local/share/Steam/steamapps/common/Resonite/",
+  "linux-flatpak":
+    "$(HOME)/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common/Resonite/",
+  macos:
+    "$(HOME)/Library/Application Support/Steam/steamapps/common/Resonite/"
+};
+
+const DEFAULT_EXPORT_OPTIONS = {
+  platform: "windows",
+  resonitePath: EXPORT_PLATFORM_PRESETS.windows,
+  includeCs: true,
+  includeCsproj: true
+};
+
 const SAMPLE_NODES = [
   {
     id: "controller-main",
@@ -168,6 +186,7 @@ const SAMPLE_NODES = [
 
 const state = {
   metadata: { ...DEFAULT_METADATA },
+  exportOptions: { ...DEFAULT_EXPORT_OPTIONS },
   nodes: [],
   selectedId: null,
   activeContainerId: ROOT_CONTAINER,
@@ -261,6 +280,64 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+function escapeXml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function generatedBaseName() {
+  return toPascalCase(
+    state.metadata.className,
+    "YourMod"
+  );
+}
+
+function normalizedResonitePath(value) {
+  const compact = String(value || "")
+    .replace(/\r\n|\r|\n/g, "")
+    .trim();
+  const path =
+    compact ||
+    DEFAULT_EXPORT_OPTIONS.resonitePath;
+
+  if (/[\\/]$/.test(path)) {
+    return path;
+  }
+
+  return path.includes("\\")
+    ? `${path}\\`
+    : `${path}/`;
+}
+
+function inferExportPlatform(path) {
+  const normalized =
+    normalizedResonitePath(path);
+
+  for (
+    const [
+      platform,
+      presetPath
+    ] of Object.entries(
+      EXPORT_PLATFORM_PRESETS
+    )
+  ) {
+    if (
+      normalized ===
+      normalizedResonitePath(
+        presetPath
+      )
+    ) {
+      return platform;
+    }
+  }
+
+  return "custom";
 }
 
 function clamp(value, minimum, maximum) {
@@ -403,7 +480,7 @@ function colorXPreview(
   const constructor =
     value.match(
       new RegExp(
-        `^new\\s+colorX\\s*\\(\\s*${number}\\s*,\\s*${number}\\s*,\\s*${number}(?:\\s*,\\s*${number})?\\s*\\)$`
+        `^(?:new\\s+colorX|\\(\\s*colorX\\s*\\)\\s*new\\s+color)\\s*\\(\\s*${number}\\s*,\\s*${number}\\s*,\\s*${number}(?:\\s*,\\s*${number})?\\s*\\)$`
       )
     );
 
@@ -439,6 +516,44 @@ function colorXPreview(
       "Custom C# expression",
     custom: true
   };
+}
+
+function portableColorXExpression(
+  expression
+) {
+  const value =
+    String(expression)
+      .trim();
+  const number =
+    "([+-]?(?:(?:\\d+(?:\\.\\d*)?)|(?:\\.\\d+))(?:[eE][+-]?\\d+)?)[fFdD]?";
+  const constructor =
+    value.match(
+      new RegExp(
+        `^new\\s+colorX\\s*\\(\\s*${number}\\s*,\\s*${number}\\s*,\\s*${number}(?:\\s*,\\s*${number})?\\s*\\)$`
+      )
+    );
+
+  if (!constructor) {
+    return value ||
+      "colorX.White";
+  }
+
+  const floatLiteral =
+    channel =>
+      `${String(channel)
+        .replace(/[fFdD]$/, "")}f`;
+
+  return (
+    "(colorX)new color(" +
+    `${floatLiteral(constructor[1])}, ` +
+    `${floatLiteral(constructor[2])}, ` +
+    `${floatLiteral(constructor[3])}, ` +
+    `${floatLiteral(
+      constructor[4] === undefined
+        ? "1"
+        : constructor[4]
+    )})`
+  );
 }
 
 function colorChannelLiteral(
@@ -484,7 +599,7 @@ function colorHexExpression(
     );
 
   return (
-    "new colorX(" +
+    "(colorX)new color(" +
     `${colorChannelLiteral(red)}, ` +
     `${colorChannelLiteral(green)}, ` +
     `${colorChannelLiteral(blue)}, ` +
@@ -808,6 +923,12 @@ function normalizeNodes(nodes) {
 
     return {
       ...node,
+      defaultValue:
+        node.valueType === "colorX"
+          ? portableColorXExpression(
+              node.defaultValue
+            )
+          : node.defaultValue,
       useSlider:
         supportsSlider(node) &&
         (validatorMode === "range" ||
@@ -899,7 +1020,9 @@ function defaultExpression(setting) {
         .join(",\n")})`;
     }
     case "colorX":
-      return value || "colorX.White";
+      return portableColorXExpression(
+        value
+      );
     case "enum": {
       const fallback = setting.enumOptions[0] || "Value";
       return `${toPascalCase(setting.enumName, "SettingOption")}.${toPascalCase(
@@ -1087,6 +1210,21 @@ function generateCode() {
       "double4"
     ].includes(entry.node.valueType)
   );
+  const usesColorX =
+    settings.some(
+      entry =>
+        entry.node.valueType ===
+        "colorX"
+    );
+  const usesCustomColorProfile =
+    settings.some(
+      entry =>
+        entry.node.valueType ===
+          "colorX" &&
+        /\bColorProfile\b/.test(
+          entry.node.defaultValue
+        )
+    );
   const className = toPascalCase(metadata.className, "YourMod");
   const namespaceName =
     metadata.namespaceName
@@ -1117,6 +1255,17 @@ function generateCode() {
  * explicitly enabled for them in the builder.
  * Whether navigation selections are persisted immediately or with Save
  * Settings is controlled globally by the user's RML Launcher preference.
+ * Picker-created colors use an explicit color-to-colorX conversion and avoid
+ * the ColorProfile-dependent colorX constructor.
+${usesColorX
+    ? ` * colorX settings add using Renderite.Shared and the generated .csproj
+ * adds the matching Renderite.Shared.dll reference automatically.
+`
+    : ""}${usesCustomColorProfile
+    ? ` * A custom ColorProfile expression additionally requires Renderite.Shared.dll.
+ * The builder's generated .csproj adds that assembly reference automatically.
+`
+    : ""} *
  * Keep the generated Apply... methods intact. Replace only each TODO-marked
  * discard statement with a call to the mod-specific logic.
  */
@@ -1126,6 +1275,9 @@ function generateCode() {
   const usingLines = [
     "using System;",
     usesElements ? "using Elements.Core;" : "",
+    usesColorX
+      ? "using Renderite.Shared;"
+      : "",
     "using ResoniteModLoader;"
   ]
     .filter(Boolean)
@@ -1307,6 +1459,88 @@ ${runtimeBlock}${visibilityBlock}}
 `;
 }
 
+function generateProjectFile() {
+  const settings = flattenNodes(state.nodes)
+    .filter(entry => entry.node.kind === "setting");
+  const usesElements = settings.some(entry =>
+    [
+      "colorX",
+      "int2",
+      "int3",
+      "int4",
+      "float2",
+      "float3",
+      "float4",
+      "double2",
+      "double3",
+      "double4"
+    ].includes(entry.node.valueType)
+  );
+  const usesRenderiteShared = settings.some(
+    entry => entry.node.valueType === "colorX"
+  );
+  const className = generatedBaseName();
+  const namespaceName =
+    state.metadata.namespaceName
+      .split(".")
+      .map(part => toPascalCase(part, "Namespace"))
+      .join(".") ||
+    "YourModNamespace";
+  const resonitePath = escapeXml(
+    normalizedResonitePath(
+      state.exportOptions.resonitePath
+    )
+  );
+  const optionalReferences = [
+    usesElements
+      ? `    <Reference Include="Elements.Core">
+      <HintPath>$(ResonitePath)Elements.Core.dll</HintPath>
+      <Private>False</Private>
+    </Reference>`
+      : "",
+    usesRenderiteShared
+      ? `    <Reference Include="Renderite.Shared">
+      <HintPath>$(ResonitePath)Renderite.Shared.dll</HintPath>
+      <Private>False</Private>
+    </Reference>`
+      : ""
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  return `<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Current Resonite and RML 4.2/5.x use net10.0.
+    Older targets require matching older Resonite and RML assemblies.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <AssemblyName>${escapeXml(className)}</AssemblyName>
+    <RootNamespace>${escapeXml(namespaceName)}</RootNamespace>
+
+    <ResonitePath Condition="'$(ResonitePath)' == ''">${resonitePath}</ResonitePath>
+    <ResonitePath>$([MSBuild]::NormalizeDirectory('$(ResonitePath)'))</ResonitePath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="ResoniteModLoader">
+      <HintPath>$(ResonitePath)Libraries/ResoniteModLoader.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+
+    <Reference Include="FrooxEngine">
+      <HintPath>$(ResonitePath)FrooxEngine.dll</HintPath>
+      <Private>False</Private>
+    </Reference>${optionalReferences ? `\n\n${optionalReferences}` : ""}
+  </ItemGroup>
+</Project>
+`;
+}
+
 function getDiagnostics() {
   const entries = flattenNodes(state.nodes);
   const errors = [];
@@ -1482,6 +1716,7 @@ function persist() {
       STORAGE_KEY,
       JSON.stringify({
         metadata: state.metadata,
+        exportOptions: state.exportOptions,
         nodes: state.nodes
       })
     );
@@ -1502,6 +1737,22 @@ function restore() {
     }
     const parsed = JSON.parse(saved);
     state.metadata = { ...DEFAULT_METADATA, ...(parsed.metadata || {}) };
+    const savedExportOptions =
+      parsed.exportOptions || {};
+    const savedResonitePath =
+      savedExportOptions.resonitePath ||
+      DEFAULT_EXPORT_OPTIONS.resonitePath;
+    state.exportOptions = {
+      ...DEFAULT_EXPORT_OPTIONS,
+      ...savedExportOptions,
+      platform:
+        savedExportOptions.platform ||
+        inferExportPlatform(
+          savedResonitePath
+        ),
+      resonitePath:
+        savedResonitePath
+    };
     state.nodes = normalizeNodes(
       Array.isArray(parsed.nodes)
         ? parsed.nodes
@@ -1510,6 +1761,7 @@ function restore() {
   } catch (error) {
     console.warn("Could not restore the local builder draft.", error);
     state.metadata = { ...DEFAULT_METADATA };
+    state.exportOptions = { ...DEFAULT_EXPORT_OPTIONS };
     state.nodes =
       normalizeNodes(
         clone(SAMPLE_NODES)
@@ -2717,7 +2969,6 @@ function updateGeneratedOutput() {
         .join("")}</ul>`
     : "";
   [
-    elements.copyCode,
     elements.copyCodeBottom,
     elements.downloadCode,
     elements.downloadCodeBottom
@@ -2746,15 +2997,14 @@ function renderAll() {
   persist();
 }
 
-async function copyGeneratedCode(button) {
-  const code = generateCode();
+async function copyText(text, button) {
   const original = button.textContent;
   try {
     if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(code);
+      await navigator.clipboard.writeText(text);
     } else {
       const temporary = document.createElement("textarea");
-      temporary.value = code;
+      temporary.value = text;
       temporary.style.position = "fixed";
       temporary.style.opacity = "0";
       document.body.appendChild(temporary);
@@ -2775,18 +3025,380 @@ async function copyGeneratedCode(button) {
   }, 1400);
 }
 
-function downloadGeneratedCode() {
-  const className = toPascalCase(state.metadata.className, "YourMod");
-  const blob = new Blob([generateCode()], {
-    type: "text/plain;charset=utf-8"
-  });
+function copyGeneratedCode(button) {
+  return copyText(
+    generateCode(),
+    button
+  );
+}
+
+function copyGeneratedProjectFile(button) {
+  return copyText(
+    generateProjectFile(),
+    button
+  );
+}
+
+function downloadBlob(blob, filename) {
   const link = document.createElement("a");
-  link.href = URL.createObjectURL(blob);
-  link.download = `${className}.cs`;
+  const objectUrl = URL.createObjectURL(blob);
+  link.href = objectUrl;
+  link.download = filename;
   document.body.appendChild(link);
   link.click();
   link.remove();
-  URL.revokeObjectURL(link.href);
+  URL.revokeObjectURL(objectUrl);
+}
+
+let crc32Table = null;
+
+function getCrc32Table() {
+  if (crc32Table) {
+    return crc32Table;
+  }
+
+  crc32Table = new Uint32Array(256);
+  for (let index = 0; index < 256; index += 1) {
+    let value = index;
+    for (let bit = 0; bit < 8; bit += 1) {
+      value =
+        (value & 1) !== 0
+          ? 0xedb88320 ^ (value >>> 1)
+          : value >>> 1;
+    }
+    crc32Table[index] = value >>> 0;
+  }
+  return crc32Table;
+}
+
+function crc32(bytes) {
+  const table = getCrc32Table();
+  let value = 0xffffffff;
+  for (const byte of bytes) {
+    value =
+      table[(value ^ byte) & 0xff] ^
+      (value >>> 8);
+  }
+  return (value ^ 0xffffffff) >>> 0;
+}
+
+function zipDateTime(date = new Date()) {
+  const year = Math.max(1980, date.getFullYear());
+  return {
+    time:
+      (date.getHours() << 11) |
+      (date.getMinutes() << 5) |
+      Math.floor(date.getSeconds() / 2),
+    date:
+      ((year - 1980) << 9) |
+      ((date.getMonth() + 1) << 5) |
+      date.getDate()
+  };
+}
+
+function createZipBlob(files) {
+  const encoder = new TextEncoder();
+  const localParts = [];
+  const centralParts = [];
+  const timestamp = zipDateTime();
+  let localOffset = 0;
+  let centralSize = 0;
+
+  for (const file of files) {
+    const nameBytes = encoder.encode(file.name);
+    const contentBytes = encoder.encode(file.content);
+    const checksum = crc32(contentBytes);
+
+    const localHeader = new Uint8Array(
+      30 + nameBytes.length
+    );
+    const localView = new DataView(
+      localHeader.buffer
+    );
+    localView.setUint32(0, 0x04034b50, true);
+    localView.setUint16(4, 20, true);
+    localView.setUint16(6, 0x0800, true);
+    localView.setUint16(8, 0, true);
+    localView.setUint16(10, timestamp.time, true);
+    localView.setUint16(12, timestamp.date, true);
+    localView.setUint32(14, checksum, true);
+    localView.setUint32(18, contentBytes.length, true);
+    localView.setUint32(22, contentBytes.length, true);
+    localView.setUint16(26, nameBytes.length, true);
+    localView.setUint16(28, 0, true);
+    localHeader.set(nameBytes, 30);
+
+    localParts.push(
+      localHeader,
+      contentBytes
+    );
+
+    const centralHeader = new Uint8Array(
+      46 + nameBytes.length
+    );
+    const centralView = new DataView(
+      centralHeader.buffer
+    );
+    centralView.setUint32(0, 0x02014b50, true);
+    centralView.setUint16(4, 20, true);
+    centralView.setUint16(6, 20, true);
+    centralView.setUint16(8, 0x0800, true);
+    centralView.setUint16(10, 0, true);
+    centralView.setUint16(12, timestamp.time, true);
+    centralView.setUint16(14, timestamp.date, true);
+    centralView.setUint32(16, checksum, true);
+    centralView.setUint32(20, contentBytes.length, true);
+    centralView.setUint32(24, contentBytes.length, true);
+    centralView.setUint16(28, nameBytes.length, true);
+    centralView.setUint16(30, 0, true);
+    centralView.setUint16(32, 0, true);
+    centralView.setUint16(34, 0, true);
+    centralView.setUint16(36, 0, true);
+    centralView.setUint32(38, 0, true);
+    centralView.setUint32(42, localOffset, true);
+    centralHeader.set(nameBytes, 46);
+    centralParts.push(centralHeader);
+
+    localOffset +=
+      localHeader.length +
+      contentBytes.length;
+    centralSize += centralHeader.length;
+  }
+
+  const endRecord = new Uint8Array(22);
+  const endView = new DataView(
+    endRecord.buffer
+  );
+  endView.setUint32(0, 0x06054b50, true);
+  endView.setUint16(4, 0, true);
+  endView.setUint16(6, 0, true);
+  endView.setUint16(8, files.length, true);
+  endView.setUint16(10, files.length, true);
+  endView.setUint32(12, centralSize, true);
+  endView.setUint32(16, localOffset, true);
+  endView.setUint16(20, 0, true);
+
+  return new Blob(
+    [
+      ...localParts,
+      ...centralParts,
+      endRecord
+    ],
+    {
+      type: "application/zip"
+    }
+  );
+}
+
+function updateExportDialog() {
+  const baseName = generatedBaseName();
+  const platform =
+    elements.exportPlatform.value;
+  const includeCs =
+    elements.exportIncludeCs.checked;
+  const includeCsproj =
+    elements.exportIncludeCsproj.checked;
+  const pathAvailable =
+    elements.exportResonitePath.value
+      .trim()
+      .length > 0;
+  const hasSelection =
+    includeCs ||
+    includeCsproj;
+  const projectPathMissing =
+    includeCsproj &&
+    !pathAvailable;
+  const hasDiagnostics =
+    getDiagnostics().length > 0;
+
+  elements.exportCsFilename.textContent =
+    `${baseName}.cs`;
+  elements.exportCsprojFilename.textContent =
+    `${baseName}.csproj`;
+  elements.exportResonitePath.setAttribute(
+    "aria-invalid",
+    String(projectPathMissing)
+  );
+  elements.exportCopyCs.disabled =
+    hasDiagnostics;
+  elements.exportCopyCsproj.disabled =
+    hasDiagnostics ||
+    !pathAvailable;
+  elements.exportDownloadSelected.disabled =
+    hasDiagnostics ||
+    !hasSelection ||
+    projectPathMissing;
+
+  const platformNotes = {
+    windows:
+      "Project target: <strong>.NET 10</strong>, matching current Resonite and RML. The Windows Steam path is selected.",
+    linux:
+      "Project target: <strong>.NET 10</strong>, matching current Resonite and RML. The Linux preset uses the MSBuild <code>$(HOME)</code> property.",
+    "linux-flatpak":
+      "Project target: <strong>.NET 10</strong>, matching current Resonite and RML. The Flatpak Steam sandbox path remains editable.",
+    macos:
+      "The generated project itself is valid on macOS with <strong>.NET 10</strong> and matching assemblies. Resonite currently has no official macOS client distribution.",
+    custom:
+      "Project target: <strong>.NET 10</strong>, matching current Resonite and RML. The custom assembly path remains editable."
+  };
+  elements.exportCompatibilityHint.innerHTML =
+    platformNotes[platform] ||
+    platformNotes.custom;
+
+  if (includeCs && includeCsproj) {
+    elements.exportDownloadSelected.textContent =
+      "Download ZIP";
+    elements.exportDownloadHint.textContent =
+      "Both selected files will be bundled into one ZIP archive.";
+  } else if (includeCs) {
+    elements.exportDownloadSelected.textContent =
+      "Download .cs";
+    elements.exportDownloadHint.textContent =
+      "The generated C# source will be downloaded directly.";
+  } else if (includeCsproj) {
+    elements.exportDownloadSelected.textContent =
+      "Download .csproj";
+    elements.exportDownloadHint.textContent =
+      pathAvailable
+        ? "The generated project file will be downloaded directly."
+        : "Enter the Resonite installation path to create the project file.";
+  } else {
+    elements.exportDownloadSelected.textContent =
+      "Select a file";
+    elements.exportDownloadHint.textContent =
+      "Select at least one file to download.";
+  }
+}
+
+function syncExportOptions() {
+  state.exportOptions = {
+    platform:
+      elements.exportPlatform.value,
+    resonitePath:
+      elements.exportResonitePath.value,
+    includeCs:
+      elements.exportIncludeCs.checked,
+    includeCsproj:
+      elements.exportIncludeCsproj.checked
+  };
+  persist();
+  updateExportDialog();
+}
+
+function applyExportPlatformPreset() {
+  const presetPath =
+    EXPORT_PLATFORM_PRESETS[
+      elements.exportPlatform.value
+    ];
+
+  if (presetPath) {
+    elements.exportResonitePath.value =
+      presetPath;
+  }
+
+  syncExportOptions();
+}
+
+function syncEditedResonitePath() {
+  const selectedPlatform =
+    elements.exportPlatform.value;
+  const presetPath =
+    EXPORT_PLATFORM_PRESETS[
+      selectedPlatform
+    ];
+
+  if (
+    presetPath &&
+    normalizedResonitePath(
+      elements.exportResonitePath.value
+    ) !==
+      normalizedResonitePath(
+        presetPath
+      )
+  ) {
+    elements.exportPlatform.value =
+      "custom";
+  }
+
+  syncExportOptions();
+}
+
+function openExportDialog() {
+  elements.exportPlatform.value =
+    state.exportOptions.platform ||
+    inferExportPlatform(
+      state.exportOptions.resonitePath
+    );
+  elements.exportResonitePath.value =
+    state.exportOptions.resonitePath;
+  elements.exportIncludeCs.checked =
+    Boolean(state.exportOptions.includeCs);
+  elements.exportIncludeCsproj.checked =
+    Boolean(state.exportOptions.includeCsproj);
+  updateExportDialog();
+
+  if (typeof elements.exportDialog.showModal === "function") {
+    elements.exportDialog.showModal();
+  } else {
+    elements.exportDialog.setAttribute("open", "");
+  }
+}
+
+function closeExportDialog() {
+  if (typeof elements.exportDialog.close === "function") {
+    elements.exportDialog.close();
+  } else {
+    elements.exportDialog.removeAttribute("open");
+  }
+}
+
+function downloadSelectedExport() {
+  syncExportOptions();
+  if (elements.exportDownloadSelected.disabled) {
+    return;
+  }
+
+  const baseName = generatedBaseName();
+  const includeCs =
+    state.exportOptions.includeCs;
+  const includeCsproj =
+    state.exportOptions.includeCsproj;
+
+  if (includeCs && includeCsproj) {
+    downloadBlob(
+      createZipBlob([
+        {
+          name: `${baseName}.cs`,
+          content: generateCode()
+        },
+        {
+          name: `${baseName}.csproj`,
+          content: generateProjectFile()
+        }
+      ]),
+      `${baseName}-RML-Project.zip`
+    );
+  } else if (includeCs) {
+    downloadBlob(
+      new Blob(
+        [generateCode()],
+        {
+          type: "text/plain;charset=utf-8"
+        }
+      ),
+      `${baseName}.cs`
+    );
+  } else if (includeCsproj) {
+    downloadBlob(
+      new Blob(
+        [generateProjectFile()],
+        {
+          type: "application/xml;charset=utf-8"
+        }
+      ),
+      `${baseName}.csproj`
+    );
+  }
 }
 
 function loadExample() {
@@ -2827,10 +3439,37 @@ function cacheElements() {
     generatedCode: document.getElementById("generated-code"),
     diagnostics: document.getElementById("diagnostics"),
     codeSummary: document.getElementById("code-summary"),
-    copyCode: document.getElementById("copy-code"),
     copyCodeBottom: document.getElementById("copy-code-bottom"),
     downloadCode: document.getElementById("download-code"),
-    downloadCodeBottom: document.getElementById("download-code-bottom")
+    downloadCodeBottom: document.getElementById("download-code-bottom"),
+    exportDialog: document.getElementById("export-dialog"),
+    exportClose: document.getElementById("export-close"),
+    exportCancel: document.getElementById("export-cancel"),
+    exportPlatform: document.getElementById("export-platform"),
+    exportResonitePath: document.getElementById(
+      "export-resonite-path"
+    ),
+    exportCompatibilityHint: document.getElementById(
+      "export-compatibility-hint"
+    ),
+    exportIncludeCs: document.getElementById("export-include-cs"),
+    exportIncludeCsproj: document.getElementById(
+      "export-include-csproj"
+    ),
+    exportCsFilename: document.getElementById("export-cs-filename"),
+    exportCsprojFilename: document.getElementById(
+      "export-csproj-filename"
+    ),
+    exportDownloadHint: document.getElementById(
+      "export-download-hint"
+    ),
+    exportCopyCs: document.getElementById("export-copy-cs"),
+    exportCopyCsproj: document.getElementById(
+      "export-copy-csproj"
+    ),
+    exportDownloadSelected: document.getElementById(
+      "export-download-selected"
+    )
   });
 }
 
@@ -2880,17 +3519,57 @@ function initialize() {
   document
     .getElementById("new-blank")
     .addEventListener("click", newBlank);
-  elements.copyCode.addEventListener("click", () =>
-    copyGeneratedCode(elements.copyCode)
-  );
   elements.copyCodeBottom.addEventListener("click", () =>
     copyGeneratedCode(elements.copyCodeBottom)
   );
-  elements.downloadCode.addEventListener("click", downloadGeneratedCode);
+  elements.downloadCode.addEventListener("click", openExportDialog);
   elements.downloadCodeBottom.addEventListener(
     "click",
-    downloadGeneratedCode
+    openExportDialog
   );
+  elements.exportClose.addEventListener("click", closeExportDialog);
+  elements.exportCancel.addEventListener("click", closeExportDialog);
+  elements.exportPlatform.addEventListener(
+    "change",
+    applyExportPlatformPreset
+  );
+  elements.exportResonitePath.addEventListener(
+    "input",
+    syncEditedResonitePath
+  );
+  elements.exportResonitePath.addEventListener("change", () => {
+    elements.exportResonitePath.value =
+      normalizedResonitePath(
+        elements.exportResonitePath.value
+      );
+    syncEditedResonitePath();
+  });
+  elements.exportIncludeCs.addEventListener(
+    "change",
+    syncExportOptions
+  );
+  elements.exportIncludeCsproj.addEventListener(
+    "change",
+    syncExportOptions
+  );
+  elements.exportCopyCs.addEventListener("click", () =>
+    copyGeneratedCode(elements.exportCopyCs)
+  );
+  elements.exportCopyCsproj.addEventListener("click", () => {
+    syncExportOptions();
+    copyGeneratedProjectFile(
+      elements.exportCopyCsproj
+    );
+  });
+  elements.exportDownloadSelected.addEventListener(
+    "click",
+    downloadSelectedExport
+  );
+  elements.exportDialog.addEventListener("click", event => {
+    if (event.target === elements.exportDialog) {
+      closeExportDialog();
+    }
+  });
 
   renderAll();
 }
