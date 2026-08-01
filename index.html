@@ -88,22 +88,30 @@
 
         <div id="palette-content"></div>
 
-        <div class="palette-group structure">
-          <h2>Structure</h2>
-          <button
-            class="palette-item controller-item"
-            type="button"
-            draggable="true"
-            data-palette="controller">
-            <span>§</span>
-            <strong>Section enum</strong>
-            <b>＋</b>
-          </button>
-          <p>
-            Creates an enum controller whose values become visible settings
-            pages. Section enums can be nested.
-          </p>
-        </div>
+        <details
+          class="palette-group structure"
+          data-palette-group="Structure"
+          open>
+          <summary>
+            <span>Structure</span>
+            <b>1</b>
+          </summary>
+          <div class="palette-group-content">
+            <button
+              class="palette-item controller-item"
+              type="button"
+              draggable="true"
+              data-palette="controller">
+              <span>§</span>
+              <strong>Section enum</strong>
+              <b>＋</b>
+            </button>
+            <p>
+              Creates an enum controller whose values become visible settings
+              pages. Section enums can be nested.
+            </p>
+          </div>
+        </details>
       </aside>
 
       <section class="canvas panel">

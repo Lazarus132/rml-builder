@@ -10,6 +10,13 @@ const ROOT_CONTAINER = "root";
 const DRAG_SCROLL_EDGE = 110;
 const DRAG_SCROLL_MAX_SPEED = 22;
 const VECTOR_COMPONENT_NAMES = ["X", "Y", "Z", "W"];
+const PALETTE_GROUP_NAMES = [
+  "Core",
+  "Numbers",
+  "Vectors",
+  "Visual",
+  "Structure"
+];
 
 const COLORX_NAMED_PREVIEWS = {
   White: { channels: [1, 1, 1, 1], label: "White" },
@@ -195,6 +202,7 @@ const state = {
   nodes: [],
   selectedId: null,
   activeContainerId: ROOT_CONTAINER,
+  collapsedPaletteGroups: [],
   dragOverContainer: null
 };
 
@@ -2063,7 +2071,9 @@ function createProjectDocument(
       selectedId:
         state.selectedId,
       activeContainerId:
-        state.activeContainerId
+        state.activeContainerId,
+      collapsedPaletteGroups:
+        [...state.collapsedPaletteGroups]
     }
   };
 }
@@ -2520,7 +2530,19 @@ function parseProjectDocument(
         projectString(
           workspaceSource.activeContainerId,
           ROOT_CONTAINER
+        ),
+      collapsedPaletteGroups:
+        Array.isArray(
+          workspaceSource.collapsedPaletteGroups
         )
+          ? workspaceSource.collapsedPaletteGroups
+              .filter(
+                group =>
+                  PALETTE_GROUP_NAMES.includes(
+                    group
+                  )
+              )
+          : []
     }
   };
 }
@@ -2551,6 +2573,11 @@ function applyProjectDocument(
     ) !== "Unknown section"
       ? project.workspace.activeContainerId
       : ROOT_CONTAINER;
+  state.collapsedPaletteGroups =
+    [...new Set(
+      project.workspace.collapsedPaletteGroups ||
+        []
+    )];
 }
 
 function persist() {
@@ -2634,10 +2661,19 @@ function renderMetadata() {
 }
 
 function renderPalette() {
-  const groups = ["Core", "Numbers", "Vectors", "Visual"];
+  const groups =
+    PALETTE_GROUP_NAMES.filter(
+      group =>
+        group !== "Structure"
+    );
   elements.paletteContent.innerHTML = groups
     .map(group => {
-      const items = TYPE_DEFINITIONS.filter(item => item.group === group)
+      const definitions =
+        TYPE_DEFINITIONS.filter(
+          item =>
+            item.group === group
+        );
+      const items = definitions
         .map(
           item => `<button
             class="palette-item"
@@ -2650,12 +2686,68 @@ function renderPalette() {
           </button>`
         )
         .join("");
-      return `<div class="palette-group">
-        <h2>${escapeHtml(group)}</h2>
+      const open =
+        state.collapsedPaletteGroups.includes(
+          group
+        )
+          ? ""
+          : " open";
+
+      return `<details
+        class="palette-group"
+        data-palette-group="${escapeHtml(
+          group
+        )}"${open}>
+        <summary>
+          <span>${escapeHtml(group)}</span>
+          <b>${definitions.length}</b>
+        </summary>
         <div class="palette-list">${items}</div>
-      </div>`;
+      </details>`;
     })
     .join("");
+
+  document
+    .querySelectorAll(
+      "[data-palette-group]"
+    )
+    .forEach(groupElement => {
+      const groupName =
+        groupElement.dataset.paletteGroup;
+
+      groupElement.open =
+        !state.collapsedPaletteGroups.includes(
+          groupName
+        );
+
+      groupElement.ontoggle = () => {
+        const wasCollapsed =
+          state.collapsedPaletteGroups.includes(
+            groupName
+          );
+        const isCollapsed =
+          !groupElement.open;
+
+        if (
+          wasCollapsed ===
+          isCollapsed
+        ) {
+          return;
+        }
+
+        state.collapsedPaletteGroups =
+          isCollapsed
+            ? [
+                ...state.collapsedPaletteGroups,
+                groupName
+              ]
+            : state.collapsedPaletteGroups.filter(
+                group =>
+                  group !== groupName
+              );
+        persist();
+      };
+    });
 
   elements.paletteContent.querySelectorAll("[data-palette]").forEach(button => {
     button.addEventListener("click", () => {
@@ -5041,6 +5133,7 @@ async function loadProjectJsonFile(
       project
     );
     renderMetadata();
+    renderPalette();
     renderAll();
 
     setProjectFileStatus(
