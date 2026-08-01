@@ -1,6 +1,12 @@
 "use strict";
 
+// v29: The properties color picker contains data-color-strength on both the
+// picker container and the actual range input. Always select the INPUT
+// explicitly, otherwise the container DIV receives the value/listener and the
+// visible Strength slider appears stuck at 1.
+
 const STORAGE_KEY = "rml-configuration-builder-standalone-v1";
+const PREVIEW_STORAGE_KEY = "rml-preview-values-v2";
 const PROJECT_FORMAT = "rml-configuration-builder-project";
 const PROJECT_FORMAT_VERSION = 1;
 const PROJECT_FILE_MAX_BYTES = 5 * 1024 * 1024;
@@ -211,6 +217,9 @@ const elements = {};
 let dragScrollActive = false;
 let dragPointerY = null;
 let dragScrollFrame = null;
+let settingsPreviewDraft = null;
+let settingsPreviewColorSession = null;
+let settingsPreviewStatusTimer = null;
 
 function makeSampleSetting(
   id,
@@ -389,6 +398,122 @@ function clamp(value, minimum, maximum) {
   );
 }
 
+
+function normalizeColorProfile(profile) {
+  return String(profile || "").toLowerCase() === "srgb"
+    ? "srgb"
+    : "linear";
+}
+
+function srgbChannelToLinear(value) {
+  const channel = Math.max(0, Number(value) || 0);
+
+  return channel <= 0.04045
+    ? channel / 12.92
+    : Math.pow(
+        (channel + 0.055) / 1.055,
+        2.4
+      );
+}
+
+function linearChannelToSrgb(value) {
+  const channel = Math.max(0, Number(value) || 0);
+
+  return channel <= 0.0031308
+    ? channel * 12.92
+    : 1.055 *
+        Math.pow(channel, 1 / 2.4) -
+        0.055;
+}
+
+function convertColorProfileChannels(
+  red,
+  green,
+  blue,
+  sourceProfile,
+  targetProfile
+) {
+  const source =
+    normalizeColorProfile(sourceProfile);
+  const target =
+    normalizeColorProfile(targetProfile);
+
+  if (source === target) {
+    return {
+      red,
+      green,
+      blue
+    };
+  }
+
+  const converter =
+    source === "srgb"
+      ? srgbChannelToLinear
+      : linearChannelToSrgb;
+
+  return {
+    red: converter(red),
+    green: converter(green),
+    blue: converter(blue)
+  };
+}
+
+function colorProfileExpression(profile) {
+  return normalizeColorProfile(profile) === "srgb"
+    ? "ColorProfile.sRGB"
+    : "ColorProfile.Linear";
+}
+
+function buildColorXExpression(
+  red,
+  green,
+  blue,
+  alpha,
+  strength = 1,
+  profile = "linear"
+) {
+  const safeStrength =
+    clamp(Number(strength) || 1, 1, 10);
+
+  return (
+    "new colorX(" +
+    "new color(" +
+    `${previewColorLiteral(red * safeStrength)}, ` +
+    `${previewColorLiteral(green * safeStrength)}, ` +
+    `${previewColorLiteral(blue * safeStrength)}, ` +
+    `${previewColorLiteral(alpha)}` +
+    "), " +
+    `${colorProfileExpression(profile)}` +
+    ")"
+  );
+}
+
+function colorVisualCss(
+  red,
+  green,
+  blue,
+  alpha,
+  profile = "linear"
+) {
+  const display =
+    normalizeColorProfile(profile) === "linear"
+      ? convertColorProfileChannels(
+          red,
+          green,
+          blue,
+          "linear",
+          "srgb"
+        )
+      : { red, green, blue };
+
+  return (
+    `rgba(${Math.round(clamp(display.red, 0, 1) * 255)}, ` +
+    `${Math.round(clamp(display.green, 0, 1) * 255)}, ` +
+    `${Math.round(clamp(display.blue, 0, 1) * 255)}, ` +
+    `${clamp(alpha, 0, 1)})`
+  );
+}
+
 function numericInputValue(value) {
   return String(value)
     .trim()
@@ -429,73 +554,95 @@ function colorByteToHex(value) {
 
 function colorChannelsToPreview(
   channels,
-  label
+  label,
+  profile = "linear",
+  explicitStrength = null
 ) {
-  const [red, green, blue, alpha] =
+  const [rawRed, rawGreen, rawBlue, rawAlpha] =
     channels;
-
-  const clampedRed =
-    clamp(red, 0, 1);
-  const clampedGreen =
-    clamp(green, 0, 1);
-  const clampedBlue =
-    clamp(blue, 0, 1);
-  const clampedAlpha =
-    clamp(alpha, 0, 1);
-
-  const redByte =
-    clampedRed * 255;
-  const greenByte =
-    clampedGreen * 255;
-  const blueByte =
-    clampedBlue * 255;
-
+  const strength =
+    clamp(
+      Number.isFinite(Number(explicitStrength))
+        ? Number(explicitStrength)
+        : Math.max(
+            1,
+            Math.abs(rawRed),
+            Math.abs(rawGreen),
+            Math.abs(rawBlue)
+          ),
+      1,
+      10
+    );
+  const red =
+    clamp(rawRed / strength, 0, 1);
+  const green =
+    clamp(rawGreen / strength, 0, 1);
+  const blue =
+    clamp(rawBlue / strength, 0, 1);
+  const alpha =
+    clamp(rawAlpha, 0, 1);
+  const normalizedProfile =
+    normalizeColorProfile(profile);
+  const display =
+    normalizedProfile === "linear"
+      ? convertColorProfileChannels(
+          red,
+          green,
+          blue,
+          "linear",
+          "srgb"
+        )
+      : { red, green, blue };
   const hex =
-    `#${colorByteToHex(redByte)}` +
-    `${colorByteToHex(greenByte)}` +
-    `${colorByteToHex(blueByte)}`;
-
-  const outsideStandardRange =
-    channels.some(
-      (value, index) =>
-        index < 3 &&
-        (value < 0 || value > 1)
+    colorBytesToHex(
+      display.red * 255,
+      display.green * 255,
+      display.blue * 255
     );
   const luminance =
-    0.2126 * clampedRed +
-    0.7152 * clampedGreen +
-    0.0722 * clampedBlue;
+    0.2126 * display.red +
+    0.7152 * display.green +
+    0.0722 * display.blue;
 
   return {
     channels: [
+      rawRed,
+      rawGreen,
+      rawBlue,
+      rawAlpha
+    ],
+    baseChannels: [
       red,
       green,
       blue,
       alpha
     ],
+    profile:
+      normalizedProfile,
+    strength,
     hex,
     cssColor:
-      `rgba(${Math.round(redByte)}, ` +
-      `${Math.round(greenByte)}, ` +
-      `${Math.round(blueByte)}, ` +
-      `${clampedAlpha})`,
+      colorVisualCss(
+        red,
+        green,
+        blue,
+        alpha,
+        normalizedProfile
+      ),
     textColor:
       luminance > 0.62 &&
-      clampedAlpha > 0.55
+      alpha > 0.55
         ? "#17131d"
         : "#ffffff",
-    label:
-      outsideStandardRange
-        ? `${label} · HDR preview clamped`
-        : clampedAlpha < 1
-          ? `${label} · Alpha ${clampedAlpha.toFixed(3)}`
-          : label,
+    label,
     custom: false
   };
 }
 
 function colorXPreview(
-  expression
+  expression,
+  storedStrength = null,
+  storedProfile = null
 ) {
   const value =
     String(expression)
@@ -515,12 +662,48 @@ function colorXPreview(
 
     return colorChannelsToPreview(
       preview.channels,
-      preview.label
+      preview.label,
+      storedProfile || "linear",
+      storedStrength
     );
   }
 
   const number =
     "([+-]?(?:(?:\\d+(?:\\.\\d*)?)|(?:\\.\\d+))(?:[eE][+-]?\\d+)?)[fFdD]?";
+  const explicit =
+    value.match(
+      new RegExp(
+        `^new\\s+colorX\\s*\\(\\s*new\\s+color\\s*\\(\\s*${number}\\s*,\\s*${number}\\s*,\\s*${number}(?:\\s*,\\s*${number})?\\s*\\)\\s*,\\s*ColorProfile\\.(sRGB|Linear)\\s*\\)$`
+      )
+    );
+
+  if (explicit) {
+    const channels = [
+      Number(explicit[1]),
+      Number(explicit[2]),
+      Number(explicit[3]),
+      explicit[4] === undefined
+        ? 1
+        : Number(explicit[4])
+    ];
+    const profile =
+      explicit[5] === "sRGB"
+        ? "srgb"
+        : "linear";
+
+    if (
+      channels.every(
+        Number.isFinite
+      )
+    ) {
+      return colorChannelsToPreview(
+        channels,
+        "Custom colorX",
+        storedProfile || profile,
+        storedStrength
+      );
+    }
+  }
 
   const constructor =
     value.match(
@@ -546,14 +729,27 @@ function colorXPreview(
     ) {
       return colorChannelsToPreview(
         channels,
-        "Custom colorX"
+        "Custom colorX",
+        storedProfile || "linear",
+        storedStrength
       );
     }
   }
 
   return {
     channels: null,
-    hex: "#7f7f7f",
+    baseChannels: [0.5, 0.5, 0.5, 1],
+    profile:
+      normalizeColorProfile(
+        storedProfile || "linear"
+      ),
+    strength:
+      clamp(
+        Number(storedStrength) || 1,
+        1,
+        10
+      ),
+    hex: "#7F7F7F",
     cssColor:
       "rgba(127, 127, 127, 1)",
     textColor:
@@ -1144,6 +1340,8 @@ function makeSetting(type) {
     maximum: "100",
     enumName: type === "enum" ? `${fieldName}Option` : "",
     enumOptions: type === "enum" ? ["Low", "Medium", "High"] : [],
+    colorProfile: type === "colorX" ? "linear" : undefined,
+    colorStrength: type === "colorX" ? 1 : undefined,
     reaction: "stored"
   };
 }
@@ -2377,6 +2575,22 @@ function sanitizeProjectNodes(
               sourceNode.enumName
             ),
           enumOptions,
+          colorProfile:
+            valueType === "colorX"
+              ? normalizeColorProfile(
+                  sourceNode.colorProfile
+                )
+              : undefined,
+          colorStrength:
+            valueType === "colorX"
+              ? clamp(
+                  Number(
+                    sourceNode.colorStrength
+                  ) || 1,
+                  1,
+                  10
+                )
+              : undefined,
           reaction:
             knownReactions.has(
               sourceNode.reaction
@@ -3254,66 +3468,69 @@ function vectorDefaultValueMarkup(
 function colorDefaultValueMarkup(
   node
 ) {
+  const profile =
+    normalizeColorProfile(
+      node.colorProfile
+    );
+  const strength =
+    clamp(
+      Number(node.colorStrength) || 1,
+      1,
+      10
+    );
   const preview =
     colorXPreview(
-      node.defaultValue
+      node.defaultValue,
+      strength,
+      profile
+    );
+  const channels =
+    pickerByteChannels(
+      preview
     );
   const alphaByte =
-    preview.channels
-      ? clamp(
-          Math.round(
-            preview.channels[3] *
-              255
-          ),
-          0,
-          255
-        )
-      : 255;
+    channels.alpha;
   const alphaPercent =
     Math.round(
-      alphaByte /
-        255 *
-        100
-    );
-  const previewChannels =
-    preview.channels ||
-    [0.5, 0.5, 0.5, 1];
-  const redByte =
-    clamp(
-      Math.round(
-        previewChannels[0] *
-          255
-      ),
-      0,
-      255
-    );
-  const greenByte =
-    clamp(
-      Math.round(
-        previewChannels[1] *
-          255
-      ),
-      0,
-      255
-    );
-  const blueByte =
-    clamp(
-      Math.round(
-        previewChannels[2] *
-          255
-      ),
-      0,
-      255
+      alphaByte / 255 * 100
     );
   const hsv =
     rgbToHsv(
-      redByte,
-      greenByte,
-      blueByte
+      channels.red,
+      channels.green,
+      channels.blue
     );
+  const glowSize =
+    strength <= 1.000001
+      ? 0
+      : 8 + (strength - 1) * 3.2;
 
   return `<fieldset class="color-default-editor">
     <legend>Default color</legend>
+
+    <div class="custom-color-profile-tabs" aria-label="Color profile">
+      <button
+        type="button"
+        class="button secondary${
+          profile === "srgb"
+            ? " selected"
+            : ""
+        }"
+        data-inspector-color-profile="srgb"${
+          strength > 1
+            ? " disabled"
+            : ""
+        }>sRGB</button>
+      <button
+        type="button"
+        class="button secondary${
+          profile === "linear"
+            ? " selected"
+            : ""
+        }"
+        data-inspector-color-profile="linear">Linear</button>
+    </div>
+
     <div
       class="custom-color-picker-inline${
         preview.custom
@@ -3322,214 +3539,176 @@ function colorDefaultValueMarkup(
       }"
       data-color-picker-inline
       data-color-preview
+      data-color-profile="${profile}"
+      data-color-strength="${strength}"
       role="group"
       aria-label="Color picker"
-      style="--preview-color: ${escapeHtml(
-        preview.cssColor
-      )}; --preview-text: ${escapeHtml(
-        preview.textColor
-      )}">
+      style="
+        --preview-color: ${escapeHtml(preview.cssColor)};
+        --preview-text: ${escapeHtml(preview.textColor)};
+        --preview-glow: ${escapeHtml(preview.cssColor)};
+        --preview-glow-size: ${glowSize}px;
+      ">
       <div class="custom-color-picker-body">
-          <div
-            class="custom-color-sv"
-            data-color-sv
-            role="slider"
-            tabindex="0"
-            aria-label="Saturation and brightness"
-            aria-valuetext="Saturation ${Math.round(
-              hsv.saturation * 100
-            )}%, brightness ${Math.round(
-              hsv.value * 100
-            )}%"
-            data-hue="${hsv.hue}"
-            data-saturation="${hsv.saturation}"
-            data-value="${hsv.value}"
-            style="--picker-hue: ${hsv.hue}; --picker-saturation: ${
-              hsv.saturation * 100
-            }%; --picker-value-position: ${
-              (1 - hsv.value) * 100
-            }%">
-            <span class="custom-color-sv-marker" aria-hidden="true"></span>
-          </div>
+        <div
+          class="custom-color-sv"
+          data-color-sv
+          role="slider"
+          tabindex="0"
+          aria-label="Saturation and brightness"
+          aria-valuetext="Saturation ${Math.round(
+            hsv.saturation * 100
+          )}%, brightness ${Math.round(
+            hsv.value * 100
+          )}%"
+          data-hue="${hsv.hue}"
+          data-saturation="${hsv.saturation}"
+          data-value="${hsv.value}"
+          style="
+            --picker-hue: ${hsv.hue};
+            --picker-saturation: ${hsv.saturation * 100}%;
+            --picker-value-position: ${(1 - hsv.value) * 100}%;
+          ">
+          <span class="custom-color-sv-marker" aria-hidden="true"></span>
+        </div>
 
-          <label class="custom-color-slider-control hue-control">
-            <span class="custom-color-control-heading">
-              <span>Hue</span>
-              <output data-color-hue-output>${Math.round(
-                hsv.hue
-              )}°</output>
-            </span>
-            <input
-              class="custom-color-slider custom-color-hue-slider"
-              type="range"
-              min="0"
-              max="359"
-              step="1"
-              value="${Math.round(
-                hsv.hue
-              )}"
-              data-color-hue
-              aria-label="Hue">
+        <label class="custom-color-slider-control hue-control">
+          <span class="custom-color-control-heading">
+            <span>Hue</span>
+            <output data-color-hue-output>${Math.round(hsv.hue)}°</output>
+          </span>
+          <input
+            class="custom-color-slider custom-color-hue-slider"
+            type="range"
+            min="0"
+            max="359"
+            step="1"
+            value="${Math.round(hsv.hue)}"
+            data-color-hue
+            aria-label="Hue">
+        </label>
+
+        <label class="custom-color-slider-control alpha-control">
+          <span class="custom-color-control-heading">
+            <span>Alpha</span>
+            <output data-color-alpha-output>${alphaByte} · ${alphaPercent}%</output>
+          </span>
+          <input
+            class="custom-color-slider custom-color-alpha-slider"
+            type="range"
+            min="0"
+            max="255"
+            step="1"
+            value="${alphaByte}"
+            data-color-alpha
+            style="--alpha-color: ${escapeHtml(preview.hex)}"
+            aria-label="Alpha">
+        </label>
+
+        <label class="custom-color-slider-control strength-control">
+          <span class="custom-color-control-heading">
+            <span>Strength</span>
+            <output data-color-strength-output>${previewColorNumber(
+              strength,
+              2
+            )}</output>
+          </span>
+          <input
+            class="custom-color-slider custom-color-strength-slider"
+            type="range"
+            min="1"
+            max="10"
+            step="0.01"
+            value="${strength}"
+            data-color-strength
+            aria-label="Strength">
+        </label>
+
+        <div class="custom-color-values custom-color-hsv-values">
+          <label>H
+            <input type="number" min="0" max="359" step="1"
+              value="${Math.round(hsv.hue)}"
+              data-color-hsv="hue">
           </label>
-
-          <label class="custom-color-slider-control alpha-control">
-            <span class="custom-color-control-heading">
-              <span>Alpha</span>
-              <output data-color-alpha-output>${alphaByte} · ${alphaPercent}%</output>
-            </span>
-            <input
-              class="custom-color-slider custom-color-alpha-slider"
-              type="range"
-              min="0"
-              max="255"
-              step="1"
-              value="${alphaByte}"
-              data-color-alpha
-              style="--alpha-color: ${escapeHtml(
-                preview.hex
-              )}"
-              aria-label="Alpha">
+          <label>S
+            <input type="number" min="0" max="100" step="1"
+              value="${Math.round(hsv.saturation * 100)}"
+              data-color-hsv="saturation">
           </label>
+          <label>V
+            <input type="number" min="0" max="100" step="1"
+              value="${Math.round(hsv.value * 100)}"
+              data-color-hsv="value">
+          </label>
+        </div>
 
-          <div
-            class="custom-color-values custom-color-hsv-values"
-            aria-label="HSV color values">
-            <label>
-              H
-              <input
-                type="number"
-                min="0"
-                max="359"
-                step="1"
-                value="${Math.round(
-                  hsv.hue
-                )}"
-                inputmode="numeric"
-                data-color-hsv="hue">
-            </label>
-            <label>
-              S
-              <input
-                type="number"
-                min="0"
-                max="100"
-                step="1"
-                value="${Math.round(
-                  hsv.saturation * 100
-                )}"
-                inputmode="numeric"
-                data-color-hsv="saturation">
-            </label>
-            <label>
-              V
-              <input
-                type="number"
-                min="0"
-                max="100"
-                step="1"
-                value="${Math.round(
-                  hsv.value * 100
-                )}"
-                inputmode="numeric"
-                data-color-hsv="value">
-            </label>
-          </div>
+        <div class="custom-color-values custom-color-rgb-values">
+          <label>R
+            <input type="number" min="0" max="255" step="1"
+              value="${channels.red}"
+              data-color-channel="red">
+          </label>
+          <label>G
+            <input type="number" min="0" max="255" step="1"
+              value="${channels.green}"
+              data-color-channel="green">
+          </label>
+          <label>B
+            <input type="number" min="0" max="255" step="1"
+              value="${channels.blue}"
+              data-color-channel="blue">
+          </label>
+          <label class="custom-color-hex-control">Hex
+            <input
+              type="text"
+              value="${escapeHtml(preview.hex.toUpperCase())}"
+              maxlength="9"
+              spellcheck="false"
+              autocomplete="off"
+              data-color-hex>
+          </label>
+        </div>
 
-          <div
-            class="custom-color-values custom-color-rgb-values"
-            aria-label="RGB color values">
-            <label>
-              R
-              <input
-                type="number"
-                min="0"
-                max="255"
-                step="1"
-                value="${redByte}"
-                inputmode="numeric"
-                data-color-channel="red">
-            </label>
-            <label>
-              G
-              <input
-                type="number"
-                min="0"
-                max="255"
-                step="1"
-                value="${greenByte}"
-                inputmode="numeric"
-                data-color-channel="green">
-            </label>
-            <label>
-              B
-              <input
-                type="number"
-                min="0"
-                max="255"
-                step="1"
-                value="${blueByte}"
-                inputmode="numeric"
-                data-color-channel="blue">
-            </label>
-            <label class="custom-color-hex-control">
-              Hex
-              <input
-                type="text"
-                value="${escapeHtml(
-                  preview.hex.toUpperCase()
-                )}"
-                inputmode="text"
-                maxlength="9"
-                spellcheck="false"
-                autocomplete="off"
-                data-color-hex>
-            </label>
-          </div>
-
-          <p
-            class="custom-color-picker-status"
-            data-color-picker-status
-            aria-live="polite">${
-              preview.custom
-                ? "Choosing a color replaces the current custom C# expression."
-                : ""
-            }</p>
+        <p
+          class="custom-color-picker-status"
+          data-color-picker-status
+          aria-live="polite">${
+            preview.custom
+              ? "Choosing a color replaces the current custom C# expression."
+              : ""
+          }</p>
       </div>
 
       <div class="custom-color-picker-actions">
         <div
           class="custom-color-result"
           data-color-result
-          style="--result-color: ${escapeHtml(
-            preview.cssColor
-          )}">
+          style="
+            --result-color: ${escapeHtml(preview.cssColor)};
+            --result-glow: ${escapeHtml(preview.cssColor)};
+            --result-glow-size: ${glowSize}px;
+          ">
           <span aria-hidden="true"></span>
           <strong data-color-result-value>${escapeHtml(
             preview.hex.toUpperCase()
+          )} · ${profile === "srgb" ? "sRGB" : "Linear"} · ×${previewColorNumber(
+            strength,
+            2
           )}</strong>
         </div>
-        <button
-          type="button"
-          class="button secondary custom-color-eyedropper"
-          data-color-eyedropper
-          hidden>
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M19.4 3.6a2.1 2.1 0 0 0-3 0l-2.1 2.1-1.2-1.2-1.4 1.4 1.2 1.2-7.7 7.7-.7 3.1 3.1-.7 7.7-7.7 1.2 1.2 1.4-1.4-1.2-1.2 2.1-2.1a2.1 2.1 0 0 0 0-3Z"/>
-          </svg>
-          Pipette
-        </button>
       </div>
     </div>
 
     <label>
       C# colorX expression
       <input
-        value="${escapeHtml(
-          node.defaultValue
-        )}"
+        value="${escapeHtml(node.defaultValue)}"
         data-field="defaultValue"
         autocomplete="off">
-      <small>The picker writes standard RGB and alpha. Keep this field for named colors, HDR values or custom colorX expressions.</small>
+      <small>
+        The normalized base color, ColorProfile and HDR strength are stored
+        separately by the builder and emitted together in the generated colorX.
+      </small>
     </label>
   </fieldset>`;
 }
@@ -3824,35 +4003,28 @@ function pickerByteChannels(
   preview
 ) {
   const channels =
+    preview.baseChannels ||
     preview.channels ||
     [0.5, 0.5, 0.5, 1];
 
   return {
     red: clamp(
-      Math.round(
-        channels[0] * 255
-      ),
+      Math.round(channels[0] * 255),
       0,
       255
     ),
     green: clamp(
-      Math.round(
-        channels[1] * 255
-      ),
+      Math.round(channels[1] * 255),
       0,
       255
     ),
     blue: clamp(
-      Math.round(
-        channels[2] * 255
-      ),
+      Math.round(channels[2] * 255),
       0,
       255
     ),
     alpha: clamp(
-      Math.round(
-        channels[3] * 255
-      ),
+      Math.round(channels[3] * 255),
       0,
       255
     )
@@ -3867,8 +4039,12 @@ function updateCustomColorPicker(
     form.querySelector(
       "[data-color-sv]"
     );
+  const inlinePicker =
+    form.querySelector(
+      "[data-color-picker-inline]"
+    );
 
-  if (!surface) {
+  if (!surface || !inlinePicker) {
     return;
   }
 
@@ -3899,43 +4075,49 @@ function updateCustomColorPicker(
       channels.red,
       channels.green,
       channels.blue
+    ).toUpperCase();
+  const profile =
+    normalizeColorProfile(
+      inlinePicker.dataset.colorProfile ||
+      preview.profile
     );
-  const hueInput =
-    form.querySelector(
-      "[data-color-hue]"
+  const strength =
+    clamp(
+      Number(
+        inlinePicker.dataset.colorStrength
+      ) || preview.strength || 1,
+      1,
+      10
     );
-  const hueOutput =
-    form.querySelector(
-      "[data-color-hue-output]"
+  const visualCss =
+    colorVisualCss(
+      channels.red / 255,
+      channels.green / 255,
+      channels.blue / 255,
+      channels.alpha / 255,
+      profile
     );
-  const alphaInput =
-    form.querySelector(
-      "[data-color-alpha]"
-    );
-  const alphaOutput =
-    form.querySelector(
-      "[data-color-alpha-output]"
-    );
-  const hexInput =
-    form.querySelector(
-      "[data-color-hex]"
-    );
-  const result =
-    form.querySelector(
-      "[data-color-result]"
-    );
-  const resultValue =
-    form.querySelector(
-      "[data-color-result-value]"
-    );
-  const status =
-    form.querySelector(
-      "[data-color-picker-status]"
-    );
-  const hsvInputs =
-    form.querySelectorAll(
-      "[data-color-hsv]"
-    );
+  const glowSize =
+    strength <= 1.000001
+      ? 0
+      : 8 + (strength - 1) * 3.2;
+
+  inlinePicker.dataset.colorProfile =
+    profile;
+  inlinePicker.dataset.colorStrength =
+    String(strength);
+  inlinePicker.style.setProperty(
+    "--preview-color",
+    visualCss
+  );
+  inlinePicker.style.setProperty(
+    "--preview-glow",
+    visualCss
+  );
+  inlinePicker.style.setProperty(
+    "--preview-glow-size",
+    `${glowSize}px`
+  );
 
   surface.dataset.hue =
     String(hsv.hue);
@@ -3955,41 +4137,69 @@ function updateCustomColorPicker(
     "--picker-value-position",
     `${(1 - hsv.value) * 100}%`
   );
-  surface.setAttribute(
-    "aria-valuetext",
-    `Saturation ${Math.round(
-      hsv.saturation * 100
-    )}%, brightness ${Math.round(
-      hsv.value * 100
-    )}%`
-  );
+
+  const hueInput =
+    form.querySelector(
+      "[data-color-hue]"
+    );
+  const hueOutput =
+    form.querySelector(
+      "[data-color-hue-output]"
+    );
+  const alphaInput =
+    form.querySelector(
+      "[data-color-alpha]"
+    );
+  const alphaOutput =
+    form.querySelector(
+      "[data-color-alpha-output]"
+    );
+  const strengthInput =
+    form.querySelector(
+      "input[data-color-strength]"
+    );
+  const strengthOutput =
+    form.querySelector(
+      "[data-color-strength-output]"
+    );
+  const hexInput =
+    form.querySelector(
+      "[data-color-hex]"
+    );
+  const result =
+    form.querySelector(
+      "[data-color-result]"
+    );
+  const resultValue =
+    form.querySelector(
+      "[data-color-result-value]"
+    );
 
   if (hueInput) {
     hueInput.value =
-      String(
-        Math.round(hsv.hue)
-      );
+      String(Math.round(hsv.hue));
   }
-
   if (hueOutput) {
     hueOutput.textContent =
       `${Math.round(hsv.hue)}°`;
   }
 
-  hsvInputs.forEach(input => {
-    const component =
-      input.dataset.colorHsv;
-
-    input.value =
-      String(
-        component === "hue"
-          ? Math.round(hsv.hue)
-          : Math.round(
-              hsv[component] *
-                100
-            )
-      );
-  });
+  form
+    .querySelectorAll(
+      "[data-color-hsv]"
+    )
+    .forEach(input => {
+      const component =
+        input.dataset.colorHsv;
+      input.value =
+        String(
+          component === "hue"
+            ? Math.round(hsv.hue)
+            : Math.round(
+                hsv[component] * 100
+              )
+        );
+    });
 
   if (alphaInput) {
     alphaInput.value =
@@ -3999,15 +4209,21 @@ function updateCustomColorPicker(
       hex
     );
   }
-
   if (alphaOutput) {
     alphaOutput.textContent =
       `${channels.alpha} · ` +
-      `${Math.round(
-        channels.alpha /
-          255 *
-          100
-      )}%`;
+      `${Math.round(channels.alpha / 255 * 100)}%`;
+  }
+  if (strengthInput) {
+    strengthInput.value =
+      String(strength);
+  }
+  if (strengthOutput) {
+    strengthOutput.textContent =
+      previewColorNumber(
+        strength,
+        2
+      );
   }
 
   form
@@ -4024,36 +4240,46 @@ function updateCustomColorPicker(
     });
 
   if (hexInput) {
-    hexInput.value =
-      hex.toUpperCase();
+    hexInput.value = hex;
   }
 
   if (result) {
     result.style.setProperty(
       "--result-color",
-      `rgba(${channels.red}, ` +
-        `${channels.green}, ` +
-        `${channels.blue}, ` +
-        `${channels.alpha / 255})`
+      visualCss
+    );
+    result.style.setProperty(
+      "--result-glow",
+      visualCss
+    );
+    result.style.setProperty(
+      "--result-glow-size",
+      `${glowSize}px`
     );
   }
 
   if (resultValue) {
     resultValue.textContent =
-      `${hex.toUpperCase()} · ` +
-      `A ${channels.alpha}`;
+      `${hex} · ` +
+      `${profile === "srgb" ? "sRGB" : "Linear"} · ` +
+      `×${previewColorNumber(strength, 2)}`;
   }
 
-  if (status) {
-    status.textContent =
-      preview.custom
-        ? "Choosing a color replaces the current custom C# expression."
-        : preview.label.includes(
-              "HDR preview clamped"
-            )
-          ? "HDR preview clamped to sRGB for display. The C# value is preserved."
-          : "";
-  }
+  form
+    .querySelectorAll(
+      "[data-inspector-color-profile]"
+    )
+    .forEach(button => {
+      const buttonProfile =
+        button.dataset.inspectorColorProfile;
+      button.classList.toggle(
+        "selected",
+        buttonProfile === profile
+      );
+      button.disabled =
+        buttonProfile === "srgb" &&
+        strength > 1.000001;
+    });
 }
 
 function updateColorPreview(
@@ -4069,19 +4295,24 @@ function updateColorPreview(
     return;
   }
 
+  const profile =
+    normalizeColorProfile(
+      previewElement.dataset.colorProfile
+    );
+  const strength =
+    clamp(
+      Number(
+        previewElement.dataset.colorStrength
+      ) || 1,
+      1,
+      10
+    );
   const preview =
     colorXPreview(
-      expression
+      expression,
+      strength,
+      profile
     );
-
-  previewElement.style.setProperty(
-    "--preview-color",
-    preview.cssColor
-  );
-  previewElement.style.setProperty(
-    "--preview-text",
-    preview.textColor
-  );
 
   previewElement.classList.toggle(
     "custom-expression",
@@ -4162,13 +4393,13 @@ function bindCustomColorPickerInteractions(
     form.querySelector(
       "[data-color-alpha]"
     );
+  const strengthInput =
+    form.querySelector(
+      "input[data-color-strength]"
+    );
   const hexInput =
     form.querySelector(
       "[data-color-hex]"
-    );
-  const status =
-    form.querySelector(
-      "[data-color-picker-status]"
     );
   const hsvInputs =
     Array.from(
@@ -4176,24 +4407,160 @@ function bindCustomColorPickerInteractions(
         "[data-color-hsv]"
       )
     );
-  const eyedropperButton =
-    form.querySelector(
-      "[data-color-eyedropper]"
+  const channelInputs =
+    Array.from(
+      form.querySelectorAll(
+        "[data-color-channel]"
+      )
     );
+
+  const currentProfile =
+    () =>
+      normalizeColorProfile(
+        inlinePicker.dataset.colorProfile
+      );
+
+  const currentStrength =
+    () =>
+      clamp(
+        Number(
+          inlinePicker.dataset.colorStrength
+        ) || 1,
+        1,
+        10
+      );
 
   const currentAlpha =
     () =>
       alphaInput
         ? clamp(
             Math.round(
-              Number(
-                alphaInput.value
-              )
+              Number(alphaInput.value)
             ),
             0,
             255
+          ) / 255
+        : 1;
+
+  const currentBaseRgb =
+    () => {
+      const red =
+        Number(
+          form.querySelector(
+            '[data-color-channel="red"]'
+          )?.value
+        );
+      const green =
+        Number(
+          form.querySelector(
+            '[data-color-channel="green"]'
+          )?.value
+        );
+      const blue =
+        Number(
+          form.querySelector(
+            '[data-color-channel="blue"]'
+          )?.value
+        );
+
+      return {
+        red:
+          clamp(
+            Number.isFinite(red)
+              ? red / 255
+              : 0,
+            0,
+            1
+          ),
+        green:
+          clamp(
+            Number.isFinite(green)
+              ? green / 255
+              : 0,
+            0,
+            1
+          ),
+        blue:
+          clamp(
+            Number.isFinite(blue)
+              ? blue / 255
+              : 0,
+            0,
+            1
           )
-        : 255;
+      };
+    };
+
+  const commitState = (
+    red,
+    green,
+    blue,
+    alpha = currentAlpha(),
+    strength = currentStrength(),
+    profile = currentProfile()
+  ) => {
+    const safeStrength =
+      clamp(
+        Number(strength) || 1,
+        1,
+        10
+      );
+    let safeProfile =
+      normalizeColorProfile(profile);
+
+    if (
+      safeStrength > 1.000001 &&
+      safeProfile === "srgb"
+    ) {
+      const converted =
+        convertColorProfileChannels(
+          red,
+          green,
+          blue,
+          "srgb",
+          "linear"
+        );
+
+      red = converted.red;
+      green = converted.green;
+      blue = converted.blue;
+      safeProfile = "linear";
+    }
+
+    red = clamp(red, 0, 1);
+    green = clamp(green, 0, 1);
+    blue = clamp(blue, 0, 1);
+    alpha = clamp(alpha, 0, 1);
+
+    inlinePicker.dataset.colorProfile =
+      safeProfile;
+    inlinePicker.dataset.colorStrength =
+      String(safeStrength);
+
+    changeSelectedNode(
+      "colorProfile",
+      safeProfile
+    );
+    changeSelectedNode(
+      "colorStrength",
+      safeStrength
+    );
+
+    const expression =
+      buildColorXExpression(
+        red,
+        green,
+        blue,
+        alpha,
+        safeStrength,
+        safeProfile
+      );
+
+    commitColorPickerExpression(
+      form,
+      expression
+    );
+  };
 
   const applyRgb = (
     red,
@@ -4201,35 +4568,11 @@ function bindCustomColorPickerInteractions(
     blue,
     alpha = currentAlpha()
   ) => {
-    const expression =
-      colorHexExpression(
-        colorBytesToHex(
-          clamp(
-            Math.round(red),
-            0,
-            255
-          ),
-          clamp(
-            Math.round(green),
-            0,
-            255
-          ),
-          clamp(
-            Math.round(blue),
-            0,
-            255
-          )
-        ),
-        clamp(
-          Math.round(alpha),
-          0,
-          255
-        )
-      );
-
-    commitColorPickerExpression(
-      form,
-      expression
+    commitState(
+      clamp(Number(red) / 255, 0, 1),
+      clamp(Number(green) / 255, 0, 1),
+      clamp(Number(blue) / 255, 0, 1),
+      alpha
     );
   };
 
@@ -4239,11 +4582,7 @@ function bindCustomColorPickerInteractions(
     value
   ) => {
     const normalizedHue =
-      clamp(
-        Number(hue),
-        0,
-        359
-      );
+      ((Number(hue) % 360) + 360) % 360;
     const normalizedSaturation =
       clamp(
         Number(saturation),
@@ -4256,6 +4595,12 @@ function bindCustomColorPickerInteractions(
         0,
         1
       );
+    const rgb =
+      hsvToRgb(
+        normalizedHue,
+        normalizedSaturation,
+        normalizedValue
+      );
 
     surface.dataset.hue =
       String(normalizedHue);
@@ -4264,19 +4609,86 @@ function bindCustomColorPickerInteractions(
     surface.dataset.value =
       String(normalizedValue);
 
-    const rgb =
-      hsvToRgb(
-        normalizedHue,
-        normalizedSaturation,
-        normalizedValue
-      );
-
     applyRgb(
       rgb.red,
       rgb.green,
       rgb.blue
     );
   };
+
+  form
+    .querySelectorAll(
+      "[data-inspector-color-profile]"
+    )
+    .forEach(button => {
+      button.addEventListener(
+        "click",
+        () => {
+          const targetProfile =
+            normalizeColorProfile(
+              button.dataset.inspectorColorProfile
+            );
+          const sourceProfile =
+            currentProfile();
+
+          if (
+            targetProfile === "srgb" &&
+            currentStrength() > 1.000001
+          ) {
+            return;
+          }
+
+          if (
+            targetProfile === sourceProfile
+          ) {
+            return;
+          }
+
+          const base =
+            currentBaseRgb();
+          const converted =
+            convertColorProfileChannels(
+              base.red,
+              base.green,
+              base.blue,
+              sourceProfile,
+              targetProfile
+            );
+
+          commitState(
+            converted.red,
+            converted.green,
+            converted.blue,
+            currentAlpha(),
+            currentStrength(),
+            targetProfile
+          );
+        }
+      );
+    });
+
+  strengthInput?.addEventListener(
+    "input",
+    () => {
+      const strength =
+        clamp(
+          Number(strengthInput.value),
+          1,
+          10
+        );
+      const base =
+        currentBaseRgb();
+
+      commitState(
+        base.red,
+        base.green,
+        base.blue,
+        currentAlpha(),
+        strength,
+        currentProfile()
+      );
+    }
+  );
 
   hueInput?.addEventListener(
     "input",
@@ -4318,7 +4730,7 @@ function bindCustomColorPickerInteractions(
           : 100;
 
       if (
-        !Number.isInteger(value) ||
+        !Number.isFinite(value) ||
         value < 0 ||
         value > maximum
       ) {
@@ -4340,78 +4752,80 @@ function bindCustomColorPickerInteractions(
       "input",
       applyHsvInputs
     );
-    input.addEventListener(
-      "change",
-      () => {
-        const value =
-          Number(input.value);
-        const maximum =
-          input.dataset.colorHsv ===
-          "hue"
-            ? 359
-            : 100;
-
-        input.value =
-          String(
-            Number.isFinite(value)
-              ? clamp(
-                  Math.round(value),
-                  0,
-                  maximum
-                )
-              : 0
-          );
-        applyHsvInputs();
-      }
-    );
   });
 
   alphaInput?.addEventListener(
     "input",
     () => {
-      if (!expressionInput) {
+      const base =
+        currentBaseRgb();
+
+      commitState(
+        base.red,
+        base.green,
+        base.blue,
+        currentAlpha()
+      );
+    }
+  );
+
+  const applyChannelInputs = () => {
+    const values = {};
+
+    for (const input of channelInputs) {
+      const value =
+        Number(input.value);
+
+      if (
+        !Number.isFinite(value) ||
+        value < 0 ||
+        value > 255
+      ) {
         return;
       }
 
-      const alpha =
-        currentAlpha();
-      const preview =
-        colorXPreview(
-          expressionInput.value
-        );
-      let expression;
-
-      if (preview.channels) {
-        expression =
-          colorExpressionWithAlpha(
-            expressionInput.value,
-            alpha
-          );
-      } else {
-        const parsed =
-          parseHexColor(
-            hexInput?.value ||
-              "#7f7f7f"
-          );
-
-        expression =
-          colorHexExpression(
-            parsed
-              ? colorBytesToHex(
-                  parsed.red,
-                  parsed.green,
-                  parsed.blue
-                )
-              : "#7f7f7f",
-            alpha
-          );
-      }
-
-      commitColorPickerExpression(
-        form,
-        expression
-      );
+      values[
+        input.dataset.colorChannel
+      ] = value;
     }
+
+    applyRgb(
+      values.red,
+      values.green,
+      values.blue
+    );
+  };
+
+  channelInputs.forEach(input => {
+    input.addEventListener(
+      "input",
+      applyChannelInputs
+    );
+  });
+
+  const applyHexInput = () => {
+    const parsed =
+      parseHexColor(
+        hexInput?.value || ""
+      );
+
+    if (!parsed) {
+      return;
+    }
+
+    applyRgb(
+      parsed.red,
+      parsed.green,
+      parsed.blue,
+      parsed.alpha === null
+        ? currentAlpha()
+        : parsed.alpha / 255
+    );
+  };
+
+  hexInput?.addEventListener(
+    "input",
+    applyHexInput
   );
 
   const setSurfaceValue = event => {
@@ -4425,30 +4839,21 @@ function bindCustomColorPickerInteractions(
       return;
     }
 
-    const saturation =
+    applyHsv(
+      Number(surface.dataset.hue),
       clamp(
-        (event.clientX -
-          rectangle.left) /
+        (event.clientX - rectangle.left) /
           rectangle.width,
         0,
         1
-      );
-    const value =
-      1 -
-      clamp(
-        (event.clientY -
-          rectangle.top) /
-          rectangle.height,
-        0,
-        1
-      );
-
-    applyHsv(
-      Number(
-        surface.dataset.hue
       ),
-      saturation,
-      value
+      1 -
+        clamp(
+          (event.clientY - rectangle.top) /
+            rectangle.height,
+          0,
+          1
+        )
     );
   };
 
@@ -4490,243 +4895,22 @@ function bindCustomColorPickerInteractions(
     }
   );
 
-  const finishSurfacePointer =
-    event => {
-      if (
-        event.pointerId ===
-        activePointerId
-      ) {
-        if (
-          surface.hasPointerCapture?.(
-            event.pointerId
-          )
-        ) {
-          surface.releasePointerCapture(
-            event.pointerId
-          );
-        }
-        activePointerId = null;
-      }
-    };
+  const finishPointer = event => {
+    if (
+      event.pointerId ===
+      activePointerId
+    ) {
+      activePointerId = null;
+    }
+  };
 
   surface.addEventListener(
     "pointerup",
-    finishSurfacePointer
+    finishPointer
   );
   surface.addEventListener(
     "pointercancel",
-    finishSurfacePointer
-  );
-
-  surface.addEventListener(
-    "keydown",
-    event => {
-      const step =
-        event.shiftKey
-          ? 0.05
-          : 0.01;
-      let saturation =
-        Number(
-          surface.dataset.saturation
-        );
-      let value =
-        Number(
-          surface.dataset.value
-        );
-
-      switch (event.key) {
-        case "ArrowLeft":
-          saturation -= step;
-          break;
-        case "ArrowRight":
-          saturation += step;
-          break;
-        case "ArrowDown":
-          value -= step;
-          break;
-        case "ArrowUp":
-          value += step;
-          break;
-        default:
-          return;
-      }
-
-      event.preventDefault();
-      applyHsv(
-        Number(
-          surface.dataset.hue
-        ),
-        clamp(
-          saturation,
-          0,
-          1
-        ),
-        clamp(
-          value,
-          0,
-          1
-        )
-      );
-    }
-  );
-
-  const channelInputs =
-    Array.from(
-      form.querySelectorAll(
-        "[data-color-channel]"
-      )
-    );
-
-  const applyChannelInputs = () => {
-    const values = {};
-
-    for (const input of channelInputs) {
-      const value =
-        Number(input.value);
-
-      if (
-        !Number.isInteger(value) ||
-        value < 0 ||
-        value > 255
-      ) {
-        return;
-      }
-
-      values[
-        input.dataset.colorChannel
-      ] = value;
-    }
-
-    applyRgb(
-      values.red,
-      values.green,
-      values.blue
-    );
-  };
-
-  channelInputs.forEach(input => {
-    input.addEventListener(
-      "input",
-      applyChannelInputs
-    );
-    input.addEventListener(
-      "change",
-      () => {
-        const value =
-          Number(input.value);
-
-        input.value =
-          String(
-            Number.isFinite(value)
-              ? clamp(
-                  Math.round(value),
-                  0,
-                  255
-                )
-              : 0
-          );
-        applyChannelInputs();
-      }
-    );
-  });
-
-  const applyHexInput = () => {
-    const parsed =
-      parseHexColor(
-        hexInput?.value || ""
-      );
-
-    if (!parsed) {
-      return false;
-    }
-
-    applyRgb(
-      parsed.red,
-      parsed.green,
-      parsed.blue,
-      parsed.alpha === null
-        ? currentAlpha()
-        : parsed.alpha
-    );
-    return true;
-  };
-
-  hexInput?.addEventListener(
-    "input",
-    applyHexInput
-  );
-  hexInput?.addEventListener(
-    "change",
-    () => {
-      if (
-        !applyHexInput() &&
-        expressionInput
-      ) {
-        updateColorPreview(
-          form,
-          expressionInput.value
-        );
-      }
-    }
-  );
-
-  const eyedropperSupported =
-    typeof window.EyeDropper ===
-      "function" &&
-    window.isSecureContext === true;
-
-  if (eyedropperButton) {
-    eyedropperButton.hidden =
-      !eyedropperSupported;
-  }
-
-  eyedropperButton?.addEventListener(
-    "click",
-    async () => {
-      if (!eyedropperSupported) {
-        return;
-      }
-
-      if (status) {
-        status.textContent =
-          "Choose a pixel anywhere on the screen…";
-      }
-
-      try {
-        const result =
-          await new window.EyeDropper()
-            .open();
-        const parsed =
-          parseHexColor(
-            result.sRGBHex
-          );
-
-        if (parsed) {
-          applyRgb(
-            parsed.red,
-            parsed.green,
-            parsed.blue
-          );
-        }
-      } catch (error) {
-        if (
-          error?.name !==
-          "AbortError"
-        ) {
-          console.warn(
-            "The browser eyedropper could not be opened.",
-            error
-          );
-
-          if (status) {
-            status.textContent =
-            "The browser could not open the eyedropper.";
-          }
-        } else if (status) {
-          status.textContent = "";
-        }
-      }
-    }
+    finishPointer
   );
 }
 
@@ -4961,6 +5145,2231 @@ function renderAll() {
   renderInspector();
   updateGeneratedOutput();
   persist();
+}
+
+function createSettingsPreviewDraft() {
+  const draft = {
+    values: {},
+    controllers: {},
+    colorStates: {}
+  };
+
+  const visit = nodes => {
+    for (const node of nodes) {
+      if (node.kind === "controller") {
+        const selectedOption =
+          node.options.find(
+            option =>
+              option.name ===
+              node.defaultOption
+          ) || node.options[0];
+
+        draft.controllers[node.id] =
+          selectedOption?.name || "";
+
+        for (const option of node.options) {
+          visit(option.children);
+        }
+
+        continue;
+      }
+
+      if (node.valueType === "bool") {
+        draft.values[node.id] =
+          String(node.defaultValue)
+            .trim()
+            .toLowerCase() !== "false";
+      } else if (isVectorType(node.valueType)) {
+        draft.values[node.id] =
+          vectorComponentValues(
+            node.defaultValue,
+            componentCount(node.valueType)
+          );
+      } else {
+        draft.values[node.id] =
+          String(node.defaultValue ?? "");
+      }
+
+      if (node.valueType === "colorX") {
+        draft.colorStates[node.id] =
+          settingsPreviewColorStateFromExpression(
+            node.defaultValue,
+            {
+              profile:
+                normalizeColorProfile(
+                  node.colorProfile
+                ),
+              strength:
+                clamp(
+                  Number(node.colorStrength) || 1,
+                  1,
+                  10
+                )
+            }
+          );
+      }
+    }
+  };
+
+  visit(state.nodes);
+  return draft;
+}
+
+function settingsPreviewTitle(
+  settingName = ""
+) {
+  const modName =
+    String(state.metadata.modName || "")
+      .trim() || "Unnamed Mod";
+  const version =
+    String(state.metadata.version || "")
+      .trim()
+      .replace(/^v\.?/i, "")
+      .replace(/^\.+/, "");
+  const title = version
+    ? `${modName} v.${version}`
+    : modName;
+
+  return settingName
+    ? `${title} -> ${settingName}`
+    : title;
+}
+
+function settingsPreviewValue(node) {
+  if (!settingsPreviewDraft) {
+    return "";
+  }
+
+  return node.kind === "controller"
+    ? settingsPreviewDraft.controllers[node.id]
+    : settingsPreviewDraft.values[node.id];
+}
+
+function previewEnumEditorMarkup(
+  node,
+  options,
+  value
+) {
+  const safeOptions =
+    options.length > 0
+      ? options
+      : [""];
+  const current =
+    safeOptions.includes(value)
+      ? value
+      : safeOptions[0];
+
+  return `<div class="rml-preview-enum" data-preview-enum="${escapeHtml(
+    node.id
+  )}">
+    <button
+      class="rml-preview-control rml-preview-enum-value"
+      type="button"
+      tabindex="-1"
+      aria-label="Current value">
+      ${escapeHtml(current)}
+    </button>
+    <button
+      class="rml-preview-control rml-preview-enum-step"
+      type="button"
+      data-preview-enum-direction="-1"
+      data-preview-node="${escapeHtml(node.id)}"
+      aria-label="Previous value">◀</button>
+    <button
+      class="rml-preview-control rml-preview-enum-step"
+      type="button"
+      data-preview-enum-direction="1"
+      data-preview-node="${escapeHtml(node.id)}"
+      aria-label="Next value">▶</button>
+  </div>`;
+}
+
+function previewNumericBounds(node) {
+  const integer =
+    node.valueType === "int";
+  let minimum =
+    Number(node.minimum);
+  let maximum =
+    Number(node.maximum);
+
+  if (!Number.isFinite(minimum)) {
+    minimum = 0;
+  }
+
+  if (!Number.isFinite(maximum)) {
+    maximum = minimum + 100;
+  }
+
+  if (maximum <= minimum) {
+    maximum = minimum + 1;
+  }
+
+  if (integer) {
+    minimum = Math.trunc(minimum);
+    maximum = Math.trunc(maximum);
+  }
+
+  return {
+    minimum,
+    maximum,
+    step: integer
+      ? 1
+      : Math.max(
+          (maximum - minimum) / 1000,
+          0.000001
+        )
+  };
+}
+
+function previewSettingEditorMarkup(node) {
+  const value =
+    settingsPreviewValue(node);
+
+  if (node.valueType === "bool") {
+    return `<label class="rml-preview-checkbox">
+      <input
+        type="checkbox"
+        data-preview-bool="${escapeHtml(node.id)}"${
+          value ? " checked" : ""
+        }>
+      <span aria-hidden="true">✓</span>
+    </label>`;
+  }
+
+  if (node.valueType === "enum") {
+    return previewEnumEditorMarkup(
+      node,
+      node.enumOptions,
+      value
+    );
+  }
+
+  if (node.valueType === "Uri") {
+    return `<div class="rml-preview-uri">
+      <input
+        class="rml-preview-text-field"
+        type="text"
+        value="${escapeHtml(value)}"
+        data-preview-input="${escapeHtml(node.id)}"
+        aria-label="${escapeHtml(node.keyName)}">
+      <button
+        class="rml-preview-control rml-preview-copy"
+        type="button"
+        data-preview-copy="${escapeHtml(node.id)}"
+        aria-label="Copy URI">⧉</button>
+    </div>`;
+  }
+
+  if (
+    isScalarNumericType(node.valueType) &&
+    usesSlider(node)
+  ) {
+    const bounds =
+      previewNumericBounds(node);
+    const numericValue =
+      clamp(
+        Number(value),
+        bounds.minimum,
+        bounds.maximum
+      );
+    const safeNumericValue =
+      Number.isFinite(numericValue)
+        ? numericValue
+        : bounds.minimum;
+    const progress =
+      settingsPreviewRangeProgress(
+        safeNumericValue,
+        bounds.minimum,
+        bounds.maximum
+      );
+
+    return `<div class="rml-preview-slider">
+      <input
+        type="range"
+        min="${bounds.minimum}"
+        max="${bounds.maximum}"
+        step="${bounds.step}"
+        value="${safeNumericValue}"
+        data-preview-range="${escapeHtml(node.id)}"
+        style="--rml-range-progress: ${progress}%"
+        aria-label="${escapeHtml(node.keyName)}">
+      <output data-preview-range-output="${escapeHtml(node.id)}">${escapeHtml(
+        value
+      )}</output>
+    </div>`;
+  }
+
+  if (isVectorType(node.valueType)) {
+    const values =
+      Array.isArray(value)
+        ? value
+        : vectorComponentValues(
+            value,
+            componentCount(node.valueType)
+          );
+    const componentType =
+      numericComponentType(node.valueType);
+
+    return `<div class="rml-preview-vector rml-preview-vector-${values.length}">
+      ${values
+        .map(
+          (component, index) => `<label>
+            <span>${VECTOR_COMPONENT_NAMES[index]}</span>
+            <input
+              class="rml-preview-text-field"
+              type="number"
+              step="${componentType === "int" ? "1" : "any"}"
+              value="${escapeHtml(component)}"
+              data-preview-vector="${escapeHtml(node.id)}"
+              data-preview-vector-index="${index}">
+          </label>`
+        )
+        .join("")}
+    </div>`;
+  }
+
+  if (node.valueType === "colorX") {
+    const storedState =
+      settingsPreviewDraft?.colorStates?.[
+        node.id
+      ];
+    const colorState =
+      storedState ||
+      settingsPreviewColorStateFromExpression(
+        value,
+        {
+          profile:
+            normalizeColorProfile(
+              node.colorProfile
+            ),
+          strength:
+            clamp(
+              Number(node.colorStrength) || 1,
+              1,
+              10
+            )
+        }
+      );
+    const preview =
+      colorChannelsToPreview(
+        [
+          colorState.red *
+            colorState.strength,
+          colorState.green *
+            colorState.strength,
+          colorState.blue *
+            colorState.strength,
+          colorState.alpha
+        ],
+        "Preview color",
+        colorState.profile,
+        colorState.strength
+      );
+    const glowStrength =
+      clamp(
+        colorState.strength,
+        1,
+        10
+      );
+    const glowSize =
+      glowStrength <= 1.000001
+        ? 0
+        : 8 + (glowStrength - 1) * 3.2;
+
+    return `<button
+      class="rml-preview-color-button"
+      type="button"
+      data-preview-color="${escapeHtml(node.id)}"
+      style="
+        --rml-preview-color: ${escapeHtml(preview.cssColor)};
+        --rml-preview-glow: ${escapeHtml(preview.cssColor)};
+        --rml-preview-glow-size: ${glowSize}px;
+      "
+      aria-label="Edit ${escapeHtml(node.keyName)} color">
+      <span aria-hidden="true"></span>
+    </button>`;
+  }
+
+  return `<input
+    class="rml-preview-text-field"
+    type="${isScalarNumericType(node.valueType) ? "number" : "text"}"
+    step="${node.valueType === "int" ? "1" : "any"}"
+    value="${escapeHtml(value)}"
+    data-preview-input="${escapeHtml(node.id)}"
+    aria-label="${escapeHtml(node.keyName)}">`;
+}
+
+function settingsPreviewNodesMarkup(nodes) {
+  const rows = [];
+  const visibleNodes =
+    flattenNodes(nodes)
+      .filter(
+        entry =>
+          entry.conditions.every(
+            condition =>
+              settingsPreviewDraft?.controllers[
+                condition.controller.id
+              ] === condition.option.name
+          )
+      )
+      .map(entry => entry.node)
+      .filter(
+        node =>
+          !(
+            node.kind === "setting" &&
+            node.hidden
+          )
+      )
+      .sort(
+        (left, right) =>
+          String(left.keyName).localeCompare(
+            String(right.keyName),
+            undefined,
+            {
+              numeric: true,
+              sensitivity: "base"
+            }
+          )
+      );
+
+  for (const node of visibleNodes) {
+    if (node.kind === "controller") {
+      const value =
+        settingsPreviewValue(node);
+      const options =
+        node.options.map(
+          option => option.name
+        );
+
+      rows.push(`<div class="rml-preview-setting rml-preview-setting-enum">
+        <div class="rml-preview-label">${escapeHtml(node.keyName)}</div>
+        <div class="rml-preview-editor">
+          ${previewEnumEditorMarkup(node, options, value)}
+        </div>
+      </div>`);
+      continue;
+    }
+
+    rows.push(`<div class="rml-preview-setting rml-preview-setting-${escapeHtml(
+      node.valueType === "bool"
+        ? "bool"
+        : node.valueType === "colorX"
+          ? "color"
+          : "value"
+    )}">
+      <div class="rml-preview-label">${escapeHtml(node.keyName)}</div>
+      <div class="rml-preview-editor">
+        ${previewSettingEditorMarkup(node)}
+      </div>
+    </div>`);
+  }
+
+  return rows.join("");
+}
+
+function previewColorLiteral(value) {
+  const numeric =
+    Number.isFinite(Number(value))
+      ? Number(value)
+      : 0;
+  const rounded =
+    Math.abs(numeric) < 0.0000005
+      ? 0
+      : Number(numeric.toFixed(6));
+
+  if (rounded === 0) {
+    return "0f";
+  }
+
+  if (rounded === 1) {
+    return "1f";
+  }
+
+  return `${rounded}f`;
+}
+
+function previewColorNumber(
+  value,
+  decimals = 2
+) {
+  const numeric =
+    Number.isFinite(Number(value))
+      ? Number(value)
+      : 0;
+
+  return numeric.toFixed(decimals);
+}
+
+function settingsPreviewColorHsv() {
+  const session =
+    settingsPreviewColorSession;
+
+  if (!session) {
+    return {
+      hue: 0,
+      saturation: 0,
+      value: 0
+    };
+  }
+
+  const derived =
+    rgbToHsv(
+      session.red * 255,
+      session.green * 255,
+      session.blue * 255
+    );
+
+  if (
+    derived.saturation > 0.000001
+  ) {
+    session.hue =
+      derived.hue;
+  }
+
+  return {
+    ...derived,
+    hue:
+      Number.isFinite(
+        session.hue
+      )
+        ? session.hue
+        : derived.hue
+  };
+}
+
+function settingsPreviewColorHex() {
+  const session =
+    settingsPreviewColorSession;
+
+  if (!session) {
+    return "#000000";
+  }
+
+  return colorBytesToHex(
+    session.red * 255,
+    session.green * 255,
+    session.blue * 255
+  ).toUpperCase();
+}
+
+function settingsPreviewColorCss(
+  session = settingsPreviewColorSession
+) {
+  if (!session) {
+    return "rgba(0, 0, 0, 1)";
+  }
+
+  return colorVisualCss(
+    session.red,
+    session.green,
+    session.blue,
+    session.alpha,
+    session.profile
+  );
+}
+
+function syncSettingsPreviewColorWorking() {
+  const session =
+    settingsPreviewColorSession;
+
+  if (!session) {
+    return;
+  }
+
+  session.working =
+    buildColorXExpression(
+      session.red,
+      session.green,
+      session.blue,
+      session.alpha,
+      session.strength,
+      session.profile
+    );
+}
+
+function settingsPreviewRangeProgress(
+  value,
+  minimum,
+  maximum
+) {
+  if (
+    !Number.isFinite(value) ||
+    !Number.isFinite(minimum) ||
+    !Number.isFinite(maximum) ||
+    maximum <= minimum
+  ) {
+    return 0;
+  }
+
+  return clamp(
+    (value - minimum) /
+      (maximum - minimum) *
+      100,
+    0,
+    100
+  );
+}
+
+function settingsPreviewColorChannelRowMarkup(
+  label,
+  component,
+  value,
+  minimum,
+  maximum,
+  step,
+  decimals = 2
+) {
+  const progress =
+    settingsPreviewRangeProgress(
+      value,
+      minimum,
+      maximum
+    );
+
+  return `<label class="rml-preview-color-channel-row">
+    <span>${escapeHtml(label)}</span>
+    <input
+      class="rml-preview-color-channel-range"
+      type="range"
+      min="${minimum}"
+      max="${maximum}"
+      step="${step}"
+      value="${value}"
+      data-preview-color-component-range="${escapeHtml(component)}"
+      style="--rml-range-progress: ${progress}%"
+      aria-label="${escapeHtml(label)}">
+    <input
+      class="rml-preview-color-channel-value"
+      type="number"
+      min="${minimum}"
+      max="${maximum}"
+      step="${step}"
+      value="${previewColorNumber(value, decimals)}"
+      data-preview-color-component-input="${escapeHtml(component)}"
+      aria-label="${escapeHtml(`${label} value`)}">
+  </label>`;
+}
+
+function settingsPreviewColorModeMarkup() {
+  const session =
+    settingsPreviewColorSession;
+
+  if (!session) {
+    return "";
+  }
+
+  const hsv =
+    settingsPreviewColorHsv();
+  const common = [
+    settingsPreviewColorChannelRowMarkup(
+      "Alpha",
+      "alpha",
+      session.alpha,
+      0,
+      1,
+      0.01
+    ),
+    settingsPreviewColorChannelRowMarkup(
+      "Strength",
+      "strength",
+      session.strength,
+      1,
+      10,
+      0.01
+    )
+  ];
+
+  if (session.mode === "hsv") {
+    return [
+      settingsPreviewColorChannelRowMarkup(
+        "Hue",
+        "hue",
+        hsv.hue,
+        0,
+        359,
+        1,
+        0
+      ),
+      settingsPreviewColorChannelRowMarkup(
+        "Saturation",
+        "saturation",
+        hsv.saturation,
+        0,
+        1,
+        0.01
+      ),
+      settingsPreviewColorChannelRowMarkup(
+        "Value",
+        "value",
+        hsv.value,
+        0,
+        1,
+        0.01
+      ),
+      ...common
+    ].join("");
+  }
+
+  if (session.mode === "hex") {
+    return `<label class="rml-preview-color-channel-row rml-preview-color-hex-row">
+      <span>Hex</span>
+      <input
+        class="rml-preview-color-hex-input"
+        type="text"
+        value="${escapeHtml(
+          settingsPreviewColorHex()
+        )}"
+        maxlength="9"
+        spellcheck="false"
+        autocomplete="off"
+        data-preview-color-hex>
+    </label>${common.join("")}`;
+  }
+
+  return [
+    settingsPreviewColorChannelRowMarkup(
+      "Red",
+      "red",
+      session.red,
+      0,
+      1,
+      0.01
+    ),
+    settingsPreviewColorChannelRowMarkup(
+      "Green",
+      "green",
+      session.green,
+      0,
+      1,
+      0.01
+    ),
+    settingsPreviewColorChannelRowMarkup(
+      "Blue",
+      "blue",
+      session.blue,
+      0,
+      1,
+      0.01
+    ),
+    ...common
+  ].join("");
+}
+
+function settingsPreviewResonitePalette() {
+  const grayscale = [
+    "#351600",
+    "#1D1D1D",
+    "#323438",
+    "#5A5A5A",
+    "#858585",
+    "#B0B0B0",
+    "#D8D8D8",
+    "#F4F4F4"
+  ];
+  const hues = [
+    0,
+    30,
+    58,
+    120,
+    180,
+    215,
+    270,
+    320
+  ];
+  const levels = [
+    [0.34, 1],
+    [0.48, 1],
+    [0.64, 1],
+    [0.78, 1],
+    [0.92, 1],
+    [1, 1],
+    [1, 0.86],
+    [0.88, 0.72],
+    [0.76, 0.60],
+    [0.65, 0.49],
+    [0.54, 0.38]
+  ];
+  const colors =
+    [...grayscale];
+
+  for (const [saturation, value] of levels) {
+    for (const hue of hues) {
+      const rgb =
+        hsvToRgb(
+          hue,
+          saturation,
+          value
+        );
+
+      colors.push(
+        colorBytesToHex(
+          rgb.red,
+          rgb.green,
+          rgb.blue
+        ).toUpperCase()
+      );
+    }
+  }
+
+  return colors;
+}
+
+function settingsPreviewColorPaletteMarkup() {
+  const selected =
+    settingsPreviewColorHex();
+
+  return settingsPreviewResonitePalette()
+    .map(
+      color => `<button
+        class="rml-preview-color-palette-swatch${
+          color === selected
+            ? " selected"
+            : ""
+        }"
+        type="button"
+        data-preview-color-swatch="${escapeHtml(color)}"
+        style="--rml-palette-color: ${escapeHtml(color)}"
+        aria-label="Select ${escapeHtml(color)} color"></button>`
+    )
+    .join("");
+}
+
+function settingsPreviewColorMarkup() {
+  const session =
+    settingsPreviewColorSession;
+
+  if (!session) {
+    return "";
+  }
+
+  const hsv =
+    settingsPreviewColorHsv();
+  const currentHex =
+    settingsPreviewColorHex();
+  const currentCss =
+    settingsPreviewColorCss();
+  const originalPreview =
+    colorChannelsToPreview(
+      [
+        session.originalState.red *
+          session.originalState.strength,
+        session.originalState.green *
+          session.originalState.strength,
+        session.originalState.blue *
+          session.originalState.strength,
+        session.originalState.alpha
+      ],
+      "Original preview color",
+      session.originalState.profile,
+      session.originalState.strength
+    );
+  const glowStrength =
+    clamp(
+      session.strength,
+      1,
+      10
+    );
+  const glowSize =
+    glowStrength <= 1.000001
+      ? 0
+      : 8 + (glowStrength - 1) * 3.2;
+
+  return `<div class="rml-preview-full-color" data-preview-color-page>
+    <section class="rml-preview-resonite-color-left">
+      <div class="rml-preview-color-surfaces">
+        <div
+          class="custom-color-sv rml-preview-resonite-sv"
+          data-color-sv
+          role="slider"
+          tabindex="0"
+          aria-label="Saturation and brightness"
+          aria-valuetext="Saturation ${Math.round(
+            hsv.saturation * 100
+          )}%, brightness ${Math.round(
+            hsv.value * 100
+          )}%"
+          data-hue="${hsv.hue}"
+          data-saturation="${hsv.saturation}"
+          data-value="${hsv.value}"
+          style="--picker-hue: ${hsv.hue}; --picker-saturation: ${hsv.saturation * 100}%; --picker-value-position: ${(1 - hsv.value) * 100}%">
+          <span class="custom-color-sv-marker" aria-hidden="true"></span>
+        </div>
+
+        <label class="rml-preview-vertical-hue" aria-label="Hue">
+          <input
+            type="range"
+            min="0"
+            max="359"
+            step="1"
+            value="${Math.round(hsv.hue)}"
+            data-preview-color-hue
+            style="--rml-range-progress: ${settingsPreviewRangeProgress(
+              hsv.hue,
+              0,
+              359
+            )}%">
+        </label>
+
+        <div class="rml-preview-color-preview-stack" aria-label="Current and previous color">
+          <button
+            class="rml-preview-tall-color-swatch current"
+            type="button"
+            title="Current color"
+            style="--rml-swatch-color: ${escapeHtml(currentCss)}; --rml-swatch-glow: ${escapeHtml(currentCss)}; --rml-swatch-glow-size: ${glowSize}px"></button>
+          <button
+            class="rml-preview-tall-color-swatch original"
+            type="button"
+            data-preview-color-restore
+            title="Restore original preview color"
+            style="--rml-swatch-color: ${escapeHtml(originalPreview.cssColor)}; --rml-swatch-glow: ${escapeHtml(originalPreview.hex)}; --rml-swatch-glow-size: 12px"></button>
+        </div>
+      </div>
+
+      <div class="rml-preview-color-profile-tabs" aria-label="Color profile">
+        ${[
+          ["srgb", "sRGB"],
+          ["linear", "Linear"]
+        ]
+          .map(
+            ([profile, label]) => `<button
+              class="rml-preview-control${
+                session.profile === profile
+                  ? " selected"
+                  : ""
+              }"
+              type="button"
+              data-preview-color-profile="${profile}"${
+                profile === "srgb" &&
+                session.strength > 1.000001
+                  ? " disabled"
+                  : ""
+              }>${label}</button>`
+          )
+          .join("")}
+      </div>
+
+      <div class="rml-preview-color-mode-tabs" aria-label="Color input mode">
+        ${[
+          ["rgb", "RGB"],
+          ["hsv", "HSV"],
+          ["hex", "Hex"]
+        ]
+          .map(
+            ([mode, label]) => `<button
+              class="rml-preview-control${
+                session.mode === mode
+                  ? " selected"
+                  : ""
+              }"
+              type="button"
+              data-preview-color-mode="${mode}">${label}</button>`
+          )
+          .join("")}
+      </div>
+
+      <div class="rml-preview-color-channel-editor">
+        ${settingsPreviewColorModeMarkup()}
+      </div>
+    </section>
+
+    <section
+      class="rml-preview-color-palette"
+      aria-label="Resonite color palette">
+      ${settingsPreviewColorPaletteMarkup()}
+    </section>
+  </div>`;
+}
+
+function setSettingsPreviewStatus(
+  message,
+  tone = ""
+) {
+  clearTimeout(
+    settingsPreviewStatusTimer
+  );
+  elements.settingsPreviewStatus.textContent =
+    message;
+  elements.settingsPreviewStatus.dataset.tone =
+    tone;
+
+  settingsPreviewStatusTimer =
+    window.setTimeout(
+      () => {
+        elements.settingsPreviewStatus.textContent = "";
+        elements.settingsPreviewStatus.dataset.tone = "";
+      },
+      2400
+    );
+}
+
+function renderSettingsPreviewFooter() {
+  if (settingsPreviewColorSession) {
+    elements.settingsPreviewSavePanel.innerHTML = `<div class="rml-preview-color-footer-actions">
+      <button
+        class="rml-preview-control rml-preview-footer-button"
+        type="button"
+        data-preview-color-cancel>
+        Cancel
+      </button>
+      <button
+        class="rml-preview-control rml-preview-footer-button"
+        type="button"
+        data-preview-color-apply>
+        Apply &amp; Back
+      </button>
+    </div>`;
+  } else {
+    elements.settingsPreviewSavePanel.innerHTML = `<button
+      id="settings-preview-save"
+      class="rml-preview-save"
+      type="button">
+      Save Settings
+    </button>`;
+  }
+}
+
+function renderSettingsPreview() {
+  if (!settingsPreviewDraft) {
+    return;
+  }
+
+  const colorNode =
+    settingsPreviewColorSession
+      ? findNode(
+          state.nodes,
+          settingsPreviewColorSession.nodeId
+        )
+      : null;
+  const colorPageOpen =
+    Boolean(
+      settingsPreviewColorSession
+    );
+
+  elements.settingsPreviewDialog.classList.toggle(
+    "rml-preview-color-open",
+    colorPageOpen
+  );
+  elements.settingsPreviewTitle.textContent =
+    settingsPreviewTitle(
+      colorNode?.keyName || ""
+    );
+
+  if (colorPageOpen) {
+    elements.settingsPreviewContent.innerHTML =
+      settingsPreviewColorMarkup();
+    bindSettingsPreviewColorInteractions();
+  } else {
+    const markup =
+      settingsPreviewNodesMarkup(
+        state.nodes
+      );
+
+    elements.settingsPreviewContent.innerHTML =
+      markup || `<div class="rml-preview-empty">This mod has no visible configuration.</div>`;
+  }
+
+  renderSettingsPreviewFooter();
+}
+
+function changeSettingsPreviewEnum(
+  nodeId,
+  direction
+) {
+  const node =
+    findNode(
+      state.nodes,
+      nodeId
+    );
+
+  if (!node || !settingsPreviewDraft) {
+    return;
+  }
+
+  const options =
+    node.kind === "controller"
+      ? node.options.map(
+          option => option.name
+        )
+      : node.enumOptions;
+
+  if (options.length === 0) {
+    return;
+  }
+
+  const currentValue =
+    settingsPreviewValue(node);
+  const currentIndex =
+    Math.max(
+      options.indexOf(currentValue),
+      0
+    );
+  const nextIndex =
+    (currentIndex +
+      direction +
+      options.length) %
+    options.length;
+
+  if (node.kind === "controller") {
+    settingsPreviewDraft.controllers[node.id] =
+      options[nextIndex];
+  } else {
+    settingsPreviewDraft.values[node.id] =
+      options[nextIndex];
+  }
+
+  renderSettingsPreview();
+}
+
+async function copySettingsPreviewUri(nodeId) {
+  const value =
+    settingsPreviewDraft?.values[nodeId] ?? "";
+
+  try {
+    if (
+      navigator.clipboard &&
+      window.isSecureContext
+    ) {
+      await navigator.clipboard.writeText(
+        String(value)
+      );
+    } else {
+      throw new Error("Clipboard API unavailable");
+    }
+
+    setSettingsPreviewStatus(
+      "URI copied to the local clipboard.",
+      "success"
+    );
+  } catch {
+    setSettingsPreviewStatus(
+      "Clipboard access is not available in this browser context.",
+      "error"
+    );
+  }
+}
+
+function settingsPreviewColorStateFromExpression(
+  expression,
+  storedState = null
+) {
+  const profile =
+    normalizeColorProfile(
+      storedState?.profile
+    );
+  const requestedStrength =
+    Number(storedState?.strength);
+  const preview =
+    colorXPreview(
+      expression,
+      Number.isFinite(requestedStrength)
+        ? requestedStrength
+        : null,
+      profile
+    );
+  const channels =
+    preview.channels ||
+    [0.5, 0.5, 0.5, 1];
+  const baseChannels =
+    preview.baseChannels ||
+    channels;
+  const strength =
+    clamp(
+      Number.isFinite(requestedStrength)
+        ? requestedStrength
+        : preview.strength,
+      1,
+      10
+    );
+  const red =
+    clamp(
+      baseChannels[0],
+      0,
+      1
+    );
+  const green =
+    clamp(
+      baseChannels[1],
+      0,
+      1
+    );
+  const blue =
+    clamp(
+      baseChannels[2],
+      0,
+      1
+    );
+  const hsv =
+    rgbToHsv(
+      red * 255,
+      green * 255,
+      blue * 255
+    );
+
+  return {
+    red,
+    green,
+    blue,
+    alpha:
+      clamp(
+        baseChannels[3],
+        0,
+        1
+      ),
+    strength,
+    profile:
+      normalizeColorProfile(
+        storedState?.profile ||
+        preview.profile
+      ),
+    hue:
+      Number.isFinite(
+        storedState?.hue
+      )
+        ? storedState.hue
+        : hsv.hue
+  };
+}
+
+function openSettingsPreviewColor(nodeId) {
+  const node =
+    findNode(
+      state.nodes,
+      nodeId
+    );
+
+  if (
+    !node ||
+    node.kind !== "setting" ||
+    node.valueType !== "colorX" ||
+    !settingsPreviewDraft
+  ) {
+    return;
+  }
+
+  if (!settingsPreviewDraft.colorStates) {
+    settingsPreviewDraft.colorStates = {};
+  }
+
+  const original =
+    settingsPreviewDraft.values[nodeId];
+  const savedState =
+    settingsPreviewDraft.colorStates[
+      nodeId
+    ];
+  const initial =
+    settingsPreviewColorStateFromExpression(
+      original,
+      savedState || {
+        profile:
+          normalizeColorProfile(
+            node.colorProfile
+          ),
+        strength:
+          clamp(
+            Number(node.colorStrength) || 1,
+            1,
+            10
+          )
+      }
+    );
+
+  settingsPreviewColorSession = {
+    nodeId,
+    original,
+    working: original,
+    mode: "rgb",
+    ...initial,
+    originalState: {
+      ...initial
+    }
+  };
+
+  syncSettingsPreviewColorWorking();
+  renderSettingsPreview();
+}
+
+function closeSettingsPreviewColor(
+  apply
+) {
+  if (
+    apply &&
+    settingsPreviewDraft &&
+    settingsPreviewColorSession
+  ) {
+    if (!settingsPreviewDraft.colorStates) {
+      settingsPreviewDraft.colorStates = {};
+    }
+
+    settingsPreviewDraft.values[
+      settingsPreviewColorSession.nodeId
+    ] =
+      settingsPreviewColorSession.working;
+
+    settingsPreviewDraft.colorStates[
+      settingsPreviewColorSession.nodeId
+    ] = {
+      red:
+        settingsPreviewColorSession.red,
+      green:
+        settingsPreviewColorSession.green,
+      blue:
+        settingsPreviewColorSession.blue,
+      alpha:
+        settingsPreviewColorSession.alpha,
+      strength:
+        settingsPreviewColorSession.strength,
+      profile:
+        settingsPreviewColorSession.profile,
+      hue:
+        settingsPreviewColorSession.hue
+    };
+  }
+
+  settingsPreviewColorSession = null;
+  renderSettingsPreview();
+}
+
+function settingsPreviewColorComponentValue(
+  component
+) {
+  const session =
+    settingsPreviewColorSession;
+
+  if (!session) {
+    return 0;
+  }
+
+  const hsv =
+    settingsPreviewColorHsv();
+
+  switch (component) {
+    case "red":
+      return session.red;
+    case "green":
+      return session.green;
+    case "blue":
+      return session.blue;
+    case "alpha":
+      return session.alpha;
+    case "strength":
+      return session.strength;
+    case "hue":
+      return hsv.hue;
+    case "saturation":
+      return hsv.saturation;
+    case "value":
+      return hsv.value;
+    default:
+      return 0;
+  }
+}
+
+function refreshSettingsPreviewColorVisuals() {
+  const session =
+    settingsPreviewColorSession;
+  const root =
+    elements.settingsPreviewContent;
+
+  if (!session || !root) {
+    return;
+  }
+
+  syncSettingsPreviewColorWorking();
+
+  const hsv =
+    settingsPreviewColorHsv();
+  const hex =
+    settingsPreviewColorHex();
+  const cssColor =
+    settingsPreviewColorCss();
+  const surface =
+    root.querySelector(
+      "[data-color-sv]"
+    );
+
+  if (surface) {
+    surface.dataset.hue =
+      String(hsv.hue);
+    surface.dataset.saturation =
+      String(hsv.saturation);
+    surface.dataset.value =
+      String(hsv.value);
+    surface.style.setProperty(
+      "--picker-hue",
+      String(hsv.hue)
+    );
+    surface.style.setProperty(
+      "--picker-saturation",
+      `${hsv.saturation * 100}%`
+    );
+    surface.style.setProperty(
+      "--picker-value-position",
+      `${(1 - hsv.value) * 100}%`
+    );
+    surface.setAttribute(
+      "aria-valuetext",
+      `Saturation ${Math.round(
+        hsv.saturation * 100
+      )}%, brightness ${Math.round(
+        hsv.value * 100
+      )}%`
+    );
+  }
+
+  const hueInput =
+    root.querySelector(
+      "[data-preview-color-hue]"
+    );
+
+  if (hueInput) {
+    hueInput.value =
+      String(
+        Math.round(hsv.hue)
+      );
+    hueInput.style.setProperty(
+      "--rml-range-progress",
+      `${settingsPreviewRangeProgress(
+        hsv.hue,
+        0,
+        359
+      )}%`
+    );
+  }
+
+  const currentSwatch =
+    root.querySelector(
+      ".rml-preview-tall-color-swatch.current"
+    );
+
+  if (currentSwatch) {
+    currentSwatch.style.setProperty(
+      "--rml-swatch-color",
+      cssColor
+    );
+    currentSwatch.style.setProperty(
+      "--rml-swatch-glow",
+      cssColor
+    );
+    currentSwatch.style.setProperty(
+      "--rml-swatch-glow-size",
+      `${
+        session.strength <= 1.000001
+          ? 0
+          : 8 +
+            (clamp(
+              session.strength,
+              1,
+              10
+            ) - 1) * 3.2
+      }px`
+    );
+  }
+
+  root
+    .querySelectorAll(
+      "[data-preview-color-profile]"
+    )
+    .forEach(button => {
+      const buttonProfile =
+        normalizeColorProfile(
+          button.dataset.previewColorProfile
+        );
+
+      button.classList.toggle(
+        "selected",
+        buttonProfile === session.profile
+      );
+      button.disabled =
+        buttonProfile === "srgb" &&
+        session.strength > 1.000001;
+    });
+
+  root
+    .querySelectorAll(
+      "[data-preview-color-component-range]"
+    )
+    .forEach(input => {
+      const component =
+        input.dataset.previewColorComponentRange;
+      const value =
+        settingsPreviewColorComponentValue(
+          component
+        );
+      const minimum =
+        Number(input.min);
+      const maximum =
+        Number(input.max);
+
+      input.value =
+        String(value);
+      input.style.setProperty(
+        "--rml-range-progress",
+        `${settingsPreviewRangeProgress(
+          value,
+          minimum,
+          maximum
+        )}%`
+      );
+    });
+
+  root
+    .querySelectorAll(
+      "[data-preview-color-component-input]"
+    )
+    .forEach(input => {
+      const component =
+        input.dataset.previewColorComponentInput;
+      const value =
+        settingsPreviewColorComponentValue(
+          component
+        );
+
+      input.value =
+        previewColorNumber(
+          value,
+          component === "hue"
+            ? 0
+            : 2
+        );
+    });
+
+  const hexInput =
+    root.querySelector(
+      "[data-preview-color-hex]"
+    );
+
+  if (hexInput) {
+    hexInput.value =
+      hex;
+  }
+
+  root
+    .querySelectorAll(
+      "[data-preview-color-swatch]"
+    )
+    .forEach(swatch => {
+      swatch.classList.toggle(
+        "selected",
+        swatch.dataset.previewColorSwatch ===
+          hex
+      );
+    });
+}
+
+function commitSettingsPreviewColor(
+  changes
+) {
+  const session =
+    settingsPreviewColorSession;
+
+  if (!session || !changes) {
+    return;
+  }
+
+  for (const component of [
+    "red",
+    "green",
+    "blue",
+    "alpha"
+  ]) {
+    if (
+      Object.hasOwn(
+        changes,
+        component
+      ) &&
+      Number.isFinite(
+        Number(
+          changes[component]
+        )
+      )
+    ) {
+      session[component] =
+        clamp(
+          Number(
+            changes[component]
+          ),
+          0,
+          1
+        );
+    }
+  }
+
+  if (
+    Object.hasOwn(
+      changes,
+      "strength"
+    ) &&
+    Number.isFinite(
+      Number(
+        changes.strength
+      )
+    )
+  ) {
+    const nextStrength =
+      clamp(
+        Number(changes.strength),
+        1,
+        10
+      );
+
+    if (
+      nextStrength > 1.000001 &&
+      session.profile === "srgb"
+    ) {
+      const converted =
+        convertColorProfileChannels(
+          session.red,
+          session.green,
+          session.blue,
+          "srgb",
+          "linear"
+        );
+
+      session.red =
+        clamp(converted.red, 0, 1);
+      session.green =
+        clamp(converted.green, 0, 1);
+      session.blue =
+        clamp(converted.blue, 0, 1);
+      session.profile =
+        "linear";
+    }
+
+    session.strength =
+      nextStrength;
+  }
+
+  if (
+    Object.hasOwn(
+      changes,
+      "hue"
+    ) &&
+    Number.isFinite(
+      Number(
+        changes.hue
+      )
+    )
+  ) {
+    session.hue =
+      ((Number(changes.hue) %
+        360) +
+        360) %
+      360;
+  }
+
+  refreshSettingsPreviewColorVisuals();
+}
+
+function bindSettingsPreviewColorInteractions() {
+  const root =
+    elements.settingsPreviewContent;
+  const surface =
+    root.querySelector(
+      "[data-color-sv]"
+    );
+
+  if (
+    !surface ||
+    !settingsPreviewColorSession
+  ) {
+    return;
+  }
+
+  const applyHsv = (
+    hue,
+    saturation,
+    value
+  ) => {
+    const normalizedHue =
+      ((Number(hue) % 360) +
+        360) %
+      360;
+    const normalizedSaturation =
+      clamp(
+        Number(saturation),
+        0,
+        1
+      );
+    const normalizedValue =
+      clamp(
+        Number(value),
+        0,
+        1
+      );
+    const rgb =
+      hsvToRgb(
+        normalizedHue,
+        normalizedSaturation,
+        normalizedValue
+      );
+
+    commitSettingsPreviewColor({
+      red:
+        rgb.red / 255,
+      green:
+        rgb.green / 255,
+      blue:
+        rgb.blue / 255,
+      hue: normalizedHue
+    });
+  };
+
+  const applyComponent = (
+    component,
+    rawValue
+  ) => {
+    const value =
+      Number(rawValue);
+
+    if (!Number.isFinite(value)) {
+      return;
+    }
+
+    const hsv =
+      settingsPreviewColorHsv();
+
+    switch (component) {
+      case "hue":
+        applyHsv(
+          clamp(value, 0, 359),
+          hsv.saturation,
+          hsv.value
+        );
+        break;
+      case "saturation":
+        applyHsv(
+          hsv.hue,
+          clamp(value, 0, 1),
+          hsv.value
+        );
+        break;
+      case "value":
+        applyHsv(
+          hsv.hue,
+          hsv.saturation,
+          clamp(value, 0, 1)
+        );
+        break;
+      case "red":
+      case "green":
+      case "blue":
+      case "alpha":
+        commitSettingsPreviewColor({
+          [component]:
+            clamp(value, 0, 1)
+        });
+        break;
+      case "strength":
+        commitSettingsPreviewColor({
+          strength:
+            clamp(value, 1, 10)
+        });
+        break;
+      default:
+        break;
+    }
+  };
+
+  root
+    .querySelectorAll(
+      "[data-preview-color-component-range]"
+    )
+    .forEach(input => {
+      input.addEventListener(
+        "input",
+        () => {
+          applyComponent(
+            input.dataset.previewColorComponentRange,
+            input.value
+          );
+        }
+      );
+    });
+
+  root
+    .querySelectorAll(
+      "[data-preview-color-component-input]"
+    )
+    .forEach(input => {
+      input.addEventListener(
+        "input",
+        () => {
+          applyComponent(
+            input.dataset.previewColorComponentInput,
+            input.value
+          );
+        }
+      );
+      input.addEventListener(
+        "change",
+        refreshSettingsPreviewColorVisuals
+      );
+    });
+
+  root
+    .querySelector(
+      "[data-preview-color-hue]"
+    )
+    ?.addEventListener(
+      "input",
+      event => {
+        const hsv =
+          settingsPreviewColorHsv();
+
+        applyHsv(
+          event.currentTarget.value,
+          hsv.saturation,
+          hsv.value
+        );
+      }
+    );
+
+  root
+    .querySelectorAll(
+      "[data-preview-color-profile]"
+    )
+    .forEach(button => {
+      button.addEventListener(
+        "click",
+        () => {
+          const session =
+            settingsPreviewColorSession;
+          const targetProfile =
+            normalizeColorProfile(
+              button.dataset.previewColorProfile
+            );
+
+          if (
+            !session ||
+            targetProfile ===
+              session.profile ||
+            (
+              targetProfile === "srgb" &&
+              session.strength > 1.000001
+            )
+          ) {
+            return;
+          }
+
+          const converted =
+            convertColorProfileChannels(
+              session.red,
+              session.green,
+              session.blue,
+              session.profile,
+              targetProfile
+            );
+
+          session.red =
+            clamp(converted.red, 0, 1);
+          session.green =
+            clamp(converted.green, 0, 1);
+          session.blue =
+            clamp(converted.blue, 0, 1);
+          session.profile =
+            targetProfile;
+
+          syncSettingsPreviewColorWorking();
+          renderSettingsPreview();
+        }
+      );
+    });
+
+  root
+    .querySelectorAll(
+      "[data-preview-color-mode]"
+    )
+    .forEach(button => {
+      button.addEventListener(
+        "click",
+        () => {
+          settingsPreviewColorSession.mode =
+            button.dataset.previewColorMode;
+          renderSettingsPreview();
+        }
+      );
+    });
+
+  root
+    .querySelectorAll(
+      "[data-preview-color-swatch]"
+    )
+    .forEach(button => {
+      button.addEventListener(
+        "click",
+        () => {
+          const parsed =
+            parseHexColor(
+              button.dataset.previewColorSwatch
+            );
+
+          if (!parsed) {
+            return;
+          }
+
+          commitSettingsPreviewColor({
+            red:
+              parsed.red / 255,
+            green:
+              parsed.green / 255,
+            blue:
+              parsed.blue / 255
+          });
+        }
+      );
+    });
+
+  root
+    .querySelector(
+      "[data-preview-color-hex]"
+    )
+    ?.addEventListener(
+      "input",
+      event => {
+        const parsed =
+          parseHexColor(
+            event.currentTarget.value
+          );
+
+        if (!parsed) {
+          return;
+        }
+
+        commitSettingsPreviewColor({
+          red:
+            parsed.red / 255,
+          green:
+            parsed.green / 255,
+          blue:
+            parsed.blue / 255,
+          ...(parsed.alpha === null
+            ? {}
+            : {
+                alpha:
+                  parsed.alpha / 255
+              })
+        });
+      }
+    );
+
+  root
+    .querySelector(
+      "[data-preview-color-restore]"
+    )
+    ?.addEventListener(
+      "click",
+      () => {
+        Object.assign(
+          settingsPreviewColorSession,
+          settingsPreviewColorSession.originalState
+        );
+        refreshSettingsPreviewColorVisuals();
+      }
+    );
+
+  const setSurfaceValue = event => {
+    const rectangle =
+      surface.getBoundingClientRect();
+
+    if (
+      rectangle.width <= 0 ||
+      rectangle.height <= 0
+    ) {
+      return;
+    }
+
+    applyHsv(
+      settingsPreviewColorHsv().hue,
+      clamp(
+        (event.clientX -
+          rectangle.left) /
+          rectangle.width,
+        0,
+        1
+      ),
+      1 -
+        clamp(
+          (event.clientY -
+            rectangle.top) /
+            rectangle.height,
+          0,
+          1
+        )
+    );
+  };
+
+  let activePointerId = null;
+
+  surface.addEventListener(
+    "pointerdown",
+    event => {
+      if (
+        event.isPrimary === false ||
+        (event.pointerType === "mouse" &&
+          event.button !== 0)
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      activePointerId =
+        event.pointerId;
+      surface.setPointerCapture?.(
+        event.pointerId
+      );
+      setSurfaceValue(event);
+    }
+  );
+
+  surface.addEventListener(
+    "pointermove",
+    event => {
+      if (
+        event.pointerId !==
+        activePointerId
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      setSurfaceValue(event);
+    }
+  );
+
+  const finishPointer = event => {
+    if (
+      event.pointerId !==
+      activePointerId
+    ) {
+      return;
+    }
+
+    if (
+      surface.hasPointerCapture?.(
+        event.pointerId
+      )
+    ) {
+      surface.releasePointerCapture(
+        event.pointerId
+      );
+    }
+
+    activePointerId = null;
+  };
+
+  surface.addEventListener(
+    "pointerup",
+    finishPointer
+  );
+  surface.addEventListener(
+    "pointercancel",
+    finishPointer
+  );
+
+  surface.addEventListener(
+    "keydown",
+    event => {
+      const hsv =
+        settingsPreviewColorHsv();
+      const step =
+        event.shiftKey
+          ? 0.05
+          : 0.01;
+      let saturation =
+        hsv.saturation;
+      let value =
+        hsv.value;
+
+      switch (event.key) {
+        case "ArrowLeft":
+          saturation -= step;
+          break;
+        case "ArrowRight":
+          saturation += step;
+          break;
+        case "ArrowDown":
+          value -= step;
+          break;
+        case "ArrowUp":
+          value += step;
+          break;
+        default:
+          return;
+      }
+
+      event.preventDefault();
+      applyHsv(
+        hsv.hue,
+        clamp(
+          saturation,
+          0,
+          1
+        ),
+        clamp(
+          value,
+          0,
+          1
+        )
+      );
+    }
+  );
+}
+
+function handleSettingsPreviewClick(event) {
+  const enumButton =
+    event.target.closest(
+      "[data-preview-enum-direction]"
+    );
+
+  if (enumButton) {
+    changeSettingsPreviewEnum(
+      enumButton.dataset.previewNode,
+      Number(
+        enumButton.dataset.previewEnumDirection
+      )
+    );
+    return;
+  }
+
+  const copyButton =
+    event.target.closest(
+      "[data-preview-copy]"
+    );
+
+  if (copyButton) {
+    copySettingsPreviewUri(
+      copyButton.dataset.previewCopy
+    );
+    return;
+  }
+
+  const colorButton =
+    event.target.closest(
+      "[data-preview-color]"
+    );
+
+  if (colorButton) {
+    openSettingsPreviewColor(
+      colorButton.dataset.previewColor
+    );
+  }
+}
+
+function handleSettingsPreviewInput(event) {
+  if (!settingsPreviewDraft) {
+    return;
+  }
+
+  const target =
+    event.target;
+
+  if (target.matches("[data-preview-bool]")) {
+    settingsPreviewDraft.values[
+      target.dataset.previewBool
+    ] = target.checked;
+    return;
+  }
+
+  if (target.matches("[data-preview-input]")) {
+    settingsPreviewDraft.values[
+      target.dataset.previewInput
+    ] = target.value;
+    return;
+  }
+
+  if (target.matches("[data-preview-range]")) {
+    settingsPreviewDraft.values[
+      target.dataset.previewRange
+    ] = target.value;
+    const output =
+      Array.from(
+        elements.settingsPreviewContent.querySelectorAll(
+          "[data-preview-range-output]"
+        )
+      ).find(
+        candidate =>
+          candidate.dataset.previewRangeOutput ===
+          target.dataset.previewRange
+      );
+
+    if (output) {
+      output.value = target.value;
+      output.textContent = target.value;
+    }
+
+    target.style.setProperty(
+      "--rml-range-progress",
+      `${settingsPreviewRangeProgress(
+        Number(target.value),
+        Number(target.min),
+        Number(target.max)
+      )}%`
+    );
+
+    return;
+  }
+
+  if (target.matches("[data-preview-vector]")) {
+    const nodeId =
+      target.dataset.previewVector;
+    const values =
+      settingsPreviewDraft.values[nodeId];
+
+    if (Array.isArray(values)) {
+      values[
+        Number(target.dataset.previewVectorIndex)
+      ] = target.value;
+    }
+  }
+}
+
+function saveSettingsPreview() {
+  try {
+    localStorage.setItem(
+      PREVIEW_STORAGE_KEY,
+      JSON.stringify(settingsPreviewDraft)
+    );
+
+    setSettingsPreviewStatus(
+      "Preview gespeichert (nur lokal, Builder bleibt unverändert).",
+      "success"
+    );
+  } catch {
+    setSettingsPreviewStatus(
+      "Speichern fehlgeschlagen.",
+      "error"
+    );
+  }
+}
+
+function openSettingsPreview() {
+  const saved = localStorage.getItem(PREVIEW_STORAGE_KEY);
+
+  settingsPreviewDraft = saved
+    ? JSON.parse(saved)
+    : createSettingsPreviewDraft();
+
+  settingsPreviewColorSession = null;
+  elements.settingsPreviewStatus.textContent = "";
+
+  renderSettingsPreview();
+  elements.settingsPreviewDialog.showModal();
+}
+
+function closeSettingsPreview() {
+  settingsPreviewColorSession = null;
+  settingsPreviewDraft = null;
+
+  if (
+    typeof elements.settingsPreviewDialog.close ===
+    "function"
+  ) {
+    elements.settingsPreviewDialog.close();
+  } else {
+    elements.settingsPreviewDialog.removeAttribute(
+      "open"
+    );
+  }
 }
 
 async function copyText(text, button) {
@@ -5551,6 +7960,25 @@ function cacheElements() {
     copyCodeBottom: document.getElementById("copy-code-bottom"),
     downloadCode: document.getElementById("download-code"),
     downloadCodeBottom: document.getElementById("download-code-bottom"),
+    settingsPreviewOpen: document.getElementById("preview-open"),
+    settingsPreviewDialog: document.getElementById(
+      "settings-preview-dialog"
+    ),
+    settingsPreviewTitle: document.getElementById(
+      "settings-preview-title"
+    ),
+    settingsPreviewClose: document.getElementById(
+      "settings-preview-close"
+    ),
+    settingsPreviewContent: document.getElementById(
+      "settings-preview-content"
+    ),
+    settingsPreviewSavePanel: document.querySelector(
+      ".rml-preview-save-panel"
+    ),
+    settingsPreviewStatus: document.getElementById(
+      "settings-preview-status"
+    ),
     projectManager: document.getElementById("project-manager"),
     projectDialog: document.getElementById("project-dialog"),
     projectClose: document.getElementById("project-close"),
@@ -5638,6 +8066,74 @@ function initialize() {
     .addEventListener("click", newBlank);
   elements.copyCodeBottom.addEventListener("click", () =>
     copyGeneratedCode(elements.copyCodeBottom)
+  );
+  elements.settingsPreviewOpen.addEventListener(
+    "click",
+    openSettingsPreview
+  );
+  elements.settingsPreviewClose.addEventListener(
+    "click",
+    closeSettingsPreview
+  );
+  elements.settingsPreviewContent.addEventListener(
+    "click",
+    handleSettingsPreviewClick
+  );
+  elements.settingsPreviewContent.addEventListener(
+    "input",
+    handleSettingsPreviewInput
+  );
+  elements.settingsPreviewSavePanel.addEventListener(
+    "click",
+    event => {
+      if (
+        event.target.closest(
+          "[data-preview-color-cancel]"
+        )
+      ) {
+        closeSettingsPreviewColor(false);
+        return;
+      }
+
+      if (
+        event.target.closest(
+          "[data-preview-color-apply]"
+        )
+      ) {
+        closeSettingsPreviewColor(true);
+        return;
+      }
+
+      if (
+        event.target.closest(
+          "#settings-preview-save"
+        )
+      ) {
+        saveSettingsPreview();
+      }
+    }
+  );
+  elements.settingsPreviewDialog.addEventListener(
+    "cancel",
+    event => {
+      if (settingsPreviewColorSession) {
+        event.preventDefault();
+        closeSettingsPreviewColor(false);
+      } else {
+        settingsPreviewDraft = null;
+      }
+    }
+  );
+  elements.settingsPreviewDialog.addEventListener(
+    "click",
+    event => {
+      if (
+        event.target ===
+        elements.settingsPreviewDialog
+      ) {
+        closeSettingsPreview();
+      }
+    }
   );
   elements.projectManager.addEventListener(
     "click",
