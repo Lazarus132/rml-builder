@@ -303,6 +303,32 @@ function generatedBaseName() {
   );
 }
 
+function projectFileBaseName() {
+  let name =
+    String(
+      state.metadata.modName ||
+        ""
+    )
+      .trim()
+      .replace(
+        /[<>:"/\\|?*\u0000-\u001F]/g,
+        "_"
+      )
+      .slice(0, 120)
+      .replace(/[. ]+$/g, "");
+
+  if (
+    /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(
+      name
+    )
+  ) {
+    name += "_";
+  }
+
+  return name ||
+    generatedBaseName();
+}
+
 function normalizedResonitePath(value) {
   const compact = String(value || "")
     .replace(/\r\n|\r|\n/g, "")
@@ -4949,10 +4975,10 @@ function saveProjectJson() {
       createProjectDocument(true),
       null,
       2
-    )}\n`;
+  )}\n`;
   const filename =
-    `${generatedBaseName()}` +
-    ".rml-builder.json";
+    `${projectFileBaseName()}` +
+    ".json";
 
   downloadBlob(
     new Blob(
