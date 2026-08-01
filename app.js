@@ -5215,6 +5215,55 @@ function createSettingsPreviewDraft() {
   return draft;
 }
 
+function mergeSettingsPreviewDraft(
+  savedDraft
+) {
+  const freshDraft =
+    createSettingsPreviewDraft();
+
+  if (
+    !savedDraft ||
+    typeof savedDraft !== "object"
+  ) {
+    return freshDraft;
+  }
+
+  return {
+    values: {
+      ...freshDraft.values,
+      ...(
+        savedDraft.values &&
+        typeof savedDraft.values ===
+          "object"
+          ? savedDraft.values
+          : {}
+      )
+    },
+
+    controllers: {
+      ...freshDraft.controllers,
+      ...(
+        savedDraft.controllers &&
+        typeof savedDraft.controllers ===
+          "object"
+          ? savedDraft.controllers
+          : {}
+      )
+    },
+
+    colorStates: {
+      ...freshDraft.colorStates,
+      ...(
+        savedDraft.colorStates &&
+        typeof savedDraft.colorStates ===
+          "object"
+          ? savedDraft.colorStates
+          : {}
+      )
+    }
+  };
+}
+
 function settingsPreviewTitle(
   settingName = ""
 ) {
@@ -5240,9 +5289,61 @@ function settingsPreviewValue(node) {
     return "";
   }
 
-  return node.kind === "controller"
-    ? settingsPreviewDraft.controllers[node.id]
-    : settingsPreviewDraft.values[node.id];
+  if (node.kind === "controller") {
+    const storedController =
+      settingsPreviewDraft.controllers?.[
+        node.id
+      ];
+
+    if (
+      storedController !== undefined &&
+      storedController !== null
+    ) {
+      return storedController;
+    }
+
+    const selectedOption =
+      node.options.find(
+        option =>
+          option.name ===
+          node.defaultOption
+      ) || node.options[0];
+
+    return selectedOption?.name || "";
+  }
+
+  const storedValue =
+    settingsPreviewDraft.values?.[
+      node.id
+    ];
+
+  if (
+    storedValue !== undefined &&
+    storedValue !== null
+  ) {
+    return storedValue;
+  }
+
+  if (node.valueType === "bool") {
+    return String(
+      node.defaultValue
+    )
+      .trim()
+      .toLowerCase() !== "false";
+  }
+
+  if (isVectorType(node.valueType)) {
+    return vectorComponentValues(
+      node.defaultValue,
+      componentCount(
+        node.valueType
+      )
+    );
+  }
+
+  return String(
+    node.defaultValue ?? ""
+  );
 }
 
 function previewEnumEditorMarkup(
@@ -7385,16 +7486,36 @@ function saveSettingsPreview() {
 }
 
 function openSettingsPreview() {
-  const saved = localStorage.getItem(PREVIEW_STORAGE_KEY);
+  let savedDraft = null;
 
-  settingsPreviewDraft = saved
-    ? JSON.parse(saved)
-    : createSettingsPreviewDraft();
+  try {
+    const saved =
+      localStorage.getItem(
+        PREVIEW_STORAGE_KEY
+      );
+
+    if (saved) {
+      savedDraft =
+        JSON.parse(saved);
+    }
+  } catch (error) {
+    console.warn(
+      "Could not restore preview values.",
+      error
+    );
+  }
+
+  settingsPreviewDraft =
+    mergeSettingsPreviewDraft(
+      savedDraft
+    );
 
   settingsPreviewColorSession = null;
-  elements.settingsPreviewStatus.textContent = "";
+  elements.settingsPreviewStatus.textContent =
+    "";
 
   renderSettingsPreview();
+
   elements.settingsPreviewDialog.showModal();
 }
 
