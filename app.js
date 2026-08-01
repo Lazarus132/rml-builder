@@ -7331,12 +7331,12 @@ function saveSettingsPreview() {
     );
 
     setSettingsPreviewStatus(
-      "Preview gespeichert (nur lokal, Builder bleibt unverändert).",
+      "Preview saved (local only, Builder remains unchanged).",
       "success"
     );
   } catch {
     setSettingsPreviewStatus(
-      "Speichern fehlgeschlagen.",
+      "Saving failed.",
       "error"
     );
   }
