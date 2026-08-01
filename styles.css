@@ -1230,6 +1230,61 @@ footer strong {
   display: none !important;
 }
 
+.project-dialog {
+  width: min(500px, calc(100vw - 32px));
+}
+
+.project-dialog-body {
+  display: grid;
+  gap: 16px;
+  padding: 19px;
+}
+
+.project-storage-note {
+  margin: 0;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(164, 118, 255, 0.07);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.project-file-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.project-file-actions .button {
+  width: 100%;
+}
+
+.project-file-status {
+  min-height: 17px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.project-file-status:empty {
+  display: none;
+}
+
+.project-file-status.success {
+  color: var(--green);
+}
+
+.project-file-status.error {
+  color: var(--red);
+}
+
+.project-dialog .export-dialog-actions {
+  justify-content: flex-end;
+}
+
 .export-project-grid {
   display: grid;
   grid-template-columns: 1fr;
@@ -1463,6 +1518,10 @@ footer strong {
   }
 
   .export-project-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .project-file-actions {
     grid-template-columns: 1fr;
   }
 

@@ -1,6 +1,11 @@
 "use strict";
 
 const STORAGE_KEY = "rml-configuration-builder-standalone-v1";
+const PROJECT_FORMAT = "rml-configuration-builder-project";
+const PROJECT_FORMAT_VERSION = 1;
+const PROJECT_FILE_MAX_BYTES = 5 * 1024 * 1024;
+const PROJECT_TREE_MAX_DEPTH = 32;
+const PROJECT_TREE_MAX_ITEMS = 10000;
 const ROOT_CONTAINER = "root";
 const DRAG_SCROLL_EDGE = 110;
 const DRAG_SCROLL_MAX_SPEED = 22;
@@ -1989,15 +1994,546 @@ function getDiagnostics() {
   return errors;
 }
 
+function isPlainObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  );
+}
+
+function projectString(
+  value,
+  fallback = ""
+) {
+  return typeof value === "string"
+    ? value
+    : fallback;
+}
+
+function createProjectDocument(
+  includeSavedAt = false
+) {
+  return {
+    format: PROJECT_FORMAT,
+    formatVersion:
+      PROJECT_FORMAT_VERSION,
+    ...(includeSavedAt
+      ? {
+          savedAt:
+            new Date().toISOString()
+        }
+      : {}),
+    metadata: clone(
+      state.metadata
+    ),
+    exportOptions: clone(
+      state.exportOptions
+    ),
+    nodes: clone(
+      state.nodes
+    ),
+    workspace: {
+      selectedId:
+        state.selectedId,
+      activeContainerId:
+        state.activeContainerId
+    }
+  };
+}
+
+function sanitizeProjectNodes(
+  nodes
+) {
+  if (!Array.isArray(nodes)) {
+    throw new Error(
+      "The project does not contain a valid nodes array."
+    );
+  }
+
+  const knownTypes =
+    new Set(
+      TYPE_DEFINITIONS.map(
+        definition =>
+          definition.type
+      )
+    );
+  const knownReactions =
+    new Set([
+      "stored",
+      "startup",
+      "saved",
+      "startup-saved"
+    ]);
+  const usedIds =
+    new Set();
+  let itemCount = 0;
+
+  const takeId = (
+    value,
+    label
+  ) => {
+    if (
+      typeof value !== "string" ||
+      value.length === 0
+    ) {
+      throw new Error(
+        `${label} has no valid identifier.`
+      );
+    }
+
+    if (usedIds.has(value)) {
+      throw new Error(
+        `The identifier '${value}' occurs more than once.`
+      );
+    }
+
+    usedIds.add(value);
+    return value;
+  };
+
+  const sanitizeList = (
+    list,
+    depth
+  ) => {
+    if (
+      depth >
+      PROJECT_TREE_MAX_DEPTH
+    ) {
+      throw new Error(
+        `The project exceeds the maximum section depth of ${PROJECT_TREE_MAX_DEPTH}.`
+      );
+    }
+
+    return list.map(
+      (sourceNode, index) => {
+        itemCount += 1;
+
+        if (
+          itemCount >
+          PROJECT_TREE_MAX_ITEMS
+        ) {
+          throw new Error(
+            `The project contains more than ${PROJECT_TREE_MAX_ITEMS} items.`
+          );
+        }
+
+        if (!isPlainObject(sourceNode)) {
+          throw new Error(
+            `Item ${index + 1} is not a valid project item.`
+          );
+        }
+
+        const id =
+          takeId(
+            sourceNode.id,
+            `Item ${index + 1}`
+          );
+
+        if (
+          sourceNode.kind ===
+          "controller"
+        ) {
+          if (
+            !Array.isArray(
+              sourceNode.options
+            ) ||
+            sourceNode.options.length <
+              1
+          ) {
+            throw new Error(
+              `Section '${projectString(
+                sourceNode.fieldName,
+                id
+              )}' has no valid options.`
+            );
+          }
+
+          const options =
+            sourceNode.options.map(
+              (
+                sourceOption,
+                optionIndex
+              ) => {
+                if (
+                  !isPlainObject(
+                    sourceOption
+                  )
+                ) {
+                  throw new Error(
+                    `Option ${optionIndex + 1} in section '${id}' is invalid.`
+                  );
+                }
+
+                const optionId =
+                  takeId(
+                    sourceOption.id,
+                    `Option ${optionIndex + 1} in section '${id}'`
+                  );
+                const children =
+                  Array.isArray(
+                    sourceOption.children
+                  )
+                    ? sourceOption.children
+                    : [];
+
+                return {
+                  ...sourceOption,
+                  id: optionId,
+                  name: projectString(
+                    sourceOption.name,
+                    `Option${optionIndex + 1}`
+                  ),
+                  children:
+                    sanitizeList(
+                      children,
+                      depth + 1
+                    )
+                };
+              }
+            );
+          const defaultOption =
+            projectString(
+              sourceNode.defaultOption,
+              options[0].name
+            );
+
+          return {
+            ...sourceNode,
+            id,
+            kind: "controller",
+            fieldName:
+              projectString(
+                sourceNode.fieldName,
+                "ActivePage"
+              ),
+            keyName:
+              projectString(
+                sourceNode.keyName,
+                "00_active_page"
+              ),
+            description:
+              projectString(
+                sourceNode.description,
+                "Selects the visible settings section."
+              ),
+            enumName:
+              projectString(
+                sourceNode.enumName,
+                "SettingsPage"
+              ),
+            defaultOption,
+            reaction:
+              knownReactions.has(
+                sourceNode.reaction
+              )
+                ? sourceNode.reaction
+                : "stored",
+            options
+          };
+        }
+
+        if (
+          sourceNode.kind !==
+          "setting"
+        ) {
+          throw new Error(
+            `Item '${id}' has the unsupported kind '${projectString(
+              sourceNode.kind,
+              "unknown"
+            )}'.`
+          );
+        }
+
+        if (
+          !knownTypes.has(
+            sourceNode.valueType
+          )
+        ) {
+          throw new Error(
+            `Setting '${id}' uses the unsupported type '${projectString(
+              sourceNode.valueType,
+              "unknown"
+            )}'.`
+          );
+        }
+
+        const valueType =
+          sourceNode.valueType;
+        const enumOptions =
+          Array.isArray(
+            sourceNode.enumOptions
+          )
+            ? sourceNode.enumOptions
+                .filter(
+                  option =>
+                    typeof option ===
+                    "string"
+                )
+            : [];
+
+        return {
+          ...sourceNode,
+          id,
+          kind: "setting",
+          valueType,
+          fieldName:
+            projectString(
+              sourceNode.fieldName,
+              toPascalCase(
+                valueType,
+                "Setting"
+              )
+            ),
+          keyName:
+            projectString(
+              sourceNode.keyName,
+              toSnakeCase(
+                sourceNode.fieldName ||
+                  valueType
+              )
+            ),
+          description:
+            projectString(
+              sourceNode.description,
+              `${friendlyTypeName(
+                valueType
+              )} configuration setting.`
+            ),
+          defaultValue:
+            projectString(
+              sourceNode.defaultValue,
+              defaultForType(
+                valueType
+              )
+            ),
+          hidden:
+            typeof sourceNode.hidden ===
+            "boolean"
+              ? sourceNode.hidden
+              : false,
+          validatorMode:
+            projectString(
+              sourceNode.validatorMode,
+              "none"
+            ),
+          customValidator:
+            projectString(
+              sourceNode.customValidator
+            ),
+          useSlider:
+            typeof sourceNode.useSlider ===
+            "boolean"
+              ? sourceNode.useSlider
+              : false,
+          minimum:
+            projectString(
+              sourceNode.minimum,
+              "0"
+            ),
+          maximum:
+            projectString(
+              sourceNode.maximum,
+              "100"
+            ),
+          enumName:
+            projectString(
+              sourceNode.enumName
+            ),
+          enumOptions,
+          reaction:
+            knownReactions.has(
+              sourceNode.reaction
+            )
+              ? sourceNode.reaction
+              : "stored"
+        };
+      }
+    );
+  };
+
+  return normalizeNodes(
+    sanitizeList(
+      nodes,
+      0
+    )
+  );
+}
+
+function parseProjectDocument(
+  source
+) {
+  if (!isPlainObject(source)) {
+    throw new Error(
+      "The selected file does not contain a builder project."
+    );
+  }
+
+  if (
+    source.format !== undefined &&
+    source.format !== PROJECT_FORMAT
+  ) {
+    throw new Error(
+      "The selected JSON file belongs to a different application."
+    );
+  }
+
+  if (
+    source.format === PROJECT_FORMAT &&
+    source.formatVersion !==
+      PROJECT_FORMAT_VERSION
+  ) {
+    throw new Error(
+      `Project format version '${source.formatVersion}' is not supported.`
+    );
+  }
+
+  const metadataSource =
+    isPlainObject(
+      source.metadata
+    )
+      ? source.metadata
+      : {};
+  const exportSource =
+    isPlainObject(
+      source.exportOptions
+    )
+      ? source.exportOptions
+      : {};
+  const workspaceSource =
+    isPlainObject(
+      source.workspace
+    )
+      ? source.workspace
+      : {};
+  const resonitePath =
+    projectString(
+      exportSource.resonitePath,
+      DEFAULT_EXPORT_OPTIONS.resonitePath
+    );
+  const platform =
+    projectString(
+      exportSource.platform,
+      inferExportPlatform(
+        resonitePath
+      )
+    );
+
+  return {
+    metadata: {
+      namespaceName:
+        projectString(
+          metadataSource.namespaceName,
+          DEFAULT_METADATA.namespaceName
+        ),
+      className:
+        projectString(
+          metadataSource.className,
+          DEFAULT_METADATA.className
+        ),
+      modName:
+        projectString(
+          metadataSource.modName,
+          DEFAULT_METADATA.modName
+        ),
+      author:
+        projectString(
+          metadataSource.author,
+          DEFAULT_METADATA.author
+        ),
+      version:
+        projectString(
+          metadataSource.version,
+          DEFAULT_METADATA.version
+        ),
+      description:
+        projectString(
+          metadataSource.description,
+          DEFAULT_METADATA.description
+        ),
+      includeGuide:
+        typeof metadataSource.includeGuide ===
+        "boolean"
+          ? metadataSource.includeGuide
+          : DEFAULT_METADATA.includeGuide
+    },
+    exportOptions: {
+      platform:
+        Object.hasOwn(
+          EXPORT_PLATFORM_PRESETS,
+          platform
+        ) ||
+        platform === "custom"
+          ? platform
+          : inferExportPlatform(
+              resonitePath
+            ),
+      resonitePath,
+      includeCs:
+        typeof exportSource.includeCs ===
+        "boolean"
+          ? exportSource.includeCs
+          : DEFAULT_EXPORT_OPTIONS.includeCs,
+      includeCsproj:
+        typeof exportSource.includeCsproj ===
+        "boolean"
+          ? exportSource.includeCsproj
+          : DEFAULT_EXPORT_OPTIONS.includeCsproj
+    },
+    nodes:
+      sanitizeProjectNodes(
+        source.nodes
+      ),
+    workspace: {
+      selectedId:
+        projectString(
+          workspaceSource.selectedId,
+          ""
+        ) || null,
+      activeContainerId:
+        projectString(
+          workspaceSource.activeContainerId,
+          ROOT_CONTAINER
+        )
+    }
+  };
+}
+
+function applyProjectDocument(
+  project
+) {
+  state.metadata =
+    project.metadata;
+  state.exportOptions =
+    project.exportOptions;
+  state.nodes =
+    project.nodes;
+  state.selectedId =
+    project.workspace.selectedId &&
+    findNode(
+      state.nodes,
+      project.workspace.selectedId
+    )
+      ? project.workspace.selectedId
+      : null;
+  state.activeContainerId =
+    project.workspace.activeContainerId ===
+      ROOT_CONTAINER ||
+    findContainerName(
+      state.nodes,
+      project.workspace.activeContainerId
+    ) !== "Unknown section"
+      ? project.workspace.activeContainerId
+      : ROOT_CONTAINER;
+}
+
 function persist() {
   try {
     localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({
-        metadata: state.metadata,
-        exportOptions: state.exportOptions,
-        nodes: state.nodes
-      })
+      JSON.stringify(
+        createProjectDocument()
+      )
     );
   } catch (error) {
     console.warn("Could not save the local builder draft.", error);
@@ -2014,28 +2550,10 @@ function restore() {
         );
       return;
     }
-    const parsed = JSON.parse(saved);
-    state.metadata = { ...DEFAULT_METADATA, ...(parsed.metadata || {}) };
-    const savedExportOptions =
-      parsed.exportOptions || {};
-    const savedResonitePath =
-      savedExportOptions.resonitePath ||
-      DEFAULT_EXPORT_OPTIONS.resonitePath;
-    state.exportOptions = {
-      ...DEFAULT_EXPORT_OPTIONS,
-      ...savedExportOptions,
-      platform:
-        savedExportOptions.platform ||
-        inferExportPlatform(
-          savedResonitePath
-        ),
-      resonitePath:
-        savedResonitePath
-    };
-    state.nodes = normalizeNodes(
-      Array.isArray(parsed.nodes)
-        ? parsed.nodes
-        : clone(SAMPLE_NODES)
+    applyProjectDocument(
+      parseProjectDocument(
+        JSON.parse(saved)
+      )
     );
   } catch (error) {
     console.warn("Could not restore the local builder draft.", error);
@@ -4380,6 +4898,148 @@ function downloadBlob(blob, filename) {
   URL.revokeObjectURL(objectUrl);
 }
 
+function setProjectFileStatus(
+  message,
+  tone = ""
+) {
+  elements.projectFileStatus.textContent =
+    message;
+  elements.projectFileStatus.classList.toggle(
+    "success",
+    tone === "success"
+  );
+  elements.projectFileStatus.classList.toggle(
+    "error",
+    tone === "error"
+  );
+}
+
+function openProjectDialog() {
+  setProjectFileStatus("");
+
+  if (
+    typeof elements.projectDialog.showModal ===
+    "function"
+  ) {
+    elements.projectDialog.showModal();
+  } else {
+    elements.projectDialog.setAttribute(
+      "open",
+      ""
+    );
+  }
+}
+
+function closeProjectDialog() {
+  if (
+    typeof elements.projectDialog.close ===
+    "function"
+  ) {
+    elements.projectDialog.close();
+  } else {
+    elements.projectDialog.removeAttribute(
+      "open"
+    );
+  }
+}
+
+function saveProjectJson() {
+  const projectJson =
+    `${JSON.stringify(
+      createProjectDocument(true),
+      null,
+      2
+    )}\n`;
+  const filename =
+    `${generatedBaseName()}` +
+    ".rml-builder.json";
+
+  downloadBlob(
+    new Blob(
+      [projectJson],
+      {
+        type:
+          "application/json;charset=utf-8"
+      }
+    ),
+    filename
+  );
+
+  setProjectFileStatus(
+    `Saved ${filename}.`,
+    "success"
+  );
+}
+
+async function loadProjectJsonFile(
+  file
+) {
+  if (!file) {
+    return;
+  }
+
+  setProjectFileStatus(
+    `Reading ${file.name}…`
+  );
+
+  try {
+    if (
+      file.size >
+      PROJECT_FILE_MAX_BYTES
+    ) {
+      throw new Error(
+        "The selected file is larger than the 5 MB project limit."
+      );
+    }
+
+    const project =
+      parseProjectDocument(
+        JSON.parse(
+          await file.text()
+        )
+      );
+
+    if (
+      state.nodes.length > 0 &&
+      !window.confirm(
+        "Replace the current builder draft with the selected JSON project?"
+      )
+    ) {
+      setProjectFileStatus(
+        "Loading was cancelled."
+      );
+      return;
+    }
+
+    applyProjectDocument(
+      project
+    );
+    renderMetadata();
+    renderAll();
+
+    setProjectFileStatus(
+      `Loaded ${file.name}.`,
+      "success"
+    );
+  } catch (error) {
+    console.warn(
+      "Could not load the builder project.",
+      error
+    );
+    setProjectFileStatus(
+      `Could not load this project: ${
+        error instanceof Error
+          ? error.message
+          : "Invalid JSON file."
+      }`,
+      "error"
+    );
+  } finally {
+    elements.projectFileInput.value =
+      "";
+  }
+}
+
 let crc32Table = null;
 
 function getCrc32Table() {
@@ -4772,6 +5432,14 @@ function cacheElements() {
     copyCodeBottom: document.getElementById("copy-code-bottom"),
     downloadCode: document.getElementById("download-code"),
     downloadCodeBottom: document.getElementById("download-code-bottom"),
+    projectManager: document.getElementById("project-manager"),
+    projectDialog: document.getElementById("project-dialog"),
+    projectClose: document.getElementById("project-close"),
+    projectDone: document.getElementById("project-done"),
+    projectSaveJson: document.getElementById("project-save-json"),
+    projectLoadJson: document.getElementById("project-load-json"),
+    projectFileInput: document.getElementById("project-file-input"),
+    projectFileStatus: document.getElementById("project-file-status"),
     exportDialog: document.getElementById("export-dialog"),
     exportClose: document.getElementById("export-close"),
     exportCancel: document.getElementById("export-cancel"),
@@ -4851,6 +5519,45 @@ function initialize() {
     .addEventListener("click", newBlank);
   elements.copyCodeBottom.addEventListener("click", () =>
     copyGeneratedCode(elements.copyCodeBottom)
+  );
+  elements.projectManager.addEventListener(
+    "click",
+    openProjectDialog
+  );
+  elements.projectClose.addEventListener(
+    "click",
+    closeProjectDialog
+  );
+  elements.projectDone.addEventListener(
+    "click",
+    closeProjectDialog
+  );
+  elements.projectSaveJson.addEventListener(
+    "click",
+    saveProjectJson
+  );
+  elements.projectLoadJson.addEventListener(
+    "click",
+    () =>
+      elements.projectFileInput.click()
+  );
+  elements.projectFileInput.addEventListener(
+    "change",
+    () =>
+      loadProjectJsonFile(
+        elements.projectFileInput.files?.[0]
+      )
+  );
+  elements.projectDialog.addEventListener(
+    "click",
+    event => {
+      if (
+        event.target ===
+        elements.projectDialog
+      ) {
+        closeProjectDialog();
+      }
+    }
   );
   elements.downloadCode.addEventListener("click", openExportDialog);
   elements.downloadCodeBottom.addEventListener(

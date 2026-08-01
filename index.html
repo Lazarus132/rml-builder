@@ -32,6 +32,9 @@
       <button id="new-blank" class="button secondary" type="button">
         New blank
       </button>
+      <button id="project-manager" class="button secondary" type="button">
+        Project…
+      </button>
       <button id="download-code" class="button primary" type="button">
         Export…
       </button>
@@ -149,6 +152,65 @@
       uploaded.
     </span>
   </footer>
+
+  <dialog
+    id="project-dialog"
+    class="export-dialog project-dialog"
+    aria-labelledby="project-dialog-title">
+    <div class="export-dialog-header">
+      <div>
+        <small>Local project file</small>
+        <h2 id="project-dialog-title">Save or restore the builder</h2>
+      </div>
+      <button
+        id="project-close"
+        class="dialog-close"
+        type="button"
+        aria-label="Close project dialog">
+        ×
+      </button>
+    </div>
+
+    <div class="project-dialog-body">
+      <p class="project-storage-note">
+        The current draft is already saved automatically in this browser.
+        A JSON project file creates a portable backup that can be reopened on
+        this or another device. Nothing is uploaded.
+      </p>
+
+      <div class="project-file-actions">
+        <button
+          id="project-save-json"
+          class="button primary"
+          type="button">
+          Save JSON
+        </button>
+        <button
+          id="project-load-json"
+          class="button secondary"
+          type="button">
+          Load JSON…
+        </button>
+      </div>
+
+      <input
+        id="project-file-input"
+        type="file"
+        accept=".json,.rml-builder.json,application/json"
+        hidden>
+
+      <p
+        id="project-file-status"
+        class="project-file-status"
+        aria-live="polite"></p>
+    </div>
+
+    <div class="export-dialog-actions">
+      <button id="project-done" class="button secondary" type="button">
+        Done
+      </button>
+    </div>
+  </dialog>
 
   <dialog
     id="export-dialog"
