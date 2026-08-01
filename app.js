@@ -1,10 +1,5 @@
 "use strict";
 
-// v29: The properties color picker contains data-color-strength on both the
-// picker container and the actual range input. Always select the INPUT
-// explicitly, otherwise the container DIV receives the value/listener and the
-// visible Strength slider appears stuck at 1.
-
 const STORAGE_KEY = "rml-configuration-builder-standalone-v1";
 const PREVIEW_STORAGE_KEY = "rml-preview-values-v2";
 const PROJECT_FORMAT = "rml-configuration-builder-project";
@@ -7511,28 +7506,78 @@ function openSettingsPreview() {
     );
 
   settingsPreviewColorSession = null;
+
   elements.settingsPreviewStatus.textContent =
     "";
 
   renderSettingsPreview();
 
-  elements.settingsPreviewDialog.showModal();
+  const dialog =
+    elements.settingsPreviewDialog;
+
+  dialog.classList.remove(
+    "rml-overlay-opened",
+    "rml-overlay-closing"
+  );
+
+  dialog.showModal();
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      dialog.classList.add(
+        "rml-overlay-opened"
+      );
+    });
+  });
 }
 
-function closeSettingsPreview() {
-  settingsPreviewColorSession = null;
-  settingsPreviewDraft = null;
-
+function closeSettingsPreview(
+  dialog =
+    elements.settingsPreviewDialog,
+  returnValue = ""
+) {
   if (
-    typeof elements.settingsPreviewDialog.close ===
-    "function"
+    !dialog ||
+    !dialog.open ||
+    dialog.classList.contains(
+      "rml-overlay-closing"
+    )
   ) {
-    elements.settingsPreviewDialog.close();
-  } else {
-    elements.settingsPreviewDialog.removeAttribute(
-      "open"
-    );
+    return;
   }
+
+  dialog.classList.remove(
+    "rml-overlay-opened"
+  );
+
+  dialog.classList.add(
+    "rml-overlay-closing"
+  );
+
+  const closeDuration = 250;
+
+  window.setTimeout(() => {
+    settingsPreviewColorSession = null;
+    settingsPreviewDraft = null;
+
+    if (
+      typeof dialog.close ===
+      "function"
+    ) {
+      dialog.close(
+        returnValue
+      );
+    } else {
+      dialog.removeAttribute(
+        "open"
+      );
+    }
+
+    dialog.classList.remove(
+      "rml-overlay-closing",
+      "rml-overlay-opened"
+    );
+  }, closeDuration + 100);
 }
 
 async function copyText(text, button) {
@@ -8236,7 +8281,7 @@ function initialize() {
   );
   elements.settingsPreviewClose.addEventListener(
     "click",
-    closeSettingsPreview
+    () => closeSettingsPreview()
   );
   elements.settingsPreviewContent.addEventListener(
     "click",
@@ -8279,11 +8324,12 @@ function initialize() {
   elements.settingsPreviewDialog.addEventListener(
     "cancel",
     event => {
+      event.preventDefault();
+
       if (settingsPreviewColorSession) {
-        event.preventDefault();
         closeSettingsPreviewColor(false);
       } else {
-        settingsPreviewDraft = null;
+        closeSettingsPreview();
       }
     }
   );

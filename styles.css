@@ -3148,3 +3148,159 @@ footer strong {
     0 0 var(--rml-preview-glow-size,10px) var(--rml-preview-glow,transparent),
     0 0 calc(var(--rml-preview-glow-size,10px)*0.45) var(--rml-preview-glow,transparent) !important;
 }
+
+/* ========================================================================== */
+/* Native Resonite RadiantModalOverlay animation                              */
+/*                                                                            */
+/* FrooxEngine:                                                               */
+/* ShowLerp 0 -> 1 in 0.25 s                                                  */
+/* MaskRect: y = 0.5 - ShowLerp / 2, height = ShowLerp                        */
+/* ContentAnimationScaleOffset: 128 -> 0                                      */
+/* ========================================================================== */
+
+.settings-preview-dialog {
+  --rml-overlay-duration: 250ms;
+  --rml-overlay-content-scale-start: 1.18;
+
+  /*
+   * Das native <dialog> darf nicht selbst eingeblendet,
+   * verschoben oder perspektivisch transformiert werden.
+   */
+  opacity: 1;
+  transform: none;
+  filter: none;
+
+  /*
+   * Entspricht der vertikal aus der Mitte wachsenden
+   * MaskRect des RadiantModalOverlay.
+   */
+  clip-path:
+    inset(
+      50% 0 50% 0
+      round 27px
+    );
+
+  pointer-events: none;
+
+  transition:
+    clip-path
+      var(--rml-overlay-duration)
+      linear;
+}
+
+/*
+ * Die Klasse wird erst nach showModal() gesetzt.
+ * Dadurch läuft die Maske von ShowLerp 0 nach 1.
+ */
+.settings-preview-dialog[open].rml-overlay-opened {
+  clip-path:
+    inset(
+      0 0 0 0
+      round 27px
+    );
+
+  pointer-events: auto;
+}
+
+/*
+ * Schließen ist exakt die umgekehrte Maskenbewegung:
+ * von voller Höhe zurück zur vertikalen Mitte.
+ */
+.settings-preview-dialog[open].rml-overlay-closing {
+  clip-path:
+    inset(
+      50% 0 50% 0
+      round 27px
+    );
+
+  pointer-events: none;
+}
+
+.settings-preview-dialog .rml-preview-window {
+  opacity: 1;
+
+  transform:
+    scale(
+      var(--rml-overlay-content-scale-start)
+    );
+
+  transform-origin: 50% 50%;
+
+  transition:
+    transform
+      var(--rml-overlay-duration)
+      linear;
+
+  will-change:
+    transform;
+}
+
+.settings-preview-dialog[open].rml-overlay-opened
+.rml-preview-window {
+  transform:
+    scale(1);
+}
+
+.settings-preview-dialog[open].rml-overlay-closing
+.rml-preview-window {
+  transform:
+    scale(
+      var(--rml-overlay-content-scale-start)
+    );
+}
+
+.settings-preview-dialog::backdrop {
+  background:
+    rgba(
+      1,
+      3,
+      6,
+      0
+    );
+
+  backdrop-filter:
+    blur(0);
+
+  transition:
+    background-color
+      var(--rml-overlay-duration)
+      linear,
+    backdrop-filter
+      var(--rml-overlay-duration)
+      linear;
+}
+
+.settings-preview-dialog[open].rml-overlay-opened::backdrop {
+  background:
+    rgba(
+      1,
+      3,
+      6,
+      0.86
+    );
+
+  backdrop-filter:
+    blur(3px);
+}
+
+.settings-preview-dialog[open].rml-overlay-closing::backdrop {
+  background:
+    rgba(
+      1,
+      3,
+      6,
+      0
+    );
+
+  backdrop-filter:
+    blur(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-preview-dialog,
+  .settings-preview-dialog::backdrop,
+  .settings-preview-dialog .rml-preview-window {
+    transition-duration:
+      1ms !important;
+  }
+}
