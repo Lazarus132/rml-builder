@@ -1517,17 +1517,17 @@ footer strong {
 
 .rml-preview-color-button {
     position: relative;
+
     width: 53px;
     height: 24px;
     margin: auto 0 auto auto;
     overflow: visible;
     padding: 0;
 
-    border: 0;
+    border: 0 !important;
     border-radius: 7px;
     outline: none !important;
-
-    background: var(--rml-preview-color) !important;
+    background: transparent !important;
 
     box-shadow:
         0 0 var(--rml-preview-glow-size, 10px)
@@ -1539,8 +1539,8 @@ footer strong {
 .rml-preview-color-button span {
     position: absolute;
     inset: 0;
-    display: block;
 
+    display: block;
     width: 100%;
     height: 100%;
 
@@ -1548,18 +1548,50 @@ footer strong {
     border-radius: 7px;
     outline: none !important;
 
-    background: var(--rml-preview-color) !important;
-    opacity: 1;
+    background:
+        linear-gradient(
+            var(--rml-preview-color),
+            var(--rml-preview-color)
+        ),
+        conic-gradient(
+            #c7c7c7 25%,
+            #606060 0 50%,
+            #c7c7c7 0 75%,
+            #606060 0
+        );
+
+    background-size:
+        100% 100%,
+        8px 8px;
 }
 
 .rml-preview-color-button:hover,
-.rml-preview-color-button:hover span,
 .rml-preview-color-button:focus,
 .rml-preview-color-button:focus-visible,
 .rml-preview-color-button:active {
     border: 0 !important;
     outline: none !important;
-    background: var(--rml-preview-color) !important;
+    background: transparent !important;
+}
+
+.rml-preview-color-button:hover span,
+.rml-preview-color-button:focus span,
+.rml-preview-color-button:active span {
+    background:
+        linear-gradient(
+            var(--rml-preview-color),
+            var(--rml-preview-color)
+        ),
+        conic-gradient(
+            #c7c7c7 25%,
+            #606060 0 50%,
+            #c7c7c7 0 75%,
+            #606060 0
+        );
+
+    background-size:
+        100% 100%,
+        8px 8px;
 }
 
 .rml-preview-empty {
@@ -2585,20 +2617,47 @@ footer strong {
 .rml-preview-tall-color-swatch {
   width: 34px;
   height: 100%;
+  overflow: hidden;
   padding: 0;
+
   border: 0;
   border-radius: 16px;
   outline: 0;
-  background: var(--rml-swatch-color);
+
   cursor: default;
+
   box-shadow:
-    0 0 var(--rml-swatch-glow-size, 12px) var(--rml-swatch-glow),
-    0 0 calc(var(--rml-swatch-glow-size, 12px) * 0.52) var(--rml-swatch-glow),
+    0 0 var(--rml-swatch-glow-size, 12px)
+      var(--rml-swatch-glow, transparent),
+    0 0 calc(var(--rml-swatch-glow-size, 12px) * 0.52)
+      var(--rml-swatch-glow, transparent),
     inset 0 1px rgba(255, 255, 255, 0.22);
 }
+.rml-preview-tall-color-swatch.original,
+.rml-preview-tall-color-swatch.current {
+  background:
+    linear-gradient(
+      to bottom,
+      var(--rml-swatch-opaque) 0%,
+      var(--rml-swatch-opaque) 50%,
+      transparent 50%,
+      transparent 100%
+    ),
+    linear-gradient(
+      var(--rml-swatch-alpha),
+      var(--rml-swatch-alpha)
+    ),
+    conic-gradient(
+      #fff1dc 25%,
+      #f1bd8c 0 50%,
+      #fff1dc 0 75%,
+      #f1bd8c 0
+    );
 
-.rml-preview-tall-color-swatch.original {
-  cursor: pointer;
+  background-size:
+    100% 100%,
+    100% 100%,
+    10px 10px;
 }
 
 .rml-preview-color-profile-tabs,

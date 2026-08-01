@@ -5948,21 +5948,46 @@ function settingsPreviewColorMarkup() {
     settingsPreviewColorHex();
   const currentCss =
     settingsPreviewColorCss();
-  const originalPreview =
-    colorChannelsToPreview(
-      [
-        session.originalState.red *
-          session.originalState.strength,
-        session.originalState.green *
-          session.originalState.strength,
-        session.originalState.blue *
-          session.originalState.strength,
-        session.originalState.alpha
-      ],
-      "Original preview color",
-      session.originalState.profile,
-      session.originalState.strength
+  const currentOpaqueCss =
+    colorVisualCss(
+      session.red,
+      session.green,
+      session.blue,
+      1,
+      session.profile
     );
+  const originalCss =
+    colorVisualCss(
+      session.originalState.red,
+      session.originalState.green,
+      session.originalState.blue,
+      session.originalState.alpha,
+      session.originalState.profile
+    );
+
+  const originalOpaqueCss =
+    colorVisualCss(
+      session.originalState.red,
+      session.originalState.green,
+      session.originalState.blue,
+      1,
+      session.originalState.profile
+    );
+
+  const originalGlowStrength =
+    clamp(
+      session.originalState.strength,
+      1,
+      10
+    );
+
+  const originalGlowSize =
+    originalGlowStrength <= 1.000001
+      ? 0
+      : 8 +
+        (
+          originalGlowStrength - 1
+        ) * 3.2;
   const glowStrength =
     clamp(
       session.strength,
@@ -6010,18 +6035,31 @@ function settingsPreviewColorMarkup() {
             )}%">
         </label>
 
-        <div class="rml-preview-color-preview-stack" aria-label="Current and previous color">
-          <button
-            class="rml-preview-tall-color-swatch current"
-            type="button"
-            title="Current color"
-            style="--rml-swatch-color: ${escapeHtml(currentCss)}; --rml-swatch-glow: ${escapeHtml(currentCss)}; --rml-swatch-glow-size: ${glowSize}px"></button>
-          <button
+        <div
+          class="rml-preview-color-preview-stack"
+          aria-label="Original and current color preview">
+
+          <div
             class="rml-preview-tall-color-swatch original"
-            type="button"
-            data-preview-color-restore
-            title="Restore original preview color"
-            style="--rml-swatch-color: ${escapeHtml(originalPreview.cssColor)}; --rml-swatch-glow: ${escapeHtml(originalPreview.hex)}; --rml-swatch-glow-size: 12px"></button>
+            title="Original color"
+            style="
+              --rml-swatch-opaque: ${escapeHtml(originalOpaqueCss)};
+              --rml-swatch-alpha: ${escapeHtml(originalCss)};
+              --rml-swatch-glow: ${escapeHtml(originalOpaqueCss)};
+              --rml-swatch-glow-size: ${originalGlowSize}px;
+            ">
+          </div>
+
+          <div
+            class="rml-preview-tall-color-swatch current"
+            title="Current color"
+            style="
+              --rml-swatch-opaque: ${escapeHtml(currentOpaqueCss)};
+              --rml-swatch-alpha: ${escapeHtml(currentCss)};
+              --rml-swatch-glow: ${escapeHtml(currentOpaqueCss)};
+              --rml-swatch-glow-size: ${glowSize}px;
+            ">
+          </div>
         </div>
       </div>
 
@@ -6536,6 +6574,27 @@ function refreshSettingsPreviewColorVisuals() {
     );
   }
 
+  const opaqueCss =
+    colorVisualCss(
+      session.red,
+      session.green,
+      session.blue,
+      1,
+      session.profile
+    );
+
+  const swatchGlowSize =
+    session.strength <= 1.000001
+      ? 0
+      : 8 +
+        (
+          clamp(
+            session.strength,
+            1,
+            10
+          ) - 1
+        ) * 3.2;
+
   const currentSwatch =
     root.querySelector(
       ".rml-preview-tall-color-swatch.current"
@@ -6543,25 +6602,23 @@ function refreshSettingsPreviewColorVisuals() {
 
   if (currentSwatch) {
     currentSwatch.style.setProperty(
-      "--rml-swatch-color",
+      "--rml-swatch-opaque",
+      opaqueCss
+    );
+
+    currentSwatch.style.setProperty(
+      "--rml-swatch-alpha",
       cssColor
     );
+
     currentSwatch.style.setProperty(
       "--rml-swatch-glow",
-      cssColor
+      opaqueCss
     );
+
     currentSwatch.style.setProperty(
       "--rml-swatch-glow-size",
-      `${
-        session.strength <= 1.000001
-          ? 0
-          : 8 +
-            (clamp(
-              session.strength,
-              1,
-              10
-            ) - 1) * 3.2
-      }px`
+      `${swatchGlowSize}px`
     );
   }
 
@@ -7049,21 +7106,6 @@ function bindSettingsPreviewColorInteractions() {
                   parsed.alpha / 255
               })
         });
-      }
-    );
-
-  root
-    .querySelector(
-      "[data-preview-color-restore]"
-    )
-    ?.addEventListener(
-      "click",
-      () => {
-        Object.assign(
-          settingsPreviewColorSession,
-          settingsPreviewColorSession.originalState
-        );
-        refreshSettingsPreviewColorVisuals();
       }
     );
 
