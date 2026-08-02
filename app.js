@@ -6303,6 +6303,13 @@ function renderSettingsPreview() {
   }
 
   renderSettingsPreviewFooter();
+   requestAnimationFrame(() => {
+    window.fitSettingsPreviewColorPicker?.();
+
+    if (colorPageOpen) {
+      window.resetSettingsPreviewColorPickerScroll?.();
+    }
+  });
 }
 
 function changeSettingsPreviewEnum(

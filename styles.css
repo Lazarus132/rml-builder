@@ -3818,855 +3818,924 @@ footer strong {
 }
 
 /* ========================================================================== */
-/* Adaptive Full Color Picker fit                                              */
-/* Scale is calculated by colorpicker_adaptive_fit.js from actual visible      */
-/* Safari viewport width AND height. Keep this block LAST.                     */
+/* FINAL UNIVERSAL FULL COLOR PICKER LAYOUT                                    */
+/* Kein zoom. Hochformat vollständig scrollbar. Querformat Mindestskalierung.  */
+/* Diesen Block unbedingt als LETZTEN Block der gesamten CSS-Datei behalten.   */
 /* ========================================================================== */
 
 .settings-preview-dialog.rml-preview-color-open {
-  --rml-picker-scale: 1;
-  --rml-visible-width: 100dvw;
-  --rml-visible-height: 100dvh;
-  --rml-picker-footer-height: 64px;
-}
-
-@media (max-width: 930px), (max-height: 700px) {
-  .settings-preview-dialog.rml-preview-color-open {
-    position: fixed !important;
-    inset: auto !important;
-    top: var(--rml-visual-top, 0px) !important;
-    left: var(--rml-visual-left, 0px) !important;
-
-    width: var(--rml-visible-width) !important;
-    max-width: var(--rml-visible-width) !important;
-    height: var(--rml-visible-height) !important;
-    max-height: var(--rml-visible-height) !important;
-
-    margin: 0 !important;
-    padding: 0 !important;
-    overflow: hidden !important;
-    border: 0 !important;
-    border-radius: 0 !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-window {
-    display: grid !important;
-    width: 100% !important;
-    height: 100% !important;
-    min-height: 0 !important;
-
-    grid-template-rows:
-      var(--rml-picker-header-height, 66px)
-      minmax(0, 1fr)
-      var(--rml-picker-footer-height) !important;
-
-    transform: none !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-header {
-    min-width: 0 !important;
-    min-height: 0 !important;
-    overflow: hidden !important;
-    padding:
-      max(7px, env(safe-area-inset-top))
-      max(10px, env(safe-area-inset-right))
-      6px
-      max(12px, env(safe-area-inset-left)) !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-header h2 {
-    min-width: 0 !important;
-    font-size: clamp(20px, 4.5vmin, 32px) !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-content {
-    position: relative !important;
-    display: grid !important;
-    min-width: 0 !important;
-    min-height: 0 !important;
-    width: 100% !important;
-    height: 100% !important;
-
-    margin: 0 !important;
-    padding: 0 !important;
-
-    place-items: center !important;
-    overflow: hidden !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-settings {
-    position: relative !important;
-    display: grid !important;
-    width: 100% !important;
-    height: 100% !important;
-    min-width: 0 !important;
-    min-height: 0 !important;
-    padding: 0 !important;
-    place-items: center !important;
-    overflow: visible !important;
-  }
-
-  /*
-   * Keep the exact desktop/Resonite geometry.
-   * JavaScript computes one uniform scale from BOTH available dimensions.
-   */
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-full-color {
-    position: absolute !important;
-    top: 50% !important;
-    left: 50% !important;
-
-    display: grid !important;
-    width: 878px !important;
-    height: 613px !important;
-    min-width: 878px !important;
-    min-height: 613px !important;
-    max-width: none !important;
-    max-height: none !important;
-
-    margin: 0 !important;
-    padding: 0 !important;
-
-    grid-template-columns:
-      435px
-      413px !important;
-
-    grid-template-rows: 613px !important;
-    gap: 30px !important;
-
-    transform:
-      translate(-50%, -50%)
-      scale(var(--rml-picker-scale)) !important;
-
-    transform-origin: center center !important;
-    will-change: transform;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-resonite-color-left {
-    width: 435px !important;
-    height: 613px !important;
-    grid-template-rows: 321px 36px 36px minmax(0, 1fr) !important;
-    row-gap: 10px !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-surfaces {
-    width: 435px !important;
-    height: 321px !important;
-    grid-template-columns: 319px 34px 34px !important;
-    gap: 10px !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-full-color .rml-preview-resonite-sv,
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-resonite-sv {
-    width: 319px !important;
-    height: 321px !important;
-    min-height: 321px !important;
-    max-height: 321px !important;
-    aspect-ratio: auto !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-vertical-hue,
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-vertical-hue input[type="range"],
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-vertical-hue input[type="range"]::-webkit-slider-runnable-track,
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-vertical-hue input[type="range"]::-moz-range-track {
-    width: 34px !important;
-    min-width: 34px !important;
-    height: 321px !important;
-    min-height: 321px !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-preview-stack {
-    width: 34px !important;
-    height: 321px !important;
-    min-height: 321px !important;
-    margin-left: 14px !important;
-    grid-template-rows: 156px 155px !important;
-    gap: 10px !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-tall-color-swatch {
-    width: 34px !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-profile-tabs,
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-mode-tabs,
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-channel-row {
-    width: 435px !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-profile-tabs,
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-mode-tabs {
-    height: 36px !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-profile-tabs .rml-preview-control,
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-mode-tabs .rml-preview-control {
-    min-height: 36px !important;
-    padding-inline: 8px !important;
-    font-size: 22px !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-channel-editor {
-    gap: 8px !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-channel-row {
-    width: 435px !important;
-    height: 32px !important;
-    min-height: 32px !important;
-    grid-template-columns: 100px minmax(0, 1fr) 70px !important;
-    gap: 14px !important;
-    font-size: 17px !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-channel-value {
-    width: 70px !important;
-    height: 32px !important;
-    min-height: 32px !important;
-    padding-inline: 7px !important;
-    font-size: 16px !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-hex-row {
-    grid-template-columns: 100px minmax(0, 1fr) !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-palette {
-    width: 413px !important;
-    height: 613px !important;
-    min-height: 613px !important;
-    max-height: 613px !important;
-    grid-template-columns: repeat(8, minmax(0, 1fr)) !important;
-    grid-template-rows: repeat(12, minmax(0, 1fr)) !important;
-    gap: 7px !important;
-    padding: 8px !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-palette-swatch {
-    min-height: 0 !important;
-    border-radius: 7px !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-footer {
-    position: relative !important;
-    inset: auto !important;
-    z-index: 30 !important;
-
-    display: flex !important;
-    width: 100% !important;
-    height: 100% !important;
-    min-height: 0 !important;
-
-    margin: 0 !important;
-    padding:
-      6px
-      max(10px, env(safe-area-inset-right))
-      max(8px, env(safe-area-inset-bottom))
-      max(10px, env(safe-area-inset-left)) !important;
-
-    align-items: center !important;
-    justify-content: center !important;
-    overflow: hidden !important;
-    background: rgba(9, 13, 19, 0.995) !important;
-    box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.46) !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-footer-actions {
-    position: static !important;
-    left: auto !important;
-
-    display: grid !important;
-    width: min(878px, 100%) !important;
-    height: 100% !important;
-    min-height: 0 !important;
-
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-    grid-template-rows: minmax(42px, 1fr) !important;
-
-    gap: 10px !important;
-    margin: 0 !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-footer-button {
-    display: block !important;
-    width: 100% !important;
-    height: 100% !important;
-    min-width: 0 !important;
-    min-height: 42px !important;
-    max-height: none !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    flex: none !important;
-    font-size: clamp(17px, 3.5vmin, 25px) !important;
-  }
-}
-
-/* Portrait: buttons stack, footer grows. Picker scale is recalculated by JS. */
-@media (max-width: 600px) and (orientation: portrait) {
-  .settings-preview-dialog.rml-preview-color-open {
-    --rml-picker-footer-height:
-      calc(104px + env(safe-area-inset-bottom));
-    --rml-picker-header-height:
-      calc(58px + env(safe-area-inset-top));
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-footer-actions {
-    grid-template-columns: minmax(0, 1fr) !important;
-    grid-template-rows: repeat(2, minmax(42px, 1fr)) !important;
-    gap: 8px !important;
-  }
-}
-
-/* Landscape: compact header/footer and two horizontal buttons. */
-@media (orientation: landscape) and (max-height: 700px) {
-  .settings-preview-dialog.rml-preview-color-open {
-    --rml-picker-header-height:
-      calc(54px + env(safe-area-inset-top));
-    --rml-picker-footer-height:
-      calc(58px + env(safe-area-inset-bottom));
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-header h2 {
-    font-size: clamp(19px, 4vh, 30px) !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-close {
-    width: 38px !important;
-    height: 38px !important;
-    font-size: 33px !important;
-  }
-}
-
-/* ========================================================================== */
-/* FINAL ORIENTATION-AWARE FULL COLOR PICKER                                   */
-/* Portrait: left picker first, palette BELOW it, scrollable.                  */
-/* Landscape: original two-column Resonite layout, fitted to width AND height. */
-/* Scale is supplied by colorpicker_adaptive_fit.js.                           */
-/* ========================================================================== */
-
-.settings-preview-dialog.rml-preview-color-open {
-  --rml-picker-scale: 1;
   --rml-visible-width: 100dvw;
   --rml-visible-height: 100dvh;
   --rml-visual-left: 0px;
   --rml-visual-top: 0px;
-  --rml-picker-header-height: 64px;
-  --rml-picker-footer-height: 64px;
+
+  --rml-picker-scale: 1;
+  --rml-picker-scaled-width: 878px;
+  --rml-picker-scaled-height: 613px;
+  --rml-picker-canvas-width: 878px;
+  --rml-picker-canvas-height: 613px;
+
+  --rml-picker-header-height:
+    calc(
+      62px +
+      env(safe-area-inset-top)
+    );
+
+  --rml-picker-footer-height:
+    calc(
+      62px +
+      env(safe-area-inset-bottom)
+    );
+
+  position: fixed !important;
+  inset: auto !important;
+
+  top:
+    var(
+      --rml-visual-top,
+      0px
+    ) !important;
+
+  left:
+    var(
+      --rml-visual-left,
+      0px
+    ) !important;
+
+  width:
+    var(
+      --rml-visible-width,
+      100dvw
+    ) !important;
+
+  min-width: 0 !important;
+
+  max-width:
+    var(
+      --rml-visible-width,
+      100dvw
+    ) !important;
+
+  height:
+    var(
+      --rml-visible-height,
+      100dvh
+    ) !important;
+
+  min-height: 0 !important;
+
+  max-height:
+    var(
+      --rml-visible-height,
+      100dvh
+    ) !important;
+
+  margin: 0 !important;
+  padding: 0 !important;
+
+  overflow: hidden !important;
+
+  border: 0 !important;
+  border-radius: 0 !important;
+
+  box-sizing: border-box !important;
 }
 
-@media (max-width: 930px), (max-height: 700px) {
-  .settings-preview-dialog.rml-preview-color-open {
-    position: fixed !important;
-    inset: auto !important;
-    top: var(--rml-visual-top) !important;
-    left: var(--rml-visual-left) !important;
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-window {
+  position: relative !important;
 
-    width: var(--rml-visible-width) !important;
-    max-width: var(--rml-visible-width) !important;
-    height: var(--rml-visible-height) !important;
-    max-height: var(--rml-visible-height) !important;
+  display: grid !important;
 
-    margin: 0 !important;
-    padding: 0 !important;
-    overflow: hidden !important;
-    border: 0 !important;
-    border-radius: 0 !important;
-  }
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
 
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-window {
-    display: grid !important;
-    width: 100% !important;
-    height: 100% !important;
-    min-width: 0 !important;
-    min-height: 0 !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: none !important;
 
-    grid-template-rows:
-      var(--rml-picker-header-height)
-      minmax(0, 1fr)
-      var(--rml-picker-footer-height) !important;
+  grid-template-columns:
+    minmax(0, 1fr) !important;
 
-    transform: none !important;
-  }
+  grid-template-rows:
+    var(--rml-picker-header-height)
+    minmax(0, 1fr)
+    var(--rml-picker-footer-height) !important;
 
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-header {
-    min-width: 0 !important;
-    min-height: 0 !important;
-    overflow: hidden !important;
+  overflow: hidden !important;
 
-    padding:
-      max(7px, env(safe-area-inset-top))
-      max(10px, env(safe-area-inset-right))
-      6px
-      max(12px, env(safe-area-inset-left)) !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-header h2 {
-    min-width: 0 !important;
-    font-size: clamp(20px, 4.2vmin, 32px) !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-content {
-    min-width: 0 !important;
-    min-height: 0 !important;
-    width: 100% !important;
-    height: 100% !important;
-
-    margin: 0 !important;
-    padding: 0 !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-settings {
-    min-width: 0 !important;
-    min-height: 0 !important;
-    width: 100% !important;
-    height: auto !important;
-    padding: 0 !important;
-  }
-
-  /* Restore exact desktop geometry inside the scaled layout. */
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-resonite-color-left {
-    width: 435px !important;
-    height: 613px !important;
-    grid-template-rows: 321px 36px 36px minmax(0, 1fr) !important;
-    row-gap: 10px !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-surfaces {
-    width: 435px !important;
-    height: 321px !important;
-    grid-template-columns: 319px 34px 34px !important;
-    gap: 10px !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-full-color .rml-preview-resonite-sv,
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-resonite-sv {
-    width: 319px !important;
-    height: 321px !important;
-    min-height: 321px !important;
-    max-height: 321px !important;
-    aspect-ratio: auto !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-vertical-hue,
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-vertical-hue input[type="range"],
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-vertical-hue input[type="range"]::-webkit-slider-runnable-track,
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-vertical-hue input[type="range"]::-moz-range-track {
-    width: 34px !important;
-    min-width: 34px !important;
-    height: 321px !important;
-    min-height: 321px !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-preview-stack {
-    width: 34px !important;
-    height: 321px !important;
-    min-height: 321px !important;
-    margin-left: 14px !important;
-    grid-template-rows: 156px 155px !important;
-    gap: 10px !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-tall-color-swatch {
-    width: 34px !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-profile-tabs,
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-mode-tabs,
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-channel-row {
-    width: 435px !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-profile-tabs,
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-mode-tabs {
-    height: 36px !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-profile-tabs .rml-preview-control,
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-mode-tabs .rml-preview-control {
-    min-height: 36px !important;
-    padding-inline: 8px !important;
-    font-size: 22px !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-channel-editor {
-    gap: 8px !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-channel-row {
-    height: 32px !important;
-    min-height: 32px !important;
-    grid-template-columns: 100px minmax(0, 1fr) 70px !important;
-    gap: 14px !important;
-    font-size: 17px !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-channel-value {
-    width: 70px !important;
-    height: 32px !important;
-    min-height: 32px !important;
-    padding-inline: 7px !important;
-    font-size: 16px !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-hex-row {
-    grid-template-columns: 100px minmax(0, 1fr) !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-palette {
-    width: 413px !important;
-    height: 613px !important;
-    min-height: 613px !important;
-    max-height: 613px !important;
-    grid-template-columns: repeat(8, minmax(0, 1fr)) !important;
-    grid-template-rows: repeat(12, minmax(0, 1fr)) !important;
-    gap: 7px !important;
-    padding: 8px !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-palette-swatch {
-    min-height: 0 !important;
-    border-radius: 7px !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-footer {
-    position: relative !important;
-    inset: auto !important;
-    z-index: 30 !important;
-
-    display: flex !important;
-    width: 100% !important;
-    height: 100% !important;
-    min-height: 0 !important;
-
-    margin: 0 !important;
-    padding:
-      6px
-      max(10px, env(safe-area-inset-right))
-      max(8px, env(safe-area-inset-bottom))
-      max(10px, env(safe-area-inset-left)) !important;
-
-    align-items: center !important;
-    justify-content: center !important;
-    overflow: hidden !important;
-    background: rgba(9, 13, 19, 0.995) !important;
-    box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.46) !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-footer-button {
-    display: block !important;
-    width: 100% !important;
-    min-width: 0 !important;
-    min-height: 42px !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    flex: none !important;
-  }
+  transform: none !important;
+  transform-origin: center !important;
 }
 
-/* PORTRAIT ---------------------------------------------------------------- */
-@media (max-width: 600px) and (orientation: portrait) {
-  .settings-preview-dialog.rml-preview-color-open {
-    --rml-picker-header-height:
-      calc(58px + env(safe-area-inset-top));
-    --rml-picker-footer-height:
-      calc(104px + env(safe-area-inset-bottom));
-  }
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-header {
+  position: relative !important;
+  z-index: 40 !important;
 
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-content {
-    overflow-x: hidden !important;
-    overflow-y: auto !important;
-    -webkit-overflow-scrolling: touch;
-    overscroll-behavior: contain;
-  }
+  display: flex !important;
 
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-settings {
-    display: block !important;
-    height: auto !important;
-    padding:
-      8px
-      0
-      14px !important;
-  }
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 100% !important;
+  min-height: 0 !important;
 
-  /*
-   * Portrait is intentionally ONE COLUMN:
-   * controls first, complete palette directly underneath.
-   * Scale is width-driven, so it does not become tiny because of total height.
-   */
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-full-color {
-    position: static !important;
-    left: auto !important;
-    top: auto !important;
+  align-items: center !important;
 
-    display: grid !important;
-    width: 435px !important;
-    height: auto !important;
-    min-width: 435px !important;
-    min-height: 1242px !important;
+  gap: 8px !important;
 
-    margin:
-      0
-      auto !important;
+  padding:
+    max(
+      6px,
+      env(safe-area-inset-top)
+    )
+    max(
+      10px,
+      env(safe-area-inset-right)
+    )
+    5px
+    max(
+      10px,
+      env(safe-area-inset-left)
+    ) !important;
 
-    padding: 0 !important;
+  overflow: hidden !important;
 
-    grid-template-columns: 435px !important;
-    grid-template-rows: 613px 613px !important;
-    gap: 16px !important;
+  background:
+    rgba(
+      9,
+      13,
+      19,
+      0.995
+    ) !important;
 
-    zoom: var(--rml-picker-scale) !important;
-    transform: none !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-palette {
-    width: 435px !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-footer-actions {
-    display: grid !important;
-    width: 100% !important;
-    height: 100% !important;
-    min-height: 0 !important;
-
-    grid-template-columns: minmax(0, 1fr) !important;
-    grid-template-rows: repeat(2, minmax(42px, 1fr)) !important;
-
-    gap: 8px !important;
-    margin: 0 !important;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-footer-button {
-    height: 100% !important;
-    max-height: none !important;
-    font-size: 18px !important;
-  }
+  box-sizing: border-box !important;
 }
 
-/* LANDSCAPE --------------------------------------------------------------- */
-@media (orientation: landscape) and (max-height: 700px) {
-  .settings-preview-dialog.rml-preview-color-open {
-    --rml-picker-header-height:
-      calc(52px + env(safe-area-inset-top));
-    --rml-picker-footer-height:
-      calc(56px + env(safe-area-inset-bottom));
-  }
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-header > div {
+  min-width: 0 !important;
+  padding-left: 0 !important;
 
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-content {
-    display: grid !important;
-    place-items: center !important;
-    overflow: hidden !important;
-  }
+  flex:
+    0
+    1
+    auto !important;
 
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-settings {
-    display: grid !important;
-    width: 100% !important;
-    height: 100% !important;
-    place-items: center !important;
-    overflow: hidden !important;
-  }
+  overflow: hidden !important;
 
-  /*
-   * Landscape keeps the original two-column picker and scales it from both
-   * available width and available height, so the large SV square cannot exceed
-   * the visible overlay.
-   */
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-full-color {
-    position: static !important;
-    left: auto !important;
-    top: auto !important;
+  font-size:
+    clamp(
+      8px,
+      1.7vmin,
+      12px
+    ) !important;
 
-    display: grid !important;
-    width: 878px !important;
-    height: 613px !important;
-    min-width: 878px !important;
-    min-height: 613px !important;
+  line-height: 1.1 !important;
 
-    margin: 0 !important;
-    padding: 0 !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
 
-    grid-template-columns: 435px 413px !important;
-    grid-template-rows: 613px !important;
-    gap: 30px !important;
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-header h2 {
+  min-width: 0 !important;
 
-    zoom: var(--rml-picker-scale) !important;
-    transform: none !important;
-  }
+  margin:
+    0
+    auto !important;
 
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-footer-actions {
-    display: grid !important;
-    width: min(878px, 100%) !important;
-    height: 100% !important;
-    min-height: 0 !important;
+  flex:
+    1
+    1
+    auto !important;
 
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-    grid-template-rows: minmax(42px, 1fr) !important;
+  overflow: hidden !important;
 
-    gap: 10px !important;
-    margin: 0 !important;
-  }
+  font-size:
+    clamp(
+      18px,
+      4.2vmin,
+      31px
+    ) !important;
 
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-footer-button {
-    height: 100% !important;
-    max-height: none !important;
-    font-size: clamp(17px, 3.5vh, 24px) !important;
-  }
+  line-height: 1 !important;
+
+  text-align: center !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-close {
+  width: 38px !important;
+  min-width: 38px !important;
+  max-width: 38px !important;
+
+  height: 38px !important;
+  min-height: 38px !important;
+  max-height: 38px !important;
+
+  flex:
+    0
+    0
+    38px !important;
+
+  font-size: 33px !important;
+}
+
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-content {
+  position: relative !important;
+  z-index: 1 !important;
+
+  display: block !important;
+
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: none !important;
+
+  margin: 0 !important;
+  padding: 0 !important;
+
+  overflow-x: auto !important;
+  overflow-y: auto !important;
+
+  overscroll-behavior:
+    contain !important;
+
+  -webkit-overflow-scrolling:
+    touch !important;
+
+  touch-action:
+    pan-x
+    pan-y !important;
+
+  scrollbar-gutter:
+    stable
+    both-edges;
+
+  scroll-behavior:
+    auto !important;
+
+  background:
+    #090d13 !important;
+}
+
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-settings {
+  position: relative !important;
+
+  display: block !important;
+
+  width:
+    max(
+      100%,
+      var(--rml-picker-canvas-width)
+    ) !important;
+
+  min-width:
+    max(
+      100%,
+      var(--rml-picker-canvas-width)
+    ) !important;
+
+  max-width: none !important;
+
+  height:
+    max(
+      100%,
+      var(--rml-picker-canvas-height)
+    ) !important;
+
+  min-height:
+    max(
+      100%,
+      var(--rml-picker-canvas-height)
+    ) !important;
+
+  max-height: none !important;
+
+  margin: 0 !important;
+  padding: 0 !important;
+
+  overflow: visible !important;
+
+  box-sizing: border-box !important;
+}
+
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-full-color {
+  position: absolute !important;
+
+  top: 12px !important;
+
+  left:
+    max(
+      12px,
+      calc(
+        (
+          100% -
+          var(--rml-picker-scaled-width)
+        ) /
+        2
+      )
+    ) !important;
+
+  margin: 0 !important;
+  padding: 0 !important;
+
+  transform:
+    scale(
+      var(--rml-picker-scale)
+    ) !important;
+
+  transform-origin:
+    top
+    left !important;
+
+  will-change:
+    transform;
+
+  box-sizing:
+    border-box !important;
+}
+
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-footer {
+  position: relative !important;
+  inset: auto !important;
+  z-index: 50 !important;
+
+  display: flex !important;
+
+  width: 100% !important;
+  min-width: 0 !important;
+
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: none !important;
+
+  margin: 0 !important;
+
+  padding:
+    6px
+    max(
+      10px,
+      env(safe-area-inset-right)
+    )
+    max(
+      7px,
+      env(safe-area-inset-bottom)
+    )
+    max(
+      10px,
+      env(safe-area-inset-left)
+    ) !important;
+
+  align-items: center !important;
+  justify-content: center !important;
+
+  overflow: hidden !important;
+
+  background:
+    rgba(
+      9,
+      13,
+      19,
+      0.995
+    ) !important;
+
+  box-shadow:
+    0
+    -8px
+    24px
+    rgba(
+      0,
+      0,
+      0,
+      0.46
+    ) !important;
+
+  box-sizing:
+    border-box !important;
+}
+
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-save-panel {
+  display: flex !important;
+
+  width:
+    min(
+      878px,
+      100%
+    ) !important;
+
+  min-width: 0 !important;
+
+  height: 100% !important;
+  min-height: 0 !important;
+
+  margin: 0 !important;
+}
+
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-color-footer-actions {
+  position: static !important;
+  inset: auto !important;
+
+  display: grid !important;
+
+  width: 100% !important;
+  min-width: 0 !important;
+
+  height: 100% !important;
+  min-height: 0 !important;
+
+  margin: 0 !important;
+
+  grid-template-columns:
+    repeat(
+      2,
+      minmax(
+        0,
+        1fr
+      )
+    ) !important;
+
+  grid-template-rows:
+    minmax(
+      40px,
+      1fr
+    ) !important;
+
+  gap: 10px !important;
+}
+
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-footer-button {
+  display: block !important;
+
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+
+  height: 100% !important;
+  min-height: 40px !important;
+  max-height: none !important;
+
+  margin: 0 !important;
+  padding: 0 8px !important;
+
+  flex: none !important;
+
+  overflow: hidden !important;
+
+  font-size:
+    clamp(
+      16px,
+      3.3vmin,
+      25px
+    ) !important;
+
+  line-height: 1 !important;
+
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+
+  box-sizing:
+    border-box !important;
 }
 
 /* ========================================================================== */
-/* ABSOLUTE LAST OVERRIDE: PORTRAIT PALETTE DIRECTLY BELOW PICKER              */
+/* HOCHKANT: Picker oben, Palette direkt darunter, vollständiges Scrollen       */
 /* ========================================================================== */
 
-@media (max-width: 600px) {
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-content {
-    display: block !important;
-    overflow-x: hidden !important;
-    overflow-y: auto !important;
-    place-items: initial !important;
-  }
+.settings-preview-dialog.rml-preview-color-open
+[data-picker-orientation="portrait"] {
+  --rml-picker-footer-height:
+    calc(
+      108px +
+      env(safe-area-inset-bottom)
+    );
+}
 
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-settings {
-    display: block !important;
-    width: 100% !important;
-    height: auto !important;
-    min-height: 0 !important;
-    overflow: visible !important;
-    place-items: initial !important;
-    padding: 8px 0 16px !important;
-  }
+/*
+ * Das data-Attribut sitzt direkt auf dem Dialog.
+ */
+.settings-preview-dialog.rml-preview-color-open[data-picker-orientation="portrait"] {
+  --rml-picker-header-height:
+    calc(
+      58px +
+      env(safe-area-inset-top)
+    );
 
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-full-color {
-    position: static !important;
-    inset: auto !important;
-    left: auto !important;
-    top: auto !important;
+  --rml-picker-footer-height:
+    calc(
+      108px +
+      env(safe-area-inset-bottom)
+    );
+}
 
-    display: flex !important;
-    flex-direction: column !important;
-    align-items: stretch !important;
+.settings-preview-dialog.rml-preview-color-open[data-picker-orientation="portrait"]
+.rml-preview-full-color {
+  display: flex !important;
 
-    width: 435px !important;
-    min-width: 435px !important;
-    max-width: none !important;
-    height: auto !important;
-    min-height: 0 !important;
-    max-height: none !important;
+  width: 435px !important;
+  min-width: 435px !important;
+  max-width: 435px !important;
 
-    margin: 0 auto !important;
-    padding: 0 !important;
-    gap: 16px !important;
+  height: 1242px !important;
+  min-height: 1242px !important;
+  max-height: 1242px !important;
 
-    grid-template-columns: none !important;
-    grid-template-rows: none !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
 
-    zoom: var(--rml-picker-scale) !important;
-    transform: none !important;
-  }
+  gap: 16px !important;
 
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-resonite-color-left {
-    order: 1 !important;
-    flex: 0 0 613px !important;
-    width: 435px !important;
-    height: 613px !important;
-  }
+  grid-template-columns: none !important;
+  grid-template-rows: none !important;
+}
 
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-palette {
-    order: 2 !important;
-    flex: 0 0 613px !important;
+.settings-preview-dialog.rml-preview-color-open[data-picker-orientation="portrait"]
+.rml-preview-resonite-color-left {
+  order: 1 !important;
 
-    width: 435px !important;
-    min-width: 435px !important;
-    max-width: 435px !important;
+  width: 435px !important;
+  min-width: 435px !important;
+  max-width: 435px !important;
 
-    height: 613px !important;
-    min-height: 613px !important;
-    max-height: 613px !important;
+  height: 613px !important;
+  min-height: 613px !important;
+  max-height: 613px !important;
 
-    margin: 0 !important;
-  }
+  flex:
+    0
+    0
+    613px !important;
+}
 
+.settings-preview-dialog.rml-preview-color-open[data-picker-orientation="portrait"]
+.rml-preview-color-palette {
+  order: 2 !important;
+
+  width: 435px !important;
+  min-width: 435px !important;
+  max-width: 435px !important;
+
+  height: 613px !important;
+  min-height: 613px !important;
+  max-height: 613px !important;
+
+  flex:
+    0
+    0
+    613px !important;
+
+  margin: 0 !important;
+}
+
+.settings-preview-dialog.rml-preview-color-open[data-picker-orientation="portrait"]
+.rml-preview-color-footer-actions {
+  grid-template-columns:
+    minmax(
+      0,
+      1fr
+    ) !important;
+
+  grid-template-rows:
+    repeat(
+      2,
+      minmax(
+        40px,
+        1fr
+      )
+    ) !important;
+
+  gap: 8px !important;
+}
+
+.settings-preview-dialog.rml-preview-color-open[data-picker-orientation="portrait"]
+.rml-preview-footer-button {
+  min-height: 40px !important;
+  font-size: 18px !important;
+}
+
+/* ========================================================================== */
+/* QUERFORMAT: originale zwei Spalten, mindestens 72 %, sonst Scrollen          */
+/* ========================================================================== */
+
+.settings-preview-dialog.rml-preview-color-open[data-picker-orientation="landscape"] {
+  --rml-picker-header-height:
+    calc(
+      52px +
+      env(safe-area-inset-top)
+    );
+
+  --rml-picker-footer-height:
+    calc(
+      58px +
+      env(safe-area-inset-bottom)
+    );
+}
+
+.settings-preview-dialog.rml-preview-color-open[data-picker-orientation="landscape"]
+.rml-preview-full-color {
+  display: grid !important;
+
+  width: 878px !important;
+  min-width: 878px !important;
+  max-width: 878px !important;
+
+  height: 613px !important;
+  min-height: 613px !important;
+  max-height: 613px !important;
+
+  grid-template-columns:
+    435px
+    413px !important;
+
+  grid-template-rows:
+    613px !important;
+
+  gap: 30px !important;
+}
+
+/* ========================================================================== */
+/* Exakte native Picker-Geometrie innerhalb beider Orientierungen              */
+/* ========================================================================== */
+
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-resonite-color-left {
+  width: 435px !important;
+  height: 613px !important;
+
+  grid-template-rows:
+    321px
+    36px
+    36px
+    minmax(
+      0,
+      1fr
+    ) !important;
+
+  row-gap: 10px !important;
+}
+
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-color-surfaces {
+  width: 435px !important;
+  height: 321px !important;
+
+  grid-template-columns:
+    319px
+    34px
+    34px !important;
+
+  gap: 10px !important;
+}
+
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-full-color
+.rml-preview-resonite-sv,
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-resonite-sv {
+  width: 319px !important;
+
+  min-width: 319px !important;
+  max-width: 319px !important;
+
+  height: 321px !important;
+
+  min-height: 321px !important;
+  max-height: 321px !important;
+
+  aspect-ratio: auto !important;
+}
+
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-vertical-hue,
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-vertical-hue
+input[type="range"],
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-vertical-hue
+input[type="range"]::-webkit-slider-runnable-track,
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-vertical-hue
+input[type="range"]::-moz-range-track {
+  width: 34px !important;
+  min-width: 34px !important;
+  max-width: 34px !important;
+
+  height: 321px !important;
+  min-height: 321px !important;
+  max-height: 321px !important;
+}
+
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-color-preview-stack {
+  width: 34px !important;
+  min-width: 34px !important;
+  max-width: 34px !important;
+
+  height: 321px !important;
+  min-height: 321px !important;
+  max-height: 321px !important;
+
+  margin-left: 14px !important;
+
+  grid-template-rows:
+    156px
+    155px !important;
+
+  gap: 10px !important;
+}
+
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-tall-color-swatch {
+  width: 34px !important;
+  min-width: 34px !important;
+  max-width: 34px !important;
+}
+
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-color-profile-tabs,
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-color-mode-tabs,
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-color-channel-row {
+  width: 435px !important;
+  min-width: 435px !important;
+  max-width: 435px !important;
+}
+
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-color-profile-tabs,
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-color-mode-tabs {
+  height: 36px !important;
+  min-height: 36px !important;
+  max-height: 36px !important;
+}
+
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-color-profile-tabs
+.rml-preview-control,
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-color-mode-tabs
+.rml-preview-control {
+  min-height: 36px !important;
+
+  padding-inline:
+    8px !important;
+
+  font-size:
+    22px !important;
+}
+
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-color-channel-editor {
+  gap: 8px !important;
+}
+
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-color-channel-row {
+  height: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
+
+  grid-template-columns:
+    100px
+    minmax(
+      0,
+      1fr
+    )
+    70px !important;
+
+  gap: 14px !important;
+
+  font-size:
+    17px !important;
+}
+
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-color-channel-value {
+  width: 70px !important;
+  min-width: 70px !important;
+  max-width: 70px !important;
+
+  height: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
+
+  padding-inline:
+    7px !important;
+
+  font-size:
+    16px !important;
+}
+
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-color-hex-row {
+  grid-template-columns:
+    100px
+    minmax(
+      0,
+      1fr
+    ) !important;
+}
+
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-color-palette {
+  width: 413px !important;
+  min-width: 413px !important;
+  max-width: 413px !important;
+
+  height: 613px !important;
+  min-height: 613px !important;
+  max-height: 613px !important;
+
+  grid-template-columns:
+    repeat(
+      8,
+      minmax(
+        0,
+        1fr
+      )
+    ) !important;
+
+  grid-template-rows:
+    repeat(
+      12,
+      minmax(
+        0,
+        1fr
+      )
+    ) !important;
+
+  gap: 7px !important;
+  padding: 8px !important;
+
+  box-sizing:
+    border-box !important;
+}
+
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-color-palette-swatch {
+  min-width: 0 !important;
+  min-height: 0 !important;
+
+  border-radius:
+    7px !important;
+}
+
+/* iPhones mit Home-Indikator und sehr kleiner sichtbarer Höhe. */
+@supports (
+  padding-bottom:
+    env(
+      safe-area-inset-bottom
+    )
+) {
   .settings-preview-dialog.rml-preview-color-open
   .rml-preview-footer {
-    position: relative !important;
-    inset: auto !important;
+    padding-bottom:
+      max(
+        7px,
+        env(
+          safe-area-inset-bottom
+        )
+      ) !important;
+  }
+}
+
+/* Verhindert Browser-Zoom beim schnellen Antippen von Eingabefeldern auf iOS. */
+@media (
+  pointer:
+    coarse
+) {
+  .settings-preview-dialog.rml-preview-color-open
+  input,
+  .settings-preview-dialog.rml-preview-color-open
+  button {
+    touch-action:
+      manipulation;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  input[type="number"],
+  .settings-preview-dialog.rml-preview-color-open
+  input[type="text"] {
+    font-size:
+      max(
+        16px,
+        1em
+      ) !important;
   }
 }
