@@ -351,11 +351,6 @@
       `${canvasHeight}px`
     );
 
-    /*
-     * This flag is set synchronously after every required geometry variable
-     * has been written. CSS keeps the freshly inserted picker invisible only
-     * during the impossible-to-fit intermediate state.
-     */
     dialog.dataset.pickerFitted =
       "true";
 

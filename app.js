@@ -6336,6 +6336,27 @@ function renderSettingsPreviewFooter() {
   }
 }
 
+function suppressSettingsPreviewPageTransition() {
+  const dialog =
+    elements.settingsPreviewDialog;
+
+  if (!dialog) {
+    return;
+  }
+
+  dialog.classList.add(
+    "rml-preview-page-switching"
+  );
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      dialog.classList.remove(
+        "rml-preview-page-switching"
+      );
+    });
+  });
+}
+
 function renderSettingsPreview() {
   if (!settingsPreviewDraft) {
     return;
@@ -6582,6 +6603,8 @@ function openSettingsPreviewColor(nodeId) {
       }
     );
 
+  suppressSettingsPreviewPageTransition();
+
   settingsPreviewColorSession = {
     nodeId,
     original,
@@ -6633,6 +6656,8 @@ function closeSettingsPreviewColor(
         settingsPreviewColorSession.hue
     };
   }
+
+  suppressSettingsPreviewPageTransition();
 
   settingsPreviewColorSession = null;
   renderSettingsPreview();
