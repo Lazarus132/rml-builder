@@ -793,125 +793,9 @@ function portableColorXExpression(
   );
 }
 
-function colorChannelLiteral(
-  byteValue
-) {
-  if (byteValue === 0) {
-    return "0f";
-  }
 
-  if (byteValue === 255) {
-    return "1f";
-  }
 
-  return `${(byteValue / 255)
-    .toFixed(6)
-    .replace(/0+$/, "")
-    .replace(/\.$/, "")}f`;
-}
 
-function colorExpressionWithAlpha(
-  expression,
-  alphaByte
-) {
-  const value =
-    String(expression)
-      .trim();
-  const alphaLiteral =
-    colorChannelLiteral(
-      alphaByte
-    );
-  const named =
-    value.match(
-      /^colorX\.([A-Za-z_][A-Za-z0-9_]*)$/
-    );
-
-  if (
-    named &&
-    COLORX_NAMED_PREVIEWS[named[1]]
-  ) {
-    const [red, green, blue] =
-      COLORX_NAMED_PREVIEWS[
-        named[1]
-      ].channels;
-
-    return (
-      "(colorX)new color(" +
-      `${numberColorLiteral(red)}, ` +
-      `${numberColorLiteral(green)}, ` +
-      `${numberColorLiteral(blue)}, ` +
-      `${alphaLiteral})`
-    );
-  }
-
-  const number =
-    "([+-]?(?:(?:\\d+(?:\\.\\d*)?)|(?:\\.\\d+))(?:[eE][+-]?\\d+)?)[fFdD]?";
-  const constructor =
-    value.match(
-      new RegExp(
-        `^(?:new\\s+colorX|\\(\\s*colorX\\s*\\)\\s*new\\s+color)\\s*\\(\\s*${number}\\s*,\\s*${number}\\s*,\\s*${number}(?:\\s*,\\s*${number})?\\s*\\)$`
-      )
-    );
-
-  if (!constructor) {
-    return value;
-  }
-
-  return (
-    "(colorX)new color(" +
-    `${numberColorLiteral(constructor[1])}, ` +
-    `${numberColorLiteral(constructor[2])}, ` +
-    `${numberColorLiteral(constructor[3])}, ` +
-    `${alphaLiteral})`
-  );
-}
-
-function numberColorLiteral(
-  value
-) {
-  const normalized =
-    String(value)
-      .replace(/[fFdD]$/, "");
-
-  return `${normalized}f`;
-}
-
-function colorHexExpression(
-  hex,
-  alphaByte = 255
-) {
-  const normalized =
-    String(hex)
-      .replace(/^#/, "")
-      .padEnd(6, "0")
-      .slice(0, 6);
-
-  const red =
-    Number.parseInt(
-      normalized.slice(0, 2),
-      16
-    );
-  const green =
-    Number.parseInt(
-      normalized.slice(2, 4),
-      16
-    );
-  const blue =
-    Number.parseInt(
-      normalized.slice(4, 6),
-      16
-    );
-
-  return (
-    "(colorX)new color(" +
-    `${colorChannelLiteral(red)}, ` +
-    `${colorChannelLiteral(green)}, ` +
-    `${colorChannelLiteral(blue)}, ` +
-    `${colorChannelLiteral(
-      alphaByte
-    )})`
-  );
-}
 
 function colorBytesToHex(
   red,
@@ -1172,6 +1056,19 @@ function flattenNodes(nodes, conditions = [], path = []) {
   return entries;
 }
 
+let flattenedNodesCacheSource = null;
+let flattenedNodesCache = [];
+
+function currentFlattenedNodes() {
+  if (flattenedNodesCacheSource !== state.nodes) {
+    flattenedNodesCacheSource = state.nodes;
+    flattenedNodesCache = flattenNodes(state.nodes);
+  }
+
+  return flattenedNodesCache;
+}
+
+
 function findNode(nodes, id) {
   for (const node of nodes) {
     if (node.id === id) return node;
@@ -1309,7 +1206,7 @@ function findContainerName(nodes, containerId) {
 }
 
 function makeSetting(type) {
-  const count = flattenNodes(state.nodes).filter(
+  const count = currentFlattenedNodes().filter(
     entry => entry.node.kind === "setting" && entry.node.valueType === type
   ).length;
   const base =
@@ -1342,7 +1239,7 @@ function makeSetting(type) {
 }
 
 function makeController() {
-  const count = flattenNodes(state.nodes).filter(
+  const count = currentFlattenedNodes().filter(
     entry => entry.node.kind === "controller"
   ).length;
   const suffix = count === 0 ? "" : `${count + 1}`;
@@ -1704,7 +1601,7 @@ function reactionIncludesSaved(reaction) {
 
 function generateCode() {
   const metadata = state.metadata;
-  const entries = flattenNodes(state.nodes);
+  const entries = currentFlattenedNodes();
   const controllers = entries.filter(entry => entry.node.kind === "controller");
   const settings = entries.filter(entry => entry.node.kind === "setting");
   const usesElements = settings.some(entry =>
@@ -1971,7 +1868,7 @@ ${runtimeBlock}${visibilityBlock}}
 }
 
 function generateProjectFile() {
-  const settings = flattenNodes(state.nodes)
+  const settings = currentFlattenedNodes()
     .filter(entry => entry.node.kind === "setting");
   const usesElements = settings.some(entry =>
     [
@@ -2053,7 +1950,7 @@ function generateProjectFile() {
 }
 
 function getDiagnostics() {
-  const entries = flattenNodes(state.nodes);
+  const entries = currentFlattenedNodes();
   const errors = [];
   const fieldNames = new Map();
   const keyNames = new Map();
@@ -3305,7 +3202,7 @@ function bindCanvasInteractions() {
 }
 
 function renderCanvas() {
-  elements.itemCount.textContent = String(flattenNodes(state.nodes).length);
+  elements.itemCount.textContent = String(currentFlattenedNodes().length);
   elements.activeContainerName.textContent = findContainerName(
     state.nodes,
     state.activeContainerId
@@ -4315,8 +4212,25 @@ function updateColorPreview(
   );
 }
 
-function updateInspectorOutput() {
-  renderCanvas();
+const CANVAS_VISIBLE_INSPECTOR_FIELDS =
+  new Set([
+    "fieldName",
+    "keyName",
+    "enumName"
+  ]);
+
+function updateInspectorOutput(
+  changedField = null
+) {
+  if (
+    changedField === null ||
+    CANVAS_VISIBLE_INSPECTOR_FIELDS.has(
+      changedField
+    )
+  ) {
+    renderCanvas();
+  }
+
   updateGeneratedOutput();
   persist();
 }
@@ -4345,7 +4259,7 @@ function commitColorPickerExpression(
     form,
     expression
   );
-  updateInspectorOutput();
+  updateInspectorOutput("defaultValue");
 }
 
 function bindCustomColorPickerInteractions(
@@ -4367,10 +4281,6 @@ function bindCustomColorPickerInteractions(
     return;
   }
 
-  const expressionInput =
-    form.querySelector(
-      '[data-field="defaultValue"]'
-    );
   const hueInput =
     form.querySelector(
       "[data-color-hue]"
@@ -4935,7 +4845,9 @@ function bindInspectorInteractions() {
       ) {
         renderAll();
       } else {
-        updateInspectorOutput();
+        updateInspectorOutput(
+          input.dataset.field
+        );
       }
     });
 
@@ -4985,7 +4897,9 @@ function bindInspectorInteractions() {
           defaultValue
         );
 
-        updateInspectorOutput();
+        updateInspectorOutput(
+          "defaultValue"
+        );
       }
     );
   });
@@ -5099,8 +5013,8 @@ function updateGeneratedOutput() {
   const errors = getDiagnostics();
   const code = generateCode();
   elements.generatedCode.textContent = code;
-  elements.codeSummary.textContent = `${flattenNodes(state.nodes).length} item${
-    flattenNodes(state.nodes).length === 1 ? "" : "s"
+  elements.codeSummary.textContent = `${currentFlattenedNodes().length} item${
+    currentFlattenedNodes().length === 1 ? "" : "s"
   } · ${code.split("\n").length} lines`;
   elements.diagnostics.hidden = errors.length === 0;
   elements.diagnostics.innerHTML = errors.length
@@ -5946,7 +5860,13 @@ function settingsPreviewColorModeMarkup() {
   ].join("");
 }
 
+let settingsPreviewPaletteCache = null;
+
 function settingsPreviewResonitePalette() {
+  if (settingsPreviewPaletteCache) {
+    return settingsPreviewPaletteCache;
+  }
+
   const grayscale = [
     "#351600",
     "#1D1D1D",
@@ -6002,7 +5922,10 @@ function settingsPreviewResonitePalette() {
     }
   }
 
-  return colors;
+  settingsPreviewPaletteCache =
+    Object.freeze(colors);
+
+  return settingsPreviewPaletteCache;
 }
 
 function settingsPreviewColorPaletteMarkup() {
@@ -6035,8 +5958,6 @@ function settingsPreviewColorMarkup() {
 
   const hsv =
     settingsPreviewColorHsv();
-  const currentHex =
-    settingsPreviewColorHex();
   const currentCss =
     settingsPreviewColorCss();
   const currentOpaqueCss =

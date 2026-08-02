@@ -3320,8 +3320,7 @@ footer strong {
   -webkit-overflow-scrolling: touch;
 }
 
-@media (max-width: 780px), (max-height: 700px) {
-  .settings-preview-dialog,
+@media (max-width: 780px) {
   .export-dialog,
   .project-dialog {
     inset: 0;
@@ -3330,20 +3329,18 @@ footer strong {
     height: 100dvh;
     max-height: 100dvh;
     margin: 0;
-    border-radius: 0;
-  }
-
-  .export-dialog,
-  .project-dialog {
     padding-top: env(safe-area-inset-top);
     padding-bottom: env(safe-area-inset-bottom);
+    border-radius: 0;
   }
 
   .export-dialog-header,
   .export-dialog-actions,
   .export-dialog-body,
   .project-dialog-body {
-    padding-inline: max(14px, env(safe-area-inset-left)) max(14px, env(safe-area-inset-right));
+    padding-inline:
+      max(14px, env(safe-area-inset-left))
+      max(14px, env(safe-area-inset-right));
   }
 
   .export-dialog-header {
@@ -3358,6 +3355,18 @@ footer strong {
   .project-dialog-body {
     padding-top: 14px;
     padding-bottom: 14px;
+  }
+}
+
+@media (max-width: 780px), (max-height: 700px) {
+  .settings-preview-dialog {
+    inset: 0;
+    width: 100dvw;
+    max-width: 100dvw;
+    height: 100dvh;
+    max-height: 100dvh;
+    margin: 0;
+    border-radius: 0;
   }
 
   .settings-preview-dialog {
@@ -3674,9 +3683,6 @@ footer strong {
   .rml-preview-color-hex-row {
     grid-template-columns: 58px minmax(0, 1fr);
   }
-}
-
-@media (max-width: 430px) {
   .settings-preview-dialog.rml-preview-color-open
   .rml-preview-window {
     position: relative;
@@ -3776,35 +3782,23 @@ footer strong {
     --rml-visible-height: 100dvh;
     --rml-visual-left: 0px;
     --rml-visual-top: 0px;
-
     --rml-picker-scale: 1;
     --rml-picker-left: 12px;
     --rml-picker-canvas-width: 878px;
     --rml-picker-canvas-height: 637px;
-
-    --rml-picker-header-height:
-      calc(58px + env(safe-area-inset-top));
-
-    --rml-picker-footer-height:
-      calc(114px + env(safe-area-inset-bottom));
-
     position: fixed !important;
     inset: auto !important;
     top: var(--rml-visual-top) !important;
     left: var(--rml-visual-left) !important;
-
     width: var(--rml-visible-width) !important;
     min-width: 0 !important;
     max-width: var(--rml-visible-width) !important;
-
     height: var(--rml-visible-height) !important;
     min-height: 0 !important;
     max-height: var(--rml-visible-height) !important;
-
     margin: 0 !important;
     padding: 0 !important;
     overflow: hidden !important;
-
     border: 0 !important;
     border-radius: 0 !important;
     box-sizing: border-box !important;
@@ -3829,22 +3823,13 @@ footer strong {
     position: absolute !important;
     z-index: 40 !important;
     inset: 0 0 auto 0 !important;
-
     display: flex !important;
     width: 100% !important;
     height: var(--rml-picker-header-height) !important;
     min-width: 0 !important;
     min-height: 0 !important;
-
     align-items: center !important;
     gap: 8px !important;
-
-    padding:
-      max(7px, env(safe-area-inset-top))
-      max(10px, env(safe-area-inset-right))
-      6px
-      max(12px, env(safe-area-inset-left)) !important;
-
     overflow: hidden !important;
     background: rgba(9, 13, 19, 0.995) !important;
     box-sizing: border-box !important;
@@ -3856,7 +3841,6 @@ footer strong {
     max-width: 31% !important;
     padding-left: 0 !important;
     overflow: hidden !important;
-    font-size: 9px !important;
     line-height: 1.05 !important;
     text-overflow: ellipsis !important;
     white-space: nowrap !important;
@@ -3868,24 +3852,13 @@ footer strong {
     margin: 0 auto !important;
     flex: 1 1 auto !important;
     overflow: hidden !important;
-    font-size: clamp(20px, 5.4vw, 30px) !important;
     line-height: 1 !important;
     text-align: center !important;
     text-overflow: ellipsis !important;
     white-space: nowrap !important;
   }
 
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-close {
-    width: 38px !important;
-    min-width: 38px !important;
-    max-width: 38px !important;
-    height: 38px !important;
-    min-height: 38px !important;
-    max-height: 38px !important;
-    flex: 0 0 38px !important;
-    font-size: 33px !important;
-  }
+  
 
   .settings-preview-dialog.rml-preview-color-open
   .rml-preview-content {
@@ -3951,24 +3924,15 @@ footer strong {
     position: absolute !important;
     z-index: 50 !important;
     inset: auto 0 0 0 !important;
-
     display: flex !important;
     width: 100% !important;
     height: var(--rml-picker-footer-height) !important;
     min-height: 0 !important;
     max-height: none !important;
-
     margin: 0 !important;
-    padding:
-      8px
-      max(10px, env(safe-area-inset-right))
-      max(10px, env(safe-area-inset-bottom))
-      max(10px, env(safe-area-inset-left)) !important;
-
     align-items: center !important;
     justify-content: center !important;
     overflow: hidden !important;
-
     background: rgba(9, 13, 19, 0.995) !important;
     box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.46) !important;
     box-sizing: border-box !important;
@@ -3987,16 +3951,12 @@ footer strong {
   .rml-preview-color-footer-actions {
     position: static !important;
     inset: auto !important;
-
     display: grid !important;
     width: 100% !important;
     height: 100% !important;
     min-height: 0 !important;
-
     margin: 0 !important;
     grid-template-columns: minmax(0, 1fr) !important;
-    grid-template-rows: 44px 44px !important;
-    gap: 8px !important;
   }
 
   .settings-preview-dialog.rml-preview-color-open
@@ -4005,17 +3965,9 @@ footer strong {
     width: 100% !important;
     min-width: 0 !important;
     max-width: none !important;
-
-    height: 44px !important;
-    min-height: 44px !important;
-    max-height: 44px !important;
-
     margin: 0 !important;
-    padding: 0 8px !important;
-
     flex: none !important;
     overflow: hidden !important;
-    font-size: 18px !important;
     line-height: 1 !important;
     box-sizing: border-box !important;
   }
@@ -4061,13 +4013,7 @@ footer strong {
     margin: 0 !important;
   }
 
-  .settings-preview-dialog.rml-preview-color-open[data-picker-orientation="landscape"] {
-    --rml-picker-header-height:
-      calc(50px + env(safe-area-inset-top));
-
-    --rml-picker-footer-height:
-      calc(64px + env(safe-area-inset-bottom));
-  }
+  
 
   .settings-preview-dialog.rml-preview-color-open[data-picker-orientation="landscape"]
   .rml-preview-full-color {
@@ -4086,12 +4032,7 @@ footer strong {
     gap: 30px !important;
   }
 
-  .settings-preview-dialog.rml-preview-color-open[data-picker-orientation="landscape"]
-  .rml-preview-color-footer-actions {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-    grid-template-rows: 44px !important;
-    gap: 10px !important;
-  }
+  
 
   .settings-preview-dialog.rml-preview-color-open
   .rml-preview-resonite-color-left {
@@ -4181,36 +4122,31 @@ footer strong {
     gap: 7px !important;
     padding: 8px !important;
   }
-}
-
-@media (max-width: 980px), (max-height: 720px) {
   .settings-preview-dialog.rml-preview-color-open {
-    --rml-mobile-ui-scale:
-      var(--rml-picker-scale, 1);
 
     --rml-mobile-close-size:
-      calc(42px * var(--rml-mobile-ui-scale));
+      calc(42px * var(--rml-picker-scale, 1));
 
     --rml-mobile-close-font-size:
-      calc(38px * var(--rml-mobile-ui-scale));
+      calc(38px * var(--rml-picker-scale, 1));
 
     --rml-mobile-header-content-height:
-      calc(50px * var(--rml-mobile-ui-scale));
+      calc(50px * var(--rml-picker-scale, 1));
 
     --rml-mobile-footer-button-height:
-      calc(46px * var(--rml-mobile-ui-scale));
+      calc(46px * var(--rml-picker-scale, 1));
 
     --rml-mobile-footer-font-size:
-      calc(27px * var(--rml-mobile-ui-scale));
+      calc(27px * var(--rml-picker-scale, 1));
 
     --rml-mobile-footer-gap:
-      calc(8px * var(--rml-mobile-ui-scale));
+      calc(8px * var(--rml-picker-scale, 1));
 
     --rml-mobile-footer-padding-top:
-      calc(8px * var(--rml-mobile-ui-scale));
+      calc(8px * var(--rml-picker-scale, 1));
 
     --rml-mobile-footer-padding-bottom:
-      calc(10px * var(--rml-mobile-ui-scale));
+      calc(10px * var(--rml-picker-scale, 1));
 
     --rml-picker-header-height:
       calc(
@@ -4233,12 +4169,12 @@ footer strong {
     padding:
       env(safe-area-inset-top)
       max(
-        calc(10px * var(--rml-mobile-ui-scale)),
+        calc(10px * var(--rml-picker-scale, 1)),
         env(safe-area-inset-right)
       )
       0
       max(
-        calc(12px * var(--rml-mobile-ui-scale)),
+        calc(12px * var(--rml-picker-scale, 1)),
         env(safe-area-inset-left)
       ) !important;
   }
@@ -4248,7 +4184,7 @@ footer strong {
     font-size:
       max(
         7px,
-        calc(9px * var(--rml-mobile-ui-scale))
+        calc(9px * var(--rml-picker-scale, 1))
       ) !important;
   }
 
@@ -4257,7 +4193,7 @@ footer strong {
     font-size:
       clamp(
         16px,
-        calc(30px * var(--rml-mobile-ui-scale)),
+        calc(30px * var(--rml-picker-scale, 1)),
         30px
       ) !important;
   }
@@ -4288,19 +4224,19 @@ footer strong {
 
     padding:
       0 0
-      calc(4px * var(--rml-mobile-ui-scale)) !important;
+      calc(4px * var(--rml-picker-scale, 1)) !important;
 
     font-size:
       var(--rml-mobile-close-font-size) !important;
 
     box-shadow:
       inset 0
-        calc(-3px * var(--rml-mobile-ui-scale))
+        calc(-3px * var(--rml-picker-scale, 1))
         0
         rgba(104, 26, 31, 0.18),
       0
-        calc(2px * var(--rml-mobile-ui-scale))
-        calc(11px * var(--rml-mobile-ui-scale))
+        calc(2px * var(--rml-picker-scale, 1))
+        calc(11px * var(--rml-picker-scale, 1))
         rgba(255, 87, 95, 0.17) !important;
   }
 
@@ -4309,7 +4245,7 @@ footer strong {
     padding:
       var(--rml-mobile-footer-padding-top)
       max(
-        calc(10px * var(--rml-mobile-ui-scale)),
+        calc(10px * var(--rml-picker-scale, 1)),
         env(safe-area-inset-right)
       )
       max(
@@ -4317,7 +4253,7 @@ footer strong {
         env(safe-area-inset-bottom)
       )
       max(
-        calc(10px * var(--rml-mobile-ui-scale)),
+        calc(10px * var(--rml-picker-scale, 1)),
         env(safe-area-inset-left)
       ) !important;
   }
@@ -4345,10 +4281,10 @@ footer strong {
 
     padding:
       0
-      calc(8px * var(--rml-mobile-ui-scale)) !important;
+      calc(8px * var(--rml-picker-scale, 1)) !important;
 
     border-radius:
-      calc(6px * var(--rml-mobile-ui-scale)) !important;
+      calc(6px * var(--rml-picker-scale, 1)) !important;
 
     font-size:
       max(
@@ -4382,6 +4318,31 @@ footer strong {
       var(--rml-mobile-footer-button-height) !important;
 
     gap:
-      calc(10px * var(--rml-mobile-ui-scale)) !important;
+      calc(10px * var(--rml-picker-scale, 1)) !important;
+  }
+}
+
+@media (min-width: 781px) {
+  dialog.export-dialog,
+  dialog.project-dialog {
+    position: fixed !important;
+    inset: auto !important;
+    top: 50% !important;
+    left: 50% !important;
+
+    width: min(620px, calc(100dvw - 32px)) !important;
+    height: fit-content !important;
+    min-height: 0 !important;
+    max-height: calc(100dvh - 32px) !important;
+
+    margin: 0 !important;
+    transform: translate(-50%, -50%) !important;
+
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+  }
+
+  dialog.project-dialog {
+    width: min(500px, calc(100dvw - 32px)) !important;
   }
 }
