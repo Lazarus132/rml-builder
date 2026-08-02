@@ -249,14 +249,46 @@ function isMobileDialogViewport() {
   );
 }
 
-function intrinsicDialogWidth(
+function utilityDialogContentSize(
   dialog
 ) {
-  return dialog?.classList.contains(
-    "project-dialog"
-  )
-    ? 500
-    : 620;
+  if (!dialog) {
+    return {
+      width: 0,
+      height: 0
+    };
+  }
+
+  const header =
+    dialog.querySelector(
+      ".export-dialog-header"
+    );
+  const body =
+    dialog.querySelector(
+      ".export-dialog-body, .project-dialog-body"
+    );
+  const actions =
+    dialog.querySelector(
+      ".export-dialog-actions"
+    );
+
+  const height =
+    (header?.scrollHeight || 0) +
+    (body?.scrollHeight || 0) +
+    (actions?.scrollHeight || 0) +
+    2;
+
+  const width =
+    Math.max(
+      header?.scrollWidth || 0,
+      body?.scrollWidth || 0,
+      actions?.scrollWidth || 0
+    );
+
+  return {
+    width,
+    height
+  };
 }
 
 function updateAdaptiveUtilityDialog(
@@ -289,20 +321,28 @@ function updateAdaptiveUtilityDialog(
     "mobile-full-modal"
   );
 
-  const requiredWidth =
-    intrinsicDialogWidth(
+  const content =
+    utilityDialogContentSize(
       dialog
     );
-  const requiredHeight =
-    Math.max(
-      dialog.scrollHeight,
-      dialog.getBoundingClientRect().height
-    );
+
+  const horizontalGap = 16;
+  const verticalGap = 16;
+
+  const contentTooWide =
+    content.width >
+    viewport.width -
+      horizontalGap;
+
+  const contentTooTall =
+    content.height >=
+    viewport.height -
+      verticalGap;
 
   dialog.classList.toggle(
     "mobile-full-modal",
-    requiredWidth >= viewport.width ||
-    requiredHeight >= viewport.height
+    contentTooWide ||
+    contentTooTall
   );
 }
 
@@ -322,21 +362,59 @@ function scheduleAdaptiveUtilityDialogs() {
     });
 }
 
-function movePreviewFocusAwayFromCloseButton() {
+function focusDialogShell(
+  dialog
+) {
   if (
-    !isMobileDialogViewport() ||
-    !elements.settingsPreviewDialog?.open
+    !dialog ||
+    !dialog.open
   ) {
     return;
   }
 
+  const active =
+    document.activeElement;
+
+  if (
+    active instanceof HTMLElement &&
+    dialog.contains(active)
+  ) {
+    active.blur();
+  }
+
   try {
-    elements.settingsPreviewDialog.focus({
+    dialog.focus({
       preventScroll: true
     });
   } catch {
-    elements.settingsPreviewDialog.focus();
+    dialog.focus();
   }
+}
+
+function stabilizeDialogFocus(
+  dialog
+) {
+  focusDialogShell(dialog);
+
+  requestAnimationFrame(() => {
+    focusDialogShell(dialog);
+
+    requestAnimationFrame(() => {
+      focusDialogShell(dialog);
+    });
+  });
+}
+
+function movePreviewFocusAwayFromCloseButton() {
+  if (
+    !isMobileDialogViewport()
+  ) {
+    return;
+  }
+
+  stabilizeDialogFocus(
+    elements.settingsPreviewDialog
+  );
 }
 
 function makeSampleSetting(
@@ -7713,10 +7791,16 @@ function openProjectDialog() {
     );
   }
 
+  stabilizeDialogFocus(
+    elements.projectDialog
+  );
+
   requestAnimationFrame(() => {
-    updateAdaptiveUtilityDialog(
-      elements.projectDialog
-    );
+    requestAnimationFrame(() => {
+      updateAdaptiveUtilityDialog(
+        elements.projectDialog
+      );
+    });
   });
 }
 
@@ -8128,10 +8212,16 @@ function openExportDialog() {
     elements.exportDialog.setAttribute("open", "");
   }
 
+  stabilizeDialogFocus(
+    elements.exportDialog
+  );
+
   requestAnimationFrame(() => {
-    updateAdaptiveUtilityDialog(
-      elements.exportDialog
-    );
+    requestAnimationFrame(() => {
+      updateAdaptiveUtilityDialog(
+        elements.exportDialog
+      );
+    });
   });
 }
 
