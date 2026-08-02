@@ -5214,11 +5214,15 @@ select,
 }
 
 .node-order-actions {
-  display: grid;
+  display: none;
   width: 24px;
   flex: 0 0 24px;
   grid-template-rows: repeat(2, 16px);
   gap: 2px;
+}
+
+.node-card.selected > .node-head > .node-order-actions {
+  display: grid;
 }
 
 .move-node {
@@ -5248,42 +5252,6 @@ select,
   opacity: 0.24;
 }
 
-.drag-reorder-placeholder {
-  position: relative;
-  min-height: 18px;
-  flex: 0 0 18px;
-  border: 1px dashed rgba(164, 118, 255, 0.72);
-  border-radius: 7px;
-  background: rgba(164, 118, 255, 0.11);
-  box-shadow:
-    inset 0 0 0 1px rgba(164, 118, 255, 0.08),
-    0 0 18px rgba(164, 118, 255, 0.12);
-  pointer-events: none;
-}
-
-.drag-reorder-placeholder::before {
-  position: absolute;
-  top: 50%;
-  right: 10px;
-  left: 10px;
-  height: 2px;
-  border-radius: 2px;
-  background: var(--accent);
-  content: "";
-  transform: translateY(-50%);
-  box-shadow: 0 0 9px rgba(164, 118, 255, 0.72);
-}
-
-.node-card.drag-insert-before,
-.node-card.drag-insert-after {
-  border-color: rgba(164, 118, 255, 0.74);
-}
-
-.drop-zone > .drag-reorder-placeholder,
-.builder-canvas > .drag-reorder-placeholder {
-  width: 100%;
-}
-
 .option-heading {
   gap: 8px;
 }
@@ -5303,19 +5271,16 @@ select,
 }
 
 .option-order-actions {
-  display: flex;
+  display: none;
   flex: 0 0 auto;
   gap: 2px;
-  opacity: 0;
-  pointer-events: none;
   transform: translateY(-1px);
-  transition: opacity 90ms ease;
 }
 
-.option-heading:hover .option-order-actions,
-.option-lane:focus-within .option-order-actions {
-  opacity: 1;
-  pointer-events: auto;
+.option-lane.active-container
+> .option-heading
+.option-order-actions {
+  display: flex;
 }
 
 .move-option {
@@ -5344,49 +5309,4 @@ select,
 .move-option:disabled {
   cursor: default;
   opacity: 0.24;
-}
-
-.controller-options.option-drag-over {
-  box-shadow: inset 0 0 0 1px rgba(164, 118, 255, 0.28);
-}
-
-.option-reorder-placeholder {
-  position: relative;
-  min-width: 92px;
-  min-height: 72px;
-  border: 1px dashed rgba(164, 118, 255, 0.78);
-  border-radius: 8px;
-  background: rgba(164, 118, 255, 0.11);
-  box-shadow:
-    inset 0 0 0 1px rgba(164, 118, 255, 0.08),
-    0 0 18px rgba(164, 118, 255, 0.13);
-  pointer-events: none;
-}
-
-.option-reorder-placeholder::before {
-  position: absolute;
-  top: 9px;
-  bottom: 9px;
-  left: 50%;
-  width: 2px;
-  border-radius: 2px;
-  background: var(--accent);
-  content: "";
-  transform: translateX(-50%);
-  box-shadow: 0 0 9px rgba(164, 118, 255, 0.72);
-}
-
-.option-lane[draggable="true"] > .option-heading {
-  cursor: grab;
-}
-
-.option-lane[draggable="true"] > .option-heading:active {
-  cursor: grabbing;
-}
-
-@media (hover: none) {
-  .option-order-actions {
-    opacity: 1;
-    pointer-events: auto;
-  }
 }

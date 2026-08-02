@@ -3608,6 +3608,31 @@ function nodeCardMarkup(
   siblingCount
 ) {
   const selected = state.selectedId === node.id ? " selected" : "";
+
+  const nestedSectionEnum =
+    node.kind === "controller" &&
+    containerId !== ROOT_CONTAINER;
+
+const previousOptionSymbol =
+  nestedSectionEnum
+    ? "▲"
+    : "←";
+
+const nextOptionSymbol =
+  nestedSectionEnum
+    ? "▼"
+    : "→";
+
+const previousOptionDirection =
+  nestedSectionEnum
+    ? "up"
+    : "left";
+
+const nextOptionDirection =
+  nestedSectionEnum
+    ? "down"
+    : "right";
+
   const subtitle =
     node.kind === "controller"
       ? `${node.enumName} · section navigation`
@@ -3638,25 +3663,26 @@ function nodeCardMarkup(
               <div class="option-heading-actions">
                 <div class="option-order-actions" aria-label="Change section order">
                   <button
-                    class="move-option move-option-left"
+                    class="move-option move-option-previous"
                     type="button"
                     draggable="false"
                     data-move-option="${escapeHtml(option.id)}"
                     data-option-controller="${escapeHtml(node.id)}"
                     data-option-direction="-1"
                     ${optionIndex <= 0 ? "disabled" : ""}
-                    title="Move section left"
-                    aria-label="Move ${escapeHtml(option.name)} left">←</button>
+                    title="Move section ${previousOptionDirection}"
+                    aria-label="Move ${escapeHtml(option.name)} ${previousOptionDirection}">${previousOptionSymbol}</button>
+
                   <button
-                    class="move-option move-option-right"
+                    class="move-option move-option-next"
                     type="button"
                     draggable="false"
                     data-move-option="${escapeHtml(option.id)}"
                     data-option-controller="${escapeHtml(node.id)}"
                     data-option-direction="1"
                     ${optionIndex >= node.options.length - 1 ? "disabled" : ""}
-                    title="Move section right"
-                    aria-label="Move ${escapeHtml(option.name)} right">→</button>
+                    title="Move section ${nextOptionDirection}"
+                    aria-label="Move ${escapeHtml(option.name)} ${nextOptionDirection}">${nextOptionSymbol}</button>
                 </div>
                 <small>${option.children.length} item${
                   option.children.length === 1 ? "" : "s"
