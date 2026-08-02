@@ -6377,10 +6377,7 @@ function renderSettingsPreview() {
   }
 
   renderSettingsPreviewFooter();
-
-  requestAnimationFrame(() => {
-    window.fitSettingsPreviewColorPicker?.();
-  });
+  window.fitSettingsPreviewColorPicker?.();
 }
 
 function changeSettingsPreviewEnum(

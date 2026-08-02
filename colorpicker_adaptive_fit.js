@@ -173,6 +173,9 @@
     delete dialog.dataset
       .pickerOrientation;
 
+    delete dialog.dataset
+      .pickerFitted;
+
     for (
       const property of
       ADAPTIVE_PROPERTIES
@@ -223,6 +226,11 @@
       );
 
     if (!colorPageOpen) {
+      if (dialog) {
+        delete dialog.dataset
+          .pickerFitted;
+      }
+
       clearAdaptiveState();
       wasOpen = false;
       return;
@@ -342,6 +350,14 @@
       "--rml-picker-canvas-height",
       `${canvasHeight}px`
     );
+
+    /*
+     * This flag is set synchronously after every required geometry variable
+     * has been written. CSS keeps the freshly inserted picker invisible only
+     * during the impossible-to-fit intermediate state.
+     */
+    dialog.dataset.pickerFitted =
+      "true";
 
     const newlyOpened =
       !wasOpen;

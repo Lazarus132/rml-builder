@@ -5140,3 +5140,12 @@ dialog#export-dialog.mobile-full-modal {
     animation: none !important;
   }
 }
+
+@media (max-width: 980px), (max-height: 720px) {
+  .settings-preview-dialog.rml-preview-color-open:not([data-picker-fitted="true"])
+  .rml-preview-full-color,
+  .settings-preview-dialog.rml-preview-color-open:not([data-picker-fitted="true"])
+  .rml-preview-color-footer-actions {
+    visibility: hidden !important;
+  }
+}
