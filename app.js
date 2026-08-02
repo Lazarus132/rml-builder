@@ -1817,6 +1817,8 @@ function generateCode() {
  * only generates its correct usage; it does not replace or redefine it.
  *
  * Numeric scalar settings use a slider when a maximum is provided.
+ * Settings implement IModConfigurationOrderProvider, so the custom RML view
+ * renders them in the exact top-to-bottom order defined in the builder.
  * Navigation enums only control RML visibility unless a runtime reaction was
  * explicitly enabled for them in the builder.
  * Whether navigation selections are persisted immediately or with Save
@@ -1856,9 +1858,18 @@ ${usesColorX
         : settingDeclaration(entry.node, entry.path)
     )
     .join("\n");
-  const interfaceSuffix = hasControllers
-    ? ",\n      IModConfigurationVisibilityProvider"
-    : "";
+  const implementedInterfaces = [
+    "IModConfigurationOrderProvider",
+    ...(hasControllers
+      ? ["IModConfigurationVisibilityProvider"]
+      : [])
+  ];
+  const interfaceSuffix =
+    implementedInterfaces.length > 0
+      ? `,\n      ${implementedInterfaces.join(
+          ",\n      "
+        )}`
+      : "";
 
   let runtimeBlock;
   if (runtimeEntries.length > 0) {
@@ -1935,6 +1946,34 @@ ${changedBranches}
     }
 `;
   }
+
+  const orderBranches = entries
+    .map(
+      (entry, index) => {
+        const field = toPascalCase(
+          entry.node.fieldName,
+          "Setting"
+        );
+
+        return `        if (ReferenceEquals(
+                key,
+                ${field}))
+        {
+            return ${index};
+        }`;
+      }
+    )
+    .join("\n\n");
+
+  const orderBlock = `
+    public int GetConfigurationKeyOrder(
+        ModConfigurationKey key)
+    {
+${orderBranches}
+
+        return int.MaxValue;
+    }
+`;
 
   let visibilityBlock = "";
   if (hasControllers) {
@@ -2021,7 +2060,7 @@ public sealed class ${className}
         "${escapeCSharp(metadata.version)}";
 
 ${declarations}
-${runtimeBlock}${visibilityBlock}}
+${runtimeBlock}${orderBlock}${visibilityBlock}}
 `;
 }
 
@@ -5681,17 +5720,6 @@ function settingsPreviewNodesMarkup(nodes) {
           !(
             node.kind === "setting" &&
             node.hidden
-          )
-      )
-      .sort(
-        (left, right) =>
-          String(left.keyName).localeCompare(
-            String(right.keyName),
-            undefined,
-            {
-              numeric: true,
-              sensitivity: "base"
-            }
           )
       );
 
