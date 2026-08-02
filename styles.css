@@ -3723,11 +3723,6 @@ footer strong {
   }
 }
 
-/* ========================================================================== */
-/* iPhone portrait: Color Picker footer must remain completely visible         */
-/* Keep this block as the final CSS block.                                     */
-/* ========================================================================== */
-
 @media (max-width: 430px) {
   .settings-preview-dialog.rml-preview-color-open
   .rml-preview-window {
@@ -3739,11 +3734,6 @@ footer strong {
       0;
   }
 
-  /*
-   * Der Inhalt scrollt hinter einem fest verankerten Footer.
-   * Der zusätzliche Innenabstand verhindert, dass die letzten
-   * Picker-Inhalte vom Footer verdeckt werden.
-   */
   .settings-preview-dialog.rml-preview-color-open
   .rml-preview-content {
     padding-bottom:
@@ -3759,10 +3749,6 @@ footer strong {
       );
   }
 
-  /*
-   * Footer vollständig aus der fehlerhaften Grid-Höhenberechnung
-   * von iOS Safari herausnehmen.
-   */
   .settings-preview-dialog.rml-preview-color-open
   .rml-preview-footer {
     position: absolute;
