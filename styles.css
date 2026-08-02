@@ -5166,3 +5166,49 @@ dialog#export-dialog.mobile-full-modal {
     visibility: hidden !important;
   }
 }
+
+html,
+body,
+button,
+label,
+span,
+div,
+section,
+article,
+header,
+footer,
+main,
+aside,
+nav,
+p,
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+small,
+strong,
+code,
+pre {
+  -webkit-user-select: none;
+  user-select: none;
+
+  -webkit-touch-callout: none;
+}
+
+input,
+textarea,
+select,
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+button,
+input,
+textarea,
+select,
+[role="button"] {
+  touch-action: manipulation;
+}

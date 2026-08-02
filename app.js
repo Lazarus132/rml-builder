@@ -8417,8 +8417,267 @@ function cacheElements() {
   });
 }
 
+const DOUBLE_ACTIVATION_MAX_DELAY = 420;
+const DOUBLE_ACTIVATION_MAX_DISTANCE = 24;
+
+let lastActivationTime = 0;
+let lastActivationX = 0;
+let lastActivationY = 0;
+let lastActivationTarget = null;
+
+function isEditableSelectionTarget(
+  target
+) {
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
+    target instanceof HTMLElement &&
+    target.isContentEditable
+  );
+}
+
+function collapseEditableSelection(
+  target,
+  clientX = null,
+  clientY = null
+) {
+  if (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement
+  ) {
+    const selectionEnd =
+      Number.isInteger(
+        target.selectionEnd
+      )
+        ? target.selectionEnd
+        : target.value.length;
+
+    try {
+      target.setSelectionRange(
+        selectionEnd,
+        selectionEnd,
+        "none"
+      );
+    } catch {
+      // Einige spezielle Input-Typen unterstützen setSelectionRange nicht.
+    }
+
+    return;
+  }
+
+  if (
+    target instanceof HTMLElement &&
+    target.isContentEditable
+  ) {
+    const selection =
+      window.getSelection();
+
+    if (!selection) {
+      return;
+    }
+
+    selection.removeAllRanges();
+
+    const caretRange =
+      clientX !== null &&
+      clientY !== null &&
+      document.caretRangeFromPoint
+        ? document.caretRangeFromPoint(
+            clientX,
+            clientY
+          )
+        : null;
+
+    if (
+      caretRange &&
+      target.contains(
+        caretRange.startContainer
+      )
+    ) {
+      caretRange.collapse(true);
+      selection.addRange(
+        caretRange
+      );
+      return;
+    }
+
+    const range =
+      document.createRange();
+
+    range.selectNodeContents(
+      target
+    );
+    range.collapse(false);
+
+    selection.addRange(
+      range
+    );
+  }
+}
+
+function preventGlobalDoubleSelection() {
+  document.addEventListener(
+    "dblclick",
+    event => {
+      event.preventDefault();
+
+      const target =
+        event.target;
+
+      if (
+        isEditableSelectionTarget(
+          target
+        )
+      ) {
+        collapseEditableSelection(
+          target,
+          event.clientX,
+          event.clientY
+        );
+      } else {
+        window
+          .getSelection()
+          ?.removeAllRanges();
+      }
+    },
+    {
+      capture: true,
+      passive: false
+    }
+  );
+
+  document.addEventListener(
+    "pointerdown",
+    event => {
+      if (
+        event.isPrimary === false
+      ) {
+        return;
+      }
+
+      const now =
+        performance.now();
+
+      const distance =
+        Math.hypot(
+          event.clientX -
+            lastActivationX,
+          event.clientY -
+            lastActivationY
+        );
+
+      const sameTarget =
+        event.target ===
+        lastActivationTarget;
+
+      const isDoubleActivation =
+        sameTarget &&
+        now -
+          lastActivationTime <=
+          DOUBLE_ACTIVATION_MAX_DELAY &&
+        distance <=
+          DOUBLE_ACTIVATION_MAX_DISTANCE;
+
+      if (isDoubleActivation) {
+        event.preventDefault();
+
+        const target =
+          event.target;
+
+        if (
+          isEditableSelectionTarget(
+            target
+          )
+        ) {
+          target.focus?.({
+            preventScroll: true
+          });
+
+          collapseEditableSelection(
+            target,
+            event.clientX,
+            event.clientY
+          );
+        } else {
+          window
+            .getSelection()
+            ?.removeAllRanges();
+        }
+
+        lastActivationTime = 0;
+        lastActivationTarget = null;
+        return;
+      }
+
+      lastActivationTime = now;
+      lastActivationX =
+        event.clientX;
+      lastActivationY =
+        event.clientY;
+      lastActivationTarget =
+        event.target;
+    },
+    {
+      capture: true,
+      passive: false
+    }
+  );
+
+  document.addEventListener(
+    "selectionchange",
+    () => {
+      const active =
+        document.activeElement;
+
+      if (
+        !(
+          active instanceof
+            HTMLInputElement ||
+          active instanceof
+            HTMLTextAreaElement
+        )
+      ) {
+        return;
+      }
+
+      const selectionStart =
+        active.selectionStart;
+      const selectionEnd =
+        active.selectionEnd;
+
+      const selectedEverything =
+        selectionStart === 0 &&
+        selectionEnd ===
+          active.value.length &&
+        active.value.length > 0;
+
+      if (!selectedEverything) {
+        return;
+      }
+
+      const recentDoubleActivation =
+        performance.now() -
+          lastActivationTime <=
+          DOUBLE_ACTIVATION_MAX_DELAY;
+
+      if (
+        recentDoubleActivation &&
+        active ===
+          lastActivationTarget
+      ) {
+        collapseEditableSelection(
+          active
+        );
+      }
+    }
+  );
+}
+
 function initialize() {
   cacheElements();
+
+  preventGlobalDoubleSelection();
   restore();
   renderMetadata();
   renderPalette();
