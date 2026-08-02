@@ -5330,27 +5330,57 @@ select,
   pointer-events: none;
 }
 
+.controller-options {
+  position: relative;
+}
+
 .option-reorder-placeholder {
-  display: block;
+  position: absolute;
+  z-index: 30;
 
-  min-width: 190px;
-  min-height: 72px;
-
-  border: 2px solid #58bfff;
-  border-radius: 8px;
-
-  background:
-    linear-gradient(
-      135deg,
-      rgba(88, 191, 255, 0.19),
-      rgba(164, 118, 255, 0.09)
+  left:
+    var(
+      --option-placeholder-left,
+      8px
     );
 
+  top:
+    var(
+      --option-placeholder-top,
+      8px
+    );
+
+  width:
+    var(
+      --option-placeholder-width,
+      4px
+    );
+
+  height:
+    var(
+      --option-placeholder-height,
+      40px
+    );
+
+  min-width: 0;
+  min-height: 0;
+
+  margin: 0;
+  padding: 0;
+
+  border: 0;
+  border-radius: 999px;
+
+  background: #58bfff;
+
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.05),
-    0 0 15px rgba(88, 191, 255, 0.32);
+    0 0 0 2px rgba(88, 191, 255, 0.12),
+    0 0 14px rgba(88, 191, 255, 0.58);
 
   pointer-events: none;
+  transform: none;
+  transition: none;
+  contain: strict;
 }
 
 .controller-options.option-drag-over {
@@ -5362,17 +5392,6 @@ select,
       rgba(88, 191, 255, 0.2);
 }
 
-.drop-zone
-.controller-options
-> .option-reorder-placeholder {
-  width: 100%;
-  min-width: 0;
-
-  height: 12px;
-  min-height: 12px;
-
-  grid-column: 1 / -1;
-}
 
 .node-card.controller.option-drop-target-locked {
   width:
@@ -5449,4 +5468,119 @@ select,
 
   overscroll-behavior:
     contain;
+}
+
+.option-sibling-drop-zone {
+  display: block;
+  width: 100%;
+  height: 6px;
+  min-height: 6px;
+  flex: 0 0 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  pointer-events: auto;
+  transition:
+    background 70ms linear,
+    box-shadow 70ms linear;
+}
+
+.option-sibling-drop-before {
+  border-radius: 8px 8px 0 0;
+}
+
+.option-sibling-drop-after {
+  border-radius: 0 0 8px 8px;
+}
+
+.option-sibling-drop-zone.option-sibling-drop-active {
+  background: #58bfff;
+  box-shadow:
+    0 0 0 2px rgba(88, 191, 255, 0.14),
+    0 0 14px rgba(88, 191, 255, 0.62);
+}
+
+.node-card > .node-head {
+  margin-top: -6px;
+}
+
+.node-card > .option-sibling-drop-after {
+  margin-top: -6px;
+}
+
+body:has(.option-reorder-placeholder),
+body:has(.controller-options.option-drag-over) {
+  --option-sibling-edge-height: 9px;
+}
+
+.option-reorder-placeholder {
+  box-shadow:
+    0 0 0 1px rgba(88, 191, 255, 0.18),
+    0 0 8px rgba(88, 191, 255, 0.42);
+}
+
+.controller-options.option-drag-over::after {
+  position: absolute;
+  z-index: 31;
+  right: 8px;
+  bottom: 8px;
+  padding: 4px 7px;
+  border: 1px solid rgba(88, 191, 255, 0.32);
+  border-radius: 6px;
+  background: rgba(8, 15, 22, 0.92);
+  color: #a9ddff;
+  content: "Mausrad: vorherige / nächste Position";
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.42);
+}
+
+.option-pointer-source {
+  opacity: 0.42;
+}
+
+.option-pointer-ghost {
+  position: fixed !important;
+  z-index: 999999 !important;
+
+  top: 0 !important;
+  left: 0 !important;
+
+  width: min(320px, 46vw) !important;
+  max-height: 180px !important;
+
+  margin: 0 !important;
+
+  overflow: hidden !important;
+
+  opacity: 0.86;
+
+  pointer-events: none !important;
+
+  transform:
+    translate3d(-10000px, -10000px, 0);
+
+  box-shadow:
+    0 14px 40px
+    rgba(0, 0, 0, 0.52);
+
+  transition: none !important;
+}
+
+.option-pointer-ghost
+.drop-zone {
+  display: none !important;
+}
+
+.option-pointer-ghost
+.option-order-actions {
+  display: none !important;
+}
+
+body:has(.option-pointer-ghost) {
+  cursor: grabbing;
+  user-select: none;
 }

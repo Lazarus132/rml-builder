@@ -225,6 +225,18 @@ let optionDragFeedbackPlaceholder = null;
 let lockedOptionTargetCard = null;
 let lockedOptionTargetHost = null;
 let lockedOptionTargetRectangle = null;
+let optionWheelTargetHost = null;
+let optionWheelTargetControllerId = null;
+let optionWheelLastStepTime = 0;
+let optionWheelDelta = 0;
+let optionWheelManualIndex = null;
+let optionWheelManualHost = null;
+let optionPointerDragActive = false;
+let optionPointerId = null;
+let optionPointerX = 0;
+let optionPointerY = 0;
+let optionPointerGhost = null;
+let optionPointerSourceLane = null;
 
 
 const MOBILE_DIALOG_MAX_WIDTH = 780;
@@ -3656,7 +3668,7 @@ const nextOptionDirection =
                 ? " drag-over"
                 : ""
             }"
-            draggable="true"
+            draggable="false"
             data-container="${escapeHtml(option.id)}"
             data-option-id="${escapeHtml(option.id)}"
             data-controller-id="${escapeHtml(node.id)}"
@@ -3714,6 +3726,10 @@ const nextOptionDirection =
     data-node-id="${escapeHtml(node.id)}"
     data-parent-container="${escapeHtml(containerId)}"
     data-sibling-index="${index}">
+    <div
+      class="option-sibling-drop-zone option-sibling-drop-before"
+      data-option-sibling-drop="before"
+      aria-hidden="true"></div>
     <div class="node-head">
       <div class="node-icon">${escapeHtml(selectedBadge(node))}</div>
       <div class="node-copy">
@@ -3748,6 +3764,10 @@ const nextOptionDirection =
         title="Delete">×</button>
     </div>
     ${body}
+    <div
+      class="option-sibling-drop-zone option-sibling-drop-after"
+      data-option-sibling-drop="after"
+      aria-hidden="true"></div>
   </article>`;
 }
 
@@ -3808,11 +3828,29 @@ function clearDragFeedback() {
       )
     );
 
+  document
+    .querySelectorAll(
+      ".option-sibling-drop-zone.option-sibling-drop-active"
+    )
+    .forEach(edge =>
+      edge.classList.remove(
+        "option-sibling-drop-active"
+      )
+    );
+
   unlockOptionDropTarget();
+
+  optionWheelTargetHost = null;
+  optionWheelTargetControllerId = null;
+  optionWheelLastStepTime = 0;
+  optionWheelManualIndex = null;
+  optionWheelManualHost = null;
 }
 
 function beginDragScrolling(event) {
   dragScrollActive = true;
+  optionWheelLastStepTime =
+    window.scrollY;
   dragPointerY =
     Number.isFinite(event?.clientY)
       ? event.clientY
@@ -4139,6 +4177,209 @@ function stabilizeLockedOptionDropTarget() {
   );
 }
 
+function positionOptionInsertPlaceholder(
+  host,
+  insertionIndex
+) {
+  if (!host) {
+    return;
+  }
+
+  const placeholder =
+    ensureOptionDragPlaceholder();
+
+  if (
+    placeholder.parentElement !==
+    host
+  ) {
+    host.appendChild(
+      placeholder
+    );
+  }
+
+  const lanes =
+    directOptionLanes(
+      host
+    );
+
+  const hostRectangle =
+    host.getBoundingClientRect();
+
+  const nestedController =
+    Boolean(
+      host.closest(
+        ".drop-zone"
+      )
+    );
+
+  const referenceLane =
+    lanes.find(
+      lane =>
+        (
+          Number(
+            lane.dataset.optionIndex
+          ) || 0
+        ) >= insertionIndex
+    );
+
+  const lastLane =
+    lanes.at(-1) || null;
+
+  if (nestedController) {
+
+    const top =
+      referenceLane
+        ? referenceLane
+            .getBoundingClientRect()
+            .top -
+          hostRectangle.top +
+          host.scrollTop -
+          host.clientTop
+        : lastLane
+          ? lastLane
+              .getBoundingClientRect()
+              .bottom -
+            hostRectangle.top +
+            host.scrollTop -
+            host.clientTop
+          : 8;
+
+    placeholder.style.setProperty(
+      "--option-placeholder-left",
+      `${Math.max(
+        0,
+        host.scrollLeft + 8
+      )}px`
+    );
+    placeholder.style.setProperty(
+      "--option-placeholder-top",
+      `${Math.max(0, top - 2)}px`
+    );
+    placeholder.style.setProperty(
+      "--option-placeholder-width",
+      `${Math.max(
+        12,
+        host.clientWidth - 16
+      )}px`
+    );
+    placeholder.style.setProperty(
+      "--option-placeholder-height",
+      "4px"
+    );
+
+    return;
+  }
+
+  const anchorRectangle =
+    referenceLane
+      ? referenceLane
+          .getBoundingClientRect()
+      : lastLane
+        ? lastLane
+            .getBoundingClientRect()
+        : null;
+
+  const left =
+    referenceLane
+      ? anchorRectangle.left -
+        hostRectangle.left -
+        3
+      : anchorRectangle
+        ? anchorRectangle.right -
+          hostRectangle.left +
+          3
+        : 8;
+
+  const top =
+    anchorRectangle
+      ? anchorRectangle.top -
+        hostRectangle.top
+      : 8;
+
+  const height =
+    anchorRectangle
+      ? anchorRectangle.height
+      : Math.max(
+          40,
+          host.clientHeight - 16
+        );
+
+  placeholder.style.setProperty(
+    "--option-placeholder-left",
+    `${Math.max(0, left)}px`
+  );
+  placeholder.style.setProperty(
+    "--option-placeholder-top",
+    `${Math.max(0, top)}px`
+  );
+  placeholder.style.setProperty(
+    "--option-placeholder-width",
+    "4px"
+  );
+  placeholder.style.setProperty(
+    "--option-placeholder-height",
+    `${Math.max(12, height)}px`
+  );
+}
+
+function stepOptionInsertWithWheel(
+  controllerId,
+  host,
+  direction
+) {
+  if (
+    !activeDraggedOptionId ||
+    !activeDraggedOptionControllerId ||
+    !host ||
+    direction === 0
+  ) {
+    return;
+  }
+
+  const lanes =
+    directOptionLanes(
+      host
+    );
+
+  const maximumIndex =
+    lanes.length;
+
+  const currentIndex =
+    state.dragInsertContainer ===
+      `controller:${controllerId}` &&
+    Number.isFinite(
+      state.dragInsertIndex
+    )
+      ? state.dragInsertIndex
+      : 0;
+
+  const nextIndex =
+    clamp(
+      currentIndex + direction,
+      0,
+      maximumIndex
+    );
+
+  if (nextIndex === currentIndex) {
+    return;
+  }
+
+  state.dragInsertContainer =
+    `controller:${controllerId}`;
+  state.dragInsertIndex =
+    nextIndex;
+
+  optionWheelManualHost =
+    host;
+  optionWheelManualIndex =
+    nextIndex;
+
+  positionOptionInsertPlaceholder(
+    host,
+    nextIndex
+  );
+}
+
 function setOptionInsertFeedback(
   controllerId,
   host,
@@ -4181,21 +4422,10 @@ function setOptionInsertFeedback(
     return;
   }
 
-  lockOptionDropTarget(
-    host
-  );
+  unlockOptionDropTarget();
 
   const placeholder =
     ensureOptionDragPlaceholder();
-
-  if (placeholder.isConnected) {
-    placeholder.style.display =
-      "none";
-  }
-
-  void host.offsetWidth;
-
-  stabilizeLockedOptionDropTarget();
 
   const lanes =
     directOptionLanes(
@@ -4225,28 +4455,152 @@ function setOptionInsertFeedback(
   let insertionIndex =
     lanes.length;
 
-  for (
-    const lane of comparisonLanes
-  ) {
-    const rectangle =
-      lane.getBoundingClientRect();
+  const manualWheelSelectionActive =
+    optionWheelManualHost === host &&
+    Number.isFinite(
+      optionWheelManualIndex
+    );
 
-    const beforeLane =
-      nestedController
-        ? event.clientY <
-          rectangle.top +
-            rectangle.height / 2
-        : event.clientX <
-          rectangle.left +
-            rectangle.width / 2;
+  if (manualWheelSelectionActive) {
+    insertionIndex =
+      clamp(
+        optionWheelManualIndex,
+        0,
+        lanes.length
+      );
+  } else if (nestedController) {
+    for (
+      const lane of
+      comparisonLanes
+    ) {
+      const rectangle =
+        lane.getBoundingClientRect();
 
-    if (beforeLane) {
+      if (
+        event.clientY <
+        rectangle.top +
+          rectangle.height / 2
+      ) {
+        insertionIndex =
+          Number(
+            lane.dataset.optionIndex
+          ) || 0;
+
+        break;
+      }
+    }
+  } else {
+
+    const laneEntries =
+      comparisonLanes.map(
+        lane => {
+          const rectangle =
+            lane.getBoundingClientRect();
+
+          return {
+            lane,
+            rectangle,
+            index:
+              Number(
+                lane.dataset.optionIndex
+              ) || 0,
+            centerX:
+              rectangle.left +
+              rectangle.width / 2,
+            centerY:
+              rectangle.top +
+              rectangle.height / 2
+          };
+        }
+      );
+
+    if (laneEntries.length > 0) {
+      const rows = [];
+
+      for (const entry of laneEntries) {
+        let row =
+          rows.find(
+            current =>
+              Math.abs(
+                current.centerY -
+                entry.centerY
+              ) <= 12
+          );
+
+        if (!row) {
+          row = {
+            centerY:
+              entry.centerY,
+            entries: []
+          };
+
+          rows.push(row);
+        }
+
+        row.entries.push(entry);
+        row.centerY =
+          row.entries.reduce(
+            (
+              total,
+              current
+            ) =>
+              total +
+              current.centerY,
+            0
+          ) /
+          row.entries.length;
+      }
+
+      rows.sort(
+        (left, right) =>
+          left.centerY -
+          right.centerY
+      );
+
+      const row =
+        rows.reduce(
+          (
+            closest,
+            current
+          ) =>
+            Math.abs(
+              current.centerY -
+              event.clientY
+            ) <
+            Math.abs(
+              closest.centerY -
+              event.clientY
+            )
+              ? current
+              : closest,
+          rows[0]
+        );
+
+      row.entries.sort(
+        (left, right) =>
+          left.centerX -
+          right.centerX
+      );
+
       insertionIndex =
-        Number(
-          lane.dataset.optionIndex
-        ) || 0;
+        row.entries[
+          row.entries.length - 1
+        ].index + 1;
 
-      break;
+      for (
+        const entry of
+        row.entries
+      ) {
+        if (
+          event.clientX <
+          entry.centerX
+        ) {
+          insertionIndex =
+            entry.index;
+
+          break;
+        }
+      }
     }
   }
 
@@ -4275,46 +4629,33 @@ function setOptionInsertFeedback(
   event.dataTransfer.dropEffect =
     "move";
 
-  placeholder.style.removeProperty(
-    "display"
-  );
-
-  const referenceLane =
-    lanes.find(
-      lane =>
-        (
-          Number(
-            lane.dataset.optionIndex
-          ) || 0
-        ) >= insertionIndex
-    );
-
-  if (referenceLane) {
-    if (
-      placeholder.parentElement !==
-        host ||
-      placeholder.nextElementSibling !==
-        referenceLane
-    ) {
-      host.insertBefore(
-        placeholder,
-        referenceLane
-      );
-    }
-  } else if (
+  if (
     placeholder.parentElement !==
-      host ||
-    placeholder !==
-      host.lastElementChild
+    host
   ) {
     host.appendChild(
       placeholder
     );
   }
 
-  void host.offsetWidth;
+  if (
+    optionWheelTargetHost !== host ||
+    optionWheelTargetControllerId !==
+      controllerId
+  ) {
+    optionWheelManualIndex = null;
+    optionWheelManualHost = null;
+  }
 
-  stabilizeLockedOptionDropTarget();
+  optionWheelTargetHost =
+    host;
+  optionWheelTargetControllerId =
+    controllerId;
+
+  positionOptionInsertPlaceholder(
+    host,
+    insertionIndex
+  );
 }
 
 function handleOptionReorderDrop(
@@ -4506,6 +4847,40 @@ function handleOptionReorderDrop(
   renderAll();
 }
 
+function leaveOptionInsertMode() {
+  optionDragFeedbackPlaceholder?.remove();
+  optionDragFeedbackPlaceholder = null;
+
+  document
+    .querySelectorAll(
+      ".controller-options.option-drag-over"
+    )
+    .forEach(currentHost => {
+      currentHost.classList.remove(
+        "option-drag-over"
+      );
+    });
+
+  unlockOptionDropTarget();
+
+  optionWheelTargetHost = null;
+  optionWheelTargetControllerId = null;
+  optionWheelLastStepTime = 0;
+  optionWheelManualIndex = null;
+  optionWheelManualHost = null;
+
+  if (
+    typeof state.dragInsertContainer ===
+      "string" &&
+    state.dragInsertContainer.startsWith(
+      "controller:"
+    )
+  ) {
+    state.dragInsertContainer = null;
+    state.dragInsertIndex = null;
+  }
+}
+
 function setContainerInsertFeedback(
   containerId,
   host,
@@ -4518,9 +4893,7 @@ function setContainerInsertFeedback(
     return;
   }
 
-  // Measure without the placeholder. Otherwise its own height shifts the
-  // card midpoints and the insertion decision can oscillate at the edge.
-  dragFeedbackPlaceholder?.remove();
+  leaveOptionInsertMode();
 
   const cards =
     directNodeCards(host);
@@ -4550,6 +4923,12 @@ function setContainerInsertFeedback(
       break;
     }
   }
+
+  const targetUnchanged =
+    state.dragInsertContainer ===
+      containerId &&
+    state.dragInsertIndex ===
+      insertionIndex;
 
   state.dragOverContainer =
     containerId;
@@ -4581,6 +4960,15 @@ function setContainerInsertFeedback(
       ? "move"
       : "copy";
 
+  if (
+    targetUnchanged &&
+    dragFeedbackPlaceholder?.isConnected &&
+    dragFeedbackPlaceholder.parentElement ===
+      host
+  ) {
+    return;
+  }
+
   document
     .querySelectorAll(
       ".node-card.drag-insert-before, .node-card.drag-insert-after"
@@ -4594,24 +4982,44 @@ function setContainerInsertFeedback(
 
   const placeholder =
     ensureDragPlaceholder();
+
   const referenceCard =
     cards.find(
       card =>
-        (Number(
-          card.dataset.siblingIndex
-        ) || 0) >= insertionIndex
+        (
+          Number(
+            card.dataset.siblingIndex
+          ) || 0
+        ) >= insertionIndex
     );
 
   if (referenceCard) {
-    host.insertBefore(
-      placeholder,
-      referenceCard
-    );
+    if (
+      placeholder.parentElement !==
+        host ||
+      placeholder.nextElementSibling !==
+        referenceCard
+    ) {
+      host.insertBefore(
+        placeholder,
+        referenceCard
+      );
+    }
+
     referenceCard.classList.add(
       "drag-insert-before"
     );
   } else {
-    host.appendChild(placeholder);
+    if (
+      placeholder.parentElement !==
+        host ||
+      placeholder !==
+        host.lastElementChild
+    ) {
+      host.appendChild(
+        placeholder
+      );
+    }
 
     cards.at(-1)?.classList.add(
       "drag-insert-after"
@@ -4822,6 +5230,1159 @@ function handleDrop(containerId, event) {
   );
 }
 
+function pointerOptionFeedbackEvent(
+  clientX,
+  clientY
+) {
+  return {
+    clientX,
+    clientY,
+
+    preventDefault() {
+    },
+
+    stopPropagation() {
+    },
+
+    dataTransfer: {
+      dropEffect: "move",
+
+      types: {
+        includes(type) {
+          return (
+            type ===
+            "application/x-rml-option"
+          );
+        }
+      }
+    }
+  };
+}
+
+function createOptionPointerGhost(
+  lane
+) {
+  optionPointerGhost?.remove();
+
+  const ghost =
+    lane.cloneNode(true);
+
+  ghost.classList.add(
+    "option-pointer-ghost"
+  );
+
+  ghost.style.pointerEvents =
+    "none";
+
+  ghost.style.userSelect =
+    "none";
+
+  ghost.removeAttribute(
+    "draggable"
+  );
+
+  ghost
+    .querySelectorAll(
+      "button"
+    )
+    .forEach(button => {
+      button.disabled = true;
+    });
+
+  document.body.appendChild(
+    ghost
+  );
+
+  optionPointerGhost =
+    ghost;
+
+  moveOptionPointerGhost(
+    optionPointerX,
+    optionPointerY
+  );
+}
+
+function moveOptionPointerGhost(
+  clientX,
+  clientY
+) {
+  if (!optionPointerGhost) {
+    return;
+  }
+
+  optionPointerGhost.style.transform =
+    `translate3d(${clientX + 14}px, ` +
+    `${clientY + 14}px, 0)`;
+}
+
+function clearOptionPointerGhost() {
+  optionPointerGhost?.remove();
+  optionPointerGhost = null;
+
+  if (optionPointerSourceLane) {
+    optionPointerSourceLane.classList.remove(
+      "option-pointer-source"
+    );
+
+    const ownerCard =
+      optionPointerSourceLane.closest(
+        ".node-card"
+      );
+
+    if (
+      ownerCard &&
+      Object.hasOwn(
+        ownerCard.dataset,
+        "pointerDragPreviousDraggable"
+      )
+    ) {
+      const previousValue =
+        ownerCard.dataset
+          .pointerDragPreviousDraggable;
+
+      if (previousValue) {
+        ownerCard.setAttribute(
+          "draggable",
+          previousValue
+        );
+      } else {
+        ownerCard.removeAttribute(
+          "draggable"
+        );
+      }
+
+      delete ownerCard.dataset
+        .pointerDragPreviousDraggable;
+    }
+  }
+
+  optionPointerSourceLane = null;
+}
+
+function setOptionPointerSiblingFeedback(
+  edge
+) {
+  leaveOptionInsertMode();
+
+  document
+    .querySelectorAll(
+      ".option-sibling-drop-zone.option-sibling-drop-active"
+    )
+    .forEach(current => {
+      current.classList.remove(
+        "option-sibling-drop-active"
+      );
+    });
+
+  edge.classList.add(
+    "option-sibling-drop-active"
+  );
+
+  const card =
+    edge.closest(
+      "[data-node-id]"
+    );
+
+  if (!card) {
+    return;
+  }
+
+  const siblingIndex =
+    Number(
+      card.dataset.siblingIndex
+    ) || 0;
+
+  const after =
+    edge.dataset.optionSiblingDrop ===
+    "after";
+
+  state.dragInsertContainer =
+    card.dataset.parentContainer ||
+    ROOT_CONTAINER;
+
+  state.dragInsertIndex =
+    siblingIndex +
+    (after ? 1 : 0);
+}
+
+function pointInsideRectangle(
+  clientX,
+  clientY,
+  rectangle
+) {
+  return (
+    clientX >= rectangle.left &&
+    clientX <= rectangle.right &&
+    clientY >= rectangle.top &&
+    clientY <= rectangle.bottom
+  );
+}
+
+function rectangleArea(
+  rectangle
+) {
+  return Math.max(
+    0,
+    rectangle.width
+  ) * Math.max(
+    0,
+    rectangle.height
+  );
+}
+
+function distanceToRectangleEdge(
+  clientX,
+  clientY,
+  rectangle
+) {
+  return Math.min(
+    Math.abs(clientX - rectangle.left),
+    Math.abs(clientX - rectangle.right),
+    Math.abs(clientY - rectangle.top),
+    Math.abs(clientY - rectangle.bottom)
+  );
+}
+
+function clearPointerEdgeFeedback() {
+  document
+    .querySelectorAll(
+      ".option-sibling-drop-zone.option-sibling-drop-active"
+    )
+    .forEach(edge => {
+      edge.classList.remove(
+        "option-sibling-drop-active"
+      );
+    });
+}
+
+function visibleOptionLanes() {
+  return Array.from(
+    document.querySelectorAll(
+      ".option-lane[data-option-id][data-controller-id]"
+    )
+  ).filter(
+    lane =>
+      lane instanceof HTMLElement &&
+      !lane.closest(
+        ".option-pointer-ghost"
+      )
+  );
+}
+
+function visibleNodeCards() {
+  return Array.from(
+    document.querySelectorAll(
+      ".node-card[data-node-id]"
+    )
+  ).filter(
+    card =>
+      card instanceof HTMLElement &&
+      !card.closest(
+        ".option-pointer-ghost"
+      )
+  );
+}
+
+function optionLaneEdgeAtPointer(
+  clientX,
+  clientY
+) {
+  const EDGE_SIZE = 10;
+
+  const candidates =
+    visibleOptionLanes()
+      .map(lane => {
+        const rectangle =
+          lane.getBoundingClientRect();
+
+        if (
+          rectangle.width <= 0 ||
+          rectangle.height <= 0 ||
+          clientX < rectangle.left - EDGE_SIZE ||
+          clientX > rectangle.right + EDGE_SIZE ||
+          clientY < rectangle.top - EDGE_SIZE ||
+          clientY > rectangle.bottom + EDGE_SIZE
+        ) {
+          return null;
+        }
+
+        const distance =
+          distanceToRectangleEdge(
+            clientX,
+            clientY,
+            rectangle
+          );
+
+        if (distance > EDGE_SIZE) {
+          return null;
+        }
+
+        const host =
+          lane.parentElement;
+
+        if (
+          !(host instanceof HTMLElement) ||
+          !host.classList.contains(
+            "controller-options"
+          )
+        ) {
+          return null;
+        }
+
+        const lanes =
+          directOptionLanes(host);
+
+        const laneIndex =
+          lanes.indexOf(lane);
+
+        if (laneIndex < 0) {
+          return null;
+        }
+
+        const nestedController =
+          Boolean(
+            host.closest(
+              ".drop-zone"
+            )
+          );
+
+        let after;
+
+        if (nestedController) {
+          const topDistance =
+            Math.abs(
+              clientY -
+              rectangle.top
+            );
+
+          const bottomDistance =
+            Math.abs(
+              clientY -
+              rectangle.bottom
+            );
+
+          after =
+            bottomDistance <
+            topDistance;
+        } else {
+          const leftDistance =
+            Math.abs(
+              clientX -
+              rectangle.left
+            );
+
+          const rightDistance =
+            Math.abs(
+              clientX -
+              rectangle.right
+            );
+
+          const topDistance =
+            Math.abs(
+              clientY -
+              rectangle.top
+            );
+
+          const bottomDistance =
+            Math.abs(
+              clientY -
+              rectangle.bottom
+            );
+
+          const horizontalDistance =
+            Math.min(
+              leftDistance,
+              rightDistance
+            );
+
+          const verticalDistance =
+            Math.min(
+              topDistance,
+              bottomDistance
+            );
+
+          after =
+            horizontalDistance <=
+            verticalDistance
+              ? rightDistance <
+                leftDistance
+              : bottomDistance <
+                topDistance;
+        }
+
+        return {
+          lane,
+          host,
+          controllerId:
+            lane.dataset.controllerId,
+          insertionIndex:
+            laneIndex +
+            (after ? 1 : 0),
+          distance,
+          area:
+            rectangleArea(
+              rectangle
+            )
+        };
+      })
+      .filter(Boolean);
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  candidates.sort(
+    (left, right) =>
+      left.distance -
+        right.distance ||
+      left.area -
+        right.area
+  );
+
+  return candidates[0];
+}
+
+function nodeCardEdgeAtPointer(
+  clientX,
+  clientY
+) {
+  const EDGE_SIZE = 10;
+
+  const candidates =
+    visibleNodeCards()
+      .map(card => {
+        const rectangle =
+          card.getBoundingClientRect();
+
+        if (
+          rectangle.width <= 0 ||
+          rectangle.height <= 0 ||
+          clientX < rectangle.left - EDGE_SIZE ||
+          clientX > rectangle.right + EDGE_SIZE ||
+          clientY < rectangle.top - EDGE_SIZE ||
+          clientY > rectangle.bottom + EDGE_SIZE
+        ) {
+          return null;
+        }
+
+        const distance =
+          distanceToRectangleEdge(
+            clientX,
+            clientY,
+            rectangle
+          );
+
+        if (distance > EDGE_SIZE) {
+          return null;
+        }
+
+        const topDistance =
+          Math.abs(
+            clientY -
+            rectangle.top
+          );
+
+        const bottomDistance =
+          Math.abs(
+            clientY -
+            rectangle.bottom
+          );
+
+        const before =
+          topDistance <=
+          bottomDistance;
+
+        const edge =
+          card.querySelector(
+            before
+              ? ":scope > .option-sibling-drop-before"
+              : ":scope > .option-sibling-drop-after"
+          );
+
+        return {
+          card,
+          edge:
+            edge instanceof HTMLElement
+              ? edge
+              : null,
+          containerId:
+            card.dataset.parentContainer ||
+            ROOT_CONTAINER,
+          insertionIndex:
+            (
+              Number(
+                card.dataset.siblingIndex
+              ) || 0
+            ) +
+            (before ? 0 : 1),
+          distance,
+          area:
+            rectangleArea(
+              rectangle
+            )
+        };
+      })
+      .filter(Boolean);
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  candidates.sort(
+    (left, right) =>
+      left.distance -
+        right.distance ||
+      left.area -
+        right.area
+  );
+
+  return candidates[0];
+}
+
+function optionLaneInteriorAtPointer(
+  clientX,
+  clientY
+) {
+  const candidates =
+    visibleOptionLanes()
+      .map(lane => {
+        const rectangle =
+          lane.getBoundingClientRect();
+
+        return {
+          lane,
+          rectangle,
+          area:
+            rectangleArea(
+              rectangle
+            )
+        };
+      })
+      .filter(
+        candidate =>
+          pointInsideRectangle(
+            clientX,
+            clientY,
+            candidate.rectangle
+          )
+      );
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  candidates.sort(
+    (left, right) =>
+      right.area -
+      left.area
+  );
+
+  return candidates[0].lane;
+}
+
+function setPointerContainerTarget(
+  containerId,
+  host,
+  insertionIndex,
+  event
+) {
+  if (!host) {
+    return;
+  }
+
+  leaveOptionInsertMode();
+  clearPointerEdgeFeedback();
+
+  state.dragOverContainer =
+    containerId;
+  state.dragInsertContainer =
+    containerId;
+  state.dragInsertIndex =
+    insertionIndex;
+
+  document
+    .querySelectorAll(
+      ".option-lane.drag-over, .builder-canvas.drag-over"
+    )
+    .forEach(zone => {
+      zone.classList.remove(
+        "drag-over"
+      );
+    });
+
+  const placeholder =
+    ensureDragPlaceholder();
+
+  const cards =
+    directNodeCards(host);
+
+  const referenceCard =
+    cards.find(
+      card =>
+        (
+          Number(
+            card.dataset.siblingIndex
+          ) || 0
+        ) >= insertionIndex
+    );
+
+  if (referenceCard) {
+    host.insertBefore(
+      placeholder,
+      referenceCard
+    );
+  } else {
+    host.appendChild(
+      placeholder
+    );
+  }
+
+  event.dataTransfer.dropEffect =
+    "move";
+}
+
+function setPointerOptionEdgeTarget(
+  target,
+  clientX,
+  clientY
+) {
+  if (
+    !target?.controllerId ||
+    !target.host
+  ) {
+    return;
+  }
+
+  clearPointerEdgeFeedback();
+
+  dragFeedbackPlaceholder?.remove();
+  dragFeedbackPlaceholder = null;
+
+  document
+    .querySelectorAll(
+      ".option-lane.drag-over, .builder-canvas.drag-over"
+    )
+    .forEach(zone => {
+      zone.classList.remove(
+        "drag-over"
+      );
+    });
+
+  optionWheelManualHost =
+    target.host;
+
+  optionWheelManualIndex =
+    target.insertionIndex;
+
+  setOptionInsertFeedback(
+    target.controllerId,
+    target.host,
+    pointerOptionFeedbackEvent(
+      clientX,
+      clientY
+    )
+  );
+}
+
+function updateOptionPointerTarget(
+  clientX,
+  clientY
+) {
+  if (!optionPointerDragActive) {
+    return;
+  }
+
+  optionPointerX =
+    clientX;
+
+  optionPointerY =
+    clientY;
+
+  moveOptionPointerGhost(
+    clientX,
+    clientY
+  );
+
+  const optionEdge =
+    optionLaneEdgeAtPointer(
+      clientX,
+      clientY
+    );
+
+  if (optionEdge) {
+    setPointerOptionEdgeTarget(
+      optionEdge,
+      clientX,
+      clientY
+    );
+
+    return;
+  }
+
+  const cardEdge =
+    nodeCardEdgeAtPointer(
+      clientX,
+      clientY
+    );
+
+  if (cardEdge) {
+    leaveOptionInsertMode();
+    clearPointerEdgeFeedback();
+
+    dragFeedbackPlaceholder?.remove();
+    dragFeedbackPlaceholder = null;
+
+    document
+      .querySelectorAll(
+        ".option-lane.drag-over, .builder-canvas.drag-over"
+      )
+      .forEach(zone => {
+        zone.classList.remove(
+          "drag-over"
+        );
+      });
+
+    if (cardEdge.edge) {
+      cardEdge.edge.classList.add(
+        "option-sibling-drop-active"
+      );
+    }
+
+    state.dragInsertContainer =
+      cardEdge.containerId;
+
+    state.dragInsertIndex =
+      cardEdge.insertionIndex;
+
+    return;
+  }
+
+  const categoryLane =
+    optionLaneInteriorAtPointer(
+      clientX,
+      clientY
+    );
+
+  if (categoryLane) {
+    const ownDropZone =
+      categoryLane.querySelector(
+        ":scope > .drop-zone"
+      );
+
+    if (ownDropZone) {
+      const children =
+        directNodeCards(
+          ownDropZone
+        );
+
+      setPointerContainerTarget(
+        categoryLane.dataset.container,
+        ownDropZone,
+        children.length,
+        pointerOptionFeedbackEvent(
+          clientX,
+          clientY
+        )
+      );
+
+      return;
+    }
+  }
+
+  const canvasRectangle =
+    elements.builderCanvas
+      .getBoundingClientRect();
+
+  if (
+    pointInsideRectangle(
+      clientX,
+      clientY,
+      canvasRectangle
+    )
+  ) {
+    const cards =
+      directNodeCards(
+        elements.builderCanvas
+      );
+
+    setPointerContainerTarget(
+      ROOT_CONTAINER,
+      elements.builderCanvas,
+      cards.length,
+      pointerOptionFeedbackEvent(
+        clientX,
+        clientY
+      )
+    );
+
+    return;
+  }
+
+  leaveOptionInsertMode();
+  clearPointerEdgeFeedback();
+  state.dragInsertContainer = null;
+  state.dragInsertIndex = null;
+}
+
+function movePointerOptionToController(
+  targetControllerId,
+  insertionIndex
+) {
+  const optionId =
+    activeDraggedOptionId;
+
+  const sourceControllerId =
+    activeDraggedOptionControllerId;
+
+  if (
+    !optionId ||
+    !sourceControllerId
+  ) {
+    return;
+  }
+
+  if (
+    sourceControllerId ===
+    targetControllerId
+  ) {
+    reorderControllerOption(
+      targetControllerId,
+      optionId,
+      insertionIndex
+    );
+
+    return;
+  }
+
+  const source =
+    findControllerOption(
+      state.nodes,
+      optionId
+    );
+
+  if (
+    !source ||
+    source.controller.id !==
+      sourceControllerId ||
+    optionContainsController(
+      source.option,
+      targetControllerId
+    )
+  ) {
+    return;
+  }
+
+  const targetBeforeDetach =
+    findNode(
+      state.nodes,
+      targetControllerId
+    );
+
+  if (
+    !targetBeforeDetach ||
+    targetBeforeDetach.kind !==
+      "controller"
+  ) {
+    return;
+  }
+
+  const detached =
+    detachControllerOption(
+      sourceControllerId,
+      optionId
+    );
+
+  if (!detached) {
+    return;
+  }
+
+  const targetAfterDetach =
+    findNode(
+      state.nodes,
+      targetControllerId
+    );
+
+  if (
+    !targetAfterDetach ||
+    targetAfterDetach.kind !==
+      "controller"
+  ) {
+    const fallbackController =
+      controllerFromDetachedOption(
+        detached.option,
+        detached.sourceController
+      );
+
+    state.nodes = [
+      ...state.nodes,
+      fallbackController
+    ];
+
+    state.selectedId =
+      fallbackController.id;
+
+    state.activeContainerId =
+      detached.option.id;
+
+    return;
+  }
+
+  const movedOption = {
+    ...detached.option,
+
+    name:
+      uniqueOptionName(
+        targetAfterDetach.options,
+        detached.option.name
+      )
+  };
+
+  state.nodes =
+    updateControllerOptions(
+      state.nodes,
+      targetControllerId,
+      options => {
+        const index =
+          clamp(
+            Number.isFinite(
+              insertionIndex
+            )
+              ? Math.trunc(
+                  insertionIndex
+                )
+              : options.length,
+            0,
+            options.length
+          );
+
+        return [
+          ...options.slice(
+            0,
+            index
+          ),
+          movedOption,
+          ...options.slice(
+            index
+          )
+        ];
+      }
+    );
+
+  state.selectedId =
+    targetControllerId;
+
+  state.activeContainerId =
+    movedOption.id;
+}
+
+function movePointerOptionToContainer(
+  containerId,
+  insertionIndex
+) {
+  const optionId =
+    activeDraggedOptionId;
+
+  const sourceControllerId =
+    activeDraggedOptionControllerId;
+
+  if (
+    !optionId ||
+    !sourceControllerId
+  ) {
+    return;
+  }
+
+  const detached =
+    detachControllerOption(
+      sourceControllerId,
+      optionId
+    );
+
+  if (!detached) {
+    return;
+  }
+
+  const controller =
+    controllerFromDetachedOption(
+      detached.option,
+      detached.sourceController
+    );
+
+  const insertion =
+    insertIntoContainerAt(
+      state.nodes,
+      containerId,
+      controller,
+      insertionIndex
+    );
+
+  state.nodes =
+    insertion.inserted
+      ? insertion.nodes
+      : [
+          ...state.nodes,
+          controller
+        ];
+
+  state.selectedId =
+    controller.id;
+
+  state.activeContainerId =
+    detached.option.id;
+}
+
+function finishOptionPointerDrag(
+  commit
+) {
+  if (!optionPointerDragActive) {
+    return;
+  }
+
+  const insertContainer =
+    state.dragInsertContainer;
+
+  const insertIndex =
+    Number.isFinite(
+      state.dragInsertIndex
+    )
+      ? state.dragInsertIndex
+      : Number.POSITIVE_INFINITY;
+
+  optionPointerDragActive = false;
+
+  if (
+    optionPointerSourceLane &&
+    optionPointerId !== null &&
+    optionPointerSourceLane
+      .hasPointerCapture?.(
+        optionPointerId
+      )
+  ) {
+    optionPointerSourceLane
+      .releasePointerCapture(
+        optionPointerId
+      );
+  }
+
+  optionPointerId = null;
+
+  clearOptionPointerGhost();
+
+  if (
+    commit &&
+    typeof insertContainer ===
+      "string"
+  ) {
+    if (
+      insertContainer.startsWith(
+        "controller:"
+      )
+    ) {
+      movePointerOptionToController(
+        insertContainer.slice(
+          "controller:".length
+        ),
+        insertIndex
+      );
+    } else {
+      movePointerOptionToContainer(
+        insertContainer,
+        insertIndex
+      );
+    }
+  }
+
+  stopDragScrolling();
+  clearDragFeedback();
+
+  activeDraggedNodeId = null;
+  activeDraggedOptionId = null;
+  activeDraggedOptionControllerId = null;
+
+  renderAll();
+}
+
+function startOptionPointerDrag(
+  lane,
+  event
+) {
+  if (
+    event.button !== 0 ||
+    event.isPrimary === false ||
+    event.target.closest(
+      "button, input, select, textarea"
+    )
+  ) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopImmediatePropagation();
+
+  optionPointerDragActive = true;
+  optionPointerId =
+    event.pointerId;
+
+  optionPointerX =
+    event.clientX;
+
+  optionPointerY =
+    event.clientY;
+
+  optionPointerSourceLane =
+    lane;
+
+  activeDraggedOptionId =
+    lane.dataset.optionId;
+
+  activeDraggedOptionControllerId =
+    lane.dataset.controllerId;
+
+  activeDraggedNodeId = null;
+
+  const ownerCard =
+    lane.closest(
+      ".node-card"
+    );
+
+  if (ownerCard) {
+    ownerCard.dataset.pointerDragPreviousDraggable =
+      ownerCard.getAttribute(
+        "draggable"
+      ) || "";
+
+    ownerCard.setAttribute(
+      "draggable",
+      "false"
+    );
+  }
+
+  lane.classList.add(
+    "option-pointer-source"
+  );
+
+  try {
+    lane.setPointerCapture(
+      event.pointerId
+    );
+  } catch {
+    // Dokumentweite Pointer-Handler übernehmen den Drag trotzdem.
+  }
+
+  createOptionPointerGhost(
+    lane
+  );
+
+  beginDragScrolling(
+    event
+  );
+
+  updateOptionPointerTarget(
+    event.clientX,
+    event.clientY
+  );
+}
+
 function bindCanvasInteractions() {
   document
     .querySelectorAll(
@@ -4879,57 +6440,111 @@ function bindCanvasInteractions() {
     )
     .forEach(lane => {
       lane.addEventListener(
-        "dragstart",
+        "pointerdown",
         event => {
-          const blockedButton =
-            event.target.closest(
-              "button"
-            );
-
-          const ownDropZone =
-            lane.querySelector(
-              ":scope > .drop-zone"
-            );
-
-          const insideOwnDropZone =
-            ownDropZone?.contains(
-              event.target
-            );
-
-          if (
-            blockedButton ||
-            insideOwnDropZone
-          ) {
-            event.preventDefault();
-            return;
-          }
-
-          event.stopPropagation();
-          activeDraggedOptionId =
-            lane.dataset.optionId;
-          activeDraggedOptionControllerId =
-            lane.dataset.controllerId;
-          activeDraggedNodeId = null;
-          beginDragScrolling(event);
-          event.dataTransfer.setData(
-            "application/x-rml-option",
-            lane.dataset.optionId
+          startOptionPointerDrag(
+            lane,
+            event
           );
-          event.dataTransfer.setData(
-            "application/x-rml-option-controller",
-            lane.dataset.controllerId
-          );
-          event.dataTransfer.effectAllowed =
-            "move";
         }
-      );
-      lane.addEventListener(
-        "dragend",
-        finishDragInteraction
       );
     });
 
   document.querySelectorAll("[data-node-id]").forEach(card => {
+
+    card
+      .querySelectorAll(
+        ":scope > [data-option-sibling-drop]"
+      )
+      .forEach(edge => {
+        edge.addEventListener(
+          "dragover",
+          event => {
+            if (
+              !event.dataTransfer.types.includes(
+                "application/x-rml-option"
+              )
+            ) {
+              return;
+            }
+
+            event.preventDefault();
+            event.stopImmediatePropagation();
+
+            leaveOptionInsertMode();
+
+            document
+              .querySelectorAll(
+                ".option-sibling-drop-zone.option-sibling-drop-active"
+              )
+              .forEach(current =>
+                current.classList.remove(
+                  "option-sibling-drop-active"
+                )
+              );
+
+            edge.classList.add(
+              "option-sibling-drop-active"
+            );
+
+            event.dataTransfer.dropEffect =
+              "move";
+          }
+        );
+
+        edge.addEventListener(
+          "dragleave",
+          event => {
+            if (
+              !edge.contains(
+                event.relatedTarget
+              )
+            ) {
+              edge.classList.remove(
+                "option-sibling-drop-active"
+              );
+            }
+          }
+        );
+
+        edge.addEventListener(
+          "drop",
+          event => {
+            if (
+              !event.dataTransfer.types.includes(
+                "application/x-rml-option"
+              )
+            ) {
+              return;
+            }
+
+            event.preventDefault();
+            event.stopImmediatePropagation();
+
+            const siblingIndex =
+              Number(
+                card.dataset.siblingIndex
+              ) || 0;
+
+            const after =
+              edge.dataset.optionSiblingDrop ===
+              "after";
+
+            edge.classList.remove(
+              "option-sibling-drop-active"
+            );
+
+            handleDropAt(
+              card.dataset.parentContainer ||
+                ROOT_CONTAINER,
+              siblingIndex +
+                (after ? 1 : 0),
+              event
+            );
+          }
+        );
+      });
+
     card.addEventListener("click", event => {
       event.stopPropagation();
       const nodeId =
@@ -4947,6 +6562,14 @@ function bindCanvasInteractions() {
       renderAll();
     });
     card.addEventListener("dragover", event => {
+      if (
+        event.dataTransfer.types.includes(
+          "application/x-rml-option"
+        )
+      ) {
+        return;
+      }
+
       event.preventDefault();
       event.stopPropagation();
       setIndexedDropFeedback(
@@ -4955,6 +6578,14 @@ function bindCanvasInteractions() {
       );
     });
     card.addEventListener("drop", event => {
+      if (
+        event.dataTransfer.types.includes(
+          "application/x-rml-option"
+        )
+      ) {
+        return;
+      }
+
       handleDropAt(
         card.dataset.parentContainer || ROOT_CONTAINER,
         state.dragInsertIndex ?? (Number(card.dataset.siblingIndex) || 0),
@@ -4963,12 +6594,17 @@ function bindCanvasInteractions() {
     });
     card.addEventListener("dragstart", event => {
       if (
+        optionPointerDragActive ||
         activeDraggedOptionId ||
+        event.target.closest(
+          "[data-option-id]"
+        ) ||
         event.target.closest(
           "button, .option-heading"
         )
       ) {
         event.preventDefault();
+        event.stopImmediatePropagation();
         return;
       }
 
@@ -5132,20 +6768,274 @@ function bindCanvasInteractions() {
     state.activeContainerId = ROOT_CONTAINER;
     elements.activeContainerName.textContent = "Root";
   };
-  elements.builderCanvas.ondragover = event => {
-    if (!event.target.closest("[data-container]")) {
+  const isDraggedSectionOption =
+    event =>
+      Array.from(
+        event.dataTransfer?.types || []
+      ).includes(
+        "application/x-rml-option"
+      );
+
+  const dragHitTestElement =
+    event => {
+      const ignoredElements = [
+        lockedOptionTargetCard,
+        optionDragFeedbackPlaceholder,
+        dragFeedbackPlaceholder
+      ].filter(
+        element =>
+          element instanceof HTMLElement &&
+          element.isConnected
+      );
+
+      const previousStyles =
+        ignoredElements.map(
+          element => ({
+            element,
+            value:
+              element.style.getPropertyValue(
+                "pointer-events"
+              ),
+            priority:
+              element.style.getPropertyPriority(
+                "pointer-events"
+              )
+          })
+        );
+
+      for (
+        const element of
+        ignoredElements
+      ) {
+        element.style.setProperty(
+          "pointer-events",
+          "none",
+          "important"
+        );
+      }
+
+      const target =
+        document.elementFromPoint(
+          event.clientX,
+          event.clientY
+        );
+
+      for (
+        const previous of
+        previousStyles
+      ) {
+        if (previous.value) {
+          previous.element.style.setProperty(
+            "pointer-events",
+            previous.value,
+            previous.priority
+          );
+        } else {
+          previous.element.style.removeProperty(
+            "pointer-events"
+          );
+        }
+      }
+
+      return target;
+    };
+
+  const pointInsideBuilderCanvas =
+    event => {
+      const rectangle =
+        elements.builderCanvas
+          .getBoundingClientRect();
+
+      return (
+        event.clientX >= rectangle.left &&
+        event.clientX <= rectangle.right &&
+        event.clientY >= rectangle.top &&
+        event.clientY <= rectangle.bottom
+      );
+    };
+
+  const isRootOptionDropPoint =
+    (
+      target,
+      event
+    ) => {
+      if (!(target instanceof Element)) {
+        return pointInsideBuilderCanvas(
+          event
+        );
+      }
+
+      if (
+        !elements.builderCanvas.contains(
+          target
+        )
+      ) {
+        return false;
+      }
+
+      if (
+        target.closest(
+          ".controller-options"
+        )
+      ) {
+        return false;
+      }
+
+      const card =
+        target.closest(
+          ".node-card"
+        );
+
+      if (!card) {
+        return true;
+      }
+
+      return (
+        card.dataset.parentContainer ===
+        ROOT_CONTAINER
+      );
+    };
+
+  elements.builderCanvas.addEventListener(
+    "dragover",
+    event => {
+      if (
+        !isDraggedSectionOption(
+          event
+        )
+      ) {
+        return;
+      }
+
+      const logicalTarget =
+        dragHitTestElement(
+          event
+        );
+
+      if (
+        !isRootOptionDropPoint(
+          logicalTarget,
+          event
+        )
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+
+      leaveOptionInsertMode();
+
+      setContainerInsertFeedback(
+        ROOT_CONTAINER,
+        elements.builderCanvas,
+        event
+      );
+
+      event.dataTransfer.dropEffect =
+        "move";
+    },
+    true
+  );
+
+  elements.builderCanvas.addEventListener(
+    "drop",
+    event => {
+      if (
+        !isDraggedSectionOption(
+          event
+        )
+      ) {
+        return;
+      }
+
+      const logicalTarget =
+        dragHitTestElement(
+          event
+        );
+
+      if (
+        !isRootOptionDropPoint(
+          logicalTarget,
+          event
+        )
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+
+      leaveOptionInsertMode();
+
+      handleDrop(
+        ROOT_CONTAINER,
+        event
+      );
+    },
+    true
+  );
+
+  elements.builderCanvas.addEventListener(
+    "dragover",
+    event => {
+      if (
+        isDraggedSectionOption(
+          event
+        )
+      ) {
+        return;
+      }
+
+      const target =
+        event.target;
+
+      if (
+        target instanceof Element &&
+        target.closest(
+          "[data-container]"
+        )
+      ) {
+        return;
+      }
+
       setContainerInsertFeedback(
         ROOT_CONTAINER,
         elements.builderCanvas,
         event
       );
     }
-  };
-  elements.builderCanvas.ondrop = event => {
-    if (!event.target.closest("[data-container]")) {
-      handleDrop(ROOT_CONTAINER, event);
+  );
+
+  elements.builderCanvas.addEventListener(
+    "drop",
+    event => {
+      if (
+        isDraggedSectionOption(
+          event
+        )
+      ) {
+        return;
+      }
+
+      const target =
+        event.target;
+
+      if (
+        target instanceof Element &&
+        target.closest(
+          "[data-container]"
+        )
+      ) {
+        return;
+      }
+
+      handleDrop(
+        ROOT_CONTAINER,
+        event
+      );
     }
-  };
+  );
   elements.builderCanvas.ondragleave = event => {
     if (!elements.builderCanvas.contains(event.relatedTarget)) {
       clearDragFeedback();
@@ -10485,6 +12375,140 @@ function initialize() {
     "dragover",
     updateDragScrolling,
     true
+  );
+
+  document.addEventListener(
+    "pointermove",
+    event => {
+      if (
+        !optionPointerDragActive ||
+        event.pointerId !==
+          optionPointerId
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+
+      dragPointerY =
+        event.clientY;
+
+      updateOptionPointerTarget(
+        event.clientX,
+        event.clientY
+      );
+    },
+    {
+      capture: true,
+      passive: false
+    }
+  );
+
+  document.addEventListener(
+    "pointerup",
+    event => {
+      if (
+        !optionPointerDragActive ||
+        event.pointerId !==
+          optionPointerId
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+
+      updateOptionPointerTarget(
+        event.clientX,
+        event.clientY
+      );
+
+      finishOptionPointerDrag(
+        true
+      );
+    },
+    {
+      capture: true,
+      passive: false
+    }
+  );
+
+  document.addEventListener(
+    "pointercancel",
+    event => {
+      if (
+        !optionPointerDragActive ||
+        event.pointerId !==
+          optionPointerId
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+
+      finishOptionPointerDrag(
+        false
+      );
+    },
+    {
+      capture: true,
+      passive: false
+    }
+  );
+
+  document.addEventListener(
+    "wheel",
+    event => {
+      if (
+        !optionPointerDragActive ||
+        !activeDraggedOptionId ||
+        !activeDraggedOptionControllerId ||
+        !optionWheelTargetHost ||
+        !optionWheelTargetHost.isConnected ||
+        !optionWheelTargetControllerId
+      ) {
+        return;
+      }
+
+      const direction =
+        event.deltaY > 0
+          ? 1
+          : event.deltaY < 0
+            ? -1
+            : 0;
+
+      if (direction === 0) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+
+      optionWheelDelta +=
+        event.deltaY;
+
+      if (
+        Math.abs(
+          optionWheelDelta
+        ) < 30
+      ) {
+        return;
+      }
+
+      optionWheelDelta = 0;
+
+      stepOptionInsertWithWheel(
+        optionWheelTargetControllerId,
+        optionWheelTargetHost,
+        direction
+      );
+    },
+    {
+      capture: true,
+      passive: false
+    }
   );
 
   document.addEventListener(
