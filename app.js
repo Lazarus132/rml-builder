@@ -222,6 +222,9 @@ let activeDraggedOptionId = null;
 let activeDraggedOptionControllerId = null;
 let dragFeedbackPlaceholder = null;
 let optionDragFeedbackPlaceholder = null;
+let lockedOptionTargetCard = null;
+let lockedOptionTargetHost = null;
+let lockedOptionTargetRectangle = null;
 
 
 const MOBILE_DIALOG_MAX_WIDTH = 780;
@@ -3804,6 +3807,8 @@ function clearDragFeedback() {
         "option-drag-over"
       )
     );
+
+  unlockOptionDropTarget();
 }
 
 function beginDragScrolling(event) {
@@ -3987,6 +3992,153 @@ function optionContainsController(
   );
 }
 
+function unlockOptionDropTarget() {
+  if (!lockedOptionTargetCard) {
+    lockedOptionTargetHost = null;
+    lockedOptionTargetRectangle = null;
+    return;
+  }
+
+  lockedOptionTargetCard.classList.remove(
+    "option-drop-target-locked"
+  );
+
+  lockedOptionTargetCard.style.removeProperty(
+    "--option-lock-width"
+  );
+  lockedOptionTargetCard.style.removeProperty(
+    "--option-lock-height"
+  );
+  lockedOptionTargetCard.style.removeProperty(
+    "--option-lock-translate-x"
+  );
+  lockedOptionTargetCard.style.removeProperty(
+    "--option-lock-translate-y"
+  );
+
+  lockedOptionTargetCard =
+    null;
+
+  lockedOptionTargetHost =
+    null;
+
+  lockedOptionTargetRectangle =
+    null;
+}
+
+function lockOptionDropTarget(
+  host
+) {
+  const targetCard =
+    host?.closest(
+      ".node-card.controller"
+    );
+
+  if (!targetCard) {
+    unlockOptionDropTarget();
+    return null;
+  }
+
+  if (
+    lockedOptionTargetCard ===
+      targetCard &&
+    lockedOptionTargetHost ===
+      host &&
+    lockedOptionTargetRectangle
+  ) {
+    return targetCard;
+  }
+
+  unlockOptionDropTarget();
+
+  const rectangle =
+    targetCard.getBoundingClientRect();
+
+  lockedOptionTargetCard =
+    targetCard;
+
+  lockedOptionTargetHost =
+    host;
+
+  lockedOptionTargetRectangle = {
+    left:
+      rectangle.left,
+    top:
+      rectangle.top,
+    width:
+      rectangle.width,
+    height:
+      rectangle.height
+  };
+
+  targetCard.style.setProperty(
+    "--option-lock-width",
+    `${rectangle.width}px`
+  );
+
+  targetCard.style.setProperty(
+    "--option-lock-height",
+    `${rectangle.height}px`
+  );
+
+  targetCard.style.setProperty(
+    "--option-lock-translate-x",
+    "0px"
+  );
+
+  targetCard.style.setProperty(
+    "--option-lock-translate-y",
+    "0px"
+  );
+
+  targetCard.classList.add(
+    "option-drop-target-locked"
+  );
+
+  return targetCard;
+}
+
+function stabilizeLockedOptionDropTarget() {
+  if (
+    !lockedOptionTargetCard ||
+    !lockedOptionTargetRectangle
+  ) {
+    return;
+  }
+
+  lockedOptionTargetCard.style.setProperty(
+    "--option-lock-translate-x",
+    "0px"
+  );
+
+  lockedOptionTargetCard.style.setProperty(
+    "--option-lock-translate-y",
+    "0px"
+  );
+
+  const currentRectangle =
+    lockedOptionTargetCard
+      .getBoundingClientRect();
+
+  const translateX =
+    lockedOptionTargetRectangle.left -
+    currentRectangle.left;
+
+  const translateY =
+    lockedOptionTargetRectangle.top -
+    currentRectangle.top;
+
+  lockedOptionTargetCard.style.setProperty(
+    "--option-lock-translate-x",
+    `${translateX}px`
+  );
+
+  lockedOptionTargetCard.style.setProperty(
+    "--option-lock-translate-y",
+    `${translateY}px`
+  );
+}
+
 function setOptionInsertFeedback(
   controllerId,
   host,
@@ -4029,7 +4181,21 @@ function setOptionInsertFeedback(
     return;
   }
 
-  optionDragFeedbackPlaceholder?.remove();
+  lockOptionDropTarget(
+    host
+  );
+
+  const placeholder =
+    ensureOptionDragPlaceholder();
+
+  if (placeholder.isConnected) {
+    placeholder.style.display =
+      "none";
+  }
+
+  void host.offsetWidth;
+
+  stabilizeLockedOptionDropTarget();
 
   const lanes =
     directOptionLanes(
@@ -4049,6 +4215,13 @@ function setOptionInsertFeedback(
         )
       : lanes;
 
+  const nestedController =
+    Boolean(
+      host.closest(
+        ".drop-zone"
+      )
+    );
+
   let insertionIndex =
     lanes.length;
 
@@ -4058,11 +4231,16 @@ function setOptionInsertFeedback(
     const rectangle =
       lane.getBoundingClientRect();
 
-    if (
-      event.clientX <
-      rectangle.left +
-        rectangle.width / 2
-    ) {
+    const beforeLane =
+      nestedController
+        ? event.clientY <
+          rectangle.top +
+            rectangle.height / 2
+        : event.clientX <
+          rectangle.left +
+            rectangle.width / 2;
+
+    if (beforeLane) {
       insertionIndex =
         Number(
           lane.dataset.optionIndex
@@ -4078,6 +4256,18 @@ function setOptionInsertFeedback(
   state.dragInsertIndex =
     insertionIndex;
 
+  document
+    .querySelectorAll(
+      ".controller-options.option-drag-over"
+    )
+    .forEach(currentHost => {
+      if (currentHost !== host) {
+        currentHost.classList.remove(
+          "option-drag-over"
+        );
+      }
+    });
+
   host.classList.add(
     "option-drag-over"
   );
@@ -4085,8 +4275,9 @@ function setOptionInsertFeedback(
   event.dataTransfer.dropEffect =
     "move";
 
-  const placeholder =
-    ensureOptionDragPlaceholder();
+  placeholder.style.removeProperty(
+    "display"
+  );
 
   const referenceLane =
     lanes.find(
@@ -4099,15 +4290,31 @@ function setOptionInsertFeedback(
     );
 
   if (referenceLane) {
-    host.insertBefore(
-      placeholder,
-      referenceLane
-    );
-  } else {
+    if (
+      placeholder.parentElement !==
+        host ||
+      placeholder.nextElementSibling !==
+        referenceLane
+    ) {
+      host.insertBefore(
+        placeholder,
+        referenceLane
+      );
+    }
+  } else if (
+    placeholder.parentElement !==
+      host ||
+    placeholder !==
+      host.lastElementChild
+  ) {
     host.appendChild(
       placeholder
     );
   }
+
+  void host.offsetWidth;
+
+  stabilizeLockedOptionDropTarget();
 }
 
 function handleOptionReorderDrop(
@@ -4854,7 +5061,6 @@ function bindCanvasInteractions() {
 
         if (
           optionDrag &&
-          activeDraggedOptionControllerId &&
           targetControllerId
         ) {
           setOptionInsertFeedback(
@@ -4866,18 +5072,19 @@ function bindCanvasInteractions() {
           return;
         }
 
-        const host =
+        const ownDropZone =
           zone.querySelector(
             ":scope > .drop-zone"
           );
 
         setContainerInsertFeedback(
           containerId,
-          host,
+          ownDropZone,
           event
         );
       }
     );
+
     zone.addEventListener(
       "drop",
       event => {

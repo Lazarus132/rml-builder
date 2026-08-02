@@ -5310,3 +5310,143 @@ select,
   cursor: default;
   opacity: 0.24;
 }
+
+.drag-reorder-placeholder {
+  display: block;
+  width: 100%;
+  min-height: 12px;
+  flex: 0 0 12px;
+
+  border: 2px solid #58bfff;
+  border-radius: 6px;
+
+  background:
+    rgba(88, 191, 255, 0.16);
+
+  box-shadow:
+    0 0 0 2px rgba(88, 191, 255, 0.08),
+    0 0 14px rgba(88, 191, 255, 0.34);
+
+  pointer-events: none;
+}
+
+.option-reorder-placeholder {
+  display: block;
+
+  min-width: 190px;
+  min-height: 72px;
+
+  border: 2px solid #58bfff;
+  border-radius: 8px;
+
+  background:
+    linear-gradient(
+      135deg,
+      rgba(88, 191, 255, 0.19),
+      rgba(164, 118, 255, 0.09)
+    );
+
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.05),
+    0 0 15px rgba(88, 191, 255, 0.32);
+
+  pointer-events: none;
+}
+
+.controller-options.option-drag-over {
+  border-color:
+    rgba(88, 191, 255, 0.58);
+
+  box-shadow:
+    inset 0 0 0 1px
+      rgba(88, 191, 255, 0.2);
+}
+
+.drop-zone
+.controller-options
+> .option-reorder-placeholder {
+  width: 100%;
+  min-width: 0;
+
+  height: 12px;
+  min-height: 12px;
+
+  grid-column: 1 / -1;
+}
+
+.node-card.controller.option-drop-target-locked {
+  width:
+    var(
+      --option-lock-width
+    ) !important;
+
+  min-width:
+    var(
+      --option-lock-width
+    ) !important;
+
+  max-width:
+    var(
+      --option-lock-width
+    ) !important;
+
+  height:
+    var(
+      --option-lock-height
+    ) !important;
+
+  min-height:
+    var(
+      --option-lock-height
+    ) !important;
+
+  max-height:
+    var(
+      --option-lock-height
+    ) !important;
+
+  flex:
+    0 0
+    var(
+      --option-lock-height
+    ) !important;
+
+  transform:
+    translate(
+      var(
+        --option-lock-translate-x,
+        0px
+      ),
+      var(
+        --option-lock-translate-y,
+        0px
+      )
+    ) !important;
+
+  z-index: 20;
+
+  transition:
+    none !important;
+
+  will-change:
+    transform;
+}
+
+.node-card.controller.option-drop-target-locked
+> .controller-options {
+  max-height:
+    calc(
+      var(
+        --option-lock-height
+      ) - 51px
+    );
+
+  overflow-x:
+    hidden;
+
+  overflow-y:
+    auto;
+
+  overscroll-behavior:
+    contain;
+}
