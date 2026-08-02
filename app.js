@@ -259,6 +259,7 @@ let nodePointerQueuedX = 0;
 let nodePointerQueuedY = 0;
 let suppressNodeClickId = null;
 let suppressNodeClickUntil = 0;
+let rootCanvasInteractionController = null;
 
 function scheduleNodePointerTargetUpdate(
   clientX,
@@ -7154,6 +7155,15 @@ function startOptionPointerDrag(
 }
 
 function bindCanvasInteractions() {
+
+  rootCanvasInteractionController?.abort();
+
+  rootCanvasInteractionController =
+    new AbortController();
+
+  const rootCanvasSignal =
+    rootCanvasInteractionController.signal;
+
   document
     .querySelectorAll(
       ".controller-options"
@@ -7751,7 +7761,10 @@ function bindCanvasInteractions() {
       event.dataTransfer.dropEffect =
         "move";
     },
-    true
+    {
+      capture: true,
+      signal: rootCanvasSignal
+    }
   );
 
   elements.builderCanvas.addEventListener(
@@ -7789,7 +7802,10 @@ function bindCanvasInteractions() {
         event
       );
     },
-    true
+    {
+      capture: true,
+      signal: rootCanvasSignal
+    }
   );
 
   elements.builderCanvas.addEventListener(
@@ -7820,6 +7836,9 @@ function bindCanvasInteractions() {
         elements.builderCanvas,
         event
       );
+    },
+    {
+      signal: rootCanvasSignal
     }
   );
 
@@ -7850,6 +7869,9 @@ function bindCanvasInteractions() {
         ROOT_CONTAINER,
         event
       );
+    },
+    {
+      signal: rootCanvasSignal
     }
   );
   elements.builderCanvas.ondragleave = event => {
@@ -13164,6 +13186,17 @@ function preventGlobalDoubleSelection() {
 }
 
 function initialize() {
+
+  if (
+    document.documentElement.dataset
+      .rmlBuilderInitialized === "true"
+  ) {
+    return;
+  }
+
+  document.documentElement.dataset
+    .rmlBuilderInitialized = "true";
+
   cacheElements();
 
   preventGlobalDoubleSelection();
