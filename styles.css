@@ -4640,3 +4640,228 @@ footer strong {
       );
   }
 }
+
+@media (max-width: 980px), (max-height: 720px) {
+  .settings-preview-dialog:not(.rml-preview-color-open) {
+    overflow: hidden !important;
+
+    --rml-normal-close-size: 42px !important;
+    --rml-normal-close-font-size: 38px !important;
+    --rml-normal-control-height: 32px !important;
+    --rml-normal-enum-step-width: 53px !important;
+    --rml-normal-control-font-size: 22px !important;
+    --rml-normal-save-height: 46px !important;
+    --rml-normal-save-font-size: 24px !important;
+    --rml-normal-footer-padding: 8px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-window {
+    width:
+      calc(
+        100% /
+        var(--rml-mobile-ui-scale, 1)
+      ) !important;
+
+    height:
+      calc(
+        100% /
+        var(--rml-mobile-ui-scale, 1)
+      ) !important;
+
+    min-width: 0 !important;
+    min-height: 0 !important;
+
+    transform:
+      scale(
+        var(--rml-mobile-ui-scale, 1)
+      ) !important;
+
+    transform-origin:
+      top left !important;
+
+    will-change:
+      transform;
+
+    grid-template-rows:
+      calc(
+        50px +
+        env(safe-area-inset-top)
+      )
+      minmax(0, 1fr)
+      calc(
+        62px +
+        env(safe-area-inset-bottom)
+      ) !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-header {
+    padding:
+      env(safe-area-inset-top)
+      10px
+      0
+      12px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-header > div {
+    font-size: 9px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-header h2 {
+    font-size: 30px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-close {
+    width: 42px !important;
+    min-width: 42px !important;
+    max-width: 42px !important;
+    height: 42px !important;
+    min-height: 42px !important;
+    max-height: 42px !important;
+    flex: 0 0 42px !important;
+    padding: 0 0 4px !important;
+    font-size: 38px !important;
+    box-shadow:
+      inset 0 -3px 0 rgba(104, 26, 31, 0.18),
+      0 2px 11px rgba(255, 87, 95, 0.17) !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-setting,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-label,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-editor,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-enum,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-uri,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-slider,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-vector {
+    min-height: 32px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-control,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-text-field,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-vector input {
+    min-height: 32px !important;
+    border-radius: 6px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-enum-value {
+    min-height: 32px !important;
+    font-size: 22px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-enum-step,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-copy {
+    width: 53px !important;
+    min-width: 53px !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    flex: 0 0 53px !important;
+    padding: 0 !important;
+    font-size: 20px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-checkbox {
+    width: 34px !important;
+    min-width: 34px !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    border-radius: 5px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-checkbox span {
+    width: 31px !important;
+    height: 29px !important;
+    border-radius: 4px !important;
+    font-size: 25px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-color-button {
+    width: 53px !important;
+    min-width: 53px !important;
+    height: 24px !important;
+    min-height: 24px !important;
+    border-radius: 7px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-color-button span {
+    border-radius: 7px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-slider input[type="range"] {
+    height: 32px !important;
+    min-height: 32px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-slider input[type="range"]::-webkit-slider-thumb {
+    width: 30px !important;
+    height: 30px !important;
+    margin-top: -7.5px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-slider input[type="range"]::-moz-range-thumb {
+    width: 30px !important;
+    height: 30px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-slider output {
+    width: 60px !important;
+    height: 32px !important;
+    flex: 0 0 60px !important;
+    font-size: 20px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-footer {
+    min-height: 0 !important;
+    padding:
+      8px
+      10px
+      max(
+        8px,
+        env(safe-area-inset-bottom)
+      )
+      10px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-save-panel {
+    width: 100% !important;
+    height: 46px !important;
+    min-height: 46px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-save {
+    width: 100% !important;
+    max-width: none !important;
+    height: 46px !important;
+    min-height: 46px !important;
+    padding: 0 8px !important;
+    border-radius: 6px !important;
+    font-size: 24px !important;
+  }
+}
