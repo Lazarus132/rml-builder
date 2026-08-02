@@ -5122,3 +5122,21 @@ dialog#export-dialog.mobile-full-modal {
 #settings-preview-close:active {
   outline: none !important;
 }
+
+@media (max-width: 980px), (max-height: 720px) {
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-window {
+    transition: none !important;
+    animation: none !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-content,
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-settings,
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-full-color {
+    transition: none !important;
+    animation: none !important;
+  }
+}

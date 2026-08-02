@@ -7465,9 +7465,13 @@ function handleSettingsPreviewClick(event) {
     );
 
   if (colorButton) {
+    colorButton.blur();
+
     openSettingsPreviewColor(
       colorButton.dataset.previewColor
     );
+
+    return;
   }
 }
 
