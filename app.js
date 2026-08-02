@@ -237,6 +237,50 @@ let optionPointerX = 0;
 let optionPointerY = 0;
 let optionPointerGhost = null;
 let optionPointerSourceLane = null;
+let optionPointerPendingLane = null;
+let optionPointerPendingId = null;
+let optionPointerPendingStartX = 0;
+let optionPointerPendingStartY = 0;
+let nodePointerDragActive = false;
+let nodePointerId = null;
+let nodePointerX = 0;
+let nodePointerY = 0;
+let nodePointerGhost = null;
+let nodePointerSourceCard = null;
+let nodePointerPendingCard = null;
+let nodePointerPendingId = null;
+let nodePointerPendingStartX = 0;
+let nodePointerPendingStartY = 0;
+let nodeWheelTargetHost = null;
+let nodeWheelTargetContainerId = null;
+let nodeWheelDelta = 0;
+let nodePointerVisualFrame = 0;
+let nodePointerQueuedX = 0;
+let nodePointerQueuedY = 0;
+let suppressNodeClickId = null;
+let suppressNodeClickUntil = 0;
+
+function scheduleNodePointerTargetUpdate(
+  clientX,
+  clientY
+) {
+  nodePointerQueuedX = clientX;
+  nodePointerQueuedY = clientY;
+
+  if (nodePointerVisualFrame) {
+    return;
+  }
+
+  nodePointerVisualFrame =
+    requestAnimationFrame(() => {
+      nodePointerVisualFrame = 0;
+
+      updateNodePointerTarget(
+        nodePointerQueuedX,
+        nodePointerQueuedY
+      );
+    });
+}
 
 
 const MOBILE_DIALOG_MAX_WIDTH = 780;
@@ -3720,9 +3764,9 @@ const nextOptionDirection =
     </div>`;
   }
 
-  return `<article
+   return `<article
     class="node-card ${escapeHtml(node.kind)}${selected}"
-    draggable="true"
+    draggable="false"
     data-node-id="${escapeHtml(node.id)}"
     data-parent-container="${escapeHtml(containerId)}"
     data-sibling-index="${index}">
@@ -3985,6 +4029,94 @@ function ensureDragPlaceholder() {
   );
 
   return dragFeedbackPlaceholder;
+}
+
+
+function positionNodeInsertPlaceholder(
+  host,
+  insertionIndex
+) {
+  if (!host) {
+    return;
+  }
+
+  const placeholder =
+    ensureDragPlaceholder();
+
+  if (
+    placeholder.parentElement !==
+    host
+  ) {
+    host.appendChild(
+      placeholder
+    );
+  }
+
+  const cards =
+    directNodeCards(
+      host
+    );
+
+  const hostRectangle =
+    host.getBoundingClientRect();
+
+  const referenceCard =
+    cards.find(
+      card =>
+        (
+          Number(
+            card.dataset.siblingIndex
+          ) || 0
+        ) >= insertionIndex
+    );
+
+  const lastCard =
+    cards.at(-1) || null;
+
+  let top;
+
+  if (referenceCard) {
+    const rectangle =
+      referenceCard.getBoundingClientRect();
+
+    top =
+      rectangle.top -
+      hostRectangle.top +
+      host.scrollTop -
+      host.clientTop;
+  } else if (lastCard) {
+    const rectangle =
+      lastCard.getBoundingClientRect();
+
+    top =
+      rectangle.bottom -
+      hostRectangle.top +
+      host.scrollTop -
+      host.clientTop;
+  } else {
+    top = 7;
+  }
+
+  placeholder.style.setProperty(
+    "--node-placeholder-left",
+    `${Math.max(
+      0,
+      host.scrollLeft + 7
+    )}px`
+  );
+
+  placeholder.style.setProperty(
+    "--node-placeholder-top",
+    `${Math.max(0, top - 2)}px`
+  );
+
+  placeholder.style.setProperty(
+    "--node-placeholder-width",
+    `${Math.max(
+      12,
+      host.clientWidth - 14
+    )}px`
+  );
 }
 
 function directOptionLanes(host) {
@@ -4980,51 +5112,10 @@ function setContainerInsertFeedback(
       );
     });
 
-  const placeholder =
-    ensureDragPlaceholder();
-
-  const referenceCard =
-    cards.find(
-      card =>
-        (
-          Number(
-            card.dataset.siblingIndex
-          ) || 0
-        ) >= insertionIndex
-    );
-
-  if (referenceCard) {
-    if (
-      placeholder.parentElement !==
-        host ||
-      placeholder.nextElementSibling !==
-        referenceCard
-    ) {
-      host.insertBefore(
-        placeholder,
-        referenceCard
-      );
-    }
-
-    referenceCard.classList.add(
-      "drag-insert-before"
-    );
-  } else {
-    if (
-      placeholder.parentElement !==
-        host ||
-      placeholder !==
-        host.lastElementChild
-    ) {
-      host.appendChild(
-        placeholder
-      );
-    }
-
-    cards.at(-1)?.classList.add(
-      "drag-insert-after"
-    );
-  }
+  positionNodeInsertPlaceholder(
+    host,
+    insertionIndex
+  );
 }
 
 function setIndexedDropFeedback(
@@ -5359,6 +5450,685 @@ function clearOptionPointerGhost() {
   optionPointerSourceLane = null;
 }
 
+
+function createNodePointerGhost(
+  card
+) {
+  nodePointerGhost?.remove();
+
+  const ghost =
+    card.cloneNode(true);
+
+  ghost.classList.add(
+    "node-pointer-ghost"
+  );
+
+  ghost.style.pointerEvents =
+    "none";
+
+  ghost.style.userSelect =
+    "none";
+
+  ghost.removeAttribute(
+    "draggable"
+  );
+
+  ghost
+    .querySelectorAll(
+      "button, input, select, textarea"
+    )
+    .forEach(control => {
+      control.disabled = true;
+    });
+
+  document.body.appendChild(
+    ghost
+  );
+
+  nodePointerGhost =
+    ghost;
+
+  moveNodePointerGhost(
+    nodePointerX,
+    nodePointerY
+  );
+}
+
+function moveNodePointerGhost(
+  clientX,
+  clientY
+) {
+  if (!nodePointerGhost) {
+    return;
+  }
+
+  nodePointerGhost.style.transform =
+    `translate3d(${clientX + 14}px, ` +
+    `${clientY + 14}px, 0)`;
+}
+
+function clearNodePointerGhost() {
+  nodePointerGhost?.remove();
+  nodePointerGhost = null;
+
+  if (nodePointerSourceCard) {
+    nodePointerSourceCard.classList.remove(
+      "node-pointer-source"
+    );
+
+    if (
+      Object.hasOwn(
+        nodePointerSourceCard.dataset,
+        "pointerDragPreviousDraggable"
+      )
+    ) {
+      const previousValue =
+        nodePointerSourceCard.dataset
+          .pointerDragPreviousDraggable;
+
+      if (previousValue) {
+        nodePointerSourceCard.setAttribute(
+          "draggable",
+          previousValue
+        );
+      } else {
+        nodePointerSourceCard.removeAttribute(
+          "draggable"
+        );
+      }
+
+      delete nodePointerSourceCard.dataset
+        .pointerDragPreviousDraggable;
+    }
+  }
+
+  nodePointerSourceCard = null;
+}
+
+function nodeDropTargetAtPointer(
+  clientX,
+  clientY,
+  excludedNodeId = null
+) {
+  const candidates = [];
+
+  const addCandidate = (
+    host,
+    containerId
+  ) => {
+    if (
+      !(host instanceof HTMLElement)
+    ) {
+      return;
+    }
+
+    const rectangle =
+      host.getBoundingClientRect();
+
+    if (
+      rectangle.width <= 0 ||
+      rectangle.height <= 0 ||
+      !pointInsideRectangle(
+        clientX,
+        clientY,
+        rectangle
+      )
+    ) {
+      return;
+    }
+
+    const cards =
+      directNodeCards(host);
+
+    const comparisonCards =
+      cards.filter(
+        card =>
+          !excludedNodeId ||
+          card.dataset.nodeId !==
+            excludedNodeId
+      );
+
+    let insertionIndex =
+      cards.length;
+
+    for (
+      const card of
+      comparisonCards
+    ) {
+      const cardRectangle =
+        card.getBoundingClientRect();
+
+      if (
+        clientY <
+        cardRectangle.top +
+          cardRectangle.height / 2
+      ) {
+        insertionIndex =
+          Number(
+            card.dataset.siblingIndex
+          ) || 0;
+
+        break;
+      }
+    }
+
+    candidates.push({
+      host,
+      containerId,
+      insertionIndex,
+      area:
+        rectangleArea(
+          rectangle
+        )
+    });
+  };
+
+  addCandidate(
+    elements.builderCanvas,
+    ROOT_CONTAINER
+  );
+
+  document
+    .querySelectorAll(
+      ".option-lane[data-container] > .drop-zone"
+    )
+    .forEach(host => {
+      const lane =
+        host.parentElement;
+
+      const containerId =
+        lane?.dataset.container;
+
+      if (containerId) {
+        addCandidate(
+          host,
+          containerId
+        );
+      }
+    });
+
+  if (
+    candidates.length === 0
+  ) {
+    return null;
+  }
+
+  const innermostCandidates =
+    candidates.filter(
+      candidate =>
+        !candidates.some(
+          other =>
+            other !== candidate &&
+            candidate.host.contains(
+              other.host
+            )
+        )
+    );
+
+  innermostCandidates.sort(
+    (left, right) =>
+      left.area -
+      right.area
+  );
+
+  return innermostCandidates[0];
+}
+
+function setNodePointerTarget(
+  containerId,
+  host,
+  insertionIndex,
+  clientX,
+  clientY
+) {
+  if (!host) {
+    return;
+  }
+
+  clearPointerEdgeFeedback();
+
+  nodeWheelTargetHost =
+    host;
+  nodeWheelTargetContainerId =
+    containerId;
+
+  setPointerContainerTarget(
+    containerId,
+    host,
+    insertionIndex,
+    pointerOptionFeedbackEvent(
+      clientX,
+      clientY
+    )
+  );
+}
+
+function updateNodePointerTarget(
+  clientX,
+  clientY
+) {
+  if (!nodePointerDragActive) {
+    return;
+  }
+
+  nodePointerX =
+    clientX;
+  nodePointerY =
+    clientY;
+
+  moveNodePointerGhost(
+    clientX,
+    clientY
+  );
+
+  const target =
+    nodeDropTargetAtPointer(
+      clientX,
+      clientY,
+      activeDraggedNodeId
+    );
+
+  if (target) {
+    setNodePointerTarget(
+      target.containerId,
+      target.host,
+      target.insertionIndex,
+      clientX,
+      clientY
+    );
+
+    return;
+  }
+
+  clearPointerEdgeFeedback();
+
+  dragFeedbackPlaceholder?.remove();
+  dragFeedbackPlaceholder = null;
+
+  document
+    .querySelectorAll(
+      ".option-lane.drag-over, .builder-canvas.drag-over"
+    )
+    .forEach(zone => {
+      zone.classList.remove(
+        "drag-over"
+      );
+    });
+
+  state.dragOverContainer = null;
+  state.dragInsertContainer = null;
+  state.dragInsertIndex = null;
+
+  nodeWheelTargetHost = null;
+  nodeWheelTargetContainerId = null;
+}
+
+function stepNodeInsertWithWheel(
+  direction
+) {
+  if (
+    !nodePointerDragActive ||
+    !activeDraggedNodeId ||
+    !nodeWheelTargetHost ||
+    !nodeWheelTargetHost.isConnected ||
+    !nodeWheelTargetContainerId ||
+    direction === 0
+  ) {
+    return;
+  }
+
+  const cards =
+    directNodeCards(
+      nodeWheelTargetHost
+    );
+
+  const maximumIndex =
+    cards.length;
+
+  const currentIndex =
+    state.dragInsertContainer ===
+      nodeWheelTargetContainerId &&
+    Number.isFinite(
+      state.dragInsertIndex
+    )
+      ? state.dragInsertIndex
+      : 0;
+
+  const nextIndex =
+    clamp(
+      currentIndex + direction,
+      0,
+      maximumIndex
+    );
+
+  if (nextIndex === currentIndex) {
+    return;
+  }
+
+  setNodePointerTarget(
+    nodeWheelTargetContainerId,
+    nodeWheelTargetHost,
+    nextIndex,
+    nodePointerX,
+    nodePointerY
+  );
+}
+
+function movePointerNodeToContainer(
+  nodeId,
+  containerId,
+  insertionIndex
+) {
+  const movingNode =
+    findNode(
+      state.nodes,
+      nodeId
+    );
+
+  if (
+    !movingNode ||
+    nodeContainsContainer(
+      movingNode,
+      containerId
+    )
+  ) {
+    return false;
+  }
+
+  const sourceContainerId =
+    findNodeContainerId(
+      state.nodes,
+      nodeId
+    );
+
+  const sourceChildren =
+    sourceContainerId === null
+      ? null
+      : containerChildren(
+          state.nodes,
+          sourceContainerId
+        );
+
+  const sourceIndex =
+    sourceChildren?.findIndex(
+      node => node.id === nodeId
+    ) ?? -1;
+
+  let correctedIndex =
+    insertionIndex;
+
+  if (
+    sourceContainerId === containerId &&
+    sourceIndex >= 0 &&
+    sourceIndex < correctedIndex
+  ) {
+    correctedIndex -= 1;
+  }
+
+  const removal =
+    removeNode(
+      state.nodes,
+      nodeId
+    );
+
+  if (!removal.removed) {
+    return false;
+  }
+
+  const insertion =
+    insertIntoContainerAt(
+      removal.nodes,
+      containerId,
+      removal.removed,
+      correctedIndex
+    );
+
+  state.nodes =
+    insertion.inserted
+      ? insertion.nodes
+      : [
+          ...removal.nodes,
+          removal.removed
+        ];
+
+  state.activeContainerId =
+    insertion.inserted
+      ? containerId
+      : ROOT_CONTAINER;
+
+  state.selectedId =
+    nodeId;
+
+  return true;
+}
+
+function finishNodePointerDrag(
+  commit
+) {
+  if (!nodePointerDragActive) {
+    return;
+  }
+
+  const nodeId =
+    activeDraggedNodeId;
+
+  const insertContainer =
+    state.dragInsertContainer;
+
+  const insertIndex =
+    Number.isFinite(
+      state.dragInsertIndex
+    )
+      ? state.dragInsertIndex
+      : Number.POSITIVE_INFINITY;
+
+  nodePointerDragActive = false;
+
+  if (nodePointerVisualFrame) {
+    cancelAnimationFrame(
+      nodePointerVisualFrame
+    );
+    nodePointerVisualFrame = 0;
+  }
+
+  if (
+    nodePointerSourceCard &&
+    nodePointerId !== null &&
+    nodePointerSourceCard
+      .hasPointerCapture?.(
+        nodePointerId
+      )
+  ) {
+    nodePointerSourceCard
+      .releasePointerCapture(
+        nodePointerId
+      );
+  }
+
+  nodePointerId = null;
+
+  clearNodePointerGhost();
+
+  if (
+    commit &&
+    nodeId &&
+    typeof insertContainer ===
+      "string"
+  ) {
+    movePointerNodeToContainer(
+      nodeId,
+      insertContainer,
+      insertIndex
+    );
+  }
+
+  stopDragScrolling();
+  clearDragFeedback();
+
+  nodeWheelTargetHost = null;
+  nodeWheelTargetContainerId = null;
+  nodeWheelDelta = 0;
+
+  suppressNodeClickId = nodeId;
+  suppressNodeClickUntil =
+    performance.now() + 350;
+
+  activeDraggedNodeId = null;
+  activeDraggedOptionId = null;
+  activeDraggedOptionControllerId = null;
+
+  renderAll();
+}
+
+
+function prepareNodePointerDrag(
+  card,
+  event
+) {
+  if (
+    event.button !== 0 ||
+    event.isPrimary === false ||
+    event.target.closest(
+      "button, input, select, textarea"
+    )
+  ) {
+    return;
+  }
+
+  card.dataset.pointerDragPreviousDraggable =
+    card.getAttribute(
+      "draggable"
+    ) || "";
+
+  card.setAttribute(
+    "draggable",
+    "false"
+  );
+
+  nodePointerPendingCard =
+    card;
+  nodePointerPendingId =
+    event.pointerId;
+  nodePointerPendingStartX =
+    event.clientX;
+  nodePointerPendingStartY =
+    event.clientY;
+}
+
+function clearPendingNodePointerDrag() {
+  if (
+    nodePointerPendingCard &&
+    Object.hasOwn(
+      nodePointerPendingCard.dataset,
+      "pointerDragPreviousDraggable"
+    )
+  ) {
+    const previousValue =
+      nodePointerPendingCard.dataset
+        .pointerDragPreviousDraggable;
+
+    if (previousValue) {
+      nodePointerPendingCard.setAttribute(
+        "draggable",
+        previousValue
+      );
+    } else {
+      nodePointerPendingCard.removeAttribute(
+        "draggable"
+      );
+    }
+
+    delete nodePointerPendingCard.dataset
+      .pointerDragPreviousDraggable;
+  }
+
+  nodePointerPendingCard = null;
+  nodePointerPendingId = null;
+}
+
+function startNodePointerDrag(
+  card,
+  event
+) {
+  const primaryMouseButtonHeld =
+    event.pointerType !== "mouse" ||
+    (event.buttons & 1) === 1;
+
+  if (
+    !primaryMouseButtonHeld ||
+    event.isPrimary === false
+  ) {
+    clearPendingNodePointerDrag();
+    return;
+  }
+
+  event.preventDefault();
+  event.stopImmediatePropagation();
+
+  nodePointerPendingCard = null;
+  nodePointerPendingId = null;
+
+  nodePointerDragActive = true;
+  nodePointerId =
+    event.pointerId;
+
+  nodePointerX =
+    event.clientX;
+  nodePointerY =
+    event.clientY;
+
+  nodePointerSourceCard =
+    card;
+
+  activeDraggedNodeId =
+    card.dataset.nodeId;
+
+  activeDraggedOptionId = null;
+  activeDraggedOptionControllerId = null;
+
+  if (
+    !Object.hasOwn(
+      card.dataset,
+      "pointerDragPreviousDraggable"
+    )
+  ) {
+    card.dataset.pointerDragPreviousDraggable =
+      card.getAttribute(
+        "draggable"
+      ) || "";
+  }
+
+  card.setAttribute(
+    "draggable",
+    "false"
+  );
+
+  card.classList.add(
+    "node-pointer-source"
+  );
+
+  try {
+    card.setPointerCapture(
+      event.pointerId
+    );
+  } catch {
+    // Dokumentweite Pointer-Handler übernehmen den Drag trotzdem.
+  }
+
+  createNodePointerGhost(
+    card
+  );
+
+  beginDragScrolling(
+    event
+  );
+
+  updateNodePointerTarget(
+    event.clientX,
+    event.clientY
+  );
+}
+
 function setOptionPointerSiblingFeedback(
   edge
 ) {
@@ -5483,303 +6253,6 @@ function visibleNodeCards() {
   );
 }
 
-function optionLaneEdgeAtPointer(
-  clientX,
-  clientY
-) {
-  const EDGE_SIZE = 10;
-
-  const candidates =
-    visibleOptionLanes()
-      .map(lane => {
-        const rectangle =
-          lane.getBoundingClientRect();
-
-        if (
-          rectangle.width <= 0 ||
-          rectangle.height <= 0 ||
-          clientX < rectangle.left - EDGE_SIZE ||
-          clientX > rectangle.right + EDGE_SIZE ||
-          clientY < rectangle.top - EDGE_SIZE ||
-          clientY > rectangle.bottom + EDGE_SIZE
-        ) {
-          return null;
-        }
-
-        const distance =
-          distanceToRectangleEdge(
-            clientX,
-            clientY,
-            rectangle
-          );
-
-        if (distance > EDGE_SIZE) {
-          return null;
-        }
-
-        const host =
-          lane.parentElement;
-
-        if (
-          !(host instanceof HTMLElement) ||
-          !host.classList.contains(
-            "controller-options"
-          )
-        ) {
-          return null;
-        }
-
-        const lanes =
-          directOptionLanes(host);
-
-        const laneIndex =
-          lanes.indexOf(lane);
-
-        if (laneIndex < 0) {
-          return null;
-        }
-
-        const nestedController =
-          Boolean(
-            host.closest(
-              ".drop-zone"
-            )
-          );
-
-        let after;
-
-        if (nestedController) {
-          const topDistance =
-            Math.abs(
-              clientY -
-              rectangle.top
-            );
-
-          const bottomDistance =
-            Math.abs(
-              clientY -
-              rectangle.bottom
-            );
-
-          after =
-            bottomDistance <
-            topDistance;
-        } else {
-          const leftDistance =
-            Math.abs(
-              clientX -
-              rectangle.left
-            );
-
-          const rightDistance =
-            Math.abs(
-              clientX -
-              rectangle.right
-            );
-
-          const topDistance =
-            Math.abs(
-              clientY -
-              rectangle.top
-            );
-
-          const bottomDistance =
-            Math.abs(
-              clientY -
-              rectangle.bottom
-            );
-
-          const horizontalDistance =
-            Math.min(
-              leftDistance,
-              rightDistance
-            );
-
-          const verticalDistance =
-            Math.min(
-              topDistance,
-              bottomDistance
-            );
-
-          after =
-            horizontalDistance <=
-            verticalDistance
-              ? rightDistance <
-                leftDistance
-              : bottomDistance <
-                topDistance;
-        }
-
-        return {
-          lane,
-          host,
-          controllerId:
-            lane.dataset.controllerId,
-          insertionIndex:
-            laneIndex +
-            (after ? 1 : 0),
-          distance,
-          area:
-            rectangleArea(
-              rectangle
-            )
-        };
-      })
-      .filter(Boolean);
-
-  if (candidates.length === 0) {
-    return null;
-  }
-
-  candidates.sort(
-    (left, right) =>
-      left.distance -
-        right.distance ||
-      left.area -
-        right.area
-  );
-
-  return candidates[0];
-}
-
-function nodeCardEdgeAtPointer(
-  clientX,
-  clientY
-) {
-  const EDGE_SIZE = 10;
-
-  const candidates =
-    visibleNodeCards()
-      .map(card => {
-        const rectangle =
-          card.getBoundingClientRect();
-
-        if (
-          rectangle.width <= 0 ||
-          rectangle.height <= 0 ||
-          clientX < rectangle.left - EDGE_SIZE ||
-          clientX > rectangle.right + EDGE_SIZE ||
-          clientY < rectangle.top - EDGE_SIZE ||
-          clientY > rectangle.bottom + EDGE_SIZE
-        ) {
-          return null;
-        }
-
-        const distance =
-          distanceToRectangleEdge(
-            clientX,
-            clientY,
-            rectangle
-          );
-
-        if (distance > EDGE_SIZE) {
-          return null;
-        }
-
-        const topDistance =
-          Math.abs(
-            clientY -
-            rectangle.top
-          );
-
-        const bottomDistance =
-          Math.abs(
-            clientY -
-            rectangle.bottom
-          );
-
-        const before =
-          topDistance <=
-          bottomDistance;
-
-        const edge =
-          card.querySelector(
-            before
-              ? ":scope > .option-sibling-drop-before"
-              : ":scope > .option-sibling-drop-after"
-          );
-
-        return {
-          card,
-          edge:
-            edge instanceof HTMLElement
-              ? edge
-              : null,
-          containerId:
-            card.dataset.parentContainer ||
-            ROOT_CONTAINER,
-          insertionIndex:
-            (
-              Number(
-                card.dataset.siblingIndex
-              ) || 0
-            ) +
-            (before ? 0 : 1),
-          distance,
-          area:
-            rectangleArea(
-              rectangle
-            )
-        };
-      })
-      .filter(Boolean);
-
-  if (candidates.length === 0) {
-    return null;
-  }
-
-  candidates.sort(
-    (left, right) =>
-      left.distance -
-        right.distance ||
-      left.area -
-        right.area
-  );
-
-  return candidates[0];
-}
-
-function optionLaneInteriorAtPointer(
-  clientX,
-  clientY
-) {
-  const candidates =
-    visibleOptionLanes()
-      .map(lane => {
-        const rectangle =
-          lane.getBoundingClientRect();
-
-        return {
-          lane,
-          rectangle,
-          area:
-            rectangleArea(
-              rectangle
-            )
-        };
-      })
-      .filter(
-        candidate =>
-          pointInsideRectangle(
-            clientX,
-            clientY,
-            candidate.rectangle
-          )
-      );
-
-  if (candidates.length === 0) {
-    return null;
-  }
-
-  candidates.sort(
-    (left, right) =>
-      right.area -
-      left.area
-  );
-
-  return candidates[0].lane;
-}
-
 function setPointerContainerTarget(
   containerId,
   host,
@@ -5802,40 +6275,20 @@ function setPointerContainerTarget(
 
   document
     .querySelectorAll(
-      ".option-lane.drag-over, .builder-canvas.drag-over"
+      ".option-lane, .builder-canvas"
     )
     .forEach(zone => {
-      zone.classList.remove(
-        "drag-over"
+      zone.classList.toggle(
+        "drag-over",
+        (zone.dataset.container || ROOT_CONTAINER) ===
+          containerId
       );
     });
 
-  const placeholder =
-    ensureDragPlaceholder();
-
-  const cards =
-    directNodeCards(host);
-
-  const referenceCard =
-    cards.find(
-      card =>
-        (
-          Number(
-            card.dataset.siblingIndex
-          ) || 0
-        ) >= insertionIndex
-    );
-
-  if (referenceCard) {
-    host.insertBefore(
-      placeholder,
-      referenceCard
-    );
-  } else {
-    host.appendChild(
-      placeholder
-    );
-  }
+  positionNodeInsertPlaceholder(
+    host,
+    insertionIndex
+  );
 
   event.dataTransfer.dropEffect =
     "move";
@@ -5884,6 +6337,241 @@ function setPointerOptionEdgeTarget(
   );
 }
 
+function optionContainsContainer(
+  option,
+  containerId
+) {
+  if (
+    !option ||
+    !containerId
+  ) {
+    return false;
+  }
+
+  if (
+    option.id ===
+    containerId
+  ) {
+    return true;
+  }
+
+  return option.children.some(
+    child =>
+      nodeContainsContainer(
+        child,
+        containerId
+      )
+  );
+}
+
+function optionControllerTargetAtPointer(
+  clientX,
+  clientY
+) {
+  const source =
+    findControllerOption(
+      state.nodes,
+      activeDraggedOptionId
+    );
+
+  if (!source) {
+    return null;
+  }
+
+  const candidates =
+    Array.from(
+      document.querySelectorAll(
+        ".controller-options"
+      )
+    )
+      .filter(
+        host =>
+          host instanceof HTMLElement &&
+          !host.closest(
+            ".option-pointer-ghost, .node-pointer-ghost"
+          )
+      )
+      .map(host => {
+        const controllerCard =
+          host.closest(
+            ".node-card.controller[data-node-id]"
+          );
+
+        const controllerId =
+          controllerCard?.dataset.nodeId;
+
+        if (
+          !controllerId ||
+          optionContainsController(
+            source.option,
+            controllerId
+          )
+        ) {
+          return null;
+        }
+
+        const rectangle =
+          host.getBoundingClientRect();
+
+        if (
+          rectangle.width <= 0 ||
+          rectangle.height <= 0 ||
+          !pointInsideRectangle(
+            clientX,
+            clientY,
+            rectangle
+          )
+        ) {
+          return null;
+        }
+
+        return {
+          host,
+          controllerId,
+          area:
+            rectangleArea(
+              rectangle
+            )
+        };
+      })
+      .filter(Boolean);
+
+  if (
+    candidates.length === 0
+  ) {
+    return null;
+  }
+
+  candidates.sort(
+    (left, right) =>
+      left.area -
+      right.area
+  );
+
+  return candidates[0];
+}
+
+function optionContainerTargetAtPointer(
+  clientX,
+  clientY
+) {
+  const source =
+    findControllerOption(
+      state.nodes,
+      activeDraggedOptionId
+    );
+
+  if (!source) {
+    return null;
+  }
+
+  const candidates = [];
+
+  const addCandidate = (
+    host,
+    containerId
+  ) => {
+    if (
+      !(host instanceof HTMLElement) ||
+      optionContainsContainer(
+        source.option,
+        containerId
+      )
+    ) {
+      return;
+    }
+
+    const rectangle =
+      host.getBoundingClientRect();
+
+    if (
+      rectangle.width <= 0 ||
+      rectangle.height <= 0 ||
+      !pointInsideRectangle(
+        clientX,
+        clientY,
+        rectangle
+      )
+    ) {
+      return;
+    }
+
+    const cards =
+      directNodeCards(
+        host
+      );
+
+    let insertionIndex =
+      cards.length;
+
+    for (const card of cards) {
+      const cardRectangle =
+        card.getBoundingClientRect();
+
+      if (
+        clientY <
+        cardRectangle.top +
+          cardRectangle.height / 2
+      ) {
+        insertionIndex =
+          Number(
+            card.dataset.siblingIndex
+          ) || 0;
+
+        break;
+      }
+    }
+
+    candidates.push({
+      host,
+      containerId,
+      insertionIndex,
+      area:
+        rectangleArea(
+          rectangle
+        )
+    });
+  };
+
+  addCandidate(
+    elements.builderCanvas,
+    ROOT_CONTAINER
+  );
+
+  document
+    .querySelectorAll(
+      ".option-lane[data-container] > .drop-zone"
+    )
+    .forEach(host => {
+      const lane =
+        host.parentElement;
+
+      const containerId =
+        lane?.dataset.container;
+
+      if (containerId) {
+        addCandidate(
+          host,
+          containerId
+        );
+      }
+    });
+
+  if (
+    candidates.length === 0
+  ) {
+    return null;
+  }
+
+  candidates.sort(
+    (left, right) =>
+      left.area -
+      right.area
+  );
+
+  return candidates[0];
+}
+
 function updateOptionPointerTarget(
   clientX,
   clientY
@@ -5903,30 +6591,13 @@ function updateOptionPointerTarget(
     clientY
   );
 
-  const optionEdge =
-    optionLaneEdgeAtPointer(
+  const controllerTarget =
+    optionControllerTargetAtPointer(
       clientX,
       clientY
     );
 
-  if (optionEdge) {
-    setPointerOptionEdgeTarget(
-      optionEdge,
-      clientX,
-      clientY
-    );
-
-    return;
-  }
-
-  const cardEdge =
-    nodeCardEdgeAtPointer(
-      clientX,
-      clientY
-    );
-
-  if (cardEdge) {
-    leaveOptionInsertMode();
+  if (controllerTarget) {
     clearPointerEdgeFeedback();
 
     dragFeedbackPlaceholder?.remove();
@@ -5942,73 +6613,29 @@ function updateOptionPointerTarget(
         );
       });
 
-    if (cardEdge.edge) {
-      cardEdge.edge.classList.add(
-        "option-sibling-drop-active"
-      );
-    }
-
-    state.dragInsertContainer =
-      cardEdge.containerId;
-
-    state.dragInsertIndex =
-      cardEdge.insertionIndex;
+    setOptionInsertFeedback(
+      controllerTarget.controllerId,
+      controllerTarget.host,
+      pointerOptionFeedbackEvent(
+        clientX,
+        clientY
+      )
+    );
 
     return;
   }
 
-  const categoryLane =
-    optionLaneInteriorAtPointer(
+  const containerTarget =
+    optionContainerTargetAtPointer(
       clientX,
       clientY
     );
 
-  if (categoryLane) {
-    const ownDropZone =
-      categoryLane.querySelector(
-        ":scope > .drop-zone"
-      );
-
-    if (ownDropZone) {
-      const children =
-        directNodeCards(
-          ownDropZone
-        );
-
-      setPointerContainerTarget(
-        categoryLane.dataset.container,
-        ownDropZone,
-        children.length,
-        pointerOptionFeedbackEvent(
-          clientX,
-          clientY
-        )
-      );
-
-      return;
-    }
-  }
-
-  const canvasRectangle =
-    elements.builderCanvas
-      .getBoundingClientRect();
-
-  if (
-    pointInsideRectangle(
-      clientX,
-      clientY,
-      canvasRectangle
-    )
-  ) {
-    const cards =
-      directNodeCards(
-        elements.builderCanvas
-      );
-
+  if (containerTarget) {
     setPointerContainerTarget(
-      ROOT_CONTAINER,
-      elements.builderCanvas,
-      cards.length,
+      containerTarget.containerId,
+      containerTarget.host,
+      containerTarget.insertionIndex,
       pointerOptionFeedbackEvent(
         clientX,
         clientY
@@ -6020,6 +6647,21 @@ function updateOptionPointerTarget(
 
   leaveOptionInsertMode();
   clearPointerEdgeFeedback();
+
+  dragFeedbackPlaceholder?.remove();
+  dragFeedbackPlaceholder = null;
+
+  document
+    .querySelectorAll(
+      ".option-lane.drag-over, .builder-canvas.drag-over"
+    )
+    .forEach(zone => {
+      zone.classList.remove(
+        "drag-over"
+      );
+    });
+
+  state.dragOverContainer = null;
   state.dragInsertContainer = null;
   state.dragInsertIndex = null;
 }
@@ -6302,7 +6944,7 @@ function finishOptionPointerDrag(
   renderAll();
 }
 
-function startOptionPointerDrag(
+function prepareOptionPointerDrag(
   lane,
   event
 ) {
@@ -6316,8 +6958,57 @@ function startOptionPointerDrag(
     return;
   }
 
+  clearPendingNodePointerDrag();
+
+  optionPointerPendingLane =
+    lane;
+
+  optionPointerPendingId =
+    event.pointerId;
+
+  optionPointerPendingStartX =
+    event.clientX;
+
+  optionPointerPendingStartY =
+    event.clientY;
+}
+
+function clearPendingOptionPointerDrag() {
+  optionPointerPendingLane = null;
+  optionPointerPendingId = null;
+}
+
+function startOptionPointerDrag(
+  lane,
+  event
+) {
+  if (
+    event.isPrimary === false ||
+    event.target.closest(
+      "button, input, select, textarea"
+    )
+  ) {
+    clearPendingOptionPointerDrag();
+    return;
+  }
+
+  const primaryMouseButtonHeld =
+    event.pointerType !== "mouse" ||
+    (event.buttons & 1) === 1;
+
+  if (
+    !primaryMouseButtonHeld ||
+    event.isPrimary === false
+  ) {
+    clearPendingOptionPointerDrag();
+    return;
+  }
+
   event.preventDefault();
   event.stopImmediatePropagation();
+
+  clearPendingNodePointerDrag();
+  clearPendingOptionPointerDrag();
 
   optionPointerDragActive = true;
   optionPointerId =
@@ -6442,15 +7133,67 @@ function bindCanvasInteractions() {
       lane.addEventListener(
         "pointerdown",
         event => {
-          startOptionPointerDrag(
+          const nestedNodeCard =
+            event.target.closest(
+              ".node-card[data-node-id]"
+            );
+
+          if (
+            nestedNodeCard &&
+            nestedNodeCard !==
+              lane.closest(
+                ".node-card[data-node-id]"
+              )
+          ) {
+            return;
+          }
+
+          prepareOptionPointerDrag(
             lane,
             event
           );
+          if (
+            optionPointerPendingLane === lane &&
+            optionPointerPendingId === event.pointerId
+          ) {
+            event.stopImmediatePropagation();
+          }
         }
       );
     });
 
   document.querySelectorAll("[data-node-id]").forEach(card => {
+    card.addEventListener(
+      "pointerdown",
+      event => {
+
+        const directCard =
+          event.target.closest(
+            ".node-card[data-node-id]"
+          );
+
+        if (directCard !== card) {
+          return;
+        }
+
+        const directOptionLane =
+          event.target.closest(
+            ".option-lane[data-option-id]"
+          );
+
+        if (
+          directOptionLane &&
+          card.contains(directOptionLane)
+        ) {
+          return;
+        }
+
+        prepareNodePointerDrag(
+          card,
+          event
+        );
+      }
+    );
 
     card
       .querySelectorAll(
@@ -6550,6 +7293,16 @@ function bindCanvasInteractions() {
       const nodeId =
         card.dataset.nodeId;
 
+      if (
+        nodeId === suppressNodeClickId &&
+        performance.now() <= suppressNodeClickUntil
+      ) {
+        event.preventDefault();
+        suppressNodeClickId = null;
+        suppressNodeClickUntil = 0;
+        return;
+      }
+
       state.selectedId =
         nodeId;
 
@@ -6592,33 +7345,17 @@ function bindCanvasInteractions() {
         event
       );
     });
-    card.addEventListener("dragstart", event => {
-      if (
-        optionPointerDragActive ||
-        activeDraggedOptionId ||
-        event.target.closest(
-          "[data-option-id]"
-        ) ||
-        event.target.closest(
-          "button, .option-heading"
-        )
-      ) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        return;
-      }
+    card.addEventListener(
+      "dragend",
+      event => {
+        if (event.target !== card) {
+          return;
+        }
 
-      event.stopPropagation();
-      activeDraggedNodeId =
-        card.dataset.nodeId;
-      beginDragScrolling(event);
-      event.dataTransfer.setData(
-        "application/x-rml-node",
-        card.dataset.nodeId
-      );
-      event.dataTransfer.effectAllowed = "move";
-    });
-    card.addEventListener("dragend", finishDragInteraction);
+        event.stopPropagation();
+        finishDragInteraction();
+      }
+    );
   });
   document.querySelectorAll("[data-move-node]").forEach(button => {
     button.addEventListener("click", event => {
@@ -12381,9 +13118,78 @@ function initialize() {
     "pointermove",
     event => {
       if (
-        !optionPointerDragActive ||
-        event.pointerId !==
-          optionPointerId
+        !nodePointerDragActive &&
+        nodePointerPendingCard &&
+        event.pointerId ===
+          nodePointerPendingId
+      ) {
+        if (
+          event.pointerType === "mouse" &&
+          (event.buttons & 1) !== 1
+        ) {
+          clearPendingNodePointerDrag();
+          return;
+        }
+
+        const distance =
+          Math.hypot(
+            event.clientX -
+              nodePointerPendingStartX,
+            event.clientY -
+              nodePointerPendingStartY
+          );
+
+        if (distance >= 5) {
+          startNodePointerDrag(
+            nodePointerPendingCard,
+            event
+          );
+        }
+      }
+
+      if (
+        !optionPointerDragActive &&
+        optionPointerPendingLane &&
+        event.pointerId ===
+          optionPointerPendingId
+      ) {
+        if (
+          event.pointerType === "mouse" &&
+          (event.buttons & 1) !== 1
+        ) {
+          clearPendingOptionPointerDrag();
+          return;
+        }
+
+        const distance =
+          Math.hypot(
+            event.clientX -
+              optionPointerPendingStartX,
+            event.clientY -
+              optionPointerPendingStartY
+          );
+
+        if (distance >= 5) {
+          startOptionPointerDrag(
+            optionPointerPendingLane,
+            event
+          );
+        }
+      }
+
+      const optionDrag =
+        optionPointerDragActive &&
+        event.pointerId ===
+          optionPointerId;
+
+      const nodeDrag =
+        nodePointerDragActive &&
+        event.pointerId ===
+          nodePointerId;
+
+      if (
+        !optionDrag &&
+        !nodeDrag
       ) {
         return;
       }
@@ -12394,10 +13200,17 @@ function initialize() {
       dragPointerY =
         event.clientY;
 
-      updateOptionPointerTarget(
-        event.clientX,
-        event.clientY
-      );
+      if (optionDrag) {
+        updateOptionPointerTarget(
+          event.clientX,
+          event.clientY
+        );
+      } else {
+        scheduleNodePointerTargetUpdate(
+          event.clientX,
+          event.clientY
+        );
+      }
     },
     {
       capture: true,
@@ -12409,9 +13222,38 @@ function initialize() {
     "pointerup",
     event => {
       if (
-        !optionPointerDragActive ||
-        event.pointerId !==
-          optionPointerId
+        optionPointerPendingLane &&
+        event.pointerId ===
+          optionPointerPendingId &&
+        !optionPointerDragActive
+      ) {
+        clearPendingOptionPointerDrag();
+        return;
+      }
+
+      if (
+        nodePointerPendingCard &&
+        event.pointerId ===
+          nodePointerPendingId &&
+        !nodePointerDragActive
+      ) {
+        clearPendingNodePointerDrag();
+        return;
+      }
+
+      const optionDrag =
+        optionPointerDragActive &&
+        event.pointerId ===
+          optionPointerId;
+
+      const nodeDrag =
+        nodePointerDragActive &&
+        event.pointerId ===
+          nodePointerId;
+
+      if (
+        !optionDrag &&
+        !nodeDrag
       ) {
         return;
       }
@@ -12419,14 +13261,25 @@ function initialize() {
       event.preventDefault();
       event.stopImmediatePropagation();
 
-      updateOptionPointerTarget(
-        event.clientX,
-        event.clientY
-      );
+      if (optionDrag) {
+        updateOptionPointerTarget(
+          event.clientX,
+          event.clientY
+        );
 
-      finishOptionPointerDrag(
-        true
-      );
+        finishOptionPointerDrag(
+          true
+        );
+      } else {
+        updateNodePointerTarget(
+          event.clientX,
+          event.clientY
+        );
+
+        finishNodePointerDrag(
+          true
+        );
+      }
     },
     {
       capture: true,
@@ -12438,9 +13291,38 @@ function initialize() {
     "pointercancel",
     event => {
       if (
-        !optionPointerDragActive ||
-        event.pointerId !==
-          optionPointerId
+        optionPointerPendingLane &&
+        event.pointerId ===
+          optionPointerPendingId &&
+        !optionPointerDragActive
+      ) {
+        clearPendingOptionPointerDrag();
+        return;
+      }
+
+      if (
+        nodePointerPendingCard &&
+        event.pointerId ===
+          nodePointerPendingId &&
+        !nodePointerDragActive
+      ) {
+        clearPendingNodePointerDrag();
+        return;
+      }
+
+      const optionDrag =
+        optionPointerDragActive &&
+        event.pointerId ===
+          optionPointerId;
+
+      const nodeDrag =
+        nodePointerDragActive &&
+        event.pointerId ===
+          nodePointerId;
+
+      if (
+        !optionDrag &&
+        !nodeDrag
       ) {
         return;
       }
@@ -12448,9 +13330,15 @@ function initialize() {
       event.preventDefault();
       event.stopImmediatePropagation();
 
-      finishOptionPointerDrag(
-        false
-      );
+      if (optionDrag) {
+        finishOptionPointerDrag(
+          false
+        );
+      } else {
+        finishNodePointerDrag(
+          false
+        );
+      }
     },
     {
       capture: true,
@@ -12461,17 +13349,6 @@ function initialize() {
   document.addEventListener(
     "wheel",
     event => {
-      if (
-        !optionPointerDragActive ||
-        !activeDraggedOptionId ||
-        !activeDraggedOptionControllerId ||
-        !optionWheelTargetHost ||
-        !optionWheelTargetHost.isConnected ||
-        !optionWheelTargetControllerId
-      ) {
-        return;
-      }
-
       const direction =
         event.deltaY > 0
           ? 1
@@ -12480,6 +13357,47 @@ function initialize() {
             : 0;
 
       if (direction === 0) {
+        return;
+      }
+
+      if (
+        nodePointerDragActive &&
+        activeDraggedNodeId &&
+        nodeWheelTargetHost &&
+        nodeWheelTargetHost.isConnected &&
+        nodeWheelTargetContainerId
+      ) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+
+        nodeWheelDelta +=
+          event.deltaY;
+
+        if (
+          Math.abs(
+            nodeWheelDelta
+          ) < 30
+        ) {
+          return;
+        }
+
+        nodeWheelDelta = 0;
+
+        stepNodeInsertWithWheel(
+          direction
+        );
+
+        return;
+      }
+
+      if (
+        !optionPointerDragActive ||
+        !activeDraggedOptionId ||
+        !activeDraggedOptionControllerId ||
+        !optionWheelTargetHost ||
+        !optionWheelTargetHost.isConnected ||
+        !optionWheelTargetControllerId
+      ) {
         return;
       }
 

@@ -5387,6 +5387,9 @@ select,
   border-color:
     rgba(88, 191, 255, 0.58);
 
+  background-color:
+    var(--accent-soft);
+
   box-shadow:
     inset 0 0 0 1px
       rgba(88, 191, 255, 0.2);
@@ -5583,4 +5586,102 @@ body:has(.controller-options.option-drag-over) {
 body:has(.option-pointer-ghost) {
   cursor: grabbing;
   user-select: none;
+}
+.node-pointer-source {
+  opacity: 0.42;
+}
+
+.node-pointer-ghost {
+  position: fixed !important;
+  z-index: 999999 !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: min(360px, 52vw) !important;
+  max-height: 180px !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+  opacity: 0.86;
+  pointer-events: none !important;
+  transform: translate3d(-10000px, -10000px, 0);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.52);
+  transition: none !important;
+}
+
+.node-pointer-ghost .controller-options,
+.node-pointer-ghost .node-order-actions {
+  display: none !important;
+}
+
+body:has(.node-pointer-ghost) {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.builder-canvas,
+.drop-zone {
+  position: relative;
+}
+
+.drag-reorder-placeholder {
+  position: absolute;
+  z-index: 40;
+
+  left: var(--node-placeholder-left, 7px);
+  top: var(--node-placeholder-top, 7px);
+
+  width: var(--node-placeholder-width, calc(100% - 14px));
+  height: 4px;
+  min-height: 4px;
+  max-height: 4px;
+  flex: none;
+
+  margin: 0;
+  padding: 0;
+
+  border: 0;
+  border-radius: 999px;
+
+  background: #58bfff;
+
+  box-shadow:
+    0 0 0 1px rgba(88, 191, 255, 0.18),
+    0 0 8px rgba(88, 191, 255, 0.42);
+
+  pointer-events: none;
+  transform: translateZ(0);
+  contain: strict;
+  transition: none !important;
+}
+
+.node-pointer-source {
+  opacity: 1 !important;
+  pointer-events: none !important;
+  border: 1px dashed rgba(88, 191, 255, 0.48) !important;
+  background: rgba(88, 191, 255, 0.055) !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(88, 191, 255, 0.06) !important;
+}
+
+.node-pointer-source > * {
+  visibility: hidden !important;
+}
+
+.node-pointer-source::before,
+.node-pointer-source::after {
+  display: none !important;
+  content: none !important;
+}
+
+.node-pointer-ghost {
+  will-change: transform;
+  backface-visibility: hidden;
+  transform-origin: top left;
+  contain: layout paint style;
+}
+
+body:has(.node-pointer-ghost) .node-card,
+body:has(.node-pointer-ghost) .drop-zone,
+body:has(.node-pointer-ghost) .builder-canvas {
+  transition: none !important;
+  animation: none !important;
 }
