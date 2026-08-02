@@ -407,6 +407,36 @@
     );
   }
 
+  if (
+    dialog &&
+    typeof ResizeObserver ===
+      "function"
+  ) {
+    const resizeObserver =
+      new ResizeObserver(
+        scheduleFit
+      );
+
+    resizeObserver.observe(
+      document.documentElement
+    );
+
+    resizeObserver.observe(
+      dialog
+    );
+
+    const content =
+      dialog.querySelector(
+        ".rml-preview-content"
+      );
+
+    if (content) {
+      resizeObserver.observe(
+        content
+      );
+    }
+  }
+
   window.addEventListener(
     "resize",
     scheduleFit,
@@ -417,21 +447,7 @@
 
   window.addEventListener(
     "orientationchange",
-    () => {
-      scheduleFit();
-      setTimeout(
-        scheduleFit,
-        100
-      );
-      setTimeout(
-        scheduleFit,
-        300
-      );
-      setTimeout(
-        scheduleFit,
-        600
-      );
-    },
+    scheduleFit,
     {
       passive: true
     }

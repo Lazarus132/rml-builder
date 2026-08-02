@@ -6336,27 +6336,6 @@ function renderSettingsPreviewFooter() {
   }
 }
 
-function suppressSettingsPreviewPageTransition() {
-  const dialog =
-    elements.settingsPreviewDialog;
-
-  if (!dialog) {
-    return;
-  }
-
-  dialog.classList.add(
-    "rml-preview-page-switching"
-  );
-
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      dialog.classList.remove(
-        "rml-preview-page-switching"
-      );
-    });
-  });
-}
-
 function renderSettingsPreview() {
   if (!settingsPreviewDraft) {
     return;
@@ -6603,8 +6582,6 @@ function openSettingsPreviewColor(nodeId) {
       }
     );
 
-  suppressSettingsPreviewPageTransition();
-
   settingsPreviewColorSession = {
     nodeId,
     original,
@@ -6656,8 +6633,6 @@ function closeSettingsPreviewColor(
         settingsPreviewColorSession.hue
     };
   }
-
-  suppressSettingsPreviewPageTransition();
 
   settingsPreviewColorSession = null;
   renderSettingsPreview();
@@ -7584,6 +7559,62 @@ function saveSettingsPreview() {
   }
 }
 
+function onSettingsPreviewTransitionFinished(
+  dialog,
+  callback
+) {
+  if (!dialog) {
+    return;
+  }
+
+  let finished = false;
+
+  const cleanup = () => {
+    dialog.removeEventListener(
+      "transitionend",
+      handleTransitionFinished
+    );
+    dialog.removeEventListener(
+      "transitioncancel",
+      handleTransitionFinished
+    );
+  };
+
+  const finish = () => {
+    if (finished) {
+      return;
+    }
+
+    finished = true;
+    cleanup();
+    callback();
+  };
+
+  const handleTransitionFinished =
+    event => {
+      if (
+        event.target !== dialog ||
+        event.propertyName !==
+          "clip-path"
+      ) {
+        return;
+      }
+
+      finish();
+    };
+
+  dialog.addEventListener(
+    "transitionend",
+    handleTransitionFinished
+  );
+  dialog.addEventListener(
+    "transitioncancel",
+    handleTransitionFinished
+  );
+
+  return finish;
+}
+
 function openSettingsPreview() {
   let savedDraft = null;
 
@@ -7621,24 +7652,34 @@ function openSettingsPreview() {
 
   dialog.classList.remove(
     "rml-overlay-opened",
-    "rml-overlay-closing"
+    "rml-overlay-closing",
+    "rml-overlay-animating"
   );
 
   dialog.showModal();
 
   movePreviewFocusAwayFromCloseButton();
 
-  requestAnimationFrame(() => {
-    movePreviewFocusAwayFromCloseButton();
+  void dialog.offsetWidth;
 
-    requestAnimationFrame(() => {
-      movePreviewFocusAwayFromCloseButton();
+  dialog.classList.add(
+    "rml-overlay-animating"
+  );
 
-      dialog.classList.add(
-        "rml-overlay-opened"
+  onSettingsPreviewTransitionFinished(
+    dialog,
+    () => {
+      dialog.classList.remove(
+        "rml-overlay-animating"
       );
-    });
-  });
+
+      movePreviewFocusAwayFromCloseButton();
+    }
+  );
+
+  dialog.classList.add(
+    "rml-overlay-opened"
+  );
 }
 
 function closeSettingsPreview(
@@ -7656,6 +7697,39 @@ function closeSettingsPreview(
     return;
   }
 
+  dialog.classList.add(
+    "rml-overlay-animating"
+  );
+
+  void dialog.offsetWidth;
+
+  onSettingsPreviewTransitionFinished(
+    dialog,
+    () => {
+      settingsPreviewColorSession = null;
+      settingsPreviewDraft = null;
+
+      if (
+        typeof dialog.close ===
+        "function"
+      ) {
+        dialog.close(
+          returnValue
+        );
+      } else {
+        dialog.removeAttribute(
+          "open"
+        );
+      }
+
+      dialog.classList.remove(
+        "rml-overlay-closing",
+        "rml-overlay-opened",
+        "rml-overlay-animating"
+      );
+    }
+  );
+
   dialog.classList.remove(
     "rml-overlay-opened"
   );
@@ -7663,31 +7737,6 @@ function closeSettingsPreview(
   dialog.classList.add(
     "rml-overlay-closing"
   );
-
-  const closeDuration = 250;
-
-  window.setTimeout(() => {
-    settingsPreviewColorSession = null;
-    settingsPreviewDraft = null;
-
-    if (
-      typeof dialog.close ===
-      "function"
-    ) {
-      dialog.close(
-        returnValue
-      );
-    } else {
-      dialog.removeAttribute(
-        "open"
-      );
-    }
-
-    dialog.classList.remove(
-      "rml-overlay-closing",
-      "rml-overlay-opened"
-    );
-  }, closeDuration + 100);
 }
 
 async function copyText(text, button) {

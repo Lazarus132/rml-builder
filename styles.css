@@ -3149,8 +3149,30 @@ footer strong {
 
   pointer-events: none;
 
+  transition: none;
+}
+
+.settings-preview-dialog.rml-overlay-animating {
   transition:
     clip-path
+      var(--rml-overlay-duration)
+      linear;
+}
+
+.settings-preview-dialog.rml-overlay-animating
+.rml-preview-window {
+  transition:
+    transform
+      var(--rml-overlay-duration)
+      linear;
+}
+
+.settings-preview-dialog.rml-overlay-animating::backdrop {
+  transition:
+    background-color
+      var(--rml-overlay-duration)
+      linear,
+    backdrop-filter
       var(--rml-overlay-duration)
       linear;
 }
@@ -3185,10 +3207,7 @@ footer strong {
 
   transform-origin: 50% 50%;
 
-  transition:
-    transform
-      var(--rml-overlay-duration)
-      linear;
+  transition: none;
 
   will-change:
     transform;
@@ -3220,13 +3239,7 @@ footer strong {
   backdrop-filter:
     blur(0);
 
-  transition:
-    background-color
-      var(--rml-overlay-duration)
-      linear,
-    backdrop-filter
-      var(--rml-overlay-duration)
-      linear;
+  transition: none;
 }
 
 .settings-preview-dialog[open].rml-overlay-opened::backdrop {
@@ -3258,7 +3271,11 @@ footer strong {
 @media (prefers-reduced-motion: reduce) {
   .settings-preview-dialog,
   .settings-preview-dialog::backdrop,
-  .settings-preview-dialog .rml-preview-window {
+  .settings-preview-dialog .rml-preview-window,
+  .settings-preview-dialog.rml-overlay-animating,
+  .settings-preview-dialog.rml-overlay-animating::backdrop,
+  .settings-preview-dialog.rml-overlay-animating
+  .rml-preview-window {
     transition-duration:
       1ms !important;
   }
@@ -5147,30 +5164,5 @@ dialog#export-dialog.mobile-full-modal {
   .settings-preview-dialog.rml-preview-color-open:not([data-picker-fitted="true"])
   .rml-preview-color-footer-actions {
     visibility: hidden !important;
-  }
-}
-
-@media (max-width: 980px), (max-height: 720px) {
-  .settings-preview-dialog.rml-preview-page-switching,
-  .settings-preview-dialog.rml-preview-page-switching::backdrop,
-  .settings-preview-dialog.rml-preview-page-switching
-  .rml-preview-window,
-  .settings-preview-dialog.rml-preview-page-switching
-  .rml-preview-content,
-  .settings-preview-dialog.rml-preview-page-switching
-  .rml-preview-settings,
-  .settings-preview-dialog.rml-preview-page-switching
-  .rml-preview-full-color,
-  .settings-preview-dialog.rml-preview-page-switching
-  .rml-preview-footer,
-  .settings-preview-dialog.rml-preview-page-switching
-  .rml-preview-save-panel {
-    transition: none !important;
-    animation: none !important;
-  }
-
-  .settings-preview-dialog.rml-preview-page-switching
-  .rml-preview-window {
-    transition-property: none !important;
   }
 }
