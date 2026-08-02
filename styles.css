@@ -4346,3 +4346,297 @@ footer strong {
     width: min(500px, calc(100dvw - 32px)) !important;
   }
 }
+
+@media (max-width: 980px), (max-height: 720px) {
+  .settings-preview-dialog:not(.rml-preview-color-open) {
+    --rml-mobile-ui-scale: 1;
+    --rml-normal-close-size:
+      calc(42px * var(--rml-mobile-ui-scale));
+    --rml-normal-close-font-size:
+      calc(38px * var(--rml-mobile-ui-scale));
+    --rml-normal-control-height:
+      calc(32px * var(--rml-mobile-ui-scale));
+    --rml-normal-enum-step-width:
+      calc(53px * var(--rml-mobile-ui-scale));
+    --rml-normal-control-font-size:
+      calc(22px * var(--rml-mobile-ui-scale));
+    --rml-normal-save-height:
+      calc(46px * var(--rml-mobile-ui-scale));
+    --rml-normal-save-font-size:
+      calc(24px * var(--rml-mobile-ui-scale));
+    --rml-normal-footer-padding:
+      calc(8px * var(--rml-mobile-ui-scale));
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-window {
+    grid-template-rows:
+      calc(
+        50px * var(--rml-mobile-ui-scale) +
+        env(safe-area-inset-top)
+      )
+      minmax(0, 1fr)
+      calc(
+        var(--rml-normal-save-height) +
+        var(--rml-normal-footer-padding) * 2 +
+        env(safe-area-inset-bottom)
+      );
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-header {
+    min-height: 0;
+    padding:
+      env(safe-area-inset-top)
+      max(
+        calc(10px * var(--rml-mobile-ui-scale)),
+        env(safe-area-inset-right)
+      )
+      0
+      max(
+        calc(12px * var(--rml-mobile-ui-scale)),
+        env(safe-area-inset-left)
+      );
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-header > div {
+    max-width: 31%;
+    padding-left: 0 !important;
+    overflow: hidden;
+    font-size:
+      max(
+        7px,
+        calc(9px * var(--rml-mobile-ui-scale))
+      ) !important;
+    line-height: 1.05;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-header h2 {
+    min-width: 0;
+    margin: 0 auto;
+    flex: 1 1 auto;
+    font-size:
+      clamp(
+        16px,
+        calc(30px * var(--rml-mobile-ui-scale)),
+        30px
+      );
+    line-height: 1;
+    text-align: center;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-close {
+    width: var(--rml-normal-close-size);
+    min-width: var(--rml-normal-close-size);
+    max-width: var(--rml-normal-close-size);
+    height: var(--rml-normal-close-size);
+    min-height: var(--rml-normal-close-size);
+    max-height: var(--rml-normal-close-size);
+    flex: 0 0 var(--rml-normal-close-size);
+    padding:
+      0 0
+      calc(4px * var(--rml-mobile-ui-scale));
+    font-size: var(--rml-normal-close-font-size);
+    box-shadow:
+      inset 0
+        calc(-3px * var(--rml-mobile-ui-scale))
+        0
+        rgba(104, 26, 31, 0.18),
+      0
+        calc(2px * var(--rml-mobile-ui-scale))
+        calc(11px * var(--rml-mobile-ui-scale))
+        rgba(255, 87, 95, 0.17);
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-setting,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-label,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-editor,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-enum,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-uri,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-slider,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-vector {
+    min-height: var(--rml-normal-control-height);
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-control,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-text-field,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-vector input {
+    min-height: var(--rml-normal-control-height);
+    border-radius:
+      calc(6px * var(--rml-mobile-ui-scale));
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-enum-value {
+    min-height: var(--rml-normal-control-height);
+    font-size:
+      max(
+        13px,
+        var(--rml-normal-control-font-size)
+      );
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-enum-step,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-copy {
+    width: var(--rml-normal-enum-step-width);
+    min-width: var(--rml-normal-enum-step-width);
+    height: var(--rml-normal-control-height);
+    min-height: var(--rml-normal-control-height);
+    flex:
+      0 0
+      var(--rml-normal-enum-step-width);
+    padding: 0;
+    font-size:
+      max(
+        13px,
+        calc(20px * var(--rml-mobile-ui-scale))
+      );
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-checkbox {
+    width:
+      calc(34px * var(--rml-mobile-ui-scale));
+    min-width:
+      calc(34px * var(--rml-mobile-ui-scale));
+    height: var(--rml-normal-control-height);
+    min-height: var(--rml-normal-control-height);
+    border-radius:
+      calc(5px * var(--rml-mobile-ui-scale));
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-checkbox span {
+    width:
+      calc(31px * var(--rml-mobile-ui-scale));
+    height:
+      calc(29px * var(--rml-mobile-ui-scale));
+    border-radius:
+      calc(4px * var(--rml-mobile-ui-scale));
+    font-size:
+      max(
+        14px,
+        calc(25px * var(--rml-mobile-ui-scale))
+      );
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-color-button {
+    width:
+      calc(53px * var(--rml-mobile-ui-scale));
+    min-width:
+      calc(53px * var(--rml-mobile-ui-scale));
+    height:
+      calc(24px * var(--rml-mobile-ui-scale));
+    min-height:
+      calc(24px * var(--rml-mobile-ui-scale));
+    border-radius:
+      calc(7px * var(--rml-mobile-ui-scale));
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-color-button span {
+    border-radius:
+      calc(7px * var(--rml-mobile-ui-scale));
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-slider input[type="range"] {
+    height: var(--rml-normal-control-height);
+    min-height: var(--rml-normal-control-height);
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-slider input[type="range"]::-webkit-slider-thumb {
+    width:
+      calc(30px * var(--rml-mobile-ui-scale));
+    height:
+      calc(30px * var(--rml-mobile-ui-scale));
+    margin-top:
+      calc(-7.5px * var(--rml-mobile-ui-scale));
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-slider input[type="range"]::-moz-range-thumb {
+    width:
+      calc(30px * var(--rml-mobile-ui-scale));
+    height:
+      calc(30px * var(--rml-mobile-ui-scale));
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-slider output {
+    width:
+      calc(60px * var(--rml-mobile-ui-scale));
+    height: var(--rml-normal-control-height);
+    flex:
+      0 0
+      calc(60px * var(--rml-mobile-ui-scale));
+    font-size:
+      max(
+        13px,
+        calc(20px * var(--rml-mobile-ui-scale))
+      );
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-footer {
+    min-height: 0;
+    padding:
+      var(--rml-normal-footer-padding)
+      max(
+        calc(10px * var(--rml-mobile-ui-scale)),
+        env(safe-area-inset-right)
+      )
+      max(
+        var(--rml-normal-footer-padding),
+        env(safe-area-inset-bottom)
+      )
+      max(
+        calc(10px * var(--rml-mobile-ui-scale)),
+        env(safe-area-inset-left)
+      );
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-save-panel {
+    width: 100%;
+    height: var(--rml-normal-save-height);
+    min-height: var(--rml-normal-save-height);
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-save {
+    width: 100%;
+    max-width: none;
+    height: var(--rml-normal-save-height);
+    min-height: var(--rml-normal-save-height);
+    padding:
+      0
+      calc(8px * var(--rml-mobile-ui-scale));
+    border-radius:
+      calc(6px * var(--rml-mobile-ui-scale));
+    font-size:
+      max(
+        14px,
+        var(--rml-normal-save-font-size)
+      );
+  }
+}

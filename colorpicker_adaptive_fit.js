@@ -23,6 +23,10 @@
     "--rml-picker-canvas-height"
   ];
 
+  const SHARED_MOBILE_PROPERTIES = [
+    "--rml-mobile-ui-scale"
+  ];
+
   const dialog =
     document.getElementById(
       "settings-preview-dialog"
@@ -102,6 +106,62 @@
     }
   }
 
+  function updateSharedMobileScale(
+    viewport
+  ) {
+    if (!dialog) {
+      return;
+    }
+
+    const dialogOpen =
+      Boolean(dialog.open);
+
+    if (
+      !dialogOpen ||
+      !isAdaptiveViewport(viewport)
+    ) {
+      for (
+        const property of
+        SHARED_MOBILE_PROPERTIES
+      ) {
+        dialog.style.removeProperty(
+          property
+        );
+      }
+
+      return;
+    }
+
+    const portrait =
+      viewport.height >=
+      viewport.width;
+
+    const designWidth =
+      portrait
+        ? PORTRAIT_WIDTH
+        : LANDSCAPE_WIDTH;
+
+    const usableWidth =
+      Math.max(
+        1,
+        viewport.width -
+        SIDE_GAP * 2
+      );
+
+    const scale =
+      Math.min(
+        1,
+        usableWidth /
+        designWidth
+      );
+
+    setStyleProperty(
+      dialog,
+      "--rml-mobile-ui-scale",
+      String(scale)
+    );
+  }
+
   function clearAdaptiveState() {
     if (
       !dialog ||
@@ -147,6 +207,13 @@
   }
 
   function fitSettingsPreviewColorPicker() {
+    const viewport =
+      readVisibleViewport();
+
+    updateSharedMobileScale(
+      viewport
+    );
+
     const colorPageOpen =
       Boolean(
         dialog?.open &&
@@ -160,9 +227,6 @@
       wasOpen = false;
       return;
     }
-
-    const viewport =
-      readVisibleViewport();
 
     if (!isAdaptiveViewport(viewport)) {
       clearAdaptiveState();
