@@ -216,6 +216,129 @@ let settingsPreviewDraft = null;
 let settingsPreviewColorSession = null;
 let settingsPreviewStatusTimer = null;
 
+
+const MOBILE_DIALOG_MAX_WIDTH = 780;
+let adaptiveDialogFrame = 0;
+
+function visibleViewportSize() {
+  const viewport =
+    window.visualViewport;
+
+  return {
+    width:
+      Math.max(
+        1,
+        viewport?.width ||
+        window.innerWidth ||
+        document.documentElement.clientWidth
+      ),
+    height:
+      Math.max(
+        1,
+        viewport?.height ||
+        window.innerHeight ||
+        document.documentElement.clientHeight
+      )
+  };
+}
+
+function isMobileDialogViewport() {
+  return (
+    visibleViewportSize().width <=
+    MOBILE_DIALOG_MAX_WIDTH
+  );
+}
+
+function intrinsicDialogWidth(
+  dialog
+) {
+  return dialog?.classList.contains(
+    "project-dialog"
+  )
+    ? 500
+    : 620;
+}
+
+function updateAdaptiveUtilityDialog(
+  dialog
+) {
+  if (
+    !dialog ||
+    !dialog.open
+  ) {
+    dialog?.classList.remove(
+      "mobile-full-modal"
+    );
+    return;
+  }
+
+  const viewport =
+    visibleViewportSize();
+
+  if (
+    viewport.width >
+    MOBILE_DIALOG_MAX_WIDTH
+  ) {
+    dialog.classList.remove(
+      "mobile-full-modal"
+    );
+    return;
+  }
+
+  dialog.classList.remove(
+    "mobile-full-modal"
+  );
+
+  const requiredWidth =
+    intrinsicDialogWidth(
+      dialog
+    );
+  const requiredHeight =
+    Math.max(
+      dialog.scrollHeight,
+      dialog.getBoundingClientRect().height
+    );
+
+  dialog.classList.toggle(
+    "mobile-full-modal",
+    requiredWidth >= viewport.width ||
+    requiredHeight >= viewport.height
+  );
+}
+
+function scheduleAdaptiveUtilityDialogs() {
+  cancelAnimationFrame(
+    adaptiveDialogFrame
+  );
+
+  adaptiveDialogFrame =
+    requestAnimationFrame(() => {
+      updateAdaptiveUtilityDialog(
+        elements.projectDialog
+      );
+      updateAdaptiveUtilityDialog(
+        elements.exportDialog
+      );
+    });
+}
+
+function movePreviewFocusAwayFromCloseButton() {
+  if (
+    !isMobileDialogViewport() ||
+    !elements.settingsPreviewDialog?.open
+  ) {
+    return;
+  }
+
+  try {
+    elements.settingsPreviewDialog.focus({
+      preventScroll: true
+    });
+  } catch {
+    elements.settingsPreviewDialog.focus();
+  }
+}
+
 function makeSampleSetting(
   id,
   valueType,
@@ -7442,8 +7565,14 @@ function openSettingsPreview() {
 
   dialog.showModal();
 
+  movePreviewFocusAwayFromCloseButton();
+
   requestAnimationFrame(() => {
+    movePreviewFocusAwayFromCloseButton();
+
     requestAnimationFrame(() => {
+      movePreviewFocusAwayFromCloseButton();
+
       dialog.classList.add(
         "rml-overlay-opened"
       );
@@ -7583,9 +7712,19 @@ function openProjectDialog() {
       ""
     );
   }
+
+  requestAnimationFrame(() => {
+    updateAdaptiveUtilityDialog(
+      elements.projectDialog
+    );
+  });
 }
 
 function closeProjectDialog() {
+  elements.projectDialog.classList.remove(
+    "mobile-full-modal"
+  );
+
   if (
     typeof elements.projectDialog.close ===
     "function"
@@ -7988,9 +8127,19 @@ function openExportDialog() {
   } else {
     elements.exportDialog.setAttribute("open", "");
   }
+
+  requestAnimationFrame(() => {
+    updateAdaptiveUtilityDialog(
+      elements.exportDialog
+    );
+  });
 }
 
 function closeExportDialog() {
+  elements.exportDialog.classList.remove(
+    "mobile-full-modal"
+  );
+
   if (typeof elements.exportDialog.close === "function") {
     elements.exportDialog.close();
   } else {
@@ -8351,6 +8500,30 @@ function initialize() {
       closeExportDialog();
     }
   });
+
+  window.addEventListener(
+    "resize",
+    scheduleAdaptiveUtilityDialogs,
+    {
+      passive: true
+    }
+  );
+
+  window.addEventListener(
+    "orientationchange",
+    scheduleAdaptiveUtilityDialogs,
+    {
+      passive: true
+    }
+  );
+
+  window.visualViewport?.addEventListener(
+    "resize",
+    scheduleAdaptiveUtilityDialogs,
+    {
+      passive: true
+    }
+  );
 
   renderAll();
 }

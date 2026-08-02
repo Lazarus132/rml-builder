@@ -4865,3 +4865,78 @@ footer strong {
     font-size: 24px !important;
   }
 }
+
+@media (max-width: 780px) {
+  dialog.export-dialog:not(.mobile-full-modal),
+  dialog.project-dialog:not(.mobile-full-modal) {
+    position: fixed !important;
+    inset: auto !important;
+    top: 50% !important;
+    left: 50% !important;
+
+    width:
+      min(
+        620px,
+        calc(100dvw - 16px)
+      ) !important;
+
+    height: fit-content !important;
+    min-height: 0 !important;
+    max-height:
+      calc(100dvh - 16px) !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+
+    border: 1px solid var(--line-strong) !important;
+    border-radius: 14px !important;
+
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+
+    transform:
+      translate(-50%, -50%) !important;
+  }
+
+  dialog.project-dialog:not(.mobile-full-modal) {
+    width:
+      min(
+        500px,
+        calc(100dvw - 16px)
+      ) !important;
+  }
+
+  dialog.export-dialog.mobile-full-modal,
+  dialog.project-dialog.mobile-full-modal {
+    position: fixed !important;
+    inset: 0 !important;
+
+    width: 100dvw !important;
+    min-width: 0 !important;
+    max-width: 100dvw !important;
+
+    height: 100dvh !important;
+    min-height: 0 !important;
+    max-height: 100dvh !important;
+
+    margin: 0 !important;
+    padding-top:
+      env(safe-area-inset-top) !important;
+    padding-bottom:
+      env(safe-area-inset-bottom) !important;
+
+    border-radius: 0 !important;
+
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+
+    transform: none !important;
+  }
+}
+
+@media (max-width: 780px) {
+  .settings-preview-dialog:focus,
+  .settings-preview-dialog:focus-visible {
+    outline: none !important;
+  }
+}
