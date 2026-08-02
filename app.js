@@ -6572,6 +6572,53 @@ function optionContainerTargetAtPointer(
   return candidates[0];
 }
 
+function optionPointerTargetModeAtPoint(
+  clientX,
+  clientY
+) {
+  const element =
+    document.elementFromPoint(
+      clientX,
+      clientY
+    );
+
+  if (!(element instanceof Element)) {
+    return "auto";
+  }
+
+  if (
+    element.closest(
+      ".option-heading"
+    )
+  ) {
+    return "controller";
+  }
+
+  const dropZone =
+    element.closest(
+      ".drop-zone"
+    );
+
+  if (
+    dropZone &&
+    dropZone.parentElement?.matches(
+      ".option-lane[data-container]"
+    )
+  ) {
+    return "container";
+  }
+
+  if (
+    element.closest(
+      ".controller-options"
+    )
+  ) {
+    return "controller";
+  }
+
+  return "auto";
+}
+
 function updateOptionPointerTarget(
   clientX,
   clientY
@@ -6591,11 +6638,41 @@ function updateOptionPointerTarget(
     clientY
   );
 
-  const controllerTarget =
-    optionControllerTargetAtPointer(
+  const targetMode =
+    optionPointerTargetModeAtPoint(
       clientX,
       clientY
     );
+
+  const containerTarget =
+    targetMode === "controller"
+      ? null
+      : optionContainerTargetAtPointer(
+          clientX,
+          clientY
+        );
+
+  const controllerTarget =
+    targetMode === "container"
+      ? null
+      : optionControllerTargetAtPointer(
+          clientX,
+          clientY
+        );
+
+  if (containerTarget) {
+    setPointerContainerTarget(
+      containerTarget.containerId,
+      containerTarget.host,
+      containerTarget.insertionIndex,
+      pointerOptionFeedbackEvent(
+        clientX,
+        clientY
+      )
+    );
+
+    return;
+  }
 
   if (controllerTarget) {
     clearPointerEdgeFeedback();
@@ -6625,24 +6702,26 @@ function updateOptionPointerTarget(
     return;
   }
 
-  const containerTarget =
-    optionContainerTargetAtPointer(
-      clientX,
-      clientY
-    );
-
-  if (containerTarget) {
-    setPointerContainerTarget(
-      containerTarget.containerId,
-      containerTarget.host,
-      containerTarget.insertionIndex,
-      pointerOptionFeedbackEvent(
+  if (targetMode === "auto") {
+    const fallbackContainer =
+      optionContainerTargetAtPointer(
         clientX,
         clientY
-      )
-    );
+      );
 
-    return;
+    if (fallbackContainer) {
+      setPointerContainerTarget(
+        fallbackContainer.containerId,
+        fallbackContainer.host,
+        fallbackContainer.insertionIndex,
+        pointerOptionFeedbackEvent(
+          clientX,
+          clientY
+        )
+      );
+
+      return;
+    }
   }
 
   leaveOptionInsertMode();
