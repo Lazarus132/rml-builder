@@ -254,6 +254,8 @@ let nodePointerPendingStartY = 0;
 let nodeWheelTargetHost = null;
 let nodeWheelTargetContainerId = null;
 let nodeWheelDelta = 0;
+let nodeWheelManualIndex = null;
+let nodeWheelManualHost = null;
 let nodePointerVisualFrame = 0;
 let nodePointerQueuedX = 0;
 let nodePointerQueuedY = 0;
@@ -5592,24 +5594,39 @@ function nodeDropTargetAtPointer(
     let insertionIndex =
       cards.length;
 
-    for (
-      const card of
-      comparisonCards
-    ) {
-      const cardRectangle =
-        card.getBoundingClientRect();
+    const manualWheelSelectionActive =
+      nodeWheelManualHost === host &&
+      Number.isFinite(
+        nodeWheelManualIndex
+      );
 
-      if (
-        clientY <
-        cardRectangle.top +
-          cardRectangle.height / 2
+    if (manualWheelSelectionActive) {
+      insertionIndex =
+        clamp(
+          nodeWheelManualIndex,
+          0,
+          cards.length
+        );
+    } else {
+      for (
+        const card of
+        comparisonCards
       ) {
-        insertionIndex =
-          Number(
-            card.dataset.siblingIndex
-          ) || 0;
+        const cardRectangle =
+          card.getBoundingClientRect();
 
-        break;
+        if (
+          clientY <
+          cardRectangle.top +
+            cardRectangle.height / 2
+        ) {
+          insertionIndex =
+            Number(
+              card.dataset.siblingIndex
+            ) || 0;
+
+          break;
+        }
       }
     }
 
@@ -5688,8 +5705,19 @@ function setNodePointerTarget(
 
   clearPointerEdgeFeedback();
 
+  if (
+    nodeWheelTargetHost !== host ||
+    nodeWheelTargetContainerId !==
+      containerId
+  ) {
+    nodeWheelManualIndex = null;
+    nodeWheelManualHost = null;
+    nodeWheelDelta = 0;
+  }
+
   nodeWheelTargetHost =
     host;
+
   nodeWheelTargetContainerId =
     containerId;
 
@@ -5762,6 +5790,9 @@ function updateNodePointerTarget(
 
   nodeWheelTargetHost = null;
   nodeWheelTargetContainerId = null;
+  nodeWheelManualHost = null;
+  nodeWheelManualIndex = null;
+  nodeWheelDelta = 0;
 }
 
 function stepNodeInsertWithWheel(
@@ -5778,22 +5809,35 @@ function stepNodeInsertWithWheel(
     return;
   }
 
+  const host =
+    nodeWheelTargetHost;
+
+  const containerId =
+    nodeWheelTargetContainerId;
+
   const cards =
     directNodeCards(
-      nodeWheelTargetHost
+      host
     );
 
   const maximumIndex =
     cards.length;
 
   const currentIndex =
-    state.dragInsertContainer ===
-      nodeWheelTargetContainerId &&
+    nodeWheelManualHost === host &&
     Number.isFinite(
-      state.dragInsertIndex
+      nodeWheelManualIndex
     )
-      ? state.dragInsertIndex
-      : 0;
+      ? nodeWheelManualIndex
+      : (
+          state.dragInsertContainer ===
+            containerId &&
+          Number.isFinite(
+            state.dragInsertIndex
+          )
+            ? state.dragInsertIndex
+            : 0
+        );
 
   const nextIndex =
     clamp(
@@ -5802,16 +5846,30 @@ function stepNodeInsertWithWheel(
       maximumIndex
     );
 
-  if (nextIndex === currentIndex) {
+  if (
+    nextIndex === currentIndex
+  ) {
     return;
   }
 
-  setNodePointerTarget(
-    nodeWheelTargetContainerId,
-    nodeWheelTargetHost,
-    nextIndex,
-    nodePointerX,
-    nodePointerY
+  nodeWheelManualHost =
+    host;
+
+  nodeWheelManualIndex =
+    nextIndex;
+
+  state.dragOverContainer =
+    containerId;
+
+  state.dragInsertContainer =
+    containerId;
+
+  state.dragInsertIndex =
+    nextIndex;
+
+  positionNodeInsertPlaceholder(
+    host,
+    nextIndex
   );
 }
 
@@ -5969,6 +6027,8 @@ function finishNodePointerDrag(
   nodeWheelTargetHost = null;
   nodeWheelTargetContainerId = null;
   nodeWheelDelta = 0;
+  nodeWheelManualHost = null;
+  nodeWheelManualIndex = null;
 
   suppressNodeClickId = nodeId;
   suppressNodeClickUntil =
