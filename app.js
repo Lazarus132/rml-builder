@@ -294,55 +294,12 @@ function utilityDialogContentSize(
 function updateAdaptiveUtilityDialog(
   dialog
 ) {
-  if (
-    !dialog ||
-    !dialog.open
-  ) {
-    dialog?.classList.remove(
-      "mobile-full-modal"
-    );
-    return;
-  }
-
-  const viewport =
-    visibleViewportSize();
-
-  if (
-    viewport.width >
-    MOBILE_DIALOG_MAX_WIDTH
-  ) {
-    dialog.classList.remove(
-      "mobile-full-modal"
-    );
+  if (!dialog) {
     return;
   }
 
   dialog.classList.remove(
     "mobile-full-modal"
-  );
-
-  const content =
-    utilityDialogContentSize(
-      dialog
-    );
-
-  const horizontalGap = 16;
-  const verticalGap = 16;
-
-  const contentTooWide =
-    content.width >
-    viewport.width -
-      horizontalGap;
-
-  const contentTooTall =
-    content.height >=
-    viewport.height -
-      verticalGap;
-
-  dialog.classList.toggle(
-    "mobile-full-modal",
-    contentTooWide ||
-    contentTooTall
   );
 }
 
