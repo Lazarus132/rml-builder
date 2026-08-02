@@ -3682,62 +3682,6 @@ footer strong {
     );
   }
 
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-window {
-    grid-template-rows:
-      calc(58px + env(safe-area-inset-top))
-      minmax(0, 1fr)
-      auto;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-footer {
-    min-height: 0;
-    height: auto;
-
-    padding:
-      8px
-      max(10px, env(safe-area-inset-right))
-      max(10px, env(safe-area-inset-bottom))
-      max(10px, env(safe-area-inset-left));
-
-    overflow: visible;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-color-footer-actions {
-    display: grid;
-    width: 100%;
-    height: auto;
-    min-height: 96px;
-
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: repeat(2, 44px);
-
-    gap: 8px;
-  }
-
-  .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-footer-button {
-    width: 100%;
-    height: 44px;
-    min-height: 44px;
-    margin: 0;
-  }
-
-  @supports (-webkit-touch-callout: none) {
-    @media (max-width: 430px) {
-      .settings-preview-dialog.rml-preview-color-open
-      .rml-preview-footer {
-        padding-bottom:
-          max(
-            14px,
-            env(safe-area-inset-bottom)
-          );
-      }
-    }
-  }
-
   .settings-preview-dialog:not(.rml-preview-color-open)
   .rml-preview-window {
     grid-template-rows:
@@ -3776,5 +3720,113 @@ footer strong {
 
   .rml-preview-color-hex-row {
     grid-template-columns: 58px minmax(0, 1fr);
+  }
+}
+
+/* ========================================================================== */
+/* iPhone portrait: Color Picker footer must remain completely visible         */
+/* Keep this block as the final CSS block.                                     */
+/* ========================================================================== */
+
+@media (max-width: 430px) {
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-window {
+    position: relative;
+
+    grid-template-rows:
+      calc(58px + env(safe-area-inset-top))
+      minmax(0, 1fr)
+      0;
+  }
+
+  /*
+   * Der Inhalt scrollt hinter einem fest verankerten Footer.
+   * Der zusätzliche Innenabstand verhindert, dass die letzten
+   * Picker-Inhalte vom Footer verdeckt werden.
+   */
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-content {
+    padding-bottom:
+      calc(
+        120px +
+        env(safe-area-inset-bottom)
+      );
+
+    scroll-padding-bottom:
+      calc(
+        120px +
+        env(safe-area-inset-bottom)
+      );
+  }
+
+  /*
+   * Footer vollständig aus der fehlerhaften Grid-Höhenberechnung
+   * von iOS Safari herausnehmen.
+   */
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-footer {
+    position: absolute;
+    z-index: 20;
+
+    right: 0;
+    bottom: 0;
+    left: 0;
+
+    display: block;
+
+    width: 100%;
+    height: auto;
+    min-height: 0;
+
+    margin: 0;
+
+    padding:
+      8px
+      max(10px, env(safe-area-inset-right))
+      max(12px, env(safe-area-inset-bottom))
+      max(10px, env(safe-area-inset-left));
+
+    overflow: visible;
+
+    background:
+      rgba(9, 13, 19, 0.98);
+
+    box-shadow:
+      0 -8px 24px rgba(0, 0, 0, 0.42);
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-color-footer-actions {
+    display: grid;
+
+    width: 100%;
+    height: 96px;
+    min-height: 96px;
+
+    grid-template-columns:
+      minmax(0, 1fr);
+
+    grid-template-rows:
+      44px
+      44px;
+
+    gap: 8px;
+
+    margin: 0;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-footer-button {
+    display: block;
+
+    width: 100%;
+    height: 44px;
+    min-height: 44px;
+    max-height: 44px;
+
+    margin: 0;
+    padding: 0;
+
+    flex: none;
   }
 }
