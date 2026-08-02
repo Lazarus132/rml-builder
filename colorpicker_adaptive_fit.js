@@ -60,6 +60,7 @@
       "--rml-visual-left",
       "--rml-visual-top",
       "--rml-picker-scale",
+      "--rml-mobile-ui-scale",
       "--rml-picker-left",
       "--rml-picker-canvas-width",
       "--rml-picker-canvas-height"
@@ -101,10 +102,6 @@
 
     const viewport = readVisibleViewport();
 
-    /*
-     * Desktop is completely untouched.
-     * The original desktop CSS remains authoritative.
-     */
     if (!isAdaptiveViewport(viewport)) {
       clearAdaptiveState(dialog);
       return;
@@ -127,10 +124,6 @@
       viewport.width - SIDE_GAP * 2
     );
 
-    /*
-     * Width-only proportional scaling.
-     * Height controls scrolling, never the scale.
-     */
     const scale = Math.min(
       1,
       usableWidth / designWidth
@@ -176,6 +169,11 @@
     );
     dialog.style.setProperty(
       "--rml-picker-scale",
+      String(scale)
+    );
+
+    dialog.style.setProperty(
+      "--rml-mobile-ui-scale",
       String(scale)
     );
     dialog.style.setProperty(

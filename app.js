@@ -3282,12 +3282,7 @@ function bindCanvasInteractions() {
       }
     });
   });
-  /*
-   * The root canvas survives renderCanvas(). Assigning these handlers replaces
-   * the previous render's handlers instead of accumulating another set on
-   * every rebuild. Nested zones and cards are recreated with innerHTML and can
-   * safely use addEventListener above.
-   */
+
   elements.builderCanvas.onclick = () => {
     state.activeContainerId = ROOT_CONTAINER;
     elements.activeContainerName.textContent = "Root";

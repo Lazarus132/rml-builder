@@ -2179,10 +2179,6 @@ footer strong {
   }
 }
 
-/* ========================================================================== */
-/* Resonite-faithful settings preview                                         */
-/* ========================================================================== */
-
 .settings-preview-dialog {
   width: min(1148px, calc(100vw - 2px));
   height: min(870px, calc(100vh - 2px));
@@ -2468,8 +2464,6 @@ footer strong {
   font-size: 24px;
   font-weight: 700;
 }
-
-/* Full picker page --------------------------------------------------------- */
 
 .settings-preview-dialog.rml-preview-color-open .rml-preview-content {
   margin: 0;
@@ -2980,7 +2974,6 @@ footer strong {
   }
 }
 
-/* Final geometry corrections after the global site footer/range rules. */
 .rml-preview-window {
   grid-template-rows: 78px minmax(0, 1fr) 72px;
 }
@@ -3007,7 +3000,6 @@ footer strong {
   left: -2px;
 }
 
-/* ===== REAL RESONITE CURSOR (NO MORE CROSSHAIR) ===== */
 .settings-preview-dialog,
 .settings-preview-dialog * {
   cursor:
@@ -3015,7 +3007,6 @@ footer strong {
     default !important;
 }
 
-/* Inspector colorX editor: same profile/strength model as FullColorPicker. */
 .custom-color-profile-tabs {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3080,7 +3071,6 @@ footer strong {
       var(--result-glow, transparent);
 }
 
-/* v28: HDR strength/profile behavior and visibly emissive inspector preview. */
 .rml-preview-color-profile-tabs .rml-preview-control:disabled,
 .custom-color-profile-tabs .button:disabled {
   background: #24272b !important;
@@ -3123,20 +3113,14 @@ footer strong {
   transition: box-shadow 100ms ease, background 100ms ease;
 }
 
-/* v30: Center the circular thumb in the 34 px vertical hue rail.
-   Chromium aligns vertical range thumbs to the rail's left edge instead of
-   centering them automatically. Half the width difference is 6 px. */
 .rml-preview-vertical-hue input[type="range"]::-webkit-slider-thumb {
   transform: translateX(6px);
 }
 
-/* Firefox uses an 18 px border-box thumb in the same 34 px rail. */
 .rml-preview-vertical-hue input[type="range"]::-moz-range-thumb {
   transform: translateX(8px);
 }
 
-
-/* v31: remove browser focus ring around preview color swatch */
 .rml-preview-color-button,
 .rml-preview-color-button:focus,
 .rml-preview-color-button:focus-visible,
@@ -3149,31 +3133,14 @@ footer strong {
     0 0 calc(var(--rml-preview-glow-size,10px)*0.45) var(--rml-preview-glow,transparent) !important;
 }
 
-/* ========================================================================== */
-/* Native Resonite RadiantModalOverlay animation                              */
-/*                                                                            */
-/* FrooxEngine:                                                               */
-/* ShowLerp 0 -> 1 in 0.25 s                                                  */
-/* MaskRect: y = 0.5 - ShowLerp / 2, height = ShowLerp                        */
-/* ContentAnimationScaleOffset: 128 -> 0                                      */
-/* ========================================================================== */
-
 .settings-preview-dialog {
   --rml-overlay-duration: 250ms;
   --rml-overlay-content-scale-start: 1.18;
 
-  /*
-   * Das native <dialog> darf nicht selbst eingeblendet,
-   * verschoben oder perspektivisch transformiert werden.
-   */
   opacity: 1;
   transform: none;
   filter: none;
 
-  /*
-   * Entspricht der vertikal aus der Mitte wachsenden
-   * MaskRect des RadiantModalOverlay.
-   */
   clip-path:
     inset(
       50% 0 50% 0
@@ -3188,10 +3155,6 @@ footer strong {
       linear;
 }
 
-/*
- * Die Klasse wird erst nach showModal() gesetzt.
- * Dadurch läuft die Maske von ShowLerp 0 nach 1.
- */
 .settings-preview-dialog[open].rml-overlay-opened {
   clip-path:
     inset(
@@ -3202,10 +3165,6 @@ footer strong {
   pointer-events: auto;
 }
 
-/*
- * Schließen ist exakt die umgekehrte Maskenbewegung:
- * von voller Höhe zurück zur vertikalen Mitte.
- */
 .settings-preview-dialog[open].rml-overlay-closing {
   clip-path:
     inset(
@@ -3304,11 +3263,6 @@ footer strong {
       1ms !important;
   }
 }
-
-/* ========================================================================== */
-/* v42-mobile: reliable dialog geometry on phones / short viewports            */
-/* Keep this block LAST. It intentionally overrides all earlier dialog rules.  */
-/* ========================================================================== */
 
 .settings-preview-dialog,
 .export-dialog,
@@ -3690,7 +3644,6 @@ footer strong {
       calc(58px + env(safe-area-inset-bottom));
   }
 
-  /* Der Save-Button muss vollständig innerhalb des Footers liegen. */
   .settings-preview-dialog:not(.rml-preview-color-open)
   .rml-preview-save-panel {
     height: 44px;
@@ -3816,13 +3769,6 @@ footer strong {
     flex: none;
   }
 }
-
-/* ========================================================================== */
-/* MOBILE/TABLET FIXED-RATIO COLOR PICKER ONLY                                */
-/*                                                                            */
-/* Desktop (>= 981 px wide AND >= 721 px high) uses the original desktop CSS. */
-/* Narrow or short viewports use this isolated proportional layout engine.    */
-/* ========================================================================== */
 
 @media (max-width: 980px), (max-height: 720px) {
   .settings-preview-dialog.rml-preview-color-open {
@@ -4074,7 +4020,6 @@ footer strong {
     box-sizing: border-box !important;
   }
 
-  /* Portrait: controls above palette. */
   .settings-preview-dialog.rml-preview-color-open[data-picker-orientation="portrait"]
   .rml-preview-full-color {
     display: flex !important;
@@ -4116,7 +4061,6 @@ footer strong {
     margin: 0 !important;
   }
 
-  /* Landscape: controls beside palette. */
   .settings-preview-dialog.rml-preview-color-open[data-picker-orientation="landscape"] {
     --rml-picker-header-height:
       calc(50px + env(safe-area-inset-top));
@@ -4149,7 +4093,6 @@ footer strong {
     gap: 10px !important;
   }
 
-  /* Restore fixed Resonite proportions against older mobile rules. */
   .settings-preview-dialog.rml-preview-color-open
   .rml-preview-resonite-color-left {
     display: grid !important;
@@ -4237,5 +4180,208 @@ footer strong {
     grid-template-rows: repeat(12, minmax(0, 1fr)) !important;
     gap: 7px !important;
     padding: 8px !important;
+  }
+}
+
+@media (max-width: 980px), (max-height: 720px) {
+  .settings-preview-dialog.rml-preview-color-open {
+    --rml-mobile-ui-scale:
+      var(--rml-picker-scale, 1);
+
+    --rml-mobile-close-size:
+      calc(42px * var(--rml-mobile-ui-scale));
+
+    --rml-mobile-close-font-size:
+      calc(38px * var(--rml-mobile-ui-scale));
+
+    --rml-mobile-header-content-height:
+      calc(50px * var(--rml-mobile-ui-scale));
+
+    --rml-mobile-footer-button-height:
+      calc(46px * var(--rml-mobile-ui-scale));
+
+    --rml-mobile-footer-font-size:
+      calc(27px * var(--rml-mobile-ui-scale));
+
+    --rml-mobile-footer-gap:
+      calc(8px * var(--rml-mobile-ui-scale));
+
+    --rml-mobile-footer-padding-top:
+      calc(8px * var(--rml-mobile-ui-scale));
+
+    --rml-mobile-footer-padding-bottom:
+      calc(10px * var(--rml-mobile-ui-scale));
+
+    --rml-picker-header-height:
+      calc(
+        var(--rml-mobile-header-content-height) +
+        env(safe-area-inset-top)
+      );
+
+    --rml-picker-footer-height:
+      calc(
+        var(--rml-mobile-footer-padding-top) +
+        var(--rml-mobile-footer-button-height) * 2 +
+        var(--rml-mobile-footer-gap) +
+        var(--rml-mobile-footer-padding-bottom) +
+        env(safe-area-inset-bottom)
+      );
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-header {
+    padding:
+      env(safe-area-inset-top)
+      max(
+        calc(10px * var(--rml-mobile-ui-scale)),
+        env(safe-area-inset-right)
+      )
+      0
+      max(
+        calc(12px * var(--rml-mobile-ui-scale)),
+        env(safe-area-inset-left)
+      ) !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-header > div {
+    font-size:
+      max(
+        7px,
+        calc(9px * var(--rml-mobile-ui-scale))
+      ) !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-header h2 {
+    font-size:
+      clamp(
+        16px,
+        calc(30px * var(--rml-mobile-ui-scale)),
+        30px
+      ) !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-close {
+    width:
+      var(--rml-mobile-close-size) !important;
+
+    min-width:
+      var(--rml-mobile-close-size) !important;
+
+    max-width:
+      var(--rml-mobile-close-size) !important;
+
+    height:
+      var(--rml-mobile-close-size) !important;
+
+    min-height:
+      var(--rml-mobile-close-size) !important;
+
+    max-height:
+      var(--rml-mobile-close-size) !important;
+
+    flex:
+      0 0
+      var(--rml-mobile-close-size) !important;
+
+    padding:
+      0 0
+      calc(4px * var(--rml-mobile-ui-scale)) !important;
+
+    font-size:
+      var(--rml-mobile-close-font-size) !important;
+
+    box-shadow:
+      inset 0
+        calc(-3px * var(--rml-mobile-ui-scale))
+        0
+        rgba(104, 26, 31, 0.18),
+      0
+        calc(2px * var(--rml-mobile-ui-scale))
+        calc(11px * var(--rml-mobile-ui-scale))
+        rgba(255, 87, 95, 0.17) !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-footer {
+    padding:
+      var(--rml-mobile-footer-padding-top)
+      max(
+        calc(10px * var(--rml-mobile-ui-scale)),
+        env(safe-area-inset-right)
+      )
+      max(
+        var(--rml-mobile-footer-padding-bottom),
+        env(safe-area-inset-bottom)
+      )
+      max(
+        calc(10px * var(--rml-mobile-ui-scale)),
+        env(safe-area-inset-left)
+      ) !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-color-footer-actions {
+    grid-template-rows:
+      var(--rml-mobile-footer-button-height)
+      var(--rml-mobile-footer-button-height) !important;
+
+    gap:
+      var(--rml-mobile-footer-gap) !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-footer-button {
+    height:
+      var(--rml-mobile-footer-button-height) !important;
+
+    min-height:
+      var(--rml-mobile-footer-button-height) !important;
+
+    max-height:
+      var(--rml-mobile-footer-button-height) !important;
+
+    padding:
+      0
+      calc(8px * var(--rml-mobile-ui-scale)) !important;
+
+    border-radius:
+      calc(6px * var(--rml-mobile-ui-scale)) !important;
+
+    font-size:
+      max(
+        14px,
+        var(--rml-mobile-footer-font-size)
+      ) !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open[data-picker-orientation="landscape"] {
+    --rml-picker-header-height:
+      calc(
+        var(--rml-mobile-header-content-height) +
+        env(safe-area-inset-top)
+      );
+
+    --rml-picker-footer-height:
+      calc(
+        var(--rml-mobile-footer-padding-top) +
+        var(--rml-mobile-footer-button-height) +
+        var(--rml-mobile-footer-padding-bottom) +
+        env(safe-area-inset-bottom)
+      );
+  }
+
+  .settings-preview-dialog.rml-preview-color-open[data-picker-orientation="landscape"]
+  .rml-preview-color-footer-actions {
+    grid-template-columns:
+      repeat(2, minmax(0, 1fr)) !important;
+
+    grid-template-rows:
+      var(--rml-mobile-footer-button-height) !important;
+
+    gap:
+      calc(10px * var(--rml-mobile-ui-scale)) !important;
   }
 }
