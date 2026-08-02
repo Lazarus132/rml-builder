@@ -3991,10 +3991,6 @@ function setOptionInsertFeedback(
     return;
   }
 
-  /*
-   * Das Ziel-Enum darf nicht innerhalb
-   * der verschobenen Sektion liegen.
-   */
   if (
     optionContainsController(
       source.option,
@@ -4114,11 +4110,6 @@ function handleOptionReorderDrop(
       ? state.dragInsertIndex
       : Number.POSITIVE_INFINITY;
 
-  /*
-   * Die IDs müssen vor finishDragInteraction()
-   * ausgelesen werden, weil dort der aktive
-   * Drag-Zustand gelöscht wird.
-   */
   finishDragInteraction();
 
   if (
@@ -4129,10 +4120,6 @@ function handleOptionReorderDrop(
     return;
   }
 
-  /*
-   * Innerhalb desselben Enums:
-   * normales Reordering.
-   */
   if (
     sourceControllerId ===
     targetControllerId
@@ -4167,10 +4154,6 @@ function handleOptionReorderDrop(
     return;
   }
 
-  /*
-   * Ein Enum innerhalb der verschobenen
-   * Sektion darf nicht ihr eigenes Ziel sein.
-   */
   if (
     optionContainsController(
       source.option,
@@ -4218,12 +4201,7 @@ function handleOptionReorderDrop(
     targetAfterDetach.kind !==
       "controller"
   ) {
-    /*
-     * Sicherheitsfallback:
-     * Falls das Ziel durch eine unerwartete
-     * Strukturänderung verschwunden ist,
-     * wird aus der Sektion wieder ein Enum.
-     */
+
     const fallbackController =
       controllerFromDetachedOption(
         detached.option,
@@ -4248,10 +4226,6 @@ function handleOptionReorderDrop(
   const movedOption = {
     ...detached.option,
 
-    /*
-     * Innerhalb eines Enums müssen die
-     * Sektionsnamen eindeutig bleiben.
-     */
     name:
       uniqueOptionName(
         targetAfterDetach.options,
@@ -4852,12 +4826,6 @@ function bindCanvasInteractions() {
         const targetControllerId =
           zone.dataset.controllerId;
 
-        /*
-        * Eine gezogene Sektion wird beim Hover
-        * über einem Enum immer als Enum-Sektion
-        * behandelt — unabhängig davon, aus
-        * welchem Enum sie stammt.
-        */
         if (
           optionDrag &&
           activeDraggedOptionControllerId &&
