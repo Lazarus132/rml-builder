@@ -3816,3 +3816,311 @@ footer strong {
     flex: none;
   }
 }
+
+/* ========================================================================== */
+/* FINAL iPhone portrait Color Picker layout                                  */
+/* Uses the small viewport so Safari's bottom toolbar cannot cover buttons.   */
+/* Keep this block LAST.                                                       */
+/* ========================================================================== */
+
+@media (max-width: 430px) {
+  .settings-preview-dialog.rml-preview-color-open {
+    inset: 0 !important;
+    width: 100vw !important;
+    width: 100svw !important;
+    max-width: 100svw !important;
+
+    height: 100vh !important;
+    height: 100svh !important;
+    max-height: 100svh !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-window {
+    position: relative !important;
+    display: grid !important;
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
+
+    grid-template-rows:
+      calc(58px + env(safe-area-inset-top))
+      minmax(0, 1fr)
+      calc(112px + env(safe-area-inset-bottom)) !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-header {
+    min-height: 0 !important;
+    overflow: hidden !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-content {
+    position: relative !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+
+    padding:
+      8px
+      max(8px, env(safe-area-inset-right))
+      14px
+      max(8px, env(safe-area-inset-left)) !important;
+
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-settings {
+    display: block !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-full-color {
+    display: grid !important;
+    position: static !important;
+    left: auto !important;
+
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 12px !important;
+    padding: 0 0 12px !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-resonite-color-left {
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+
+    grid-template-rows:
+      auto
+      34px
+      34px
+      auto !important;
+
+    row-gap: 8px !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-color-surfaces {
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+
+    grid-template-columns:
+      minmax(0, 1fr)
+      28px
+      28px !important;
+
+    gap: 7px !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-full-color .rml-preview-resonite-sv,
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-resonite-sv {
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    aspect-ratio: 1 / 0.82 !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-vertical-hue,
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-vertical-hue input[type="range"],
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-vertical-hue input[type="range"]::-webkit-slider-runnable-track,
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-vertical-hue input[type="range"]::-moz-range-track {
+    width: 28px !important;
+    min-width: 28px !important;
+    height: 100% !important;
+    min-height: 0 !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-color-preview-stack {
+    width: 28px !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    margin-left: 0 !important;
+
+    grid-template-rows:
+      repeat(2, minmax(0, 1fr)) !important;
+
+    gap: 7px !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-tall-color-swatch {
+    width: 28px !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-color-profile-tabs,
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-color-mode-tabs,
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-color-channel-row,
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-color-palette {
+    width: 100% !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-color-profile-tabs,
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-color-mode-tabs {
+    height: 34px !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-color-profile-tabs .rml-preview-control,
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-color-mode-tabs .rml-preview-control {
+    min-height: 34px !important;
+    padding-inline: 3px !important;
+    font-size: 15px !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-color-channel-editor {
+    gap: 6px !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-color-channel-row {
+    min-height: 34px !important;
+    height: auto !important;
+
+    grid-template-columns:
+      56px
+      minmax(0, 1fr)
+      54px !important;
+
+    gap: 5px !important;
+    font-size: 13px !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-color-channel-value {
+    width: 54px !important;
+    height: 30px !important;
+    min-height: 30px !important;
+    padding-inline: 2px !important;
+    font-size: 13px !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-color-hex-row {
+    grid-template-columns:
+      56px
+      minmax(0, 1fr) !important;
+  }
+
+  /*
+   * The desktop palette is too tall for an iPhone portrait viewport.
+   * It remains fully usable, but is compressed vertically.
+   */
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-color-palette {
+    height: clamp(280px, 39svh, 340px) !important;
+    min-height: 280px !important;
+    max-height: 340px !important;
+
+    grid-template-rows:
+      repeat(12, minmax(18px, 1fr)) !important;
+
+    gap: 4px !important;
+    padding: 5px !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-color-palette-swatch {
+    min-height: 18px !important;
+    border-radius: 5px !important;
+  }
+
+  /*
+   * Footer stays inside the dialog's own final grid row.
+   * No absolute/fixed positioning, so Safari cannot place it underneath
+   * its browser toolbar.
+   */
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-footer {
+    position: relative !important;
+    inset: auto !important;
+    z-index: 20 !important;
+
+    display: flex !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+
+    margin: 0 !important;
+
+    padding:
+      8px
+      max(10px, env(safe-area-inset-right))
+      max(10px, env(safe-area-inset-bottom))
+      max(10px, env(safe-area-inset-left)) !important;
+
+    overflow: hidden !important;
+    background: rgba(9, 13, 19, 0.99) !important;
+    box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.42) !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-color-footer-actions {
+    position: static !important;
+    left: auto !important;
+
+    display: grid !important;
+    width: 100% !important;
+    height: 96px !important;
+    min-height: 96px !important;
+
+    grid-template-columns:
+      minmax(0, 1fr) !important;
+
+    grid-template-rows:
+      44px
+      44px !important;
+
+    gap: 8px !important;
+    margin: 0 !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-footer-button {
+    display: block !important;
+    width: 100% !important;
+    height: 44px !important;
+    min-height: 44px !important;
+    max-height: 44px !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+    flex: none !important;
+  }
+}
