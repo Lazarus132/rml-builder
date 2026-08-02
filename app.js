@@ -204,7 +204,9 @@ const state = {
   selectedId: null,
   activeContainerId: ROOT_CONTAINER,
   collapsedPaletteGroups: [],
-  dragOverContainer: null
+  dragOverContainer: null,
+  dragInsertContainer: null,
+  dragInsertIndex: null
 };
 
 const elements = {};
@@ -215,6 +217,11 @@ let dragScrollFrame = null;
 let settingsPreviewDraft = null;
 let settingsPreviewColorSession = null;
 let settingsPreviewStatusTimer = null;
+let activeDraggedNodeId = null;
+let activeDraggedOptionId = null;
+let activeDraggedOptionControllerId = null;
+let dragFeedbackPlaceholder = null;
+let optionDragFeedbackPlaceholder = null;
 
 
 const MOBILE_DIALOG_MAX_WIDTH = 780;
@@ -1306,31 +1313,519 @@ function removeNode(nodes, id) {
   return { nodes: next, removed };
 }
 
-function insertIntoContainer(nodes, containerId, nodeToInsert) {
+function insertIntoContainerAt(
+  nodes,
+  containerId,
+  nodeToInsert,
+  requestedIndex = Number.POSITIVE_INFINITY
+) {
+  const insertAt = list => {
+    const index = clamp(
+      Number.isFinite(requestedIndex)
+        ? Math.trunc(requestedIndex)
+        : list.length,
+      0,
+      list.length
+    );
+
+    return [
+      ...list.slice(0, index),
+      nodeToInsert,
+      ...list.slice(index)
+    ];
+  };
+
   if (containerId === ROOT_CONTAINER) {
-    return { nodes: [...nodes, nodeToInsert], inserted: true };
+    return {
+      nodes: insertAt(nodes),
+      inserted: true
+    };
   }
+
   let inserted = false;
   const next = nodes.map(node => {
     if (node.kind !== "controller") return node;
+
     return {
       ...node,
       options: node.options.map(option => {
         if (option.id === containerId) {
           inserted = true;
-          return { ...option, children: [...option.children, nodeToInsert] };
+          return {
+            ...option,
+            children: insertAt(option.children)
+          };
         }
-        const nested = insertIntoContainer(
+
+        const nested = insertIntoContainerAt(
           option.children,
           containerId,
-          nodeToInsert
+          nodeToInsert,
+          requestedIndex
         );
+
         if (nested.inserted) inserted = true;
-        return { ...option, children: nested.nodes };
+
+        return {
+          ...option,
+          children: nested.nodes
+        };
       })
     };
   });
+
   return { nodes: next, inserted };
+}
+
+function insertIntoContainer(nodes, containerId, nodeToInsert) {
+  return insertIntoContainerAt(
+    nodes,
+    containerId,
+    nodeToInsert,
+    Number.POSITIVE_INFINITY
+  );
+}
+
+function containerChildren(nodes, containerId) {
+  if (containerId === ROOT_CONTAINER) {
+    return nodes;
+  }
+
+  for (const node of nodes) {
+    if (node.kind !== "controller") continue;
+
+    for (const option of node.options) {
+      if (option.id === containerId) {
+        return option.children;
+      }
+
+      const nested = containerChildren(
+        option.children,
+        containerId
+      );
+
+      if (nested) return nested;
+    }
+  }
+
+  return null;
+}
+
+function moveNodeOneStep(nodeId, direction) {
+  const containerId =
+    findNodeContainerId(
+      state.nodes,
+      nodeId
+    );
+
+  if (containerId === null) {
+    return;
+  }
+
+  const children =
+    containerChildren(
+      state.nodes,
+      containerId
+    );
+
+  if (!children) return;
+
+  const currentIndex =
+    children.findIndex(
+      node => node.id === nodeId
+    );
+  const targetIndex =
+    currentIndex + direction;
+
+  if (
+    currentIndex < 0 ||
+    targetIndex < 0 ||
+    targetIndex >= children.length
+  ) {
+    return;
+  }
+
+  const removal =
+    removeNode(
+      state.nodes,
+      nodeId
+    );
+
+  if (!removal.removed) return;
+
+  const insertion =
+    insertIntoContainerAt(
+      removal.nodes,
+      containerId,
+      removal.removed,
+      targetIndex
+    );
+
+  state.nodes = insertion.inserted
+    ? insertion.nodes
+    : state.nodes;
+  state.selectedId = nodeId;
+  state.activeContainerId =
+    containerId;
+  renderAll();
+}
+
+function findControllerOption(
+  nodes,
+  optionId
+) {
+  for (const node of nodes) {
+    if (node.kind !== "controller") {
+      continue;
+    }
+
+    const optionIndex =
+      node.options.findIndex(
+        option => option.id === optionId
+      );
+
+    if (optionIndex >= 0) {
+      return {
+        controller: node,
+        option: node.options[optionIndex],
+        optionIndex
+      };
+    }
+
+    for (const option of node.options) {
+      const nested =
+        findControllerOption(
+          option.children,
+          optionId
+        );
+
+      if (nested) {
+        return nested;
+      }
+    }
+  }
+
+  return null;
+}
+
+function updateControllerOptions(
+  nodes,
+  controllerId,
+  updater
+) {
+  return updateNode(
+    nodes,
+    controllerId,
+    controller => {
+      if (controller.kind !== "controller") {
+        return controller;
+      }
+
+      const options = updater(
+        controller.options
+      );
+      const defaultOption =
+        options.some(
+          option =>
+            option.name ===
+            controller.defaultOption
+        )
+          ? controller.defaultOption
+          : options[0]?.name || "";
+
+      return {
+        ...controller,
+        options,
+        defaultOption
+      };
+    }
+  );
+}
+
+function moveControllerOptionOneStep(
+  controllerId,
+  optionId,
+  direction
+) {
+  const found =
+    findControllerOption(
+      state.nodes,
+      optionId
+    );
+
+  if (
+    !found ||
+    found.controller.id !== controllerId
+  ) {
+    return;
+  }
+
+  const targetIndex =
+    found.optionIndex + direction;
+
+  if (
+    targetIndex < 0 ||
+    targetIndex >=
+      found.controller.options.length
+  ) {
+    return;
+  }
+
+  state.nodes =
+    updateControllerOptions(
+      state.nodes,
+      controllerId,
+      options => {
+        const next = [...options];
+        const [moving] =
+          next.splice(
+            found.optionIndex,
+            1
+          );
+        next.splice(
+          targetIndex,
+          0,
+          moving
+        );
+        return next;
+      }
+    );
+
+  state.activeContainerId = optionId;
+  state.selectedId = controllerId;
+  renderAll();
+}
+
+function uniqueOptionName(
+  options,
+  preferred
+) {
+  const used =
+    new Set(
+      options.map(option =>
+        toPascalCase(
+          option.name,
+          "Section"
+        )
+      )
+    );
+  let candidate =
+    preferred || "Section";
+  let index = 2;
+
+  while (
+    used.has(
+      toPascalCase(
+        candidate,
+        "Section"
+      )
+    )
+  ) {
+    candidate = `Section${index}`;
+    index += 1;
+  }
+
+  return candidate;
+}
+
+function controllerFromDetachedOption(
+  option,
+  sourceController
+) {
+  const controller =
+    makeController();
+  const fallbackName =
+    uniqueOptionName(
+      [option],
+      "Section2"
+    );
+
+  return {
+    ...controller,
+    description:
+      `Selects the visible ${option.name} settings section.`,
+    defaultOption: option.name,
+    options: [
+      option,
+      {
+        id: createId("option"),
+        name: fallbackName,
+        children: []
+      }
+    ],
+    reaction:
+      sourceController?.reaction ||
+      "stored"
+  };
+}
+
+function detachControllerOption(
+  controllerId,
+  optionId
+) {
+  let detached = null;
+
+  const processList =
+    nodes => {
+      const result = [];
+
+      for (const node of nodes) {
+        if (
+          node.kind !==
+          "controller"
+        ) {
+          result.push(node);
+          continue;
+        }
+
+        if (
+          node.id ===
+          controllerId
+        ) {
+          const option =
+            node.options.find(
+              current =>
+                current.id ===
+                optionId
+            );
+
+          if (!option) {
+            result.push(node);
+            continue;
+          }
+
+          detached = {
+            option,
+            sourceController:
+              node
+          };
+
+          const remainingOptions =
+            node.options.filter(
+              current =>
+                current.id !==
+                optionId
+            );
+
+          if (
+            remainingOptions.length >=
+            2
+          ) {
+            const defaultOption =
+              remainingOptions.some(
+                current =>
+                  current.name ===
+                  node.defaultOption
+              )
+                ? node.defaultOption
+                : remainingOptions[0]
+                    .name;
+
+            result.push({
+              ...node,
+              options:
+                remainingOptions,
+              defaultOption
+            });
+
+            continue;
+          }
+
+          if (
+            remainingOptions.length ===
+            1
+          ) {
+            const remainingChildren =
+              processList(
+                remainingOptions[0]
+                  .children
+              );
+
+            result.push(
+              ...remainingChildren
+            );
+          }
+
+          continue;
+        }
+
+        result.push({
+          ...node,
+          options:
+            node.options.map(
+              option => ({
+                ...option,
+                children:
+                  processList(
+                    option.children
+                  )
+              })
+            )
+        });
+      }
+
+      return result;
+    };
+
+  state.nodes =
+    processList(
+      state.nodes
+    );
+
+  return detached;
+}
+
+function reorderControllerOption(
+  controllerId,
+  optionId,
+  requestedIndex
+) {
+  const found =
+    findControllerOption(
+      state.nodes,
+      optionId
+    );
+
+  if (
+    !found ||
+    found.controller.id !== controllerId
+  ) {
+    return false;
+  }
+
+  let targetIndex = clamp(
+    Math.trunc(requestedIndex),
+    0,
+    found.controller.options.length
+  );
+
+  if (found.optionIndex < targetIndex) {
+    targetIndex -= 1;
+  }
+
+  state.nodes =
+    updateControllerOptions(
+      state.nodes,
+      controllerId,
+      options => {
+        const next = [...options];
+        const [moving] =
+          next.splice(
+            found.optionIndex,
+            1
+          );
+        next.splice(
+          targetIndex,
+          0,
+          moving
+        );
+        return next;
+      }
+    );
+
+  state.activeContainerId = optionId;
+  state.selectedId = controllerId;
+  return true;
 }
 
 function nodeContainsContainer(node, containerId) {
@@ -3089,18 +3584,41 @@ function selectedBadge(node) {
   );
 }
 
-function nodeCardMarkup(node) {
+function nodeCardsMarkup(
+  nodes,
+  containerId
+) {
+  return nodes
+    .map(
+      (node, index) =>
+        nodeCardMarkup(
+          node,
+          containerId,
+          index,
+          nodes.length
+        )
+    )
+    .join("");
+}
+
+function nodeCardMarkup(
+  node,
+  containerId,
+  index,
+  siblingCount
+) {
   const selected = state.selectedId === node.id ? " selected" : "";
   const subtitle =
     node.kind === "controller"
       ? `${node.enumName} · section navigation`
       : `${node.valueType} · ${node.keyName}`;
   let body = "";
+
   if (node.kind === "controller") {
     body = `<div class="controller-options">
       ${node.options
         .map(
-          option => `<section
+          (option, optionIndex) => `<section
             class="option-lane${
               state.activeContainerId === option.id
                 ? " active-container"
@@ -3110,17 +3628,48 @@ function nodeCardMarkup(node) {
                 ? " drag-over"
                 : ""
             }"
-            data-container="${escapeHtml(option.id)}">
+            draggable="true"
+            data-container="${escapeHtml(option.id)}"
+            data-option-id="${escapeHtml(option.id)}"
+            data-controller-id="${escapeHtml(node.id)}"
+            data-option-index="${optionIndex}">
             <header class="option-heading">
               <span>${escapeHtml(option.name)}</span>
-              <small>${option.children.length} item${
-                option.children.length === 1 ? "" : "s"
-              }</small>
+              <div class="option-heading-actions">
+                <div class="option-order-actions" aria-label="Change section order">
+                  <button
+                    class="move-option move-option-left"
+                    type="button"
+                    draggable="false"
+                    data-move-option="${escapeHtml(option.id)}"
+                    data-option-controller="${escapeHtml(node.id)}"
+                    data-option-direction="-1"
+                    ${optionIndex <= 0 ? "disabled" : ""}
+                    title="Move section left"
+                    aria-label="Move ${escapeHtml(option.name)} left">←</button>
+                  <button
+                    class="move-option move-option-right"
+                    type="button"
+                    draggable="false"
+                    data-move-option="${escapeHtml(option.id)}"
+                    data-option-controller="${escapeHtml(node.id)}"
+                    data-option-direction="1"
+                    ${optionIndex >= node.options.length - 1 ? "disabled" : ""}
+                    title="Move section right"
+                    aria-label="Move ${escapeHtml(option.name)} right">→</button>
+                </div>
+                <small>${option.children.length} item${
+                  option.children.length === 1 ? "" : "s"
+                }</small>
+              </div>
             </header>
             <div class="drop-zone">
               ${
                 option.children.length
-                  ? option.children.map(nodeCardMarkup).join("")
+                  ? nodeCardsMarkup(
+                      option.children,
+                      option.id
+                    )
                   : `<div class="empty-drop"><span>＋</span>Drop or add controls here</div>`
               }
             </div>
@@ -3129,19 +3678,43 @@ function nodeCardMarkup(node) {
         .join("")}
     </div>`;
   }
+
   return `<article
     class="node-card ${escapeHtml(node.kind)}${selected}"
     draggable="true"
-    data-node-id="${escapeHtml(node.id)}">
+    data-node-id="${escapeHtml(node.id)}"
+    data-parent-container="${escapeHtml(containerId)}"
+    data-sibling-index="${index}">
     <div class="node-head">
       <div class="node-icon">${escapeHtml(selectedBadge(node))}</div>
       <div class="node-copy">
         <strong>${escapeHtml(node.fieldName)}</strong>
         <small>${escapeHtml(subtitle)}</small>
       </div>
+      <div class="node-order-actions" aria-label="Change item order">
+        <button
+          class="move-node move-node-up"
+          type="button"
+          draggable="false"
+          data-move-node="${escapeHtml(node.id)}"
+          data-move-direction="-1"
+          ${index <= 0 ? "disabled" : ""}
+          title="Move one position up"
+          aria-label="Move ${escapeHtml(node.fieldName)} up">▲</button>
+        <button
+          class="move-node move-node-down"
+          type="button"
+          draggable="false"
+          data-move-node="${escapeHtml(node.id)}"
+          data-move-direction="1"
+          ${index >= siblingCount - 1 ? "disabled" : ""}
+          title="Move one position down"
+          aria-label="Move ${escapeHtml(node.fieldName)} down">▼</button>
+      </div>
       <button
         class="delete-node"
         type="button"
+        draggable="false"
         data-delete-node="${escapeHtml(node.id)}"
         title="Delete">×</button>
     </div>
@@ -3168,9 +3741,43 @@ function allowContainerDrop(container, event) {
 
 function clearDragFeedback() {
   state.dragOverContainer = null;
+  state.dragInsertContainer = null;
+  state.dragInsertIndex = null;
+
   document
-    .querySelectorAll(".option-lane.drag-over, .builder-canvas.drag-over")
-    .forEach(zone => zone.classList.remove("drag-over"));
+    .querySelectorAll(
+      ".option-lane.drag-over, .builder-canvas.drag-over"
+    )
+    .forEach(zone =>
+      zone.classList.remove("drag-over")
+    );
+
+  document
+    .querySelectorAll(
+      ".node-card.drag-insert-before, .node-card.drag-insert-after"
+    )
+    .forEach(card => {
+      card.classList.remove(
+        "drag-insert-before",
+        "drag-insert-after"
+      );
+    });
+
+  dragFeedbackPlaceholder?.remove();
+  dragFeedbackPlaceholder = null;
+
+  optionDragFeedbackPlaceholder?.remove();
+  optionDragFeedbackPlaceholder = null;
+
+  document
+    .querySelectorAll(
+      ".controller-options.option-drag-over"
+    )
+    .forEach(host =>
+      host.classList.remove(
+        "option-drag-over"
+      )
+    );
 }
 
 function beginDragScrolling(event) {
@@ -3264,48 +3871,857 @@ function stopDragScrolling() {
 function finishDragInteraction() {
   stopDragScrolling();
   clearDragFeedback();
+  activeDraggedNodeId = null;
+  activeDraggedOptionId = null;
+  activeDraggedOptionControllerId = null;
 }
 
-function handleDrop(containerId, event) {
+function directNodeCards(host) {
+  return Array.from(host?.children || [])
+    .filter(
+      child =>
+        child instanceof HTMLElement &&
+        child.classList.contains("node-card")
+    );
+}
+
+function dropHostForCard(card) {
+  const parent = card.parentElement;
+
+  if (
+    parent?.classList.contains("drop-zone") ||
+    parent?.classList.contains("builder-canvas")
+  ) {
+    return parent;
+  }
+
+  return null;
+}
+
+function ensureDragPlaceholder() {
+  if (
+    dragFeedbackPlaceholder &&
+    dragFeedbackPlaceholder.isConnected
+  ) {
+    return dragFeedbackPlaceholder;
+  }
+
+  dragFeedbackPlaceholder =
+    document.createElement("div");
+  dragFeedbackPlaceholder.className =
+    "drag-reorder-placeholder";
+  dragFeedbackPlaceholder.setAttribute(
+    "aria-hidden",
+    "true"
+  );
+
+  return dragFeedbackPlaceholder;
+}
+
+function directOptionLanes(host) {
+  return Array.from(host?.children || [])
+    .filter(
+      child =>
+        child instanceof HTMLElement &&
+        child.classList.contains(
+          "option-lane"
+        )
+    );
+}
+
+function ensureOptionDragPlaceholder() {
+  if (
+    optionDragFeedbackPlaceholder &&
+    optionDragFeedbackPlaceholder.isConnected
+  ) {
+    return optionDragFeedbackPlaceholder;
+  }
+
+  optionDragFeedbackPlaceholder =
+    document.createElement("div");
+  optionDragFeedbackPlaceholder.className =
+    "option-reorder-placeholder";
+  optionDragFeedbackPlaceholder.setAttribute(
+    "aria-hidden",
+    "true"
+  );
+
+  return optionDragFeedbackPlaceholder;
+}
+
+function optionContainsController(
+  option,
+  controllerId
+) {
+  return Boolean(
+    findNode(
+      option.children,
+      controllerId
+    )
+  );
+}
+
+function setOptionInsertFeedback(
+  controllerId,
+  host,
+  event
+) {
   event.preventDefault();
   event.stopPropagation();
-  const paletteType = event.dataTransfer.getData(
-    "application/x-rml-palette"
-  );
-  const nodeId = event.dataTransfer.getData("application/x-rml-node");
-  finishDragInteraction();
-  if (paletteType) {
-    addPaletteItem(paletteType, containerId);
+
+  if (
+    !host ||
+    !activeDraggedOptionId ||
+    !activeDraggedOptionControllerId
+  ) {
     return;
   }
+
+  const source =
+    findControllerOption(
+      state.nodes,
+      activeDraggedOptionId
+    );
+
+  if (
+    !source ||
+    source.controller.id !==
+      activeDraggedOptionControllerId
+  ) {
+    return;
+  }
+
+  /*
+   * Das Ziel-Enum darf nicht innerhalb
+   * der verschobenen Sektion liegen.
+   */
+  if (
+    optionContainsController(
+      source.option,
+      controllerId
+    )
+  ) {
+    event.dataTransfer.dropEffect =
+      "none";
+
+    return;
+  }
+
+  optionDragFeedbackPlaceholder?.remove();
+
+  const lanes =
+    directOptionLanes(
+      host
+    );
+
+  const sameController =
+    activeDraggedOptionControllerId ===
+    controllerId;
+
+  const comparisonLanes =
+    sameController
+      ? lanes.filter(
+          lane =>
+            lane.dataset.optionId !==
+            activeDraggedOptionId
+        )
+      : lanes;
+
+  let insertionIndex =
+    lanes.length;
+
+  for (
+    const lane of comparisonLanes
+  ) {
+    const rectangle =
+      lane.getBoundingClientRect();
+
+    if (
+      event.clientX <
+      rectangle.left +
+        rectangle.width / 2
+    ) {
+      insertionIndex =
+        Number(
+          lane.dataset.optionIndex
+        ) || 0;
+
+      break;
+    }
+  }
+
+  state.dragInsertContainer =
+    `controller:${controllerId}`;
+
+  state.dragInsertIndex =
+    insertionIndex;
+
+  host.classList.add(
+    "option-drag-over"
+  );
+
+  event.dataTransfer.dropEffect =
+    "move";
+
+  const placeholder =
+    ensureOptionDragPlaceholder();
+
+  const referenceLane =
+    lanes.find(
+      lane =>
+        (
+          Number(
+            lane.dataset.optionIndex
+          ) || 0
+        ) >= insertionIndex
+    );
+
+  if (referenceLane) {
+    host.insertBefore(
+      placeholder,
+      referenceLane
+    );
+  } else {
+    host.appendChild(
+      placeholder
+    );
+  }
+}
+
+function handleOptionReorderDrop(
+  targetControllerId,
+  event
+) {
+  event.preventDefault();
+  event.stopPropagation();
+
+  const optionId =
+    event.dataTransfer.getData(
+      "application/x-rml-option"
+    );
+
+  const sourceControllerId =
+    event.dataTransfer.getData(
+      "application/x-rml-option-controller"
+    );
+
+  const insertionIndex =
+    state.dragInsertContainer ===
+      `controller:${targetControllerId}` &&
+    Number.isFinite(
+      state.dragInsertIndex
+    )
+      ? state.dragInsertIndex
+      : Number.POSITIVE_INFINITY;
+
+  /*
+   * Die IDs müssen vor finishDragInteraction()
+   * ausgelesen werden, weil dort der aktive
+   * Drag-Zustand gelöscht wird.
+   */
+  finishDragInteraction();
+
+  if (
+    !optionId ||
+    !sourceControllerId
+  ) {
+    renderAll();
+    return;
+  }
+
+  /*
+   * Innerhalb desselben Enums:
+   * normales Reordering.
+   */
+  if (
+    sourceControllerId ===
+    targetControllerId
+  ) {
+    if (
+      reorderControllerOption(
+        targetControllerId,
+        optionId,
+        insertionIndex
+      )
+    ) {
+      renderAll();
+      return;
+    }
+
+    renderAll();
+    return;
+  }
+
+  const source =
+    findControllerOption(
+      state.nodes,
+      optionId
+    );
+
+  if (
+    !source ||
+    source.controller.id !==
+      sourceControllerId
+  ) {
+    renderAll();
+    return;
+  }
+
+  /*
+   * Ein Enum innerhalb der verschobenen
+   * Sektion darf nicht ihr eigenes Ziel sein.
+   */
+  if (
+    optionContainsController(
+      source.option,
+      targetControllerId
+    )
+  ) {
+    renderAll();
+    return;
+  }
+
+  const targetBeforeDetach =
+    findNode(
+      state.nodes,
+      targetControllerId
+    );
+
+  if (
+    !targetBeforeDetach ||
+    targetBeforeDetach.kind !==
+      "controller"
+  ) {
+    renderAll();
+    return;
+  }
+
+  const detached =
+    detachControllerOption(
+      sourceControllerId,
+      optionId
+    );
+
+  if (!detached) {
+    renderAll();
+    return;
+  }
+
+  const targetAfterDetach =
+    findNode(
+      state.nodes,
+      targetControllerId
+    );
+
+  if (
+    !targetAfterDetach ||
+    targetAfterDetach.kind !==
+      "controller"
+  ) {
+    /*
+     * Sicherheitsfallback:
+     * Falls das Ziel durch eine unerwartete
+     * Strukturänderung verschwunden ist,
+     * wird aus der Sektion wieder ein Enum.
+     */
+    const fallbackController =
+      controllerFromDetachedOption(
+        detached.option,
+        detached.sourceController
+      );
+
+    state.nodes = [
+      ...state.nodes,
+      fallbackController
+    ];
+
+    state.selectedId =
+      fallbackController.id;
+
+    state.activeContainerId =
+      detached.option.id;
+
+    renderAll();
+    return;
+  }
+
+  const movedOption = {
+    ...detached.option,
+
+    /*
+     * Innerhalb eines Enums müssen die
+     * Sektionsnamen eindeutig bleiben.
+     */
+    name:
+      uniqueOptionName(
+        targetAfterDetach.options,
+        detached.option.name
+      )
+  };
+
+  state.nodes =
+    updateControllerOptions(
+      state.nodes,
+      targetControllerId,
+      options => {
+        const index =
+          clamp(
+            Number.isFinite(
+              insertionIndex
+            )
+              ? Math.trunc(
+                  insertionIndex
+                )
+              : options.length,
+            0,
+            options.length
+          );
+
+        return [
+          ...options.slice(
+            0,
+            index
+          ),
+          movedOption,
+          ...options.slice(
+            index
+          )
+        ];
+      }
+    );
+
+  state.selectedId =
+    targetControllerId;
+
+  state.activeContainerId =
+    movedOption.id;
+
+  renderAll();
+}
+
+function setContainerInsertFeedback(
+  containerId,
+  host,
+  event
+) {
+  event.preventDefault();
+  event.stopPropagation();
+
+  if (!host) {
+    return;
+  }
+
+  // Measure without the placeholder. Otherwise its own height shifts the
+  // card midpoints and the insertion decision can oscillate at the edge.
+  dragFeedbackPlaceholder?.remove();
+
+  const cards =
+    directNodeCards(host);
+  const comparisonCards =
+    cards.filter(
+      card =>
+        card.dataset.nodeId !==
+        activeDraggedNodeId
+    );
+
+  let insertionIndex =
+    cards.length;
+
+  for (const card of comparisonCards) {
+    const rectangle =
+      card.getBoundingClientRect();
+
+    if (
+      event.clientY <
+      rectangle.top +
+        rectangle.height / 2
+    ) {
+      insertionIndex =
+        Number(
+          card.dataset.siblingIndex
+        ) || 0;
+      break;
+    }
+  }
+
+  state.dragOverContainer =
+    containerId;
+  state.dragInsertContainer =
+    containerId;
+  state.dragInsertIndex =
+    insertionIndex;
+
+  document
+    .querySelectorAll(
+      ".option-lane, .builder-canvas"
+    )
+    .forEach(zone => {
+      zone.classList.toggle(
+        "drag-over",
+        (zone.dataset.container ||
+          ROOT_CONTAINER) ===
+          containerId
+      );
+    });
+
+  event.dataTransfer.dropEffect =
+    event.dataTransfer.types.includes(
+      "application/x-rml-node"
+    ) ||
+    event.dataTransfer.types.includes(
+      "application/x-rml-option"
+    )
+      ? "move"
+      : "copy";
+
+  document
+    .querySelectorAll(
+      ".node-card.drag-insert-before, .node-card.drag-insert-after"
+    )
+    .forEach(card => {
+      card.classList.remove(
+        "drag-insert-before",
+        "drag-insert-after"
+      );
+    });
+
+  const placeholder =
+    ensureDragPlaceholder();
+  const referenceCard =
+    cards.find(
+      card =>
+        (Number(
+          card.dataset.siblingIndex
+        ) || 0) >= insertionIndex
+    );
+
+  if (referenceCard) {
+    host.insertBefore(
+      placeholder,
+      referenceCard
+    );
+    referenceCard.classList.add(
+      "drag-insert-before"
+    );
+  } else {
+    host.appendChild(placeholder);
+
+    cards.at(-1)?.classList.add(
+      "drag-insert-after"
+    );
+  }
+}
+
+function setIndexedDropFeedback(
+  card,
+  event
+) {
+  setContainerInsertFeedback(
+    card.dataset.parentContainer ||
+      ROOT_CONTAINER,
+    dropHostForCard(card),
+    event
+  );
+}
+
+function handleDropAt(
+  containerId,
+  insertionIndex,
+  event
+) {
+  event.preventDefault();
+  event.stopPropagation();
+
+  const paletteType =
+    event.dataTransfer.getData(
+      "application/x-rml-palette"
+    );
+  const nodeId =
+    event.dataTransfer.getData(
+      "application/x-rml-node"
+    );
+  const optionId =
+    event.dataTransfer.getData(
+      "application/x-rml-option"
+    );
+  const optionControllerId =
+    event.dataTransfer.getData(
+      "application/x-rml-option-controller"
+    );
+
+  finishDragInteraction();
+
+  if (
+    optionId &&
+    optionControllerId
+  ) {
+    const detached =
+      detachControllerOption(
+        optionControllerId,
+        optionId
+      );
+
+    if (!detached) {
+      renderAll();
+      return;
+    }
+
+    const controller =
+      controllerFromDetachedOption(
+        detached.option,
+        detached.sourceController
+      );
+    const insertion =
+      insertIntoContainerAt(
+        state.nodes,
+        containerId,
+        controller,
+        insertionIndex
+      );
+
+    state.nodes = insertion.inserted
+      ? insertion.nodes
+      : [...state.nodes, controller];
+    state.selectedId = controller.id;
+    state.activeContainerId =
+      detached.option.id;
+    renderAll();
+    return;
+  }
+
+  if (paletteType) {
+    const node =
+      paletteType === "controller"
+        ? makeController()
+        : makeSetting(paletteType);
+    const insertion =
+      insertIntoContainerAt(
+        state.nodes,
+        containerId,
+        node,
+        insertionIndex
+      );
+
+    state.nodes = insertion.inserted
+      ? insertion.nodes
+      : [...state.nodes, node];
+    state.selectedId = node.id;
+    state.activeContainerId =
+      insertion.inserted
+        ? containerId
+        : ROOT_CONTAINER;
+    renderAll();
+    return;
+  }
+
   if (!nodeId) {
     renderAll();
     return;
   }
-  const movingNode = findNode(state.nodes, nodeId);
-  if (!movingNode || nodeContainsContainer(movingNode, containerId)) {
+
+  const movingNode =
+    findNode(
+      state.nodes,
+      nodeId
+    );
+
+  if (
+    !movingNode ||
+    nodeContainsContainer(
+      movingNode,
+      containerId
+    )
+  ) {
     renderAll();
     return;
   }
-  const removal = removeNode(state.nodes, nodeId);
+
+  const sourceContainerId =
+    findNodeContainerId(
+      state.nodes,
+      nodeId
+    );
+  const sourceChildren =
+    sourceContainerId === null
+      ? null
+      : containerChildren(
+          state.nodes,
+          sourceContainerId
+        );
+  const sourceIndex =
+    sourceChildren?.findIndex(
+      node => node.id === nodeId
+    ) ?? -1;
+  let correctedIndex =
+    insertionIndex;
+
+  if (
+    sourceContainerId === containerId &&
+    sourceIndex >= 0 &&
+    sourceIndex < correctedIndex
+  ) {
+    correctedIndex -= 1;
+  }
+
+  const removal =
+    removeNode(
+      state.nodes,
+      nodeId
+    );
+
   if (!removal.removed) {
     renderAll();
     return;
   }
-  const insertion = insertIntoContainer(
-    removal.nodes,
-    containerId,
-    removal.removed
-  );
+
+  const insertion =
+    insertIntoContainerAt(
+      removal.nodes,
+      containerId,
+      removal.removed,
+      correctedIndex
+    );
+
   state.nodes = insertion.inserted
     ? insertion.nodes
     : [...removal.nodes, removal.removed];
-  state.activeContainerId = containerId;
+  state.activeContainerId =
+    insertion.inserted
+      ? containerId
+      : ROOT_CONTAINER;
   state.selectedId = nodeId;
   renderAll();
 }
 
+function handleDrop(containerId, event) {
+  const children =
+    containerChildren(
+      state.nodes,
+      containerId
+    );
+  const insertionIndex =
+    state.dragInsertContainer ===
+      containerId &&
+    Number.isFinite(
+      state.dragInsertIndex
+    )
+      ? state.dragInsertIndex
+      : children?.length || 0;
+
+  handleDropAt(
+    containerId,
+    insertionIndex,
+    event
+  );
+}
+
 function bindCanvasInteractions() {
+  document
+    .querySelectorAll(
+      ".controller-options"
+    )
+    .forEach(host => {
+      const controllerCard =
+        host.closest(
+          "[data-node-id]"
+        );
+      const controllerId =
+        controllerCard?.dataset.nodeId;
+
+      if (!controllerId) {
+        return;
+      }
+
+      host.addEventListener(
+        "dragover",
+        event => {
+          if (
+            event.dataTransfer.types.includes(
+              "application/x-rml-option"
+            )
+          ) {
+            setOptionInsertFeedback(
+              controllerId,
+              host,
+              event
+            );
+          }
+        }
+      );
+
+      host.addEventListener(
+        "drop",
+        event => {
+          if (
+            event.dataTransfer.types.includes(
+              "application/x-rml-option"
+            )
+          ) {
+            handleOptionReorderDrop(
+              controllerId,
+              event
+            );
+          }
+        }
+      );
+    });
+
+  document
+    .querySelectorAll(
+      "[data-option-id]"
+    )
+    .forEach(lane => {
+      lane.addEventListener(
+        "dragstart",
+        event => {
+          const blockedButton =
+            event.target.closest(
+              "button"
+            );
+
+          const ownDropZone =
+            lane.querySelector(
+              ":scope > .drop-zone"
+            );
+
+          const insideOwnDropZone =
+            ownDropZone?.contains(
+              event.target
+            );
+
+          if (
+            blockedButton ||
+            insideOwnDropZone
+          ) {
+            event.preventDefault();
+            return;
+          }
+
+          event.stopPropagation();
+          activeDraggedOptionId =
+            lane.dataset.optionId;
+          activeDraggedOptionControllerId =
+            lane.dataset.controllerId;
+          activeDraggedNodeId = null;
+          beginDragScrolling(event);
+          event.dataTransfer.setData(
+            "application/x-rml-option",
+            lane.dataset.optionId
+          );
+          event.dataTransfer.setData(
+            "application/x-rml-option-controller",
+            lane.dataset.controllerId
+          );
+          event.dataTransfer.effectAllowed =
+            "move";
+        }
+      );
+      lane.addEventListener(
+        "dragend",
+        finishDragInteraction
+      );
+    });
+
   document.querySelectorAll("[data-node-id]").forEach(card => {
     card.addEventListener("click", event => {
       event.stopPropagation();
@@ -3323,8 +4739,35 @@ function bindCanvasInteractions() {
 
       renderAll();
     });
-    card.addEventListener("dragstart", event => {
+    card.addEventListener("dragover", event => {
+      event.preventDefault();
       event.stopPropagation();
+      setIndexedDropFeedback(
+        card,
+        event
+      );
+    });
+    card.addEventListener("drop", event => {
+      handleDropAt(
+        card.dataset.parentContainer || ROOT_CONTAINER,
+        state.dragInsertIndex ?? (Number(card.dataset.siblingIndex) || 0),
+        event
+      );
+    });
+    card.addEventListener("dragstart", event => {
+      if (
+        activeDraggedOptionId ||
+        event.target.closest(
+          "button, .option-heading"
+        )
+      ) {
+        event.preventDefault();
+        return;
+      }
+
+      event.stopPropagation();
+      activeDraggedNodeId =
+        card.dataset.nodeId;
       beginDragScrolling(event);
       event.dataTransfer.setData(
         "application/x-rml-node",
@@ -3334,6 +4777,47 @@ function bindCanvasInteractions() {
     });
     card.addEventListener("dragend", finishDragInteraction);
   });
+  document.querySelectorAll("[data-move-node]").forEach(button => {
+    button.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      moveNodeOneStep(
+        button.dataset.moveNode,
+        Number(button.dataset.moveDirection)
+      );
+    });
+    button.addEventListener("pointerdown", event => {
+      event.stopPropagation();
+    });
+  });
+
+  document
+    .querySelectorAll(
+      "[data-move-option]"
+    )
+    .forEach(button => {
+      button.addEventListener(
+        "click",
+        event => {
+          event.preventDefault();
+          event.stopPropagation();
+          moveControllerOptionOneStep(
+            button.dataset.optionController,
+            button.dataset.moveOption,
+            Number(
+              button.dataset.optionDirection
+            )
+          );
+        }
+      );
+      button.addEventListener(
+        "pointerdown",
+        event => {
+          event.stopPropagation();
+        }
+      );
+    });
+
   document.querySelectorAll("[data-delete-node]").forEach(button => {
     button.addEventListener("click", event => {
       event.stopPropagation();
@@ -3357,11 +4841,77 @@ function bindCanvasInteractions() {
       state.activeContainerId = containerId;
       renderCanvas();
     });
-    zone.addEventListener("dragover", event =>
-      allowContainerDrop(containerId, event)
+    zone.addEventListener(
+      "dragover",
+      event => {
+        const optionDrag =
+          event.dataTransfer.types.includes(
+            "application/x-rml-option"
+          );
+
+        const targetControllerId =
+          zone.dataset.controllerId;
+
+        /*
+        * Eine gezogene Sektion wird beim Hover
+        * über einem Enum immer als Enum-Sektion
+        * behandelt — unabhängig davon, aus
+        * welchem Enum sie stammt.
+        */
+        if (
+          optionDrag &&
+          activeDraggedOptionControllerId &&
+          targetControllerId
+        ) {
+          setOptionInsertFeedback(
+            targetControllerId,
+            zone.parentElement,
+            event
+          );
+
+          return;
+        }
+
+        const host =
+          zone.querySelector(
+            ":scope > .drop-zone"
+          );
+
+        setContainerInsertFeedback(
+          containerId,
+          host,
+          event
+        );
+      }
     );
-    zone.addEventListener("drop", event =>
-      handleDrop(containerId, event)
+    zone.addEventListener(
+      "drop",
+      event => {
+        const optionDrag =
+          event.dataTransfer.types.includes(
+            "application/x-rml-option"
+          );
+
+        const targetControllerId =
+          zone.dataset.controllerId;
+
+        if (
+          optionDrag &&
+          targetControllerId
+        ) {
+          handleOptionReorderDrop(
+            targetControllerId,
+            event
+          );
+
+          return;
+        }
+
+        handleDrop(
+          containerId,
+          event
+        );
+      }
     );
     zone.addEventListener("dragleave", event => {
       if (!zone.contains(event.relatedTarget)) {
@@ -3383,7 +4933,11 @@ function bindCanvasInteractions() {
   };
   elements.builderCanvas.ondragover = event => {
     if (!event.target.closest("[data-container]")) {
-      allowContainerDrop(ROOT_CONTAINER, event);
+      setContainerInsertFeedback(
+        ROOT_CONTAINER,
+        elements.builderCanvas,
+        event
+      );
     }
   };
   elements.builderCanvas.ondrop = event => {
@@ -3405,7 +4959,7 @@ function renderCanvas() {
     state.activeContainerId
   );
   elements.builderCanvas.innerHTML = state.nodes.length
-    ? `${state.nodes.map(nodeCardMarkup).join("")}
+    ? `${nodeCardsMarkup(state.nodes, ROOT_CONTAINER)}
        <span class="root-label">Drop on background to move to root</span>`
     : `<div class="empty-canvas">
         <span>＋</span>
@@ -8734,8 +10288,11 @@ function initialize() {
 
   document.addEventListener(
     "drop",
-    finishDragInteraction,
-    true
+    event => {
+      if (!event.defaultPrevented) {
+        finishDragInteraction();
+      }
+    }
   );
 
   document.addEventListener(
