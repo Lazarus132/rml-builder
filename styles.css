@@ -4586,3 +4586,87 @@ footer strong {
     font-size: clamp(17px, 3.5vh, 24px) !important;
   }
 }
+
+/* ========================================================================== */
+/* ABSOLUTE LAST OVERRIDE: PORTRAIT PALETTE DIRECTLY BELOW PICKER              */
+/* ========================================================================== */
+
+@media (max-width: 600px) {
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-content {
+    display: block !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    place-items: initial !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-settings {
+    display: block !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    place-items: initial !important;
+    padding: 8px 0 16px !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-full-color {
+    position: static !important;
+    inset: auto !important;
+    left: auto !important;
+    top: auto !important;
+
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+
+    width: 435px !important;
+    min-width: 435px !important;
+    max-width: none !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+
+    margin: 0 auto !important;
+    padding: 0 !important;
+    gap: 16px !important;
+
+    grid-template-columns: none !important;
+    grid-template-rows: none !important;
+
+    zoom: var(--rml-picker-scale) !important;
+    transform: none !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-resonite-color-left {
+    order: 1 !important;
+    flex: 0 0 613px !important;
+    width: 435px !important;
+    height: 613px !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-color-palette {
+    order: 2 !important;
+    flex: 0 0 613px !important;
+
+    width: 435px !important;
+    min-width: 435px !important;
+    max-width: 435px !important;
+
+    height: 613px !important;
+    min-height: 613px !important;
+    max-height: 613px !important;
+
+    margin: 0 !important;
+  }
+
+  .settings-preview-dialog.rml-preview-color-open
+  .rml-preview-footer {
+    position: relative !important;
+    inset: auto !important;
+  }
+}
