@@ -1,11 +1,12 @@
 (() => {
   "use strict";
 
-  const BASE_PICKER_WIDTH = 878;
-  const BASE_PICKER_HEIGHT = 613;
-  const EDGE_GAP = 10;
+  const PORTRAIT_BASE_WIDTH = 435;
+  const LANDSCAPE_BASE_WIDTH = 878;
+  const LANDSCAPE_BASE_HEIGHT = 613;
+  const EDGE_GAP = 12;
 
-  function getVisibleViewport() {
+  function visibleViewport() {
     const viewport = window.visualViewport;
 
     if (viewport) {
@@ -34,7 +35,7 @@
       return;
     }
 
-    const viewport = getVisibleViewport();
+    const viewport = visibleViewport();
 
     dialog.style.setProperty(
       "--rml-visible-width",
@@ -64,57 +65,73 @@
       return;
     }
 
-    const availableWidth =
-      Math.max(1, content.clientWidth - EDGE_GAP * 2);
+    const portrait =
+      viewport.height >= viewport.width;
 
-    const availableHeight =
-      Math.max(1, content.clientHeight - EDGE_GAP * 2);
+    let scale;
 
-    /*
-     * One uniform factor from BOTH dimensions.
-     * Portrait therefore grows until height or width is full.
-     * Landscape shrinks until the complete picker remains visible.
-     */
-    const scale = Math.min(
-      availableWidth / BASE_PICKER_WIDTH,
-      availableHeight / BASE_PICKER_HEIGHT,
-      1
+    if (portrait) {
+      /*
+       * Portrait uses width only.
+       * The palette sits below the controls and the middle area scrolls.
+       */
+      scale =
+        (content.clientWidth - EDGE_GAP * 2) /
+        PORTRAIT_BASE_WIDTH;
+    } else {
+      /*
+       * Landscape must fit the complete original two-column picker into the
+       * visible middle area, so both dimensions constrain the scale.
+       */
+      scale = Math.min(
+        (content.clientWidth - EDGE_GAP * 2) /
+          LANDSCAPE_BASE_WIDTH,
+        (content.clientHeight - EDGE_GAP * 2) /
+          LANDSCAPE_BASE_HEIGHT
+      );
+    }
+
+    scale = Math.max(
+      0.1,
+      Math.min(scale, 1)
     );
 
     dialog.style.setProperty(
       "--rml-picker-scale",
-      String(Math.max(0.1, scale))
+      String(scale)
     );
   }
 
-  let frame = 0;
+  let scheduledFrame = 0;
 
   function scheduleFit() {
-    cancelAnimationFrame(frame);
+    cancelAnimationFrame(scheduledFrame);
 
-    frame = requestAnimationFrame(() => {
+    scheduledFrame = requestAnimationFrame(() => {
       fitSettingsPreviewColorPicker();
 
-      /*
-       * Safari can change its visual viewport again after toolbar animation.
-       */
       requestAnimationFrame(
         fitSettingsPreviewColorPicker
       );
     });
   }
 
-  const observer = new MutationObserver(scheduleFit);
+  const observer = new MutationObserver(
+    scheduleFit
+  );
 
-  observer.observe(document.documentElement, {
-    subtree: true,
-    childList: true,
-    attributes: true,
-    attributeFilter: [
-      "open",
-      "class"
-    ]
-  });
+  observer.observe(
+    document.documentElement,
+    {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: [
+        "open",
+        "class"
+      ]
+    }
+  );
 
   window.addEventListener(
     "resize",
@@ -148,9 +165,6 @@
     { once: true }
   );
 
-  /*
-   * Public hook: call after opening or rerendering the picker.
-   */
   window.fitSettingsPreviewColorPicker =
     fitSettingsPreviewColorPicker;
 })();
