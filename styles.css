@@ -5063,8 +5063,47 @@ dialog#export-dialog.mobile-full-modal {
 
 #project-close,
 #export-close,
-#settings-preview-close {
+#settings-preview-close,
+.rml-preview-color-button,
+.rml-preview-color-button span {
   -webkit-tap-highlight-color: transparent !important;
+  -webkit-touch-callout: none !important;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .rml-preview-color-button,
+  .rml-preview-color-button:hover,
+  .rml-preview-color-button:focus,
+  .rml-preview-color-button:focus-visible,
+  .rml-preview-color-button:active {
+    opacity: 1 !important;
+    filter: none !important;
+    transform: none !important;
+
+    border: 0 !important;
+    outline: none !important;
+    background: transparent !important;
+
+    transition: none !important;
+    animation: none !important;
+
+    -webkit-tap-highlight-color: transparent !important;
+  }
+
+  .rml-preview-color-button span,
+  .rml-preview-color-button:hover span,
+  .rml-preview-color-button:focus span,
+  .rml-preview-color-button:focus-visible span,
+  .rml-preview-color-button:active span {
+    opacity: 1 !important;
+    filter: none !important;
+    transform: none !important;
+
+    transition: none !important;
+    animation: none !important;
+
+    -webkit-tap-highlight-color: transparent !important;
+  }
 }
 
 #project-close:focus,
