@@ -1,106 +1,163 @@
 (() => {
   "use strict";
 
-  const PORTRAIT_BASE_WIDTH = 435;
-  const PORTRAIT_BASE_HEIGHT = 1242;
+  const PORTRAIT_WIDTH = 435;
+  const PORTRAIT_HEIGHT = 1242;
 
-  const LANDSCAPE_BASE_WIDTH = 878;
-  const LANDSCAPE_BASE_HEIGHT = 613;
+  const LANDSCAPE_WIDTH = 878;
+  const LANDSCAPE_HEIGHT = 613;
 
-  const CONTENT_GAP = 12;
+  const SIDE_GAP = 12;
+  const VERTICAL_GAP = 12;
 
-  /*
-   * Querformat wird niemals kleiner als 72 %.
-   * Reicht der Platz dafür nicht aus, wird gescrollt statt weiter verkleinert.
-   */
-  const MIN_LANDSCAPE_SCALE = 0.72;
-
-  let scheduledFrame = 0;
+  let frameId = 0;
   let lastOrientation = "";
-  let lastColorPageOpen = false;
+  let wasOpen = false;
 
-  function visibleViewport() {
-    const viewport = window.visualViewport;
+  function readVisibleViewport() {
+    const viewport =
+      window.visualViewport;
 
     if (viewport) {
       return {
-        width: Math.max(1, viewport.width),
-        height: Math.max(1, viewport.height),
-        left: viewport.offsetLeft,
-        top: viewport.offsetTop
+        width:
+          Math.max(
+            1,
+            viewport.width
+          ),
+        height:
+          Math.max(
+            1,
+            viewport.height
+          ),
+        left:
+          viewport.offsetLeft,
+        top:
+          viewport.offsetTop
       };
     }
 
     return {
-      width: Math.max(
-        1,
-        window.innerWidth ||
-        document.documentElement.clientWidth
-      ),
-      height: Math.max(
-        1,
-        window.innerHeight ||
-        document.documentElement.clientHeight
-      ),
+      width:
+        Math.max(
+          1,
+          window.innerWidth ||
+          document.documentElement.clientWidth
+        ),
+      height:
+        Math.max(
+          1,
+          window.innerHeight ||
+          document.documentElement.clientHeight
+        ),
       left: 0,
       top: 0
     };
   }
 
-  function finitePositive(value, fallback) {
-    return Number.isFinite(value) && value > 0
-      ? value
-      : fallback;
-  }
-
-  function resetPickerScroll(dialog) {
-    const content = dialog.querySelector(
-      ".rml-preview-content"
-    );
+  function resetScroll(dialog) {
+    const content =
+      dialog.querySelector(
+        ".rml-preview-content"
+      );
 
     if (!content) {
       return;
     }
 
-    /*
-     * Sofort und noch einmal im nächsten Frame.
-     * Das verhindert insbesondere auf iOS Safari, dass eine alte
-     * Scrollposition nach Rendern oder Drehen wiederhergestellt wird.
-     */
-    content.scrollTo({
-      top: 0,
-      left: 0,
-      behavior: "instant"
-    });
+    content.scrollTop = 0;
+    content.scrollLeft = 0;
 
     requestAnimationFrame(() => {
-      content.scrollTo({
-        top: 0,
-        left: 0,
-        behavior: "instant"
-      });
+      content.scrollTop = 0;
+      content.scrollLeft = 0;
     });
   }
 
   function fitSettingsPreviewColorPicker() {
-    const dialog = document.querySelector(
-      ".settings-preview-dialog"
-    );
+    const dialog =
+      document.querySelector(
+        ".settings-preview-dialog.rml-preview-color-open"
+      );
 
-    const colorPageOpen = Boolean(
-      dialog &&
-      dialog.open &&
-      dialog.classList.contains(
-        "rml-preview-color-open"
-      )
-    );
-
-    if (!colorPageOpen) {
-      lastColorPageOpen = false;
+    if (
+      !dialog ||
+      !dialog.open
+    ) {
+      wasOpen = false;
       return;
     }
 
-    const viewport = visibleViewport();
+    const viewport =
+      readVisibleViewport();
+
+    const portrait =
+      viewport.height >=
+      viewport.width;
+
+    const orientation =
+      portrait
+        ? "portrait"
+        : "landscape";
+
+    const designWidth =
+      portrait
+        ? PORTRAIT_WIDTH
+        : LANDSCAPE_WIDTH;
+
+    const designHeight =
+      portrait
+        ? PORTRAIT_HEIGHT
+        : LANDSCAPE_HEIGHT;
+
+    /*
+     * Width is the only scale constraint.
+     * Height only determines how far the middle region can scroll.
+     */
+    const usableWidth =
+      Math.max(
+        1,
+        viewport.width -
+        SIDE_GAP * 2
+      );
+
+    const scale =
+      Math.min(
+        1,
+        usableWidth /
+        designWidth
+      );
+
+    const scaledWidth =
+      designWidth *
+      scale;
+
+    const scaledHeight =
+      designHeight *
+      scale;
+
+    const canvasWidth =
+      Math.max(
+        viewport.width,
+        scaledWidth +
+        SIDE_GAP * 2
+      );
+
+    const canvasHeight =
+      scaledHeight +
+      VERTICAL_GAP * 2;
+
+    const pickerLeft =
+      Math.max(
+        SIDE_GAP,
+        (
+          canvasWidth -
+          scaledWidth
+        ) / 2
+      );
+
+    dialog.dataset.pickerOrientation =
+      orientation;
 
     dialog.style.setProperty(
       "--rml-visible-width",
@@ -122,142 +179,28 @@
       `${viewport.top}px`
     );
 
-    const content = dialog.querySelector(
-      ".rml-preview-content"
-    );
-
-    if (!content) {
-      return;
-    }
-
-    const contentWidth = finitePositive(
-      content.clientWidth,
-      viewport.width
-    );
-
-    const contentHeight = finitePositive(
-      content.clientHeight,
-      viewport.height
-    );
-
-    const portrait =
-      viewport.height >= viewport.width;
-
-    const orientation =
-      portrait
-        ? "portrait"
-        : "landscape";
-
-    let scale;
-    let scaledWidth;
-    let scaledHeight;
-
-    if (portrait) {
-      /*
-       * Im Hochformat bestimmt ausschließlich die Breite die Skalierung.
-       * Die Gesamthöhe bleibt scrollbar.
-       */
-      scale = Math.min(
-        1,
-        Math.max(
-          0.1,
-          (
-            contentWidth -
-            CONTENT_GAP * 2
-          ) /
-          PORTRAIT_BASE_WIDTH
-        )
-      );
-
-      scaledWidth =
-        PORTRAIT_BASE_WIDTH *
-        scale;
-
-      scaledHeight =
-        PORTRAIT_BASE_HEIGHT *
-        scale;
-    } else {
-      const widthScale =
-        (
-          contentWidth -
-          CONTENT_GAP * 2
-        ) /
-        LANDSCAPE_BASE_WIDTH;
-
-      const heightScale =
-        (
-          contentHeight -
-          CONTENT_GAP * 2
-        ) /
-        LANDSCAPE_BASE_HEIGHT;
-
-      const fittedScale =
-        Math.min(
-          widthScale,
-          heightScale,
-          1
-        );
-
-      /*
-       * Unterhalb von 72 % wird nicht weiter verkleinert.
-       * Stattdessen bekommt der mittlere Bereich horizontales und
-       * vertikales Scrollen.
-       */
-      scale = Math.min(
-        1,
-        Math.max(
-          MIN_LANDSCAPE_SCALE,
-          fittedScale
-        )
-      );
-
-      scaledWidth =
-        LANDSCAPE_BASE_WIDTH *
-        scale;
-
-      scaledHeight =
-        LANDSCAPE_BASE_HEIGHT *
-        scale;
-    }
-
-    dialog.dataset.pickerOrientation =
-      orientation;
-
     dialog.style.setProperty(
       "--rml-picker-scale",
       String(scale)
     );
 
     dialog.style.setProperty(
-      "--rml-picker-scaled-width",
-      `${scaledWidth}px`
-    );
-
-    dialog.style.setProperty(
-      "--rml-picker-scaled-height",
-      `${scaledHeight}px`
+      "--rml-picker-left",
+      `${pickerLeft}px`
     );
 
     dialog.style.setProperty(
       "--rml-picker-canvas-width",
-      `${Math.max(
-        contentWidth,
-        scaledWidth +
-        CONTENT_GAP * 2
-      )}px`
+      `${canvasWidth}px`
     );
 
     dialog.style.setProperty(
       "--rml-picker-canvas-height",
-      `${Math.max(
-        contentHeight,
-        scaledHeight +
-        CONTENT_GAP * 2
-      )}px`
+      `${canvasHeight}px`
     );
 
     const newlyOpened =
-      !lastColorPageOpen;
+      !wasOpen;
 
     const orientationChanged =
       orientation !==
@@ -267,34 +210,38 @@
       newlyOpened ||
       orientationChanged
     ) {
-      resetPickerScroll(dialog);
+      resetScroll(dialog);
     }
 
-    lastColorPageOpen = true;
-    lastOrientation = orientation;
+    wasOpen = true;
+    lastOrientation =
+      orientation;
   }
 
   function scheduleFit() {
     cancelAnimationFrame(
-      scheduledFrame
+      frameId
     );
 
-    scheduledFrame =
+    frameId =
       requestAnimationFrame(() => {
         fitSettingsPreviewColorPicker();
 
+        /*
+         * Safari can update visualViewport one frame later.
+         */
         requestAnimationFrame(
           fitSettingsPreviewColorPicker
         );
       });
   }
 
-  const observer =
+  const mutationObserver =
     new MutationObserver(
       scheduleFit
     );
 
-  observer.observe(
+  mutationObserver.observe(
     document.documentElement,
     {
       subtree: true,
@@ -318,23 +265,16 @@
   window.addEventListener(
     "orientationchange",
     () => {
-      /*
-       * iOS liefert direkt beim orientationchange häufig noch die alten
-       * VisualViewport-Maße. Deshalb mehrere spätere Messungen.
-       */
       scheduleFit();
-
-      window.setTimeout(
+      setTimeout(
         scheduleFit,
         100
       );
-
-      window.setTimeout(
+      setTimeout(
         scheduleFit,
         300
       );
-
-      window.setTimeout(
+      setTimeout(
         scheduleFit,
         600
       );
@@ -381,7 +321,7 @@
         );
 
       if (dialog) {
-        resetPickerScroll(dialog);
+        resetScroll(dialog);
       }
     };
 })();

@@ -6303,12 +6303,9 @@ function renderSettingsPreview() {
   }
 
   renderSettingsPreviewFooter();
-   requestAnimationFrame(() => {
-    window.fitSettingsPreviewColorPicker?.();
 
-    if (colorPageOpen) {
-      window.resetSettingsPreviewColorPickerScroll?.();
-    }
+  requestAnimationFrame(() => {
+    window.fitSettingsPreviewColorPicker?.();
   });
 }
 
