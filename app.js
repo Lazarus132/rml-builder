@@ -8,9 +8,12 @@ const PROJECT_FILE_MAX_BYTES = 5 * 1024 * 1024;
 const PROJECT_TREE_MAX_DEPTH = 32;
 const PROJECT_TREE_MAX_ITEMS = 10000;
 const ROOT_CONTAINER = "root";
-const DRAG_SCROLL_EDGE = 110;
+const DRAG_SCROLL_VISIBILITY_PADDING = 8;
 const DRAG_SCROLL_MAX_SPEED = 22;
+const DRAG_SCROLL_VISIBILITY_MAX_SPEED = 48;
 const VECTOR_COMPONENT_NAMES = ["X", "Y", "Z", "W"];
+const DRAG_SCROLL_EDGE_SIZE = 110;
+const DRAG_SCROLL_MIN_SPEED = 3;
 const PALETTE_GROUP_NAMES = [
   "Core",
   "Numbers",
@@ -214,6 +217,9 @@ const elements = {};
 let dragScrollActive = false;
 let dragPointerY = null;
 let dragScrollFrame = null;
+let dragScrollLastTimestamp = 0;
+let dragScrollOriginX = 0;
+let dragScrollOriginY = 0;
 let settingsPreviewDraft = null;
 let settingsPreviewColorSession = null;
 let settingsPreviewStatusTimer = null;
@@ -231,6 +237,11 @@ let optionWheelLastStepTime = 0;
 let optionWheelDelta = 0;
 let optionWheelManualIndex = null;
 let optionWheelManualHost = null;
+let optionContainerWheelTargetHost = null;
+let optionContainerWheelTargetContainerId = null;
+let optionContainerWheelDelta = 0;
+let optionContainerWheelManualIndex = null;
+let optionContainerWheelManualHost = null;
 let optionPointerDragActive = false;
 let optionPointerId = null;
 let optionPointerX = 0;
@@ -256,12 +267,37 @@ let nodeWheelTargetContainerId = null;
 let nodeWheelDelta = 0;
 let nodeWheelManualIndex = null;
 let nodeWheelManualHost = null;
+let optionPointerVisualFrame = 0;
+let optionPointerQueuedX = 0;
+let optionPointerQueuedY = 0;
 let nodePointerVisualFrame = 0;
 let nodePointerQueuedX = 0;
 let nodePointerQueuedY = 0;
 let suppressNodeClickId = null;
 let suppressNodeClickUntil = 0;
 let rootCanvasInteractionController = null;
+
+function scheduleOptionPointerTargetUpdate(
+  clientX,
+  clientY
+) {
+  optionPointerQueuedX = clientX;
+  optionPointerQueuedY = clientY;
+
+  if (optionPointerVisualFrame) {
+    return;
+  }
+
+  optionPointerVisualFrame =
+    requestAnimationFrame(() => {
+      optionPointerVisualFrame = 0;
+
+      updateOptionPointerTarget(
+        optionPointerQueuedX,
+        optionPointerQueuedY
+      );
+    });
+}
 
 function scheduleNodePointerTargetUpdate(
   clientX,
@@ -3892,21 +3928,37 @@ function clearDragFeedback() {
   optionWheelLastStepTime = 0;
   optionWheelManualIndex = null;
   optionWheelManualHost = null;
+
+  optionContainerWheelTargetHost = null;
+  optionContainerWheelTargetContainerId = null;
+  optionContainerWheelDelta = 0;
+  optionContainerWheelManualIndex = null;
+  optionContainerWheelManualHost = null;
 }
 
 function beginDragScrolling(event) {
+
+  if (!dragScrollActive) {
+    const scrollElement =
+      document.scrollingElement ||
+      document.documentElement;
+
+    dragScrollOriginX =
+      scrollElement.scrollLeft;
+
+    dragScrollOriginY =
+      scrollElement.scrollTop;
+  }
+
   dragScrollActive = true;
-  optionWheelLastStepTime =
-    window.scrollY;
+  dragScrollLastTimestamp = 0;
+
   dragPointerY =
     Number.isFinite(event?.clientY)
       ? event.clientY
       : null;
 
-  if (dragScrollFrame === null) {
-    dragScrollFrame =
-      window.requestAnimationFrame(runDragScrolling);
-  }
+  requestDragPlaceholderVisibility();
 }
 
 function updateDragScrolling(event) {
@@ -3915,65 +3967,390 @@ function updateDragScrolling(event) {
   }
 
   dragPointerY = event.clientY;
+  requestDragPlaceholderVisibility();
 }
 
-function runDragScrolling() {
-  dragScrollFrame = null;
+function activeDragInsertPlaceholder() {
+  const placeholders = [
+    optionDragFeedbackPlaceholder,
+    dragFeedbackPlaceholder
+  ];
 
-  if (!dragScrollActive) {
+  for (const placeholder of placeholders) {
+    if (
+      placeholder instanceof HTMLElement &&
+      placeholder.isConnected
+    ) {
+      const rectangle =
+        placeholder.getBoundingClientRect();
+
+      if (
+        rectangle.width > 0 &&
+        rectangle.height > 0
+      ) {
+        return placeholder;
+      }
+    }
+  }
+
+  return null;
+}
+
+function dragViewportTop() {
+  const viewportHeight =
+    window.innerHeight ||
+    document.documentElement.clientHeight;
+
+  let visibleTop =
+    DRAG_SCROLL_VISIBILITY_PADDING;
+
+  document
+    .querySelectorAll(
+      "header, [role='banner'], .app-header, .top-header, .toolbar, .topbar"
+    )
+    .forEach(element => {
+      if (!(element instanceof HTMLElement)) {
+        return;
+      }
+
+      const style =
+        getComputedStyle(element);
+
+      if (
+        style.position !== "fixed" &&
+        style.position !== "sticky"
+      ) {
+        return;
+      }
+
+      const rectangle =
+        element.getBoundingClientRect();
+
+      if (
+        rectangle.width <= 0 ||
+        rectangle.height <= 0 ||
+        rectangle.bottom <= 0 ||
+        rectangle.top >= viewportHeight
+      ) {
+        return;
+      }
+
+      if (rectangle.top <= 1) {
+        visibleTop =
+          Math.max(
+            visibleTop,
+            rectangle.bottom +
+              DRAG_SCROLL_VISIBILITY_PADDING
+          );
+      }
+    });
+
+  return visibleTop;
+}
+
+function dragManualInsertSelectionActive() {
+  if (
+    nodePointerDragActive &&
+    nodeWheelManualHost &&
+    nodeWheelManualHost.isConnected &&
+    Number.isFinite(
+      nodeWheelManualIndex
+    )
+  ) {
+    return true;
+  }
+
+  if (!optionPointerDragActive) {
+    return false;
+  }
+
+  return (
+    optionWheelManualHost &&
+    optionWheelManualHost.isConnected &&
+    Number.isFinite(
+      optionWheelManualIndex
+    )
+  ) || (
+    optionContainerWheelManualHost &&
+    optionContainerWheelManualHost.isConnected &&
+    Number.isFinite(
+      optionContainerWheelManualIndex
+    )
+  );
+}
+
+function dragPlaceholderVisibilityDelta() {
+  const placeholder =
+    activeDragInsertPlaceholder();
+
+  if (!placeholder) {
+    return 0;
+  }
+
+  const rectangle =
+    placeholder.getBoundingClientRect();
+
+  if (
+    rectangle.width <= 0 ||
+    rectangle.height <= 0
+  ) {
+    return 0;
+  }
+
+  const viewportHeight =
+    window.innerHeight ||
+    document.documentElement.clientHeight;
+
+  const visibleTop =
+    dragViewportTop();
+
+  const visibleBottom =
+    viewportHeight -
+    DRAG_SCROLL_VISIBILITY_PADDING;
+
+  const visibleHeight =
+    Math.max(
+      1,
+      visibleBottom - visibleTop
+    );
+
+  if (rectangle.height <= visibleHeight) {
+    if (rectangle.top < visibleTop) {
+      return rectangle.top - visibleTop;
+    }
+
+    if (rectangle.bottom > visibleBottom) {
+      return rectangle.bottom - visibleBottom;
+    }
+
+    return 0;
+  }
+
+  if (rectangle.bottom <= visibleTop) {
+    return rectangle.bottom - visibleTop;
+  }
+
+  if (rectangle.top >= visibleBottom) {
+    return rectangle.top - visibleBottom;
+  }
+
+  return 0;
+}
+
+function refreshPointerTargetAfterDragScroll() {
+
+  if (dragManualInsertSelectionActive()) {
     return;
   }
 
-  if (dragPointerY !== null) {
+  if (nodePointerDragActive) {
+    scheduleNodePointerTargetUpdate(
+      nodePointerX,
+      nodePointerY
+    );
+
+    return;
+  }
+
+  if (optionPointerDragActive) {
+    scheduleOptionPointerTargetUpdate(
+      optionPointerX,
+      optionPointerY
+    );
+  }
+}
+
+function requestDragPlaceholderVisibility() {
+  if (
+    !dragScrollActive ||
+    dragScrollFrame !== null
+  ) {
+    return;
+  }
+
+  dragScrollLastTimestamp = 0;
+  dragScrollFrame =
+    window.requestAnimationFrame(
+      runDragScrolling
+    );
+}
+
+function runDragScrolling(timestamp) {
+  dragScrollFrame = null;
+
+  if (
+    !dragScrollActive ||
+    !Number.isFinite(dragPointerY)
+  ) {
+    dragScrollLastTimestamp = 0;
+    return;
+  }
+
+  const manualSelection =
+    dragManualInsertSelectionActive();
+
+  const visibilityDelta =
+    dragPlaceholderVisibilityDelta();
+
+  let scrollAmount = 0;
+  let refreshTarget = false;
+
+  if (Math.abs(visibilityDelta) > 0.5) {
+    scrollAmount =
+      Math.sign(visibilityDelta) *
+      Math.min(
+        DRAG_SCROLL_VISIBILITY_MAX_SPEED,
+        Math.max(
+          DRAG_SCROLL_MIN_SPEED,
+          Math.abs(visibilityDelta) * 0.16
+        )
+      );
+  } else if (manualSelection) {
+
+    dragScrollLastTimestamp = 0;
+    return;
+  } else {
     const viewportHeight =
       window.innerHeight ||
       document.documentElement.clientHeight;
 
-    let scrollAmount = 0;
+    const visibleTop =
+      dragViewportTop();
 
-    if (dragPointerY < DRAG_SCROLL_EDGE) {
-      const intensity =
-        (DRAG_SCROLL_EDGE - Math.max(0, dragPointerY)) /
-        DRAG_SCROLL_EDGE;
+    const visibleBottom =
+      viewportHeight -
+      DRAG_SCROLL_VISIBILITY_PADDING;
 
-      scrollAmount =
-        -Math.ceil(
-          DRAG_SCROLL_MAX_SPEED *
-          intensity
+    const availableHeight =
+      Math.max(
+        1,
+        visibleBottom - visibleTop
+      );
+
+    const edgeSize =
+      Math.max(
+        1,
+        Math.min(
+          DRAG_SCROLL_EDGE_SIZE,
+          availableHeight * 0.35
+        )
+      );
+
+    const topEdge =
+      visibleTop + edgeSize;
+
+    const bottomEdge =
+      visibleBottom - edgeSize;
+
+    let direction = 0;
+    let intensity = 0;
+
+    if (dragPointerY < topEdge) {
+      direction = -1;
+      intensity =
+        clamp(
+          (topEdge - dragPointerY) /
+            edgeSize,
+          0,
+          1
         );
     } else if (
-      dragPointerY >
-      viewportHeight - DRAG_SCROLL_EDGE
+      dragPointerY > bottomEdge
     ) {
-      const intensity =
-        (
-          dragPointerY -
-          (viewportHeight - DRAG_SCROLL_EDGE)
-        ) /
-        DRAG_SCROLL_EDGE;
-
-      scrollAmount =
-        Math.ceil(
-          DRAG_SCROLL_MAX_SPEED *
-          Math.min(1, intensity)
+      direction = 1;
+      intensity =
+        clamp(
+          (dragPointerY - bottomEdge) /
+            edgeSize,
+          0,
+          1
         );
     }
 
-    if (scrollAmount !== 0) {
-      window.scrollBy(
-        0,
-        scrollAmount
-      );
+    if (direction === 0) {
+      dragScrollLastTimestamp = 0;
+      return;
     }
+
+    const elapsed =
+      dragScrollLastTimestamp > 0
+        ? clamp(
+            timestamp -
+              dragScrollLastTimestamp,
+            8,
+            34
+          )
+        : 16.6667;
+
+    dragScrollLastTimestamp =
+      timestamp;
+
+    const frameScale =
+      elapsed / 16.6667;
+
+    const speed =
+      (
+        DRAG_SCROLL_MIN_SPEED +
+        (
+          DRAG_SCROLL_MAX_SPEED -
+          DRAG_SCROLL_MIN_SPEED
+        ) *
+        intensity *
+        intensity
+      ) *
+      frameScale;
+
+    scrollAmount =
+      direction * speed;
+
+    refreshTarget = true;
+  }
+
+  const scrollElement =
+    document.scrollingElement ||
+    document.documentElement;
+
+  const previousScrollTop =
+    scrollElement.scrollTop;
+
+  const maximumScrollTop =
+    Math.max(
+      0,
+      scrollElement.scrollHeight -
+        scrollElement.clientHeight
+    );
+
+  scrollElement.scrollTop =
+    clamp(
+      previousScrollTop +
+        scrollAmount,
+      0,
+      maximumScrollTop
+    );
+
+  const actuallyScrolled =
+    scrollElement.scrollTop !==
+    previousScrollTop;
+
+  if (actuallyScrolled && refreshTarget) {
+    refreshPointerTargetAfterDragScroll();
+  }
+
+  if (!actuallyScrolled) {
+    dragScrollLastTimestamp = 0;
+    return;
   }
 
   dragScrollFrame =
-    window.requestAnimationFrame(runDragScrolling);
+    window.requestAnimationFrame(
+      runDragScrolling
+    );
 }
 
 function stopDragScrolling() {
   dragScrollActive = false;
   dragPointerY = null;
+  dragScrollLastTimestamp = 0;
 
   if (dragScrollFrame !== null) {
     window.cancelAnimationFrame(
@@ -4120,6 +4497,8 @@ function positionNodeInsertPlaceholder(
       host.clientWidth - 14
     )}px`
   );
+
+  requestDragPlaceholderVisibility();
 }
 
 function directOptionLanes(host) {
@@ -4402,6 +4781,7 @@ function positionOptionInsertPlaceholder(
       "4px"
     );
 
+    requestDragPlaceholderVisibility();
     return;
   }
 
@@ -4455,6 +4835,8 @@ function positionOptionInsertPlaceholder(
     "--option-placeholder-height",
     `${Math.max(12, height)}px`
   );
+
+  requestDragPlaceholderVisibility();
 }
 
 function stepOptionInsertWithWheel(
@@ -4556,6 +4938,12 @@ function setOptionInsertFeedback(
 
     return;
   }
+
+  optionContainerWheelTargetHost = null;
+  optionContainerWheelTargetContainerId = null;
+  optionContainerWheelDelta = 0;
+  optionContainerWheelManualIndex = null;
+  optionContainerWheelManualHost = null;
 
   unlockOptionDropTarget();
 
@@ -5553,143 +5941,190 @@ function nodeDropTargetAtPointer(
   clientY,
   excludedNodeId = null
 ) {
-  const candidates = [];
-
-  const addCandidate = (
-    host,
-    containerId
-  ) => {
-    if (
-      !(host instanceof HTMLElement)
-    ) {
-      return;
-    }
-
-    const rectangle =
-      host.getBoundingClientRect();
-
-    if (
-      rectangle.width <= 0 ||
-      rectangle.height <= 0 ||
-      !pointInsideRectangle(
-        clientX,
-        clientY,
-        rectangle
-      )
-    ) {
-      return;
-    }
-
-    const cards =
-      directNodeCards(host);
-
-    const comparisonCards =
-      cards.filter(
-        card =>
-          !excludedNodeId ||
-          card.dataset.nodeId !==
-            excludedNodeId
-      );
-
-    let insertionIndex =
-      cards.length;
-
-    const manualWheelSelectionActive =
-      nodeWheelManualHost === host &&
-      Number.isFinite(
-        nodeWheelManualIndex
-      );
-
-    if (manualWheelSelectionActive) {
-      insertionIndex =
-        clamp(
-          nodeWheelManualIndex,
-          0,
-          cards.length
-        );
-    } else {
-      for (
-        const card of
-        comparisonCards
-      ) {
-        const cardRectangle =
-          card.getBoundingClientRect();
-
-        if (
-          clientY <
-          cardRectangle.top +
-            cardRectangle.height / 2
-        ) {
-          insertionIndex =
-            Number(
-              card.dataset.siblingIndex
-            ) || 0;
-
-          break;
-        }
-      }
-    }
-
-    candidates.push({
-      host,
-      containerId,
-      insertionIndex,
-      area:
-        rectangleArea(
-          rectangle
-        )
-    });
-  };
-
-  addCandidate(
-    elements.builderCanvas,
-    ROOT_CONTAINER
-  );
-
-  document
-    .querySelectorAll(
-      ".option-lane[data-container] > .drop-zone"
-    )
-    .forEach(host => {
-      const lane =
-        host.parentElement;
-
-      const containerId =
-        lane?.dataset.container;
-
-      if (containerId) {
-        addCandidate(
-          host,
-          containerId
-        );
-      }
-    });
+  const canvas =
+    elements.builderCanvas;
 
   if (
-    candidates.length === 0
+    !(canvas instanceof HTMLElement)
   ) {
     return null;
   }
 
-  const innermostCandidates =
-    candidates.filter(
-      candidate =>
-        !candidates.some(
-          other =>
-            other !== candidate &&
-            candidate.host.contains(
-              other.host
-            )
-        )
+  const canvasRectangle =
+    canvas.getBoundingClientRect();
+
+  if (
+    !pointInsideRectangle(
+      clientX,
+      clientY,
+      canvasRectangle
+    )
+  ) {
+    return null;
+  }
+
+  const hitElements =
+    document.elementsFromPoint(
+      clientX,
+      clientY
     );
 
-  innermostCandidates.sort(
-    (left, right) =>
-      left.area -
-      right.area
-  );
+  let host = null;
+  let containerId = null;
 
-  return innermostCandidates[0];
+  for (const element of hitElements) {
+    if (!(element instanceof Element)) {
+      continue;
+    }
+
+    if (
+      element.closest(
+        ".node-pointer-ghost, " +
+        ".option-pointer-ghost, " +
+        ".drag-reorder-placeholder, " +
+        ".option-reorder-placeholder"
+      )
+    ) {
+      continue;
+    }
+
+    const sectionDropZone =
+      element.closest(
+        ".option-lane[data-container] > .drop-zone"
+      );
+
+    if (
+      sectionDropZone instanceof HTMLElement &&
+      canvas.contains(
+        sectionDropZone
+      )
+    ) {
+      const sectionLane =
+        sectionDropZone.parentElement;
+
+      const sectionContainerId =
+        sectionLane?.dataset.container;
+
+      if (sectionContainerId) {
+        host =
+          sectionDropZone;
+
+        containerId =
+          sectionContainerId;
+
+        break;
+      }
+    }
+
+    if (
+      element === canvas ||
+      canvas.contains(element)
+    ) {
+      host =
+        canvas;
+
+      containerId =
+        ROOT_CONTAINER;
+
+      break;
+    }
+  }
+
+  if (
+    !host ||
+    !containerId
+  ) {
+    host =
+      canvas;
+
+    containerId =
+      ROOT_CONTAINER;
+  }
+
+  const movingNode =
+    excludedNodeId
+      ? findNode(
+          state.nodes,
+          excludedNodeId
+        )
+      : null;
+
+  if (
+    movingNode &&
+    containerId !== ROOT_CONTAINER &&
+    nodeContainsContainer(
+      movingNode,
+      containerId
+    )
+  ) {
+    host =
+      canvas;
+
+    containerId =
+      ROOT_CONTAINER;
+  }
+
+  const cards =
+    directNodeCards(
+      host
+    );
+
+  const comparisonCards =
+    cards.filter(
+      card =>
+        !excludedNodeId ||
+        card.dataset.nodeId !==
+          excludedNodeId
+    );
+
+  let insertionIndex =
+    cards.length;
+
+  const manualWheelSelectionActive =
+    nodeWheelManualHost === host &&
+    Number.isFinite(
+      nodeWheelManualIndex
+    );
+
+  if (manualWheelSelectionActive) {
+    insertionIndex =
+      clamp(
+        nodeWheelManualIndex,
+        0,
+        cards.length
+      );
+  } else {
+    for (
+      const card of
+      comparisonCards
+    ) {
+      const cardRectangle =
+        card.getBoundingClientRect();
+
+      if (
+        clientY <
+        cardRectangle.top +
+          cardRectangle.height / 2
+      ) {
+        insertionIndex =
+          Number(
+            card.dataset.siblingIndex
+          ) || 0;
+
+        break;
+      }
+    }
+  }
+
+  return {
+    host,
+    containerId,
+    insertionIndex,
+    area:
+      rectangleArea(
+        host.getBoundingClientRect()
+      )
+  };
 }
 
 function setNodePointerTarget(
@@ -6327,6 +6762,24 @@ function setPointerContainerTarget(
   leaveOptionInsertMode();
   clearPointerEdgeFeedback();
 
+  if (optionPointerDragActive) {
+    if (
+      optionContainerWheelTargetHost !== host ||
+      optionContainerWheelTargetContainerId !==
+        containerId
+    ) {
+      optionContainerWheelDelta = 0;
+      optionContainerWheelManualIndex = null;
+      optionContainerWheelManualHost = null;
+    }
+
+    optionContainerWheelTargetHost =
+      host;
+
+    optionContainerWheelTargetContainerId =
+      containerId;
+  }
+
   state.dragOverContainer =
     containerId;
   state.dragInsertContainer =
@@ -6425,6 +6878,60 @@ function optionContainsContainer(
   );
 }
 
+function optionPointerHitElements(
+  clientX,
+  clientY
+) {
+  const canvas =
+    elements.builderCanvas;
+
+  if (
+    !(canvas instanceof HTMLElement)
+  ) {
+    return [];
+  }
+
+  const canvasRectangle =
+    canvas.getBoundingClientRect();
+
+  if (
+    !pointInsideRectangle(
+      clientX,
+      clientY,
+      canvasRectangle
+    )
+  ) {
+    return [];
+  }
+
+  return document
+    .elementsFromPoint(
+      clientX,
+      clientY
+    )
+    .filter(element => {
+      if (!(element instanceof Element)) {
+        return false;
+      }
+
+      if (
+        element.closest(
+          ".option-pointer-ghost, " +
+          ".node-pointer-ghost, " +
+          ".drag-reorder-placeholder, " +
+          ".option-reorder-placeholder"
+        )
+      ) {
+        return false;
+      }
+
+      return (
+        element === canvas ||
+        canvas.contains(element)
+      );
+    });
+}
+
 function optionControllerTargetAtPointer(
   clientX,
   clientY
@@ -6439,77 +6946,61 @@ function optionControllerTargetAtPointer(
     return null;
   }
 
-  const candidates =
-    Array.from(
-      document.querySelectorAll(
+  const hitElements =
+    optionPointerHitElements(
+      clientX,
+      clientY
+    );
+
+  for (const element of hitElements) {
+
+    const directDropZone =
+      element.closest(
+        ".option-lane[data-container] > .drop-zone"
+      );
+
+    if (directDropZone) {
+      continue;
+    }
+
+    const host =
+      element.closest(
         ".controller-options"
+      );
+
+    if (!(host instanceof HTMLElement)) {
+      continue;
+    }
+
+    const controllerCard =
+      host.closest(
+        ".node-card.controller[data-node-id]"
+      );
+
+    const controllerId =
+      controllerCard?.dataset.nodeId;
+
+    if (
+      !controllerId ||
+      optionContainsController(
+        source.option,
+        controllerId
       )
-    )
-      .filter(
-        host =>
-          host instanceof HTMLElement &&
-          !host.closest(
-            ".option-pointer-ghost, .node-pointer-ghost"
-          )
-      )
-      .map(host => {
-        const controllerCard =
-          host.closest(
-            ".node-card.controller[data-node-id]"
-          );
+    ) {
+      continue;
+    }
 
-        const controllerId =
-          controllerCard?.dataset.nodeId;
-
-        if (
-          !controllerId ||
-          optionContainsController(
-            source.option,
-            controllerId
-          )
-        ) {
-          return null;
-        }
-
-        const rectangle =
-          host.getBoundingClientRect();
-
-        if (
-          rectangle.width <= 0 ||
-          rectangle.height <= 0 ||
-          !pointInsideRectangle(
-            clientX,
-            clientY,
-            rectangle
-          )
-        ) {
-          return null;
-        }
-
-        return {
-          host,
-          controllerId,
-          area:
-            rectangleArea(
-              rectangle
-            )
-        };
-      })
-      .filter(Boolean);
-
-  if (
-    candidates.length === 0
-  ) {
-    return null;
+    return {
+      host,
+      controllerId,
+      area:
+        rectangleArea(
+          host.getBoundingClientRect()
+        )
+    };
   }
 
-  candidates.sort(
-    (left, right) =>
-      left.area -
-      right.area
-  );
-
-  return candidates[0];
+  return null;
 }
 
 function optionContainerTargetAtPointer(
@@ -6522,49 +7013,89 @@ function optionContainerTargetAtPointer(
       activeDraggedOptionId
     );
 
-  if (!source) {
+  const canvas =
+    elements.builderCanvas;
+
+  if (
+    !source ||
+    !(canvas instanceof HTMLElement)
+  ) {
     return null;
   }
 
-  const candidates = [];
+  const hitElements =
+    optionPointerHitElements(
+      clientX,
+      clientY
+    );
 
-  const addCandidate = (
-    host,
-    containerId
-  ) => {
-    if (
-      !(host instanceof HTMLElement) ||
-      optionContainsContainer(
-        source.option,
-        containerId
-      )
-    ) {
-      return;
-    }
+  if (hitElements.length === 0) {
+    return null;
+  }
 
-    const rectangle =
-      host.getBoundingClientRect();
+  let host = canvas;
+  let containerId = ROOT_CONTAINER;
 
-    if (
-      rectangle.width <= 0 ||
-      rectangle.height <= 0 ||
-      !pointInsideRectangle(
-        clientX,
-        clientY,
-        rectangle
-      )
-    ) {
-      return;
-    }
-
-    const cards =
-      directNodeCards(
-        host
+  for (const element of hitElements) {
+    const dropZone =
+      element.closest(
+        ".option-lane[data-container] > .drop-zone"
       );
 
-    let insertionIndex =
-      cards.length;
+    if (
+      dropZone instanceof HTMLElement &&
+      canvas.contains(dropZone)
+    ) {
+      const lane =
+        dropZone.parentElement;
+      const candidateContainerId =
+        lane?.dataset.container;
 
+      if (
+        candidateContainerId &&
+        !optionContainsContainer(
+          source.option,
+          candidateContainerId
+        )
+      ) {
+        host = dropZone;
+        containerId =
+          candidateContainerId;
+      }
+
+      break;
+    }
+
+    if (
+      element === canvas ||
+      canvas.contains(element)
+    ) {
+      host = canvas;
+      containerId = ROOT_CONTAINER;
+      break;
+    }
+  }
+
+  const cards =
+    directNodeCards(host);
+
+  let insertionIndex =
+    cards.length;
+
+  const manualWheelSelectionActive =
+    optionContainerWheelManualHost === host &&
+    Number.isFinite(
+      optionContainerWheelManualIndex
+    );
+
+  if (manualWheelSelectionActive) {
+    insertionIndex =
+      clamp(
+        optionContainerWheelManualIndex,
+        0,
+        cards.length
+      );
+  } else {
     for (const card of cards) {
       const cardRectangle =
         card.getBoundingClientRect();
@@ -6578,103 +7109,57 @@ function optionContainerTargetAtPointer(
           Number(
             card.dataset.siblingIndex
           ) || 0;
-
         break;
       }
     }
-
-    candidates.push({
-      host,
-      containerId,
-      insertionIndex,
-      area:
-        rectangleArea(
-          rectangle
-        )
-    });
-  };
-
-  addCandidate(
-    elements.builderCanvas,
-    ROOT_CONTAINER
-  );
-
-  document
-    .querySelectorAll(
-      ".option-lane[data-container] > .drop-zone"
-    )
-    .forEach(host => {
-      const lane =
-        host.parentElement;
-
-      const containerId =
-        lane?.dataset.container;
-
-      if (containerId) {
-        addCandidate(
-          host,
-          containerId
-        );
-      }
-    });
-
-  if (
-    candidates.length === 0
-  ) {
-    return null;
   }
 
-  candidates.sort(
-    (left, right) =>
-      left.area -
-      right.area
-  );
-
-  return candidates[0];
+  return {
+    host,
+    containerId,
+    insertionIndex,
+    area:
+      rectangleArea(
+        host.getBoundingClientRect()
+      )
+  };
 }
 
 function optionPointerTargetModeAtPoint(
   clientX,
   clientY
 ) {
-  const element =
-    document.elementFromPoint(
+  const hitElements =
+    optionPointerHitElements(
       clientX,
       clientY
     );
 
-  if (!(element instanceof Element)) {
-    return "auto";
-  }
+  for (const element of hitElements) {
+    if (
+      element.closest(
+        ".option-lane[data-container] > .drop-zone"
+      )
+    ) {
+      return "container";
+    }
 
-  if (
-    element.closest(
-      ".option-heading"
-    )
-  ) {
-    return "controller";
-  }
+    if (
+      element.closest(
+        ".option-heading, .controller-options"
+      )
+    ) {
+      return "controller";
+    }
 
-  const dropZone =
-    element.closest(
-      ".drop-zone"
-    );
-
-  if (
-    dropZone &&
-    dropZone.parentElement?.matches(
-      ".option-lane[data-container]"
-    )
-  ) {
-    return "container";
-  }
-
-  if (
-    element.closest(
-      ".controller-options"
-    )
-  ) {
-    return "controller";
+    if (
+      element === elements.builderCanvas ||
+      elements.builderCanvas.contains(
+        element
+      )
+    ) {
+      return "container";
+    }
   }
 
   return "auto";
@@ -6804,6 +7289,89 @@ function updateOptionPointerTarget(
   state.dragOverContainer = null;
   state.dragInsertContainer = null;
   state.dragInsertIndex = null;
+
+  optionContainerWheelTargetHost = null;
+  optionContainerWheelTargetContainerId = null;
+  optionContainerWheelDelta = 0;
+  optionContainerWheelManualIndex = null;
+  optionContainerWheelManualHost = null;
+}
+
+function stepOptionContainerInsertWithWheel(
+  direction
+) {
+  if (
+    !optionPointerDragActive ||
+    !activeDraggedOptionId ||
+    !activeDraggedOptionControllerId ||
+    !optionContainerWheelTargetHost ||
+    !optionContainerWheelTargetHost.isConnected ||
+    !optionContainerWheelTargetContainerId ||
+    direction === 0
+  ) {
+    return false;
+  }
+
+  const host =
+    optionContainerWheelTargetHost;
+
+  const containerId =
+    optionContainerWheelTargetContainerId;
+
+  const cards =
+    directNodeCards(host);
+
+  const maximumIndex =
+    cards.length;
+
+  const currentIndex =
+    optionContainerWheelManualHost === host &&
+    Number.isFinite(
+      optionContainerWheelManualIndex
+    )
+      ? optionContainerWheelManualIndex
+      : (
+          state.dragInsertContainer ===
+            containerId &&
+          Number.isFinite(
+            state.dragInsertIndex
+          )
+            ? state.dragInsertIndex
+            : 0
+        );
+
+  const nextIndex =
+    clamp(
+      currentIndex + direction,
+      0,
+      maximumIndex
+    );
+
+  if (nextIndex === currentIndex) {
+    return false;
+  }
+
+  optionContainerWheelManualHost =
+    host;
+
+  optionContainerWheelManualIndex =
+    nextIndex;
+
+  state.dragOverContainer =
+    containerId;
+
+  state.dragInsertContainer =
+    containerId;
+
+  state.dragInsertIndex =
+    nextIndex;
+
+  positionNodeInsertPlaceholder(
+    host,
+    nextIndex
+  );
+
+  return true;
 }
 
 function movePointerOptionToController(
@@ -7032,6 +7600,13 @@ function finishOptionPointerDrag(
 
   optionPointerDragActive = false;
 
+  if (optionPointerVisualFrame) {
+    cancelAnimationFrame(
+      optionPointerVisualFrame
+    );
+    optionPointerVisualFrame = 0;
+  }
+
   if (
     optionPointerSourceLane &&
     optionPointerId !== null &&
@@ -7080,6 +7655,12 @@ function finishOptionPointerDrag(
   activeDraggedNodeId = null;
   activeDraggedOptionId = null;
   activeDraggedOptionControllerId = null;
+
+  optionContainerWheelTargetHost = null;
+  optionContainerWheelTargetContainerId = null;
+  optionContainerWheelDelta = 0;
+  optionContainerWheelManualIndex = null;
+  optionContainerWheelManualHost = null;
 
   renderAll();
 }
@@ -13372,8 +13953,10 @@ function initialize() {
       dragPointerY =
         event.clientY;
 
+      requestDragPlaceholderVisibility();
+
       if (optionDrag) {
-        updateOptionPointerTarget(
+        scheduleOptionPointerTargetUpdate(
           event.clientX,
           event.clientY
         );
@@ -13519,14 +14102,69 @@ function initialize() {
   );
 
   document.addEventListener(
+    "keydown",
+    event => {
+      if (event.key !== "Escape") {
+        return;
+      }
+
+      const dragIsActive =
+        dragScrollActive ||
+        nodePointerDragActive ||
+        optionPointerDragActive ||
+        Boolean(activeDraggedNodeId) ||
+        Boolean(activeDraggedOptionId);
+
+      if (!dragIsActive) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+
+      const restoreX =
+        dragScrollOriginX;
+
+      const restoreY =
+        dragScrollOriginY;
+
+      if (nodePointerDragActive) {
+        finishNodePointerDrag(false);
+      }
+      else if (optionPointerDragActive) {
+        finishOptionPointerDrag(false);
+      }
+      else {
+        finishDragInteraction();
+      }
+
+      clearPendingNodePointerDrag();
+      clearPendingOptionPointerDrag();
+
+      window.scrollTo({
+        left: restoreX,
+        top: restoreY,
+        behavior: "auto"
+      });
+
+      requestAnimationFrame(() => {
+        window.scrollTo({
+          left: restoreX,
+          top: restoreY,
+          behavior: "auto"
+        });
+      });
+    },
+    {
+      capture: true
+    }
+  );
+
+  document.addEventListener(
     "wheel",
     event => {
       const direction =
-        event.deltaY > 0
-          ? 1
-          : event.deltaY < 0
-            ? -1
-            : 0;
+        Math.sign(event.deltaY);
 
       if (direction === 0) {
         return;
@@ -13546,60 +14184,86 @@ function initialize() {
           event.deltaY;
 
         if (
-          Math.abs(
-            nodeWheelDelta
-          ) < 30
+          Math.abs(nodeWheelDelta) < 30
         ) {
           return;
         }
 
         nodeWheelDelta = 0;
-
-        stepNodeInsertWithWheel(
-          direction
-        );
-
+        stepNodeInsertWithWheel(direction);
+        requestDragPlaceholderVisibility();
         return;
       }
 
       if (
-        !optionPointerDragActive ||
-        !activeDraggedOptionId ||
-        !activeDraggedOptionControllerId ||
-        !optionWheelTargetHost ||
-        !optionWheelTargetHost.isConnected ||
-        !optionWheelTargetControllerId
+        optionPointerDragActive &&
+        activeDraggedOptionId &&
+        activeDraggedOptionControllerId
       ) {
-        return;
+        if (
+          optionWheelTargetHost &&
+          optionWheelTargetHost.isConnected &&
+          optionWheelTargetControllerId
+        ) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+
+          optionWheelDelta +=
+            event.deltaY;
+
+          if (
+            Math.abs(optionWheelDelta) < 30
+          ) {
+            return;
+          }
+
+          optionWheelDelta = 0;
+
+          stepOptionInsertWithWheel(
+            optionWheelTargetControllerId,
+            optionWheelTargetHost,
+            direction
+          );
+
+          requestDragPlaceholderVisibility();
+          return;
+        }
+
+        if (
+          optionContainerWheelTargetHost &&
+          optionContainerWheelTargetHost.isConnected &&
+          optionContainerWheelTargetContainerId
+        ) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+
+          optionContainerWheelDelta +=
+            event.deltaY;
+
+          if (
+            Math.abs(
+              optionContainerWheelDelta
+            ) < 30
+          ) {
+            return;
+          }
+
+          optionContainerWheelDelta = 0;
+
+          stepOptionContainerInsertWithWheel(
+            direction
+          );
+
+          requestDragPlaceholderVisibility();
+        }
       }
-
-      event.preventDefault();
-      event.stopImmediatePropagation();
-
-      optionWheelDelta +=
-        event.deltaY;
-
-      if (
-        Math.abs(
-          optionWheelDelta
-        ) < 30
-      ) {
-        return;
-      }
-
-      optionWheelDelta = 0;
-
-      stepOptionInsertWithWheel(
-        optionWheelTargetControllerId,
-        optionWheelTargetHost,
-        direction
-      );
     },
     {
       capture: true,
       passive: false
     }
   );
+
 
   document.addEventListener(
     "drop",
