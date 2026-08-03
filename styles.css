@@ -5838,16 +5838,4 @@ body:has(.node-pointer-ghost) .builder-canvas {
     margin-left: 0 !important;
     margin-right: 0 !important;
   }
-
-  .settings-preview-dialog:not(.rml-preview-color-open)
-  .rml-preview-header {
-    padding-right:
-      max(
-        calc(
-          10px *
-          var(--rml-mobile-ui-scale, 1)
-        ),
-        env(safe-area-inset-right)
-      ) !important;
-  }
 }
