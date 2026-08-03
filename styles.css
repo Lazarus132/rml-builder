@@ -1317,7 +1317,6 @@ footer strong {
   border: 1px solid rgba(72, 94, 114, 0.2);
   border-radius: 9px;
   background: rgba(6, 10, 15, 0.68);
-  /* WebKit-based browsers fallback using vendor pseudo-elements */
   --rml-scrollbar-thumb: #435461;
   --rml-scrollbar-track: #0a1118;
 }
@@ -2268,7 +2267,6 @@ footer strong {
   background: transparent;
 }
 
-/* Apply Firefox-only property inside a feature query to avoid compatibility warnings */
 @supports (scrollbar-width: thin) {
   .rml-preview-content {
     scrollbar-width: thin;
@@ -3145,18 +3143,19 @@ footer strong {
 }
 
 .custom-color-result {
-  /* Fallback for browsers without color-mix support */
   border: 1px solid var(--line);
-
-  /* Use color-mix where supported (Chrome 111+) for glow blending */
-  @supports (color: color-mix(in srgb, var(--result-glow, transparent) 45%, var(--line))) {
-    border-color: color-mix(in srgb, var(--result-glow, transparent) 45%, var(--line));
-  }
   box-shadow:
     0 0 var(--result-glow-size, 0px) var(--result-glow, transparent),
     0 0 calc(var(--result-glow-size, 0px) * 0.5) var(--result-glow, transparent),
     inset 0 0 calc(var(--result-glow-size, 0px) * 0.22)
       color-mix(in srgb, var(--result-glow, transparent) 35%, transparent);
+}
+
+@supports (color: color-mix(in srgb, var(--result-glow, transparent) 45%, var(--line))) {
+
+  .custom-color-result {
+    border-color: color-mix(in srgb, var(--result-glow, transparent) 45%, var(--line));
+  }
 }
 
 .custom-color-result > span {
@@ -3353,7 +3352,6 @@ footer strong {
   overscroll-behavior: contain;
 }
 
-/* Use scrollbar-gutter where supported; provide a lightweight fallback for Safari */
 @supports (scrollbar-gutter: stable) {
   .export-dialog,
   .project-dialog {
@@ -3364,7 +3362,6 @@ footer strong {
 @supports not (scrollbar-gutter: stable) {
   .export-dialog,
   .project-dialog {
-    /* reserve a small padding to reduce layout shift when scrollbars appear */
     padding-right: 12px;
   }
 }
@@ -3405,10 +3402,8 @@ footer strong {
 
 .rml-preview-content {
   overscroll-behavior: contain;
-  /* -webkit-overflow-scrolling is deprecated/unsupported in many browsers; rely on native scrolling */
   overflow: scroll;
 }
-
 
 
 @media (max-width: 780px), (max-height: 700px) {
@@ -3911,7 +3906,6 @@ footer strong {
     white-space: nowrap !important;
   }
 
-  
 
   .settings-preview-dialog.rml-preview-color-open
   .rml-preview-content {
@@ -3934,7 +3928,6 @@ footer strong {
 
     overflow-x: auto !important;
     overflow-y: auto !important;
-    /* -webkit-overflow-scrolling is deprecated/unsupported in many browsers; rely on native scrolling */
     overflow: scroll !important;
     overscroll-behavior: contain !important;
     touch-action: pan-x pan-y !important;
@@ -4067,7 +4060,6 @@ footer strong {
     margin: 0 !important;
   }
 
-  
 
   .settings-preview-dialog.rml-preview-color-open[data-picker-orientation="landscape"]
   .rml-preview-full-color {
@@ -4086,7 +4078,6 @@ footer strong {
     gap: 30px !important;
   }
 
-  
 
   .settings-preview-dialog.rml-preview-color-open
   .rml-preview-resonite-color-left {

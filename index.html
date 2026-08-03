@@ -1,384 +1,375 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta
-    name="description"
-    content="Build copy-ready ResoniteModLoader configuration code visually.">
-  <title>RML Configuration Builder</title>
-  <link rel="stylesheet" href="styles.css?v=84">
-  <link rel="shortcut icon" href="./favicon.svg">
-  <link rel="icon" href="./favicon.svg">
-  <style>
-    .rml-preview-warning {
-      font-size: 12px;
-      color: #ffaa66;
-      padding-left: 20px;
-    }
-  </style>
-</head>
-<body>
-  <header class="topbar">
-    <div class="brand-mark" aria-hidden="true">
-      <span></span>
-      <span></span>
-    </div>
-    <div class="brand-copy">
-      <small>Resonite Mod Loader</small>
-      <h1>Configuration Builder</h1>
-    </div>
-    <div class="local-state">
-      <span></span>
-      Draft saved locally
-    </div>
-    <div class="top-actions">
-      <button id="load-example" class="button secondary" type="button">
-        Load example
-      </button>
-      <button id="new-blank" class="button secondary" type="button">
-        New blank
-      </button>
-      <button id="preview-open" class="button secondary" type="button">
-        Preview…
-      </button>
-      <button id="project-manager" class="button secondary" type="button">
-        Project…
-      </button>
-      <button id="download-code" class="button primary" type="button">
-        Export…
-      </button>
-    </div>
-  </header>
-
-  <main>
-    <section class="identity panel">
-      <div class="panel-title">
-        <span><small>Step 1</small> Mod identity</span>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="Build copy-ready ResoniteModLoader configuration code visually.">
+    <title>RML Configuration Builder</title>
+    <link rel="stylesheet" href="styles.css?v=84">
+    <link rel="shortcut icon" href="./favicon.svg">
+    <link rel="icon" href="./favicon.svg">
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand-mark" aria-hidden="true">
+        <span></span>
+        <span></span>
       </div>
-      <div class="identity-grid">
-        <label>
-          Mod name
-          <input id="mod-name" autocomplete="off">
-        </label>
-        <label>
-          Author
-          <input id="author" autocomplete="off">
-        </label>
-        <label>
-          Version
-          <input id="version" autocomplete="off">
-        </label>
-        <label>
-          Namespace
-          <input id="namespace-name" autocomplete="off">
-        </label>
-        <label>
-          C# class
-          <input id="class-name" autocomplete="off">
-        </label>
-        <label>
-          Mod description
-          <input id="mod-description" autocomplete="off">
-        </label>
+      <div class="brand-copy">
+        <small>Resonite Mod Loader</small>
+        <h1>Configuration Builder</h1>
       </div>
-    </section>
-
-    <section class="workspace">
-      <aside class="palette panel">
-        <div class="panel-title">
-          <span><small>Step 2</small> Add controls</span>
-          <b id="item-count">0</b>
-        </div>
-        <p class="help">
-          Click to add to the active section, or drag a type directly into one.
-          Selecting any item activates its containing section. Move near the
-          top or bottom edge while dragging to scroll the page.
-        </p>
-
-        <div id="palette-content"></div>
-
-        <details
-          class="palette-group structure"
-          data-palette-group="Structure"
-          open>
-          <summary>
-            <span>Structure</span>
-            <b>1</b>
-          </summary>
-          <div class="palette-group-content">
-            <button
-              class="palette-item controller-item"
-              type="button"
-              draggable="true"
-              data-palette="controller">
-              <span>§</span>
-              <strong>Section enum</strong>
-              <b>＋</b>
-            </button>
-            <p>
-              Creates an enum controller whose values become visible settings
-              pages. Section enums can be nested.
-            </p>
-          </div>
-        </details>
-      </aside>
-
-      <section class="canvas panel">
-        <div class="panel-title canvas-title">
-          <span><small>Step 3</small> Configuration outline</span>
-          <em>Adding to: <strong id="active-container-name">Root</strong></em>
-        </div>
-        <div id="builder-canvas" class="builder-canvas"></div>
-      </section>
-
-      <aside class="inspector panel">
-        <div class="panel-title">
-          <span><small>Step 4</small> Properties</span>
-        </div>
-        <div id="inspector-content"></div>
-      </aside>
-    </section>
-
-    <section class="code-panel panel">
-      <div class="code-toolbar">
-        <div>
-          <small>Step 5</small>
-          <h2>Generated C#</h2>
-          <span id="code-summary"></span>
-        </div>
-        <label class="guide-toggle">
-          <input id="include-guide" type="checkbox">
-          Include guidance comments
-        </label>
-        <button id="download-code-bottom" class="button secondary" type="button">
+      <div class="local-state">
+        <span></span>
+        Draft saved locally
+      </div>
+      <div class="top-actions">
+        <button id="load-example" class="button secondary" type="button">
+          Load example
+        </button>
+        <button id="new-blank" class="button secondary" type="button">
+          New blank
+        </button>
+        <button id="preview-open" class="button secondary" type="button">
+          Preview…
+        </button>
+        <button id="project-manager" class="button secondary" type="button">
+          Project…
+        </button>
+        <button id="download-code" class="button primary" type="button">
           Export…
         </button>
-        <button id="copy-code-bottom" class="button primary" type="button">
-          Copy C#
-        </button>
       </div>
-      <div id="diagnostics" class="diagnostics" hidden></div>
-      <pre><code id="generated-code"></code></pre>
-    </section>
-  </main>
+    </header>
 
-  <footer>
-    <strong>RML Configuration Builder</strong>
-    <span>
-      Runs entirely in this browser. No source code or configuration data is
-      uploaded.
-    </span>
-  </footer>
-
-  <dialog
-    id="settings-preview-dialog"
-    class="settings-preview-dialog"
-    tabindex="-1"
-    aria-labelledby="settings-preview-title">
-    <div class="rml-preview-window">
-      <header class="rml-preview-header">
-        <div class="rml-preview-warning">
-          ⚠ Requires Lazarus132 custom RML version
+    <main>
+      <section class="identity panel">
+        <div class="panel-title">
+          <span><small>Step 1</small> Mod identity</span>
         </div>
-        <h2 id="settings-preview-title">Mod Settings</h2>
-        <button
-          id="settings-preview-close"
-          class="rml-preview-close"
-          type="button"
-          aria-label="Close settings preview">
-          ×
-        </button>
-      </header>
+        <div class="identity-grid">
+          <label>
+            Mod name
+            <input id="mod-name" autocomplete="off">
+          </label>
+          <label>
+            Author
+            <input id="author" autocomplete="off">
+          </label>
+          <label>
+            Version
+            <input id="version" autocomplete="off">
+          </label>
+          <label>
+            Namespace
+            <input id="namespace-name" autocomplete="off">
+          </label>
+          <label>
+            C# class
+            <input id="class-name" autocomplete="off">
+          </label>
+          <label>
+            Mod description
+            <input id="mod-description" autocomplete="off">
+          </label>
+        </div>
+      </section>
 
-      <div class="rml-preview-content">
-        <div id="settings-preview-content" class="rml-preview-settings"></div>
-      </div>
+      <section class="workspace">
+        <aside class="palette panel">
+          <div class="panel-title">
+            <span><small>Step 2</small> Add controls</span>
+            <b id="item-count">0</b>
+          </div>
+          <p class="help">
+            Click to add to the active section, or drag a type directly into one.
+            Selecting any item activates its containing section. Move near the
+            top or bottom edge while dragging to scroll the page.
+          </p>
 
-      <footer class="rml-preview-footer">
-        <div class="rml-preview-save-panel">
-          <button
-            id="settings-preview-save"
-            class="rml-preview-save"
-            type="button">
-            Save Settings
+          <div id="palette-content"></div>
+
+          <details
+            class="palette-group structure"
+            data-palette-group="Structure"
+            open>
+            <summary>
+              <span>Structure</span>
+              <b>1</b>
+            </summary>
+            <div class="palette-group-content">
+              <button
+                class="palette-item controller-item"
+                type="button"
+                draggable="true"
+                data-palette="controller">
+                <span>§</span>
+                <strong>Section enum</strong>
+                <b>＋</b>
+              </button>
+              <p>
+                Creates an enum controller whose values become visible settings
+                pages. Section enums can be nested.
+              </p>
+            </div>
+          </details>
+        </aside>
+
+        <section class="canvas panel">
+          <div class="panel-title canvas-title">
+            <span><small>Step 3</small> Configuration outline</span>
+            <em>Adding to: <strong id="active-container-name">Root</strong></em>
+          </div>
+          <div id="builder-canvas" class="builder-canvas"></div>
+        </section>
+
+        <aside class="inspector panel">
+          <div class="panel-title">
+            <span><small>Step 4</small> Properties</span>
+          </div>
+          <div id="inspector-content"></div>
+        </aside>
+      </section>
+
+      <section class="code-panel panel">
+        <div class="code-toolbar">
+          <div>
+            <small>Step 5</small>
+            <h2>Generated C#</h2>
+            <span id="code-summary"></span>
+          </div>
+          <label class="guide-toggle">
+            <input id="include-guide" type="checkbox">
+            Include guidance comments
+          </label>
+          <button id="download-code-bottom" class="button secondary" type="button">
+            Export…
+          </button>
+          <button id="copy-code-bottom" class="button primary" type="button">
+            Copy C#
           </button>
         </div>
-      </footer>
+        <div id="diagnostics" class="diagnostics" hidden></div>
+        <pre><code id="generated-code"></code></pre>
+      </section>
+    </main>
 
-      <p
-        id="settings-preview-status"
-        class="rml-preview-status"
-        aria-live="polite"></p>
-    </div>
-  </dialog>
+    <footer>
+      <strong>RML Configuration Builder</strong>
+      <span>
+        Runs entirely in this browser. No source code or configuration data is
+        uploaded.
+      </span>
+    </footer>
 
-  <dialog
-    id="project-dialog"
-    class="export-dialog project-dialog"
-    tabindex="-1"
-    aria-labelledby="project-dialog-title">
-    <div class="export-dialog-header">
-      <div>
-        <small>Local project file</small>
-        <h2 id="project-dialog-title">Save or restore the builder</h2>
+    <dialog
+      id="settings-preview-dialog"
+      class="settings-preview-dialog"
+      tabindex="-1"
+      aria-labelledby="settings-preview-title">
+      <div class="rml-preview-window">
+        <header class="rml-preview-header">
+          <div class="rml-preview-warning">
+            ⚠ Requires Lazarus132 custom RML version
+          </div>
+          <h2 id="settings-preview-title">Mod Settings</h2>
+          <button
+            id="settings-preview-close"
+            class="rml-preview-close"
+            type="button"
+            aria-label="Close settings preview">
+            ×
+          </button>
+        </header>
+
+        <div class="rml-preview-content">
+          <div id="settings-preview-content" class="rml-preview-settings"></div>
+        </div>
+
+        <footer class="rml-preview-footer">
+          <div class="rml-preview-save-panel">
+            <button
+              id="settings-preview-save"
+              class="rml-preview-save"
+              type="button">
+              Save Settings
+            </button>
+          </div>
+        </footer>
+
+        <p
+          id="settings-preview-status"
+          class="rml-preview-status"
+          aria-live="polite"></p>
       </div>
-      <button
-        id="project-close"
-        class="dialog-close"
-        type="button"
-        aria-label="Close project dialog">
-        ×
-      </button>
-    </div>
+    </dialog>
 
-    <div class="project-dialog-body">
-      <p class="project-storage-note">
-        The current draft is already saved automatically in this browser.
-        A JSON project file creates a portable backup that can be reopened on
-        this or another device. Nothing is uploaded.
-      </p>
-
-      <div class="project-file-actions">
+    <dialog
+      id="project-dialog"
+      class="export-dialog project-dialog"
+      tabindex="-1"
+      aria-labelledby="project-dialog-title">
+      <div class="export-dialog-header">
+        <div>
+          <small>Local project file</small>
+          <h2 id="project-dialog-title">Save or restore the builder</h2>
+        </div>
         <button
-          id="project-save-json"
+          id="project-close"
+          class="dialog-close"
+          type="button"
+          aria-label="Close project dialog">
+          ×
+        </button>
+      </div>
+
+      <div class="project-dialog-body">
+        <p class="project-storage-note">
+          The current draft is already saved automatically in this browser.
+          A JSON project file creates a portable backup that can be reopened on
+          this or another device. Nothing is uploaded.
+        </p>
+
+        <div class="project-file-actions">
+          <button
+            id="project-save-json"
+            class="button primary"
+            type="button">
+            Save JSON
+          </button>
+          <button
+            id="project-load-json"
+            class="button secondary"
+            type="button">
+            Load JSON…
+          </button>
+        </div>
+
+        <input
+          id="project-file-input"
+          type="file"
+          accept=".json,.rml-builder.json,application/json"
+          hidden>
+
+        <p
+          id="project-file-status"
+          class="project-file-status"
+          aria-live="polite"></p>
+      </div>
+
+      <div class="export-dialog-actions">
+        <button id="project-done" class="button secondary" type="button">
+          Done
+        </button>
+      </div>
+    </dialog>
+
+    <dialog
+      id="export-dialog"
+      class="export-dialog"
+      tabindex="-1"
+      aria-labelledby="export-dialog-title">
+      <div class="export-dialog-header">
+        <div>
+          <small>Project export</small>
+          <h2 id="export-dialog-title">Download or copy</h2>
+        </div>
+        <button
+          id="export-close"
+          class="dialog-close"
+          type="button"
+          aria-label="Close export dialog">
+          ×
+        </button>
+      </div>
+
+      <div class="export-dialog-body">
+        <div class="export-project-grid">
+          <label class="export-select-field">
+            Path preset
+            <select id="export-platform">
+              <option value="windows">Windows / Steam</option>
+              <option value="linux">Linux / Steam</option>
+              <option value="linux-flatpak">Linux / Flatpak Steam</option>
+              <option value="macos">macOS / Steam layout</option>
+              <option value="custom">Custom path</option>
+            </select>
+          </label>
+        </div>
+
+        <p id="export-compatibility-hint" class="export-compatibility-hint">
+          Project target: <strong>.NET 10</strong>, matching the current Resonite
+          runtime and current RML releases.
+        </p>
+
+        <label class="export-path-field">
+          Resonite installation path
+          <input
+            id="export-resonite-path"
+            type="text"
+            autocomplete="off"
+            spellcheck="false">
+          <small>
+            Used for the local assembly references in the generated project.
+            MSBuild variables such as <code>$(HOME)</code> are supported. You can
+            still override <code>ResonitePath</code> when building.
+          </small>
+        </label>
+
+        <fieldset class="export-selection">
+          <legend>Files to download</legend>
+
+          <label class="export-option">
+            <input id="export-include-cs" type="checkbox">
+            <span>
+              <strong>C# source</strong>
+              <small id="export-cs-filename">YourMod.cs</small>
+            </span>
+          </label>
+
+          <label class="export-option">
+            <input id="export-include-csproj" type="checkbox">
+            <span>
+              <strong>Project file</strong>
+              <small id="export-csproj-filename">YourMod.csproj</small>
+            </span>
+          </label>
+        </fieldset>
+
+        <p id="export-download-hint" class="export-hint">
+          Both selected files will be bundled into one ZIP archive.
+        </p>
+
+        <div class="export-copy-row" aria-label="Copy generated files">
+          <button
+            id="export-copy-cs"
+            class="button secondary"
+            type="button">
+            Copy C#
+          </button>
+          <button
+            id="export-copy-csproj"
+            class="button secondary"
+            type="button">
+            Copy .csproj
+          </button>
+        </div>
+      </div>
+
+      <div class="export-dialog-actions">
+        <button id="export-cancel" class="button secondary" type="button">
+          Cancel
+        </button>
+        <button
+          id="export-download-selected"
           class="button primary"
           type="button">
-          Save JSON
-        </button>
-        <button
-          id="project-load-json"
-          class="button secondary"
-          type="button">
-          Load JSON…
+          Download ZIP
         </button>
       </div>
-
-      <input
-        id="project-file-input"
-        type="file"
-        accept=".json,.rml-builder.json,application/json"
-        hidden>
-
-      <p
-        id="project-file-status"
-        class="project-file-status"
-        aria-live="polite"></p>
-    </div>
-
-    <div class="export-dialog-actions">
-      <button id="project-done" class="button secondary" type="button">
-        Done
-      </button>
-    </div>
-  </dialog>
-
-  <dialog
-    id="export-dialog"
-    class="export-dialog"
-    tabindex="-1"
-    aria-labelledby="export-dialog-title">
-    <div class="export-dialog-header">
-      <div>
-        <small>Project export</small>
-        <h2 id="export-dialog-title">Download or copy</h2>
-      </div>
-      <button
-        id="export-close"
-        class="dialog-close"
-        type="button"
-        aria-label="Close export dialog">
-        ×
-      </button>
-    </div>
-
-    <div class="export-dialog-body">
-      <div class="export-project-grid">
-        <label class="export-select-field">
-          Path preset
-          <select id="export-platform">
-            <option value="windows">Windows / Steam</option>
-            <option value="linux">Linux / Steam</option>
-            <option value="linux-flatpak">Linux / Flatpak Steam</option>
-            <option value="macos">macOS / Steam layout</option>
-            <option value="custom">Custom path</option>
-          </select>
-        </label>
-      </div>
-
-      <p id="export-compatibility-hint" class="export-compatibility-hint">
-        Project target: <strong>.NET 10</strong>, matching the current Resonite
-        runtime and current RML releases.
-      </p>
-
-      <label class="export-path-field">
-        Resonite installation path
-        <input
-          id="export-resonite-path"
-          type="text"
-          autocomplete="off"
-          spellcheck="false">
-        <small>
-          Used for the local assembly references in the generated project.
-          MSBuild variables such as <code>$(HOME)</code> are supported. You can
-          still override <code>ResonitePath</code> when building.
-        </small>
-      </label>
-
-      <fieldset class="export-selection">
-        <legend>Files to download</legend>
-
-        <label class="export-option">
-          <input id="export-include-cs" type="checkbox">
-          <span>
-            <strong>C# source</strong>
-            <small id="export-cs-filename">YourMod.cs</small>
-          </span>
-        </label>
-
-        <label class="export-option">
-          <input id="export-include-csproj" type="checkbox">
-          <span>
-            <strong>Project file</strong>
-            <small id="export-csproj-filename">YourMod.csproj</small>
-          </span>
-        </label>
-      </fieldset>
-
-      <p id="export-download-hint" class="export-hint">
-        Both selected files will be bundled into one ZIP archive.
-      </p>
-
-      <div class="export-copy-row" aria-label="Copy generated files">
-        <button
-          id="export-copy-cs"
-          class="button secondary"
-          type="button">
-          Copy C#
-        </button>
-        <button
-          id="export-copy-csproj"
-          class="button secondary"
-          type="button">
-          Copy .csproj
-        </button>
-      </div>
-    </div>
-
-    <div class="export-dialog-actions">
-      <button id="export-cancel" class="button secondary" type="button">
-        Cancel
-      </button>
-      <button
-        id="export-download-selected"
-        class="button primary"
-        type="button">
-        Download ZIP
-      </button>
-    </div>
-  </dialog>
-
-  <script src="app.js?v=84"></script>
-  <script src="colorpicker_adaptive_fit.js?v=84"></script>
-</body>
+    </dialog>
+    <script src="app.js?v=84"></script>
+  </body>
 </html>

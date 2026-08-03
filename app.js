@@ -325,6 +325,134 @@ function scheduleNodePointerTargetUpdate(
 const MOBILE_DIALOG_MAX_WIDTH = 780;
 let adaptiveDialogFrame = 0;
 
+const COLOR_PICKER_ADAPTIVE_QUERY =
+  window.matchMedia(
+    "(max-width: 980px), (max-height: 720px)"
+  );
+
+const APP_SCRIPT_BASE_URL =
+  document.currentScript?.src ||
+  window.location.href;
+
+let colorPickerAdaptiveFitLoadPromise = null;
+
+function ensureColorPickerAdaptiveFitLoaded() {
+  if (
+    !COLOR_PICKER_ADAPTIVE_QUERY.matches ||
+    window.fitSettingsPreviewColorPicker
+  ) {
+    return Promise.resolve(false);
+  }
+
+  if (colorPickerAdaptiveFitLoadPromise) {
+    return colorPickerAdaptiveFitLoadPromise;
+  }
+
+  colorPickerAdaptiveFitLoadPromise =
+    new Promise((resolve, reject) => {
+      const existingScript =
+        document.querySelector(
+          'script[data-rml-colorpicker-adaptive-fit]'
+        );
+
+      if (existingScript) {
+        existingScript.addEventListener(
+          "load",
+          () => resolve(true),
+          { once: true }
+        );
+        existingScript.addEventListener(
+          "error",
+          () => reject(
+            new Error(
+              "colorpicker_adaptive_fit.js could not be loaded."
+            )
+          ),
+          { once: true }
+        );
+        return;
+      }
+
+      const script =
+        document.createElement("script");
+
+      script.src =
+        new URL(
+          "colorpicker_adaptive_fit.js",
+          APP_SCRIPT_BASE_URL
+        ).href;
+
+      script.async = true;
+      script.dataset
+        .rmlColorpickerAdaptiveFit =
+        "true";
+
+      script.addEventListener(
+        "load",
+        () => {
+          window
+            .fitSettingsPreviewColorPicker
+            ?.();
+
+          resolve(true);
+        },
+        { once: true }
+      );
+
+      script.addEventListener(
+        "error",
+        () => {
+          colorPickerAdaptiveFitLoadPromise =
+            null;
+
+          reject(
+            new Error(
+              "colorpicker_adaptive_fit.js could not be loaded."
+            )
+          );
+        },
+        { once: true }
+      );
+
+      document.head.appendChild(
+        script
+      );
+    });
+
+  colorPickerAdaptiveFitLoadPromise.catch(
+    error => {
+      console.warn(
+        "Adaptive color picker fit was not loaded.",
+        error
+      );
+    }
+  );
+
+  return colorPickerAdaptiveFitLoadPromise;
+}
+
+function handleColorPickerAdaptiveViewportChange() {
+  if (
+    COLOR_PICKER_ADAPTIVE_QUERY.matches
+  ) {
+    ensureColorPickerAdaptiveFitLoaded();
+  }
+}
+
+if (
+  typeof COLOR_PICKER_ADAPTIVE_QUERY
+    .addEventListener === "function"
+) {
+  COLOR_PICKER_ADAPTIVE_QUERY.addEventListener(
+    "change",
+    handleColorPickerAdaptiveViewportChange
+  );
+} else {
+  COLOR_PICKER_ADAPTIVE_QUERY.addListener(
+    handleColorPickerAdaptiveViewportChange
+  );
+}
+
 function visibleViewportSize() {
   const viewport =
     window.visualViewport;
@@ -13863,6 +13991,8 @@ function initialize() {
 
   document.documentElement.dataset
     .rmlBuilderInitialized = "true";
+
+  ensureColorPickerAdaptiveFitLoaded();
 
   cacheElements();
 
