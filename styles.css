@@ -1348,10 +1348,12 @@ footer strong {
 }
 .rml-preview-settings {
   display: grid;
-  min-height: 100%;
   align-content: start;
-  gap: 6px;
-  padding: 8px;
+  min-height: max-content;
+  height: auto;
+  overflow: visible;
+  gap: 4px;
+  padding: 25px 2px 8px;
 }
 
 .rml-preview-setting {
@@ -2520,10 +2522,12 @@ footer strong {
   overflow: hidden;
 }
 
-.settings-preview-dialog.rml-preview-color-open .rml-preview-settings {
-  height: 100%;
-  min-height: 0;
-  padding: 0;
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-settings {
+    height: auto;
+    min-height: max-content;
+    overflow: visible;
+    padding: 0;
 }
 
 .settings-preview-dialog.rml-preview-color-open .rml-preview-footer {
@@ -3402,7 +3406,8 @@ footer strong {
 
 .rml-preview-content {
   overscroll-behavior: contain;
-  overflow: scroll;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 
@@ -3926,9 +3931,8 @@ footer strong {
     margin: 0 !important;
     padding: 0 !important;
 
-    overflow-x: auto !important;
+    overflow-x: hidden !important;
     overflow-y: auto !important;
-    overflow: scroll !important;
     overscroll-behavior: contain !important;
     touch-action: pan-x pan-y !important;
     background: #090d13 !important;
@@ -5756,4 +5760,27 @@ body:has(.node-pointer-ghost) .builder-canvas {
   font-size:12px;
   color:#ffaa66;
   padding-left:20px;
+}
+
+@media (max-width: 980px), (max-height: 720px) {
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-content {
+    padding-left:
+      max(
+        12px,
+        env(safe-area-inset-left)
+      ) !important;
+
+    padding-right:
+      max(
+        22px,
+        calc(
+          env(safe-area-inset-right) +
+          10px
+        )
+      ) !important;
+
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+  }
 }
