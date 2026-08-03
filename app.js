@@ -6952,36 +6952,37 @@ function optionControllerTargetAtPointer(
       clientY
     );
 
+  const checkedCards =
+    new Set();
+
   for (const element of hitElements) {
-
-    const directDropZone =
-      element.closest(
-        ".option-lane[data-container] > .drop-zone"
-      );
-
-    if (directDropZone) {
-      continue;
-    }
-
-    const host =
-      element.closest(
-        ".controller-options"
-      );
-
-    if (!(host instanceof HTMLElement)) {
-      continue;
-    }
-
     const controllerCard =
-      host.closest(
+      element.closest(
         ".node-card.controller[data-node-id]"
       );
 
+    if (
+      !(controllerCard instanceof HTMLElement) ||
+      checkedCards.has(controllerCard)
+    ) {
+      continue;
+    }
+
+    checkedCards.add(
+      controllerCard
+    );
+
     const controllerId =
-      controllerCard?.dataset.nodeId;
+      controllerCard.dataset.nodeId;
+
+    const host =
+      controllerCard.querySelector(
+        ":scope > .controller-options"
+      );
 
     if (
       !controllerId ||
+      !(host instanceof HTMLElement) ||
       optionContainsController(
         source.option,
         controllerId
@@ -6995,7 +6996,8 @@ function optionControllerTargetAtPointer(
       controllerId,
       area:
         rectangleArea(
-          host.getBoundingClientRect()
+          controllerCard
+            .getBoundingClientRect()
         )
     };
   }
@@ -7136,20 +7138,44 @@ function optionPointerTargetModeAtPoint(
     );
 
   for (const element of hitElements) {
+    const controllerCard =
+      element.closest(
+        ".node-card.controller[data-node-id]"
+      );
+
+    if (
+      controllerCard instanceof HTMLElement
+    ) {
+      const dropZone =
+        element.closest(
+          ".option-lane[data-container] > .drop-zone"
+        );
+
+      if (
+        dropZone instanceof HTMLElement
+      ) {
+        const dropZoneOwner =
+          dropZone.closest(
+            ".node-card.controller[data-node-id]"
+          );
+
+        if (
+          dropZoneOwner ===
+          controllerCard
+        ) {
+          return "container";
+        }
+      }
+
+      return "controller";
+    }
+
     if (
       element.closest(
         ".option-lane[data-container] > .drop-zone"
       )
     ) {
       return "container";
-    }
-
-    if (
-      element.closest(
-        ".option-heading, .controller-options"
-      )
-    ) {
-      return "controller";
     }
 
     if (
