@@ -58,6 +58,7 @@ button {
   padding: 13px 22px;
   border-bottom: 1px solid var(--line);
   background: rgba(9, 8, 15, 0.91);
+  -webkit-backdrop-filter: blur(18px);
   backdrop-filter: blur(18px);
 }
 
@@ -339,6 +340,7 @@ fieldset legend {
   border-radius: 6px;
   cursor: pointer;
   list-style: none;
+  -webkit-user-select: none;
   user-select: none;
 }
 
@@ -1315,9 +1317,36 @@ footer strong {
   border: 1px solid rgba(72, 94, 114, 0.2);
   border-radius: 9px;
   background: rgba(6, 10, 15, 0.68);
-  scrollbar-color: #435461 #0a1118;
+  /* WebKit-based browsers fallback using vendor pseudo-elements */
+  --rml-scrollbar-thumb: #435461;
+  --rml-scrollbar-track: #0a1118;
 }
 
+@supports (scrollbar-width: thin) {
+  .rml-preview-content {
+    scrollbar-width: thin;
+  }
+}
+
+@supports (scrollbar-color: auto) {
+  .rml-preview-content {
+    scrollbar-color: var(--rml-scrollbar-thumb) var(--rml-scrollbar-track);
+  }
+}
+
+.rml-preview-content::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+.rml-preview-content::-webkit-scrollbar-track {
+  background: var(--rml-scrollbar-track);
+}
+.rml-preview-content::-webkit-scrollbar-thumb {
+  background-color: var(--rml-scrollbar-thumb);
+  border-radius: 6px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
 .rml-preview-settings {
   display: grid;
   min-height: 100%;
@@ -1736,6 +1765,7 @@ footer strong {
 
 .export-dialog::backdrop {
   background: rgba(4, 3, 8, 0.78);
+  -webkit-backdrop-filter: blur(6px);
   backdrop-filter: blur(6px);
 }
 
@@ -2236,7 +2266,29 @@ footer strong {
   border: 0;
   border-radius: 0;
   background: transparent;
-  scrollbar-color: #3e4c58 #0a1016;
+}
+
+/* Apply Firefox-only property inside a feature query to avoid compatibility warnings */
+@supports (scrollbar-width: thin) {
+  .rml-preview-content {
+    scrollbar-width: thin;
+    scrollbar-color: #3e4c58 #0a1016;
+  }
+}
+
+.rml-preview-content::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.rml-preview-content::-webkit-scrollbar-track {
+  background: #0a1016;
+}
+
+.rml-preview-content::-webkit-scrollbar-thumb {
+  background-color: #3e4c58;
+  border-radius: 999px;
+  border: 3px solid #0a1016;
 }
 
 .rml-preview-settings {
@@ -3093,7 +3145,13 @@ footer strong {
 }
 
 .custom-color-result {
-  border: 1px solid color-mix(in srgb, var(--result-glow, transparent) 45%, var(--line));
+  /* Fallback for browsers without color-mix support */
+  border: 1px solid var(--line);
+
+  /* Use color-mix where supported (Chrome 111+) for glow blending */
+  @supports (color: color-mix(in srgb, var(--result-glow, transparent) 45%, var(--line))) {
+    border-color: color-mix(in srgb, var(--result-glow, transparent) 45%, var(--line));
+  }
   box-shadow:
     0 0 var(--result-glow-size, 0px) var(--result-glow, transparent),
     0 0 calc(var(--result-glow-size, 0px) * 0.5) var(--result-glow, transparent),
@@ -3235,10 +3293,8 @@ footer strong {
       6,
       0
     );
-
-  backdrop-filter:
-    blur(0);
-
+  -webkit-backdrop-filter: blur(0);
+  backdrop-filter: blur(0);
   transition: none;
 }
 
@@ -3250,9 +3306,8 @@ footer strong {
       6,
       0.86
     );
-
-  backdrop-filter:
-    blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
 }
 
 .settings-preview-dialog[open].rml-overlay-closing::backdrop {
@@ -3263,9 +3318,8 @@ footer strong {
       6,
       0
     );
-
-  backdrop-filter:
-    blur(0);
+  -webkit-backdrop-filter: blur(0);
+  backdrop-filter: blur(0);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3297,7 +3351,22 @@ footer strong {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
-  scrollbar-gutter: stable;
+}
+
+/* Use scrollbar-gutter where supported; provide a lightweight fallback for Safari */
+@supports (scrollbar-gutter: stable) {
+  .export-dialog,
+  .project-dialog {
+    scrollbar-gutter: stable;
+  }
+}
+
+@supports not (scrollbar-gutter: stable) {
+  .export-dialog,
+  .project-dialog {
+    /* reserve a small padding to reduce layout shift when scrollbars appear */
+    padding-right: 12px;
+  }
 }
 
 .export-dialog-header {
@@ -3306,6 +3375,7 @@ footer strong {
   top: 0;
   padding-top: max(17px, env(safe-area-inset-top));
   background: rgba(17, 16, 25, 0.98);
+  -webkit-backdrop-filter: blur(14px);
   backdrop-filter: blur(14px);
 }
 
@@ -3315,6 +3385,7 @@ footer strong {
   bottom: 0;
   padding-bottom: max(17px, env(safe-area-inset-bottom));
   background: rgba(13, 12, 19, 0.98);
+  -webkit-backdrop-filter: blur(14px);
   backdrop-filter: blur(14px);
 }
 
@@ -3334,7 +3405,8 @@ footer strong {
 
 .rml-preview-content {
   overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
+  /* -webkit-overflow-scrolling is deprecated/unsupported in many browsers; rely on native scrolling */
+  overflow: scroll;
 }
 
 
@@ -3421,7 +3493,7 @@ footer strong {
   }
 
   .rml-preview-label {
-    min-height: auto;
+    min-height: 0;
     padding: 0 2px;
     overflow: visible;
     font-size: 16px;
@@ -3862,7 +3934,8 @@ footer strong {
 
     overflow-x: auto !important;
     overflow-y: auto !important;
-    -webkit-overflow-scrolling: touch !important;
+    /* -webkit-overflow-scrolling is deprecated/unsupported in many browsers; rely on native scrolling */
+    overflow: scroll !important;
     overscroll-behavior: contain !important;
     touch-action: pan-x pan-y !important;
     background: #090d13 !important;
@@ -5585,6 +5658,7 @@ body:has(.controller-options.option-drag-over) {
 
 body:has(.option-pointer-ghost) {
   cursor: grabbing;
+  -webkit-user-select: none;
   user-select: none;
 }
 .node-pointer-source {
@@ -5614,6 +5688,7 @@ body:has(.option-pointer-ghost) {
 
 body:has(.node-pointer-ghost) {
   cursor: grabbing;
+  -webkit-user-select: none;
   user-select: none;
 }
 
@@ -5684,4 +5759,10 @@ body:has(.node-pointer-ghost) .drop-zone,
 body:has(.node-pointer-ghost) .builder-canvas {
   transition: none !important;
   animation: none !important;
+}
+
+.rml-preview-warning {
+  font-size:12px;
+  color:#ffaa66;
+  padding-left:20px;
 }
