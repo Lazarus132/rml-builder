@@ -2602,7 +2602,7 @@ footer strong {
   border-radius: 15px;
   appearance: none;
   writing-mode: vertical-lr;
-  direction: rtl;
+  direction: ltr;
   background: linear-gradient(
     to bottom,
     #ff1b17 0%,
