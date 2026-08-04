@@ -2520,6 +2520,18 @@ footer strong {
 .settings-preview-dialog.rml-preview-color-open .rml-preview-content {
   margin: 0;
   overflow: hidden;
+  -ms-overflow-style: none !important;
+}
+
+@supports (scrollbar-width: none) {
+  .settings-preview-dialog.rml-preview-color-open .rml-preview-content {
+    scrollbar-width: none !important;      /* Firefox */
+  }
+}
+
+.settings-preview-dialog.rml-preview-color-open
+.rml-preview-content::-webkit-scrollbar {
+  display: none !important;              /* Chrome, Edge, Safari */
 }
 
 .settings-preview-dialog.rml-preview-color-open
