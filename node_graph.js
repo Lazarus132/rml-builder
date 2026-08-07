@@ -2,7 +2,7 @@
   "use strict";
 
   const EXTENSION_NAME = "typedNodeGraph";
-  const GRAPH_SCHEMA_VERSION = 10;
+  const GRAPH_SCHEMA_VERSION = 11;
   const GRAPH_STAGE_WIDTH = 5200;
   const GRAPH_STAGE_HEIGHT = 3400;
   const GRAPH_MIN_ZOOM = 0.35;
@@ -265,11 +265,11 @@
       ]
     },
     "constant.color": {
-      title: "Color Constant",
+      title: "ColorX Constant",
       group: "Values",
       symbol: "C",
       description:
-        "A colorX value represented by an editable CSS color for graph planning.",
+        "A full HDR colorX constant with the same profile, strength, preview feed and custom color picker used by the Configuration Outline.",
       parameterKind: "color",
       outputs: [
         port("value", "Value", "colorX")
@@ -540,24 +540,6 @@
       ]
     },
 
-    "cast.intToFloat": {
-      title: "Int To Float",
-      group: "Conversions",
-      symbol: "I→F",
-      description:
-        "Explicitly converts an int to a float.",
-      inputs: [port("value", "Value", "int")],
-      outputs: [port("result", "Result", "float")]
-    },
-    "cast.floatToDouble": {
-      title: "Float To Double",
-      group: "Conversions",
-      symbol: "F→D",
-      description:
-        "Explicitly converts a float to a double.",
-      inputs: [port("value", "Value", "float")],
-      outputs: [port("result", "Result", "double")]
-    },
     "cast.doubleToFloat": {
       title: "Double To Float",
       group: "Conversions",
@@ -589,24 +571,16 @@
     },
 
     "resonite.onStart": {
-      title: "On Start",
-      group: "Resonite",
+      title: "On Engine Init",
+      group: "Lifecycle",
       symbol: "▶",
       description:
-        "A ProtoFlux-style startup impulse source.",
-      outputs: [port("impulse", "Impulse", "impulse")]
-    },
-    "resonite.onSaved": {
-      title: "On Settings Saved",
-      group: "Resonite",
-      symbol: "■",
-      description:
-        "An impulse source representing a successful settings save.",
+        "Fires once from the generated mod's OnEngineInit method.",
       outputs: [port("impulse", "Impulse", "impulse")]
     },
     "resonite.impulseRelay": {
-      title: "Impulse Relay",
-      group: "Resonite",
+      title: "Impulse Reroute",
+      group: "Flow",
       symbol: "↯",
       description:
         "Passes an impulse through without changing its type.",
@@ -614,8 +588,8 @@
       outputs: [port("out", "Out", "impulse")]
     },
     "resonite.valueRelay": {
-      title: "Value Relay",
-      group: "Resonite",
+      title: "Value Reroute",
+      group: "Flow",
       symbol: "⇢",
       description:
         "Relays one concrete value type. The first connection binds the generic type.",
@@ -624,7 +598,7 @@
     },
     "resonite.displayValue": {
       title: "Display Value",
-      group: "Resonite",
+      group: "Debug & Output",
       symbol: "▣",
       description:
         "Displays the current typed value live. It is a terminal monitor with one input; branch it directly from an existing typed wire when the same value is needed elsewhere.",
@@ -657,27 +631,9 @@
         return `_impulseCount${token}++;\nPublishDisplay("${api.escapeString(label)}", _impulseCount${token});`;
       }
     },
-    "resonite.dataModelStore": {
-      title: "Data Model Store",
-      group: "Resonite",
-      symbol: "DM",
-      description:
-        "A globally synchronized ProtoFlux-style store. Its value type is selected explicitly.",
-      configurableTypeVar: "T",
-      configurableTypes: VALUE_TYPES,
-      defaultType: "float",
-      inputs: [
-        port("write", "Write", "impulse"),
-        genericPort("value", "Value", "T", "value")
-      ],
-      outputs: [
-        port("written", "On Written", "impulse"),
-        genericPort("current", "Current", "T", "value")
-      ]
-    },
     "resonite.store": {
-      title: "Store",
-      group: "Resonite",
+      title: "Local State Store",
+      group: "Flow",
       symbol: "S",
       description:
         "A local ProtoFlux-style mutable store with an explicitly selected value type.",
@@ -693,37 +649,9 @@
         genericPort("current", "Current", "T", "value")
       ]
     },
-    "resonite.dynamicRead": {
-      title: "Dynamic Variable Read",
-      group: "Resonite",
-      symbol: "D↦",
-      description:
-        "Reads a typed dynamic value by name. Choose the expected output type in the inspector.",
-      configurableTypeVar: "T",
-      configurableTypes: VALUE_TYPES,
-      defaultType: "float",
-      inputs: [port("name", "Name", "string")],
-      outputs: [genericPort("value", "Value", "T", "value")]
-    },
-    "resonite.dynamicWrite": {
-      title: "Dynamic Variable Write",
-      group: "Resonite",
-      symbol: "↦D",
-      description:
-        "Writes a typed value to a dynamic variable name when called.",
-      configurableTypeVar: "T",
-      configurableTypes: VALUE_TYPES,
-      defaultType: "float",
-      inputs: [
-        port("call", "Call", "impulse"),
-        port("name", "Name", "string"),
-        genericPort("value", "Value", "T", "value")
-      ],
-      outputs: [port("done", "On Written", "impulse")]
-    },
     "resonite.packColorX": {
       title: "Pack ColorX",
-      group: "Resonite",
+      group: "Values",
       symbol: "CLR",
       description:
         "Packs RGBA float channels into colorX.",
@@ -737,7 +665,7 @@
     },
     "resonite.unpackColorX": {
       title: "Unpack ColorX",
-      group: "Resonite",
+      group: "Values",
       symbol: "RGB",
       description:
         "Splits colorX into RGBA float channels.",
@@ -756,7 +684,9 @@
     "Math",
     "Logic",
     "Conversions",
-    "Resonite"
+    "Flow",
+    "Lifecycle",
+    "Debug & Output"
   ];
 
   const GRAPH_CODEGEN_PLUGINS = [];
@@ -840,8 +770,7 @@
 
   function registerGraphNode(
     operatorId,
-    definition,
-    options = {}
+    definition
   ) {
     const id = String(operatorId || "").trim();
 
@@ -857,13 +786,7 @@
     }
 
     OPERATOR_DEFINITIONS[id] =
-      options.merge === true &&
-      OPERATOR_DEFINITIONS[id]
-        ? {
-            ...OPERATOR_DEFINITIONS[id],
-            ...definition
-          }
-        : definition;
+      definition;
 
     const group =
       OPERATOR_DEFINITIONS[id].group;
@@ -874,19 +797,6 @@
     ) {
       registerGraphGroup(group);
     }
-  }
-
-  function patchGraphNode(
-    operatorId,
-    patch
-  ) {
-    registerGraphNode(
-      operatorId,
-      patch,
-      {
-        merge: true
-      }
-    );
   }
 
   function registerGraphCodegenPlugin(
@@ -910,7 +820,7 @@
     "RMLModNodeRegistry",
     {
       value: Object.freeze({
-        version: 1,
+        version: 2,
         port,
         genericPort,
         registerType:
@@ -919,8 +829,6 @@
           registerGraphGroup,
         registerNode:
           registerGraphNode,
-        patchNode:
-          patchGraphNode,
         registerCodegenPlugin:
           registerGraphCodegenPlugin,
         getNodeDefinition(
@@ -2177,143 +2085,6 @@
     return list;
   }
 
-  function legacyDisplayJunctionPosition(
-    displayNode
-  ) {
-    const width =
-      Number.isFinite(displayNode?.width)
-        ? displayNode.width
-        : 280;
-    const mirrored =
-      displayNode?.parameters?.portLayout ===
-        "mirrored";
-
-    return {
-      x: clamp(
-        mirrored
-          ? displayNode.x + width + 24
-          : displayNode.x - 24,
-        -GRAPH_COORDINATE_LIMIT,
-        GRAPH_COORDINATE_LIMIT
-      ),
-      y: clamp(
-        displayNode.y + 82,
-        -GRAPH_COORDINATE_LIMIT,
-        GRAPH_COORDINATE_LIMIT
-      )
-    };
-  }
-
-  function migrateLegacyDisplayValuePassThrough(
-    stateValue
-  ) {
-    const displays =
-      stateValue.nodes.filter(
-        node =>
-          node.kind === "operator" &&
-          node.operatorId ===
-            "resonite.displayValue"
-      );
-
-    if (displays.length === 0) {
-      return;
-    }
-
-    const droppedIds = new Set();
-
-    for (const display of displays) {
-      const incoming =
-        stateValue.connections.find(
-          connection =>
-            connection.toNode ===
-              display.id &&
-            connection.toPort ===
-              "value"
-        ) || null;
-      const outgoing =
-        stateValue.connections.filter(
-          connection =>
-            connection.fromNode ===
-              display.id &&
-            connection.fromPort ===
-              "result"
-        );
-
-      if (outgoing.length === 0) {
-        continue;
-      }
-
-      if (!incoming) {
-        for (const connection of outgoing) {
-          droppedIds.add(connection.id);
-        }
-        continue;
-      }
-
-      incoming.points =
-        Array.isArray(incoming.points)
-          ? incoming.points
-          : [];
-
-      const position =
-        legacyDisplayJunctionPosition(
-          display
-        );
-      let junction =
-        incoming.points.find(point =>
-          Math.hypot(
-            point.x - position.x,
-            point.y - position.y
-          ) <= GRAPH_WIRE_POINT_REUSE_DISTANCE
-        ) || null;
-
-      if (!junction) {
-        let junctionId =
-          `${incoming.id}-display-${display.id}`;
-        let suffix = 2;
-
-        while (
-          incoming.points.some(point =>
-            point.id === junctionId
-          )
-        ) {
-          junctionId =
-            `${incoming.id}-display-${display.id}-${suffix}`;
-          suffix += 1;
-        }
-
-        junction = {
-          id: junctionId,
-          ...position
-        };
-        incoming.points.push(junction);
-      }
-
-      for (const connection of outgoing) {
-        connection.fromNode =
-          incoming.fromNode;
-        connection.fromPort =
-          incoming.fromPort;
-        connection.branchFrom = {
-          connectionId:
-            incoming.id,
-          pointId:
-            junction.id
-        };
-      }
-    }
-
-    if (droppedIds.size > 0) {
-      stateValue.connections =
-        stateValue.connections.filter(
-          connection =>
-            !droppedIds.has(
-              connection.id
-            )
-        );
-    }
-  }
-
   function sanitizeGraphState(raw) {
     const result = defaultGraphState();
 
@@ -2488,130 +2259,17 @@
         ? raw.connections
         : [];
 
-    const legacyLifecycleSources =
-      new Map();
-    const packedConfigurationNode =
-      result.nodes.find(
-        node =>
-          node.kind ===
-            "configuration"
-      ) || null;
-
-    if (packedConfigurationNode) {
-      const legacyDefinitions = [
-        {
-          portId: "event-startup",
-          operatorId: "resonite.onStart",
-          label: "Migrated On Engine Init",
-          yOffset: 0
-        },
-        {
-          portId: "event-saved",
-          operatorId: "resonite.onSaved",
-          label: "Migrated On Settings Saved",
-          yOffset: 118
-        }
-      ];
-
-      for (const legacy of legacyDefinitions) {
-        const needed =
-          rawConnections.some(
-            connection =>
-              connection?.fromNode ===
-                packedConfigurationNode.id &&
-              connection?.fromPort ===
-                legacy.portId
-          );
-
-        if (!needed) {
-          continue;
-        }
-
-        let migratedId =
-          `${packedConfigurationNode.id}-${legacy.portId}-lifecycle`;
-        let suffix = 2;
-
-        while (usedNodeIds.has(migratedId)) {
-          migratedId =
-            `${packedConfigurationNode.id}-${legacy.portId}-lifecycle-${suffix}`;
-          suffix += 1;
-        }
-
-        const definition =
-          OPERATOR_DEFINITIONS[
-            legacy.operatorId
-          ];
-        const parameters = {};
-
-        normalizePortLayoutParameter(
-          parameters,
-          definition
-        );
-
-        result.nodes.push({
-          id: migratedId,
-          kind: "operator",
-          operatorId:
-            legacy.operatorId,
-          x: clamp(
-            packedConfigurationNode.x +
-              (Number.isFinite(
-                packedConfigurationNode.width
-              )
-                ? packedConfigurationNode.width
-                : 390) +
-              120,
-            -GRAPH_COORDINATE_LIMIT,
-            GRAPH_COORDINATE_LIMIT
-          ),
-          y: clamp(
-            packedConfigurationNode.y +
-              legacy.yOffset,
-            -GRAPH_COORDINATE_LIMIT,
-            GRAPH_COORDINATE_LIMIT
-          ),
-          width: null,
-          height: null,
-          label: legacy.label,
-          parameters
-        });
-
-        usedNodeIds.add(migratedId);
-        legacyLifecycleSources.set(
-          legacy.portId,
-          {
-            nodeId: migratedId,
-            portId: "impulse"
-          }
-        );
-      }
-    }
-
     const usedConnectionIds = new Set();
 
     for (const source of rawConnections) {
-      const migratedLifecycle =
-        source?.fromNode ===
-          packedConfigurationNode?.id
-          ? legacyLifecycleSources.get(
-              source?.fromPort
-            ) || null
-          : null;
-      const fromNode =
-        migratedLifecycle?.nodeId ||
-        source?.fromNode;
-      const fromPort =
-        migratedLifecycle?.portId ||
-        source?.fromPort;
-
       if (
         !source ||
         typeof source !== "object" ||
         typeof source.id !== "string" ||
         usedConnectionIds.has(source.id) ||
-        !usedNodeIds.has(fromNode) ||
+        !usedNodeIds.has(source.fromNode) ||
         !usedNodeIds.has(source.toNode) ||
-        typeof fromPort !== "string" ||
+        typeof source.fromPort !== "string" ||
         typeof source.toPort !== "string"
       ) {
         continue;
@@ -2620,8 +2278,8 @@
       usedConnectionIds.add(source.id);
       result.connections.push({
         id: source.id,
-        fromNode,
-        fromPort,
+        fromNode: source.fromNode,
+        fromPort: source.fromPort,
         toNode: source.toNode,
         toPort: source.toPort,
         points:
@@ -2636,9 +2294,6 @@
       });
     }
 
-    migrateLegacyDisplayValuePassThrough(
-      result
-    );
     normalizeConnectionRouting(
       result.connections
     );
@@ -5338,8 +4993,6 @@
           break;
         }
 
-        case "cast.intToFloat":
-        case "cast.floatToDouble":
         case "cast.doubleToFloat":
         case "cast.floatToInt": {
           const value = input("value");
@@ -5378,15 +5031,7 @@
           break;
 
         case "resonite.store":
-        case "resonite.dataModelStore":
           result = input("value");
-          break;
-
-        case "resonite.dynamicRead":
-          result = previewUnknown(
-            type,
-            "Runtime dynamic value"
-          );
           break;
 
         case "resonite.packColorX":
@@ -5911,8 +5556,6 @@
       [];
     const extensionEngineInitStatements =
       [];
-    const extensionSettingsSavedStatements =
-      [];
     const extensionFiles = [];
     const extensionReferences =
       new Map();
@@ -6262,12 +5905,6 @@
           code
         );
       },
-      addSettingsSaved(code) {
-        addStatement(
-          extensionSettingsSavedStatements,
-          code
-        );
-      },
       addFile(file) {
         if (
           file &&
@@ -6537,16 +6174,6 @@
               `(${input("condition").code} ? ${input("true").code} : ${input("false").code})`;
             break;
 
-          case "cast.intToFloat":
-            code =
-              `((float)${input("value").code})`;
-            break;
-
-          case "cast.floatToDouble":
-            code =
-              `((double)${input("value").code})`;
-            break;
-
           case "cast.doubleToFloat":
             code =
               `((float)${input("value").code})`;
@@ -6568,13 +6195,7 @@
             break;
 
           case "resonite.store":
-          case "resonite.dataModelStore":
             code = storeFieldName(node);
-            break;
-
-          case "resonite.dynamicRead":
-            code =
-              `ReadDynamic<${csType}>(${input("name").code})`;
             break;
 
           case "resonite.packColorX":
@@ -6652,10 +6273,8 @@
       graph.nodes.filter(
         node =>
           node.kind === "operator" &&
-          [
-            "resonite.store",
-            "resonite.dataModelStore"
-          ].includes(node.operatorId)
+          node.operatorId ===
+            "resonite.store"
       );
     const storeFields =
       storeNodes.map(node => {
@@ -6851,8 +6470,7 @@
             : "";
         }
 
-        case "resonite.store":
-        case "resonite.dataModelStore": {
+        case "resonite.store": {
           const field =
             storeFieldName(targetNode);
           const value =
@@ -6865,25 +6483,6 @@
 
           return `${field} = ${value};${written
             ? `\n        ${written}();`
-            : ""}`;
-        }
-
-        case "resonite.dynamicWrite": {
-          const name =
-            inputExpression(
-              targetNode,
-              "name"
-            ).code;
-          const value =
-            inputExpression(
-              targetNode,
-              "value"
-            ).code;
-          const done =
-            emit("done");
-
-          return `WriteDynamic(${name}, ${value});${done
-            ? `\n        ${done}();`
             : ""}`;
         }
 
@@ -7002,7 +6601,6 @@ ${actions.length > 0
           "configuration"
       ) || null;
     const startupEmitters = [];
-    const savedEmitters = [];
 
     for (const node of graph.nodes) {
       if (
@@ -7026,20 +6624,6 @@ ${actions.length > 0
         }
       }
 
-      if (
-        node.operatorId ===
-        "resonite.onSaved"
-      ) {
-        const method =
-          impulseMethodByPort.get(
-            `${node.id}:impulse`
-          );
-        if (method) {
-          savedEmitters.push(
-            `${method}();`
-          );
-        }
-      }
     }
 
     const displayNodes =
@@ -7149,32 +6733,6 @@ ${actions.length > 0
       ) ||
       extensionRequirements.usesRenderiteShared ===
         true;
-
-    if (
-      graph.nodes.some(
-        node =>
-          node.operatorId ===
-          "resonite.dataModelStore"
-      )
-    ) {
-      warnings.push(
-        "Data Model Store is generated as graph-local process storage because the graph currently has no World/Slot context input."
-      );
-    }
-
-    if (
-      graph.nodes.some(
-        node =>
-          [
-            "resonite.dynamicRead",
-            "resonite.dynamicWrite"
-          ].includes(node.operatorId)
-      )
-    ) {
-      warnings.push(
-        "Dynamic Variable nodes use the generated graph-local typed dictionary until a concrete Resonite World/Slot context is added to the graph."
-      );
-    }
 
     const usingSet = new Set([
       "using System;",
@@ -7298,10 +6856,6 @@ ${actions.length > 0
             .join("\n")}\n */\n`
         : "\n";
 
-    const hasGlobalSettingsSavedLogic =
-      savedEmitters.length > 0 ||
-      extensionSettingsSavedStatements.length > 0;
-
     const source = `${usingLines}
 
 namespace ${namespaceName};
@@ -7313,8 +6867,6 @@ ${warningsComment}
 internal static partial class ${graphClassName}
 {
     private static Action<string> _display = static _ => { };
-    private static readonly Dictionary<string, object?> _dynamicValues =
-        new(StringComparer.Ordinal);
     private static readonly Dictionary<string, object?> _displayValues =
         new(StringComparer.Ordinal);
 
@@ -7360,22 +6912,7 @@ ${startupEmitters.length > 0
         RefreshDisplays();
     }
 
-${hasGlobalSettingsSavedLogic
-  ? `    public static void OnSettingsSaved()
-    {
-${savedEmitters.length > 0
-  ? savedEmitters
-      .map(call => `        ${call}`)
-      .join("\n")
-  : ""}${extensionSettingsSavedStatements.length > 0
-  ? `${savedEmitters.length > 0 ? "\n" : ""}${formatExtensionStatements(
-      extensionSettingsSavedStatements
-    )}`
-  : ""}
-    }
-
-`
-  : ""}    public static void OnConfigurationSynchronized()
+    public static void OnConfigurationSynchronized()
     {
         RefreshDisplays();
     }
@@ -7467,19 +7004,6 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
                 : factor;
 
         return (T)(a + (b - a) * t);
-    }
-
-    private static T ReadDynamic<T>(string name)
-    {
-        return _dynamicValues.TryGetValue(name ?? string.Empty, out object? value) &&
-               value is T typed
-            ? typed
-            : default!;
-    }
-
-    private static void WriteDynamic<T>(string name, T value)
-    {
-        _dynamicValues[name ?? string.Empty] = value;
     }
 
     private static float ReadFloatComponent(object? value, string memberName)
@@ -7595,10 +7119,6 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         `${graphClassName}.Initialize(message => Msg(message));`,
       onEngineInitializedStatement:
         `${graphClassName}.OnEngineInit();`,
-      onSettingsSavedStatement:
-        hasGlobalSettingsSavedLogic
-          ? `${graphClassName}.OnSettingsSaved();`
-          : "",
       onConfigurationSynchronizedStatement:
         `${graphClassName}.OnConfigurationSynchronized();`,
       requirements: {
@@ -9508,7 +9028,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
          <span>◆ Both</span>
        </div>
        <span>Wire colors are value types. Startup/Saved configuration sockets can connect to both matching value inputs and impulse inputs; Stored sockets remain value-only.</span>
-       <span>Invalid sockets are disabled while connecting. Drop an unfinished socket wire on empty graph space to create a correctly typed source or monitor automatically.</span>
+       <span>Invalid sockets are disabled while connecting. Dropping an output wire on empty space creates a monitor. Dropping a value input wire creates only a self-contained constant or context source; impulse inputs and multi-input runtime operations must be connected explicitly.</span>
        <span>Resize: drag the right edge, bottom edge, or corner. Double-click a resize grip to reset that axis.</span>
        <span>Normal nodes declare their own usings, references and build requirements. Advanced / Raw C# is only a manual escape hatch.</span>`;
 
@@ -10067,10 +9587,25 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     return "0";
   }
 
+  function automaticTypedDefaultRecipe() {
+    return {
+      operatorId:
+        "constant.typedDefault",
+      outputPort: "value"
+    };
+  }
+
   function automaticSourceRecipe(
     inputRef,
     valueType
   ) {
+    if (
+      !valueType ||
+      valueType === "impulse"
+    ) {
+      return null;
+    }
+
     if (isScalarNumericType(valueType)) {
       return {
         operatorId: "constant.number",
@@ -10097,52 +9632,44 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       };
     }
 
-    const recipes = {
-      impulse: ["flow.customEvent", "event"],
+    const selfContainedRecipes = {
       bool: ["constant.bool", "value"],
       string: ["constant.string", "value"],
       Uri: ["constant.uri", "value"],
       colorX: ["constant.color", "value"],
       object: ["constant.nullObject", "value"],
-      byteArray: ["file.readBytes", "bytes"],
       stringArray: ["constant.stringArray", "value"],
-      objectArray: ["constant.objectArray", "value"],
-      type: ["reflection.findType", "type"],
-      memberInfo: ["reflection.getMethod", "method"],
-      methodBase: ["reflection.getMethod", "method"],
-      methodInfo: ["reflection.getMethod", "method"],
-      fieldInfo: ["reflection.getField", "field"],
-      propertyInfo: ["reflection.getProperty", "property"],
       engine: ["resonite.currentEngine", "engine"],
       world: ["resonite.focusedWorld", "world"],
-      user: ["resonite.localUser", "user"],
-      slot: ["resonite.worldRootSlot", "slot"],
-      component: ["resonite.getComponent", "component"],
-      uiBuilder: ["ui.createBuilder", "builder"],
-      uiElement: ["ui.panel", "element"],
-      asset: ["asset.request", "asset"],
-      json: ["json.parse", "json"],
-      httpResponse: ["network.httpRequest", "response"],
-      webSocket: ["network.webSocket", "socket"],
       task: ["task.completedTask", "task"],
-      dynamicVariableSpace: [
-        "resonite.dynamicVariableSpace",
-        "space"
-      ],
       radiantDash: ["resonite.radiantDash", "dash"]
     };
-    const recipe = recipes[valueType];
+    const recipe =
+      selfContainedRecipes[valueType];
 
     return recipe
       ? {
           operatorId: recipe[0],
           outputPort: recipe[1]
         }
-      : {
-          operatorId:
-            "constant.typedDefault",
-          outputPort: "value"
-        };
+      : automaticTypedDefaultRecipe();
+  }
+
+  function automaticSourceIsSelfContained(
+    node,
+    outputPort
+  ) {
+    const definition =
+      nodeDefinition(node);
+
+    return Boolean(
+      definition &&
+      (definition.inputs?.length || 0) === 0 &&
+      definition.outputs?.some(
+        specification =>
+          specification.id === outputPort
+      )
+    );
   }
 
   function configureAutomaticNode(
@@ -10385,29 +9912,48 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       interactionConcreteType(
         interaction
       );
+
+    if (!valueType) {
+      return {
+        attempted: true,
+        connected: false,
+        reason:
+          "The input type is unresolved. Connect another socket first or choose a concrete type in the inspector."
+      };
+    }
+
     const targetPoint =
       socketGraphCenter(
         interaction.start.nodeId,
         interaction.start.portId,
         "input"
       ) || dropPoint;
+
+    if (valueType === "impulse") {
+      return {
+        attempted: true,
+        connected: false,
+        reason:
+          "Impulse inputs require an explicit event source or an existing impulse path. No event node was created automatically because choosing one would change runtime behavior."
+      };
+    }
+
     const preferred =
       automaticSourceRecipe(
         inputRef,
         valueType
       );
-    const recipes = [preferred];
+    const recipes = preferred
+      ? [preferred]
+      : [];
 
     if (
-      preferred.operatorId !==
-        "constant.typedDefault" &&
-      valueType !== "impulse"
+      preferred?.operatorId !==
+        "constant.typedDefault"
     ) {
-      recipes.push({
-        operatorId:
-          "constant.typedDefault",
-        outputPort: "value"
-      });
+      recipes.push(
+        automaticTypedDefaultRecipe()
+      );
     }
 
     let lastReason = "";
@@ -10433,20 +9979,19 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
       const definition =
         nodeDefinition(node);
-      const outputExists =
-        definition?.outputs?.some(
-          spec =>
-            spec.id ===
-            recipe.outputPort
-        );
 
-      if (!outputExists) {
+      if (
+        !automaticSourceIsSelfContained(
+          node,
+          recipe.outputPort
+        )
+      ) {
         removeAutomaticNode(
           node,
           previousSequence
         );
         lastReason =
-          "The suggested source does not expose its expected output.";
+          `${definition?.title || "The suggested node"} is not a self-contained source and was not created automatically.`;
         continue;
       }
 
@@ -10492,7 +10037,10 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         connected: true,
         reason: "",
         message:
-          `${definition.title} created for ${typeLabel(valueType)}.`
+          node.operatorId ===
+            "constant.typedDefault"
+            ? `Safe typed default created for ${typeLabel(valueType)}. Replace it with an explicit runtime source when needed.`
+            : `${definition.title} created for ${typeLabel(valueType)}.`
       };
     }
 

@@ -3,9 +3,9 @@
 
   const registry = window.RMLModNodeRegistry;
 
-  if (!registry) {
+  if (!registry || registry.version !== 2) {
     console.error(
-      "RML universal mod nodes require node_graph.js to be loaded first."
+      "RML universal mod nodes require the matching node_graph.js registry version 2."
     );
     return;
   }
@@ -16,7 +16,6 @@
     registerType,
     registerGroup,
     registerNode,
-    patchNode,
     registerCodegenPlugin
   } = registry;
 
@@ -444,11 +443,8 @@
   }
 
   const groups = [
-    ["Flow", { after: "Conversions" }],
-    ["Lifecycle", { after: "Flow" }],
     ["Harmony", { after: "Lifecycle" }],
     ["Reflection", { after: "Harmony" }],
-    ["Debug & Output", { after: "Reflection" }],
     ["Slots & Components", { after: "Debug & Output" }],
     ["UI", { after: "Slots & Components" }],
     ["Assets", { after: "UI" }],
@@ -460,73 +456,6 @@
 
   for (const [name, options] of groups) {
     registerGroup(name, options);
-  }
-
-  patchNode("resonite.onStart", {
-    title: "On Engine Init",
-    group: "Lifecycle",
-    description:
-      "Fires once from the generated mod's OnEngineInit method."
-  });
-  patchNode("resonite.onSaved", {
-    title: "Legacy On Settings Saved",
-    group: "Lifecycle",
-    hiddenFromPalette: true,
-    description:
-      "Legacy compatibility node for older packed graphs. New projects use each Configuration Outline item's Runtime behavior and connect that typed configuration socket directly to an impulse input."
-  });
-  patchNode("resonite.impulseRelay", {
-    title: "Impulse Reroute",
-    group: "Flow"
-  });
-  patchNode("resonite.valueRelay", {
-    title: "Value Reroute",
-    group: "Flow"
-  });
-  patchNode("resonite.displayValue", {
-    group: "Debug & Output"
-  });
-  patchNode("constant.color", {
-    title: "ColorX Constant",
-    description:
-      "A full HDR colorX constant with the same profile, strength, preview feed and custom color picker used by the Configuration Outline."
-  });
-  for (const id of [
-    "cast.intToFloat",
-    "cast.floatToDouble"
-  ]) {
-    patchNode(id, {
-      hiddenFromPalette: true,
-      description:
-        "Legacy explicit widening conversion. New graphs connect these numeric types directly; the typed graph inserts the safe C# widening automatically."
-    });
-  }
-  patchNode("resonite.store", {
-    group: "Flow",
-    title: "Local State Store"
-  });
-  patchNode("resonite.dataModelStore", {
-    hiddenFromPalette: true,
-    description:
-      "Deprecated compatibility node. Use real Slot/Component/Sync nodes or Local State Store."
-  });
-  patchNode("resonite.dynamicRead", {
-    hiddenFromPalette: true,
-    description:
-      "Deprecated graph-local dictionary node. Use Read Slot/Component Member for real Resonite state."
-  });
-  patchNode("resonite.dynamicWrite", {
-    hiddenFromPalette: true,
-    description:
-      "Deprecated graph-local dictionary node. Use Write Slot/Component Member for real Resonite state."
-  });
-  for (const id of [
-    "resonite.packColorX",
-    "resonite.unpackColorX"
-  ]) {
-    patchNode(id, {
-      group: "Values"
-    });
   }
 
   function ensureReflectionRuntime(api) {
@@ -5566,20 +5495,6 @@ ${indented}
         );
       }
 
-      const deprecated = nodes.filter(
-        node =>
-          [
-            "resonite.dataModelStore",
-            "resonite.dynamicRead",
-            "resonite.dynamicWrite"
-          ].includes(node.operatorId)
-      );
-
-      if (deprecated.length > 0) {
-        api.warning(
-          "This project still contains deprecated graph-local pseudo-Resonite nodes. Replace them with real Slot/Component/Sync nodes."
-        );
-      }
     }
   });
 })();

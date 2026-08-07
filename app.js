@@ -2526,7 +2526,6 @@ function getTypedNodeGraphContribution() {
       reactionStatements: {},
       initializeStatement: "",
       onEngineInitializedStatement: "",
-      onSettingsSavedStatement: "",
       onConfigurationSynchronizedStatement: "",
       requirements: {
         usesElements: false,
@@ -2562,7 +2561,6 @@ function getTypedNodeGraphContribution() {
         reactionStatements: {},
         initializeStatement: "",
         onEngineInitializedStatement: "",
-        onSettingsSavedStatement: "",
         onConfigurationSynchronizedStatement: "",
         requirements: {
           usesElements: false,
@@ -2594,7 +2592,6 @@ function getTypedNodeGraphContribution() {
       reactionStatements: {},
       initializeStatement: "",
       onEngineInitializedStatement: "",
-      onSettingsSavedStatement: "",
       onConfigurationSynchronizedStatement: "",
       requirements: {
         usesElements: false,
@@ -2917,14 +2914,6 @@ ${usesColorX
             .join("\n")
         : "";
 
-    const graphSavedStatement =
-      graphRuntimeActive
-        ? String(
-            graphContribution
-              ?.onSettingsSavedStatement ||
-            ""
-          ).trim()
-        : "";
     const graphSynchronizedStatement =
       graphRuntimeActive
         ? String(
@@ -2965,13 +2954,6 @@ ${usesColorX
                   12
                 )}`
               : "";
-          const savedCall =
-            graphSavedStatement
-              ? `\n${indentGeneratedStatement(
-                  graphSavedStatement,
-                  12
-                )}`
-              : "";
           const synchronizedCall =
             graphRuntimeActive &&
             graphSynchronizedStatement
@@ -2985,7 +2967,7 @@ ${usesColorX
                 configurationEvent.Key,
                 ${field}))
         {
-            ${applyCall}${reactionCall}${savedCall}${synchronizedCall}
+            ${applyCall}${reactionCall}${synchronizedCall}
             return;
         }`;
         })
