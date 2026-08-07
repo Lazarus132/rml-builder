@@ -454,7 +454,11 @@
       "Fires once from the generated mod's OnEngineInit method."
   });
   patchNode("resonite.onSaved", {
-    group: "Lifecycle"
+    title: "Legacy On Settings Saved",
+    group: "Lifecycle",
+    hiddenFromPalette: true,
+    description:
+      "Legacy compatibility node for older packed graphs. New projects use each Configuration Outline item's Runtime behavior and connect that typed configuration socket directly to an impulse input."
   });
   patchNode("resonite.impulseRelay", {
     title: "Impulse Reroute",

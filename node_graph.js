@@ -2,7 +2,7 @@
   "use strict";
 
   const EXTENSION_NAME = "typedNodeGraph";
-  const GRAPH_SCHEMA_VERSION = 6;
+  const GRAPH_SCHEMA_VERSION = 7;
   const GRAPH_STAGE_WIDTH = 5200;
   const GRAPH_STAGE_HEIGHT = 3400;
   const GRAPH_MIN_ZOOM = 0.35;
@@ -162,6 +162,37 @@
       shape: "diamond"
     }
   };
+
+  function runtimeBehaviorIncludesStartup(
+    reaction
+  ) {
+    return (
+      reaction === "startup" ||
+      reaction === "startup-saved"
+    );
+  }
+
+  function runtimeBehaviorIncludesSaved(
+    reaction
+  ) {
+    return (
+      reaction === "saved" ||
+      reaction === "startup-saved"
+    );
+  }
+
+  function runtimeBehaviorEmitsImpulse(
+    reaction
+  ) {
+    return (
+      runtimeBehaviorIncludesStartup(
+        reaction
+      ) ||
+      runtimeBehaviorIncludesSaved(
+        reaction
+      )
+    );
+  }
 
   const port = (
     id,
@@ -2259,17 +2290,135 @@
         ? raw.connections
         : [];
 
+    /*
+     * Schema 7 removes the duplicate lifecycle sockets from the packed
+     * configuration node. Preserve older projects by moving each legacy
+     * lifecycle path onto its dedicated Lifecycle operator node.
+     */
+    const legacyLifecycleSources =
+      new Map();
+    const packedConfigurationNode =
+      result.nodes.find(
+        node =>
+          node.kind ===
+            "configuration"
+      ) || null;
+
+    if (packedConfigurationNode) {
+      const legacyDefinitions = [
+        {
+          portId: "event-startup",
+          operatorId: "resonite.onStart",
+          label: "Migrated On Engine Init",
+          yOffset: 0
+        },
+        {
+          portId: "event-saved",
+          operatorId: "resonite.onSaved",
+          label: "Migrated On Settings Saved",
+          yOffset: 118
+        }
+      ];
+
+      for (const legacy of legacyDefinitions) {
+        const needed =
+          rawConnections.some(
+            connection =>
+              connection?.fromNode ===
+                packedConfigurationNode.id &&
+              connection?.fromPort ===
+                legacy.portId
+          );
+
+        if (!needed) {
+          continue;
+        }
+
+        let migratedId =
+          `${packedConfigurationNode.id}-${legacy.portId}-lifecycle`;
+        let suffix = 2;
+
+        while (usedNodeIds.has(migratedId)) {
+          migratedId =
+            `${packedConfigurationNode.id}-${legacy.portId}-lifecycle-${suffix}`;
+          suffix += 1;
+        }
+
+        const definition =
+          OPERATOR_DEFINITIONS[
+            legacy.operatorId
+          ];
+        const parameters = {};
+
+        normalizePortLayoutParameter(
+          parameters,
+          definition
+        );
+
+        result.nodes.push({
+          id: migratedId,
+          kind: "operator",
+          operatorId:
+            legacy.operatorId,
+          x: clamp(
+            packedConfigurationNode.x +
+              (Number.isFinite(
+                packedConfigurationNode.width
+              )
+                ? packedConfigurationNode.width
+                : 390) +
+              120,
+            -GRAPH_COORDINATE_LIMIT,
+            GRAPH_COORDINATE_LIMIT
+          ),
+          y: clamp(
+            packedConfigurationNode.y +
+              legacy.yOffset,
+            -GRAPH_COORDINATE_LIMIT,
+            GRAPH_COORDINATE_LIMIT
+          ),
+          width: null,
+          height: null,
+          label: legacy.label,
+          parameters
+        });
+
+        usedNodeIds.add(migratedId);
+        legacyLifecycleSources.set(
+          legacy.portId,
+          {
+            nodeId: migratedId,
+            portId: "impulse"
+          }
+        );
+      }
+    }
+
     const usedConnectionIds = new Set();
 
     for (const source of rawConnections) {
+      const migratedLifecycle =
+        source?.fromNode ===
+          packedConfigurationNode?.id
+          ? legacyLifecycleSources.get(
+              source?.fromPort
+            ) || null
+          : null;
+      const fromNode =
+        migratedLifecycle?.nodeId ||
+        source?.fromNode;
+      const fromPort =
+        migratedLifecycle?.portId ||
+        source?.fromPort;
+
       if (
         !source ||
         typeof source !== "object" ||
         typeof source.id !== "string" ||
         usedConnectionIds.has(source.id) ||
-        !usedNodeIds.has(source.fromNode) ||
+        !usedNodeIds.has(fromNode) ||
         !usedNodeIds.has(source.toNode) ||
-        typeof source.fromPort !== "string" ||
+        typeof fromPort !== "string" ||
         typeof source.toPort !== "string"
       ) {
         continue;
@@ -2278,8 +2427,8 @@
       usedConnectionIds.add(source.id);
       result.connections.push({
         id: source.id,
-        fromNode: source.fromNode,
-        fromPort: source.fromPort,
+        fromNode,
+        fromPort,
         toNode: source.toNode,
         toPort: source.toPort,
         points:
@@ -2623,26 +2772,7 @@
     const metadata =
       snapshot.metadata || {};
 
-    const outputs = [
-      port(
-        "event-startup",
-        "On Engine Init",
-        "impulse",
-        {
-          reaction: "startup",
-          detail: "Runtime startup event"
-        }
-      ),
-      port(
-        "event-saved",
-        "On Settings Saved",
-        "impulse",
-        {
-          reaction: "saved",
-          detail: "Configuration saved event"
-        }
-      )
-    ];
+    const outputs = [];
 
     for (
       const entry of
@@ -2691,11 +2821,27 @@
       group: "Packed Configuration",
       symbol: "§",
       description:
-        "All configuration keys are exposed as typed outputs. Runtime behavior changes each socket shape, while the line color represents its value type.",
+        "Each configuration key is exposed exactly once as a typed reactive output. Connect it to value inputs to read the current value; Startup/Saved sockets can also connect directly to impulse inputs.",
       inputs: [],
       outputs,
       width: 390
     };
+  }
+
+  function isConfigurationReactionConnection(
+    fromRef,
+    toRef
+  ) {
+    return Boolean(
+      fromRef?.direction === "output" &&
+      fromRef.node?.kind ===
+        "configuration" &&
+      runtimeBehaviorEmitsImpulse(
+        fromRef.spec?.reaction
+      ) &&
+      toRef?.direction === "input" &&
+      toRef.spec?.type === "impulse"
+    );
   }
 
   function nodeDefinition(node) {
@@ -3174,7 +3320,40 @@
         };
       }
 
-      const from = termFor(fromRef);
+      const targetIsImpulse =
+        toRef.spec?.type ===
+          "impulse";
+      const sourceIsConfiguration =
+        fromRef.node?.kind ===
+          "configuration";
+      const reactiveConfigurationEdge =
+        isConfigurationReactionConnection(
+          fromRef,
+          toRef
+        );
+
+      if (
+        sourceIsConfiguration &&
+        targetIsImpulse &&
+        !reactiveConfigurationEdge
+      ) {
+        return {
+          valid: false,
+          reason:
+            `${fromRef.definition.title} · ${fromRef.spec.label} is Stored only and cannot trigger an impulse. Select Startup, Saved or Startup + Saved in the Configuration Outline.`,
+          bindings: new Map(),
+          domains: new Map()
+        };
+      }
+
+      const from =
+        reactiveConfigurationEdge
+          ? {
+              fixed: true,
+              type: "impulse",
+              portRef: fromRef
+            }
+          : termFor(fromRef);
       const to = termFor(toRef);
       if (!from || !to) {
         return {
@@ -3186,7 +3365,12 @@
         };
       }
 
-      const edge = { connection, from, to };
+      const edge = {
+        connection,
+        from,
+        to,
+        reactiveConfigurationEdge
+      };
       edges.push(edge);
 
       if (!from.fixed && to.fixed) {
@@ -5235,7 +5419,17 @@
           backing:
             `_config${field}`,
           setter:
-            `Set${field}`
+            `Set${field}`,
+          reactor:
+            `React${field}`,
+          portId:
+            `config-${node.id}`,
+          reaction:
+            RUNTIME_BEHAVIORS[
+              node.reaction
+            ]
+              ? node.reaction
+              : "stored"
         };
       });
     const configurationFieldById =
@@ -5915,13 +6109,51 @@
         const spec of
         definition?.outputs || []
       ) {
+        const concreteType =
+          resolvedType(node, spec);
+        const reactiveConfiguration =
+          node.kind ===
+            "configuration" &&
+          runtimeBehaviorEmitsImpulse(
+            spec.reaction
+          );
+        const reactiveConfigurationConnected =
+          reactiveConfiguration &&
+          graph.connections.some(
+            connection => {
+              if (
+                connection.fromNode !==
+                  node.id ||
+                connection.fromPort !==
+                  spec.id
+              ) {
+                return false;
+              }
+
+              return isConfigurationReactionConnection(
+                {
+                  node,
+                  definition,
+                  spec,
+                  direction: "output"
+                },
+                findPortSpec(
+                  connection.toNode,
+                  connection.toPort,
+                  "input"
+                )
+              );
+            }
+          );
+
         if (
-          resolvedType(node, spec) ===
-          "impulse"
+          concreteType === "impulse" ||
+          reactiveConfigurationConnected
         ) {
           impulseOutputs.push({
             node,
             spec,
+            reactiveConfiguration,
             method:
               `Emit${graphCsMethodToken(
                 node.id,
@@ -6025,14 +6257,16 @@
             `${targetNode.id}:${portId}`
           );
 
-        return method
-          ? `${method}();`
-          : "";
+        return method || "";
       };
 
       switch (targetNode.operatorId) {
-        case "resonite.impulseRelay":
-          return emit("out");
+        case "resonite.impulseRelay": {
+          const next = emit("out");
+          return next
+            ? `${next}();`
+            : "";
+        }
 
         case "resonite.store":
         case "resonite.dataModelStore": {
@@ -6047,7 +6281,7 @@
             emit("written");
 
           return `${field} = ${value};${written
-            ? `\n        ${written}`
+            ? `\n        ${written}();`
             : ""}`;
         }
 
@@ -6066,7 +6300,7 @@
             emit("done");
 
           return `WriteDynamic(${name}, ${value});${done
-            ? `\n        ${done}`
+            ? `\n        ${done}();`
             : ""}`;
         }
 
@@ -6121,14 +6355,43 @@
 
     const impulseMethods =
       impulseOutputs.map(item => {
+        const sourceRef = {
+          node: item.node,
+          definition:
+            nodeDefinition(
+              item.node
+            ),
+          spec: item.spec,
+          direction: "output"
+        };
         const connections =
-          graph.connections.filter(
-            connection =>
-              connection.fromNode ===
-                item.node.id &&
-              connection.fromPort ===
-                item.spec.id
-          );
+          graph.connections
+            .filter(
+              connection =>
+                connection.fromNode ===
+                  item.node.id &&
+                connection.fromPort ===
+                  item.spec.id
+            )
+            .filter(connection => {
+              if (
+                !item.reactiveConfiguration
+              ) {
+                return true;
+              }
+
+              const targetRef =
+                findPortSpec(
+                  connection.toNode,
+                  connection.toPort,
+                  "input"
+                );
+
+              return isConfigurationReactionConnection(
+                sourceRef,
+                targetRef
+              );
+            });
         const actions =
           connections
             .map(targetAction)
@@ -6154,32 +6417,9 @@ ${actions.length > 0
         node =>
           node.kind ===
           "configuration"
-      );
+      ) || null;
     const startupEmitters = [];
     const savedEmitters = [];
-
-    if (configurationNode) {
-      const startup =
-        impulseMethodByPort.get(
-          `${configurationNode.id}:event-startup`
-        );
-      const saved =
-        impulseMethodByPort.get(
-          `${configurationNode.id}:event-saved`
-        );
-
-      if (startup) {
-        startupEmitters.push(
-          `${startup}();`
-        );
-      }
-
-      if (saved) {
-        savedEmitters.push(
-          `${saved}();`
-        );
-      }
-    }
 
     for (const node of graph.nodes) {
       if (
@@ -6250,13 +6490,34 @@ ${actions.length > 0
       });
 
     const applyStatements = {};
+    const syncStatements = {};
+    const reactionStatements = {};
 
     for (
       const item of
       configurationFields
     ) {
-      applyStatements[item.node.id] =
+      const syncStatement =
         `${graphClassName}.${item.setter}(value);`;
+
+      applyStatements[item.node.id] =
+        syncStatement;
+      syncStatements[item.node.id] =
+        syncStatement;
+
+      const reactionEmitter =
+        configurationNode
+          ? impulseMethodByPort.get(
+              `${configurationNode.id}:${item.portId}`
+            )
+          : "";
+
+      if (reactionEmitter) {
+        reactionStatements[
+          item.node.id
+        ] =
+          `${graphClassName}.${item.reactor}();`;
+      }
     }
 
     const usesElements =
@@ -6380,6 +6641,27 @@ ${actions.length > 0
     }`
         )
         .join("\n\n");
+    const reactionCode =
+      configurationFields
+        .filter(item =>
+          Boolean(
+            reactionStatements[
+              item.node.id
+            ]
+          )
+        )
+        .map(item => {
+          const emitter =
+            impulseMethodByPort.get(
+              `${configurationNode.id}:${item.portId}`
+            );
+
+          return `    public static void ${item.reactor}()
+    {
+        ${emitter}();
+    }`;
+        })
+        .join("\n\n");
     const storeFieldsCode =
       storeFields
         .map(item =>
@@ -6433,6 +6715,10 @@ ${actions.length > 0
             .join("\n")}\n */\n`
         : "\n";
 
+    const hasGlobalSettingsSavedLogic =
+      savedEmitters.length > 0 ||
+      extensionSettingsSavedStatements.length > 0;
+
     const source = `${usingLines}
 
 namespace ${namespaceName};
@@ -6472,7 +6758,9 @@ ${storeFieldsCode ? `\n${storeFieldsCode}` : ""}${extensionFieldsCode ? `\n\n${e
   : ""}
     }
 
-${setterCode || "    // No configuration setters."}
+${setterCode || "    // No configuration setters."}${reactionCode ? `
+
+${reactionCode}` : ""}
 
     public static void OnEngineInit()
     {
@@ -6489,18 +6777,23 @@ ${startupEmitters.length > 0
         RefreshDisplays();
     }
 
-    public static void OnSettingsSaved()
+${hasGlobalSettingsSavedLogic
+  ? `    public static void OnSettingsSaved()
     {
 ${savedEmitters.length > 0
   ? savedEmitters
       .map(call => `        ${call}`)
       .join("\n")
-  : "        // No connected settings-saved impulse paths."}${extensionSettingsSavedStatements.length > 0
-  ? `\n${formatExtensionStatements(
+  : ""}${extensionSettingsSavedStatements.length > 0
+  ? `${savedEmitters.length > 0 ? "\n" : ""}${formatExtensionStatements(
       extensionSettingsSavedStatements
     )}`
   : ""}
+    }
 
+`
+  : ""}    public static void OnConfigurationSynchronized()
+    {
         RefreshDisplays();
     }
 
@@ -6713,12 +7006,18 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         });
       })(),
       applyStatements,
+      syncStatements,
+      reactionStatements,
       initializeStatement:
         `${graphClassName}.Initialize(message => Msg(message));`,
       onEngineInitializedStatement:
         `${graphClassName}.OnEngineInit();`,
       onSettingsSavedStatement:
-        `${graphClassName}.OnSettingsSaved();`,
+        hasGlobalSettingsSavedLogic
+          ? `${graphClassName}.OnSettingsSaved();`
+          : "",
+      onConfigurationSynchronizedStatement:
+        `${graphClassName}.OnConfigurationSynchronized();`,
       requirements: {
         usesElements,
         usesRenderiteShared:
@@ -8486,8 +8785,8 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
          <span>■ Saved</span>
          <span>◆ Both</span>
        </div>
-       <span>Wire colors are value types. Invalid sockets are disabled while connecting.</span>
-       <span>Drop an unfinished socket wire on empty graph space to create a correctly typed source or monitor automatically.</span>
+       <span>Wire colors are value types. Startup/Saved configuration sockets can connect to both matching value inputs and impulse inputs; Stored sockets remain value-only.</span>
+       <span>Invalid sockets are disabled while connecting. Drop an unfinished socket wire on empty graph space to create a correctly typed source or monitor automatically.</span>
        <span>Resize: drag the right edge, bottom edge, or corner. Double-click a resize grip to reset that axis.</span>`;
 
     root.append(
@@ -12178,6 +12477,10 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       );
 
     if (
+      !isConfigurationReactionConnection(
+        sourcePort,
+        targetPort
+      ) &&
       sourceType &&
       targetType &&
       !connectionTypesCompatible(
@@ -12482,6 +12785,17 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           connection.fromPort,
           "output"
         );
+      const toRef =
+        findPortSpec(
+          connection.toNode,
+          connection.toPort,
+          "input"
+        );
+      const reactiveImpulse =
+        isConfigurationReactionConnection(
+          fromRef,
+          toRef
+        );
       const concreteType =
         resolvePortType(
           fromRef,
@@ -12506,7 +12820,8 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         const visible =
           svgPath(
             `rml-graph-wire${
-              concreteType === "impulse"
+              concreteType === "impulse" ||
+              reactiveImpulse
                 ? " impulse"
                 : ""
             }${
@@ -15969,7 +16284,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       )
     );
     pruneConnections();
-    /* Persist normalized schema 5 routing data, including legacy migration. */
+    /* Persist normalized schema 7 data, including lifecycle migration. */
     persistGraph(true);
 
     ensurePackButton();
