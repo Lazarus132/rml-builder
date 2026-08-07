@@ -96,6 +96,21 @@
     help
   });
 
+  const RAW_CSHARP_GROUP =
+    "Advanced / Raw C#";
+
+  const NUMERIC_VECTOR_TYPES = [
+    "int2",
+    "int3",
+    "int4",
+    "float2",
+    "float3",
+    "float4",
+    "double2",
+    "double3",
+    "double4"
+  ];
+
   const COMMON_VALUE_TYPES = [
     "bool",
     "string",
@@ -440,7 +455,7 @@
     ["Files & JSON", { after: "Assets" }],
     ["Networking", { after: "Files & JSON" }],
     ["Tasks & Threading", { after: "Networking" }],
-    ["C# Advanced", { after: "Tasks & Threading" }]
+    [RAW_CSHARP_GROUP, { after: "Tasks & Threading" }]
   ];
 
   for (const [name, options] of groups) {
@@ -471,6 +486,21 @@
   patchNode("resonite.displayValue", {
     group: "Debug & Output"
   });
+  patchNode("constant.color", {
+    title: "ColorX Constant",
+    description:
+      "A full HDR colorX constant with the same profile, strength, preview feed and custom color picker used by the Configuration Outline."
+  });
+  for (const id of [
+    "cast.intToFloat",
+    "cast.floatToDouble"
+  ]) {
+    patchNode(id, {
+      hiddenFromPalette: true,
+      description:
+        "Legacy explicit widening conversion. New graphs connect these numeric types directly; the typed graph inserts the safe C# widening automatically."
+    });
+  }
   patchNode("resonite.store", {
     group: "Flow",
     title: "Local State Store"
@@ -491,10 +521,6 @@
       "Deprecated graph-local dictionary node. Use Write Slot/Component Member for real Resonite state."
   });
   for (const id of [
-    "resonite.packFloat2",
-    "resonite.packFloat3",
-    "resonite.packFloat4",
-    "resonite.unpackFloat3",
     "resonite.packColorX",
     "resonite.unpackColorX"
   ]) {
@@ -1705,20 +1731,14 @@ private static void CreateGeneratedReversePatch(
     group: "Values",
     symbol: "VEC",
     description:
-      "A typed int/float/double vector constant.",
+      "An intelligent int/float/double 2D, 3D or 4D vector constant. Auto follows compatible connected vector sockets; an explicit type remains available.",
     configurableTypeVar: "T",
-    configurableTypes: [
-      "int2",
-      "int3",
-      "int4",
-      "float2",
-      "float3",
-      "float4",
-      "double2",
-      "double3",
-      "double4"
-    ],
-    defaultType: "float3",
+    configurableTypes:
+      NUMERIC_VECTOR_TYPES,
+    defaultType: "auto",
+    autoFallbackType: "float3",
+    allowAutoType: true,
+    typeSelectorLabel: "Vector type",
     parameters: [
       pText(
         "components",
@@ -1737,8 +1757,13 @@ private static void CreateGeneratedReversePatch(
     ],
     codegenExpression(api) {
       const type =
-        api.node.parameters.valueType ||
-        "float3";
+        NUMERIC_VECTOR_TYPES.includes(
+          api.type
+        )
+          ? api.type
+          : numericVectorDescriptor(
+              api.node
+            ).type;
       const count = Number(type.slice(-1));
       const scalar = type.startsWith("int")
         ? "int"
@@ -1758,6 +1783,301 @@ private static void CreateGeneratedReversePatch(
         .slice(0, count)
         .map(value => api.numberLiteral(value, scalar))
         .join(", ")})`;
+    },
+    previewEvaluate({
+      node,
+      type,
+      known,
+      unknown
+    }) {
+      const information =
+        numericVectorDescriptor(type);
+
+      if (!information) {
+        return unknown(
+          type,
+          "The vector type is unresolved."
+        );
+      }
+
+      const raw = String(
+        node.parameters?.components ||
+          ""
+      )
+        .split(",")
+        .map(value => value.trim());
+      const values = [];
+
+      for (
+        let index = 0;
+        index <
+          information.componentCount;
+        index += 1
+      ) {
+        const number = Number(
+          raw[index] || "0"
+        );
+
+        if (!Number.isFinite(number)) {
+          return unknown(
+            type,
+            "A vector component is not finite."
+          );
+        }
+
+        values.push(number);
+      }
+
+      return known(type, values);
+    }
+  });
+
+  function numericVectorDescriptor(
+    requested
+  ) {
+    const parameters =
+      requested &&
+      typeof requested === "object" &&
+      !Array.isArray(requested)
+        ? requested.parameters || requested
+        : null;
+    const requestedType = parameters
+      ? parameters.valueType === "auto"
+        ? parameters.autoVectorType
+        : parameters.valueType
+      : requested;
+    const type =
+      NUMERIC_VECTOR_TYPES.includes(
+        requestedType
+      )
+        ? requestedType
+        : "float3";
+    const match = type.match(
+      /^(int|float|double)([234])$/
+    );
+
+    return {
+      type,
+      scalarType:
+        match?.[1] || "float",
+      componentCount:
+        Number(match?.[2]) || 3,
+      componentIds:
+        ["x", "y", "z", "w"].slice(
+          0,
+          Number(match?.[2]) || 3
+        )
+    };
+  }
+
+  function ensureNumericVectorRuntime(
+    api
+  ) {
+    api.addMember(
+      "universal.vector.components",
+      String.raw`
+private static T ReadNumericComponent<T>(
+    object? value,
+    string memberName)
+{
+    if (value is null)
+    {
+        return default!;
+    }
+
+    const BindingFlags flags =
+        BindingFlags.Instance |
+        BindingFlags.Public |
+        BindingFlags.NonPublic |
+        BindingFlags.IgnoreCase;
+
+    Type sourceType = value.GetType();
+    object? component =
+        sourceType.GetField(memberName, flags)?.GetValue(value) ??
+        sourceType.GetProperty(memberName, flags)?.GetValue(value);
+
+    if (component is null)
+    {
+        return default!;
+    }
+
+    if (component is T typed)
+    {
+        return typed;
+    }
+
+    Type targetType =
+        Nullable.GetUnderlyingType(typeof(T)) ??
+        typeof(T);
+
+    return (T)Convert.ChangeType(
+        component,
+        targetType,
+        CultureInfo.InvariantCulture);
+}
+`
+    );
+  }
+
+  registerNode("vector.compose", {
+    title: "Compose Vector",
+    group: "Values",
+    symbol: "VEC+",
+    description:
+      "Builds any int/float/double 2D, 3D or 4D vector. Auto follows connected vector targets and scalar component sources; an explicit type can be locked in the inspector.",
+    configurableTypeVar: "T",
+    configurableTypes:
+      NUMERIC_VECTOR_TYPES,
+    defaultType: "auto",
+    autoFallbackType: "float3",
+    allowAutoType: true,
+    typeSelectorLabel: "Vector type",
+    resolveDefinition(node) {
+      const information =
+        numericVectorDescriptor(
+          node
+        );
+
+      return {
+        inputs:
+          information.componentIds.map(
+            id =>
+              port(
+                id,
+                id.toUpperCase(),
+                information.scalarType
+              )
+          ),
+        outputs: [
+          port(
+            "value",
+            "Value",
+            information.type
+          )
+        ]
+      };
+    },
+    codegenExpression(api) {
+      const information =
+        numericVectorDescriptor(
+          api.node
+        );
+
+      return `new ${information.type}(${information.componentIds
+        .map(id => api.input(id).code)
+        .join(", ")})`;
+    },
+    previewEvaluate({
+      node,
+      input,
+      known,
+      unknown
+    }) {
+      const information =
+        numericVectorDescriptor(
+          node
+        );
+      const values = [];
+
+      for (const id of information.componentIds) {
+        const current = input(id);
+
+        if (!current.known) {
+          return unknown(
+            information.type,
+            current.reason
+          );
+        }
+
+        values.push(
+          Number(current.value) || 0
+        );
+      }
+
+      return known(
+        information.type,
+        values
+      );
+    }
+  });
+
+  registerNode("vector.decompose", {
+    title: "Decompose Vector",
+    group: "Values",
+    symbol: "VEC−",
+    description:
+      "Splits any int/float/double 2D, 3D or 4D vector. Auto follows the connected vector source and compatible scalar targets; an explicit type can be locked in the inspector.",
+    configurableTypeVar: "T",
+    configurableTypes:
+      NUMERIC_VECTOR_TYPES,
+    defaultType: "auto",
+    autoFallbackType: "float3",
+    allowAutoType: true,
+    typeSelectorLabel: "Vector type",
+    resolveDefinition(node) {
+      const information =
+        numericVectorDescriptor(
+          node
+        );
+
+      return {
+        inputs: [
+          port(
+            "value",
+            "Value",
+            information.type
+          )
+        ],
+        outputs:
+          information.componentIds.map(
+            id =>
+              port(
+                id,
+                id.toUpperCase(),
+                information.scalarType
+              )
+          )
+      };
+    },
+    codegenCollect(api) {
+      ensureNumericVectorRuntime(api);
+    },
+    codegenExpression(api) {
+      const information =
+        numericVectorDescriptor(
+          api.node
+        );
+
+      return `ReadNumericComponent<${information.scalarType}>(${api.input("value").code}, "${api.portId}")`;
+    },
+    previewEvaluate({
+      node,
+      portId,
+      input,
+      known,
+      unknown
+    }) {
+      const information =
+        numericVectorDescriptor(
+          node
+        );
+      const value = input("value");
+      const index =
+        information.componentIds.indexOf(
+          portId
+        );
+
+      if (!value.known) {
+        return unknown(
+          information.scalarType,
+          value.reason
+        );
+      }
+
+      return known(
+        information.scalarType,
+        value.value?.[index] ?? 0
+      );
     }
   });
 
@@ -2508,6 +2828,7 @@ private static void CreateGeneratedReversePatch(
   registerNode("harmony.reversePatch", {
     title: "Create Reverse Patch",
     group: "Harmony",
+    expertOnly: true,
     symbol: "REV",
     description:
       "Creates a Harmony reverse patch between an existing target method and an exact stand-in method supplied in custom C# source.",
@@ -4408,9 +4729,277 @@ private static void CreateGeneratedReversePatch(
     }
   });
 
+  const RAW_CSHARP_USING_RULES = [
+    [
+      "System.Diagnostics",
+      /\b(?:Process|ProcessStartInfo|Stopwatch|Debug|Trace)\b|System\.Diagnostics\./
+    ],
+    [
+      "System.IO",
+      /\b(?:File|Directory|Path|FileInfo|DirectoryInfo|FileStream|MemoryStream|StreamReader|StreamWriter|BinaryReader|BinaryWriter)\b|System\.IO\./
+    ],
+    [
+      "System.Linq",
+      /\b(?:Enumerable|Queryable)\b|\.(?:Select|Where|OrderBy|OrderByDescending|FirstOrDefault|SingleOrDefault|ToArray|ToList|Any|All|Concat)\s*\(/
+    ],
+    [
+      "System.Net.Http",
+      /\b(?:HttpClient|HttpRequestMessage|HttpResponseMessage|HttpContent|StringContent)\b|System\.Net\.Http\./
+    ],
+    [
+      "System.Net.WebSockets",
+      /\b(?:ClientWebSocket|WebSocketMessageType|WebSocketReceiveResult)\b|System\.Net\.WebSockets\./
+    ],
+    [
+      "System.Text.Json",
+      /\b(?:JsonSerializer|JsonDocument|JsonElement|JsonSerializerOptions)\b|System\.Text\.Json\./
+    ],
+    [
+      "System.Text.Json.Nodes",
+      /\b(?:JsonNode|JsonObject|JsonArray|JsonValue)\b|System\.Text\.Json\.Nodes\./
+    ],
+    [
+      "System.Text",
+      /\b(?:StringBuilder|Encoding|UTF8Encoding)\b|System\.Text\./
+    ],
+    [
+      "System.Threading",
+      /\b(?:CancellationToken|CancellationTokenSource|SemaphoreSlim|Interlocked|Volatile|Mutex|Monitor)\b|System\.Threading\./
+    ],
+    [
+      "System.Threading.Tasks",
+      /\b(?:Task|ValueTask|TaskCompletionSource|TaskScheduler)\b|System\.Threading\.Tasks\./
+    ],
+    [
+      "System.Collections.Concurrent",
+      /\b(?:ConcurrentDictionary|ConcurrentQueue|ConcurrentBag|BlockingCollection)\b|System\.Collections\.Concurrent\./
+    ],
+    [
+      "System.Collections.Generic",
+      /\b(?:List|Dictionary|HashSet|Queue|Stack|IEnumerable|IReadOnlyList)\s*</
+    ],
+    [
+      "System.Reflection",
+      /\b(?:BindingFlags|MethodInfo|MethodBase|FieldInfo|PropertyInfo|Assembly)\b|System\.Reflection\./
+    ],
+    [
+      "System.Globalization",
+      /\b(?:CultureInfo|NumberStyles)\b|System\.Globalization\./
+    ],
+    [
+      "System.Runtime.InteropServices",
+      /\b(?:DllImport|LibraryImport|Marshal|StructLayout|UnmanagedFunctionPointer|GCHandle)\b|System\.Runtime\.InteropServices\./
+    ],
+    [
+      "System.Runtime.CompilerServices",
+      /\b(?:MethodImpl|MethodImplOptions|CallerMemberName|CallerFilePath|CallerLineNumber|RuntimeHelpers|Unsafe)\b|System\.Runtime\.CompilerServices\./
+    ],
+    [
+      "System.Buffers",
+      /\b(?:ArrayPool|MemoryPool|ReadOnlySequence|SequenceReader)\b|System\.Buffers\./
+    ],
+    [
+      "System.Text.RegularExpressions",
+      /\b(?:Regex|Match|MatchCollection|RegexOptions)\b|System\.Text\.RegularExpressions\./
+    ],
+    [
+      "System.Security.Cryptography",
+      /\b(?:SHA256|SHA512|MD5|RandomNumberGenerator|Aes|RSA|CryptographicOperations)\b|System\.Security\.Cryptography\./
+    ],
+    [
+      "Microsoft.Win32",
+      /\b(?:Registry|RegistryKey)\b|Microsoft\.Win32\./
+    ],
+    [
+      "Newtonsoft.Json",
+      /\bJsonConvert\b|Newtonsoft\.Json\./
+    ],
+    [
+      "Newtonsoft.Json.Linq",
+      /\b(?:JObject|JArray|JToken|JValue)\b|Newtonsoft\.Json\.Linq\./
+    ],
+    [
+      "Websocket.Client",
+      /\bWebsocketClient\b|Websocket\.Client\./
+    ]
+  ];
+
+  const RAW_CSHARP_PACKAGE_RULES = [
+    {
+      pattern:
+        /\bNewtonsoft\.Json\b|\b(?:JsonConvert|JObject|JArray|JToken|JValue)\b/,
+      include: "Newtonsoft.Json",
+      version: "13.0.3"
+    },
+    {
+      pattern:
+        /\bWebsocket\.Client\b|\bWebsocketClient\b/,
+      include: "Websocket.Client",
+      version: "5.1.2"
+    }
+  ];
+
+  const RAW_CSHARP_FRAMEWORK_RULES = [
+    {
+      pattern:
+        /\bMicrosoft\.AspNetCore\b|^\s*using\s+Microsoft\.AspNetCore(?:\.|;)/m,
+      include: "Microsoft.AspNetCore.App"
+    }
+  ];
+
+  function analyzeRawCSharpDependencies(
+    source
+  ) {
+    const code = String(source || "");
+    const usings = new Set();
+    const usingPattern =
+      /^\s*using\s+(?:static\s+)?([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*;/gm;
+    let match;
+
+    while ((match = usingPattern.exec(code))) {
+      usings.add(match[1]);
+    }
+
+    for (const [namespaceName, pattern] of
+      RAW_CSHARP_USING_RULES) {
+      if (pattern.test(code)) {
+        usings.add(namespaceName);
+      }
+    }
+
+    const useWindowsForms =
+      /\bSystem\.Windows\.Forms\b|^\s*using\s+System\.Windows\.Forms\s*;/m.test(
+        code
+      ) ||
+      /\b(?:MessageBox\.Show|NotifyIcon|OpenFileDialog|SaveFileDialog|FolderBrowserDialog)\b/.test(
+        code
+      ) ||
+      (/\bApplication\.Run\s*\(/.test(code) &&
+        /\bForm\b/.test(code));
+    const allowUnsafeBlocks =
+      /\bunsafe\b|\bstackalloc\b|\bfixed\s*\(|delegate\s*\*|->|\b(?:void|byte|sbyte|short|ushort|int|uint|long|ulong|char|float|double|nint|nuint|[A-Za-z_][A-Za-z0-9_<>]*)\s*\*+\s*[A-Za-z_(]/.test(
+        code
+      );
+    const usesElements =
+      /\b(?:int2|int3|int4|float2|float3|float4|double2|double3|double4|colorX)\b|\bnew\s+color\s*\(|Elements\.Core\./.test(
+        code
+      );
+    const usesRenderiteShared =
+      /\bColorProfile\b|Renderite\.Shared\./.test(
+        code
+      );
+    const usesHarmony =
+      /\bHarmonyLib\b|\[\s*HarmonyPatch\b|\bHarmonyMethod\b|\bnew\s+Harmony\s*\(/.test(
+        code
+      );
+
+    if (useWindowsForms) {
+      usings.add("System.Windows.Forms");
+    }
+    if (usesElements) {
+      usings.add("Elements.Core");
+    }
+    if (usesRenderiteShared) {
+      usings.add("Renderite.Shared");
+    }
+    if (usesHarmony) {
+      usings.add("HarmonyLib");
+    }
+
+    const packageReferences =
+      RAW_CSHARP_PACKAGE_RULES
+        .filter(rule =>
+          rule.pattern.test(code)
+        )
+        .map(rule => ({
+          include: rule.include,
+          version: rule.version,
+          privateAssets: "",
+          includeAssets: ""
+        }));
+    const frameworkReferences =
+      RAW_CSHARP_FRAMEWORK_RULES
+        .filter(rule =>
+          rule.pattern.test(code)
+        )
+        .map(rule => rule.include);
+
+    return {
+      usings,
+      packageReferences,
+      frameworkReferences,
+      allowUnsafeBlocks,
+      useWindowsForms,
+      usesElements,
+      usesRenderiteShared,
+      usesHarmony
+    };
+  }
+
+  function applyRawCSharpDependencies(
+    api,
+    source,
+    options = {}
+  ) {
+    const information =
+      analyzeRawCSharpDependencies(
+        source
+      );
+
+    if (options.addUsings !== false) {
+      for (const namespaceName of
+        information.usings) {
+        api.addUsing(namespaceName);
+      }
+    }
+
+    api.require(
+      "allowUnsafeBlocks",
+      information.allowUnsafeBlocks
+    );
+    api.require(
+      "useWindowsForms",
+      information.useWindowsForms
+    );
+    api.require(
+      "usesElements",
+      information.usesElements
+    );
+    api.require(
+      "usesRenderiteShared",
+      information.usesRenderiteShared
+    );
+
+    if (information.usesHarmony) {
+      api.addReference({
+        include: "0Harmony",
+        hintPath:
+          "$(ResonitePath)Libraries/0Harmony.dll",
+        private: false
+      });
+    }
+
+    for (const packageReference of
+      information.packageReferences) {
+      api.addPackageReference(
+        packageReference
+      );
+    }
+
+    for (const frameworkReference of
+      information.frameworkReferences) {
+      api.addFrameworkReference(
+        frameworkReference
+      );
+    }
+
+    return information;
+  }
+
   registerNode("csharp.expression", {
     title: "C# Expression",
-    group: "C# Advanced",
+    group: RAW_CSHARP_GROUP,
+    expertOnly: true,
     symbol: "C#=",
     description:
       "Universal typed expression escape hatch. Placeholders {A}…{H}, {MOD}, {GRAPH}, {NAMESPACE} and {NODE} are replaced during export.",
@@ -4461,7 +5050,8 @@ private static void CreateGeneratedReversePatch(
 
   registerNode("csharp.action", {
     title: "C# Action",
-    group: "C# Advanced",
+    group: RAW_CSHARP_GROUP,
+    expertOnly: true,
     symbol: "C#;",
     description:
       "Universal statement escape hatch. {A}…{H} are input expressions; {NEXT} calls the Done output. When {NEXT} is absent, Done is appended automatically.",
@@ -4517,7 +5107,8 @@ private static void CreateGeneratedReversePatch(
 
   registerNode("csharp.runtimeMember", {
     title: "C# Graph Runtime Member",
-    group: "C# Advanced",
+    group: RAW_CSHARP_GROUP,
+    expertOnly: true,
     symbol: "MEM",
     description:
       "Adds fields, methods, nested types or properties directly inside the generated static NodeGraph class.",
@@ -4549,7 +5140,8 @@ private static void CreateGeneratedReversePatch(
 
   registerNode("csharp.mainMember", {
     title: "C# Main Mod Member",
-    group: "C# Advanced",
+    group: RAW_CSHARP_GROUP,
+    expertOnly: true,
     symbol: "MOD",
     description:
       "Adds fields, helpers or nested types inside the generated public partial ResoniteMod class.",
@@ -4566,7 +5158,8 @@ private static void CreateGeneratedReversePatch(
 
   registerNode("csharp.additionalSource", {
     title: "Additional C# Source File",
-    group: "C# Advanced",
+    group: RAW_CSHARP_GROUP,
+    expertOnly: true,
     symbol: ".CS",
     description:
       "Exports a complete additional source file. This makes arbitrary classes, services, exact API adapters and platform code possible.",
@@ -4588,7 +5181,8 @@ private static void CreateGeneratedReversePatch(
 
   registerNode("harmony.exactPatchSource", {
     title: "Harmony Exact Patch Source",
-    group: "Harmony",
+    group: RAW_CSHARP_GROUP,
+    expertOnly: true,
     symbol: "H.CS",
     description:
       "Exports a complete Harmony patch source file for exact signatures, transpilers, reverse-patch stand-ins, ref returns and advanced state handling.",
@@ -4609,11 +5203,12 @@ private static void CreateGeneratedReversePatch(
   });
 
   registerNode("csharp.using", {
-    title: "Add Using Namespace",
-    group: "C# Advanced",
+    title: "Manual Using Override",
+    group: RAW_CSHARP_GROUP,
+    expertOnly: true,
     symbol: "USING",
     description:
-      "Adds a using directive to the generated NodeGraph runtime file.",
+      "Expert fallback for a namespace the automatic raw-code dependency detector cannot infer.",
     parameters: [
       pText(
         "namespace",
@@ -4624,11 +5219,12 @@ private static void CreateGeneratedReversePatch(
   });
 
   registerNode("csharp.assemblyReference", {
-    title: "Assembly Reference",
-    group: "C# Advanced",
+    title: "Manual Assembly Reference",
+    group: RAW_CSHARP_GROUP,
+    expertOnly: true,
     symbol: "DLL",
     description:
-      "Adds a direct MSBuild Reference to the generated .csproj.",
+      "Expert fallback for an external assembly that no visual node can declare automatically.",
     parameters: [
       pText(
         "include",
@@ -4649,11 +5245,12 @@ private static void CreateGeneratedReversePatch(
   });
 
   registerNode("csharp.packageReference", {
-    title: "NuGet Package Reference",
-    group: "C# Advanced",
+    title: "Manual NuGet Package Reference",
+    group: RAW_CSHARP_GROUP,
+    expertOnly: true,
     symbol: "NUGET",
     description:
-      "Adds a PackageReference to the generated .csproj.",
+      "Expert fallback for an external NuGet package that no visual node can declare automatically.",
     parameters: [
       pText(
         "include",
@@ -4679,11 +5276,12 @@ private static void CreateGeneratedReversePatch(
   });
 
   registerNode("csharp.frameworkReference", {
-    title: "Framework Reference",
-    group: "C# Advanced",
+    title: "Manual Framework Reference",
+    group: RAW_CSHARP_GROUP,
+    expertOnly: true,
     symbol: "FX",
     description:
-      "Adds a FrameworkReference, for example Microsoft.AspNetCore.App.",
+      "Expert fallback for a framework reference that no visual node can declare automatically.",
     parameters: [
       pText(
         "include",
@@ -4694,11 +5292,12 @@ private static void CreateGeneratedReversePatch(
   });
 
   registerNode("csharp.buildOptions", {
-    title: "C# Build Options",
-    group: "C# Advanced",
+    title: "Manual Build Option Override",
+    group: RAW_CSHARP_GROUP,
+    expertOnly: true,
     symbol: "BUILD",
     description:
-      "Enables project-level options required by native interop or Windows UI code.",
+      "Manual override only. Raw C# is scanned automatically for unsafe code and System.Windows.Forms first.",
     parameters: [
       pBool(
         "unsafe",
@@ -4720,6 +5319,11 @@ private static void CreateGeneratedReversePatch(
         : [];
 
       const mainMembers = [];
+      const mainMemberUsings =
+        new Set([
+          "System",
+          "ResoniteModLoader"
+        ]);
       let advancedCodeUsed = false;
 
       for (const node of nodes) {
@@ -4728,6 +5332,53 @@ private static void CreateGeneratedReversePatch(
           node.kind !== "operator"
         ) {
           continue;
+        }
+
+        const rawSource =
+          node.operatorId === "csharp.expression" ||
+          node.operatorId === "csharp.action" ||
+          node.operatorId === "csharp.runtimeMember" ||
+          node.operatorId === "csharp.mainMember"
+            ? node.parameters?.code
+            : node.operatorId === "csharp.additionalSource" ||
+                node.operatorId === "harmony.exactPatchSource"
+              ? node.parameters?.content
+              : "";
+
+        let rawDependencies = null;
+
+        if (rawSource) {
+          const nodeApi = {
+            ...api,
+            node,
+            definition:
+              api.definitions?.[
+                node.operatorId
+              ]
+          };
+          const addUsings =
+            node.operatorId !== "csharp.additionalSource" &&
+            node.operatorId !== "harmony.exactPatchSource" &&
+            node.operatorId !== "csharp.mainMember";
+
+          rawDependencies =
+            applyRawCSharpDependencies(
+              nodeApi,
+              rawSource,
+              { addUsings }
+            );
+
+          if (
+            node.operatorId ===
+              "csharp.mainMember"
+          ) {
+            for (const namespaceName of
+              rawDependencies.usings) {
+              mainMemberUsings.add(
+                namespaceName
+              );
+            }
+          }
         }
 
         switch (node.operatorId) {
@@ -4883,12 +5534,21 @@ private static void CreateGeneratedReversePatch(
           )
           .join("\n\n");
 
+        const usingLines =
+          [...mainMemberUsings]
+            .sort((left, right) =>
+              left.localeCompare(right)
+            )
+            .map(namespaceName =>
+              `using ${namespaceName};`
+            )
+            .join("\n");
+
         api.addFile({
           name:
             `${api.className}.Custom.cs`,
           content:
-`using System;
-using ResoniteModLoader;
+`${usingLines}
 
 namespace ${api.namespaceName};
 

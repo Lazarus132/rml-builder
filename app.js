@@ -1054,6 +1054,25 @@ function colorXPreview(
     );
   }
 
+  const parsedHex =
+    parseHexColor(value);
+
+  if (parsedHex) {
+    return colorChannelsToPreview(
+      [
+        parsedHex.red / 255,
+        parsedHex.green / 255,
+        parsedHex.blue / 255,
+        parsedHex.alpha === null
+          ? 1
+          : parsedHex.alpha / 255
+      ],
+      "Custom hex color",
+      storedProfile || "srgb",
+      storedStrength
+    );
+  }
+
   const number =
     "([+-]?(?:(?:\\d+(?:\\.\\d*)?)|(?:\\.\\d+))(?:[eE][+-]?\\d+)?)[fFdD]?";
   const explicit =
@@ -9524,22 +9543,27 @@ function vectorDefaultValueMarkup(
   </fieldset>`;
 }
 
-function colorDefaultValueMarkup(
-  node
+function colorXEditorMarkup(
+  options = {}
 ) {
+  const expression =
+    String(
+      options.expression ??
+        "colorX.White"
+    );
   const profile =
     normalizeColorProfile(
-      node.colorProfile
+      options.profile
     );
   const strength =
     clamp(
-      Number(node.colorStrength) || 1,
+      Number(options.strength) || 1,
       1,
       10
     );
   const preview =
     colorXPreview(
-      node.defaultValue,
+      expression,
       strength,
       profile
     );
@@ -9563,9 +9587,44 @@ function colorDefaultValueMarkup(
     strength <= 1.000001
       ? 0
       : 8 + (strength - 1) * 3.2;
+  const editorClass =
+    String(
+      options.editorClass ||
+        "color-default-editor"
+    )
+      .trim() ||
+      "color-default-editor";
+  const legend =
+    String(
+      options.legend ||
+        "Color"
+    );
+  const expressionLabel =
+    String(
+      options.expressionLabel ||
+        "C# colorX expression"
+    );
+  const expressionHelp =
+    String(
+      options.expressionHelp ||
+        "The normalized base color, ColorProfile and HDR strength are stored separately by the builder and emitted together in the generated colorX."
+    );
+  const expressionField =
+    typeof options.expressionField ===
+      "string"
+      ? options.expressionField.trim()
+      : "";
+  const expressionFieldAttribute =
+    expressionField
+      ? ` data-field="${escapeHtml(
+          expressionField
+        )}"`
+      : "";
 
-  return `<fieldset class="color-default-editor">
-    <legend>Default color</legend>
+  return `<fieldset
+    class="${escapeHtml(editorClass)}"
+    data-color-x-editor>
+    <legend>${escapeHtml(legend)}</legend>
 
     <div class="custom-color-profile-tabs" aria-label="Color profile">
       <button
@@ -9759,17 +9818,31 @@ function colorDefaultValueMarkup(
     </div>
 
     <label>
-      C# colorX expression
+      ${escapeHtml(expressionLabel)}
       <input
-        value="${escapeHtml(node.defaultValue)}"
-        data-field="defaultValue"
+        value="${escapeHtml(expression)}"
+        data-color-expression${expressionFieldAttribute}
         autocomplete="off">
-      <small>
-        The normalized base color, ColorProfile and HDR strength are stored
-        separately by the builder and emitted together in the generated colorX.
-      </small>
+      <small>${escapeHtml(expressionHelp)}</small>
     </label>
   </fieldset>`;
+}
+
+function colorDefaultValueMarkup(
+  node
+) {
+  return colorXEditorMarkup({
+    expression:
+      node.defaultValue,
+    profile:
+      node.colorProfile,
+    strength:
+      node.colorStrength,
+    legend:
+      "Default color",
+    expressionField:
+      "defaultValue"
+  });
 }
 
 function defaultValueMarkup(node) {
@@ -10413,7 +10486,7 @@ function commitColorPickerExpression(
 ) {
   const expressionInput =
     form.querySelector(
-      '[data-field="defaultValue"]'
+      '[data-color-expression], [data-field="defaultValue"]'
     );
 
   if (!expressionInput) {
@@ -10435,8 +10508,14 @@ function commitColorPickerExpression(
 }
 
 function bindCustomColorPickerInteractions(
-  form
+  form,
+  options = {}
 ) {
+  const onCommit =
+    typeof options.onCommit ===
+      "function"
+      ? options.onCommit
+      : null;
   const inlinePicker =
     form.querySelector(
       "[data-color-picker-inline]"
@@ -10609,15 +10688,6 @@ function bindCustomColorPickerInteractions(
     inlinePicker.dataset.colorStrength =
       String(safeStrength);
 
-    changeSelectedNode(
-      "colorProfile",
-      safeProfile
-    );
-    changeSelectedNode(
-      "colorStrength",
-      safeStrength
-    );
-
     const expression =
       buildColorXExpression(
         red,
@@ -10627,6 +10697,40 @@ function bindCustomColorPickerInteractions(
         safeStrength,
         safeProfile
       );
+
+    if (onCommit) {
+      const expressionInput =
+        form.querySelector(
+          '[data-color-expression], [data-field="defaultValue"]'
+        );
+
+      if (expressionInput) {
+        expressionInput.value =
+          expression;
+      }
+
+      updateColorPreview(
+        form,
+        expression
+      );
+
+      onCommit({
+        expression,
+        profile: safeProfile,
+        strength: safeStrength,
+        source: "picker"
+      });
+      return;
+    }
+
+    changeSelectedNode(
+      "colorProfile",
+      safeProfile
+    );
+    changeSelectedNode(
+      "colorStrength",
+      safeStrength
+    );
 
     commitColorPickerExpression(
       form,
@@ -14835,6 +14939,160 @@ function preventGlobalDoubleSelection() {
   );
 }
 
+function createReusableColorXEditor(
+  options = {}
+) {
+  const expression =
+    String(
+      options.expression ||
+        "colorX.White"
+    );
+  const profile =
+    normalizeColorProfile(
+      options.profile
+    );
+  const strength =
+    clamp(
+      Number(options.strength) || 1,
+      1,
+      10
+    );
+  const onChange =
+    typeof options.onChange ===
+      "function"
+      ? options.onChange
+      : null;
+
+  const host =
+    document.createElement("div");
+  host.innerHTML =
+    colorDefaultValueMarkup({
+      defaultValue: expression,
+      colorProfile: profile,
+      colorStrength: strength
+    });
+
+  const editor =
+    host.firstElementChild;
+
+  if (!(editor instanceof HTMLElement)) {
+    return host;
+  }
+
+  editor.classList.add(
+    "rml-shared-colorx-editor"
+  );
+
+  const legend =
+    editor.querySelector("legend");
+
+  if (legend) {
+    legend.textContent =
+      String(
+        options.label ||
+          "Color value"
+      );
+  }
+
+  const expressionInput =
+    editor.querySelector(
+      '[data-field="defaultValue"]'
+    );
+
+  if (expressionInput) {
+    expressionInput.removeAttribute(
+      "data-field"
+    );
+    expressionInput.setAttribute(
+      "data-color-expression",
+      "true"
+    );
+  }
+
+  const currentState = () => {
+    const inlinePicker =
+      editor.querySelector(
+        "[data-color-picker-inline]"
+      );
+
+    return {
+      profile:
+        normalizeColorProfile(
+          inlinePicker?.dataset
+            .colorProfile ||
+            profile
+        ),
+      strength:
+        clamp(
+          Number(
+            inlinePicker?.dataset
+              .colorStrength
+          ) || strength,
+          1,
+          10
+        )
+    };
+  };
+
+  const notify = state => {
+    onChange?.({
+      expression:
+        String(
+          state.expression ||
+            "colorX.White"
+        ),
+      profile:
+        normalizeColorProfile(
+          state.profile
+        ),
+      strength:
+        clamp(
+          Number(state.strength) || 1,
+          1,
+          10
+        ),
+      source:
+        state.source ||
+        "expression"
+    });
+  };
+
+  bindCustomColorPickerInteractions(
+    editor,
+    {
+      onCommit: notify
+    }
+  );
+
+  expressionInput?.addEventListener(
+    "input",
+    () => {
+      const state =
+        currentState();
+      const nextExpression =
+        expressionInput.value;
+
+      updateColorPreview(
+        editor,
+        nextExpression
+      );
+
+      notify({
+        expression:
+          nextExpression,
+        profile:
+          state.profile,
+        strength:
+          state.strength,
+        source:
+          "expression"
+      });
+    }
+  );
+
+  return editor;
+}
+
 function builderStateSnapshot() {
   return clone({
     metadata:
@@ -14885,6 +15143,12 @@ function exposeBuilderBridge() {
         "saved",
         "startup-saved"
       ];
+    },
+
+    createColorXEditor(options) {
+      return createReusableColorXEditor(
+        options
+      );
     },
 
     getPreviewValueSnapshot() {

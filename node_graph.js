@@ -2,7 +2,7 @@
   "use strict";
 
   const EXTENSION_NAME = "typedNodeGraph";
-  const GRAPH_SCHEMA_VERSION = 7;
+  const GRAPH_SCHEMA_VERSION = 10;
   const GRAPH_STAGE_WIDTH = 5200;
   const GRAPH_STAGE_HEIGHT = 3400;
   const GRAPH_MIN_ZOOM = 0.35;
@@ -721,58 +721,6 @@
       ],
       outputs: [port("done", "On Written", "impulse")]
     },
-    "resonite.packFloat2": {
-      title: "Pack Float2",
-      group: "Resonite",
-      symbol: "F2",
-      description:
-        "Packs two float components into float2.",
-      inputs: [
-        port("x", "X", "float"),
-        port("y", "Y", "float")
-      ],
-      outputs: [port("value", "Value", "float2")]
-    },
-    "resonite.packFloat3": {
-      title: "Pack Float3",
-      group: "Resonite",
-      symbol: "F3",
-      description:
-        "Packs three float components into float3.",
-      inputs: [
-        port("x", "X", "float"),
-        port("y", "Y", "float"),
-        port("z", "Z", "float")
-      ],
-      outputs: [port("value", "Value", "float3")]
-    },
-    "resonite.packFloat4": {
-      title: "Pack Float4",
-      group: "Resonite",
-      symbol: "F4",
-      description:
-        "Packs four float components into float4.",
-      inputs: [
-        port("x", "X", "float"),
-        port("y", "Y", "float"),
-        port("z", "Z", "float"),
-        port("w", "W", "float")
-      ],
-      outputs: [port("value", "Value", "float4")]
-    },
-    "resonite.unpackFloat3": {
-      title: "Unpack Float3",
-      group: "Resonite",
-      symbol: "3F",
-      description:
-        "Splits a float3 into its components.",
-      inputs: [port("value", "Value", "float3")],
-      outputs: [
-        port("x", "X", "float"),
-        port("y", "Y", "float"),
-        port("z", "Z", "float")
-      ]
-    },
     "resonite.packColorX": {
       title: "Pack ColorX",
       group: "Resonite",
@@ -1324,6 +1272,67 @@
       : null;
   }
 
+  const AUTO_VECTOR_OPERATOR_IDS =
+    Object.freeze([
+      "vector.compose",
+      "vector.decompose"
+    ]);
+
+  function isAutoVectorOperator(
+    node
+  ) {
+    return Boolean(
+      node?.kind === "operator" &&
+      AUTO_VECTOR_OPERATOR_IDS.includes(
+        node.operatorId
+      ) &&
+      node.parameters?.valueType ===
+        "auto"
+    );
+  }
+
+  function effectiveAutoVectorType(
+    node
+  ) {
+    const configured =
+      node?.parameters?.valueType;
+
+    if (numericVectorInfo(configured)) {
+      return configured;
+    }
+
+    const inferred =
+      node?.parameters?.autoVectorType;
+
+    if (numericVectorInfo(inferred)) {
+      return inferred;
+    }
+
+    const definition =
+      OPERATOR_DEFINITIONS[
+        node?.operatorId
+      ];
+    const fallback =
+      definition?.autoFallbackType ||
+      fallbackTypeForDefinition(
+        definition || {}
+      );
+
+    return numericVectorInfo(fallback)
+      ? fallback
+      : "float3";
+  }
+
+  function vectorComponentIndex(
+    portId
+  ) {
+    return ["x", "y", "z", "w"]
+      .indexOf(
+        String(portId || "")
+          .toLowerCase()
+      );
+  }
+
   function validateNumericVectorValue(
     rawValue,
     type,
@@ -1414,6 +1423,158 @@
       : allowed[0] || "float";
   }
 
+  function normalizeGraphColorProfile(
+    profile
+  ) {
+    return String(profile || "")
+      .toLowerCase() === "srgb"
+      ? "srgb"
+      : "linear";
+  }
+
+  function graphEditorFloatLiteral(
+    value
+  ) {
+    const number =
+      Number.isFinite(Number(value))
+        ? Number(value)
+        : 0;
+    const text = String(number);
+
+    return /[.eE]/.test(text)
+      ? `${text}f`
+      : `${text}.0f`;
+  }
+
+  function graphColorXExpressionFromChannels(
+    channels,
+    profile = "linear",
+    strength = 1
+  ) {
+    const safeStrength = clamp(
+      Number(strength) || 1,
+      1,
+      10
+    );
+    const values =
+      Array.isArray(channels)
+        ? channels
+        : [1, 1, 1, 1];
+    const red =
+      finiteNumber(values[0], 1) *
+      safeStrength;
+    const green =
+      finiteNumber(values[1], 1) *
+      safeStrength;
+    const blue =
+      finiteNumber(values[2], 1) *
+      safeStrength;
+    const alpha = clamp(
+      finiteNumber(values[3], 1),
+      0,
+      1
+    );
+    const colorProfile =
+      normalizeGraphColorProfile(profile) ===
+        "srgb"
+        ? "ColorProfile.sRGB"
+        : "ColorProfile.Linear";
+
+    return (
+      "new colorX(new color(" +
+      [red, green, blue, alpha]
+        .map(graphEditorFloatLiteral)
+        .join(", ") +
+      `), ${colorProfile})`
+    );
+  }
+
+  function normalizeColorConstantParameters(
+    parameters
+  ) {
+    if (!parameters) {
+      return parameters;
+    }
+
+    let value = String(
+      parameters.value ||
+        "colorX.White"
+    ).trim();
+    const hasProfile =
+      typeof parameters.colorProfile ===
+        "string";
+    const profileMatch =
+      value.match(
+        /ColorProfile\.(sRGB|Linear)/
+      );
+    let profile = hasProfile
+      ? normalizeGraphColorProfile(
+          parameters.colorProfile
+        )
+      : profileMatch?.[1] === "sRGB"
+        ? "srgb"
+        : "linear";
+    const hasStrength =
+      Number.isFinite(
+        Number(
+          parameters.colorStrength
+        )
+      );
+    let strength = hasStrength
+      ? clamp(
+          Number(
+            parameters.colorStrength
+          ),
+          1,
+          10
+        )
+      : 1;
+
+    if (/^#[0-9a-fA-F]{6,8}$/.test(value)) {
+      const channels =
+        previewColorChannels(value);
+
+      if (!hasProfile) {
+        profile = "srgb";
+      }
+
+      value =
+        graphColorXExpressionFromChannels(
+          channels,
+          profile,
+          strength
+        );
+    } else if (!hasStrength) {
+      const channels =
+        previewColorChannels(value);
+      strength = clamp(
+        Math.max(
+          1,
+          Math.abs(
+            finiteNumber(channels[0], 0)
+          ),
+          Math.abs(
+            finiteNumber(channels[1], 0)
+          ),
+          Math.abs(
+            finiteNumber(channels[2], 0)
+          )
+        ),
+        1,
+        10
+      );
+    }
+
+    parameters.value =
+      value || "colorX.White";
+    parameters.colorProfile =
+      profile;
+    parameters.colorStrength =
+      strength;
+
+    return parameters;
+  }
+
   function normalizeNodeParametersObject(
     parameters,
     definition,
@@ -1487,6 +1648,37 @@
 
       if (result.valid) {
         parameters.components = result.value;
+      }
+    }
+
+    if (operatorId === "constant.color") {
+      normalizeColorConstantParameters(
+        parameters
+      );
+    }
+
+    if (
+      AUTO_VECTOR_OPERATOR_IDS.includes(
+        operatorId
+      )
+    ) {
+      if (parameters.valueType === "auto") {
+        const fallback =
+          definition.autoFallbackType ||
+          fallbackTypeForDefinition(
+            definition
+          );
+
+        parameters.autoVectorType =
+          numericVectorInfo(
+            parameters.autoVectorType
+          )
+            ? parameters.autoVectorType
+            : numericVectorInfo(fallback)
+              ? fallback
+              : "float3";
+      } else {
+        delete parameters.autoVectorType;
       }
     }
 
@@ -1733,6 +1925,7 @@
       version: GRAPH_SCHEMA_VERSION,
       active: false,
       sourceSignature: "",
+      showAdvancedNodes: false,
       configSnapshot: null,
       nodes: [],
       connections: [],
@@ -2141,6 +2334,9 @@
         ? raw.sourceSignature
         : "";
 
+    result.showAdvancedNodes =
+      raw.showAdvancedNodes === true;
+
     if (
       raw.configSnapshot &&
       typeof raw.configSnapshot === "object" &&
@@ -2180,12 +2376,22 @@
         source.kind === "configuration"
           ? "configuration"
           : "operator";
+      const parameters =
+        source.parameters &&
+        typeof source.parameters === "object" &&
+        !Array.isArray(source.parameters)
+          ? clone(source.parameters)
+          : {};
+      const operatorId =
+        kind === "operator"
+          ? source.operatorId
+          : undefined;
 
       if (
         kind === "operator" &&
         !Object.hasOwn(
           OPERATOR_DEFINITIONS,
-          source.operatorId
+          operatorId
         )
       ) {
         continue;
@@ -2196,16 +2402,9 @@
       const definition =
         kind === "operator"
           ? OPERATOR_DEFINITIONS[
-              source.operatorId
+              operatorId
             ]
           : null;
-
-      const parameters =
-        source.parameters &&
-        typeof source.parameters === "object" &&
-        !Array.isArray(source.parameters)
-          ? clone(source.parameters)
-          : {};
 
       if (
         definition?.configurableTypeVar
@@ -2238,7 +2437,7 @@
       normalizeNodeParametersObject(
         parameters,
         definition,
-        source.operatorId || "",
+        operatorId || "",
         true
       );
 
@@ -2247,7 +2446,7 @@
         kind,
         operatorId:
           kind === "operator"
-            ? source.operatorId
+            ? operatorId
             : undefined,
         x: clamp(
           finiteNumber(source.x, 120),
@@ -2545,6 +2744,8 @@
       active: graph.active,
       sourceSignature:
         graph.sourceSignature,
+      showAdvancedNodes:
+        graph.showAdvancedNodes === true,
       configSnapshot:
         graph.configSnapshot
           ? clone(graph.configSnapshot)
@@ -2882,6 +3083,34 @@
           )
         ]
       };
+    }
+
+    if (
+      typeof definition?.resolveDefinition ===
+        "function"
+    ) {
+      try {
+        const resolved =
+          definition.resolveDefinition(
+            node
+          );
+
+        if (
+          resolved &&
+          typeof resolved === "object" &&
+          !Array.isArray(resolved)
+        ) {
+          return {
+            ...definition,
+            ...resolved
+          };
+        }
+      } catch (error) {
+        console.error(
+          `Dynamic node definition failed for ${node.operatorId}.`,
+          error
+        );
+      }
     }
 
     return definition;
@@ -3723,6 +3952,376 @@
     return null;
   }
 
+  function concretePortTypeForAnalysis(
+    nodeId,
+    portId,
+    direction,
+    analysis
+  ) {
+    const reference =
+      findPortSpec(
+        nodeId,
+        portId,
+        direction
+      );
+
+    if (!reference) {
+      return null;
+    }
+
+    const bound =
+      reference.spec.type ||
+      analysis?.bindings
+        ?.get(reference.node.id)?.[
+          reference.spec.typeVar
+        ] ||
+      null;
+
+    if (bound) {
+      return bound;
+    }
+
+    if (
+      reference.spec.typeVar &&
+      reference.definition
+        ?.configurableTypeVar ===
+          reference.spec.typeVar
+    ) {
+      const configured =
+        reference.node.parameters
+          ?.valueType;
+
+      if (
+        configured &&
+        configured !== "auto"
+      ) {
+        return configured;
+      }
+
+      if (
+        isAutoVectorOperator(
+          reference.node
+        )
+      ) {
+        return effectiveAutoVectorType(
+          reference.node
+        );
+      }
+
+      const fallback =
+        reference.definition
+          .autoFallbackType ||
+        fallbackTypeForDefinition(
+          reference.definition
+        );
+
+      return fallback || null;
+    }
+
+    return null;
+  }
+
+  function inferAutoVectorType(
+    node,
+    connections,
+    analysis = null
+  ) {
+    if (!isAutoVectorOperator(node)) {
+      return null;
+    }
+
+    const currentType =
+      effectiveAutoVectorType(node);
+    const current =
+      numericVectorInfo(currentType) ||
+      numericVectorInfo("float3");
+    const exactVectorTypes = [];
+    const scalarInputTypes = [];
+    const scalarOutputTypes = [];
+    let minimumDimension =
+      current.componentCount;
+
+    for (const connection of connections) {
+      if (node.operatorId === "vector.compose") {
+        if (
+          connection.fromNode === node.id &&
+          connection.fromPort === "value"
+        ) {
+          const type =
+            concretePortTypeForAnalysis(
+              connection.toNode,
+              connection.toPort,
+              "input",
+              analysis
+            );
+
+          if (numericVectorInfo(type)) {
+            exactVectorTypes.push(type);
+          }
+        }
+
+        if (connection.toNode === node.id) {
+          const index =
+            vectorComponentIndex(
+              connection.toPort
+            );
+
+          if (index >= 0) {
+            minimumDimension = Math.max(
+              minimumDimension,
+              index + 1,
+              2
+            );
+
+            const type =
+              concretePortTypeForAnalysis(
+                connection.fromNode,
+                connection.fromPort,
+                "output",
+                analysis
+              );
+
+            if (isScalarNumericType(type)) {
+              scalarInputTypes.push(type);
+            }
+          }
+        }
+      } else if (
+        node.operatorId ===
+          "vector.decompose"
+      ) {
+        if (
+          connection.toNode === node.id &&
+          connection.toPort === "value"
+        ) {
+          const type =
+            concretePortTypeForAnalysis(
+              connection.fromNode,
+              connection.fromPort,
+              "output",
+              analysis
+            );
+
+          if (numericVectorInfo(type)) {
+            exactVectorTypes.push(type);
+          }
+        }
+
+        if (connection.fromNode === node.id) {
+          const index =
+            vectorComponentIndex(
+              connection.fromPort
+            );
+
+          if (index >= 0) {
+            minimumDimension = Math.max(
+              minimumDimension,
+              index + 1,
+              2
+            );
+
+            const type =
+              concretePortTypeForAnalysis(
+                connection.toNode,
+                connection.toPort,
+                "input",
+                analysis
+              );
+
+            if (isScalarNumericType(type)) {
+              scalarOutputTypes.push(type);
+            }
+          }
+        }
+      }
+    }
+
+    const uniqueExact = [
+      ...new Set(exactVectorTypes)
+    ];
+
+    if (uniqueExact.length === 1) {
+      return uniqueExact[0];
+    }
+
+    if (uniqueExact.length > 1) {
+      /* Keep the current shape so normal type validation can explain the conflict. */
+      return currentType;
+    }
+
+    let scalarType =
+      current.scalarType;
+
+    if (
+      node.operatorId ===
+        "vector.compose" &&
+      scalarInputTypes.length > 0
+    ) {
+      scalarType =
+        promotedScalarNumericType(
+          scalarInputTypes
+        ) || scalarType;
+    } else if (
+      node.operatorId ===
+        "vector.decompose" &&
+      scalarOutputTypes.length > 0
+    ) {
+      scalarType =
+        scalarNumericTypeAtRank(
+          Math.min(
+            ...scalarOutputTypes.map(
+              scalarNumericRank
+            )
+          )
+        );
+    }
+
+    return `${scalarType}${clamp(
+      minimumDimension,
+      2,
+      4
+    )}`;
+  }
+
+  function analyzeWithAutoVectors(
+    connections,
+    seedAnalysis = null
+  ) {
+    const automaticNodes =
+      graph.nodes.filter(
+        isAutoVectorOperator
+      );
+    const snapshots =
+      new Map(
+        automaticNodes.map(node => [
+          node.id,
+          {
+            hadValue:
+              Object.hasOwn(
+                node.parameters,
+                "autoVectorType"
+              ),
+            value:
+              node.parameters
+                .autoVectorType
+          }
+        ])
+      );
+    let analysis =
+      seedAnalysis?.valid
+        ? seedAnalysis
+        : null;
+
+    try {
+      for (
+        let pass = 0;
+        pass < 8;
+        pass += 1
+      ) {
+        let changed = false;
+
+        for (const node of automaticNodes) {
+          const inferred =
+            inferAutoVectorType(
+              node,
+              connections,
+              analysis
+            );
+
+          if (
+            inferred &&
+            inferred !==
+              node.parameters
+                .autoVectorType
+          ) {
+            node.parameters
+              .autoVectorType =
+              inferred;
+            changed = true;
+          }
+        }
+
+        analysis =
+          analyzeConnections(
+            connections
+          );
+
+        if (!changed) {
+          break;
+        }
+      }
+
+      const updates =
+        new Map(
+          automaticNodes.map(node => [
+            node.id,
+            effectiveAutoVectorType(node)
+          ])
+        );
+
+      return {
+        analysis:
+          analysis ||
+          analyzeConnections(
+            connections
+          ),
+        updates
+      };
+    } finally {
+      for (const node of automaticNodes) {
+        const snapshot =
+          snapshots.get(node.id);
+
+        if (snapshot?.hadValue) {
+          node.parameters
+            .autoVectorType =
+            snapshot.value;
+        } else {
+          delete node.parameters
+            .autoVectorType;
+        }
+      }
+    }
+  }
+
+  function applyAutoVectorUpdates(
+    updates
+  ) {
+    if (!(updates instanceof Map)) {
+      return;
+    }
+
+    for (const [nodeId, type] of updates) {
+      const node =
+        findGraphNode(nodeId);
+
+      if (
+        isAutoVectorOperator(node) &&
+        numericVectorInfo(type)
+      ) {
+        node.parameters.autoVectorType =
+          type;
+      }
+    }
+  }
+
+  function synchronizeAutoVectorTypes(
+    connections,
+    seedAnalysis = null
+  ) {
+    const result =
+      analyzeWithAutoVectors(
+        connections,
+        seedAnalysis
+      );
+
+    applyAutoVectorUpdates(
+      result.updates
+    );
+
+    return result.analysis;
+  }
+
   function pathExists(
     adjacency,
     start,
@@ -3893,17 +4492,22 @@
       candidate
     ];
 
-    const analysis =
-      analyzeConnections(
-        nextConnections
+    const inferred =
+      analyzeWithAutoVectors(
+        nextConnections,
+        currentAnalysis
       );
+    const analysis =
+      inferred.analysis;
 
     return {
       valid: analysis.valid,
       reason: analysis.reason,
       candidate,
       nextConnections,
-      analysis
+      analysis,
+      autoVectorUpdates:
+        inferred.updates
     };
   }
 
@@ -3950,8 +4554,9 @@
       graph.connections
     );
     currentAnalysis =
-      analyzeConnections(
-        graph.connections
+      synchronizeAutoVectorTypes(
+        graph.connections,
+        currentAnalysis
       );
 
     if (
@@ -4492,14 +5097,34 @@
           );
           break;
 
-        case "constant.color":
-          result = previewKnown(
-            "colorX",
+        case "constant.color": {
+          const channels =
             previewColorChannels(
               node.parameters?.value
-            )
+            );
+          const strength = clamp(
+            Number(
+              node.parameters
+                ?.colorStrength
+            ) || 1,
+            1,
+            10
+          );
+
+          result = previewKnown(
+            "colorX",
+            [
+              finiteNumber(channels[0], 0) *
+                strength,
+              finiteNumber(channels[1], 0) *
+                strength,
+              finiteNumber(channels[2], 0) *
+                strength,
+              finiteNumber(channels[3], 1)
+            ]
           );
           break;
+        }
 
         case "constant.typedDefault":
           result = previewDefaultValue(type);
@@ -4779,56 +5404,6 @@
             "Runtime dynamic value"
           );
           break;
-
-        case "resonite.packFloat2":
-          result = previewKnown(
-            "float2",
-            [
-              input("x").value || 0,
-              input("y").value || 0
-            ]
-          );
-          break;
-
-        case "resonite.packFloat3":
-          result = previewKnown(
-            "float3",
-            [
-              input("x").value || 0,
-              input("y").value || 0,
-              input("z").value || 0
-            ]
-          );
-          break;
-
-        case "resonite.packFloat4":
-          result = previewKnown(
-            "float4",
-            [
-              input("x").value || 0,
-              input("y").value || 0,
-              input("z").value || 0,
-              input("w").value || 0
-            ]
-          );
-          break;
-
-        case "resonite.unpackFloat3": {
-          const value = input("value");
-          const index =
-            ["x", "y", "z"]
-              .indexOf(portId);
-          result = value.known
-            ? previewKnown(
-                "float",
-                value.value?.[index] || 0
-              )
-            : previewUnknown(
-                "float",
-                value.reason
-              );
-          break;
-        }
 
         case "resonite.packColorX":
           result = previewKnown(
@@ -5221,22 +5796,68 @@
       : `${text}.0f`;
   }
 
-  function graphCsColorLiteral(value) {
-    const channels =
-      previewColorChannels(value);
-
-    return (
-      "(colorX)new color(" +
-      channels
-        .map(channel =>
-          graphCsNumberLiteral(
-            channel,
-            "float"
-          )
-        )
-        .join(", ") +
-      ")"
+  function graphCsColorLiteral(
+    value,
+    profile = "linear",
+    strength = 1
+  ) {
+    const text =
+      String(value || "")
+        .trim();
+    const normalizedProfile =
+      normalizeGraphColorProfile(
+        profile
+      );
+    const safeStrength = clamp(
+      Number(strength) || 1,
+      1,
+      10
     );
+
+    if (!text) {
+      return "colorX.White";
+    }
+
+    if (/^#[0-9a-fA-F]{6,8}$/.test(text)) {
+      return graphColorXExpressionFromChannels(
+        previewColorChannels(text),
+        normalizedProfile === "linear" &&
+          !profile
+          ? "srgb"
+          : normalizedProfile,
+        safeStrength
+      );
+    }
+
+    if (
+      /^colorX\.[A-Za-z_][A-Za-z0-9_]*$/.test(
+        text
+      )
+    ) {
+      if (
+        safeStrength <= 1.000001 &&
+        normalizedProfile === "linear"
+      ) {
+        return text;
+      }
+
+      return graphColorXExpressionFromChannels(
+        previewColorChannels(text),
+        normalizedProfile,
+        safeStrength
+      );
+    }
+
+    if (
+      /^(?:new\s+colorX|\(\s*colorX\s*\)\s*new\s+color)\b/.test(
+        text
+      )
+    ) {
+      return text;
+    }
+
+    /* Raw colorX expressions remain an intentional advanced escape hatch. */
+    return text;
   }
 
   function graphCsMethodToken(
@@ -5706,6 +6327,7 @@
           )
         ) {
           extensionRequirements[name] =
+            extensionRequirements[name] ||
             Boolean(value);
         }
       },
@@ -5823,7 +6445,9 @@
 
           case "constant.color":
             code = graphCsColorLiteral(
-              node.parameters?.value
+              node.parameters?.value,
+              node.parameters?.colorProfile,
+              node.parameters?.colorStrength
             );
             break;
 
@@ -5972,26 +6596,6 @@
           case "resonite.dynamicRead":
             code =
               `ReadDynamic<${csType}>(${input("name").code})`;
-            break;
-
-          case "resonite.packFloat2":
-            code =
-              `new float2(${input("x").code}, ${input("y").code})`;
-            break;
-
-          case "resonite.packFloat3":
-            code =
-              `new float3(${input("x").code}, ${input("y").code}, ${input("z").code})`;
-            break;
-
-          case "resonite.packFloat4":
-            code =
-              `new float4(${input("x").code}, ${input("y").code}, ${input("z").code}, ${input("w").code})`;
-            break;
-
-          case "resonite.unpackFloat3":
-            code =
-              `ReadFloatComponent(${input("value").code}, "${portId}")`;
             break;
 
           case "resonite.packColorX":
@@ -7126,7 +7730,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         display: grid;
         height: 100%;
         min-height: 0;
-        grid-template-rows: auto minmax(0, 1fr) auto;
+        grid-template-rows: auto auto minmax(0, 1fr) auto;
         background: #0d0c14;
       }
 
@@ -7138,6 +7742,49 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         min-height: 34px;
         padding: 7px 9px;
         font-size: 10px;
+      }
+
+      .rml-graph-palette-mode {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: start;
+        gap: 8px;
+        margin: 0 10px 8px;
+        padding: 8px 9px;
+        border: 1px solid #2d3440;
+        border-radius: 8px;
+        background: rgba(18, 21, 29, 0.86);
+        color: #c7d0d8;
+        cursor: pointer;
+        text-transform: none;
+      }
+
+      .rml-graph-palette-mode input {
+        width: 16px;
+        height: 16px;
+        min-height: 16px;
+        margin: 1px 0 0;
+      }
+
+      .rml-graph-palette-mode span,
+      .rml-graph-palette-mode strong,
+      .rml-graph-palette-mode small {
+        display: block;
+        min-width: 0;
+      }
+
+      .rml-graph-palette-mode strong {
+        font-size: 9px;
+      }
+
+      .rml-graph-palette-mode small {
+        margin-top: 3px;
+        color: #7f8b97;
+        font-size: 7px;
+        font-weight: 500;
+        line-height: 1.35;
+        letter-spacing: 0;
+        text-transform: none;
       }
 
       .rml-graph-palette-scroll {
@@ -7210,6 +7857,15 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       .rml-graph-palette-item:hover:not(:disabled) {
         border-color: #4d86ad;
         background: #1b2430;
+      }
+
+      .rml-graph-palette-item.expert {
+        border-color: rgba(255, 209, 129, 0.28);
+        background: rgba(45, 37, 25, 0.62);
+      }
+
+      .rml-graph-palette-item.expert > span {
+        color: #ffd181;
       }
 
       .rml-graph-palette-item:disabled {
@@ -8005,6 +8661,52 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         line-height: 1.45;
       }
 
+      .rml-graph-colorx-editor {
+        width: 100%;
+        gap: 10px;
+        padding: 10px;
+        border-color: rgba(255, 103, 220, 0.3);
+        background: rgba(16, 10, 19, 0.56);
+      }
+
+      .rml-graph-colorx-editor .custom-color-sv {
+        min-height: 158px;
+      }
+
+      .rml-graph-colorx-editor .custom-color-result {
+        max-width: 100%;
+      }
+
+      .rml-graph-colorx-editor .custom-color-result strong {
+        max-width: none;
+      }
+
+      .rml-graph-colorx-editor > label {
+        font-size: 8px;
+      }
+
+      .rml-graph-colorx-help {
+        color: var(--faint);
+        font-size: 8px;
+        font-weight: 500;
+        line-height: 1.45;
+        letter-spacing: 0;
+        text-transform: none;
+      }
+
+      .rml-graph-auto-type-status {
+        display: block;
+        margin: -4px 0 2px;
+        padding: 7px 9px;
+        border: 1px solid rgba(89, 183, 255, 0.18);
+        border-radius: 7px;
+        background: rgba(25, 45, 62, 0.32);
+        color: #9fc9e7;
+        font-size: 8px;
+        font-weight: 550;
+        line-height: 1.4;
+      }
+
       .rml-graph-code-input {
         font-family: Consolas, "Courier New", monospace !important;
         font-size: 9px !important;
@@ -8570,6 +9272,12 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     button.dataset.graphOperator =
       operatorId;
 
+    if (definition.expertOnly === true) {
+      button.classList.add(
+        "expert"
+      );
+    }
+
     if (isConfiguration) {
       button.dataset.graphConfiguration =
         "true";
@@ -8669,6 +9377,36 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     search.autocomplete = "off";
     searchWrap.appendChild(search);
 
+    const modeWrap =
+      document.createElement("label");
+    modeWrap.className =
+      "rml-graph-palette-mode";
+
+    const modeInput =
+      document.createElement("input");
+    modeInput.type = "checkbox";
+    modeInput.checked =
+      graph.showAdvancedNodes === true;
+
+    const modeCopy =
+      document.createElement("span");
+    const modeTitle =
+      document.createElement("strong");
+    modeTitle.textContent =
+      "Show Advanced / Raw C#";
+    const modeHelp =
+      document.createElement("small");
+    modeHelp.textContent =
+      "Manual usings, references, source files and compiler overrides stay hidden unless needed as an expert fallback.";
+    modeCopy.append(
+      modeTitle,
+      modeHelp
+    );
+    modeWrap.append(
+      modeInput,
+      modeCopy
+    );
+
     const scroll =
       document.createElement("div");
     scroll.className =
@@ -8727,7 +9465,11 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         ).filter(
           ([, definition]) =>
             definition.group === group &&
-            definition.hiddenFromPalette !== true
+            definition.hiddenFromPalette !== true &&
+            (
+              graph.showAdvancedNodes === true ||
+              definition.expertOnly !== true
+            )
         );
 
       if (entries.length === 0) {
@@ -8739,7 +9481,8 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       details.className =
         "rml-graph-palette-group";
       details.open =
-        group !== "Conversions";
+        group !== "Conversions" &&
+        group !== "Advanced / Raw C#";
 
       const summary =
         document.createElement("summary");
@@ -8787,14 +9530,26 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
        </div>
        <span>Wire colors are value types. Startup/Saved configuration sockets can connect to both matching value inputs and impulse inputs; Stored sockets remain value-only.</span>
        <span>Invalid sockets are disabled while connecting. Drop an unfinished socket wire on empty graph space to create a correctly typed source or monitor automatically.</span>
-       <span>Resize: drag the right edge, bottom edge, or corner. Double-click a resize grip to reset that axis.</span>`;
+       <span>Resize: drag the right edge, bottom edge, or corner. Double-click a resize grip to reset that axis.</span>
+       <span>Normal nodes declare their own usings, references and build requirements. Advanced / Raw C# is only a manual escape hatch.</span>`;
 
     root.append(
       searchWrap,
+      modeWrap,
       scroll,
       legend
     );
     dom.paletteContent.appendChild(root);
+
+    modeInput.addEventListener(
+      "change",
+      () => {
+        graph.showAdvancedNodes =
+          modeInput.checked;
+        persistGraph(true);
+        renderGraphPalette();
+      }
+    );
 
     search.addEventListener(
       "input",
@@ -8881,7 +9636,11 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       definition.parameterKind ===
       "color"
     ) {
-      parameters.value = "#ffffff";
+      parameters.value =
+        "colorX.White";
+      parameters.colorProfile =
+        "linear";
+      parameters.colorStrength = 1;
     }
 
     for (
@@ -9733,6 +10492,9 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         continue;
       }
 
+      applyAutoVectorUpdates(
+        proposal.autoVectorUpdates
+      );
       graph.connections =
         proposal.nextConnections;
       normalizeConnectionRouting(
@@ -9845,6 +10607,9 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       };
     }
 
+    applyAutoVectorUpdates(
+      proposal.autoVectorUpdates
+    );
     graph.connections =
       proposal.nextConnections;
     normalizeConnectionRouting(
@@ -13278,9 +14043,30 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       const label =
         document.createElement("label");
       label.textContent =
+        definition.typeSelectorLabel ||
         "Generic value type";
       const select =
         document.createElement("select");
+
+      if (
+        definitionAllowsAutoType(
+          definition
+        )
+      ) {
+        const automatic =
+          document.createElement(
+            "option"
+          );
+        automatic.value = "auto";
+        automatic.textContent =
+          "Auto · infer safely from wires";
+        automatic.selected =
+          node.parameters.valueType ===
+            "auto";
+        select.appendChild(
+          automatic
+        );
+      }
 
       for (
         const type of
@@ -13303,6 +14089,12 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         () => {
           node.parameters.valueType =
             select.value;
+          normalizeGraphNodeParameters(
+            node,
+            OPERATOR_DEFINITIONS[
+              node.operatorId
+            ] || definition
+          );
           pruneConnections();
           persistGraph(true);
           renderGraphNodesAndWires();
@@ -13315,6 +14107,46 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       );
       label.appendChild(select);
       card.appendChild(label);
+
+      if (
+        node.parameters.valueType ===
+          "auto"
+      ) {
+        const automaticStatus =
+          document.createElement("small");
+        automaticStatus.className =
+          "rml-graph-auto-type-status";
+        const analysis =
+          currentAnalysis ||
+          analyzeConnections(
+            graph.connections
+          );
+        let resolved = null;
+
+        if (
+          isAutoVectorOperator(node)
+        ) {
+          resolved =
+            effectiveAutoVectorType(
+              node
+            );
+        } else {
+          resolved =
+            analysis.bindings
+              .get(node.id)?.[
+                definition
+                  .configurableTypeVar
+              ] || null;
+        }
+
+        automaticStatus.textContent =
+          resolved
+            ? `Currently resolved as ${typeLabel(resolved)}.`
+            : "Waiting for compatible wire evidence.";
+        card.appendChild(
+          automaticStatus
+        );
+      }
     }
 
     appendParameterControl(
@@ -13421,6 +14253,84 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     return card;
   }
 
+  function appendColorXParameterControl(
+    card,
+    node,
+    specification
+  ) {
+    normalizeColorConstantParameters(
+      node.parameters
+    );
+
+    const createEditor =
+      bridge?.createColorXEditor;
+
+    if (
+      typeof createEditor !==
+        "function"
+    ) {
+      return false;
+    }
+
+    const editor =
+      createEditor.call(
+        bridge,
+        {
+          label:
+            specification.label ||
+            "Color value",
+          expression:
+            node.parameters[
+              specification.key
+            ] ||
+            "colorX.White",
+          profile:
+            node.parameters
+              .colorProfile ||
+            "linear",
+          strength:
+            node.parameters
+              .colorStrength ||
+            1,
+          onChange: state => {
+            node.parameters[
+              specification.key
+            ] = state.expression;
+            node.parameters
+              .colorProfile =
+              state.profile;
+            node.parameters
+              .colorStrength =
+              state.strength;
+
+            persistGraph();
+            refreshDisplayValueNodes();
+          }
+        }
+      );
+
+    if (!(editor instanceof HTMLElement)) {
+      return false;
+    }
+
+    editor.classList.add(
+      "rml-graph-colorx-editor"
+    );
+
+    if (specification.help) {
+      const help =
+        document.createElement("small");
+      help.className =
+        "rml-graph-colorx-help";
+      help.textContent =
+        specification.help;
+      editor.appendChild(help);
+    }
+
+    card.appendChild(editor);
+    return true;
+  }
+
   function appendParameterControl(
     card,
     node,
@@ -13461,6 +14371,25 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     }
 
     for (const specification of specifications) {
+      const kind =
+        specification.kind ||
+        "text";
+
+      if (
+        kind === "color" ||
+        kind === "colorX"
+      ) {
+        if (
+          appendColorXParameterControl(
+            card,
+            node,
+            specification
+          )
+        ) {
+          continue;
+        }
+      }
+
       const label =
         document.createElement("label");
       label.textContent =
@@ -13468,9 +14397,6 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         specification.key;
 
       let control;
-      const kind =
-        specification.kind ||
-        "text";
 
       if (kind === "bool") {
         control =
@@ -15396,6 +16322,9 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         ? branch.points
         : [];
 
+    applyAutoVectorUpdates(
+      proposal.autoVectorUpdates
+    );
     graph.connections =
       proposal.nextConnections;
     normalizeConnectionRouting(
@@ -15452,6 +16381,9 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           );
 
         if (proposal.valid) {
+          applyAutoVectorUpdates(
+            proposal.autoVectorUpdates
+          );
           graph.connections =
             proposal.nextConnections;
           graph.selectedConnectionId =
@@ -16215,7 +17147,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     ) {
       graph = incomingGraph;
       pruneConnections();
-      /* Persist schema upgrades and legacy wire migrations immediately. */
+      /* Persist schema upgrades and legacy graph migrations immediately. */
       persistGraph(true);
     }
 
@@ -16237,6 +17169,8 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       active: value.active,
       sourceSignature:
         value.sourceSignature,
+      showAdvancedNodes:
+        value.showAdvancedNodes === true,
       configSnapshot:
         value.configSnapshot,
       nodes: value.nodes,
@@ -16284,7 +17218,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       )
     );
     pruneConnections();
-    /* Persist normalized schema 7 data, including lifecycle migration. */
+    /* Persist normalized schema 9 data, including palette and vector inference. */
     persistGraph(true);
 
     ensurePackButton();
