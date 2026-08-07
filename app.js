@@ -1203,10 +1203,6 @@ function portableColorXExpression(
   );
 }
 
-
-
-
-
 function colorBytesToHex(
   red,
   green,
@@ -2731,12 +2727,6 @@ function generateCode() {
   const hasControllers =
     controllers.length > 0;
 
-  /*
-   * The packed graph keeps every configuration value synchronized so any
-   * runtime event can read the current value. Runtime behavior remains the
-   * single source of truth for whether that configuration socket itself
-   * emits a Startup and/or Saved impulse.
-   */
   const runtimeEntries =
     graphRuntimeActive
       ? entries

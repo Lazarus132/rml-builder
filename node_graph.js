@@ -1868,7 +1868,6 @@
       return true;
     }
 
-    /* Safe C# implicit scalar widening only. */
     if (
       canImplicitlyConvertScalarNumber(
         fromType,
@@ -2489,11 +2488,6 @@
         ? raw.connections
         : [];
 
-    /*
-     * Schema 7 removes the duplicate lifecycle sockets from the packed
-     * configuration node. Preserve older projects by moving each legacy
-     * lifecycle path onto its dedicated Lifecycle operator node.
-     */
     const legacyLifecycleSources =
       new Map();
     const packedConfigurationNode =
@@ -3116,11 +3110,6 @@
     return definition;
   }
 
-  /*
-   * UX invariant: Socket layout has exactly one user-facing control.
-   * It is the ⇄ button in the node header, and it only exists for nodes
-   * that actually have at least one input or output socket.
-   */
   function definitionHasSockets(
     definition
   ) {
@@ -4145,7 +4134,6 @@
     }
 
     if (uniqueExact.length > 1) {
-      /* Keep the current shape so normal type validation can explain the conflict. */
       return currentType;
     }
 
@@ -4572,10 +4560,6 @@
 
     normalizeSelectedWirePoint();
   }
-
-  /* ================================================================
-   * LIVE GRAPH VALUE PREVIEW
-   * ================================================================ */
 
   function previewKnown(
     type,
@@ -5639,10 +5623,6 @@
     }
   }
 
-  /* ================================================================
-   * C# GRAPH COMPILER
-   * ================================================================ */
-
   let typedGraphCodegenCacheKey = "";
   let typedGraphCodegenCache = null;
 
@@ -5856,7 +5836,6 @@
       return text;
     }
 
-    /* Raw colorX expressions remain an intentional advanced escape hatch. */
     return text;
   }
 
@@ -11114,12 +11093,6 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     const overNode =
       Boolean(nodeElement);
 
-    /*
-     * Wheel routing is deliberately separated:
-     * - Ctrl/Command + wheel always pans the root canvas.
-     * - Plain wheel over a node belongs only to that node.
-     * - Plain wheel over the root pans the root canvas.
-     */
     if (!forceRoot && overNode) {
       const body =
         nodeElement.querySelector(
@@ -11377,7 +11350,6 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     nodeId,
     body
   ) {
-    /* Ctrl/Command explicitly overrides the node and pans the root. */
     if (event.ctrlKey || event.metaKey) {
       return;
     }
@@ -12839,15 +12811,6 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       rectangle.top +
       rectangle.height / 2;
 
-    /*
-     * A manually shortened or narrowed node keeps its real sockets inside
-     * a scrollable body. getBoundingClientRect() still reports the layout
-     * position of a clipped socket, which previously left the wire floating
-     * outside the visible node. Clamp only the visual endpoint to the body's
-     * visible rectangle; the semantic connection continues to target the
-     * original typed socket. As soon as scrolling exposes the socket again,
-     * the endpoint returns to its exact center.
-     */
     if (articleRectangle && bodyRectangle) {
       const clipLeft = Math.max(
         articleRectangle.left,
@@ -15972,10 +15935,6 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
               detachedConnection.id
           );
 
-        /*
-         * Keep the input socket as the drag origin. This makes rewiring
-         * completely symmetric: input → output and output → input both work.
-         */
         effectiveStart = startRef;
       }
     }
@@ -17147,7 +17106,6 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     ) {
       graph = incomingGraph;
       pruneConnections();
-      /* Persist schema upgrades and legacy graph migrations immediately. */
       persistGraph(true);
     }
 
@@ -17218,7 +17176,6 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       )
     );
     pruneConnections();
-    /* Persist normalized schema 9 data, including palette and vector inference. */
     persistGraph(true);
 
     ensurePackButton();
