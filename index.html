@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta
       name="description"
-      content="Build copy-ready ResoniteModLoader configuration code visually.">
-    <title>RML Configuration Builder</title>
-    <link rel="stylesheet" href="styles.css?v=84">
+      content="Build complete typed ResoniteModLoader projects visually with configuration, Harmony, Reflection, Resonite API, UI, files, networking and C# escape nodes.">
+    <title>RML Universal Mod Builder</title>
+    <link rel="stylesheet" href="styles.css?v=87">
     <link rel="shortcut icon" href="./favicon.svg">
     <link rel="icon" href="./favicon.svg">
   </head>
@@ -19,7 +19,7 @@
       </div>
       <div class="brand-copy">
         <small>Resonite Mod Loader</small>
-        <h1>Configuration Builder</h1>
+        <h1>Universal Mod Builder</h1>
       </div>
       <div class="local-state">
         <span></span>
@@ -157,7 +157,7 @@
     </main>
 
     <footer>
-      <strong>RML Configuration Builder</strong>
+      <strong>RML Universal Mod Builder</strong>
       <span>
         Runs entirely in this browser. No source code or configuration data is
         uploaded.
@@ -324,7 +324,7 @@
           <label class="export-option">
             <input id="export-include-cs" type="checkbox">
             <span>
-              <strong>C# source</strong>
+              <strong>Main mod C# source</strong>
               <small id="export-cs-filename">YourMod.cs</small>
             </span>
           </label>
@@ -334,6 +334,21 @@
             <span>
               <strong>Project file</strong>
               <small id="export-csproj-filename">YourMod.csproj</small>
+            </span>
+          </label>
+
+          <label
+            id="export-node-graph-option"
+            class="export-option"
+            hidden>
+            <input
+              id="export-include-node-graph"
+              type="checkbox"
+              checked
+              disabled>
+            <span>
+              <strong>Generated mod runtime sources</strong>
+              <small id="export-node-graph-filename">YourMod.NodeGraph.cs</small>
             </span>
           </label>
         </fieldset>
@@ -348,6 +363,13 @@
             class="button secondary"
             type="button">
             Copy C#
+          </button>
+          <button
+            id="export-copy-node-graph"
+            class="button secondary"
+            type="button"
+            hidden>
+            Copy Graph C#
           </button>
           <button
             id="export-copy-csproj"
@@ -370,6 +392,8 @@
         </button>
       </div>
     </dialog>
-    <script src="app.js?v=84"></script>
+    <script src="app.js?v=88"></script>
+    <script src="node_graph.js?v=13"></script>
+    <script src="mod_nodes.js?v=4"></script>
   </body>
 </html>

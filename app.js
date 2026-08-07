@@ -204,6 +204,7 @@ const state = {
   metadata: { ...DEFAULT_METADATA },
   exportOptions: { ...DEFAULT_EXPORT_OPTIONS },
   nodes: [],
+  extensions: {},
   selectedId: null,
   activeContainerId: ROOT_CONTAINER,
   collapsedPaletteGroups: [],
@@ -320,7 +321,6 @@ function scheduleNodePointerTargetUpdate(
       );
     });
 }
-
 
 const MOBILE_DIALOG_MAX_WIDTH = 780;
 let adaptiveDialogFrame = 0;
@@ -2478,24 +2478,197 @@ function reactionIncludesSaved(reaction) {
   return reaction === "saved" || reaction === "startup-saved";
 }
 
+function getTypedNodeGraphContribution() {
+  const extensionState =
+    isPlainObject(state.extensions)
+      ? state.extensions.typedNodeGraph
+      : null;
+
+  if (
+    !extensionState ||
+    extensionState.active !== true
+  ) {
+    return null;
+  }
+
+  const generator =
+    window.RMLTypedNodeGraphGenerator;
+
+  if (
+    !generator ||
+    typeof generator.build !==
+      "function"
+  ) {
+    return {
+      active: true,
+      diagnostics: [
+        "The typed node graph generator is not loaded. Ensure node_graph.js is loaded after app.js."
+      ],
+      warnings: [],
+      files: [],
+      applyStatements: {},
+      initializeStatement: "",
+      onEngineInitializedStatement: "",
+      onSettingsSavedStatement: "",
+      requirements: {
+        usesElements: false,
+        usesRenderiteShared: false
+      }
+    };
+  }
+
+  try {
+    const contribution =
+      generator.build({
+        state:
+          builderStateSnapshot(),
+        entries:
+          clone(
+            currentFlattenedNodes()
+          )
+      });
+
+    if (
+      !contribution ||
+      contribution.active !== true
+    ) {
+      return {
+        active: true,
+        diagnostics: [
+          "The typed node graph is active, but no C# runtime contribution was generated."
+        ],
+        warnings: [],
+        files: [],
+        applyStatements: {},
+        initializeStatement: "",
+        onEngineInitializedStatement: "",
+        onSettingsSavedStatement: "",
+        requirements: {
+          usesElements: false,
+          usesRenderiteShared: false
+        }
+      };
+    }
+
+    return contribution;
+  } catch (error) {
+    console.error(
+      "Typed node graph C# generation failed.",
+      error
+    );
+
+    return {
+      active: true,
+      diagnostics: [
+        `Typed node graph C# generation failed: ${
+          error instanceof Error
+            ? error.message
+            : String(error)
+        }`
+      ],
+      warnings: [],
+      files: [],
+      applyStatements: {},
+      initializeStatement: "",
+      onEngineInitializedStatement: "",
+      onSettingsSavedStatement: "",
+      requirements: {
+        usesElements: false,
+        usesRenderiteShared: false
+      }
+    };
+  }
+}
+
+function getAdditionalGeneratedSourceFiles() {
+  const contribution =
+    getTypedNodeGraphContribution();
+
+  if (
+    !contribution?.active ||
+    !Array.isArray(
+      contribution.files
+    )
+  ) {
+    return [];
+  }
+
+  return contribution.files
+    .filter(
+      file =>
+        file &&
+        typeof file.name === "string" &&
+        file.name.trim() &&
+        typeof file.content === "string"
+    )
+    .map(file => ({
+      name: file.name,
+      content: file.content,
+      type:
+        file.type ||
+        "text/plain;charset=utf-8"
+    }));
+}
+
+function indentGeneratedStatement(
+  statement,
+  spaces
+) {
+  const prefix = " ".repeat(spaces);
+
+  return String(statement || "")
+    .split("\n")
+    .filter(
+      (line, index, lines) =>
+        line.length > 0 ||
+        (
+          index > 0 &&
+          index < lines.length - 1
+        )
+    )
+    .map(line =>
+      line.length > 0
+        ? `${prefix}${line}`
+        : ""
+    )
+    .join("\n");
+}
+
 function generateCode() {
   const metadata = state.metadata;
   const entries = currentFlattenedNodes();
-  const controllers = entries.filter(entry => entry.node.kind === "controller");
-  const settings = entries.filter(entry => entry.node.kind === "setting");
-  const usesElements = settings.some(entry =>
-    [
-      "colorX",
-      "int2",
-      "int3",
-      "int4",
-      "float2",
-      "float3",
-      "float4",
-      "double2",
-      "double3",
-      "double4"
-    ].includes(entry.node.valueType)
+  const graphContribution =
+    getTypedNodeGraphContribution();
+  const graphRuntimeActive =
+    Boolean(
+      graphContribution?.active
+    );
+  const controllers = entries.filter(
+    entry =>
+      entry.node.kind ===
+      "controller"
+  );
+  const settings = entries.filter(
+    entry =>
+      entry.node.kind ===
+      "setting"
+  );
+  const usesElements = settings.some(
+    entry =>
+      [
+        "colorX",
+        "int2",
+        "int3",
+        "int4",
+        "float2",
+        "float3",
+        "float4",
+        "double2",
+        "double3",
+        "double4"
+      ].includes(
+        entry.node.valueType
+      )
   );
   const usesColorX =
     settings.some(
@@ -2512,24 +2685,63 @@ function generateCode() {
           entry.node.defaultValue
         )
     );
-  const className = toPascalCase(metadata.className, "YourMod");
+  const className = toPascalCase(
+    metadata.className,
+    "YourMod"
+  );
   const namespaceName =
     metadata.namespaceName
       .split(".")
-      .map(part => toPascalCase(part, "Namespace"))
-      .join(".") || "YourModNamespace";
-  const hasControllers = controllers.length > 0;
-  const runtimeEntries = entries.filter(
-    entry => entry.node.reaction !== "stored"
-  );
-  const savedEntries = runtimeEntries.filter(entry =>
-    reactionIncludesSaved(entry.node.reaction)
-  );
-  const startupEntries = runtimeEntries.filter(entry =>
-    reactionIncludesStartup(entry.node.reaction)
-  );
+      .map(part =>
+        toPascalCase(
+          part,
+          "Namespace"
+        )
+      )
+      .join(".") ||
+    "YourModNamespace";
+  const hasControllers =
+    controllers.length > 0;
+
+  /*
+   * A packed node graph consumes every configuration value. Therefore
+   * all values are initialized and observed, regardless of the visual
+   * Runtime behavior badge on the packed configuration socket.
+   */
+  const runtimeEntries =
+    graphRuntimeActive
+      ? entries
+      : entries.filter(
+          entry =>
+            entry.node.reaction !==
+            "stored"
+        );
+  const savedEntries =
+    graphRuntimeActive
+      ? entries
+      : runtimeEntries.filter(
+          entry =>
+            reactionIncludesSaved(
+              entry.node.reaction
+            )
+        );
+  const startupEntries =
+    graphRuntimeActive
+      ? entries
+      : runtimeEntries.filter(
+          entry =>
+            reactionIncludesStartup(
+              entry.node.reaction
+            )
+        );
+
+  const graphFileName =
+    graphContribution?.files?.[0]
+      ?.name ||
+    `${className}.NodeGraph.cs`;
+
   const guide = metadata.includeGuide
-    ? `// RML configuration template version: 1.5
+    ? `// RML configuration template version: 1.6
 
 /*
  * Generated by the RML Configuration Builder.
@@ -2554,16 +2766,26 @@ ${usesColorX
     ? ` * A custom ColorProfile expression additionally requires Renderite.Shared.dll.
  * The builder's generated .csproj adds that assembly reference automatically.
 `
-    : ""} *
- * Keep the generated Apply... methods intact. Replace only each TODO-marked
- * discard statement with a call to the mod-specific logic.
- */
+    : ""}${graphRuntimeActive
+    ? ` * Typed node-graph runtime logic is generated separately in
+ * ${graphFileName}. The Apply... methods below forward every current
+ * configuration value into that generated runtime; no manual replacement is
+ * required.
+`
+    : ` * Generated Apply... methods cache the latest runtime values in
+ * Current... properties and deliberately retain the original TODO line.
+ * Replace only that TODO line with mod-specific logic when no packed graph is
+ * used.
+`} */
 
 `
     : "";
+
   const usingLines = [
     "using System;",
-    usesElements ? "using Elements.Core;" : "",
+    usesElements
+      ? "using Elements.Core;"
+      : "",
     usesColorX
       ? "using Renderite.Shared;"
       : "",
@@ -2571,18 +2793,28 @@ ${usesColorX
   ]
     .filter(Boolean)
     .join("\n");
-  const enums = enumDeclarations(entries);
+  const enums =
+    enumDeclarations(entries);
   const declarations = entries
     .map(entry =>
-      entry.node.kind === "controller"
-        ? controllerDeclaration(entry.node, entry.path)
-        : settingDeclaration(entry.node, entry.path)
+      entry.node.kind ===
+      "controller"
+        ? controllerDeclaration(
+            entry.node,
+            entry.path
+          )
+        : settingDeclaration(
+            entry.node,
+            entry.path
+          )
     )
     .join("\n");
   const implementedInterfaces = [
     "IModConfigurationOrderProvider",
     ...(hasControllers
-      ? ["IModConfigurationVisibilityProvider"]
+      ? [
+          "IModConfigurationVisibilityProvider"
+        ]
       : [])
   ];
   const interfaceSuffix =
@@ -2592,59 +2824,190 @@ ${usesColorX
         )}`
       : "";
 
-  let runtimeBlock;
-  if (runtimeEntries.length > 0) {
-    const startupCalls = startupEntries
-      .map(
-        entry =>
-          `        Apply${toPascalCase(entry.node.fieldName, "Setting")}();`
-      )
-      .join("\n");
-    const changedBranches = savedEntries
+  const runtimeValueDeclarations =
+    runtimeEntries
       .map(entry => {
-        const field = toPascalCase(entry.node.fieldName, "Setting");
-        return `        if (ReferenceEquals(
+        const node = entry.node;
+        const field = toPascalCase(
+          node.fieldName,
+          "Setting"
+        );
+        const type =
+          node.kind === "controller"
+            ? toPascalCase(
+                node.enumName,
+                "SettingsPage"
+              )
+            : node.valueType === "enum"
+              ? toPascalCase(
+                  node.enumName,
+                  "SettingOption"
+                )
+              : node.valueType;
+
+        return `    private static ${type} _runtime${field} = default!;
+
+    public static ${type} Current${field} =>
+        _runtime${field};`;
+      })
+      .join("\n\n");
+
+  let runtimeBlock;
+
+  if (runtimeEntries.length > 0) {
+    const startupCalls =
+      startupEntries
+        .map(
+          entry =>
+            `        Apply${toPascalCase(
+              entry.node.fieldName,
+              "Setting"
+            )}();`
+        )
+        .join("\n");
+
+    const graphSavedStatement =
+      graphRuntimeActive
+        ? String(
+            graphContribution
+              ?.onSettingsSavedStatement ||
+            ""
+          ).trim()
+        : "";
+
+    const changedBranches =
+      savedEntries
+        .map(entry => {
+          const field = toPascalCase(
+            entry.node.fieldName,
+            "Setting"
+          );
+          const savedCall =
+            graphSavedStatement
+              ? `\n${indentGeneratedStatement(
+                  graphSavedStatement,
+                  12
+                )}`
+              : "";
+
+          return `        if (ReferenceEquals(
                 configurationEvent.Key,
                 ${field}))
         {
-            Apply${field}();
+            Apply${field}();${savedCall}
             return;
         }`;
-      })
-      .join("\n\n");
-    const applyMethods = runtimeEntries
-      .map(entry => {
-        const node = entry.node;
-        const field = toPascalCase(node.fieldName, "Setting");
-        const type =
-          node.kind === "controller"
-            ? toPascalCase(node.enumName, "SettingsPage")
-            : node.valueType === "enum"
-              ? toPascalCase(node.enumName, "SettingOption")
-              : node.valueType;
-        return `    private static void Apply${field}()
+        })
+        .join("\n\n");
+
+    const applyMethods =
+      runtimeEntries
+        .map(entry => {
+          const node = entry.node;
+          const field = toPascalCase(
+            node.fieldName,
+            "Setting"
+          );
+          const type =
+            node.kind === "controller"
+              ? toPascalCase(
+                  node.enumName,
+                  "SettingsPage"
+                )
+              : node.valueType === "enum"
+                ? toPascalCase(
+                    node.enumName,
+                    "SettingOption"
+                  )
+                : node.valueType;
+          const statements = [
+            `_runtime${field} = value;`
+          ];
+
+          if (!graphRuntimeActive) {
+            statements.push(
+              `_ = value; // TODO: Replace only this line with mod-specific logic.`
+            );
+          }
+
+          const graphStatement =
+            graphContribution
+              ?.applyStatements?.[
+                node.id
+              ];
+
+          if (
+            graphRuntimeActive &&
+            typeof graphStatement ===
+              "string" &&
+            graphStatement.trim()
+          ) {
+            statements.push(
+              graphStatement.trim()
+            );
+          }
+
+          return `    private static void Apply${field}()
     {
         ${type} value =
             _configuration.GetValue(
                 ${field});
 
-        _ = value; // TODO: Replace only this line with mod-specific logic.
+${statements
+  .map(statement =>
+    indentGeneratedStatement(
+      statement,
+      8
+    )
+  )
+  .join("\n")}
     }`;
-      })
-      .join("\n\n");
-    runtimeBlock = `    private static ModConfiguration _configuration = null!;
+        })
+        .join("\n\n");
+
+    const graphInitializeStatement =
+      graphRuntimeActive
+        ? String(
+            graphContribution
+              ?.initializeStatement ||
+            ""
+          ).trim()
+        : "";
+    const graphEngineInitializedStatement =
+      graphRuntimeActive
+        ? String(
+            graphContribution
+              ?.onEngineInitializedStatement ||
+            ""
+          ).trim()
+        : "";
+
+    runtimeBlock = `${runtimeValueDeclarations}
+
+    private static ModConfiguration _configuration = null!;
 
     public override void OnEngineInit()
     {
         _configuration =
             GetConfiguration();
-${savedEntries.length > 0
+${graphInitializeStatement
+    ? `\n${indentGeneratedStatement(
+        graphInitializeStatement,
+        8
+      )}\n`
+    : ""}${savedEntries.length > 0
     ? `
         _configuration.OnThisConfigurationChanged +=
             OnConfigurationChanged;
 `
     : ""}
-${startupCalls || "        // Read stored values here when the mod needs them."}
+${startupCalls ||
+  "        // No startup value read was requested."}${graphEngineInitializedStatement
+    ? `\n\n${indentGeneratedStatement(
+        graphEngineInitializedStatement,
+        8
+      )}`
+    : ""}
     }
 
 ${savedEntries.length > 0
@@ -2662,7 +3025,7 @@ ${changedBranches}
     {
         /*
          * No automatic runtime reactions were selected.
-         * Read configuration values here whenever the mod requires them.
+         * Read configuration values whenever the mod requires them.
          */
     }
 `;
@@ -2701,12 +3064,22 @@ ${orderBranches}
     const controllerValues = controllers
       .map(entry => {
         const controller = entry.node;
-        const enumName = toPascalCase(controller.enumName, "SettingsPage");
-        const field = toPascalCase(controller.fieldName, "ActivePage");
-        const local = toCamelCase(controller.fieldName);
+        const enumName = toPascalCase(
+          controller.enumName,
+          "SettingsPage"
+        );
+        const field = toPascalCase(
+          controller.fieldName,
+          "ActivePage"
+        );
+        const local = toCamelCase(
+          controller.fieldName
+        );
         const fallback = toPascalCase(
           controller.defaultOption,
-          controller.options[0]?.name || "General"
+          controller.options[0]
+            ?.name ||
+            "General"
         );
         return `        ${enumName} ${local} =
             getCurrentValue(
@@ -2718,8 +3091,14 @@ ${orderBranches}
       .join("\n\n");
     const keyBranches = entries
       .map(entry => {
-        const field = toPascalCase(entry.node.fieldName, "Setting");
-        const expression = conditionExpression(entry.conditions);
+        const field = toPascalCase(
+          entry.node.fieldName,
+          "Setting"
+        );
+        const expression =
+          conditionExpression(
+            entry.conditions
+          );
         return `        if (ReferenceEquals(
                 key,
                 ${field}))
@@ -2729,15 +3108,16 @@ ${orderBranches}
         }`;
       })
       .join("\n\n");
-    const controllerChecks = controllers
-      .map(
-        entry =>
-          `ReferenceEquals(\n                key,\n                ${toPascalCase(
-            entry.node.fieldName,
-            "ActivePage"
-          )})`
-      )
-      .join(" ||\n            ");
+    const controllerChecks =
+      controllers
+        .map(
+          entry =>
+            `ReferenceEquals(\n                key,\n                ${toPascalCase(
+              entry.node.fieldName,
+              "ActivePage"
+            )})`
+        )
+        .join(" ||\n            ");
     visibilityBlock = `
     public bool IsConfigurationKeyVisible(
         ModConfiguration configuration,
@@ -2766,19 +3146,28 @@ ${keyBranches}
 namespace ${namespaceName};
 
 ${enums ? `${enums}\n\n` : ""}/// <summary>
-/// ${metadata.description.replace(/\r\n|\r|\n/g, " ")}
+/// ${metadata.description.replace(
+  /\r\n|\r|\n/g,
+  " "
+)}
 /// </summary>
-public sealed class ${className}
+public sealed partial class ${className}
     : ResoniteMod${interfaceSuffix}
 {
     public override string Name =>
-        "${escapeCSharp(metadata.modName)}";
+        "${escapeCSharp(
+          metadata.modName
+        )}";
 
     public override string Author =>
-        "${escapeCSharp(metadata.author)}";
+        "${escapeCSharp(
+          metadata.author
+        )}";
 
     public override string Version =>
-        "${escapeCSharp(metadata.version)}";
+        "${escapeCSharp(
+          metadata.version
+        )}";
 
 ${declarations}
 ${runtimeBlock}${orderBlock}${visibilityBlock}}
@@ -2788,23 +3177,31 @@ ${runtimeBlock}${orderBlock}${visibilityBlock}}
 function generateProjectFile() {
   const settings = currentFlattenedNodes()
     .filter(entry => entry.node.kind === "setting");
-  const usesElements = settings.some(entry =>
-    [
-      "colorX",
-      "int2",
-      "int3",
-      "int4",
-      "float2",
-      "float3",
-      "float4",
-      "double2",
-      "double3",
-      "double4"
-    ].includes(entry.node.valueType)
-  );
-  const usesRenderiteShared = settings.some(
-    entry => entry.node.valueType === "colorX"
-  );
+  const graphContribution =
+    getTypedNodeGraphContribution();
+  const graphRequirements =
+    graphContribution?.requirements || {};
+  const usesElements =
+    settings.some(entry =>
+      [
+        "colorX",
+        "int2",
+        "int3",
+        "int4",
+        "float2",
+        "float3",
+        "float4",
+        "double2",
+        "double3",
+        "double4"
+      ].includes(entry.node.valueType)
+    ) ||
+    graphRequirements.usesElements === true;
+  const usesRenderiteShared =
+    settings.some(
+      entry => entry.node.valueType === "colorX"
+    ) ||
+    graphRequirements.usesRenderiteShared === true;
   const className = generatedBaseName();
   const namespaceName =
     state.metadata.namespaceName
@@ -2817,22 +3214,192 @@ function generateProjectFile() {
       state.exportOptions.resonitePath
     )
   );
-  const optionalReferences = [
-    usesElements
-      ? `    <Reference Include="Elements.Core">
-      <HintPath>$(ResonitePath)Elements.Core.dll</HintPath>
-      <Private>False</Private>
-    </Reference>`
-      : "",
-    usesRenderiteShared
-      ? `    <Reference Include="Renderite.Shared">
-      <HintPath>$(ResonitePath)Renderite.Shared.dll</HintPath>
-      <Private>False</Private>
-    </Reference>`
-      : ""
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+
+  const referenceMap = new Map();
+
+  const addReference = reference => {
+    if (
+      !reference ||
+      typeof reference !== "object"
+    ) {
+      return;
+    }
+
+    const include = String(
+      reference.include || ""
+    ).trim();
+
+    if (!include) {
+      return;
+    }
+
+    referenceMap.set(
+      include.toLowerCase(),
+      {
+        include,
+        hintPath:
+          String(
+            reference.hintPath || ""
+          ).trim(),
+        private:
+          reference.private === true
+      }
+    );
+  };
+
+  if (usesElements) {
+    addReference({
+      include: "Elements.Core",
+      hintPath:
+        "$(ResonitePath)Elements.Core.dll"
+    });
+  }
+
+  if (usesRenderiteShared) {
+    addReference({
+      include: "Renderite.Shared",
+      hintPath:
+        "$(ResonitePath)Renderite.Shared.dll"
+    });
+  }
+
+  for (
+    const reference of
+    Array.isArray(
+      graphRequirements.references
+    )
+      ? graphRequirements.references
+      : []
+  ) {
+    addReference(reference);
+  }
+
+  const optionalReferences =
+    [...referenceMap.values()]
+      .map(reference => {
+        const include =
+          escapeXml(reference.include);
+        const hintPath =
+          escapeXml(reference.hintPath);
+        const privateValue =
+          reference.private
+            ? "True"
+            : "False";
+
+        if (!hintPath) {
+          return `    <Reference Include="${include}" />`;
+        }
+
+        return `    <Reference Include="${include}">
+      <HintPath>${hintPath}</HintPath>
+      <Private>${privateValue}</Private>
+    </Reference>`;
+      })
+      .join("\n\n");
+
+  const packageMap = new Map();
+
+  for (
+    const packageReference of
+    Array.isArray(
+      graphRequirements.packageReferences
+    )
+      ? graphRequirements.packageReferences
+      : []
+  ) {
+    if (
+      !packageReference ||
+      typeof packageReference !== "object"
+    ) {
+      continue;
+    }
+
+    const include = String(
+      packageReference.include || ""
+    ).trim();
+    const version = String(
+      packageReference.version || ""
+    ).trim();
+
+    if (!include || !version) {
+      continue;
+    }
+
+    packageMap.set(
+      include.toLowerCase(),
+      {
+        include,
+        version,
+        privateAssets:
+          String(
+            packageReference.privateAssets || ""
+          ).trim(),
+        includeAssets:
+          String(
+            packageReference.includeAssets || ""
+          ).trim()
+      }
+    );
+  }
+
+  const packageReferences =
+    [...packageMap.values()]
+      .map(packageReference => {
+        const attributes = [
+          `Include="${escapeXml(
+            packageReference.include
+          )}"`,
+          `Version="${escapeXml(
+            packageReference.version
+          )}"`
+        ];
+
+        if (packageReference.privateAssets) {
+          attributes.push(
+            `PrivateAssets="${escapeXml(
+              packageReference.privateAssets
+            )}"`
+          );
+        }
+
+        if (packageReference.includeAssets) {
+          attributes.push(
+            `IncludeAssets="${escapeXml(
+              packageReference.includeAssets
+            )}"`
+          );
+        }
+
+        return `    <PackageReference ${attributes.join(
+          " "
+        )} />`;
+      })
+      .join("\n");
+
+  const frameworkReferences =
+    (Array.isArray(
+      graphRequirements.frameworkReferences
+    )
+      ? graphRequirements.frameworkReferences
+      : [])
+      .map(value => String(value || "").trim())
+      .filter(Boolean)
+      .map(
+        value =>
+          `    <FrameworkReference Include="${escapeXml(
+            value
+          )}" />`
+      )
+      .join("\n");
+
+  const allowUnsafeBlocks =
+    graphRequirements.allowUnsafeBlocks === true;
+  const useWindowsForms =
+    graphRequirements.useWindowsForms === true;
+  const targetFramework =
+    useWindowsForms
+      ? "net10.0-windows"
+      : "net10.0";
 
   return `<Project Sdk="Microsoft.NET.Sdk">
   <!--
@@ -2840,10 +3407,14 @@ function generateProjectFile() {
     Older targets require matching older Resonite and RML assemblies.
   -->
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>${targetFramework}</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
+    <ImplicitUsings>enable</ImplicitUsings>${allowUnsafeBlocks
+      ? "\n    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>"
+      : ""}${useWindowsForms
+      ? "\n    <UseWindowsForms>true</UseWindowsForms>\n    <EnableWindowsTargeting>true</EnableWindowsTargeting>"
+      : ""}
 
     <AssemblyName>${escapeXml(className)}</AssemblyName>
     <RootNamespace>${escapeXml(namespaceName)}</RootNamespace>
@@ -2861,8 +3432,14 @@ function generateProjectFile() {
     <Reference Include="FrooxEngine">
       <HintPath>$(ResonitePath)FrooxEngine.dll</HintPath>
       <Private>False</Private>
-    </Reference>${optionalReferences ? `\n\n${optionalReferences}` : ""}
-  </ItemGroup>
+    </Reference>${optionalReferences
+      ? `\n\n${optionalReferences}`
+      : ""}
+  </ItemGroup>${packageReferences
+    ? `\n\n  <ItemGroup>\n${packageReferences}\n  </ItemGroup>`
+    : ""}${frameworkReferences
+    ? `\n\n  <ItemGroup>\n${frameworkReferences}\n  </ItemGroup>`
+    : ""}
 </Project>
 `;
 }
@@ -3033,6 +3610,19 @@ function getDiagnostics() {
   for (const [enumName, count] of enumNames) {
     if (count > 1) errors.push(`Duplicate enum type name: ${enumName}.`);
   }
+
+  const graphContribution =
+    getTypedNodeGraphContribution();
+
+  for (
+    const diagnostic of
+    graphContribution?.diagnostics || []
+  ) {
+    errors.push(
+      `Node graph: ${diagnostic}`
+    );
+  }
+
   return errors;
 }
 
@@ -3074,6 +3664,11 @@ function createProjectDocument(
     ),
     nodes: clone(
       state.nodes
+    ),
+    extensions: clone(
+      isPlainObject(state.extensions)
+        ? state.extensions
+        : {}
     ),
     workspace: {
       selectedId:
@@ -3466,6 +4061,12 @@ function parseProjectDocument(
     )
       ? source.workspace
       : {};
+  const extensionsSource =
+    isPlainObject(
+      source.extensions
+    )
+      ? source.extensions
+      : {};
   const resonitePath =
     projectString(
       exportSource.resonitePath,
@@ -3544,6 +4145,8 @@ function parseProjectDocument(
       sanitizeProjectNodes(
         source.nodes
       ),
+    extensions:
+      clone(extensionsSource),
     workspace: {
       selectedId:
         projectString(
@@ -3580,6 +4183,10 @@ function applyProjectDocument(
     project.exportOptions;
   state.nodes =
     project.nodes;
+  state.extensions =
+    isPlainObject(project.extensions)
+      ? clone(project.extensions)
+      : {};
   state.selectedId =
     project.workspace.selectedId &&
     findNode(
@@ -3636,6 +4243,7 @@ function restore() {
     console.warn("Could not restore the local builder draft.", error);
     state.metadata = { ...DEFAULT_METADATA };
     state.exportOptions = { ...DEFAULT_EXPORT_OPTIONS };
+    state.extensions = {};
     state.nodes =
       normalizeNodes(
         clone(SAMPLE_NODES)
@@ -10487,10 +11095,26 @@ function renderInspector() {
 function updateGeneratedOutput() {
   const errors = getDiagnostics();
   const code = generateCode();
+  const additionalFiles =
+    getAdditionalGeneratedSourceFiles();
+  const graphSummary =
+    additionalFiles.length > 0
+      ? additionalFiles
+          .map(
+            file =>
+              `${file.name}: ${file.content.split("\n").length} lines`
+          )
+          .join(" · ")
+      : "";
+
   elements.generatedCode.textContent = code;
   elements.codeSummary.textContent = `${currentFlattenedNodes().length} item${
     currentFlattenedNodes().length === 1 ? "" : "s"
-  } · ${code.split("\n").length} lines`;
+  } · main: ${code.split("\n").length} lines${
+    graphSummary
+      ? ` · ${graphSummary}`
+      : ""
+  }`;
   elements.diagnostics.hidden = errors.length === 0;
   elements.diagnostics.innerHTML = errors.length
     ? `<strong>Fix these issues before copying:</strong><ul>${errors
@@ -10524,6 +11148,18 @@ function renderAll() {
   renderInspector();
   updateGeneratedOutput();
   persist();
+
+  document.dispatchEvent(
+    new CustomEvent(
+      "rml-builder:rendered",
+      {
+        detail: {
+          itemCount:
+            currentFlattenedNodes().length
+        }
+      }
+    )
+  );
 }
 
 function createSettingsPreviewDraft() {
@@ -13087,6 +13723,32 @@ function copyGeneratedProjectFile(button) {
   );
 }
 
+function copyGeneratedNodeGraphCode(
+  button
+) {
+  const files =
+    getAdditionalGeneratedSourceFiles();
+
+  if (files.length === 0) {
+    return Promise.resolve();
+  }
+
+  const combined = files
+    .map(
+      file =>
+        `// ============================================================\n` +
+        `// FILE: ${file.name}\n` +
+        `// ============================================================\n\n` +
+        file.content.trimEnd()
+    )
+    .join("\n\n");
+
+  return copyText(
+    `${combined}\n`,
+    button
+  );
+}
+
 function downloadBlob(blob, filename) {
   const link = document.createElement("a");
   const objectUrl = URL.createObjectURL(blob);
@@ -13405,13 +14067,37 @@ function updateExportDialog() {
     elements.exportIncludeCs.checked;
   const includeCsproj =
     elements.exportIncludeCsproj.checked;
+  const graphFiles =
+    getAdditionalGeneratedSourceFiles();
+  const graphFile =
+    graphFiles[0] || null;
+  const includeGraphCs =
+    includeCs &&
+    Boolean(graphFile);
   const pathAvailable =
     elements.exportResonitePath.value
       .trim()
       .length > 0;
+  const selectedFiles = [
+    ...(includeCs
+      ? [
+          {
+            name: `${baseName}.cs`
+          },
+          ...graphFiles
+        ]
+      : []),
+    ...(includeCsproj
+      ? [
+          {
+            name:
+              `${baseName}.csproj`
+          }
+        ]
+      : [])
+  ];
   const hasSelection =
-    includeCs ||
-    includeCsproj;
+    selectedFiles.length > 0;
   const projectPathMissing =
     includeCsproj &&
     !pathAvailable;
@@ -13422,6 +14108,39 @@ function updateExportDialog() {
     `${baseName}.cs`;
   elements.exportCsprojFilename.textContent =
     `${baseName}.csproj`;
+
+  if (
+    elements.exportNodeGraphOption &&
+    elements.exportNodeGraphFilename
+  ) {
+    elements.exportNodeGraphOption.hidden =
+      !graphFile;
+    elements.exportNodeGraphFilename.textContent =
+      graphFiles.length > 1
+        ? `${graphFiles.length} generated C# files`
+        : graphFile?.name ||
+          `${baseName}.NodeGraph.cs`;
+    elements.exportNodeGraphOption.title =
+      includeCs
+        ? "Generated automatically with the main mod C# source."
+        : "Enable Main mod C# source to include the typed node-graph runtime.";
+  }
+
+  if (elements.exportIncludeNodeGraph) {
+    elements.exportIncludeNodeGraph.checked =
+      includeGraphCs;
+    elements.exportIncludeNodeGraph.disabled =
+      true;
+  }
+
+  if (elements.exportCopyNodeGraph) {
+    elements.exportCopyNodeGraph.hidden =
+      !graphFile;
+    elements.exportCopyNodeGraph.disabled =
+      hasDiagnostics ||
+      !graphFile;
+  }
+
   elements.exportResonitePath.setAttribute(
     "aria-invalid",
     String(projectPathMissing)
@@ -13452,29 +14171,44 @@ function updateExportDialog() {
     platformNotes[platform] ||
     platformNotes.custom;
 
-  if (includeCs && includeCsproj) {
+  if (!hasSelection) {
     elements.exportDownloadSelected.textContent =
-      "Download ZIP";
+      "Select a file";
     elements.exportDownloadHint.textContent =
-      "Both selected files will be bundled into one ZIP archive.";
-  } else if (includeCs) {
+      "Select at least one file to download.";
+    return;
+  }
+
+  if (
+    selectedFiles.length === 1 &&
+    !includeCsproj
+  ) {
     elements.exportDownloadSelected.textContent =
       "Download .cs";
     elements.exportDownloadHint.textContent =
       "The generated C# source will be downloaded directly.";
-  } else if (includeCsproj) {
+    return;
+  }
+
+  if (
+    selectedFiles.length === 1 &&
+    includeCsproj
+  ) {
     elements.exportDownloadSelected.textContent =
       "Download .csproj";
     elements.exportDownloadHint.textContent =
       pathAvailable
         ? "The generated project file will be downloaded directly."
         : "Enter the Resonite installation path to create the project file.";
-  } else {
-    elements.exportDownloadSelected.textContent =
-      "Select a file";
-    elements.exportDownloadHint.textContent =
-      "Select at least one file to download.";
+    return;
   }
+
+  elements.exportDownloadSelected.textContent =
+    "Download ZIP";
+  elements.exportDownloadHint.textContent =
+    includeGraphCs
+      ? `The ZIP contains ${selectedFiles.length} files, including ${graphFiles.length} generated mod-runtime source file${graphFiles.length === 1 ? "" : "s"}.`
+      : `The ${selectedFiles.length} selected files will be bundled into one ZIP archive.`;
 }
 
 function syncExportOptions() {
@@ -13577,55 +14311,74 @@ function closeExportDialog() {
 
 function downloadSelectedExport() {
   syncExportOptions();
-  if (elements.exportDownloadSelected.disabled) {
+
+  if (
+    elements.exportDownloadSelected
+      .disabled
+  ) {
     return;
   }
 
-  const baseName = generatedBaseName();
+  const baseName =
+    generatedBaseName();
   const includeCs =
     state.exportOptions.includeCs;
   const includeCsproj =
     state.exportOptions.includeCsproj;
+  const files = [];
 
-  if (includeCs && includeCsproj) {
-    downloadBlob(
-      createZipBlob([
-        {
-          name: `${baseName}.cs`,
-          content: generateCode()
-        },
-        {
-          name: `${baseName}.csproj`,
-          content: generateProjectFile()
-        }
-      ]),
-      `${baseName}-RML-Project.zip`
-    );
-  } else if (includeCs) {
-    downloadBlob(
-      new Blob(
-        [generateCode()],
-        {
-          type: "text/plain;charset=utf-8"
-        }
-      ),
-      `${baseName}.cs`
-    );
-  } else if (includeCsproj) {
-    downloadBlob(
-      new Blob(
-        [generateProjectFile()],
-        {
-          type: "application/xml;charset=utf-8"
-        }
-      ),
-      `${baseName}.csproj`
+  if (includeCs) {
+    files.push({
+      name: `${baseName}.cs`,
+      content: generateCode(),
+      type:
+        "text/plain;charset=utf-8"
+    });
+
+    files.push(
+      ...getAdditionalGeneratedSourceFiles()
     );
   }
+
+  if (includeCsproj) {
+    files.push({
+      name: `${baseName}.csproj`,
+      content: generateProjectFile(),
+      type:
+        "application/xml;charset=utf-8"
+    });
+  }
+
+  if (files.length === 0) {
+    return;
+  }
+
+  if (files.length === 1) {
+    const file = files[0];
+
+    downloadBlob(
+      new Blob(
+        [file.content],
+        {
+          type:
+            file.type ||
+            "text/plain;charset=utf-8"
+        }
+      ),
+      file.name
+    );
+    return;
+  }
+
+  downloadBlob(
+    createZipBlob(files),
+    `${baseName}-RML-Project.zip`
+  );
 }
 
 function loadExample() {
   state.metadata = { ...DEFAULT_METADATA };
+  state.extensions = {};
   state.nodes =
     normalizeNodes(
       clone(SAMPLE_NODES)
@@ -13644,6 +14397,7 @@ function newBlank() {
     return;
   }
   state.metadata = { ...DEFAULT_METADATA };
+  state.extensions = {};
   state.nodes = [];
   state.selectedId = null;
   state.activeContainerId = ROOT_CONTAINER;
@@ -13710,10 +14464,22 @@ function cacheElements() {
     exportCsprojFilename: document.getElementById(
       "export-csproj-filename"
     ),
+    exportNodeGraphOption: document.getElementById(
+      "export-node-graph-option"
+    ),
+    exportIncludeNodeGraph: document.getElementById(
+      "export-include-node-graph"
+    ),
+    exportNodeGraphFilename: document.getElementById(
+      "export-node-graph-filename"
+    ),
     exportDownloadHint: document.getElementById(
       "export-download-hint"
     ),
     exportCopyCs: document.getElementById("export-copy-cs"),
+    exportCopyNodeGraph: document.getElementById(
+      "export-copy-node-graph"
+    ),
     exportCopyCsproj: document.getElementById(
       "export-copy-csproj"
     ),
@@ -13976,6 +14742,183 @@ function preventGlobalDoubleSelection() {
           active
         );
       }
+    }
+  );
+}
+
+function builderStateSnapshot() {
+  return clone({
+    metadata:
+      state.metadata,
+    exportOptions:
+      state.exportOptions,
+    nodes:
+      state.nodes,
+    extensions:
+      isPlainObject(state.extensions)
+        ? state.extensions
+        : {},
+    workspace: {
+      selectedId:
+        state.selectedId,
+      activeContainerId:
+        state.activeContainerId,
+      collapsedPaletteGroups:
+        state.collapsedPaletteGroups
+    }
+  });
+}
+
+function exposeBuilderBridge() {
+  const bridge = {
+    version: 2,
+
+    getStateSnapshot() {
+      return builderStateSnapshot();
+    },
+
+    getFlattenedEntries() {
+      return clone(
+        currentFlattenedNodes()
+      );
+    },
+
+    getTypeDefinitions() {
+      return clone(
+        TYPE_DEFINITIONS
+      );
+    },
+
+    getRuntimeBehaviors() {
+      return [
+        "stored",
+        "startup",
+        "saved",
+        "startup-saved"
+      ];
+    },
+
+    getPreviewValueSnapshot() {
+      let draft =
+        settingsPreviewDraft;
+
+      if (!draft) {
+        let savedDraft = null;
+
+        try {
+          const saved =
+            localStorage.getItem(
+              PREVIEW_STORAGE_KEY
+            );
+
+          if (saved) {
+            savedDraft =
+              JSON.parse(saved);
+          }
+        } catch {
+          savedDraft = null;
+        }
+
+        draft =
+          mergeSettingsPreviewDraft(
+            savedDraft
+          );
+      }
+
+      return clone(draft);
+    },
+
+    getExtensionState(name) {
+      if (
+        typeof name !== "string" ||
+        !name.trim()
+      ) {
+        return null;
+      }
+
+      const value =
+        isPlainObject(state.extensions)
+          ? state.extensions[name]
+          : undefined;
+
+      return value === undefined
+        ? null
+        : clone(value);
+    },
+
+    setExtensionState(
+      name,
+      value
+    ) {
+      if (
+        typeof name !== "string" ||
+        !name.trim()
+      ) {
+        throw new TypeError(
+          "Extension name must be a non-empty string."
+        );
+      }
+
+      if (!isPlainObject(state.extensions)) {
+        state.extensions = {};
+      }
+
+      if (
+        value === null ||
+        value === undefined
+      ) {
+        delete state.extensions[name];
+      } else {
+        state.extensions[name] =
+          clone(value);
+      }
+
+      persist();
+
+      document.dispatchEvent(
+        new CustomEvent(
+          "rml-builder:extension-state-changed",
+          {
+            detail: {
+              name
+            }
+          }
+        )
+      );
+    },
+
+    requestRender() {
+      renderAll();
+    },
+
+    requestPaletteRender() {
+      renderPalette();
+    },
+
+    requestGeneratedOutputRefresh() {
+      updateGeneratedOutput();
+
+      if (
+        elements.exportDialog?.open
+      ) {
+        updateExportDialog();
+      }
+    },
+
+    persist() {
+      persist();
+    }
+  };
+
+  Object.defineProperty(
+    window,
+    "RMLBuilderBridge",
+    {
+      value:
+        Object.freeze(bridge),
+      writable: false,
+      enumerable: true,
+      configurable: true
     }
   );
 }
@@ -14586,6 +15529,13 @@ function initialize() {
   elements.exportCopyCs.addEventListener("click", () =>
     copyGeneratedCode(elements.exportCopyCs)
   );
+  elements.exportCopyNodeGraph?.addEventListener(
+    "click",
+    () =>
+      copyGeneratedNodeGraphCode(
+        elements.exportCopyNodeGraph
+      )
+  );
   elements.exportCopyCsproj.addEventListener("click", () => {
     syncExportOptions();
     copyGeneratedProjectFile(
@@ -14626,7 +15576,14 @@ function initialize() {
     }
   );
 
+  exposeBuilderBridge();
   renderAll();
+
+  document.dispatchEvent(
+    new CustomEvent(
+      "rml-builder:ready"
+    )
+  );
 }
 
 document.addEventListener("DOMContentLoaded", initialize);
