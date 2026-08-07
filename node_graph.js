@@ -2,7 +2,7 @@
   "use strict";
 
   const EXTENSION_NAME = "typedNodeGraph";
-  const GRAPH_SCHEMA_VERSION = 5;
+  const GRAPH_SCHEMA_VERSION = 6;
   const GRAPH_STAGE_WIDTH = 5200;
   const GRAPH_STAGE_HEIGHT = 3400;
   const GRAPH_MIN_ZOOM = 0.35;
@@ -2198,11 +2198,11 @@
         }
       }
 
-      parameters.portLayout =
-        parameters.portLayout ===
-          "mirrored"
-          ? "mirrored"
-          : "standard";
+      normalizePortLayoutParameter(
+        parameters,
+        definition,
+        kind === "configuration"
+      );
 
       normalizeNodeParametersObject(
         parameters,
@@ -2421,7 +2421,9 @@
             : null,
         label: node.label || "",
         parameters:
-          clone(node.parameters || {})
+          serializableNodeParameters(
+            node
+          )
       })),
       connections:
         graph.connections.map(
@@ -2737,6 +2739,60 @@
     }
 
     return definition;
+  }
+
+  /*
+   * UX invariant: Socket layout has exactly one user-facing control.
+   * It is the ⇄ button in the node header, and it only exists for nodes
+   * that actually have at least one input or output socket.
+   */
+  function definitionHasSockets(
+    definition
+  ) {
+    return Boolean(
+      (definition?.inputs?.length || 0) > 0 ||
+      (definition?.outputs?.length || 0) > 0
+    );
+  }
+
+  function normalizePortLayoutParameter(
+    parameters,
+    definition,
+    forceSupported = false
+  ) {
+    if (
+      !parameters ||
+      typeof parameters !== "object"
+    ) {
+      return parameters;
+    }
+
+    if (
+      forceSupported ||
+      definitionHasSockets(definition)
+    ) {
+      parameters.portLayout =
+        parameters.portLayout === "mirrored"
+          ? "mirrored"
+          : "standard";
+    } else {
+      delete parameters.portLayout;
+    }
+
+    return parameters;
+  }
+
+  function serializableNodeParameters(
+    node
+  ) {
+    const parameters =
+      clone(node?.parameters || {});
+
+    return normalizePortLayoutParameter(
+      parameters,
+      nodeDefinition(node),
+      node?.kind === "configuration"
+    );
   }
 
   function findGraphNode(nodeId) {
@@ -8491,9 +8547,12 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
   function nodeDefaultParameters(
     definition
   ) {
-    const parameters = {
-      portLayout: "standard"
-    };
+    const parameters = {};
+
+    normalizePortLayoutParameter(
+      parameters,
+      definition
+    );
 
     if (
       definition.configurableTypeVar
@@ -8711,6 +8770,9 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     direction
   ) {
     const mirrored =
+      definitionHasSockets(
+        nodeDefinition(node)
+      ) &&
       node.parameters?.portLayout ===
         "mirrored";
 
@@ -9218,14 +9280,16 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       (referencePoint?.x ??
         nodeCenterX);
 
-    node.parameters.portLayout =
-      role === "source"
-        ? droppedBeforeReference
-          ? "standard"
-          : "mirrored"
-        : droppedBeforeReference
-          ? "mirrored"
-          : "standard";
+    if (definitionHasSockets(definition)) {
+      node.parameters.portLayout =
+        role === "source"
+          ? droppedBeforeReference
+            ? "standard"
+            : "mirrored"
+          : droppedBeforeReference
+            ? "mirrored"
+            : "standard";
+    }
 
     configureAutomaticNode(
       node,
@@ -10643,12 +10707,21 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         title?.querySelector("small")
       )
     );
+    const headerItemCount = [
+      symbol,
+      title,
+      flip,
+      remove
+    ].filter(Boolean).length;
     const headerWidth =
       (symbol?.offsetWidth || 0) +
       (flip?.offsetWidth || 0) +
       (remove?.offsetWidth || 0) +
       titleWidth +
-      headerGap * 3 +
+      headerGap * Math.max(
+        0,
+        headerItemCount - 1
+      ) +
       (header
         ? horizontalBoxSize(header)
         : 0);
@@ -11231,9 +11304,14 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
   ) {
     const definition =
       nodeDefinition(node);
+    const hasSockets =
+      definitionHasSockets(
+        definition
+      );
     const mirrored =
+      hasSockets &&
       node.parameters?.portLayout ===
-      "mirrored";
+        "mirrored";
     const inputSide =
       mirrored ? "right" : "left";
     const outputSide =
@@ -11293,34 +11371,41 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       "Graph";
     title.append(strong, small);
 
-    const flip =
-      document.createElement("button");
-    flip.className =
-      "rml-graph-node-flip";
-    flip.type = "button";
-    flip.textContent = "⇄";
-    flip.title = mirrored
-      ? "Use inputs on the left and outputs on the right"
-      : "Use outputs on the left and inputs on the right";
-    flip.addEventListener(
-      "pointerdown",
-      event =>
-        event.stopPropagation()
-    );
-    flip.addEventListener(
-      "click",
-      event => {
-        event.preventDefault();
-        event.stopPropagation();
-        node.parameters.portLayout =
-          mirrored
-            ? "standard"
-            : "mirrored";
-        persistGraph(true);
-        renderGraphNodesAndWires();
-        renderGraphInspector();
-      }
-    );
+    let flip = null;
+
+    if (hasSockets) {
+      flip =
+        document.createElement("button");
+      flip.className =
+        "rml-graph-node-flip";
+      flip.type = "button";
+      flip.textContent = "⇄";
+      flip.title = mirrored
+        ? "Use inputs on the left and outputs on the right"
+        : "Use outputs on the left and inputs on the right";
+      flip.setAttribute(
+        "aria-label",
+        flip.title
+      );
+      flip.addEventListener(
+        "pointerdown",
+        event =>
+          event.stopPropagation()
+      );
+      flip.addEventListener(
+        "click",
+        event => {
+          event.preventDefault();
+          event.stopPropagation();
+          node.parameters.portLayout =
+            mirrored
+              ? "standard"
+              : "mirrored";
+          persistGraph(true);
+          renderGraphNodesAndWires();
+        }
+      );
+    }
 
     const remove =
       document.createElement("button");
@@ -11347,10 +11432,14 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
     header.append(
       symbol,
-      title,
-      flip,
-      remove
+      title
     );
+
+    if (flip) {
+      header.appendChild(flip);
+    }
+
+    header.appendChild(remove);
 
     const body =
       document.createElement("div");
@@ -12784,42 +12873,6 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       heading,
       description
     );
-
-    const portLayoutLabel =
-      document.createElement("label");
-    portLayoutLabel.textContent =
-      "Socket layout";
-    const portLayoutSelect =
-      document.createElement("select");
-
-    for (const [value, text] of [
-      ["standard", "Inputs left · outputs right"],
-      ["mirrored", "Outputs left · inputs right"]
-    ]) {
-      const option =
-        document.createElement("option");
-      option.value = value;
-      option.textContent = text;
-      option.selected =
-        (node.parameters?.portLayout ||
-          "standard") === value;
-      portLayoutSelect.appendChild(option);
-    }
-
-    portLayoutSelect.addEventListener(
-      "change",
-      () => {
-        node.parameters.portLayout =
-          portLayoutSelect.value;
-        persistGraph(true);
-        renderGraphNodesAndWires();
-        renderGraphInspector();
-      }
-    );
-    portLayoutLabel.appendChild(
-      portLayoutSelect
-    );
-    card.appendChild(portLayoutLabel);
 
     if (definition?.displaysValue) {
       const preview =
