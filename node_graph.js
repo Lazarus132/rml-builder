@@ -2,7 +2,7 @@
   "use strict";
 
   const EXTENSION_NAME = "typedNodeGraph";
-  const GRAPH_SCHEMA_VERSION = 11;
+  const GRAPH_SCHEMA_VERSION = 14;
   const GRAPH_STAGE_WIDTH = 5200;
   const GRAPH_STAGE_HEIGHT = 3400;
   const GRAPH_MIN_ZOOM = 0.35;
@@ -820,7 +820,7 @@
     "RMLModNodeRegistry",
     {
       value: Object.freeze({
-        version: 2,
+        version: 3,
         port,
         genericPort,
         registerType:
@@ -842,12 +842,25 @@
           return TYPE_INFO[
             typeBase(type)
           ] || null;
+        },
+        getNodeDefinitions() {
+          return OPERATOR_DEFINITIONS;
+        },
+        getTypeDefinitions() {
+          return TYPE_INFO;
+        },
+        getValueTypes() {
+          return VALUE_TYPES;
         }
       }),
       writable: false,
       enumerable: true,
       configurable: true
     }
+  );
+
+  window.__rmlResolveNodeRegistryReady?.(
+    window.RMLModNodeRegistry
   );
 
   let bridge = null;
@@ -4017,6 +4030,22 @@
       ...connections,
       candidate
     ]) {
+      const sourceNode =
+        graph?.nodes?.find(
+          node =>
+            node.id ===
+            connection.fromNode
+        );
+
+      if (
+        sourceNode?.kind === "operator" &&
+        sourceNode.operatorId ===
+          "resonite.store" &&
+        connection.fromPort === "current"
+      ) {
+        continue;
+      }
+
       const list =
         adjacency.get(
           connection.fromNode
@@ -5663,6 +5692,8 @@
             `_config${field}`,
           setter:
             `Set${field}`,
+          getter:
+            `Get${field}`,
           reactor:
             `React${field}`,
           portId:
@@ -5736,9 +5767,16 @@
         );
 
       if (!connection) {
+        const explicitDefault =
+          typeof inputSpec?.defaultCs === "string" &&
+          inputSpec.defaultCs.trim()
+            ? inputSpec.defaultCs.trim()
+            : null;
+
         return {
           type,
           code:
+            explicitDefault ||
             graphCsDefault(type)
         };
       }
@@ -6028,7 +6066,7 @@
             );
 
           code = field
-            ? field.backing
+            ? `${field.getter}()`
             : graphCsDefault(type);
         }
       } else {
@@ -6778,7 +6816,18 @@ ${actions.length > 0
         .map(item =>
           `    public static void ${item.setter}(${item.csType} value)
     {
-        ${item.backing} = value;
+        lock (_configurationStateLock)
+        {
+            ${item.backing} = value;
+        }
+    }
+
+    private static ${item.csType} ${item.getter}()
+    {
+        lock (_configurationStateLock)
+        {
+            return ${item.backing};
+        }
     }`
         )
         .join("\n\n");
@@ -6806,7 +6855,7 @@ ${actions.length > 0
     const storeFieldsCode =
       storeFields
         .map(item =>
-          `    private static ${item.csType} ${item.field} = default!;`
+          `    private static ${item.csType} ${item.field} = ${graphCsDefault(item.type)};`
         )
         .join("\n");
     const extensionFieldsCode =
@@ -6866,6 +6915,7 @@ ${warningsComment}
 /// </summary>
 internal static partial class ${graphClassName}
 {
+    private static readonly object _configurationStateLock = new();
     private static Action<string> _display = static _ => { };
     private static readonly Dictionary<string, object?> _displayValues =
         new(StringComparer.Ordinal);
@@ -7202,9 +7252,13 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           min-height: 0;
         }
 
-        body.rml-node-graph-mode #builder-canvas,
-        body.rml-node-graph-mode #inspector-content {
+        body.rml-node-graph-mode #builder-canvas {
           height: 100%;
+          min-height: 0;
+        }
+
+        body.rml-node-graph-mode #inspector-content {
+          height: calc(100% - 52px);
           min-height: 0;
         }
 
@@ -7302,10 +7356,11 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       .rml-graph-palette-group > summary {
         display: grid;
         min-height: 29px;
-        grid-template-columns: 1fr auto;
+        grid-template-columns: 1fr auto 10px;
         align-items: center;
         gap: 8px;
         padding: 5px 4px;
+        border-radius: 6px;
         color: var(--faint);
         font-size: 9px;
         font-weight: 820;
@@ -7313,10 +7368,22 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         text-transform: uppercase;
         cursor: pointer;
         list-style: none;
+        -webkit-user-select: none;
+        user-select: none;
       }
 
       .rml-graph-palette-group > summary::-webkit-details-marker {
         display: none;
+      }
+
+      .rml-graph-palette-group > summary:hover {
+        background: rgba(164, 118, 255, 0.08);
+        color: #b7a9d4;
+      }
+
+      .rml-graph-palette-group > summary:focus-visible {
+        outline: 2px solid var(--accent-dark);
+        outline-offset: 2px;
       }
 
       .rml-graph-palette-group > summary b {
@@ -7328,6 +7395,24 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         border-radius: 6px;
         font-size: 8px;
         letter-spacing: 0;
+      }
+
+      .rml-graph-palette-group > summary::after {
+        width: 7px;
+        height: 7px;
+        border-right: 2px solid currentColor;
+        border-bottom: 2px solid currentColor;
+        content: "";
+        transform: rotate(45deg) translate(-1px, -1px);
+        transition: transform 0.15s ease;
+      }
+
+      .rml-graph-palette-group:not([open]) > summary {
+        margin-bottom: 0;
+      }
+
+      .rml-graph-palette-group:not([open]) > summary::after {
+        transform: rotate(-45deg);
       }
 
       .rml-graph-palette-list {
@@ -7398,27 +7483,11 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         font-size: 11px;
       }
 
-      .rml-graph-palette-legend {
-        display: grid;
-        gap: 5px;
-        margin: 9px;
-        padding: 9px;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        background: rgba(9, 13, 19, 0.72);
+      .rml-graph-palette-status {
+        margin: 6px 9px;
         color: var(--faint);
         font-size: 8px;
-        line-height: 1.35;
-      }
-
-      .rml-graph-runtime-legend {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 5px 8px;
-      }
-
-      .rml-graph-runtime-legend span {
-        white-space: nowrap;
+        line-height: 1.3;
       }
 
       .rml-graph-root {
@@ -8854,6 +8923,11 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       return;
     }
 
+    const previousQuery =
+      dom.paletteContent.querySelector(
+        ".rml-graph-palette-search input"
+      )?.value || "";
+
     dom.paletteContent.replaceChildren();
 
     const root =
@@ -8872,8 +8946,9 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       document.createElement("input");
     search.type = "search";
     search.placeholder =
-      "Math, relay, dynamic…";
+      "Type at least 2 characters for API nodes…";
     search.autocomplete = "off";
+    search.value = previousQuery;
     searchWrap.appendChild(search);
 
     const modeWrap =
@@ -8893,13 +8968,8 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       document.createElement("strong");
     modeTitle.textContent =
       "Show Advanced / Raw C#";
-    const modeHelp =
-      document.createElement("small");
-    modeHelp.textContent =
-      "Manual usings, references, source files and compiler overrides stay hidden unless needed as an expert fallback.";
-    modeCopy.append(
-      modeTitle,
-      modeHelp
+    modeCopy.appendChild(
+      modeTitle
     );
     modeWrap.append(
       modeInput,
@@ -8911,68 +8981,43 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     scroll.className =
       "rml-graph-palette-scroll";
 
-    const configGroup =
-      document.createElement("details");
-    configGroup.className =
-      "rml-graph-palette-group";
-    configGroup.open = true;
 
-    const configSummary =
-      document.createElement("summary");
-    const configSummaryText =
-      document.createElement("span");
-    configSummaryText.textContent =
-      "Packed Configuration";
-    const configCount =
-      document.createElement("b");
-    configCount.textContent = "1";
-    configSummary.append(
-      configSummaryText,
-      configCount
+
+    root.append(
+      searchWrap,
+      modeWrap,
+      scroll
     );
+    dom.paletteContent.appendChild(root);
 
-    const configList =
-      document.createElement("div");
-    configList.className =
-      "rml-graph-palette-list";
-    configList.appendChild(
-      createPaletteItem(
-        "configuration",
-        {
-          title:
-            "Packed Configuration",
-          symbol: "§",
-          description:
-            "Restores the packed configuration start node after it was deleted."
-        },
-        true
-      )
-    );
+    const allEntries =
+      Object.entries(
+        OPERATOR_DEFINITIONS
+      );
 
-    configGroup.append(
-      configSummary,
-      configList
-    );
-    scroll.appendChild(
-      configGroup
-    );
+    const MAX_SEARCH_RESULTS = 240;
+    let searchTimer = 0;
 
-    for (const group of OPERATOR_GROUP_ORDER) {
-      const entries =
-        Object.entries(
-          OPERATOR_DEFINITIONS
-        ).filter(
-          ([, definition]) =>
-            definition.group === group &&
-            definition.hiddenFromPalette !== true &&
-            (
-              graph.showAdvancedNodes === true ||
-              definition.expertOnly !== true
-            )
-        );
+    const searchableText =
+      (operatorId, definition) =>
+        `${
+          definition.title || ""
+        } ${
+          definition.description || ""
+        } ${
+          definition.apiSearchText || ""
+        } ${
+          definition.group || ""
+        } ${operatorId}`
+          .toLowerCase();
 
+    const appendGroup = (
+      group,
+      entries,
+      options = {}
+    ) => {
       if (entries.length === 0) {
-        continue;
+        return;
       }
 
       const details =
@@ -8980,8 +9025,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       details.className =
         "rml-graph-palette-group";
       details.open =
-        group !== "Conversions" &&
-        group !== "Advanced / Raw C#";
+        options.open !== false;
 
       const summary =
         document.createElement("summary");
@@ -9013,32 +9057,238 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
       details.append(summary, list);
       scroll.appendChild(details);
-    }
+    };
 
-    const legend =
-      document.createElement("div");
-    legend.className =
-      "rml-graph-palette-legend";
-    legend.innerHTML =
-      `<strong>Configuration socket shapes</strong>
-       <div class="rml-graph-runtime-legend">
-         <span>● Stored</span>
-         <span>▶ Startup</span>
-         <span>■ Saved</span>
-         <span>◆ Both</span>
-       </div>
-       <span>Wire colors are value types. Startup/Saved configuration sockets can connect to both matching value inputs and impulse inputs; Stored sockets remain value-only.</span>
-       <span>Invalid sockets are disabled while connecting. Dropping an output wire on empty space creates a monitor. Dropping a value input wire creates only a self-contained constant or context source; impulse inputs and multi-input runtime operations must be connected explicitly.</span>
-       <span>Resize: drag the right edge, bottom edge, or corner. Double-click a resize grip to reset that axis.</span>
-       <span>Normal nodes declare their own usings, references and build requirements. Advanced / Raw C# is only a manual escape hatch.</span>`;
+    const appendMessage = text => {
+      const message =
+        document.createElement("div");
+      message.className =
+        "rml-graph-palette-status";
+      message.textContent = text;
+      scroll.appendChild(message);
+    };
 
-    root.append(
-      searchWrap,
-      modeWrap,
-      scroll,
-      legend
-    );
-    dom.paletteContent.appendChild(root);
+    const renderEntries = () => {
+      scroll.replaceChildren();
+
+      const configGroup =
+        document.createElement("details");
+      configGroup.className =
+        "rml-graph-palette-group";
+      configGroup.open = true;
+
+      const configSummary =
+        document.createElement("summary");
+      const configSummaryText =
+        document.createElement("span");
+      configSummaryText.textContent =
+        "Packed Configuration";
+      const configCount =
+        document.createElement("b");
+      configCount.textContent = "1";
+      configSummary.append(
+        configSummaryText,
+        configCount
+      );
+
+      const configList =
+        document.createElement("div");
+      configList.className =
+        "rml-graph-palette-list";
+      configList.appendChild(
+        createPaletteItem(
+          "configuration",
+          {
+            title:
+              "Packed Configuration",
+            symbol: "§",
+            description:
+              "Restores the packed configuration start node after it was deleted."
+          },
+          true
+        )
+      );
+
+      configGroup.append(
+        configSummary,
+        configList
+      );
+      scroll.appendChild(
+        configGroup
+      );
+
+      const query =
+        search.value
+          .trim()
+          .toLowerCase();
+
+      const showAdvanced =
+        graph.showAdvancedNodes === true;
+
+      if (query.length >= 2) {
+        const matching = [];
+
+        for (
+          const entry of allEntries
+        ) {
+          const [, definition] = entry;
+
+          if (
+            definition.hiddenFromPalette === true ||
+            (
+              !showAdvanced &&
+              definition.expertOnly === true
+            )
+          ) {
+            continue;
+          }
+
+          if (
+            searchableText(
+              entry[0],
+              definition
+            ).includes(query)
+          ) {
+            matching.push(entry);
+
+            if (
+              matching.length >=
+              MAX_SEARCH_RESULTS
+            ) {
+              break;
+            }
+          }
+        }
+
+        if (matching.length === 0) {
+          appendMessage(
+            "No node matches this search."
+          );
+          return;
+        }
+
+        const grouped =
+          new Map();
+
+        for (const entry of matching) {
+          const group =
+            entry[1].group ||
+            "Other";
+
+          if (!grouped.has(group)) {
+            grouped.set(group, []);
+          }
+
+          grouped.get(group).push(entry);
+        }
+
+        for (
+          const group of
+          OPERATOR_GROUP_ORDER
+        ) {
+          const entries =
+            grouped.get(group);
+
+          if (entries) {
+            appendGroup(
+              group,
+              entries,
+              { open: true }
+            );
+            grouped.delete(group);
+          }
+        }
+
+        for (
+          const [group, entries] of
+          grouped
+        ) {
+          appendGroup(
+            group,
+            entries,
+            { open: true }
+          );
+        }
+
+        if (
+          matching.length >=
+          MAX_SEARCH_RESULTS
+        ) {
+          appendMessage(
+            `Showing the first ${MAX_SEARCH_RESULTS} matches. Refine the search to narrow the live API catalog.`
+          );
+        }
+
+        return;
+      }
+
+      const normalGroups =
+        new Map();
+
+      for (
+        const entry of allEntries
+      ) {
+        const [, definition] = entry;
+
+        if (
+          definition.hiddenFromPalette === true ||
+          definition.catalogGenerated === true ||
+          (
+            !showAdvanced &&
+            definition.expertOnly === true
+          )
+        ) {
+          continue;
+        }
+
+        const group =
+          definition.group ||
+          "Other";
+
+        if (!normalGroups.has(group)) {
+          normalGroups.set(group, []);
+        }
+
+        normalGroups.get(group)
+          .push(entry);
+      }
+
+      for (
+        const group of
+        OPERATOR_GROUP_ORDER
+      ) {
+        const entries =
+          normalGroups.get(group);
+
+        if (!entries) {
+          continue;
+        }
+
+        appendGroup(
+          group,
+          entries,
+          {
+            open:
+              group !== "Conversions" &&
+              group !== "Advanced / Raw C#"
+          }
+        );
+
+        normalGroups.delete(group);
+      }
+
+      for (
+        const [group, entries] of
+        normalGroups
+      ) {
+        appendGroup(
+          group,
+          entries,
+          { open: false }
+        );
+      }
+
+    };
 
     modeInput.addEventListener(
       "change",
@@ -9046,55 +9296,24 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         graph.showAdvancedNodes =
           modeInput.checked;
         persistGraph(true);
-        renderGraphPalette();
+        renderEntries();
       }
     );
 
     search.addEventListener(
       "input",
       () => {
-        const query =
-          search.value
-            .trim()
-            .toLowerCase();
+        clearTimeout(searchTimer);
 
-        root
-          .querySelectorAll(
-            ".rml-graph-palette-item"
-          )
-          .forEach(item => {
-            const matches =
-              !query ||
-              item.textContent
-                .toLowerCase()
-                .includes(query) ||
-              item.title
-                .toLowerCase()
-                .includes(query);
-
-            item.hidden = !matches;
-          });
-
-        root
-          .querySelectorAll(
-            ".rml-graph-palette-group"
-          )
-          .forEach(group => {
-            const visible =
-              group.querySelector(
-                ".rml-graph-palette-item:not([hidden])"
-              );
-            group.hidden = !visible;
-
-            if (
-              query &&
-              visible
-            ) {
-              group.open = true;
-            }
-          });
+        searchTimer =
+          window.setTimeout(
+            renderEntries,
+            70
+          );
       }
     );
+
+    renderEntries();
   }
 
   function nodeDefaultParameters(
@@ -9620,6 +9839,19 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       };
     }
 
+
+    if (
+      valueType.startsWith(
+        "apiEnum:"
+      )
+    ) {
+      return {
+        operatorId:
+          "catalog.enumConstant",
+        outputPort: "value"
+      };
+    }
+
     if (
       valueType === "object" &&
       inputRef?.node?.operatorId ===
@@ -9637,6 +9869,10 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       string: ["constant.string", "value"],
       Uri: ["constant.uri", "value"],
       colorX: ["constant.color", "value"],
+      floatQ: ["transform.quaternionIdentity", "rotation"],
+      primitive: ["resonite.primitiveConstant", "value"],
+      blendMode: ["material.blendModeConstant", "value"],
+      textureWrapMode: ["asset.textureWrapModeConstant", "value"],
       object: ["constant.nullObject", "value"],
       stringArray: ["constant.stringArray", "value"],
       engine: ["resonite.currentEngine", "engine"],
@@ -9724,6 +9960,17 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
       case "constant.stringArray":
         node.parameters.items = "";
+        break;
+
+      case "catalog.enumConstant":
+        node.parameters.enumType =
+          valueType.startsWith(
+            "apiEnum:"
+          )
+            ? valueType.slice(
+                "apiEnum:".length
+              )
+            : node.parameters.enumType;
         break;
 
       case "constant.typedDefault":
@@ -14111,6 +14358,78 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
       label.appendChild(control);
 
+      if (
+        control.tagName === "INPUT" &&
+        Array.isArray(
+          specification.suggestions
+        ) &&
+        specification.suggestions.length > 0
+      ) {
+        const list =
+          document.createElement(
+            "datalist"
+          );
+        const listId =
+          `rml-graph-suggestions-${node.id}-${specification.key}`
+            .replace(
+              /[^A-Za-z0-9_-]/g,
+              "-"
+            );
+        const usedSuggestions =
+          new Set();
+
+        list.id = listId;
+        control.setAttribute(
+          "list",
+          listId
+        );
+
+        for (
+          const suggestion of
+          specification.suggestions
+        ) {
+          const value = String(
+            typeof suggestion ===
+                "object" &&
+              suggestion !== null
+              ? suggestion.value ??
+                suggestion.label ??
+                ""
+              : suggestion ?? ""
+          ).trim();
+
+          if (
+            !value ||
+            usedSuggestions.has(value)
+          ) {
+            continue;
+          }
+
+          usedSuggestions.add(value);
+
+          const option =
+            document.createElement(
+              "option"
+            );
+          option.value = value;
+
+          if (
+            typeof suggestion ===
+              "object" &&
+            suggestion !== null &&
+            suggestion.label
+          ) {
+            option.label = String(
+              suggestion.label
+            );
+          }
+
+          list.appendChild(option);
+        }
+
+        label.appendChild(list);
+      }
+
       if (specification.help) {
         const help =
           document.createElement("small");
@@ -16723,6 +17042,11 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         EXTENSION_NAME
       )
     );
+
+    // View mode is session-only. A reload must never unexpectedly boot
+    // straight into the packed graph, but the packed nodes/wires remain saved.
+    graph.active = false;
+
     pruneConnections();
     persistGraph(true);
 
@@ -16837,18 +17161,56 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       ?.();
   }
 
+  function refreshAfterNodeModulesReady() {
+    if (!bridge || !graph) {
+      return;
+    }
+
+    if (graph.active) {
+      renderGraphPalette();
+      renderGraphNodesAndWires();
+      renderGraphInspector();
+    }
+
+    bridge
+      .requestGeneratedOutputRefresh
+      ?.();
+  }
+
+  function initializeImmediately() {
+    initialize();
+
+    Promise.resolve(
+      window.RMLModNodesReady
+    )
+      .then(
+        refreshAfterNodeModulesReady
+      )
+      .catch(error => {
+        console.error(
+          "Typed mod-node background initialization failed.",
+          error
+        );
+      });
+
+    window.addEventListener(
+      "rml-api-node-factory-ready",
+      refreshAfterNodeModulesReady
+    );
+  }
+
   if (
     document.readyState ===
     "loading"
   ) {
     document.addEventListener(
       "DOMContentLoaded",
-      initialize,
+      initializeImmediately,
       {
         once: true
       }
     );
   } else {
-    initialize();
+    initializeImmediately();
   }
 })();

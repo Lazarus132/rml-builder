@@ -9370,14 +9370,13 @@ function renderCanvas() {
     state.nodes,
     state.activeContainerId
   );
-  elements.builderCanvas.innerHTML = state.nodes.length
-    ? `${nodeCardsMarkup(state.nodes, ROOT_CONTAINER)}
-       <span class="root-label">Drop on background to move to root</span>`
-    : `<div class="empty-canvas">
-        <span>＋</span>
-        <h2>Start with a setting or section enum</h2>
-        <p>Click a type in the palette or drag it into this canvas.</p>
-      </div>`;
+  elements.builderCanvas.innerHTML =
+    state.nodes.length
+      ? nodeCardsMarkup(
+          state.nodes,
+          ROOT_CONTAINER
+        )
+      : "";
   bindCanvasInteractions();
 }
 
@@ -9414,7 +9413,6 @@ function reactionSelectMarkup(value) {
         value
       )}
     </select>
-    <small>Section enums normally stay “Stored only”; RML already handles their navigation.</small>
   </label>`;
 }
 
@@ -9511,7 +9509,6 @@ function vectorDefaultValueMarkup(
         )
         .join("")}
     </div>
-    <small>Separate ${componentType} fields for the ${count} vector components.</small>
   </fieldset>`;
 }
 
@@ -9903,7 +9900,7 @@ function settingInspectorMarkup(node) {
           <legend>Normal enum</legend>
           ${fieldMarkup("Enum type name", node.enumName, "enumName")}
           <label>
-            Enum values <small>One value per line.</small>
+            Enum values
             <textarea data-field="enumOptions">${escapeHtml(
               node.enumOptions.join("\n")
             )}</textarea>
@@ -9919,11 +9916,6 @@ function settingInspectorMarkup(node) {
     ? `<div class="toggle-row">
         <span>
           <strong>Use slider</strong>
-          <small>${
-            sliderRequiredByValidator
-              ? "Required by the numeric range validator."
-              : "A maximum enables the scalar numeric slider."
-          }</small>
         </span>
         <input type="checkbox" data-field="useSlider"${
           usesSlider(node)
@@ -9979,7 +9971,6 @@ function settingInspectorMarkup(node) {
     <div class="toggle-row">
       <span>
         <strong>Internal / hidden</strong>
-        <small>Stored in the config but not editable in RML.</small>
       </span>
       <input type="checkbox" data-field="hidden"${
         node.hidden ? " checked" : ""
@@ -11243,11 +11234,7 @@ function renderInspector() {
     ? findNode(state.nodes, state.selectedId)
     : null;
   if (!node) {
-    elements.inspectorContent.innerHTML = `<div class="empty-inspector">
-      <span>⌁</span>
-      <h2>Select an item</h2>
-      <p>Its names, defaults, validation, slider and runtime behavior appear here.</p>
-    </div>`;
+    elements.inspectorContent.replaceChildren();
     return;
   }
   elements.inspectorContent.innerHTML =
@@ -14570,6 +14557,56 @@ function newBlank() {
   renderAll();
 }
 
+function setTopMenuOpen(open) {
+  const expanded = Boolean(open);
+
+  elements.topActions?.classList.toggle(
+    "mobile-menu-open",
+    expanded
+  );
+
+  if (elements.topMenuToggle) {
+    elements.topMenuToggle.setAttribute(
+      "aria-expanded",
+      String(expanded)
+    );
+    elements.topMenuToggle.setAttribute(
+      "aria-label",
+      expanded
+        ? "Close menu"
+        : "Open menu"
+    );
+  }
+}
+
+function toggleTopMenu() {
+  setTopMenuOpen(
+    !elements.topActions?.classList.contains(
+      "mobile-menu-open"
+    )
+  );
+}
+
+function openInformationDialog() {
+  if (!elements.informationDialog?.open) {
+    elements.informationDialog.showModal();
+  }
+
+  try {
+    elements.informationDialog.focus({
+      preventScroll: true
+    });
+  } catch {
+    elements.informationDialog.focus();
+  }
+}
+
+function closeInformationDialog() {
+  if (elements.informationDialog?.open) {
+    elements.informationDialog.close();
+  }
+}
+
 function cacheElements() {
   Object.assign(elements, {
     paletteContent: document.getElementById("palette-content"),
@@ -14584,6 +14621,11 @@ function cacheElements() {
     copyCodeBottom: document.getElementById("copy-code-bottom"),
     downloadCode: document.getElementById("download-code"),
     downloadCodeBottom: document.getElementById("download-code-bottom"),
+    topMenuToggle: document.getElementById("top-menu-toggle"),
+    topActions: document.getElementById("top-actions"),
+    informationOpen: document.getElementById("information-open"),
+    informationDialog: document.getElementById("information-dialog"),
+    informationClose: document.getElementById("information-close"),
     settingsPreviewOpen: document.getElementById("preview-open"),
     settingsPreviewDialog: document.getElementById(
       "settings-preview-dialog"
@@ -15712,6 +15754,63 @@ function initialize() {
     .addEventListener("click", newBlank);
   elements.copyCodeBottom.addEventListener("click", () =>
     copyGeneratedCode(elements.copyCodeBottom)
+  );
+  elements.topMenuToggle?.addEventListener(
+    "click",
+    toggleTopMenu
+  );
+
+  elements.topActions?.addEventListener(
+    "click",
+    event => {
+      if (
+        event.target.closest("button") &&
+        window.matchMedia(
+          "(max-width: 780px)"
+        ).matches
+      ) {
+        setTopMenuOpen(false);
+      }
+    }
+  );
+
+  window.addEventListener(
+    "resize",
+    () => {
+      if (
+        window.innerWidth > 780
+      ) {
+        setTopMenuOpen(false);
+      }
+    },
+    { passive: true }
+  );
+
+  elements.informationOpen.addEventListener(
+    "click",
+    openInformationDialog
+  );
+  elements.informationClose.addEventListener(
+    "click",
+    closeInformationDialog
+  );
+  elements.informationDialog.addEventListener(
+    "cancel",
+    event => {
+      event.preventDefault();
+      closeInformationDialog();
+    }
+  );
+  elements.informationDialog.addEventListener(
+    "click",
+    event => {
+      if (
+        event.target ===
+        elements.informationDialog
+      ) {
+        closeInformationDialog();
+      }
+    }
   );
   elements.settingsPreviewOpen.addEventListener(
     "click",

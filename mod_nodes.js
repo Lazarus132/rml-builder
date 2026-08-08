@@ -3,9 +3,9 @@
 
   const registry = window.RMLModNodeRegistry;
 
-  if (!registry || registry.version !== 2) {
+  if (!registry || registry.version !== 3) {
     console.error(
-      "RML universal mod nodes require the matching node_graph.js registry version 2."
+      "RML universal mod nodes require the matching node_graph.js registry version 3."
     );
     return;
   }
@@ -95,6 +95,226 @@
     help
   });
 
+  const CSHARP_IDENTIFIER_KEYWORDS =
+    new Set([
+      "abstract", "as", "base", "bool", "break", "byte",
+      "case", "catch", "char", "checked", "class", "const",
+      "continue", "decimal", "default", "delegate", "do",
+      "double", "else", "enum", "event", "explicit", "extern",
+      "false", "finally", "fixed", "float", "for", "foreach",
+      "goto", "if", "implicit", "in", "int", "interface",
+      "internal", "is", "lock", "long", "namespace", "new",
+      "null", "object", "operator", "out", "override", "params",
+      "private", "protected", "public", "readonly", "ref",
+      "return", "sbyte", "sealed", "short", "sizeof", "stackalloc",
+      "static", "string", "struct", "switch", "this", "throw",
+      "true", "try", "typeof", "uint", "ulong", "unchecked",
+      "unsafe", "ushort", "using", "virtual", "void", "volatile",
+      "while", "add", "alias", "and", "ascending", "async",
+      "await", "by", "descending", "dynamic", "equals", "file",
+      "from", "get", "global", "group", "init", "into", "join",
+      "let", "managed", "nameof", "nint", "not", "notnull",
+      "nuint", "on", "or", "orderby", "partial", "record",
+      "remove", "required", "scoped", "select", "set", "unmanaged",
+      "value", "var", "when", "where", "with", "yield"
+    ]);
+
+  function csharpIdentifier(value) {
+    const identifier = String(value || "");
+
+    return CSHARP_IDENTIFIER_KEYWORDS.has(
+      identifier
+    )
+      ? `@${identifier}`
+      : identifier;
+  }
+
+
+  const componentCatalog =
+    window.RMLResoniteApiCatalog ||
+    window.RMLFrooxComponentCatalog ||
+    Object.freeze({
+      schemaVersion: 3,
+      catalogSource: "embedded-fallback",
+      engineVersion: "unknown",
+      components: Object.freeze([
+        "FrooxEngine.Grabbable",
+        "FrooxEngine.PBS_Metallic",
+        "FrooxEngine.BoxMesh"
+      ]),
+      materials: Object.freeze([
+        "FrooxEngine.PBS_Metallic",
+        "FrooxEngine.PBS_Specular",
+        "FrooxEngine.UnlitMaterial"
+      ]),
+      commonMaterials: Object.freeze([
+        "FrooxEngine.PBS_Metallic",
+        "FrooxEngine.PBS_Specular",
+        "FrooxEngine.UnlitMaterial"
+      ]),
+      meshes: Object.freeze([
+        "FrooxEngine.QuadMesh",
+        "FrooxEngine.BoxMesh",
+        "FrooxEngine.SphereMesh",
+        "FrooxEngine.CylinderMesh",
+        "FrooxEngine.ArrowMesh"
+      ]),
+      slotAttachOverloads: Object.freeze([]),
+      types: Object.freeze([]),
+      enums: Object.freeze([])
+    });
+
+  const CATALOG_TYPES =
+    Array.isArray(componentCatalog.types)
+      ? componentCatalog.types.filter(
+          value =>
+            value &&
+            typeof value === "object"
+        )
+      : [];
+
+
+  const CATALOG_ENUMS =
+    Array.isArray(componentCatalog.enums)
+      ? componentCatalog.enums.filter(
+          value =>
+            value &&
+            typeof value === "object" &&
+            typeof value.fullName === "string" &&
+            Array.isArray(value.values) &&
+            value.values.length > 0 &&
+            value.isObsolete !== true
+        )
+      : [];
+
+  const CATALOG_ENUM_BY_NAME =
+    new Map(
+      CATALOG_ENUMS.map(value => [
+        value.fullName,
+        value
+      ])
+    );
+
+  const CATALOG_ENUM_TYPE_PREFIX =
+    "apiEnum:";
+
+  function catalogEnumGraphType(
+    fullName
+  ) {
+    return `${CATALOG_ENUM_TYPE_PREFIX}${fullName}`;
+  }
+
+  function uniqueCatalogNames(values) {
+    return [...new Set(
+      (Array.isArray(values)
+        ? values
+        : [])
+        .map(value =>
+          String(value || "").trim()
+        )
+        .filter(Boolean)
+    )].sort((left, right) =>
+      left.localeCompare(right)
+    );
+  }
+
+  function catalogNames(
+    directProperty,
+    typeFlag,
+    fallback
+  ) {
+    const direct =
+      uniqueCatalogNames(
+        componentCatalog[directProperty]
+      );
+
+    if (direct.length > 0) {
+      return direct;
+    }
+
+    const derived =
+      uniqueCatalogNames(
+        CATALOG_TYPES
+          .filter(type =>
+            type[typeFlag] === true
+          )
+          .map(type =>
+            type.fullName
+          )
+      );
+
+    return derived.length > 0
+      ? derived
+      : [...fallback];
+  }
+
+  const FROOX_COMPONENT_TYPES =
+    catalogNames(
+      "components",
+      "isAttachableComponent",
+      [
+        "FrooxEngine.Grabbable",
+        "FrooxEngine.PBS_Metallic",
+        "FrooxEngine.BoxMesh"
+      ]
+    );
+  const FROOX_MATERIAL_TYPES =
+    catalogNames(
+      "materials",
+      "isMaterial",
+      [
+        "FrooxEngine.PBS_Metallic",
+        "FrooxEngine.PBS_Specular",
+        "FrooxEngine.UnlitMaterial"
+      ]
+    );
+  const FROOX_COMMON_MATERIAL_TYPES =
+    catalogNames(
+      "commonMaterials",
+      "isCommonMaterial",
+      [
+        "FrooxEngine.PBS_Metallic",
+        "FrooxEngine.PBS_Specular",
+        "FrooxEngine.UnlitMaterial"
+      ]
+    );
+  const FROOX_MESH_TYPES =
+    catalogNames(
+      "meshes",
+      "isMeshProvider",
+      [
+        "FrooxEngine.QuadMesh",
+        "FrooxEngine.BoxMesh",
+        "FrooxEngine.SphereMesh",
+        "FrooxEngine.CylinderMesh",
+        "FrooxEngine.ArrowMesh"
+      ]
+    );
+  const FROOX_SLOT_ATTACH_OVERLOADS =
+    Array.isArray(
+      componentCatalog.slotAttachOverloads
+    )
+      ? componentCatalog.slotAttachOverloads
+      : [];
+
+  const FROOX_COMPONENT_TYPE_SET =
+    new Set(FROOX_COMPONENT_TYPES);
+  const FROOX_MATERIAL_TYPE_SET =
+    new Set(FROOX_MATERIAL_TYPES);
+  const FROOX_COMMON_MATERIAL_TYPE_SET =
+    new Set(FROOX_COMMON_MATERIAL_TYPES);
+  const FROOX_MESH_TYPE_SET =
+    new Set(FROOX_MESH_TYPES);
+
+  const CATALOG_SOURCE_DESCRIPTION =
+    componentCatalog.catalogSource ===
+      "scanner"
+      ? "live scanner catalog"
+      : componentCatalog.catalogSource ===
+          "scanner-cache"
+        ? "cached live scanner catalog"
+        : "fallback catalog";
+
   const RAW_CSHARP_GROUP =
     "Advanced / Raw C#";
 
@@ -126,35 +346,30 @@
     "double2",
     "double3",
     "double4",
+    "colorX"
+  ];
+
+  const JSON_CONVERTIBLE_TYPES = [
+    "bool",
+    "string",
+    "Uri",
+    "int",
+    "float",
+    "double",
+    "int2",
+    "int3",
+    "int4",
+    "float2",
+    "float3",
+    "float4",
+    "double2",
+    "double3",
+    "double4",
     "colorX",
     "object",
     "byteArray",
     "stringArray",
-    "objectArray",
-    "type",
-    "memberInfo",
-    "methodBase",
-    "methodInfo",
-    "fieldInfo",
-    "propertyInfo",
-    "exception",
-    "engine",
-    "world",
-    "slot",
-    "component",
-    "uiBuilder",
-    "uiElement",
-    "asset",
-    "texture",
-    "material",
-    "mesh",
-    "audioClip",
-    "json",
-    "httpResponse",
-    "webSocket",
-    "task",
-    "cancellationToken",
-    "patchContext"
+    "objectArray"
   ];
 
   const typeDefinitions = {
@@ -199,7 +414,7 @@
       label: "System.Type",
       short: "TYPE",
       color: "#76c6ff",
-      csType: "Type",
+      csType: "System.Type",
       defaultCs: "null!",
       referenceType: true,
       assignableTo: ["object"]
@@ -208,7 +423,7 @@
       label: "MemberInfo",
       short: "MEM",
       color: "#70bce8",
-      csType: "MemberInfo",
+      csType: "System.Reflection.MemberInfo",
       defaultCs: "null!",
       referenceType: true,
       assignableTo: ["object"]
@@ -217,7 +432,7 @@
       label: "MethodBase",
       short: "MBASE",
       color: "#5fb7ee",
-      csType: "MethodBase",
+      csType: "System.Reflection.MethodBase",
       defaultCs: "null!",
       referenceType: true,
       assignableTo: ["memberInfo", "object"]
@@ -226,7 +441,7 @@
       label: "MethodInfo",
       short: "METH",
       color: "#4eace6",
-      csType: "MethodInfo",
+      csType: "System.Reflection.MethodInfo",
       defaultCs: "null!",
       referenceType: true,
       assignableTo: ["methodBase", "memberInfo", "object"]
@@ -235,7 +450,7 @@
       label: "FieldInfo",
       short: "FIELD",
       color: "#4fc6c8",
-      csType: "FieldInfo",
+      csType: "System.Reflection.FieldInfo",
       defaultCs: "null!",
       referenceType: true,
       assignableTo: ["memberInfo", "object"]
@@ -244,7 +459,7 @@
       label: "PropertyInfo",
       short: "PROP",
       color: "#52d2b4",
-      csType: "PropertyInfo",
+      csType: "System.Reflection.PropertyInfo",
       defaultCs: "null!",
       referenceType: true,
       assignableTo: ["memberInfo", "object"]
@@ -253,7 +468,7 @@
       label: "Exception",
       short: "EX",
       color: "#ff7188",
-      csType: "Exception",
+      csType: "System.Exception",
       defaultCs: "null!",
       referenceType: true,
       assignableTo: ["object"]
@@ -267,11 +482,39 @@
       referenceType: true,
       assignableTo: ["object"]
     },
+    floatQ: {
+      label: "Quaternion",
+      short: "QUAT",
+      color: "#61d3ff",
+      csType: "Elements.Core.floatQ",
+      defaultCs: "Elements.Core.floatQ.Identity"
+    },
+    primitive: {
+      label: "Primitive",
+      short: "PRIM",
+      color: "#f2c66d",
+      csType: "FrooxEngine.Primitive",
+      defaultCs: "FrooxEngine.Primitive.Cube"
+    },
+    blendMode: {
+      label: "Blend mode",
+      short: "BLEND",
+      color: "#ff9c75",
+      csType: "FrooxEngine.BlendMode",
+      defaultCs: "FrooxEngine.BlendMode.Opaque"
+    },
+    textureWrapMode: {
+      label: "Texture wrap mode",
+      short: "WRAP",
+      color: "#ffb86a",
+      csType: "Renderite.Shared.TextureWrapMode",
+      defaultCs: "Renderite.Shared.TextureWrapMode.Repeat"
+    },
     engine: {
       label: "Resonite Engine",
       short: "ENG",
       color: "#67d6ff",
-      csType: "object",
+      csType: "FrooxEngine.Engine",
       defaultCs: "null!",
       referenceType: true,
       assignableTo: ["object"]
@@ -280,7 +523,16 @@
       label: "Resonite World",
       short: "WORLD",
       color: "#62e4c4",
-      csType: "object",
+      csType: "FrooxEngine.World",
+      defaultCs: "null!",
+      referenceType: true,
+      assignableTo: ["object"]
+    },
+    user: {
+      label: "Resonite User",
+      short: "USER",
+      color: "#65dcb1",
+      csType: "FrooxEngine.User",
       defaultCs: "null!",
       referenceType: true,
       assignableTo: ["object"]
@@ -289,7 +541,7 @@
       label: "Resonite Slot",
       short: "SLOT",
       color: "#8ae271",
-      csType: "object",
+      csType: "FrooxEngine.Slot",
       defaultCs: "null!",
       referenceType: true,
       assignableTo: ["object"]
@@ -298,7 +550,7 @@
       label: "Resonite Component",
       short: "COMP",
       color: "#a4df64",
-      csType: "object",
+      csType: "FrooxEngine.Component",
       defaultCs: "null!",
       referenceType: true,
       assignableTo: ["object"]
@@ -307,7 +559,7 @@
       label: "UIBuilder",
       short: "UIB",
       color: "#de8cff",
-      csType: "object",
+      csType: "FrooxEngine.UIX.UIBuilder",
       defaultCs: "null!",
       referenceType: true,
       assignableTo: ["object"]
@@ -322,55 +574,298 @@
       assignableTo: ["object"]
     },
     asset: {
-      label: "Asset",
+      label: "Asset provider",
       short: "ASSET",
       color: "#f6c75c",
-      csType: "object",
+      csType: "FrooxEngine.IAssetProvider",
       defaultCs: "null!",
       referenceType: true,
       assignableTo: ["object"]
     },
     texture: {
-      label: "Texture",
+      label: "Texture 2D provider",
       short: "TEX",
       color: "#ffb655",
-      csType: "object",
+      csType: "FrooxEngine.IAssetProvider<FrooxEngine.ITexture2D>",
       defaultCs: "null!",
       referenceType: true,
       assignableTo: ["asset", "object"]
     },
     material: {
-      label: "Material",
+      label: "Material provider",
       short: "MAT",
       color: "#f4a261",
-      csType: "object",
+      csType: "FrooxEngine.IAssetProvider<FrooxEngine.Material>",
       defaultCs: "null!",
       referenceType: true,
       assignableTo: ["asset", "object"]
     },
+    commonMaterial: {
+      label: "Common material",
+      short: "CMAT",
+      color: "#f39a64",
+      csType: "FrooxEngine.ICommonMaterial",
+      defaultCs: "null!",
+      referenceType: true,
+      assignableTo: ["material", "asset", "object"]
+    },
+    pbsMaterial: {
+      label: "PBS material",
+      short: "PBS",
+      color: "#f18c5d",
+      csType: "FrooxEngine.PBS_Material",
+      defaultCs: "null!",
+      referenceType: true,
+      assignableTo: ["commonMaterial", "material", "asset", "component", "object"]
+    },
+    pbsMetallic: {
+      label: "PBS Metallic",
+      short: "PBS-M",
+      color: "#ef8057",
+      csType: "FrooxEngine.PBS_Metallic",
+      defaultCs: "null!",
+      referenceType: true,
+      assignableTo: ["pbsMaterial", "commonMaterial", "material", "asset", "component", "object"]
+    },
+    pbsSpecular: {
+      label: "PBS Specular",
+      short: "PBS-S",
+      color: "#ee7c6d",
+      csType: "FrooxEngine.PBS_Specular",
+      defaultCs: "null!",
+      referenceType: true,
+      assignableTo: ["pbsMaterial", "commonMaterial", "material", "asset", "component", "object"]
+    },
+    unlitMaterial: {
+      label: "Unlit material",
+      short: "UNLIT",
+      color: "#ef9b6c",
+      csType: "FrooxEngine.UnlitMaterial",
+      defaultCs: "null!",
+      referenceType: true,
+      assignableTo: ["commonMaterial", "material", "asset", "component", "object"]
+    },
     mesh: {
-      label: "Mesh",
+      label: "Mesh provider",
       short: "MESH",
       color: "#dfbd69",
-      csType: "object",
+      csType: "FrooxEngine.IAssetProvider<FrooxEngine.Mesh>",
       defaultCs: "null!",
       referenceType: true,
       assignableTo: ["asset", "object"]
     },
     audioClip: {
-      label: "Audio clip",
+      label: "Audio clip provider",
       short: "AUD",
       color: "#d8d66a",
-      csType: "object",
+      csType: "FrooxEngine.IAssetProvider<FrooxEngine.AudioClip>",
       defaultCs: "null!",
       referenceType: true,
       assignableTo: ["asset", "object"]
+    },
+    meshRenderer: {
+      label: "Mesh Renderer",
+      short: "RENDER",
+      color: "#d5b56a",
+      csType: "FrooxEngine.MeshRenderer",
+      defaultCs: "null!",
+      referenceType: true,
+      assignableTo: ["component", "object"]
+    },
+    collider: {
+      label: "Collider",
+      short: "COL",
+      color: "#cfca73",
+      csType: "FrooxEngine.Collider",
+      defaultCs: "null!",
+      referenceType: true,
+      assignableTo: ["component", "object"]
+    },
+    meshCollider: {
+      label: "Mesh Collider",
+      short: "MCOL",
+      color: "#c9c56a",
+      csType: "FrooxEngine.MeshCollider",
+      defaultCs: "null!",
+      referenceType: true,
+      assignableTo: ["collider", "component", "object"]
+    },
+    boxCollider: {
+      label: "Box Collider",
+      short: "BCOL",
+      color: "#c6c267",
+      csType: "FrooxEngine.BoxCollider",
+      defaultCs: "null!",
+      referenceType: true,
+      assignableTo: ["collider", "component", "object"]
+    },
+    sphereCollider: {
+      label: "Sphere Collider",
+      short: "SCOL",
+      color: "#c4c065",
+      csType: "FrooxEngine.SphereCollider",
+      defaultCs: "null!",
+      referenceType: true,
+      assignableTo: ["collider", "component", "object"]
+    },
+    cylinderCollider: {
+      label: "Cylinder Collider",
+      short: "CCOL",
+      color: "#c2be63",
+      csType: "FrooxEngine.CylinderCollider",
+      defaultCs: "null!",
+      referenceType: true,
+      assignableTo: ["collider", "component", "object"]
+    },
+    quadMesh: {
+      label: "Quad Mesh",
+      short: "QUAD",
+      color: "#e0bf70",
+      csType: "FrooxEngine.QuadMesh",
+      defaultCs: "null!",
+      referenceType: true,
+      assignableTo: ["mesh", "asset", "component", "object"]
+    },
+    boxMesh: {
+      label: "Box Mesh",
+      short: "BOX",
+      color: "#dfbb6b",
+      csType: "FrooxEngine.BoxMesh",
+      defaultCs: "null!",
+      referenceType: true,
+      assignableTo: ["mesh", "asset", "component", "object"]
+    },
+    sphereMesh: {
+      label: "Sphere Mesh",
+      short: "SPHERE",
+      color: "#ddb767",
+      csType: "FrooxEngine.SphereMesh",
+      defaultCs: "null!",
+      referenceType: true,
+      assignableTo: ["mesh", "asset", "component", "object"]
+    },
+    cylinderMesh: {
+      label: "Cylinder Mesh",
+      short: "CYL",
+      color: "#dbb363",
+      csType: "FrooxEngine.CylinderMesh",
+      defaultCs: "null!",
+      referenceType: true,
+      assignableTo: ["mesh", "asset", "component", "object"]
+    },
+    arrowMesh: {
+      label: "Arrow Mesh",
+      short: "ARROW",
+      color: "#d9af60",
+      csType: "FrooxEngine.ArrowMesh",
+      defaultCs: "null!",
+      referenceType: true,
+      assignableTo: ["mesh", "asset", "component", "object"]
+    },
+    staticTexture2D: {
+      label: "Static Texture 2D",
+      short: "STEX",
+      color: "#ffb35a",
+      csType: "FrooxEngine.StaticTexture2D",
+      defaultCs: "null!",
+      referenceType: true,
+      assignableTo: ["texture", "asset", "component", "object"]
+    },
+    staticCubemap: {
+      label: "Static Cubemap",
+      short: "CUBE-T",
+      color: "#ffad58",
+      csType: "FrooxEngine.StaticCubemap",
+      defaultCs: "null!",
+      referenceType: true,
+      assignableTo: ["asset", "component", "object"]
+    },
+    spriteProvider: {
+      label: "Sprite Provider",
+      short: "SPRITE",
+      color: "#ffa957",
+      csType: "FrooxEngine.SpriteProvider",
+      defaultCs: "null!",
+      referenceType: true,
+      assignableTo: ["asset", "component", "object"]
+    },
+    staticMesh: {
+      label: "Static Mesh",
+      short: "SMESH",
+      color: "#d8b05f",
+      csType: "FrooxEngine.StaticMesh",
+      defaultCs: "null!",
+      referenceType: true,
+      assignableTo: ["mesh", "asset", "component", "object"]
+    },
+    staticAudioClip: {
+      label: "Static Audio Clip",
+      short: "SAUD",
+      color: "#d4d366",
+      csType: "FrooxEngine.StaticAudioClip",
+      defaultCs: "null!",
+      referenceType: true,
+      assignableTo: ["audioClip", "asset", "component", "object"]
+    },
+    staticFont: {
+      label: "Static Font",
+      short: "FONT",
+      color: "#e0cb72",
+      csType: "FrooxEngine.StaticFont",
+      defaultCs: "null!",
+      referenceType: true,
+      assignableTo: ["asset", "component", "object"]
+    },
+    skybox: {
+      label: "Skybox",
+      short: "SKY",
+      color: "#879bea",
+      csType: "FrooxEngine.Skybox",
+      defaultCs: "null!",
+      referenceType: true,
+      assignableTo: ["component", "object"]
+    },
+    grabbable: {
+      label: "Grabbable",
+      short: "GRAB",
+      color: "#8fdf83",
+      csType: "FrooxEngine.Grabbable",
+      defaultCs: "null!",
+      referenceType: true,
+      assignableTo: ["component", "object"]
+    },
+    audioOutput: {
+      label: "Audio Output",
+      short: "AOUT",
+      color: "#d0d15f",
+      csType: "FrooxEngine.AudioOutput",
+      defaultCs: "null!",
+      referenceType: true,
+      assignableTo: ["component", "object"]
+    },
+    dynamicVariableSpace: {
+      label: "Dynamic Variable Space",
+      short: "DVS",
+      color: "#57d6b8",
+      csType: "FrooxEngine.DynamicVariableSpace",
+      defaultCs: "null!",
+      referenceType: true,
+      assignableTo: ["component", "object"]
+    },
+    radiantDash: {
+      label: "Radiant Dash",
+      short: "DASH",
+      color: "#ffbd68",
+      csType: "FrooxEngine.RadiantDash",
+      defaultCs: "null!",
+      referenceType: true,
+      assignableTo: ["component", "object"]
     },
     json: {
       label: "JSON node",
       short: "JSON",
       color: "#e9c26b",
-      csType: "JsonNode",
+      csType: "System.Text.Json.Nodes.JsonNode",
       defaultCs: "null!",
       referenceType: true,
       assignableTo: ["object"]
@@ -388,7 +883,7 @@
       label: "WebSocket",
       short: "WS",
       color: "#46cfe2",
-      csType: "ClientWebSocket",
+      csType: "System.Net.WebSockets.ClientWebSocket",
       defaultCs: "null!",
       referenceType: true,
       assignableTo: ["object"]
@@ -397,8 +892,8 @@
       label: "Task",
       short: "TASK",
       color: "#b8a2ff",
-      csType: "Task",
-      defaultCs: "Task.CompletedTask",
+      csType: "System.Threading.Tasks.Task",
+      defaultCs: "System.Threading.Tasks.Task.CompletedTask",
       referenceType: true,
       assignableTo: ["object"]
     },
@@ -406,47 +901,65 @@
       label: "CancellationToken",
       short: "CANCEL",
       color: "#a395e8",
-      csType: "CancellationToken",
-      defaultCs: "CancellationToken.None"
+      csType: "System.Threading.CancellationToken",
+      defaultCs: "System.Threading.CancellationToken.None"
     }
   };
 
   for (const [type, information] of Object.entries(typeDefinitions)) {
-    registerType(type, information);
-  }
+    const storeableInformation = {
+      valueType: information.valueType !== false,
+      ...information
+    };
 
-  for (const [type, information] of Object.entries({
-    dynamicVariableSpace: {
-      label: "Dynamic Variable Space",
-      short: "DVS",
-      color: "#57d6b8",
-      csType: "object",
-      defaultCs: "null!",
-      referenceType: true,
-      assignableTo: ["component", "object"]
-    },
-    radiantDash: {
-      label: "Radiant Dash",
-      short: "DASH",
-      color: "#ffbd68",
-      csType: "object",
-      defaultCs: "null!",
-      referenceType: true,
-      assignableTo: ["component", "object"]
-    }
-  })) {
-    registerType(type, information);
+    registerType(type, storeableInformation);
 
-    if (!COMMON_VALUE_TYPES.includes(type)) {
+    if (
+      storeableInformation.valueType === true &&
+      !COMMON_VALUE_TYPES.includes(type)
+    ) {
       COMMON_VALUE_TYPES.push(type);
     }
   }
 
+
+  for (const enumInfo of CATALOG_ENUMS) {
+    const firstValue =
+      enumInfo.values[0]?.name ||
+      "0";
+
+    registerType(
+      catalogEnumGraphType(
+        enumInfo.fullName
+      ),
+      {
+        label:
+          enumInfo.fullName
+            .split(".")
+            .pop() ||
+          enumInfo.fullName,
+        short: "ENUM",
+        color: "#ffd181",
+        csType: enumInfo.fullName,
+        defaultCs:
+          `global::${enumInfo.fullName}.${csharpIdentifier(firstValue)}`,
+        valueType: false,
+        constraints: [
+          "value",
+          "serializable"
+        ]
+      }
+    );
+  }
+
   const groups = [
+    ["Transforms", { after: "Math" }],
     ["Harmony", { after: "Lifecycle" }],
     ["Reflection", { after: "Harmony" }],
     ["Slots & Components", { after: "Debug & Output" }],
-    ["UI", { after: "Slots & Components" }],
+    ["Attach & Create", { after: "Slots & Components" }],
+    ["Materials & Rendering", { after: "Attach & Create" }],
+    ["UI", { after: "Materials & Rendering" }],
     ["Assets", { after: "UI" }],
     ["Files & JSON", { after: "Assets" }],
     ["Networking", { after: "Files & JSON" }],
@@ -893,34 +1406,29 @@ private static void UnsubscribeGraphEvents()
 
   function ensureResoniteRuntime(api) {
     ensureReflectionRuntime(api);
+    api.addUsing("FrooxEngine");
     api.addMember("universal.resonite.helpers", String.raw`
-private static object? CurrentEngine()
+private static FrooxEngine.Engine? CurrentEngine()
 {
-    Type? engineType = FindType("FrooxEngine.Engine");
-    return engineType is null
-        ? null
-        : ReadMember(engineType, "Current");
+    return FrooxEngine.Engine.Current;
 }
 
-private static object? CurrentUserspaceWorld()
+private static FrooxEngine.World? CurrentUserspaceWorld()
 {
-    object? engine = CurrentEngine();
-    return ReadMemberPath(engine, "WorldManager.UserspaceWorld") ??
-           ReadMemberPath(engine, "WorldManager.Userspace");
+    return FrooxEngine.Userspace.UserspaceWorld;
 }
 
-private static object? CurrentFocusedWorld()
+private static FrooxEngine.World? CurrentFocusedWorld()
 {
-    object? engine = CurrentEngine();
-    return ReadMemberPath(engine, "WorldManager.FocusedWorld") ??
-           ReadMemberPath(engine, "WorldManager.LocalWorld") ??
-           CurrentUserspaceWorld();
+    return FrooxEngine.Engine.Current?.WorldManager?.FocusedWorld ??
+           FrooxEngine.Userspace.UserspaceWorld;
 }
 
-private static object? CurrentLocalUser(object? world)
+private static FrooxEngine.User? CurrentLocalUser(object? world)
 {
-    return ReadMember(world, "LocalUser") ??
-           ReadMemberPath(world, "Userspace.LocalUser");
+    return world is FrooxEngine.World typed
+        ? typed.LocalUser
+        : null;
 }
 
 private static IEnumerable<object> EnumerateObjects(object? value)
@@ -1562,6 +2070,1451 @@ private static void CreateGeneratedReversePatch(
     return field;
   }
 
+
+  const DEFAULT_MATERIAL_TYPE =
+    "FrooxEngine.PBS_Metallic";
+
+  const DEFAULT_MESH_TYPE =
+    "FrooxEngine.BoxMesh";
+
+  const MATERIAL_GRAPH_TYPES = new Map([
+    ["FrooxEngine.PBS_Metallic", "pbsMetallic"],
+    ["PBS_Metallic", "pbsMetallic"],
+    ["FrooxEngine.PBS_Specular", "pbsSpecular"],
+    ["PBS_Specular", "pbsSpecular"],
+    ["FrooxEngine.UnlitMaterial", "unlitMaterial"],
+    ["UnlitMaterial", "unlitMaterial"]
+  ]);
+
+  const MESH_GRAPH_TYPES = new Map([
+    ["FrooxEngine.QuadMesh", "quadMesh"],
+    ["QuadMesh", "quadMesh"],
+    ["FrooxEngine.BoxMesh", "boxMesh"],
+    ["BoxMesh", "boxMesh"],
+    ["FrooxEngine.SphereMesh", "sphereMesh"],
+    ["SphereMesh", "sphereMesh"],
+    ["FrooxEngine.CylinderMesh", "cylinderMesh"],
+    ["CylinderMesh", "cylinderMesh"],
+    ["FrooxEngine.ArrowMesh", "arrowMesh"],
+    ["ArrowMesh", "arrowMesh"],
+    ["FrooxEngine.StaticMesh", "staticMesh"],
+    ["StaticMesh", "staticMesh"]
+  ]);
+
+  function isSafeCSharpTypeExpression(value) {
+    const source = String(value || "").replace(/\s+/g, "");
+    let index = 0;
+
+    const identifier = () => {
+      if (source[index] === "@") {
+        index += 1;
+      }
+
+      const match = source
+        .slice(index)
+        .match(/^[A-Za-z_][A-Za-z0-9_]*/);
+
+      if (!match) {
+        return false;
+      }
+
+      index += match[0].length;
+      return true;
+    };
+
+    const type = () => {
+      if (source.startsWith("global::", index)) {
+        index += "global::".length;
+      }
+
+      if (!identifier()) {
+        return false;
+      }
+
+      while (source[index] === ".") {
+        index += 1;
+        if (!identifier()) {
+          return false;
+        }
+      }
+
+      if (source[index] === "<") {
+        index += 1;
+
+        if (!type()) {
+          return false;
+        }
+
+        while (source[index] === ",") {
+          index += 1;
+          if (!type()) {
+            return false;
+          }
+        }
+
+        if (source[index] !== ">") {
+          return false;
+        }
+
+        index += 1;
+      }
+
+      while (
+        source[index] === "[" &&
+        source[index + 1] === "]"
+      ) {
+        index += 2;
+      }
+
+      return true;
+    };
+
+    return Boolean(source && type() && index === source.length);
+  }
+
+  function safeQualifiedTypeName(
+    api,
+    value,
+    fallback,
+    label = "C# type"
+  ) {
+    const candidate = String(value || "").trim();
+
+    if (isSafeCSharpTypeExpression(candidate)) {
+      return candidate.replace(/\s+/g, "");
+    }
+
+    api?.diagnostic?.(
+      `${label} '${candidate || "<empty>"}' is not a safe C# type expression. '${fallback}' was used.`
+    );
+
+    return fallback;
+  }
+
+  function graphMaterialType(value) {
+    return MATERIAL_GRAPH_TYPES.get(
+      String(value || "").trim()
+    ) || "commonMaterial";
+  }
+
+  function graphMeshType(value) {
+    return MESH_GRAPH_TYPES.get(
+      String(value || "").trim()
+    ) || "mesh";
+  }
+
+  function catalogQualifiedTypeName(
+    api,
+    value,
+    allowedTypes,
+    fallback,
+    label
+  ) {
+    const candidate =
+      safeQualifiedTypeName(
+        api,
+        value,
+        fallback,
+        label
+      );
+    const normalized =
+      candidate.startsWith("global::")
+        ? candidate.slice(8)
+        : candidate;
+
+    if (allowedTypes.has(normalized)) {
+      return normalized;
+    }
+
+    api?.diagnostic?.(
+      `${label} '${normalized}' is not part of the ${CATALOG_SOURCE_DESCRIPTION} for FrooxEngine ${componentCatalog.engineVersion}. '${fallback}' was used.`
+    );
+
+    return fallback;
+  }
+
+  function materialTypeParameter(
+    defaultValue = DEFAULT_MATERIAL_TYPE,
+    commonOnly = false
+  ) {
+    const values = commonOnly
+      ? FROOX_COMMON_MATERIAL_TYPES
+      : FROOX_MATERIAL_TYPES;
+
+    return pSelect(
+      "materialType",
+      commonOnly
+        ? "Common material component type"
+        : "Material component type",
+      values,
+      values.includes(defaultValue)
+        ? defaultValue
+        : values[0] ||
+          DEFAULT_MATERIAL_TYPE,
+      commonOnly
+        ? "Verified concrete FrooxEngine component implementing ICommonMaterial and IAssetProvider<Material>."
+        : "Verified concrete FrooxEngine component implementing IAssetProvider<Material>.",
+      { affectsPorts: true }
+    );
+  }
+
+  function meshTypeParameter(
+    defaultValue = DEFAULT_MESH_TYPE
+  ) {
+    return pSelect(
+      "meshType",
+      "Mesh component type",
+      FROOX_MESH_TYPES,
+      FROOX_MESH_TYPES.includes(
+        defaultValue
+      )
+        ? defaultValue
+        : FROOX_MESH_TYPES[0] ||
+          DEFAULT_MESH_TYPE,
+      "Verified concrete FrooxEngine component implementing IAssetProvider<Mesh>.",
+      { affectsPorts: true }
+    );
+  }
+
+  function directMaterialType(api) {
+    return catalogQualifiedTypeName(
+      api,
+      api.node.parameters?.materialType,
+      FROOX_MATERIAL_TYPE_SET,
+      DEFAULT_MATERIAL_TYPE,
+      "Material component type"
+    );
+  }
+
+  function directCommonMaterialType(api) {
+    return catalogQualifiedTypeName(
+      api,
+      api.node.parameters?.materialType,
+      FROOX_COMMON_MATERIAL_TYPE_SET,
+      DEFAULT_MATERIAL_TYPE,
+      "Common material component type"
+    );
+  }
+
+  function directMeshType(api) {
+    return catalogQualifiedTypeName(
+      api,
+      api.node.parameters?.meshType,
+      FROOX_MESH_TYPE_SET,
+      DEFAULT_MESH_TYPE,
+      "Mesh component type"
+    );
+  }
+
+  function verifiedComponentType(api) {
+    return catalogQualifiedTypeName(
+      api,
+      api.node.parameters?.componentType,
+      FROOX_COMPONENT_TYPE_SET,
+      "FrooxEngine.Grabbable",
+      "Component type"
+    );
+  }
+
+  function directFieldName(api, suffix) {
+    return `_${suffix}${nodeToken(api)}`;
+  }
+
+  function ensureDirectResoniteCore(api) {
+    api.addUsing("FrooxEngine");
+  }
+
+  function ensureDirectResoniteMath(api) {
+    ensureDirectResoniteCore(api);
+    api.addUsing("Elements.Core");
+    api.require("usesElements", true);
+  }
+
+  function ensureDirectResoniteRendering(api) {
+    ensureDirectResoniteMath(api);
+    api.addUsing("Renderite.Shared");
+    api.require("usesRenderiteShared", true);
+  }
+
+  function attachResultFields(
+    api,
+    prefix,
+    meshCsType = "FrooxEngine.IAssetProvider<FrooxEngine.Mesh>",
+    colliderCsType = "FrooxEngine.Collider"
+  ) {
+    ensureDirectResoniteCore(api);
+    const fields = {
+      slot: addStatefulField(
+        api,
+        `${prefix}Slot`,
+        "FrooxEngine.Slot?",
+        "null"
+      ),
+      mesh: addStatefulField(
+        api,
+        `${prefix}Mesh`,
+        `${meshCsType}?`,
+        "null"
+      ),
+      material: addStatefulField(
+        api,
+        `${prefix}Material`,
+        "FrooxEngine.IAssetProvider<FrooxEngine.Material>?",
+        "null"
+      ),
+      renderer: addStatefulField(
+        api,
+        `${prefix}Renderer`,
+        "FrooxEngine.MeshRenderer?",
+        "null"
+      ),
+      collider: addStatefulField(
+        api,
+        `${prefix}Collider`,
+        `${colliderCsType}?`,
+        "null"
+      ),
+      success: addStatefulField(
+        api,
+        `${prefix}Success`,
+        "bool",
+        "false"
+      ),
+      exception: addStatefulField(
+        api,
+        `${prefix}Exception`,
+        "System.Exception?",
+        "null"
+      )
+    };
+
+    return fields;
+  }
+
+  function attachOutputExpression(
+    api,
+    prefix,
+    extra = {}
+  ) {
+    const portFields = {
+      slot: directFieldName(api, `${prefix}Slot`),
+      mesh: directFieldName(api, `${prefix}Mesh`),
+      material: directFieldName(api, `${prefix}Material`),
+      renderer: directFieldName(api, `${prefix}Renderer`),
+      collider: directFieldName(api, `${prefix}Collider`),
+      success: directFieldName(api, `${prefix}Success`),
+      exception: directFieldName(api, `${prefix}Exception`),
+      ...extra
+    };
+
+    return portFields[api.portId] || "null!";
+  }
+
+
+  const BUILT_IN_ATTACH_METHOD_NAMES =
+    new Set([
+      "AttachTexture",
+      "AttachCubemap",
+      "AttachSprite",
+      "AttachStaticMesh",
+      "AttachAudioClip",
+      "AttachFont",
+      "AttachQuad",
+      "AttachSphere",
+      "AttachBox",
+      "AttachArrow",
+      "AttachCylinder",
+      "AttachMesh",
+      "AttachPrimitive",
+      "AttachSkybox"
+    ]);
+
+  const CATALOG_TYPE_BY_NAME =
+    new Map(
+      CATALOG_TYPES
+        .filter(type =>
+          typeof type.fullName === "string"
+        )
+        .map(type => [
+          type.fullName,
+          type
+        ])
+    );
+
+  function normalizedCatalogTypeName(value) {
+    return String(value || "")
+      .trim()
+      .replace(/^global::/, "")
+      .replace(/&$/, "");
+  }
+
+  function catalogTypeSatisfiesConstraint(
+    candidate,
+    constraint,
+    visited = new Set()
+  ) {
+    const candidateName =
+      normalizedCatalogTypeName(candidate);
+    const constraintName =
+      normalizedCatalogTypeName(constraint);
+
+    if (
+      !candidateName ||
+      !constraintName
+    ) {
+      return false;
+    }
+
+    if (
+      candidateName === constraintName ||
+      constraintName === "System.Object"
+    ) {
+      return true;
+    }
+
+    if (visited.has(candidateName)) {
+      return false;
+    }
+
+    visited.add(candidateName);
+
+    const information =
+      CATALOG_TYPE_BY_NAME.get(
+        candidateName
+      );
+
+    if (!information) {
+      return false;
+    }
+
+    if (
+      Array.isArray(information.interfaces) &&
+      information.interfaces.some(value =>
+        normalizedCatalogTypeName(value) ===
+        constraintName
+      )
+    ) {
+      return true;
+    }
+
+    return Boolean(
+      information.baseType &&
+      catalogTypeSatisfiesConstraint(
+        information.baseType,
+        constraintName,
+        visited
+      )
+    );
+  }
+
+  function catalogCsTypeIsNullable(value) {
+    return String(value || "")
+      .trim()
+      .replace(/^global::/, "")
+      .startsWith(
+        "System.Nullable<"
+      );
+  }
+
+  function normalizedCatalogCsType(value) {
+    let type = String(value || "")
+      .trim()
+      .replace(/^global::/, "")
+      .replace(/&$/, "");
+
+    if (
+      type.startsWith("System.Nullable<") &&
+      type.endsWith(">")
+    ) {
+      type = type.slice(
+        "System.Nullable<".length,
+        -1
+      );
+    }
+
+    return type;
+  }
+
+  function catalogGraphType(value) {
+    const type =
+      normalizedCatalogCsType(value);
+    const direct = new Map([
+      ["System.Boolean", "bool"],
+      ["bool", "bool"],
+      ["System.String", "string"],
+      ["string", "string"],
+      ["System.Uri", "Uri"],
+      ["System.Int32", "int"],
+      ["int", "int"],
+      ["System.Single", "float"],
+      ["float", "float"],
+      ["System.Double", "double"],
+      ["double", "double"],
+      ["System.Byte[]", "byteArray"],
+      ["byte[]", "byteArray"],
+      ["System.String[]", "stringArray"],
+      ["string[]", "stringArray"],
+      ["System.Object[]", "objectArray"],
+      ["object[]", "objectArray"],
+      ["System.Type", "type"],
+      ["System.Exception", "exception"],
+      ["System.Threading.CancellationToken", "cancellationToken"],
+      ["Elements.Core.int2", "int2"],
+      ["Elements.Core.int3", "int3"],
+      ["Elements.Core.int4", "int4"],
+      ["Elements.Core.float2", "float2"],
+      ["Elements.Core.float3", "float3"],
+      ["Elements.Core.float4", "float4"],
+      ["Elements.Core.double2", "double2"],
+      ["Elements.Core.double3", "double3"],
+      ["Elements.Core.double4", "double4"],
+      ["Elements.Core.colorX", "colorX"],
+      ["Elements.Core.floatQ", "floatQ"],
+      ["FrooxEngine.Primitive", "primitive"],
+      ["FrooxEngine.BlendMode", "blendMode"],
+      ["Renderite.Shared.TextureWrapMode", "textureWrapMode"],
+      ["FrooxEngine.Engine", "engine"],
+      ["FrooxEngine.World", "world"],
+      ["FrooxEngine.User", "user"],
+      ["FrooxEngine.Slot", "slot"],
+      ["FrooxEngine.Component", "component"],
+      ["FrooxEngine.MeshRenderer", "meshRenderer"],
+      ["FrooxEngine.Collider", "collider"],
+      ["FrooxEngine.MeshCollider", "meshCollider"],
+      ["FrooxEngine.BoxCollider", "boxCollider"],
+      ["FrooxEngine.SphereCollider", "sphereCollider"],
+      ["FrooxEngine.CylinderCollider", "cylinderCollider"],
+      ["FrooxEngine.PBS_Metallic", "pbsMetallic"],
+      ["FrooxEngine.PBS_Specular", "pbsSpecular"],
+      ["FrooxEngine.UnlitMaterial", "unlitMaterial"],
+      ["FrooxEngine.ICommonMaterial", "commonMaterial"],
+      ["FrooxEngine.IAssetProvider<FrooxEngine.Material>", "material"],
+      ["FrooxEngine.IAssetProvider<FrooxEngine.Mesh>", "mesh"],
+      ["FrooxEngine.IAssetProvider<FrooxEngine.ITexture2D>", "texture"],
+      ["FrooxEngine.IAssetProvider<FrooxEngine.AudioClip>", "audioClip"]
+    ]);
+
+    if (direct.has(type)) {
+      return direct.get(type);
+    }
+
+    if (
+      /^FrooxEngine\.IAssetProvider<.*Material>$/.test(type)
+    ) {
+      return "material";
+    }
+
+    if (
+      /^FrooxEngine\.IAssetProvider<.*Mesh>$/.test(type)
+    ) {
+      return "mesh";
+    }
+
+    if (FROOX_MATERIAL_TYPE_SET.has(type)) {
+      return graphMaterialType(type);
+    }
+
+    if (FROOX_MESH_TYPE_SET.has(type)) {
+      return graphMeshType(type);
+    }
+
+    const catalogType =
+      CATALOG_TYPE_BY_NAME.get(type);
+
+    if (catalogType?.isCollider === true) {
+      return "collider";
+    }
+
+    if (catalogType?.isComponent === true) {
+      return "component";
+    }
+
+    if (
+      catalogType?.kind === "enum" ||
+      CATALOG_ENUM_BY_NAME.has(type)
+    ) {
+      return catalogEnumGraphType(type);
+    }
+
+    return null;
+  }
+
+  function catalogMethodById(methodId) {
+    return FROOX_SLOT_ATTACH_OVERLOADS
+      .find(method =>
+        String(method?.id || "") ===
+        String(methodId || "")
+      ) || null;
+  }
+
+  function genericOptionsForParameter(
+    genericParameter
+  ) {
+    if (
+      genericParameter?.valueTypeConstraint ===
+      true
+    ) {
+      return [];
+    }
+
+    const constraints =
+      (Array.isArray(
+        genericParameter?.constraints
+      )
+        ? genericParameter.constraints
+        : [])
+        .map(normalizedCatalogTypeName)
+        .filter(Boolean);
+    const candidates =
+      uniqueCatalogNames([
+        ...FROOX_COMPONENT_TYPES,
+        ...FROOX_MATERIAL_TYPES,
+        ...FROOX_MESH_TYPES
+      ]);
+
+    const filtered = candidates.filter(
+      candidate => {
+        const information =
+          CATALOG_TYPE_BY_NAME.get(
+            candidate
+          );
+
+        if (
+          genericParameter
+            ?.defaultConstructorConstraint ===
+            true &&
+          information &&
+          information.kind !== "struct" &&
+          !(
+            Array.isArray(
+              information.constructors
+            ) &&
+            information.constructors.some(
+              constructor =>
+                Array.isArray(
+                  constructor.parameters
+                ) &&
+                constructor.parameters.length ===
+                  0
+            )
+          )
+        ) {
+          return false;
+        }
+
+        return constraints.every(
+          constraint =>
+            catalogTypeSatisfiesConstraint(
+              candidate,
+              constraint
+            )
+        );
+      }
+    );
+
+    if (filtered.length > 0) {
+      return filtered;
+    }
+
+    // Unconstrained Slot.Attach<T> methods can still safely use a
+    // concrete Component. Unknown or unsatisfied constraints are
+    // deliberately rejected rather than producing invalid C#.
+    return constraints.length === 0
+      ? [...FROOX_COMPONENT_TYPES]
+      : [];
+  }
+
+  function catalogMethodGenericTypes(
+    node,
+    method
+  ) {
+    const result = {};
+
+    for (const genericParameter of
+      Array.isArray(method?.genericParameters)
+        ? method.genericParameters
+        : []) {
+      const options =
+        genericOptionsForParameter(
+          genericParameter
+        );
+      const key =
+        `genericType${genericParameter.position}`;
+      const configured = String(
+        node?.parameters?.[key] || ""
+      ).trim();
+
+      result[genericParameter.name] =
+        options.includes(configured)
+          ? configured
+          : options[0] || "";
+    }
+
+    return result;
+  }
+
+  function substituteCatalogGenericTypes(
+    value,
+    genericTypes
+  ) {
+    let result = String(value || "");
+
+    for (const [name, type] of
+      Object.entries(genericTypes)) {
+      const escaped = name.replace(
+        /[.*+?^${}()|[\]\\]/g,
+        "\\$&"
+      );
+
+      result = result
+        .replaceAll(`@${name}`, type)
+        .replace(
+          new RegExp(
+            `\\b${escaped}\\b`,
+            "g"
+          ),
+          type
+        );
+    }
+
+    return result;
+  }
+
+  function catalogPortId(
+    parameter
+  ) {
+    const safe = String(
+      parameter?.name ||
+      `arg${parameter?.position ?? 0}`
+    )
+      .replace(/[^A-Za-z0-9_]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .toLowerCase();
+
+    return `arg-${parameter?.position ?? 0}-${safe || "value"}`;
+  }
+
+  function catalogMethodInputs(
+    node,
+    method
+  ) {
+    const genericTypes =
+      catalogMethodGenericTypes(
+        node,
+        method
+      );
+    const parameters =
+      Array.isArray(method?.parameters)
+        ? method.parameters
+        : [];
+    const startIndex =
+      method?.isExtensionMethod === true
+        ? 1
+        : 0;
+    const inputs = [
+      port("call", "Call", "impulse"),
+      port("parent", "Parent Slot", "slot")
+    ];
+
+    for (
+      let index = startIndex;
+      index < parameters.length;
+      index += 1
+    ) {
+      const parameter = parameters[index];
+
+      if (parameter?.isOut === true) {
+        continue;
+      }
+
+      const substituted =
+        substituteCatalogGenericTypes(
+          parameter?.elementType ||
+          parameter?.type,
+          genericTypes
+        );
+      const graphType =
+        catalogGraphType(substituted);
+
+      if (!graphType) {
+        return null;
+      }
+
+      inputs.push(
+        port(
+          catalogPortId(parameter),
+          parameter?.name ||
+            `Argument ${index}`,
+          graphType,
+          parameter?.hasDefaultValue === true &&
+          typeof parameter.defaultValueCSharp === "string"
+            ? {
+                defaultCs:
+                  parameter.defaultValueCSharp
+              }
+            : {}
+        )
+      );
+    }
+
+    return inputs;
+  }
+
+  function catalogMethodOutputs(
+    node,
+    method
+  ) {
+    const genericTypes =
+      catalogMethodGenericTypes(
+        node,
+        method
+      );
+    const outputs = [
+      port("done", "Done", "impulse")
+    ];
+    const returnType =
+      substituteCatalogGenericTypes(
+        method?.returnType,
+        genericTypes
+      );
+
+    if (
+      returnType &&
+      returnType !== "System.Void" &&
+      returnType !== "void"
+    ) {
+      const graphType =
+        catalogGraphType(returnType);
+
+      if (!graphType) {
+        return null;
+      }
+
+      outputs.push(
+        port(
+          "result",
+          "Result",
+          graphType
+        )
+      );
+    }
+
+    for (const parameter of
+      Array.isArray(method?.parameters)
+        ? method.parameters
+        : []) {
+      if (
+        parameter?.isOut !== true &&
+        !(
+          parameter?.isByRef === true &&
+          parameter?.isIn !== true
+        )
+      ) {
+        continue;
+      }
+
+      const substituted =
+        substituteCatalogGenericTypes(
+          parameter?.elementType ||
+          parameter?.type,
+          genericTypes
+        );
+      const graphType =
+        catalogGraphType(substituted);
+
+      if (!graphType) {
+        return null;
+      }
+
+      outputs.push(
+        port(
+          `out-${catalogPortId(parameter)}`,
+          parameter?.name || "Out",
+          graphType
+        )
+      );
+    }
+
+    outputs.push(
+      port("success", "Success", "bool"),
+      port("exception", "Exception", "exception")
+    );
+
+    return outputs;
+  }
+
+  function catalogMethodSupported(method) {
+    if (
+      !method ||
+      typeof method !== "object" ||
+      method.isObsolete === true ||
+      BUILT_IN_ATTACH_METHOD_NAMES.has(
+        method.name
+      ) ||
+      !Array.isArray(method.parameters) ||
+      typeof method.declaringType !== "string" ||
+      typeof method.id !== "string"
+    ) {
+      return false;
+    }
+
+    const genericParameters =
+      Array.isArray(method.genericParameters)
+        ? method.genericParameters
+        : [];
+
+    if (
+      genericParameters.some(
+        genericParameter =>
+          genericOptionsForParameter(
+            genericParameter
+          ).length === 0
+      )
+    ) {
+      return false;
+    }
+
+    if (
+      method.returnType !== "System.Void" &&
+      method.returnType !== "void" &&
+      catalogCsTypeIsNullable(
+        method.returnType
+      )
+    ) {
+      return false;
+    }
+
+    if (
+      method.parameters.some(parameter =>
+        (parameter?.isOut === true ||
+         (parameter?.isByRef === true &&
+          parameter?.isIn !== true)) &&
+        catalogCsTypeIsNullable(
+          parameter?.elementType ||
+          parameter?.type
+        )
+      )
+    ) {
+      return false;
+    }
+
+    const placeholderNode = {
+      parameters: {}
+    };
+
+    return Boolean(
+      catalogMethodInputs(
+        placeholderNode,
+        method
+      ) &&
+      catalogMethodOutputs(
+        placeholderNode,
+        method
+      )
+    );
+  }
+
+  const DISCOVERED_SLOT_ATTACH_METHODS =
+    FROOX_SLOT_ATTACH_OVERLOADS
+      .filter(catalogMethodSupported);
+
+  function catalogMethodParameters(
+    node,
+    method
+  ) {
+    const parameters = [
+      pSelect(
+        "catalogMethodId",
+        "Discovered Slot.Attach method",
+        DISCOVERED_SLOT_ATTACH_METHODS.map(
+          candidate => ({
+            value: candidate.id,
+            label: candidate.signature ||
+              candidate.name
+          })
+        ),
+        method?.id ||
+          DISCOVERED_SLOT_ATTACH_METHODS[0]?.id ||
+          "",
+        "Methods not already covered by the dedicated Attach nodes. The list comes from the live Resonite API catalog.",
+        { affectsPorts: true }
+      )
+    ];
+
+    for (const genericParameter of
+      Array.isArray(method?.genericParameters)
+        ? method.genericParameters
+        : []) {
+      const options =
+        genericOptionsForParameter(
+          genericParameter
+        );
+
+      parameters.push(
+        pSelect(
+          `genericType${genericParameter.position}`,
+          `Generic type ${genericParameter.name}`,
+          options,
+          options[0] ||
+            "FrooxEngine.Grabbable",
+          `Satisfies the scanned generic constraints for ${genericParameter.name}.`,
+          { affectsPorts: true }
+        )
+      );
+    }
+
+    return parameters;
+  }
+
+  function catalogMethodFieldName(
+    api,
+    suffix
+  ) {
+    return `_catalogAttach${suffix}${nodeToken(api)}`;
+  }
+
+  function catalogMethodResolvedType(
+    node,
+    method,
+    value
+  ) {
+    return substituteCatalogGenericTypes(
+      value,
+      catalogMethodGenericTypes(
+        node,
+        method
+      )
+    );
+  }
+
+  if (
+    DISCOVERED_SLOT_ATTACH_METHODS.length > 0
+  ) {
+    registerGroup(
+      "Discovered Resonite API",
+      { after: "Attach & Create" }
+    );
+
+    registerNode("catalog.slotAttach", {
+      title: "Discovered Slot Attach",
+      group: "Discovered Resonite API",
+      symbol: "+API",
+      description:
+        "Directly calls a newly discovered public Slot.Attach* API that is not already represented by a dedicated high-level node.",
+      parameters: catalogMethodParameters(
+        null,
+        DISCOVERED_SLOT_ATTACH_METHODS[0]
+      ),
+      inputs: [
+        port("call", "Call", "impulse"),
+        port("parent", "Parent Slot", "slot")
+      ],
+      outputs: [
+        port("done", "Done", "impulse"),
+        port("success", "Success", "bool"),
+        port("exception", "Exception", "exception")
+      ],
+      resolveDefinition(node) {
+        const method =
+          catalogMethodById(
+            node.parameters?.catalogMethodId
+          ) ||
+          DISCOVERED_SLOT_ATTACH_METHODS[0];
+        const inputs =
+          catalogMethodInputs(
+            node,
+            method
+          );
+        const outputs =
+          catalogMethodOutputs(
+            node,
+            method
+          );
+
+        return {
+          title:
+            `Attach API · ${method.name}`,
+          description:
+            method.signature,
+          parameters:
+            catalogMethodParameters(
+              node,
+              method
+            ),
+          inputs: inputs || [],
+          outputs: outputs || []
+        };
+      },
+      codegenCollect(api) {
+        ensureDirectResoniteCore(api);
+        const method =
+          catalogMethodById(
+            api.node.parameters
+              ?.catalogMethodId
+          ) ||
+          DISCOVERED_SLOT_ATTACH_METHODS[0];
+        const genericTypes =
+          catalogMethodGenericTypes(
+            api.node,
+            method
+          );
+        const returnType =
+          substituteCatalogGenericTypes(
+            method.returnType,
+            genericTypes
+          );
+
+        if (
+          returnType !== "System.Void" &&
+          returnType !== "void"
+        ) {
+          api.addField(
+            `${api.node.id}.catalogResult`,
+            `private static ${returnType} ${catalogMethodFieldName(api, "Result")} = default!;`
+          );
+        }
+
+        for (const parameter of
+          method.parameters || []) {
+          if (
+            parameter.isOut !== true &&
+            !(
+              parameter.isByRef === true &&
+              parameter.isIn !== true
+            )
+          ) {
+            continue;
+          }
+
+          const type =
+            substituteCatalogGenericTypes(
+              parameter.elementType ||
+                parameter.type,
+              genericTypes
+            );
+          api.addField(
+            `${api.node.id}.catalogOut.${parameter.position}`,
+            `private static ${type} ${catalogMethodFieldName(api, `Out${parameter.position}`)} = default!;`
+          );
+        }
+
+        api.addField(
+          `${api.node.id}.catalogSuccess`,
+          `private static bool ${catalogMethodFieldName(api, "Success")};`
+        );
+        api.addField(
+          `${api.node.id}.catalogException`,
+          `private static System.Exception? ${catalogMethodFieldName(api, "Exception")};`
+        );
+      },
+      codegenExpression(api) {
+        const method =
+          catalogMethodById(
+            api.node.parameters
+              ?.catalogMethodId
+          ) ||
+          DISCOVERED_SLOT_ATTACH_METHODS[0];
+
+        if (api.portId === "result") {
+          return catalogMethodFieldName(
+            api,
+            "Result"
+          );
+        }
+
+        if (api.portId === "success") {
+          return catalogMethodFieldName(
+            api,
+            "Success"
+          );
+        }
+
+        if (api.portId === "exception") {
+          return `${catalogMethodFieldName(api, "Exception")}!`;
+        }
+
+        const outputParameter =
+          (method.parameters || [])
+            .find(parameter =>
+              `out-${catalogPortId(parameter)}` ===
+              api.portId
+            );
+
+        return outputParameter
+          ? catalogMethodFieldName(
+              api,
+              `Out${outputParameter.position}`
+            )
+          : "null!";
+      },
+      codegenAction(api) {
+        const method =
+          catalogMethodById(
+            api.node.parameters
+              ?.catalogMethodId
+          ) ||
+          DISCOVERED_SLOT_ATTACH_METHODS[0];
+        const genericTypes =
+          catalogMethodGenericTypes(
+            api.node,
+            method
+          );
+        const genericArguments =
+          (method.genericParameters || [])
+            .map(parameter =>
+              genericTypes[parameter.name]
+            )
+            .filter(Boolean);
+        const genericSuffix =
+          genericArguments.length > 0
+            ? `<${genericArguments.join(", ")}>`
+            : "";
+        const parameters =
+          method.parameters || [];
+        const startIndex =
+          method.isExtensionMethod === true
+            ? 1
+            : 0;
+        const argumentsCode = [];
+        const prelude = [];
+
+        if (method.isExtensionMethod === true) {
+          argumentsCode.push(
+            api.input("parent").code
+          );
+        }
+
+        for (
+          let index = startIndex;
+          index < parameters.length;
+          index += 1
+        ) {
+          const parameter = parameters[index];
+          const outField =
+            catalogMethodFieldName(
+              api,
+              `Out${parameter.position}`
+            );
+
+          if (parameter.isOut === true) {
+            argumentsCode.push(
+              `out ${outField}`
+            );
+            continue;
+          }
+
+          if (
+            parameter.isByRef === true &&
+            parameter.isIn === true
+          ) {
+            argumentsCode.push(
+              api.input(
+                catalogPortId(parameter)
+              ).code
+            );
+            continue;
+          }
+
+          if (parameter.isByRef === true) {
+            prelude.push(
+              `${outField} = ${api.input(catalogPortId(parameter)).code};`
+            );
+            argumentsCode.push(
+              `ref ${outField}`
+            );
+            continue;
+          }
+
+          argumentsCode.push(
+            api.input(
+              catalogPortId(parameter)
+            ).code
+          );
+        }
+
+        const declaringType =
+          String(method.declaringType || "")
+            .replace(/^global::/, "");
+        const call =
+          method.isExtensionMethod === true ||
+          method.isStatic === true
+            ? `global::${declaringType}.${method.name}${genericSuffix}(${argumentsCode.join(", ")})`
+            : `${api.input("parent").code}.${method.name}${genericSuffix}(${argumentsCode.join(", ")})`;
+        const returnType =
+          substituteCatalogGenericTypes(
+            method.returnType,
+            genericTypes
+          );
+        const successField =
+          catalogMethodFieldName(
+            api,
+            "Success"
+          );
+        const exceptionField =
+          catalogMethodFieldName(
+            api,
+            "Exception"
+          );
+        const resultField =
+          catalogMethodFieldName(
+            api,
+            "Result"
+          );
+        const done = api.emit("done");
+        const callStatement =
+          returnType === "System.Void" ||
+          returnType === "void"
+            ? `${call};`
+            : `${resultField} = ${call};`;
+
+        return `try\n        {\n            ${exceptionField} = null;${prelude.length > 0 ? `\n            ${prelude.join("\n            ")}` : ""}\n            ${callStatement}\n            ${successField} = true;\n        }\n        catch (System.Exception caught)\n        {\n            ${exceptionField} = caught;\n            ${successField} = false;\n        }${done ? `\n        ${done}();` : ""}`;
+      }
+    });
+  }
+
+  if (CATALOG_ENUMS.length > 0) {
+    function selectedCatalogEnum(node) {
+      return CATALOG_ENUM_BY_NAME.get(
+        String(
+          node?.parameters?.enumType ||
+          ""
+        )
+      ) || CATALOG_ENUMS[0];
+    }
+
+    function catalogEnumParameters(node) {
+      const enumInfo =
+        selectedCatalogEnum(node);
+      const enumNames =
+        enumInfo.values.map(value =>
+          value.name
+        );
+      const configuredValue =
+        String(
+          node?.parameters?.enumValue ||
+          ""
+        );
+
+      return [
+        pSelect(
+          "enumType",
+          "Resonite enum type",
+          CATALOG_ENUMS.map(value => ({
+            value: value.fullName,
+            label: value.fullName
+          })),
+          enumInfo.fullName,
+          "Enum types are loaded from the live Resonite API catalog.",
+          { affectsPorts: true }
+        ),
+        pSelect(
+          "enumValue",
+          "Value",
+          enumNames,
+          enumNames.includes(
+            configuredValue
+          )
+            ? configuredValue
+            : enumNames[0],
+          enumInfo.isFlags === true
+            ? "This is a flags enum. This constant selects one declared flag value. Combine flags through an explicit integer/enum operation when needed."
+            : "Declared value from the selected Resonite enum."
+        )
+      ];
+    }
+
+    registerNode(
+      "catalog.enumConstant",
+      {
+        title: "Resonite Enum Constant",
+        group: "Values",
+        symbol: "E",
+        description:
+          "A strongly typed enum value discovered from the live Resonite API catalog.",
+        parameters:
+          catalogEnumParameters(null),
+        outputs: [
+          port(
+            "value",
+            "Value",
+            catalogEnumGraphType(
+              CATALOG_ENUMS[0].fullName
+            )
+          )
+        ],
+        resolveDefinition(node) {
+          const enumInfo =
+            selectedCatalogEnum(node);
+
+          return {
+            title:
+              `Enum · ${enumInfo.fullName.split(".").pop()}`,
+            description:
+              `Strongly typed ${enumInfo.fullName} value from the ${CATALOG_SOURCE_DESCRIPTION}.`,
+            parameters:
+              catalogEnumParameters(node),
+            outputs: [
+              port(
+                "value",
+                "Value",
+                catalogEnumGraphType(
+                  enumInfo.fullName
+                )
+              )
+            ]
+          };
+        },
+        codegenExpression(api) {
+          const enumInfo =
+            selectedCatalogEnum(
+              api.node
+            );
+          const names =
+            enumInfo.values.map(value =>
+              value.name
+            );
+          const configured =
+            String(
+              api.node.parameters
+                ?.enumValue ||
+              ""
+            );
+          const value =
+            names.includes(configured)
+              ? configured
+              : names[0];
+
+          return `global::${enumInfo.fullName}.${csharpIdentifier(value)}`;
+        },
+        previewEvaluate({
+          node,
+          known
+        }) {
+          const enumInfo =
+            selectedCatalogEnum(node);
+          const names =
+            enumInfo.values.map(value =>
+              value.name
+            );
+          const configured =
+            String(
+              node.parameters?.enumValue ||
+              ""
+            );
+
+          return known(
+            catalogEnumGraphType(
+              enumInfo.fullName
+            ),
+            names.includes(configured)
+              ? configured
+              : names[0]
+          );
+        }
+      }
+    );
+  }
+
   registerNode("constant.uri", {
     title: "URI Constant",
     group: "Values",
@@ -2029,6 +3982,31 @@ private static T ReadNumericComponent<T>(
         .filter(Boolean)
         .map(method => `${method}();`)
         .join("\n");
+    }
+  });
+
+  registerNode("flow.impulseMerge", {
+    title: "Merge Impulses",
+    group: "Flow",
+    symbol: "↯∨",
+    description:
+      "Merges up to eight independent impulse sources into one typed impulse path. Every input invokes the same Output; values are never merged implicitly.",
+    inputs: [
+      port("a", "A", "impulse"),
+      port("b", "B", "impulse"),
+      port("c", "C", "impulse"),
+      port("d", "D", "impulse"),
+      port("e", "E", "impulse"),
+      port("f", "F", "impulse"),
+      port("g", "G", "impulse"),
+      port("h", "H", "impulse")
+    ],
+    outputs: [port("out", "Output", "impulse")],
+    codegenAction(api) {
+      const next = api.emit("out");
+      return next
+        ? `${next}();`
+        : "";
     }
   });
 
@@ -3081,26 +5059,19 @@ private static T ReadNumericComponent<T>(
     }
   });
 
-  registerType("user", {
-    label: "Resonite User",
-    short: "USER",
-    color: "#65dcb1",
-    csType: "object",
-    defaultCs: "null!",
-    referenceType: true,
-    assignableTo: ["object"]
-  });
 
   registerNode("resonite.currentEngine", {
     title: "Current Engine",
     group: "Slots & Components",
     symbol: "ENG",
     description:
-      "Reads FrooxEngine.Engine.Current through reflection.",
+      "Reads the actual FrooxEngine.Engine.Current instance.",
     outputs: [port("engine", "Engine", "engine")],
-    codegenExpression(api) {
-      ensureResoniteRuntime(api);
-      return "CurrentEngine()!";
+    codegenCollect(api) {
+      ensureDirectResoniteCore(api);
+    },
+    codegenExpression() {
+      return "FrooxEngine.Engine.Current!";
     }
   });
 
@@ -3109,11 +5080,13 @@ private static T ReadNumericComponent<T>(
     group: "Slots & Components",
     symbol: "USR",
     description:
-      "Gets the current Userspace world through the Engine's WorldManager.",
+      "Gets the actual Userspace world from Engine.Current.WorldManager.",
     outputs: [port("world", "World", "world")],
-    codegenExpression(api) {
-      ensureResoniteRuntime(api);
-      return "CurrentUserspaceWorld()!";
+    codegenCollect(api) {
+      ensureDirectResoniteCore(api);
+    },
+    codegenExpression() {
+      return "FrooxEngine.Userspace.UserspaceWorld!";
     }
   });
 
@@ -3122,11 +5095,13 @@ private static T ReadNumericComponent<T>(
     group: "Slots & Components",
     symbol: "WRLD",
     description:
-      "Gets the currently focused/local world with a Userspace fallback.",
+      "Gets the actual focused world, with Userspace as a fallback.",
     outputs: [port("world", "World", "world")],
-    codegenExpression(api) {
-      ensureResoniteRuntime(api);
-      return "CurrentFocusedWorld()!";
+    codegenCollect(api) {
+      ensureDirectResoniteCore(api);
+    },
+    codegenExpression() {
+      return "(FrooxEngine.Engine.Current?.WorldManager?.FocusedWorld ?? FrooxEngine.Userspace.UserspaceWorld)!";
     }
   });
 
@@ -3135,12 +5110,14 @@ private static T ReadNumericComponent<T>(
     group: "Slots & Components",
     symbol: "ROOT",
     description:
-      "Gets RootSlot/Root from a reflected world object.",
+      "Gets World.RootSlot through the real FrooxEngine API.",
     inputs: [port("world", "World", "world")],
     outputs: [port("slot", "Root Slot", "slot")],
+    codegenCollect(api) {
+      ensureDirectResoniteCore(api);
+    },
     codegenExpression(api) {
-      ensureResoniteRuntime(api);
-      return `WorldRootSlot(${api.input("world").code})!`;
+      return `${api.input("world").code}.RootSlot`;
     }
   });
 
@@ -3149,12 +5126,14 @@ private static T ReadNumericComponent<T>(
     group: "Slots & Components",
     symbol: "ME",
     description:
-      "Gets the local user from a world.",
+      "Gets World.LocalUser through the real FrooxEngine API.",
     inputs: [port("world", "World", "world")],
     outputs: [port("user", "User", "user")],
+    codegenCollect(api) {
+      ensureDirectResoniteCore(api);
+    },
     codegenExpression(api) {
-      ensureResoniteRuntime(api);
-      return `CurrentLocalUser(${api.input("world").code})!`;
+      return `${api.input("world").code}.LocalUser!`;
     }
   });
 
@@ -3171,7 +5150,7 @@ private static T ReadNumericComponent<T>(
     outputs: [port("slot", "Slot", "slot")],
     codegenExpression(api) {
       ensureResoniteRuntime(api);
-      return `FindSlotRecursive(${api.input("root").code}, ${api.input("name").code})!`;
+      return `(FrooxEngine.Slot)FindSlotRecursive(${api.input("root").code}, ${api.input("name").code})!`;
     }
   });
 
@@ -3180,7 +5159,7 @@ private static T ReadNumericComponent<T>(
     group: "Slots & Components",
     symbol: "+S",
     description:
-      "Creates a child slot using AddSlot/AddChild reflection fallback.",
+      "Creates a child Slot with Slot.AddSlot using the real FrooxEngine API.",
     inputs: [
       port("call", "Call", "impulse"),
       port("parent", "Parent", "slot"),
@@ -3191,11 +5170,11 @@ private static T ReadNumericComponent<T>(
       port("slot", "Created Slot", "slot")
     ],
     codegenCollect(api) {
-      ensureResoniteRuntime(api);
+      ensureDirectResoniteCore(api);
       addStatefulField(
         api,
         "createdSlot",
-        "object?",
+        "FrooxEngine.Slot?",
         "null"
       );
     },
@@ -3205,11 +5184,12 @@ private static T ReadNumericComponent<T>(
     codegenAction(api) {
       const field = `_createdSlot${nodeToken(api)}`;
       const done = api.emit("done");
-      return `${field} = AddSlotReflective(${api.input("parent").code}, ${api.input("name").code});${done ? `\n        ${done}();` : ""}`;
+      return `${field} = ${api.input("parent").code}.AddSlot(${api.input("name").code});${done ? `\n        ${done}();` : ""}`;
     }
   });
 
   registerNode("resonite.destroyObject", {
+    expertOnly: true,
     title: "Destroy Slot / Component",
     group: "Slots & Components",
     symbol: "DEL",
@@ -3242,54 +5222,1783 @@ private static T ReadNumericComponent<T>(
     }
   });
 
+  registerNode("resonite.componentTypeConstant", {
+    title: "Component Type Constant",
+    group: "Values",
+    symbol: "TYPE<C>",
+    description:
+      `Selects one of ${FROOX_COMPONENT_TYPES.length} concrete component types from the ${CATALOG_SOURCE_DESCRIPTION} for FrooxEngine ${componentCatalog.engineVersion} and emits its System.Type.`,
+    parameters: [
+      pText(
+        "componentType",
+        "Component type",
+        "FrooxEngine.Grabbable",
+        "Choose from the live scanner catalog when Resonite is running; otherwise the packaged fallback catalog is used.",
+        {
+          suggestions: FROOX_COMPONENT_TYPES,
+          placeholder: "FrooxEngine.Grabbable"
+        }
+      )
+    ],
+    outputs: [port("type", "Component Type", "type")],
+    codegenCollect(api) {
+      ensureDirectResoniteCore(api);
+    },
+    codegenExpression(api) {
+      return `typeof(${verifiedComponentType(api)})`;
+    }
+  });
+
   registerNode("resonite.getComponent", {
     title: "Get Component",
     group: "Slots & Components",
     symbol: "GETC",
     description:
-      "Finds a component of the supplied reflected Type on a Slot.",
+      "Calls Slot.GetComponent(Type, exactTypeOnly) directly. It works with every concrete component type without reflection fallback code.",
     inputs: [
       port("slot", "Slot", "slot"),
+      port("type", "Component Type", "type"),
+      port("exact", "Exact Type Only", "bool", { defaultCs: "false" })
+    ],
+    outputs: [port("component", "Component", "component")],
+    codegenCollect(api) {
+      ensureDirectResoniteCore(api);
+    },
+    codegenExpression(api) {
+      return `${api.input("slot").code}.GetComponent(${api.input("type").code}, ${api.input("exact").code})!`;
+    }
+  });
+
+  registerNode("resonite.getComponentInChildren", {
+    title: "Get Component In Children",
+    group: "Slots & Components",
+    symbol: "GETC↓",
+    description:
+      "Calls Slot.GetComponentInChildren(Type) directly.",
+    inputs: [
+      port("slot", "Root Slot", "slot"),
       port("type", "Component Type", "type")
     ],
     outputs: [port("component", "Component", "component")],
+    codegenCollect(api) {
+      ensureDirectResoniteCore(api);
+    },
     codegenExpression(api) {
-      ensureResoniteRuntime(api);
-      return `FindComponentReflective(${api.input("slot").code}, ${api.input("type").code})!`;
+      return `${api.input("slot").code}.GetComponentInChildren(${api.input("type").code})!`;
     }
   });
 
   registerNode("resonite.attachComponent", {
     title: "Attach Component",
-    group: "Slots & Components",
+    group: "Attach & Create",
     symbol: "+C",
     description:
-      "Attaches a component by Type, including generic AttachComponent<T>() fallback.",
+      "Calls Slot.AttachComponent(Type, runOnAttachBehavior) directly and therefore covers every valid concrete FrooxEngine Component type.",
     inputs: [
       port("call", "Call", "impulse"),
       port("slot", "Slot", "slot"),
-      port("type", "Component Type", "type")
+      port("type", "Component Type", "type"),
+      port("runOnAttach", "Run OnAttach Behavior", "bool", { defaultCs: "true" })
+    ],
+    outputs: [
+      port("done", "Done", "impulse"),
+      port("component", "Component", "component"),
+      port("success", "Success", "bool"),
+      port("exception", "Exception", "exception")
+    ],
+    codegenCollect(api) {
+      ensureDirectResoniteCore(api);
+      addStatefulField(api, "attachedComponent", "FrooxEngine.Component?", "null");
+      addStatefulField(api, "attachedComponentSuccess", "bool", "false");
+      addStatefulField(api, "attachedComponentException", "System.Exception?", "null");
+    },
+    codegenExpression(api) {
+      const token = nodeToken(api);
+      return {
+        component: `_attachedComponent${token}!`,
+        success: `_attachedComponentSuccess${token}`,
+        exception: `_attachedComponentException${token}!`
+      }[api.portId] || "null!";
+    },
+    codegenAction(api) {
+      const token = nodeToken(api);
+      const component = `_attachedComponent${token}`;
+      const success = `_attachedComponentSuccess${token}`;
+      const exception = `_attachedComponentException${token}`;
+      const done = api.emit("done");
+      return `try\n        {\n            ${exception} = null;\n            ${component} = ${api.input("slot").code}.AttachComponent(${api.input("type").code}, ${api.input("runOnAttach").code});\n            ${success} = ${component} is not null;\n        }\n        catch (System.Exception caught)\n        {\n            ${exception} = caught;\n            ${component} = null;\n            ${success} = false;\n        }${done ? `\n        ${done}();` : ""}`;
+    }
+  });
+
+  registerNode("resonite.getOrAttachComponent", {
+    title: "Get Or Attach Component",
+    group: "Attach & Create",
+    symbol: "C?+",
+    description:
+      "Gets an existing component by Type or attaches it directly when missing.",
+    inputs: [
+      port("call", "Call", "impulse"),
+      port("slot", "Slot", "slot"),
+      port("type", "Component Type", "type"),
+      port("exact", "Exact Type Only", "bool", { defaultCs: "false" }),
+      port("runOnAttach", "Run OnAttach Behavior", "bool", { defaultCs: "true" })
+    ],
+    outputs: [
+      port("done", "Done", "impulse"),
+      port("component", "Component", "component"),
+      port("attached", "Was Attached", "bool"),
+      port("success", "Success", "bool"),
+      port("exception", "Exception", "exception")
+    ],
+    codegenCollect(api) {
+      ensureDirectResoniteCore(api);
+      addStatefulField(api, "getOrAttachComponent", "FrooxEngine.Component?", "null");
+      addStatefulField(api, "getOrAttachWasAttached", "bool", "false");
+      addStatefulField(api, "getOrAttachSuccess", "bool", "false");
+      addStatefulField(api, "getOrAttachException", "System.Exception?", "null");
+    },
+    codegenExpression(api) {
+      const token = nodeToken(api);
+      return {
+        component: `_getOrAttachComponent${token}!`,
+        attached: `_getOrAttachWasAttached${token}`,
+        success: `_getOrAttachSuccess${token}`,
+        exception: `_getOrAttachException${token}!`
+      }[api.portId] || "null!";
+    },
+    codegenAction(api) {
+      const token = nodeToken(api);
+      const component = `_getOrAttachComponent${token}`;
+      const attached = `_getOrAttachWasAttached${token}`;
+      const success = `_getOrAttachSuccess${token}`;
+      const exception = `_getOrAttachException${token}`;
+      const slot = api.input("slot").code;
+      const type = api.input("type").code;
+      const done = api.emit("done");
+      return `try\n        {\n            ${exception} = null;\n            ${component} = ${slot}.GetComponent(${type}, ${api.input("exact").code});\n            ${attached} = ${component} is null;\n            ${component} ??= ${slot}.AttachComponent(${type}, ${api.input("runOnAttach").code});\n            ${success} = ${component} is not null;\n        }\n        catch (System.Exception caught)\n        {\n            ${exception} = caught;\n            ${component} = null;\n            ${attached} = false;\n            ${success} = false;\n        }${done ? `\n        ${done}();` : ""}`;
+    }
+  });
+
+  function registerComponentTransferNode(
+    id,
+    title,
+    symbol,
+    methodName,
+    description
+  ) {
+    registerNode(id, {
+      title,
+      group: "Attach & Create",
+      symbol,
+      description,
+      inputs: [
+        port("call", "Call", "impulse"),
+        port("destination", "Destination Slot", "slot"),
+        port("source", "Source Component", "component")
+      ],
+      outputs: [
+        port("done", "Done", "impulse"),
+        port("component", "Result Component", "component"),
+        port("success", "Success", "bool"),
+        port("exception", "Exception", "exception")
+      ],
+      codegenCollect(api) {
+        ensureDirectResoniteCore(api);
+        addStatefulField(api, `${id.replace(/[^A-Za-z0-9]/g, "")}Result`, "FrooxEngine.Component?", "null");
+        addStatefulField(api, `${id.replace(/[^A-Za-z0-9]/g, "")}Success`, "bool", "false");
+        addStatefulField(api, `${id.replace(/[^A-Za-z0-9]/g, "")}Exception`, "System.Exception?", "null");
+      },
+      codegenExpression(api) {
+        const stem = id.replace(/[^A-Za-z0-9]/g, "");
+        const token = nodeToken(api);
+        return {
+          component: `_${stem}Result${token}!`,
+          success: `_${stem}Success${token}`,
+          exception: `_${stem}Exception${token}!`
+        }[api.portId] || "null!";
+      },
+      codegenAction(api) {
+        const stem = id.replace(/[^A-Za-z0-9]/g, "");
+        const token = nodeToken(api);
+        const result = `_${stem}Result${token}`;
+        const success = `_${stem}Success${token}`;
+        const exception = `_${stem}Exception${token}`;
+        const done = api.emit("done");
+        return `try\n        {\n            ${exception} = null;\n            ${result} = ${api.input("destination").code}.${methodName}(${api.input("source").code});\n            ${success} = ${result} is not null;\n        }\n        catch (System.Exception caught)\n        {\n            ${exception} = caught;\n            ${result} = null;\n            ${success} = false;\n        }${done ? `\n        ${done}();` : ""}`;
+      }
+    });
+  }
+
+  registerComponentTransferNode(
+    "resonite.copyComponent",
+    "Copy Component",
+    "COPY-C",
+    "CopyComponent",
+    "Copies a component to another Slot through Slot.CopyComponent(Component)."
+  );
+
+  registerComponentTransferNode(
+    "resonite.moveComponent",
+    "Move Component",
+    "MOVE-C",
+    "MoveComponent",
+    "Moves a component to another Slot through Slot.MoveComponent(Component), preserving compatible references."
+  );
+
+  function graphComponentType(value) {
+    const normalized = String(value || "").trim();
+    const exact = new Map([
+      ...MATERIAL_GRAPH_TYPES,
+      ...MESH_GRAPH_TYPES,
+      ["FrooxEngine.MeshRenderer", "meshRenderer"],
+      ["MeshRenderer", "meshRenderer"],
+      ["FrooxEngine.Collider", "collider"],
+      ["Collider", "collider"],
+      ["FrooxEngine.MeshCollider", "meshCollider"],
+      ["MeshCollider", "meshCollider"],
+      ["FrooxEngine.BoxCollider", "boxCollider"],
+      ["BoxCollider", "boxCollider"],
+      ["FrooxEngine.SphereCollider", "sphereCollider"],
+      ["SphereCollider", "sphereCollider"],
+      ["FrooxEngine.CylinderCollider", "cylinderCollider"],
+      ["CylinderCollider", "cylinderCollider"],
+      ["FrooxEngine.StaticTexture2D", "staticTexture2D"],
+      ["StaticTexture2D", "staticTexture2D"],
+      ["FrooxEngine.StaticCubemap", "staticCubemap"],
+      ["StaticCubemap", "staticCubemap"],
+      ["FrooxEngine.SpriteProvider", "spriteProvider"],
+      ["SpriteProvider", "spriteProvider"],
+      ["FrooxEngine.StaticAudioClip", "staticAudioClip"],
+      ["StaticAudioClip", "staticAudioClip"],
+      ["FrooxEngine.StaticFont", "staticFont"],
+      ["StaticFont", "staticFont"],
+      ["FrooxEngine.Skybox", "skybox"],
+      ["Skybox", "skybox"],
+      ["FrooxEngine.Grabbable", "grabbable"],
+      ["Grabbable", "grabbable"],
+      ["FrooxEngine.AudioOutput", "audioOutput"],
+      ["AudioOutput", "audioOutput"],
+      ["FrooxEngine.DynamicVariableSpace", "dynamicVariableSpace"],
+      ["DynamicVariableSpace", "dynamicVariableSpace"],
+      ["FrooxEngine.RadiantDash", "radiantDash"],
+      ["RadiantDash", "radiantDash"]
+    ]);
+
+    return exact.get(normalized) || "component";
+  }
+
+  function ensureRuntimeEnumHelpers(api) {
+    ensureDirectResoniteCore(api);
+    api.addMember(
+      "direct.runtime.enums",
+      String.raw`
+private static Primitive GraphPrimitiveFromValue(object? value)
+{
+    if (value is Primitive primitive)
+    {
+        return primitive;
+    }
+
+    return Enum.TryParse(
+        Convert.ToString(value, CultureInfo.InvariantCulture),
+        ignoreCase: true,
+        out Primitive parsed)
+            ? parsed
+            : Primitive.Cube;
+}
+
+private static BlendMode GraphBlendModeFromValue(object? value)
+{
+    if (value is BlendMode blendMode)
+    {
+        return blendMode;
+    }
+
+    return Enum.TryParse(
+        Convert.ToString(value, CultureInfo.InvariantCulture),
+        ignoreCase: true,
+        out BlendMode parsed)
+            ? parsed
+            : BlendMode.Opaque;
+}
+`
+    );
+  }
+
+  registerNode("resonite.primitiveConstant", {
+    title: "Primitive Constant",
+    group: "Values",
+    symbol: "PRIM",
+    description:
+      "A real FrooxEngine.Primitive value for Quad, Cube or Sphere.",
+    parameters: [
+      pSelect(
+        "value",
+        "Primitive",
+        ["Quad", "Cube", "Sphere"],
+        "Cube"
+      )
+    ],
+    outputs: [port("value", "Primitive", "primitive")],
+    codegenCollect(api) {
+      ensureDirectResoniteCore(api);
+    },
+    codegenExpression(api) {
+      const value = ["Quad", "Cube", "Sphere"].includes(
+        api.node.parameters?.value
+      )
+        ? api.node.parameters.value
+        : "Cube";
+      return `FrooxEngine.Primitive.${value}`;
+    },
+    previewEvaluate({ node, known }) {
+      return known(
+        "primitive",
+        String(node.parameters?.value || "Cube")
+      );
+    }
+  });
+
+  registerNode("resonite.primitiveFromValue", {
+    title: "Value To Primitive",
+    group: "Conversions",
+    symbol: "→PRIM",
+    description:
+      "Converts a configuration enum or text value named Quad, Cube or Sphere into the real FrooxEngine.Primitive enum.",
+    inputs: [
+      genericPort("value", "Enum / text", "T", "anyValue")
+    ],
+    outputs: [port("primitive", "Primitive", "primitive")],
+    codegenCollect(api) {
+      ensureRuntimeEnumHelpers(api);
+    },
+    codegenExpression(api) {
+      return `GraphPrimitiveFromValue(${api.input("value").code})`;
+    }
+  });
+
+  registerNode("material.blendModeConstant", {
+    title: "Blend Mode Constant",
+    group: "Values",
+    symbol: "BLEND",
+    description:
+      "A real FrooxEngine.BlendMode value.",
+    parameters: [
+      pSelect(
+        "value",
+        "Blend mode",
+        [
+          "Opaque",
+          "Cutout",
+          "Alpha",
+          "Transparent",
+          "Additive",
+          "Multiply"
+        ],
+        "Opaque"
+      )
+    ],
+    outputs: [port("value", "Blend Mode", "blendMode")],
+    codegenCollect(api) {
+      ensureDirectResoniteCore(api);
+    },
+    codegenExpression(api) {
+      const modes = [
+        "Opaque",
+        "Cutout",
+        "Alpha",
+        "Transparent",
+        "Additive",
+        "Multiply"
+      ];
+      const value = modes.includes(api.node.parameters?.value)
+        ? api.node.parameters.value
+        : "Opaque";
+      return `FrooxEngine.BlendMode.${value}`;
+    }
+  });
+
+  registerNode("material.blendModeFromValue", {
+    title: "Value To Blend Mode",
+    group: "Conversions",
+    symbol: "→BLEND",
+    description:
+      "Converts a configuration enum or text to FrooxEngine.BlendMode.",
+    inputs: [
+      genericPort("value", "Enum / text", "T", "anyValue")
+    ],
+    outputs: [port("blendMode", "Blend Mode", "blendMode")],
+    codegenCollect(api) {
+      ensureRuntimeEnumHelpers(api);
+    },
+    codegenExpression(api) {
+      return `GraphBlendModeFromValue(${api.input("value").code})`;
+    }
+  });
+
+  registerNode("asset.textureWrapModeConstant", {
+    title: "Texture Wrap Mode Constant",
+    group: "Values",
+    symbol: "WRAP",
+    description:
+      "A real Renderite.Shared.TextureWrapMode value.",
+    parameters: [
+      pSelect(
+        "value",
+        "Wrap mode",
+        ["Repeat", "Clamp"],
+        "Repeat"
+      )
+    ],
+    outputs: [
+      port("value", "Wrap Mode", "textureWrapMode")
+    ],
+    codegenCollect(api) {
+      api.addUsing("Renderite.Shared");
+      api.require("usesRenderiteShared", true);
+    },
+    codegenExpression(api) {
+      const values = ["Repeat", "Clamp"];
+      const value = values.includes(api.node.parameters?.value)
+        ? api.node.parameters.value
+        : "Repeat";
+      return `Renderite.Shared.TextureWrapMode.${value}`;
+    }
+  });
+
+  registerNode("transform.quaternionIdentity", {
+    title: "Quaternion Identity",
+    group: "Transforms",
+    symbol: "Q1",
+    description:
+      "Elements.Core.floatQ.Identity.",
+    outputs: [port("rotation", "Rotation", "floatQ")],
+    codegenCollect(api) {
+      ensureDirectResoniteMath(api);
+    },
+    codegenExpression() {
+      return "Elements.Core.floatQ.Identity";
+    },
+    previewEvaluate({ known }) {
+      return known("floatQ", "Identity");
+    }
+  });
+
+  registerNode("transform.rotateVector", {
+    title: "Rotate Vector",
+    group: "Transforms",
+    symbol: "Q×V",
+    description:
+      "Rotates a float3 by a floatQ using the real Elements.Core operator.",
+    inputs: [
+      port("rotation", "Rotation", "floatQ"),
+      port("vector", "Vector", "float3")
+    ],
+    outputs: [port("result", "Result", "float3")],
+    codegenCollect(api) {
+      ensureDirectResoniteMath(api);
+    },
+    codegenExpression(api) {
+      return `(${api.input("rotation").code} * ${api.input("vector").code})`;
+    }
+  });
+
+  registerNode("transform.multiplyQuaternion", {
+    title: "Multiply Quaternions",
+    group: "Transforms",
+    symbol: "Q×Q",
+    description:
+      "Combines two floatQ rotations.",
+    inputs: [
+      port("a", "A", "floatQ"),
+      port("b", "B", "floatQ")
+    ],
+    outputs: [port("result", "Result", "floatQ")],
+    codegenCollect(api) {
+      ensureDirectResoniteMath(api);
+    },
+    codegenExpression(api) {
+      return `(${api.input("a").code} * ${api.input("b").code})`;
+    }
+  });
+
+  registerNode("resonite.userRootSlot", {
+    title: "User Root Slot",
+    group: "Slots & Components",
+    symbol: "UROOT",
+    description:
+      "Returns User.Root.Slot from the actual Resonite User.",
+    inputs: [port("user", "User", "user")],
+    outputs: [port("slot", "Root Slot", "slot")],
+    codegenCollect(api) {
+      ensureDirectResoniteCore(api);
+    },
+    codegenExpression(api) {
+      return `(${api.input("user").code}.Root?.Slot ?? null!)`;
+    }
+  });
+
+  registerNode("resonite.slotWorld", {
+    title: "Slot World",
+    group: "Slots & Components",
+    symbol: "S→W",
+    description:
+      "Returns Slot.World.",
+    inputs: [port("slot", "Slot", "slot")],
+    outputs: [port("world", "World", "world")],
+    codegenCollect(api) {
+      ensureDirectResoniteCore(api);
+    },
+    codegenExpression(api) {
+      return `${api.input("slot").code}.World`;
+    }
+  });
+
+  registerNode("resonite.slotParent", {
+    title: "Slot Parent",
+    group: "Slots & Components",
+    symbol: "S↑",
+    description:
+      "Returns Slot.Parent.",
+    inputs: [port("slot", "Slot", "slot")],
+    outputs: [port("parent", "Parent", "slot")],
+    codegenCollect(api) {
+      ensureDirectResoniteCore(api);
+    },
+    codegenExpression(api) {
+      return `${api.input("slot").code}.Parent!`;
+    }
+  });
+
+  registerNode("resonite.isSlotValid", {
+    title: "Is Slot Valid",
+    group: "Slots & Components",
+    symbol: "S?",
+    description:
+      "True when the Slot exists, is not destroyed and still has a World.",
+    inputs: [port("slot", "Slot", "slot")],
+    outputs: [port("valid", "Valid", "bool")],
+    codegenCollect(api) {
+      ensureDirectResoniteCore(api);
+      api.addMember(
+        "typed.resonite.validity",
+        `private static bool IsGraphSlotValid(FrooxEngine.Slot? slot)
+{
+    return slot is not null && !slot.IsDestroyed && slot.World is not null;
+}
+
+private static bool IsGraphComponentValid(FrooxEngine.Component? component)
+{
+    return component is not null && !component.IsDestroyed;
+}`
+      );
+    },
+    codegenExpression(api) {
+      return `IsGraphSlotValid(${api.input("slot").code})`;
+    }
+  });
+
+  registerNode("resonite.isComponentValid", {
+    title: "Is Component Valid",
+    group: "Slots & Components",
+    symbol: "C?",
+    description:
+      "True when the Component exists and is not destroyed.",
+    inputs: [port("component", "Component", "component")],
+    outputs: [port("valid", "Valid", "bool")],
+    codegenCollect(api) {
+      ensureDirectResoniteCore(api);
+      api.addMember(
+        "typed.resonite.validity",
+        `private static bool IsGraphSlotValid(FrooxEngine.Slot? slot)
+{
+    return slot is not null && !slot.IsDestroyed && slot.World is not null;
+}
+
+private static bool IsGraphComponentValid(FrooxEngine.Component? component)
+{
+    return component is not null && !component.IsDestroyed;
+}`
+      );
+    },
+    codegenExpression(api) {
+      return `IsGraphComponentValid(${api.input("component").code})`;
+    }
+  });
+
+  registerNode("resonite.addLocalSlot", {
+    title: "Add Local Slot",
+    group: "Slots & Components",
+    symbol: "+LS",
+    description:
+      "Creates a local Slot with Slot.AddLocalSlot.",
+    inputs: [
+      port("call", "Call", "impulse"),
+      port("parent", "Parent", "slot"),
+      port("name", "Name", "string"),
+      port("persistent", "Persistent", "bool", { defaultCs: "false" })
+    ],
+    outputs: [
+      port("done", "Done", "impulse"),
+      port("slot", "Created Slot", "slot")
+    ],
+    codegenCollect(api) {
+      ensureDirectResoniteCore(api);
+      addStatefulField(
+        api,
+        "createdLocalSlot",
+        "FrooxEngine.Slot?",
+        "null"
+      );
+    },
+    codegenExpression(api) {
+      return `_createdLocalSlot${nodeToken(api)}!`;
+    },
+    codegenAction(api) {
+      const field = `_createdLocalSlot${nodeToken(api)}`;
+      const done = api.emit("done");
+      return `${field} = ${api.input("parent").code}.AddLocalSlot(${api.input("name").code}, ${api.input("persistent").code});${done ? `\n        ${done}();` : ""}`;
+    }
+  });
+
+  registerNode("resonite.destroySlot", {
+    title: "Destroy Slot",
+    group: "Slots & Components",
+    symbol: "DEL-S",
+    description:
+      "Destroys a typed FrooxEngine.Slot directly.",
+    inputs: [
+      port("call", "Call", "impulse"),
+      port("slot", "Slot", "slot")
+    ],
+    outputs: [port("done", "Done", "impulse")],
+    codegenCollect(api) {
+      ensureDirectResoniteCore(api);
+    },
+    codegenAction(api) {
+      const done = api.emit("done");
+      const slot = api.input("slot").code;
+      return `if (${slot} is not null && !${slot}.IsDestroyed)\n        {\n            ${slot}.Destroy();\n        }${done ? `\n        ${done}();` : ""}`;
+    }
+  });
+
+  registerNode("resonite.destroyComponent", {
+    title: "Destroy Component",
+    group: "Slots & Components",
+    symbol: "DEL-C",
+    description:
+      "Destroys a typed FrooxEngine.Component directly.",
+    inputs: [
+      port("call", "Call", "impulse"),
+      port("component", "Component", "component")
+    ],
+    outputs: [port("done", "Done", "impulse")],
+    codegenCollect(api) {
+      ensureDirectResoniteCore(api);
+    },
+    codegenAction(api) {
+      const done = api.emit("done");
+      const component = api.input("component").code;
+      return `if (${component} is not null && !${component}.IsDestroyed)\n        {\n            ${component}.Destroy();\n        }${done ? `\n        ${done}();` : ""}`;
+    }
+  });
+
+  registerNode("resonite.setSlotName", {
+    title: "Set Slot Name",
+    group: "Slots & Components",
+    symbol: "NAME",
+    description:
+      "Sets Slot.Name directly.",
+    inputs: [
+      port("call", "Call", "impulse"),
+      port("slot", "Slot", "slot"),
+      port("name", "Name", "string")
+    ],
+    outputs: [port("done", "Done", "impulse")],
+    codegenCollect(api) {
+      ensureDirectResoniteCore(api);
+    },
+    codegenAction(api) {
+      const done = api.emit("done");
+      return `${api.input("slot").code}.Name = ${api.input("name").code};${done ? `\n        ${done}();` : ""}`;
+    }
+  });
+
+  registerNode("resonite.setSlotActive", {
+    title: "Set Slot Active",
+    group: "Slots & Components",
+    symbol: "ACTIVE",
+    description:
+      "Sets Slot.ActiveSelf directly.",
+    inputs: [
+      port("call", "Call", "impulse"),
+      port("slot", "Slot", "slot"),
+      port("active", "Active", "bool")
+    ],
+    outputs: [port("done", "Done", "impulse")],
+    codegenCollect(api) {
+      ensureDirectResoniteCore(api);
+    },
+    codegenAction(api) {
+      const done = api.emit("done");
+      return `${api.input("slot").code}.ActiveSelf = ${api.input("active").code};${done ? `\n        ${done}();` : ""}`;
+    }
+  });
+
+  registerNode("resonite.setSlotParent", {
+    title: "Set Slot Parent",
+    group: "Slots & Components",
+    symbol: "PARENT",
+    description:
+      "Calls Slot.SetParent with optional global-transform preservation.",
+    inputs: [
+      port("call", "Call", "impulse"),
+      port("slot", "Slot", "slot"),
+      port("parent", "New Parent", "slot"),
+      port("keepGlobal", "Keep Global Transform", "bool", { defaultCs: "true" })
+    ],
+    outputs: [port("done", "Done", "impulse")],
+    codegenCollect(api) {
+      ensureDirectResoniteCore(api);
+    },
+    codegenAction(api) {
+      const done = api.emit("done");
+      return `${api.input("slot").code}.SetParent(${api.input("parent").code}, ${api.input("keepGlobal").code});${done ? `\n        ${done}();` : ""}`;
+    }
+  });
+
+  function registerSlotTransformSetter(
+    id,
+    title,
+    symbol,
+    member,
+    valueType,
+    valueLabel
+  ) {
+    registerNode(id, {
+      title,
+      group: "Transforms",
+      symbol,
+      description:
+        `Sets Slot.${member} directly without changing the other transform channels.`,
+      inputs: [
+        port("call", "Call", "impulse"),
+        port("slot", "Slot", "slot"),
+        port("value", valueLabel, valueType)
+      ],
+      outputs: [port("done", "Done", "impulse")],
+      codegenCollect(api) {
+        ensureDirectResoniteCore(api);
+      },
+      codegenAction(api) {
+        const done = api.emit("done");
+        return `${api.input("slot").code}.${member} = ${api.input("value").code};${done ? `\n        ${done}();` : ""}`;
+      }
+    });
+  }
+
+  registerSlotTransformSetter(
+    "transform.setLocalPosition",
+    "Set Slot Local Position",
+    "LPOS=",
+    "LocalPosition",
+    "float3",
+    "Position"
+  );
+  registerSlotTransformSetter(
+    "transform.setLocalRotation",
+    "Set Slot Local Rotation",
+    "LROT=",
+    "LocalRotation",
+    "floatQ",
+    "Rotation"
+  );
+  registerSlotTransformSetter(
+    "transform.setLocalScale",
+    "Set Slot Local Scale",
+    "LSCL=",
+    "LocalScale",
+    "float3",
+    "Scale"
+  );
+  registerSlotTransformSetter(
+    "transform.setGlobalPosition",
+    "Set Slot Global Position",
+    "GPOS=",
+    "GlobalPosition",
+    "float3",
+    "Position"
+  );
+  registerSlotTransformSetter(
+    "transform.setGlobalRotation",
+    "Set Slot Global Rotation",
+    "GROT=",
+    "GlobalRotation",
+    "floatQ",
+    "Rotation"
+  );
+  registerSlotTransformSetter(
+    "transform.setGlobalScale",
+    "Set Slot Global Scale",
+    "GSCL=",
+    "GlobalScale",
+    "float3",
+    "Scale"
+  );
+
+  function registerSlotTransformReader(
+    id,
+    title,
+    symbol,
+    prefix
+  ) {
+    registerNode(id, {
+      title,
+      group: "Transforms",
+      symbol,
+      description:
+        `Reads Slot.${prefix}Position, ${prefix}Rotation and ${prefix}Scale.`,
+      inputs: [port("slot", "Slot", "slot")],
+      outputs: [
+        port("position", "Position", "float3", { defaultCs: "Elements.Core.float3.Zero" }),
+        port("rotation", "Rotation", "floatQ", { defaultCs: "Elements.Core.floatQ.Identity" }),
+        port("scale", "Scale", "float3", { defaultCs: "Elements.Core.float3.One" })
+      ],
+      codegenCollect(api) {
+        ensureDirectResoniteMath(api);
+      },
+      codegenExpression(api) {
+        const member = {
+          position: `${prefix}Position`,
+          rotation: `${prefix}Rotation`,
+          scale: `${prefix}Scale`
+        }[api.portId];
+        return `${api.input("slot").code}.${member}`;
+      }
+    });
+  }
+
+  registerSlotTransformReader(
+    "transform.readLocalSlot",
+    "Read Local Slot Transform",
+    "L-TRS",
+    "Local"
+  );
+
+  registerSlotTransformReader(
+    "transform.readGlobalSlot",
+    "Read Global Slot Transform",
+    "G-TRS",
+    "Global"
+  );
+
+  function registerSlotTransformWriter(
+    id,
+    title,
+    symbol,
+    prefix
+  ) {
+    registerNode(id, {
+      title,
+      group: "Transforms",
+      symbol,
+      description:
+        `Writes Slot.${prefix}Position, ${prefix}Rotation and ${prefix}Scale directly.`,
+      inputs: [
+        port("call", "Call", "impulse"),
+        port("slot", "Slot", "slot"),
+        port("position", "Position", "float3", { defaultCs: "Elements.Core.float3.Zero" }),
+        port("rotation", "Rotation", "floatQ", { defaultCs: "Elements.Core.floatQ.Identity" }),
+        port("scale", "Scale", "float3", { defaultCs: "Elements.Core.float3.One" })
+      ],
+      outputs: [port("done", "Done", "impulse")],
+      codegenCollect(api) {
+        ensureDirectResoniteMath(api);
+      },
+      codegenAction(api) {
+        const done = api.emit("done");
+        const slot = api.input("slot").code;
+        return `${slot}.${prefix}Position = ${api.input("position").code};\n        ${slot}.${prefix}Rotation = ${api.input("rotation").code};\n        ${slot}.${prefix}Scale = ${api.input("scale").code};${done ? `\n        ${done}();` : ""}`;
+      }
+    });
+  }
+
+  registerSlotTransformWriter(
+    "transform.writeLocalSlot",
+    "Set Local Slot Transform",
+    "→L-TRS",
+    "Local"
+  );
+
+  registerSlotTransformWriter(
+    "transform.writeGlobalSlot",
+    "Set Global Slot Transform",
+    "→G-TRS",
+    "Global"
+  );
+
+  registerNode("task.dispatchWorld", {
+    title: "Dispatch To World",
+    group: "Tasks & Threading",
+    symbol: "WORLD↯",
+    description:
+      "Schedules the connected impulse path on World.Coroutines and awaits ToWorld before mutating Resonite state.",
+    inputs: [
+      port("call", "Call", "impulse"),
+      port("world", "World", "world"),
+      port(
+        "requireFocused",
+        "Require Still Focused",
+        "bool",
+        { defaultCs: "false" }
+      )
+    ],
+    outputs: [port("done", "On World Thread", "impulse")],
+    codegenCollect(api) {
+      ensureDirectResoniteCore(api);
+    },
+    codegenAction(api) {
+      const done = api.emit("done");
+      const token = nodeToken(api);
+      const world = `world${token}`;
+      return `FrooxEngine.World ${world} = ${api.input("world").code};\n        if (${world} is not null && !${world}.IsDisposed)\n        {\n            ${world}.Coroutines.StartTask(\n                async delegate\n                {\n                    await default(FrooxEngine.ToWorld);\n\n                    if (\n                        !${world}.IsDisposed &&\n                        (\n                            !${api.input("requireFocused").code} ||\n                            ReferenceEquals(\n                                FrooxEngine.Engine.Current?.WorldManager?.FocusedWorld,\n                                ${world})\n                        )\n                    )\n                    {${done ? `\n                        ${done}();` : ""}\n                    }\n                });\n        }`;
+    }
+  });
+
+  registerNode("task.dispatchWorldLatest", {
+    title: "Dispatch Latest To World",
+    group: "Tasks & Threading",
+    symbol: "WORLD↯1",
+    description:
+      "Coalesces repeated calls, switches to the World thread with ToWorld and runs the newest requested state once more when calls arrived while an update was pending.",
+    inputs: [
+      port("call", "Call", "impulse"),
+      port("world", "World", "world"),
+      port(
+        "requireFocused",
+        "Require Still Focused",
+        "bool",
+        { defaultCs: "true" }
+      )
+    ],
+    outputs: [port("done", "On World Thread", "impulse")],
+    codegenCollect(api) {
+      ensureDirectResoniteCore(api);
+      api.addUsing("System.Threading");
+      const token = nodeToken(api);
+      const emit = api.emitMethod(
+        api.node.id,
+        "done"
+      );
+      api.addField(
+        `${api.node.id}.latestWorld`,
+        `private static FrooxEngine.World? _latestWorld${token};`
+      );
+      api.addField(
+        `${api.node.id}.latestRequireFocused`,
+        `private static bool _latestRequireFocused${token};`
+      );
+      api.addField(
+        `${api.node.id}.latestVersion`,
+        `private static int _latestWorldVersion${token};`
+      );
+      api.addField(
+        `${api.node.id}.latestPending`,
+        `private static int _latestWorldPending${token};`
+      );
+      api.addMember(
+        `${api.node.id}.latestDispatcher`,
+        `private static void RequestLatestWorld${token}(FrooxEngine.World world, bool requireFocused)\n{\n    _latestWorld${token} = world;\n    _latestRequireFocused${token} = requireFocused;\n    Interlocked.Increment(ref _latestWorldVersion${token});\n    ScheduleLatestWorld${token}();\n}\n\nprivate static void ScheduleLatestWorld${token}()\n{\n    FrooxEngine.World? world = _latestWorld${token};\n\n    if (world is null || world.IsDisposed)\n    {\n        return;\n    }\n\n    if (Interlocked.Exchange(ref _latestWorldPending${token}, 1) != 0)\n    {\n        return;\n    }\n\n    int scheduledVersion = Volatile.Read(ref _latestWorldVersion${token});\n\n    world.Coroutines.StartTask(\n        async delegate\n        {\n            await default(FrooxEngine.ToWorld);\n\n            try\n            {\n                if (\n                    !world.IsDisposed &&\n                    (\n                        !_latestRequireFocused${token} ||\n                        ReferenceEquals(\n                            FrooxEngine.Engine.Current?.WorldManager?.FocusedWorld,\n                            world)\n                    )\n                )\n                {${emit ? `\n                    ${emit}();` : ""}\n                }\n            }\n            finally\n            {\n                Volatile.Write(ref _latestWorldPending${token}, 0);\n\n                if (\n                    scheduledVersion !=\n                    Volatile.Read(ref _latestWorldVersion${token})\n                )\n                {\n                    ScheduleLatestWorld${token}();\n                }\n            }\n        });\n}`
+      );
+    },
+    codegenAction(api) {
+      const token = nodeToken(api);
+      return `RequestLatestWorld${token}(${api.input("world").code}, ${api.input("requireFocused").code});`;
+    }
+  });
+
+  registerNode("resonite.getComponentTyped", {
+    expertOnly: true,
+    title: "Get Component (Typed)",
+    group: "Slots & Components",
+    symbol: "GET<T>",
+    description:
+      "Generates Slot.GetComponent<T>() directly. The inspector type name is compile-time C#, not runtime reflection.",
+    parameters: [
+      pText(
+        "componentType",
+        "Component type",
+        "FrooxEngine.PBS_Metallic",
+        "Verified fully-qualified FrooxEngine component type.",
+        { suggestions: FROOX_COMPONENT_TYPES }
+      )
+    ],
+    resolveDefinition(node) {
+      return {
+        outputs: [
+          port(
+            "component",
+            "Component",
+            graphComponentType(
+              node.parameters?.componentType
+            )
+          )
+        ]
+      };
+    },
+    inputs: [port("slot", "Slot", "slot")],
+    outputs: [port("component", "Component", "component")],
+    codegenCollect(api) {
+      ensureDirectResoniteCore(api);
+    },
+    codegenExpression(api) {
+      const componentType = verifiedComponentType(api);
+      return `${api.input("slot").code}.GetComponent<${componentType}>()!`;
+    }
+  });
+
+  registerNode("resonite.attachComponentTyped", {
+    expertOnly: true,
+    title: "Attach Component (Typed)",
+    group: "Attach & Create",
+    symbol: "+C<T>",
+    description:
+      "Generates Slot.AttachComponent<T>() directly and covers every concrete FrooxEngine Component type with a public parameterless constructor.",
+    parameters: [
+      pText(
+        "componentType",
+        "Component type",
+        "FrooxEngine.Grabbable",
+        "Verified fully-qualified FrooxEngine component type.",
+        { suggestions: FROOX_COMPONENT_TYPES }
+      )
+    ],
+    resolveDefinition(node) {
+      return {
+        outputs: [
+          port("done", "Done", "impulse"),
+          port(
+            "component",
+            "Component",
+            graphComponentType(
+              node.parameters?.componentType
+            )
+          )
+        ]
+      };
+    },
+    inputs: [
+      port("call", "Call", "impulse"),
+      port("slot", "Slot", "slot")
     ],
     outputs: [
       port("done", "Done", "impulse"),
       port("component", "Component", "component")
     ],
     codegenCollect(api) {
-      ensureResoniteRuntime(api);
+      ensureDirectResoniteCore(api);
+      const componentType = verifiedComponentType(api);
       addStatefulField(
         api,
-        "attachedComponent",
-        "object?",
+        "typedComponent",
+        `${componentType}?`,
         "null"
       );
     },
     codegenExpression(api) {
-      return `_attachedComponent${nodeToken(api)}!`;
+      return `_typedComponent${nodeToken(api)}!`;
     },
     codegenAction(api) {
-      const field = `_attachedComponent${nodeToken(api)}`;
+      const componentType = verifiedComponentType(api);
+      const field = `_typedComponent${nodeToken(api)}`;
       const done = api.emit("done");
-      return `${field} = AttachComponentReflective(${api.input("slot").code}, ${api.input("type").code});${done ? `\n        ${done}();` : ""}`;
+      return `${field} = ${api.input("slot").code}.AttachComponent<${componentType}>();${done ? `\n        ${done}();` : ""}`;
+    }
+  });
+
+  registerNode("resonite.ensureGrabbable", {
+    title: "Ensure Grabbable",
+    group: "Attach & Create",
+    symbol: "GRAB",
+    description:
+      "Returns an existing Grabbable or attaches one directly.",
+    inputs: [
+      port("call", "Call", "impulse"),
+      port("slot", "Slot", "slot")
+    ],
+    outputs: [
+      port("done", "Done", "impulse"),
+      port("grabbable", "Grabbable", "grabbable")
+    ],
+    codegenCollect(api) {
+      ensureDirectResoniteCore(api);
+      addStatefulField(
+        api,
+        "grabbable",
+        "FrooxEngine.Grabbable?",
+        "null"
+      );
+    },
+    codegenExpression(api) {
+      return `_grabbable${nodeToken(api)}!`;
+    },
+    codegenAction(api) {
+      const field = `_grabbable${nodeToken(api)}`;
+      const slot = api.input("slot").code;
+      const done = api.emit("done");
+      return `${field} = ${slot}.GetComponent<FrooxEngine.Grabbable>() ?? ${slot}.AttachComponent<FrooxEngine.Grabbable>();${done ? `\n        ${done}();` : ""}`;
+    }
+  });
+
+  registerNode("material.setCommonColor", {
+    title: "Set Common Material Color",
+    group: "Materials & Rendering",
+    symbol: "MAT=C",
+    description:
+      "Sets ICommonMaterial.Color directly.",
+    inputs: [
+      port("call", "Call", "impulse"),
+      port("material", "Material", "commonMaterial"),
+      port("color", "Color", "colorX")
+    ],
+    outputs: [port("done", "Done", "impulse")],
+    codegenCollect(api) {
+      ensureDirectResoniteRendering(api);
+    },
+    codegenAction(api) {
+      const done = api.emit("done");
+      return `${api.input("material").code}.Color = ${api.input("color").code};${done ? `\n        ${done}();` : ""}`;
+    }
+  });
+
+  registerNode("material.setPbsMetallic", {
+    title: "Set PBS Metallic",
+    group: "Materials & Rendering",
+    symbol: "PBS=",
+    description:
+      "Sets AlbedoColor, Metallic, Smoothness and BlendMode on a real PBS_Metallic component.",
+    inputs: [
+      port("call", "Call", "impulse"),
+      port("material", "PBS Metallic", "pbsMetallic"),
+      port("albedo", "Albedo Color", "colorX", { defaultCs: "colorX.White" }),
+      port("metallic", "Metallic", "float", { defaultCs: "0.05f" }),
+      port("smoothness", "Smoothness", "float", { defaultCs: "0.65f" }),
+      port("blendMode", "Blend Mode", "blendMode", { defaultCs: "FrooxEngine.BlendMode.Opaque" })
+    ],
+    outputs: [port("done", "Done", "impulse")],
+    codegenCollect(api) {
+      ensureDirectResoniteRendering(api);
+    },
+    codegenAction(api) {
+      const done = api.emit("done");
+      const material = api.input("material").code;
+      return `${material}.AlbedoColor.Value = ${api.input("albedo").code};\n        ${material}.Metallic.Value = ${api.input("metallic").code};\n        ${material}.Smoothness.Value = ${api.input("smoothness").code};\n        ${material}.BlendMode.Value = ${api.input("blendMode").code};${done ? `\n        ${done}();` : ""}`;
+    }
+  });
+
+  registerNode("attach.primitive", {
+    title: "Attach Primitive",
+    group: "Attach & Create",
+    symbol: "+PRIM",
+    description:
+      "Calls Slot.AttachPrimitive<TMaterial>() directly and returns the created Slot, material, mesh, renderer and collider.",
+    parameters: [materialTypeParameter(DEFAULT_MATERIAL_TYPE, true)],
+    resolveDefinition(node) {
+      return {
+        outputs: [
+          port("done", "Done", "impulse"),
+          port("slot", "Created Slot", "slot"),
+          port(
+            "material",
+            "Material",
+            graphMaterialType(
+              node.parameters?.materialType
+            )
+          ),
+          port("mesh", "Mesh", "mesh"),
+          port("renderer", "Renderer", "meshRenderer"),
+          port("collider", "Collider", "collider"),
+          port("success", "Success", "bool"),
+          port("exception", "Exception", "exception")
+        ]
+      };
+    },
+    inputs: [
+      port("call", "Call", "impulse"),
+      port("parent", "Parent", "slot"),
+      port("primitive", "Primitive", "primitive", { defaultCs: "FrooxEngine.Primitive.Cube" }),
+      port("scale", "Scale", "float3", { defaultCs: "Elements.Core.float3.One" }),
+      port("color", "Color", "colorX", { defaultCs: "colorX.White" }),
+      port("collider", "Collider", "bool", { defaultCs: "true" })
+    ],
+    outputs: [
+      port("done", "Done", "impulse"),
+      port("slot", "Created Slot", "slot"),
+      port("material", "Material", "commonMaterial"),
+      port("mesh", "Mesh", "mesh"),
+      port("renderer", "Renderer", "meshRenderer"),
+      port("collider", "Collider", "collider"),
+      port("success", "Success", "bool"),
+      port("exception", "Exception", "exception")
+    ],
+    codegenCollect(api) {
+      const materialType = directCommonMaterialType(api);
+      attachResultFields(api, "attachPrimitive");
+      addStatefulField(
+        api,
+        "attachPrimitiveMaterialTyped",
+        `${materialType}?`,
+        "null"
+      );
+    },
+    codegenExpression(api) {
+      if (api.portId === "material") {
+        return `_attachPrimitiveMaterialTyped${nodeToken(api)}!`;
+      }
+      return attachOutputExpression(api, "attachPrimitive");
+    },
+    codegenAction(api) {
+      const materialType = directCommonMaterialType(api);
+      const token = nodeToken(api);
+      const slot = `_attachPrimitiveSlot${token}`;
+      const mesh = `_attachPrimitiveMesh${token}`;
+      const material = `_attachPrimitiveMaterial${token}`;
+      const materialTyped = `_attachPrimitiveMaterialTyped${token}`;
+      const renderer = `_attachPrimitiveRenderer${token}`;
+      const collider = `_attachPrimitiveCollider${token}`;
+      const success = `_attachPrimitiveSuccess${token}`;
+      const exception = `_attachPrimitiveException${token}`;
+      const parent = api.input("parent").code;
+      const primitive = api.input("primitive").code;
+      const wantsCollider = api.input("collider").code;
+      const done = api.emit("done");
+      return `try\n        {\n            ${exception} = null;\n            ${slot} = ${parent}.AttachPrimitive<${materialType}>(\n                ${primitive},\n                ${api.input("scale").code},\n                ${api.input("color").code},\n                collider: ${wantsCollider});\n            ${materialTyped} = ${slot}.GetComponent<${materialType}>();\n            ${material} = ${materialTyped};\n            ${renderer} = ${slot}.GetComponent<FrooxEngine.MeshRenderer>();\n            ${mesh} = ${primitive} switch\n            {\n                FrooxEngine.Primitive.Quad => ${slot}.GetComponent<FrooxEngine.QuadMesh>(),\n                FrooxEngine.Primitive.Cube => ${slot}.GetComponent<FrooxEngine.BoxMesh>(),\n                FrooxEngine.Primitive.Sphere => ${slot}.GetComponent<FrooxEngine.SphereMesh>(),\n                _ => null\n            };\n            ${collider} = ${primitive} switch\n            {\n                FrooxEngine.Primitive.Quad => ${slot}.GetComponent<FrooxEngine.BoxCollider>(),\n                FrooxEngine.Primitive.Cube => ${slot}.GetComponent<FrooxEngine.BoxCollider>(),\n                FrooxEngine.Primitive.Sphere => ${slot}.GetComponent<FrooxEngine.SphereCollider>(),\n                _ => null\n            };\n            ${success} = ${slot} is not null && ${materialTyped} is not null && ${mesh} is not null && ${renderer} is not null && (!${wantsCollider} || ${collider} is not null);\n        }\n        catch (System.Exception caught)\n        {\n            ${exception} = caught;\n            ${slot} = null;\n            ${mesh} = null;\n            ${material} = null;\n            ${materialTyped} = null;\n            ${renderer} = null;\n            ${collider} = null;\n            ${success} = false;\n        }${done ? `\n        ${done}();` : ""}`;
+    }
+  });
+
+  registerNode("attach.mesh", {
+    title: "Attach Mesh",
+    group: "Attach & Create",
+    symbol: "+MESH",
+    description:
+      "Covers every Slot.AttachMesh overload: existing mesh/material providers, generated mesh/material components, renderer, optional MeshCollider and sorting order.",
+    parameters: [
+      meshTypeParameter(),
+      materialTypeParameter(),
+      pBool(
+        "applyColor",
+        "Apply color when material supports ICommonMaterial",
+        false
+      )
+    ],
+    inputs: [
+      port("call", "Call", "impulse"),
+      port("slot", "Slot", "slot"),
+      port("existingMesh", "Existing Mesh (optional)", "mesh"),
+      port("existingMaterial", "Existing Material (optional)", "material"),
+      port("collider", "Mesh Collider", "bool", { defaultCs: "false" }),
+      port("sortingOrder", "Sorting Order", "int", { defaultCs: "0" }),
+      port("color", "Color", "colorX", { defaultCs: "colorX.White" })
+    ],
+    outputs: [
+      port("done", "Done", "impulse"),
+      port("slot", "Slot", "slot"),
+      port("mesh", "Mesh", "mesh"),
+      port("material", "Material", "material"),
+      port("renderer", "Renderer", "meshRenderer"),
+      port("collider", "Mesh Collider", "meshCollider"),
+      port("success", "Success", "bool"),
+      port("exception", "Exception", "exception")
+    ],
+    codegenCollect(api) {
+      attachResultFields(
+        api,
+        "attachMesh",
+        "FrooxEngine.IAssetProvider<FrooxEngine.Mesh>",
+        "FrooxEngine.MeshCollider"
+      );
+    },
+    codegenExpression(api) {
+      return attachOutputExpression(api, "attachMesh");
+    },
+    codegenAction(api) {
+      const meshType = directMeshType(api);
+      const materialType = directMaterialType(api);
+      const token = nodeToken(api);
+      const slotField = `_attachMeshSlot${token}`;
+      const meshField = `_attachMeshMesh${token}`;
+      const materialField = `_attachMeshMaterial${token}`;
+      const rendererField = `_attachMeshRenderer${token}`;
+      const colliderField = `_attachMeshCollider${token}`;
+      const successField = `_attachMeshSuccess${token}`;
+      const exceptionField = `_attachMeshException${token}`;
+      const slot = api.input("slot").code;
+      const suppliedMesh = api.input("existingMesh").code;
+      const suppliedMaterial = api.input("existingMaterial").code;
+      const collider = api.input("collider").code;
+      const sortingOrder = api.input("sortingOrder").code;
+      const color = api.input("color").code;
+      const applyColor = api.node.parameters?.applyColor === true;
+      const done = api.emit("done");
+      return `try\n        {\n            ${exceptionField} = null;\n            ${slotField} = ${slot};\n            FrooxEngine.IAssetProvider<FrooxEngine.Mesh>? suppliedMesh${token} = ${suppliedMesh};\n            FrooxEngine.IAssetProvider<FrooxEngine.Material>? suppliedMaterial${token} = ${suppliedMaterial};\n\n            if (suppliedMesh${token} is not null && suppliedMaterial${token} is not null)\n            {\n                ${rendererField} = ${slot}.AttachMesh(suppliedMesh${token}, suppliedMaterial${token}, ${sortingOrder});\n                ${meshField} = suppliedMesh${token};\n                ${materialField} = suppliedMaterial${token};\n                if (${collider})\n                {\n                    ${colliderField} = ${slot}.AttachComponent<FrooxEngine.MeshCollider>();\n                    ${colliderField}.Mesh.Target = suppliedMesh${token};\n                }\n                else\n                {\n                    ${colliderField} = null;\n                }\n            }\n            else if (suppliedMaterial${token} is not null)\n            {\n                ${meshType} createdMesh${token} = ${slot}.AttachMesh<${meshType}>(suppliedMaterial${token}, out FrooxEngine.MeshRenderer createdRenderer${token}, ${collider}, ${sortingOrder});\n                ${meshField} = createdMesh${token};\n                ${materialField} = suppliedMaterial${token};\n                ${rendererField} = createdRenderer${token};\n                ${colliderField} = ${slot}.GetComponent<FrooxEngine.MeshCollider>();\n            }\n            else if (suppliedMesh${token} is not null)\n            {\n                ${materialType} createdMaterial${token} = ${slot}.AttachMesh<${materialType}>(suppliedMesh${token}, ${collider}, ${sortingOrder});\n                ${meshField} = suppliedMesh${token};\n                ${materialField} = createdMaterial${token};\n                ${rendererField} = ${slot}.GetComponent<FrooxEngine.MeshRenderer>();\n                ${colliderField} = ${slot}.GetComponent<FrooxEngine.MeshCollider>();\n            }\n            else\n            {\n                FrooxEngine.AttachedModel<${meshType}, ${materialType}> model${token} = ${slot}.AttachMesh<${meshType}, ${materialType}>(${collider}, ${sortingOrder});\n                ${meshField} = model${token}.mesh;\n                ${materialField} = model${token}.material;\n                ${rendererField} = model${token}.renderer;\n                ${colliderField} = model${token}.collider;\n            }\n${applyColor ? `\n            if (${materialField} is FrooxEngine.ICommonMaterial commonMaterial${token})\n            {\n                commonMaterial${token}.Color = ${color};\n            }\n` : ""}\n            ${successField} = ${meshField} is not null && ${materialField} is not null && ${rendererField} is not null && (!${collider} || ${colliderField} is not null);\n        }\n        catch (System.Exception caught)\n        {\n            ${exceptionField} = caught;\n            ${meshField} = null;\n            ${materialField} = null;\n            ${rendererField} = null;\n            ${colliderField} = null;\n            ${successField} = false;\n        }${done ? `\n        ${done}();` : ""}`;
+    }
+  });
+
+  function registerShapeAttachNode(specification) {
+    registerNode(specification.id, {
+      title: specification.title,
+      group: "Attach & Create",
+      symbol: specification.symbol,
+      description: specification.description,
+      parameters: [materialTypeParameter()],
+      inputs: [
+        port("call", "Call", "impulse"),
+        port("slot", "Slot", "slot"),
+        port("material", "Existing Material (optional)", "material"),
+        ...specification.inputs,
+        ...(specification.supportsCollider
+          ? [port("collider", "Collider", "bool", { defaultCs: "true" })]
+          : [])
+      ],
+      outputs: [
+        port("done", "Done", "impulse"),
+        port("slot", "Slot", "slot"),
+        port("mesh", "Mesh", specification.meshGraphType),
+        port("material", "Material", "material"),
+        port("renderer", "Renderer", "meshRenderer"),
+        port("collider", "Collider", "collider"),
+        port("success", "Success", "bool"),
+        port("exception", "Exception", "exception")
+      ],
+      codegenCollect(api) {
+        attachResultFields(
+          api,
+          specification.fieldPrefix,
+          specification.meshCsType
+        );
+      },
+      codegenExpression(api) {
+        return attachOutputExpression(
+          api,
+          specification.fieldPrefix
+        );
+      },
+      codegenAction(api) {
+        const materialType = directMaterialType(api);
+        const token = nodeToken(api);
+        const prefix = specification.fieldPrefix;
+        const slotField = `_${prefix}Slot${token}`;
+        const meshField = `_${prefix}Mesh${token}`;
+        const materialField = `_${prefix}Material${token}`;
+        const rendererField = `_${prefix}Renderer${token}`;
+        const colliderField = `_${prefix}Collider${token}`;
+        const successField = `_${prefix}Success${token}`;
+        const exceptionField = `_${prefix}Exception${token}`;
+        const slot = api.input("slot").code;
+        const suppliedMaterial = api.input("material").code;
+        const collider = specification.supportsCollider
+          ? api.input("collider").code
+          : "false";
+        const done = api.emit("done");
+        const existingCall = specification.existingCall(
+          api,
+          slot,
+          `suppliedMaterial${token}`,
+          collider
+        );
+        const genericCall = specification.genericCall(
+          api,
+          slot,
+          materialType,
+          collider
+        );
+
+        return `try\n        {\n            ${exceptionField} = null;\n            ${slotField} = ${slot};\n            FrooxEngine.IAssetProvider<FrooxEngine.Material>? suppliedMaterial${token} = ${suppliedMaterial};\n\n            if (suppliedMaterial${token} is not null)\n            {\n                ${meshField} = ${existingCall};\n                ${materialField} = suppliedMaterial${token};\n            }\n            else\n            {\n                ${meshField} = ${genericCall};\n                ${materialField} = ${slot}.GetComponent<${materialType}>();\n            }\n\n            ${rendererField} = ${slot}.GetComponent<FrooxEngine.MeshRenderer>();\n            ${colliderField} = ${slot}.GetComponent<FrooxEngine.Collider>();\n            ${successField} = ${meshField} is not null && ${materialField} is not null && ${rendererField} is not null && (!${collider} || ${colliderField} is not null);\n        }\n        catch (System.Exception caught)\n        {\n            ${exceptionField} = caught;\n            ${meshField} = null;\n            ${materialField} = null;\n            ${rendererField} = null;\n            ${colliderField} = null;\n            ${successField} = false;\n        }${done ? `\n        ${done}();` : ""}`;
+      }
+    });
+  }
+
+  registerShapeAttachNode({
+    id: "attach.quad",
+    title: "Attach Quad",
+    symbol: "+QUAD",
+    description:
+      "Covers both Slot.AttachQuad overloads with an existing or newly created material.",
+    fieldPrefix: "attachQuad",
+    meshGraphType: "quadMesh",
+    meshCsType: "FrooxEngine.QuadMesh",
+    supportsCollider: true,
+    inputs: [port("size", "Size", "float2", { defaultCs: "new Elements.Core.float2(1f, 1f)" })],
+    existingCall: (api, slot, material, collider) =>
+      `${slot}.AttachQuad(${api.input("size").code}, ${material}, ${collider})`,
+    genericCall: (api, slot, materialType, collider) =>
+      `${slot}.AttachQuad<${materialType}>(${api.input("size").code}, ${collider})`
+  });
+
+  registerShapeAttachNode({
+    id: "attach.box",
+    title: "Attach Box",
+    symbol: "+BOX",
+    description:
+      "Covers both Slot.AttachBox overloads with an existing or newly created material.",
+    fieldPrefix: "attachBox",
+    meshGraphType: "boxMesh",
+    meshCsType: "FrooxEngine.BoxMesh",
+    supportsCollider: true,
+    inputs: [port("size", "Size", "float3", { defaultCs: "Elements.Core.float3.One" })],
+    existingCall: (api, slot, material, collider) =>
+      `${slot}.AttachBox(${api.input("size").code}, ${material}, ${collider})`,
+    genericCall: (api, slot, materialType, collider) =>
+      `${slot}.AttachBox<${materialType}>(${api.input("size").code}, ${collider})`
+  });
+
+  registerShapeAttachNode({
+    id: "attach.sphere",
+    title: "Attach Sphere",
+    symbol: "+SPH",
+    description:
+      "Covers both Slot.AttachSphere overloads with an existing or newly created material.",
+    fieldPrefix: "attachSphere",
+    meshGraphType: "sphereMesh",
+    meshCsType: "FrooxEngine.SphereMesh",
+    supportsCollider: true,
+    inputs: [port("radius", "Radius", "float", { defaultCs: "0.5f" })],
+    existingCall: (api, slot, material, collider) =>
+      `${slot}.AttachSphere(${api.input("radius").code}, ${material}, ${collider})`,
+    genericCall: (api, slot, materialType, collider) =>
+      `${slot}.AttachSphere<${materialType}>(${api.input("radius").code}, ${collider})`
+  });
+
+  registerShapeAttachNode({
+    id: "attach.cylinder",
+    title: "Attach Cylinder",
+    symbol: "+CYL",
+    description:
+      "Covers both Slot.AttachCylinder overloads with an existing or newly created material.",
+    fieldPrefix: "attachCylinder",
+    meshGraphType: "cylinderMesh",
+    meshCsType: "FrooxEngine.CylinderMesh",
+    supportsCollider: true,
+    inputs: [
+      port("radius", "Radius", "float", { defaultCs: "0.5f" }),
+      port("height", "Height", "float", { defaultCs: "1f" })
+    ],
+    existingCall: (api, slot, material, collider) =>
+      `${slot}.AttachCylinder(${api.input("radius").code}, ${api.input("height").code}, ${material}, ${collider})`,
+    genericCall: (api, slot, materialType, collider) =>
+      `${slot}.AttachCylinder<${materialType}>(${api.input("radius").code}, ${api.input("height").code}, ${collider})`
+  });
+
+  registerNode("attach.arrow", {
+    title: "Attach Arrow",
+    group: "Attach & Create",
+    symbol: "+ARR",
+    description:
+      "Covers Slot.AttachArrow with a generated material or an existing material provider.",
+    parameters: [materialTypeParameter()],
+    inputs: [
+      port("call", "Call", "impulse"),
+      port("slot", "Slot", "slot"),
+      port("material", "Existing Material (optional)", "material"),
+      port("vector", "Vector", "float3", { defaultCs: "new Elements.Core.float3(0f, 0f, 1f)" }),
+      port("color", "Color", "colorX", { defaultCs: "colorX.White" })
+    ],
+    outputs: [
+      port("done", "Done", "impulse"),
+      port("slot", "Slot", "slot"),
+      port("mesh", "Arrow Mesh", "arrowMesh"),
+      port("material", "Material", "material"),
+      port("renderer", "Renderer", "meshRenderer"),
+      port("success", "Success", "bool"),
+      port("exception", "Exception", "exception")
+    ],
+    codegenCollect(api) {
+      attachResultFields(
+        api,
+        "attachArrow",
+        "FrooxEngine.ArrowMesh"
+      );
+    },
+    codegenExpression(api) {
+      return attachOutputExpression(api, "attachArrow");
+    },
+    codegenAction(api) {
+      const materialType = directMaterialType(api);
+      const token = nodeToken(api);
+      const slotField = `_attachArrowSlot${token}`;
+      const meshField = `_attachArrowMesh${token}`;
+      const materialField = `_attachArrowMaterial${token}`;
+      const rendererField = `_attachArrowRenderer${token}`;
+      const successField = `_attachArrowSuccess${token}`;
+      const exceptionField = `_attachArrowException${token}`;
+      const slot = api.input("slot").code;
+      const suppliedMaterial = api.input("material").code;
+      const vector = api.input("vector").code;
+      const color = api.input("color").code;
+      const done = api.emit("done");
+      return `try\n        {\n            ${exceptionField} = null;\n            ${slotField} = ${slot};\n            FrooxEngine.IAssetProvider<FrooxEngine.Material>? suppliedMaterial${token} = ${suppliedMaterial};\n\n            if (suppliedMaterial${token} is not null)\n            {\n                ${meshField} = ${slot}.AttachMesh<FrooxEngine.ArrowMesh>(suppliedMaterial${token});\n                ${meshField}.Vector.Value = ${vector};\n                ${materialField} = suppliedMaterial${token};\n            }\n            else\n            {\n                FrooxEngine.AttachedModel<FrooxEngine.ArrowMesh, ${materialType}> model${token} = ${slot}.AttachArrow<${materialType}>(${vector});\n                ${meshField} = model${token}.mesh;\n                ${materialField} = model${token}.material;\n                ${rendererField} = model${token}.renderer;\n            }\n\n            if (${materialField} is FrooxEngine.ICommonMaterial commonMaterial${token})\n            {\n                commonMaterial${token}.Color = ${color};\n            }\n\n            ${rendererField} ??= ${slot}.GetComponent<FrooxEngine.MeshRenderer>();\n            ${successField} = ${meshField} is not null && ${materialField} is not null && ${rendererField} is not null;\n        }\n        catch (System.Exception caught)\n        {\n            ${exceptionField} = caught;\n            ${meshField} = null;\n            ${materialField} = null;\n            ${rendererField} = null;\n            ${successField} = false;\n        }${done ? `\n        ${done}();` : ""}`;
+    }
+  });
+
+  function registerSimpleAttachNode(specification) {
+    registerNode(specification.id, {
+      title: specification.title,
+      group: "Attach & Create",
+      symbol: specification.symbol,
+      description: specification.description,
+      parameters: specification.parameters || [],
+      inputs: [
+        port("call", "Call", "impulse"),
+        port("slot", "Slot", "slot"),
+        ...specification.inputs
+      ],
+      outputs: [
+        port("done", "Done", "impulse"),
+        port("asset", specification.outputLabel, specification.outputType),
+        port("success", "Success", "bool"),
+        port("exception", "Exception", "exception")
+      ],
+      codegenCollect(api) {
+        ensureDirectResoniteCore(api);
+        addStatefulField(
+          api,
+          `${specification.fieldPrefix}Value`,
+          `${specification.outputCsType}?`,
+          "null"
+        );
+        addStatefulField(
+          api,
+          `${specification.fieldPrefix}Success`,
+          "bool",
+          "false"
+        );
+        addStatefulField(
+          api,
+          `${specification.fieldPrefix}Exception`,
+          "System.Exception?",
+          "null"
+        );
+      },
+      codegenExpression(api) {
+        const token = nodeToken(api);
+        if (api.portId === "success") {
+          return `_${specification.fieldPrefix}Success${token}`;
+        }
+        if (api.portId === "exception") {
+          return `_${specification.fieldPrefix}Exception${token}!`;
+        }
+        return `_${specification.fieldPrefix}Value${token}!`;
+      },
+      codegenAction(api) {
+        const token = nodeToken(api);
+        const value = `_${specification.fieldPrefix}Value${token}`;
+        const success = `_${specification.fieldPrefix}Success${token}`;
+        const exception = `_${specification.fieldPrefix}Exception${token}`;
+        const done = api.emit("done");
+        return `try\n        {\n            ${exception} = null;\n            ${value} = ${specification.call(api)};\n            ${success} = ${value} is not null;\n        }\n        catch (System.Exception caught)\n        {\n            ${exception} = caught;\n            ${value} = null;\n            ${success} = false;\n        }${done ? `\n        ${done}();` : ""}`;
+      }
+    });
+  }
+
+  registerSimpleAttachNode({
+    id: "attach.texture2D",
+    title: "Attach Texture 2D",
+    symbol: "+TEX",
+    description:
+      "Covers both Slot.AttachTexture overloads, including independent U/V wrap modes and optional MaxSize.",
+    fieldPrefix: "attachTexture",
+    outputLabel: "Static Texture 2D",
+    outputType: "staticTexture2D",
+    outputCsType: "FrooxEngine.StaticTexture2D",
+    inputs: [
+      port("uri", "URI", "Uri"),
+      port("getExisting", "Get Existing", "bool", { defaultCs: "true" }),
+      port("uncompressed", "Uncompressed", "bool", { defaultCs: "false" }),
+      port("directLoad", "Direct Load", "bool", { defaultCs: "false" }),
+      port("evenNull", "Create Even If Null", "bool", { defaultCs: "false" }),
+      port("wrapU", "Wrap U", "textureWrapMode", { defaultCs: "Renderite.Shared.TextureWrapMode.Repeat" }),
+      port("wrapV", "Wrap V", "textureWrapMode", { defaultCs: "Renderite.Shared.TextureWrapMode.Repeat" }),
+      port("maxSize", "Max Size (0 = none)", "int", { defaultCs: "0" })
+    ],
+    call: api => {
+      const maxSize = api.input("maxSize").code;
+      return `${api.input("slot").code}.AttachTexture(${api.input("uri").code}, ${api.input("getExisting").code}, ${api.input("uncompressed").code}, ${api.input("directLoad").code}, ${api.input("evenNull").code}, ${api.input("wrapU").code}, ${api.input("wrapV").code}, ${maxSize} > 0 ? ${maxSize} : (int?)null)`;
+    }
+  });
+
+  registerSimpleAttachNode({
+    id: "attach.cubemap",
+    title: "Attach Cubemap",
+    symbol: "+CUBE-T",
+    description:
+      "Calls Slot.AttachCubemap directly.",
+    fieldPrefix: "attachCubemap",
+    outputLabel: "Static Cubemap",
+    outputType: "staticCubemap",
+    outputCsType: "FrooxEngine.StaticCubemap",
+    inputs: [
+      port("uri", "URI", "Uri"),
+      port("getExisting", "Get Existing", "bool", { defaultCs: "true" }),
+      port("evenNull", "Create Even If Null", "bool", { defaultCs: "false" })
+    ],
+    call: api =>
+      `${api.input("slot").code}.AttachCubemap(${api.input("uri").code}, ${api.input("getExisting").code}, ${api.input("evenNull").code})`
+  });
+
+  registerSimpleAttachNode({
+    id: "attach.spriteUri",
+    title: "Attach Sprite From URI",
+    symbol: "+SPR-URI",
+    description:
+      "Covers the URI overload of Slot.AttachSprite.",
+    fieldPrefix: "attachSpriteUri",
+    outputLabel: "Sprite Provider",
+    outputType: "spriteProvider",
+    outputCsType: "FrooxEngine.SpriteProvider",
+    inputs: [
+      port("uri", "URI", "Uri"),
+      port("uncompressed", "Uncompressed", "bool", { defaultCs: "false" }),
+      port("evenNull", "Create Even If Null", "bool", { defaultCs: "false" }),
+      port("getExisting", "Get Existing", "bool", { defaultCs: "true" }),
+      port("maxSize", "Max Size (0 = none)", "int", { defaultCs: "0" })
+    ],
+    call: api => {
+      const maxSize = api.input("maxSize").code;
+      return `${api.input("slot").code}.AttachSprite(${api.input("uri").code}, ${api.input("uncompressed").code}, ${api.input("evenNull").code}, ${api.input("getExisting").code}, ${maxSize} > 0 ? ${maxSize} : (int?)null)`;
+    }
+  });
+
+  registerSimpleAttachNode({
+    id: "attach.spriteTexture",
+    title: "Attach Sprite From Texture",
+    symbol: "+SPR-TEX",
+    description:
+      "Covers the IAssetProvider<ITexture2D> overload of Slot.AttachSprite.",
+    fieldPrefix: "attachSpriteTexture",
+    outputLabel: "Sprite Provider",
+    outputType: "spriteProvider",
+    outputCsType: "FrooxEngine.SpriteProvider",
+    inputs: [port("texture", "Texture", "texture")],
+    call: api =>
+      `${api.input("slot").code}.AttachSprite(${api.input("texture").code})`
+  });
+
+  registerSimpleAttachNode({
+    id: "attach.staticMesh",
+    title: "Attach Static Mesh",
+    symbol: "+SMESH",
+    description:
+      "Calls Slot.AttachStaticMesh directly.",
+    fieldPrefix: "attachStaticMesh",
+    outputLabel: "Static Mesh",
+    outputType: "staticMesh",
+    outputCsType: "FrooxEngine.StaticMesh",
+    inputs: [
+      port("uri", "URI", "Uri"),
+      port("getExisting", "Get Existing", "bool", { defaultCs: "true" })
+    ],
+    call: api =>
+      `${api.input("slot").code}.AttachStaticMesh(${api.input("uri").code}, ${api.input("getExisting").code})`
+  });
+
+  registerSimpleAttachNode({
+    id: "attach.audioClip",
+    title: "Attach Audio Clip",
+    symbol: "+AUDIO",
+    description:
+      "Calls Slot.AttachAudioClip directly.",
+    fieldPrefix: "attachAudioClip",
+    outputLabel: "Static Audio Clip",
+    outputType: "staticAudioClip",
+    outputCsType: "FrooxEngine.StaticAudioClip",
+    inputs: [
+      port("uri", "URI", "Uri"),
+      port("getExisting", "Get Existing", "bool", { defaultCs: "true" })
+    ],
+    call: api =>
+      `${api.input("slot").code}.AttachAudioClip(${api.input("uri").code}, ${api.input("getExisting").code})`
+  });
+
+  registerSimpleAttachNode({
+    id: "attach.font",
+    title: "Attach Font",
+    symbol: "+FONT",
+    description:
+      "Calls Slot.AttachFont directly.",
+    fieldPrefix: "attachFont",
+    outputLabel: "Static Font",
+    outputType: "staticFont",
+    outputCsType: "FrooxEngine.StaticFont",
+    inputs: [
+      port("uri", "URI", "Uri"),
+      port("getExisting", "Get Existing", "bool", { defaultCs: "true" })
+    ],
+    call: api =>
+      `${api.input("slot").code}.AttachFont(${api.input("uri").code}, ${api.input("getExisting").code})`
+  });
+
+  registerNode("attach.skybox", {
+    title: "Attach Skybox",
+    group: "Attach & Create",
+    symbol: "+SKY",
+    description:
+      "Calls Slot.AttachSkybox<TMaterial>() directly and exposes both the Skybox and created material.",
+    parameters: [materialTypeParameter()],
+    resolveDefinition(node) {
+      return {
+        outputs: [
+          port("done", "Done", "impulse"),
+          port("skybox", "Skybox", "skybox"),
+          port(
+            "material",
+            "Material",
+            graphMaterialType(
+              node.parameters?.materialType
+            )
+          ),
+          port("success", "Success", "bool"),
+          port("exception", "Exception", "exception")
+        ]
+      };
+    },
+    inputs: [
+      port("call", "Call", "impulse"),
+      port("slot", "Slot", "slot")
+    ],
+    outputs: [
+      port("done", "Done", "impulse"),
+      port("skybox", "Skybox", "skybox"),
+      port("material", "Material", "commonMaterial"),
+      port("success", "Success", "bool"),
+      port("exception", "Exception", "exception")
+    ],
+    codegenCollect(api) {
+      ensureDirectResoniteCore(api);
+      const materialType = directMaterialType(api);
+      addStatefulField(api, "attachSkybox", "FrooxEngine.Skybox?", "null");
+      addStatefulField(api, "attachSkyboxMaterial", `${materialType}?`, "null");
+      addStatefulField(api, "attachSkyboxSuccess", "bool", "false");
+      addStatefulField(api, "attachSkyboxException", "System.Exception?", "null");
+    },
+    codegenExpression(api) {
+      const token = nodeToken(api);
+      return {
+        skybox: `_attachSkybox${token}!`,
+        material: `_attachSkyboxMaterial${token}!`,
+        success: `_attachSkyboxSuccess${token}`,
+        exception: `_attachSkyboxException${token}!`
+      }[api.portId] || "null!";
+    },
+    codegenAction(api) {
+      const materialType = directMaterialType(api);
+      const token = nodeToken(api);
+      const skybox = `_attachSkybox${token}`;
+      const material = `_attachSkyboxMaterial${token}`;
+      const success = `_attachSkyboxSuccess${token}`;
+      const exception = `_attachSkyboxException${token}`;
+      const slot = api.input("slot").code;
+      const done = api.emit("done");
+      return `try\n        {\n            ${exception} = null;\n            ${material} = ${slot}.AttachSkybox<${materialType}>();\n            ${skybox} = ${slot}.GetComponent<FrooxEngine.Skybox>();\n            ${success} = ${material} is not null && ${skybox} is not null;\n        }\n        catch (System.Exception caught)\n        {\n            ${exception} = caught;\n            ${material} = null;\n            ${skybox} = null;\n            ${success} = false;\n        }${done ? `\n        ${done}();` : ""}`;
     }
   });
 
@@ -3380,7 +7089,7 @@ private static T ReadNumericComponent<T>(
     ],
     codegenExpression(api) {
       ensureResoniteRuntime(api);
-      return `FindComponentReflective(${api.input("slot").code}, FindType("FrooxEngine.DynamicVariableSpace"))!`;
+      return `(FrooxEngine.DynamicVariableSpace)FindComponentReflective(${api.input("slot").code}, typeof(FrooxEngine.DynamicVariableSpace))!`;
     }
   });
 
@@ -3407,7 +7116,7 @@ private static T ReadNumericComponent<T>(
       addStatefulField(
         api,
         "dynamicSpace",
-        "object?",
+        "FrooxEngine.DynamicVariableSpace?",
         "null"
       );
     },
@@ -3417,7 +7126,7 @@ private static T ReadNumericComponent<T>(
     codegenAction(api) {
       const field = `_dynamicSpace${nodeToken(api)}`;
       const done = api.emit("done");
-      return `${field} = AttachComponentReflective(${api.input("slot").code}, FindType("FrooxEngine.DynamicVariableSpace"));${done ? `\n        ${done}();` : ""}`;
+      return `${field} = (FrooxEngine.DynamicVariableSpace?)AttachComponentReflective(${api.input("slot").code}, typeof(FrooxEngine.DynamicVariableSpace));${done ? `\n        ${done}();` : ""}`;
     }
   });
 
@@ -3511,7 +7220,7 @@ private static T ReadNumericComponent<T>(
     ],
     codegenExpression(api) {
       ensureResoniteRuntime(api);
-      return "CurrentRadiantDash()!";
+      return `(FrooxEngine.RadiantDash)CurrentRadiantDash()!`;
     }
   });
 
@@ -3570,7 +7279,7 @@ private static T ReadNumericComponent<T>(
       addStatefulField(
         api,
         "modalRoot",
-        "object?",
+        "FrooxEngine.Slot?",
         "null"
       );
     },
@@ -3580,7 +7289,7 @@ private static T ReadNumericComponent<T>(
     codegenAction(api) {
       const field = `_modalRoot${nodeToken(api)}`;
       const done = api.emit("done");
-      return `${field} = OpenRadiantDashModalReflective(${api.input("dash").code}, ${api.input("size").code}, ${api.input("title").code});${done ? `\n        ${done}();` : ""}`;
+      return `${field} = (FrooxEngine.Slot?)OpenRadiantDashModalReflective(${api.input("dash").code}, ${api.input("size").code}, ${api.input("title").code});${done ? `\n        ${done}();` : ""}`;
     }
   });
 
@@ -3594,7 +7303,7 @@ private static T ReadNumericComponent<T>(
     outputs: [port("builder", "UIBuilder", "uiBuilder")],
     codegenExpression(api) {
       ensureResoniteRuntime(api);
-      return `CreateUiBuilderReflective(${api.input("slot").code})!`;
+      return `(FrooxEngine.UIX.UIBuilder)CreateUiBuilderReflective(${api.input("slot").code})!`;
     }
   });
 
@@ -3803,7 +7512,7 @@ private static T ReadNumericComponent<T>(
     ],
     outputs: [
       port("done", "Done", "impulse"),
-      port("asset", "Asset / request", "asset")
+      port("asset", "Result / request", "object")
     ],
     codegenCollect(api) {
       ensureResoniteRuntime(api);
@@ -4171,15 +7880,7 @@ private static T ReadNumericComponent<T>(
     description:
       "Deserializes a JsonNode into the selected graph value type.",
     configurableTypeVar: "T",
-    configurableTypes: COMMON_VALUE_TYPES.filter(
-      type =>
-        ![
-          "json",
-          "patchContext",
-          "task",
-          "cancellationToken"
-        ].includes(type)
-    ),
+    configurableTypes: JSON_CONVERTIBLE_TYPES,
     defaultType: "string",
     inputs: [port("json", "JSON", "json")],
     outputs: [
@@ -4569,7 +8270,8 @@ private static T ReadNumericComponent<T>(
   });
 
   registerNode("task.dispatchResonite", {
-    title: "Dispatch To Resonite",
+    expertOnly: true,
+    title: "Dispatch Via Engine Fallback",
     group: "Tasks & Threading",
     symbol: "MAIN",
     description:
@@ -5246,6 +8948,41 @@ private static T ReadNumericComponent<T>(
       const nodes = Array.isArray(api.nodes)
         ? api.nodes
         : [];
+
+      const selectedRuntimeTypes = new Set();
+
+      for (const node of nodes) {
+        const configuredType =
+          node?.kind === "operator"
+            ? node.parameters?.valueType
+            : null;
+
+        if (
+          typeof configuredType === "string" &&
+          configuredType &&
+          configuredType !== "auto"
+        ) {
+          selectedRuntimeTypes.add(
+            configuredType
+          );
+        }
+      }
+
+      if (
+        selectedRuntimeTypes.has(
+          "httpResponse"
+        )
+      ) {
+        ensureNetworkRuntime(api);
+      }
+
+      if (
+        selectedRuntimeTypes.has(
+          "patchContext"
+        )
+      ) {
+        ensureHarmonyRuntime(api);
+      }
 
       const mainMembers = [];
       const mainMemberUsings =
