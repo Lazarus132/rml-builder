@@ -241,31 +241,32 @@
       const color = colorForString(csType);
 
       registerType(graphType, {
-        label,
-        short: shortBadge(label),
-        color,
-        csType,
-        defaultCs: referenceType
-            ? "null!"
-            : `default(${csType})`,
-        referenceType,
-        valueType: true,
+          label,
+          short: shortBadge(label),
+          color,
+          csType,
+          defaultCs: referenceType
+              ? "null!"
+              : `default(${csType})`,
+          referenceType,
+          valueType: true,
+          globalGenericCandidate: false,
 
-        enumType:
-            information.kind === "enum",
+          enumType:
+              information.kind === "enum",
 
-        assignableTo: referenceType
-            ? ["object"]
-            : [],
+          assignableTo: referenceType
+              ? ["object"]
+              : [],
 
-        constraints:
-            information.kind === "enum"
-                ? ["value", "serializable", "enumOrString"]
-                : referenceType
-                    ? ["reference", "serializable"]
-                    : ["serializable"],
+          constraints:
+              information.kind === "enum"
+                  ? ["value", "serializable", "enumOrString"]
+                  : referenceType
+                      ? ["reference", "serializable"]
+                      : ["serializable"],
 
-        apiCatalogType: csType
+          apiCatalogType: csType
       });
 
       graphTypeByCs.set(csType, graphType);

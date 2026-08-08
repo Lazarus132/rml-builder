@@ -714,10 +714,11 @@
     };
 
     if (
-      information.valueType === true &&
-      !VALUE_TYPES.includes(id)
+        information.valueType === true &&
+        information.globalGenericCandidate !== false &&
+        !VALUE_TYPES.includes(id)
     ) {
-      VALUE_TYPES.push(id);
+        VALUE_TYPES.push(id);
     }
   }
 
@@ -2887,27 +2888,29 @@
   }
 
   function graphConcreteTypes() {
-    const result = new Set([
-      ...VALUE_TYPES,
-      ...Object.keys(TYPE_INFO)
-    ]);
+      const result = new Set(
+          VALUE_TYPES
+      );
 
-    for (const node of graph.nodes) {
-      const definition = nodeDefinition(node);
+      for (const node of graph.nodes) {
+          const definition =
+              nodeDefinition(node);
 
-      for (const spec of [
-        ...(definition?.inputs || []),
-        ...(definition?.outputs || [])
-      ]) {
-        if (spec.type) {
-          result.add(spec.type);
-        }
+          for (const spec of [
+              ...(definition?.inputs || []),
+              ...(definition?.outputs || [])
+          ]) {
+              if (
+                  spec.type &&
+                  spec.type !== "generic" &&
+                  spec.type !== "auto"
+              ) {
+                  result.add(spec.type);
+              }
+          }
       }
-    }
 
-    result.delete("generic");
-    result.delete("auto");
-    return [...result];
+      return [...result];
   }
 
   function genericVariableDefault(variable) {
@@ -3144,8 +3147,7 @@
                 : node.operatorId === "constant.vector"
                   ? "Vector Constant components are not valid for the selected vector type."
                   : `${definition?.title || "Node"} has no valid concrete type for generic ${typeVar}.`,
-            bindings: new Map(),
-            domains: new Map()
+            bindings: new Map()
           };
         }
 
@@ -3211,8 +3213,7 @@
           valid: false,
           reason:
             "A connection references a missing node or port.",
-          bindings: new Map(),
-          domains: new Map()
+          bindings: new Map()
         };
       }
 
@@ -3237,8 +3238,7 @@
           valid: false,
           reason:
             `${fromRef.definition.title} · ${fromRef.spec.label} is Stored only and cannot trigger an impulse. Select Startup, Saved or Startup + Saved in the Configuration Outline.`,
-          bindings: new Map(),
-          domains: new Map()
+          bindings: new Map()
         };
       }
 
@@ -3256,8 +3256,7 @@
           valid: false,
           reason:
             "A connection references an unresolved port type.",
-          bindings: new Map(),
-          domains: new Map()
+          bindings: new Map()
         };
       }
 
@@ -3304,8 +3303,7 @@
             valid: false,
             reason:
               `No safe type can connect ${edge.from.portRef.definition.title} · ${edge.from.portRef.spec.label} to ${edge.to.portRef.definition.title} · ${edge.to.portRef.spec.label}. Narrowing conversions require an explicit conversion node.`,
-            bindings: new Map(),
-            domains: new Map()
+            bindings: new Map()
           };
         }
 
@@ -3344,8 +3342,7 @@
             valid: false,
             reason:
               `The connection between ${edge.from.portRef.definition.title} and ${edge.to.portRef.definition.title} leaves no valid concrete type.`,
-            bindings: new Map(),
-            domains: new Map()
+            bindings: new Map()
           };
         }
       }
@@ -3542,13 +3539,7 @@
         valid: false,
         reason:
           "No safe concrete type assignment satisfies all connected generic ports. Add an explicit conversion or select a concrete node type.",
-        bindings: new Map(),
-        domains: new Map(
-          [...variables].map(([key, variable]) => [
-            key,
-            [...variable.domain]
-          ])
-        )
+        bindings: new Map()
       };
     }
 
@@ -3580,22 +3571,15 @@
           valid: false,
           reason:
             `${typeLabel(fromType)} cannot safely connect to ${typeLabel(toType)}.`,
-          bindings,
-          domains: new Map()
+          bindings
         };
       }
     }
 
     return {
-      valid: true,
-      reason: "",
-      bindings,
-      domains: new Map(
-        [...variables].map(([key, variable]) => [
-          key,
-          [...variable.domain]
-        ])
-      )
+        valid: true,
+        reason: "",
+        bindings
     };
   }
 
