@@ -11244,29 +11244,53 @@ function renderInspector() {
   bindInspectorInteractions();
 }
 
+function generatedCodeForCurrentView() {
+  const graphFiles =
+    getAdditionalGeneratedSourceFiles();
+
+  if (graphFiles.length > 0) {
+    return {
+      graphActive: true,
+      files: graphFiles,
+      code: graphFiles
+        .map(
+          file =>
+            `// ============================================================\n` +
+            `// FILE: ${file.name}\n` +
+            `// ============================================================\n\n` +
+            file.content.trimEnd()
+        )
+        .join("\n\n") + "\n"
+    };
+  }
+
+  return {
+    graphActive: false,
+    files: [],
+    code: generateCode()
+  };
+}
+
 function updateGeneratedOutput() {
   const errors = getDiagnostics();
-  const code = generateCode();
-  const additionalFiles =
-    getAdditionalGeneratedSourceFiles();
-  const graphSummary =
-    additionalFiles.length > 0
-      ? additionalFiles
-          .map(
-            file =>
-              `${file.name}: ${file.content.split("\n").length} lines`
-          )
-          .join(" · ")
-      : "";
+  const output =
+    generatedCodeForCurrentView();
+  const code = output.code;
 
   elements.generatedCode.textContent = code;
-  elements.codeSummary.textContent = `${currentFlattenedNodes().length} item${
-    currentFlattenedNodes().length === 1 ? "" : "s"
-  } · main: ${code.split("\n").length} lines${
-    graphSummary
-      ? ` · ${graphSummary}`
-      : ""
-  }`;
+
+  if (output.graphActive) {
+    elements.codeSummary.textContent =
+      `${output.files.length} graph C# file${
+        output.files.length === 1 ? "" : "s"
+      } · ${code.split("\n").length} lines`;
+  } else {
+    elements.codeSummary.textContent =
+      `${currentFlattenedNodes().length} item${
+        currentFlattenedNodes().length === 1 ? "" : "s"
+      } · main: ${code.split("\n").length} lines`;
+  }
+
   elements.diagnostics.hidden = errors.length === 0;
   elements.diagnostics.innerHTML = errors.length
     ? `<strong>Fix these issues before copying:</strong><ul>${errors
@@ -13868,6 +13892,15 @@ function copyGeneratedCode(button) {
   );
 }
 
+function copyGeneratedCodeForCurrentView(
+  button
+) {
+  return copyText(
+    generatedCodeForCurrentView().code,
+    button
+  );
+}
+
 function copyGeneratedProjectFile(button) {
   return copyText(
     generateProjectFile(),
@@ -15753,7 +15786,9 @@ function initialize() {
     .getElementById("new-blank")
     .addEventListener("click", newBlank);
   elements.copyCodeBottom.addEventListener("click", () =>
-    copyGeneratedCode(elements.copyCodeBottom)
+    copyGeneratedCodeForCurrentView(
+      elements.copyCodeBottom
+    )
   );
   elements.topMenuToggle?.addEventListener(
     "click",
