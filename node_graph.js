@@ -2181,16 +2181,6 @@
           ? source.operatorId
           : undefined;
 
-      if (
-        kind === "operator" &&
-        !Object.hasOwn(
-          OPERATOR_DEFINITIONS,
-          operatorId
-        )
-      ) {
-        continue;
-      }
-
       usedNodeIds.add(source.id);
 
       const definition =
@@ -4177,15 +4167,33 @@
     };
   }
 
-  function pruneConnections() {
-    if (graph.connections.length === 0) {
-        currentAnalysis =
-            synchronizeAutoVectorTypes(
-                graph.connections,
-                currentAnalysis
-            );
+  function hasMissingOperatorDefinitions() {
+    return graph.nodes.some(
+      node =>
+        node.kind === "operator" &&
+        (
+          typeof node.operatorId !== "string" ||
+          !Object.hasOwn(
+            OPERATOR_DEFINITIONS,
+            node.operatorId
+          )
+        )
+    );
+  }
 
-        return;
+  function pruneConnections() {
+    if (hasMissingOperatorDefinitions()) {
+      return;
+    }
+
+    if (graph.connections.length === 0) {
+      currentAnalysis =
+        synchronizeAutoVectorTypes(
+          graph.connections,
+          currentAnalysis
+        );
+
+      return;
     }
 
     const wholeGraph =
