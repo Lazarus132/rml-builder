@@ -318,6 +318,11 @@
   const RAW_CSHARP_GROUP =
     "Advanced / Raw C#";
 
+  // Attach/create nodes default to the currently selected Resonite world's
+  // RootSlot. A connected Slot wire always overrides this expression.
+  const DEFAULT_WORLD_ROOT_SLOT_CS =
+    "(FrooxEngine.Engine.Current?.WorldManager?.FocusedWorld ?? FrooxEngine.Userspace.UserspaceWorld)!.RootSlot";
+
   const NUMERIC_VECTOR_TYPES = [
     "int2",
     "int3",
@@ -1726,30 +1731,18 @@ private static object? CreateUiElementReflective(
 
 private static void DispatchToResonite(Action action)
 {
-    object? engine = CurrentEngine();
-
-    foreach (string methodName in new[]
+    FrooxEngine.World? world = CurrentFocusedWorld();
+    if (world is null || world.IsDisposed)
     {
-        "RunPostInit",
-        "RunSynchronously",
-        "Schedule",
-        "Enqueue"
-    })
-    {
-        try
-        {
-            object? result = InvokeBest(engine, methodName, action);
-            if (result is not null)
-            {
-                return;
-            }
-        }
-        catch
-        {
-        }
+        throw new InvalidOperationException(
+            "No usable Resonite world is available for synchronous execution.");
     }
 
-    action();
+    // World.RunSynchronously is FrooxEngine's supported bridge for code that
+    // needs to mutate the world's data model from another/background thread.
+    world.RunSynchronously(
+        action,
+        immediatellyIfPossible: true);
 }
 `);
   }
@@ -5160,10 +5153,10 @@ private static T ReadNumericComponent<T>(
     group: "Slots & Components",
     symbol: "+S",
     description:
-      "Creates a child Slot with Slot.AddSlot using the real FrooxEngine API.",
+      "Creates a child Slot with Slot.AddSlot. With Parent unconnected it uses the focused World.RootSlot; connect a Slot explicitly to override the parent.",
     inputs: [
       port("call", "Call", "impulse"),
-      port("parent", "Parent", "slot"),
+      port("parent", "Parent", "slot", { defaultCs: DEFAULT_WORLD_ROOT_SLOT_CS }),
       port("name", "Name", "string")
     ],
     outputs: [
@@ -5297,7 +5290,7 @@ private static T ReadNumericComponent<T>(
       "Calls Slot.AttachComponent(Type, runOnAttachBehavior) directly and therefore covers every valid concrete FrooxEngine Component type.",
     inputs: [
       port("call", "Call", "impulse"),
-      port("slot", "Slot", "slot"),
+      port("slot", "Slot", "slot", { defaultCs: DEFAULT_WORLD_ROOT_SLOT_CS }),
       port("type", "Component Type", "type"),
       port("runOnAttach", "Run OnAttach Behavior", "bool", { defaultCs: "true" })
     ],
@@ -5339,7 +5332,7 @@ private static T ReadNumericComponent<T>(
       "Gets an existing component by Type or attaches it directly when missing.",
     inputs: [
       port("call", "Call", "impulse"),
-      port("slot", "Slot", "slot"),
+      port("slot", "Slot", "slot", { defaultCs: DEFAULT_WORLD_ROOT_SLOT_CS }),
       port("type", "Component Type", "type"),
       port("exact", "Exact Type Only", "bool", { defaultCs: "false" }),
       port("runOnAttach", "Run OnAttach Behavior", "bool", { defaultCs: "true" })
@@ -6300,7 +6293,7 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
     },
     inputs: [
       port("call", "Call", "impulse"),
-      port("slot", "Slot", "slot")
+      port("slot", "Slot", "slot", { defaultCs: DEFAULT_WORLD_ROOT_SLOT_CS })
     ],
     outputs: [
       port("done", "Done", "impulse"),
@@ -6335,7 +6328,7 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
       "Returns an existing Grabbable or attaches one directly.",
     inputs: [
       port("call", "Call", "impulse"),
-      port("slot", "Slot", "slot")
+      port("slot", "Slot", "slot", { defaultCs: DEFAULT_WORLD_ROOT_SLOT_CS })
     ],
     outputs: [
       port("done", "Done", "impulse"),
@@ -6412,7 +6405,7 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
     group: "Attach & Create",
     symbol: "+PRIM",
     description:
-      "Calls Slot.AttachPrimitive<TMaterial>() directly and returns the created Slot, material, mesh, renderer and collider.",
+      "Calls Slot.AttachPrimitive<TMaterial>() directly. With Parent unconnected it creates under the focused World.RootSlot; connect a Slot explicitly to override the parent.",
     parameters: [materialTypeParameter(DEFAULT_MATERIAL_TYPE, true)],
     resolveDefinition(node) {
       return {
@@ -6436,7 +6429,7 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
     },
     inputs: [
       port("call", "Call", "impulse"),
-      port("parent", "Parent", "slot"),
+      port("parent", "Parent", "slot", { defaultCs: DEFAULT_WORLD_ROOT_SLOT_CS }),
       port("primitive", "Primitive", "primitive", { defaultCs: "FrooxEngine.Primitive.Cube" }),
       port("scale", "Scale", "float3", { defaultCs: "Elements.Core.float3.One" }),
       port("color", "Color", "colorX", { defaultCs: "colorX.White" }),
@@ -6504,7 +6497,7 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
     ],
     inputs: [
       port("call", "Call", "impulse"),
-      port("slot", "Slot", "slot"),
+      port("slot", "Slot", "slot", { defaultCs: DEFAULT_WORLD_ROOT_SLOT_CS }),
       port("existingMesh", "Existing Mesh (optional)", "mesh"),
       port("existingMaterial", "Existing Material (optional)", "material"),
       port("collider", "Mesh Collider", "bool", { defaultCs: "false" }),
@@ -6564,7 +6557,7 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
       parameters: [materialTypeParameter()],
       inputs: [
         port("call", "Call", "impulse"),
-        port("slot", "Slot", "slot"),
+        port("slot", "Slot", "slot", { defaultCs: DEFAULT_WORLD_ROOT_SLOT_CS }),
         port("material", "Existing Material (optional)", "material"),
         ...specification.inputs,
         ...(specification.supportsCollider
@@ -6709,7 +6702,7 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
     parameters: [materialTypeParameter()],
     inputs: [
       port("call", "Call", "impulse"),
-      port("slot", "Slot", "slot"),
+      port("slot", "Slot", "slot", { defaultCs: DEFAULT_WORLD_ROOT_SLOT_CS }),
       port("material", "Existing Material (optional)", "material"),
       port("vector", "Vector", "float3", { defaultCs: "new Elements.Core.float3(0f, 0f, 1f)" }),
       port("color", "Color", "colorX", { defaultCs: "colorX.White" })
@@ -6760,7 +6753,7 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
       parameters: specification.parameters || [],
       inputs: [
         port("call", "Call", "impulse"),
-        port("slot", "Slot", "slot"),
+        port("slot", "Slot", "slot", { defaultCs: DEFAULT_WORLD_ROOT_SLOT_CS }),
         ...specification.inputs
       ],
       outputs: [
@@ -6974,7 +6967,7 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
     },
     inputs: [
       port("call", "Call", "impulse"),
-      port("slot", "Slot", "slot")
+      port("slot", "Slot", "slot", { defaultCs: DEFAULT_WORLD_ROOT_SLOT_CS })
     ],
     outputs: [
       port("done", "Done", "impulse"),
@@ -8282,11 +8275,11 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
 
   registerNode("task.dispatchResonite", {
     expertOnly: true,
-    title: "Dispatch Via Engine Fallback",
+    title: "Dispatch To World Update",
     group: "Tasks & Threading",
     symbol: "MAIN",
     description:
-      "Attempts common Engine dispatcher methods through reflection and falls back to immediate execution.",
+      "Dispatches the impulse through World.RunSynchronously so Resonite data-model mutations execute in the target world update context.",
     inputs: [port("call", "Dispatch", "impulse")],
     outputs: [port("run", "Run", "impulse")],
     codegenCollect(api) {

@@ -5593,8 +5593,7 @@
     request = {}
   ) {
     if (
-      !graph?.active ||
-      !graph.configSnapshot
+      !graph?.configSnapshot
     ) {
       return {
         active: false,
@@ -6863,7 +6862,9 @@ ${actions.length > 0
       "using System;",
       "using System.Collections.Generic;",
       "using System.Globalization;",
-      "using System.Reflection;"
+      "using System.Linq;",
+      "using System.Reflection;",
+      "using System.Threading;"
     ]);
 
     if (usesElements) {
@@ -6935,7 +6936,11 @@ ${actions.length > 0
 
           return `    public static void ${item.reactor}()
     {
-        ${emitter}();
+        DispatchGraphToWorld(() =>
+        {
+            ${emitter}();
+            RefreshDisplays();
+        });
     }`;
         })
         .join("\n\n");
@@ -7042,9 +7047,7 @@ ${reactionCode}` : ""}
     public static void OnEngineInit()
     {
 ${startupEmitters.length > 0
-  ? startupEmitters
-      .map(call => `        ${call}`)
-      .join("\n")
+  ? "        BeginStartupWhenWorldReady();"
   : "        // No connected startup impulse paths."}${extensionEngineInitStatements.length > 0
   ? `\n${formatExtensionStatements(
       extensionEngineInitStatements
@@ -7053,6 +7056,94 @@ ${startupEmitters.length > 0
 
         RefreshDisplays();
     }
+
+    // Graph entry points use the global CoroutineManager only to wait until a
+    // usable world exists. Actual graph execution is dispatched through
+    // World.RunSynchronously(), FrooxEngine's supported data-model mutation
+    // path for background threads and other worlds.
+    private static FrooxEngine.World? GraphExecutionWorld()
+    {
+        return FrooxEngine.Engine.Current?.WorldManager?.FocusedWorld ??
+               FrooxEngine.Userspace.UserspaceWorld;
+    }
+
+    private static bool GraphWorldReady(FrooxEngine.World? world)
+    {
+        return world is not null &&
+               !world.IsDisposed &&
+               world.RootSlot is not null &&
+               world.LocalUser is not null;
+    }
+
+    private static bool TryDispatchGraphToWorld(Action action)
+    {
+        FrooxEngine.World? world = GraphExecutionWorld();
+        if (!GraphWorldReady(world))
+        {
+            return false;
+        }
+
+        world!.RunSynchronously(
+            action,
+            immediatellyIfPossible: true);
+        return true;
+    }
+
+    private static void DispatchGraphToWorld(Action action)
+    {
+        if (TryDispatchGraphToWorld(action))
+        {
+            return;
+        }
+
+        FrooxEngine.CoroutineManager? manager =
+            FrooxEngine.Engine.Current?.GlobalCoroutineManager;
+
+        if (manager is null)
+        {
+            throw new System.InvalidOperationException(
+                "The Resonite GlobalCoroutineManager is not available while waiting for a world-safe graph execution context.");
+        }
+
+        _ = manager.StartTask(
+            async () =>
+            {
+                while (!TryDispatchGraphToWorld(action))
+                {
+                    // Updates is only a wait primitive. World.RunSynchronously
+                    // is what grants the valid world mutation context.
+                    await new FrooxEngine.Updates(1);
+                }
+            });
+    }
+${startupEmitters.length > 0 ? `
+    private static int _startupWorldReadyState;
+
+    private static void BeginStartupWhenWorldReady()
+    {
+        if (System.Threading.Interlocked.CompareExchange(
+                ref _startupWorldReadyState, 1, 0) != 0)
+        {
+            return;
+        }
+
+        DispatchGraphToWorld(RunStartupOnce);
+    }
+
+    private static void RunStartupOnce()
+    {
+        if (System.Threading.Interlocked.CompareExchange(
+                ref _startupWorldReadyState, 2, 1) != 1)
+        {
+            return;
+        }
+
+${startupEmitters
+  .map(call => `        ${call}`)
+  .join("\n")}
+        RefreshDisplays();
+    }
+` : ""}
 
     public static void OnConfigurationSynchronized()
     {

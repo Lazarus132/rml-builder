@@ -2499,10 +2499,15 @@ function getTypedNodeGraphContribution() {
       ? state.extensions.typedNodeGraph
       : null;
 
-  if (
-    !extensionState ||
-    extensionState.active !== true
-  ) {
+  const hasPackedRuntimeGraph =
+    Boolean(
+      extensionState &&
+      extensionState.configSnapshot &&
+      typeof extensionState.configSnapshot === "object" &&
+      Array.isArray(extensionState.configSnapshot.nodes)
+    );
+
+  if (!hasPackedRuntimeGraph) {
     return null;
   }
 
