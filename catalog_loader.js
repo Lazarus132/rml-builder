@@ -24,7 +24,7 @@
     scriptUrl
   ).href;
   const modNodesUrl = new URL(
-    "mod_nodes.js?v=15",
+    "mod_nodes.js?v=16",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(

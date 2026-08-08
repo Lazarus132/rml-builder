@@ -3626,7 +3626,8 @@ private static void CreateGeneratedReversePatch(
         "components",
         "Components",
         "0, 0, 0",
-        "Comma-separated numeric components."
+        "One numeric field per vector component.",
+        { kind: "vector" }
       )
     ],
     outputs: [

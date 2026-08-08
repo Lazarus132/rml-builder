@@ -14089,6 +14089,212 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     return true;
   }
 
+  function appendNumericVectorParameterControl(
+    card,
+    node,
+    definition,
+    specification
+  ) {
+    const configuredType =
+      specification.vectorType ||
+      specification.valueType ||
+      node.parameters?.valueType;
+
+    let vectorType =
+      numericVectorInfo(configuredType)
+        ? configuredType
+        : null;
+
+    if (
+      !vectorType &&
+      node.parameters?.valueType === "auto" &&
+      definition?.configurableTypeVar
+    ) {
+      const analysis =
+        currentAnalysis ||
+        analyzeConnections(
+          graph.connections
+        );
+      const inferredType =
+        analysis.bindings
+          .get(node.id)?.[
+            definition.configurableTypeVar
+          ] || null;
+
+      if (numericVectorInfo(inferredType)) {
+        vectorType = inferredType;
+      }
+    }
+
+    if (
+      !vectorType &&
+      isAutoVectorOperator(node)
+    ) {
+      const inferredType =
+        effectiveAutoVectorType(node);
+
+      if (numericVectorInfo(inferredType)) {
+        vectorType = inferredType;
+      }
+    }
+
+    if (!vectorType) {
+      const fallbackType =
+        definition?.autoFallbackType ||
+        fallbackTypeForDefinition(
+          definition || {}
+        );
+
+      if (numericVectorInfo(fallbackType)) {
+        vectorType = fallbackType;
+      }
+    }
+
+    const information =
+      numericVectorInfo(vectorType);
+
+    if (!information) {
+      return false;
+    }
+
+    const normalized =
+      validateNumericVectorValue(
+        node.parameters?.[specification.key] ||
+          Array.from(
+            { length: information.componentCount },
+            () => "0"
+          ).join(", "),
+        vectorType,
+        { coerce: true }
+      );
+
+    const components =
+      normalized.valid
+        ? [...normalized.components]
+        : Array.from(
+            { length: information.componentCount },
+            () => "0"
+          );
+
+    node.parameters[specification.key] =
+      components.join(", " );
+
+    const editor =
+      document.createElement("fieldset");
+    editor.className =
+      "vector-default-editor rml-graph-vector-editor";
+
+    const title =
+      document.createElement("legend");
+    title.textContent =
+      specification.label ||
+      specification.key ||
+      "Vector";
+
+    const fields =
+      document.createElement("div");
+    fields.className =
+      `vector-fields vector-fields-${information.componentCount}`;
+
+    const componentNames =
+      ["X", "Y", "Z", "W"];
+
+    const commitComponents = () => {
+      node.parameters[specification.key] =
+        components.join(", " );
+      persistGraph(
+        specification.commitImmediately === true
+      );
+      refreshDisplayValueNodes();
+    };
+
+    for (
+      let index = 0;
+      index < information.componentCount;
+      index += 1
+    ) {
+      const componentLabel =
+        document.createElement("label");
+      componentLabel.className =
+        "vector-component";
+      componentLabel.textContent =
+        componentNames[index];
+
+      const input =
+        document.createElement("input");
+      input.type = "number";
+      input.step =
+        information.scalarType === "int"
+          ? "1"
+          : "any";
+      input.value = components[index];
+      input.inputMode = "decimal";
+
+      input.addEventListener(
+        "input",
+        () => {
+          const result =
+            validateNumericValue(
+              input.value,
+              information.scalarType,
+              { coerce: false }
+            );
+
+          input.setCustomValidity(
+            result.valid
+              ? ""
+              : result.reason
+          );
+
+          if (!result.valid) {
+            return;
+          }
+
+          components[index] =
+            result.value;
+          commitComponents();
+        }
+      );
+
+      input.addEventListener(
+        "change",
+        () => {
+          const result =
+            validateNumericValue(
+              input.value,
+              information.scalarType,
+              { coerce: true }
+            );
+          components[index] =
+            result.value;
+          input.value =
+            result.value;
+          input.setCustomValidity("");
+          commitComponents();
+        }
+      );
+
+      componentLabel.appendChild(input);
+      fields.appendChild(componentLabel);
+    }
+
+    editor.append(
+      title,
+      fields
+    );
+
+    if (specification.help) {
+      const help =
+        document.createElement("small");
+      help.textContent =
+        specification.help;
+      editor.appendChild(help);
+    }
+
+    card.appendChild(editor);
+    return true;
+  }
+
   function appendParameterControl(
     card,
     node,
@@ -14132,6 +14338,18 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       const kind =
         specification.kind ||
         "text";
+
+      if (
+        kind === "vector" &&
+        appendNumericVectorParameterControl(
+          card,
+          node,
+          definition,
+          specification
+        )
+      ) {
+        continue;
+      }
 
       if (
         kind === "color" ||
