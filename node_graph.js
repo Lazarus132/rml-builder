@@ -6699,6 +6699,35 @@ ${actions.length > 0
       ) || null;
     const startupEmitters = [];
 
+    // Configuration sockets marked Startup or Startup + Saved are real
+    // startup impulse sources. Emit their connected paths from the generated
+    // graph's OnEngineInit(), after the main mod has synchronized every
+    // configuration value through the generated Set... methods.
+    if (configurationNode) {
+      for (const item of configurationFields) {
+        if (
+          !runtimeBehaviorIncludesStartup(
+            item.reaction
+          )
+        ) {
+          continue;
+        }
+
+        const method =
+          impulseMethodByPort.get(
+            `${configurationNode.id}:${item.portId}`
+          );
+
+        if (method) {
+          startupEmitters.push(
+            `${method}();`
+          );
+        }
+      }
+    }
+
+    // Explicit On Engine Init nodes are independent lifecycle sources and
+    // therefore remain additive to Configuration startup sockets.
     for (const node of graph.nodes) {
       if (
         node.kind !== "operator"
@@ -6720,7 +6749,6 @@ ${actions.length > 0
           );
         }
       }
-
     }
 
     const displayNodes =

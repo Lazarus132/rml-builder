@@ -2891,29 +2891,6 @@ ${usesColorX
         })
         .join("\n");
 
-    const startupReactionCalls =
-      graphRuntimeActive
-        ? startupEntries
-            .map(entry => {
-              const statement =
-                graphContribution
-                  ?.reactionStatements?.[
-                    entry.node.id
-                  ];
-
-              return typeof statement ===
-                  "string" &&
-                statement.trim()
-                ? indentGeneratedStatement(
-                    statement.trim(),
-                    8
-                  )
-                : "";
-            })
-            .filter(Boolean)
-            .join("\n")
-        : "";
-
     const graphSynchronizedStatement =
       graphRuntimeActive
         ? String(
@@ -3080,9 +3057,7 @@ ${graphInitializeStatement
 ${startupSynchronizationCalls ||
   (graphRuntimeActive
     ? "        // No configuration values require synchronization."
-    : "        // No startup value read was requested.")}${startupReactionCalls
-    ? `\n\n${startupReactionCalls}`
-    : ""}${graphEngineInitializedStatement
+    : "        // No startup value read was requested.")}${graphEngineInitializedStatement
     ? `\n\n${indentGeneratedStatement(
         graphEngineInitializedStatement,
         8
