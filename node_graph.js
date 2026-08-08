@@ -8217,7 +8217,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         font-size: 8px;
       }
 
-      .rml-graph-inspector-card input,
+      .rml-graph-inspector-card input:not(.custom-color-slider),
       .rml-graph-inspector-card select,
       .rml-graph-inspector-card textarea {
         min-height: 35px;
