@@ -979,6 +979,7 @@
     const labels = {
       value: "Any value",
       anyValue: "Any non-impulse value",
+      enumOrString: "Enum or string",
       reference: "Reference value",
       arithmetic: "Numeric or vector",
       scalar: "Scalar number",
@@ -1709,6 +1710,15 @@
       )
     ) {
       return true;
+    }
+
+    if (constraint === "enumOrString") {
+        return (
+            base === "string" ||
+            base === "enum" ||
+            String(type).startsWith("apiEnum:") ||
+            information.enumType === true
+        );
     }
 
     if (
@@ -4184,6 +4194,63 @@
   }
 
   function pruneConnections() {
+    if (graph.connections.length === 0) {
+        currentAnalysis =
+            synchronizeAutoVectorTypes(
+                graph.connections,
+                currentAnalysis
+            );
+
+        return;
+    }
+
+    const wholeGraph =
+        analyzeWithAutoVectors(
+            graph.connections,
+            currentAnalysis
+        );
+
+    if (wholeGraph.analysis.valid) {
+        if (
+            Array.isArray(wholeGraph.updates) &&
+            wholeGraph.updates.length > 0
+        ) {
+            for (const update of wholeGraph.updates) {
+                if (
+                    update?.node &&
+                    update.type
+                ) {
+                    update.node.parameters.autoVectorType =
+                        update.type;
+                }
+            }
+        }
+
+        currentAnalysis =
+            synchronizeAutoVectorTypes(
+                graph.connections,
+                wholeGraph.analysis
+            );
+
+        normalizeConnectionRouting(
+            graph.connections
+        );
+
+        if (
+            graph.selectedConnectionId &&
+            !graph.connections.some(
+                connection =>
+                    connection.id ===
+                    graph.selectedConnectionId
+            )
+        ) {
+            graph.selectedConnectionId = null;
+        }
+
+        normalizeSelectedWirePoint();
+
+        return;
+    }
     const accepted = [];
 
     for (const connection of graph.connections) {

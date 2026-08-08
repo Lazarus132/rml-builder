@@ -5567,7 +5567,12 @@ private static BlendMode GraphBlendModeFromValue(object? value)
     description:
       "Converts a configuration enum or text value named Quad, Cube or Sphere into the real FrooxEngine.Primitive enum.",
     inputs: [
-      genericPort("value", "Enum / text", "T", "anyValue")
+      genericPort(
+        "value",
+        "Enum / text",
+        "T",
+        "enumOrString"
+      )
     ],
     outputs: [port("primitive", "Primitive", "primitive")],
     codegenCollect(api) {
@@ -5626,7 +5631,12 @@ private static BlendMode GraphBlendModeFromValue(object? value)
     description:
       "Converts a configuration enum or text to FrooxEngine.BlendMode.",
     inputs: [
-      genericPort("value", "Enum / text", "T", "anyValue")
+      genericPort(
+        "value",
+        "Enum / text",
+        "T",
+        "enumOrString"
+      )
     ],
     outputs: [port("blendMode", "Blend Mode", "blendMode")],
     codegenCollect(api) {

@@ -246,14 +246,25 @@
         color,
         csType,
         defaultCs: referenceType
-          ? "null!"
-          : `default(${csType})`,
+            ? "null!"
+            : `default(${csType})`,
         referenceType,
         valueType: true,
-        assignableTo: referenceType ? ["object"] : [],
-        constraints: referenceType
-          ? ["reference", "serializable"]
-          : ["serializable"],
+
+        enumType:
+            information.kind === "enum",
+
+        assignableTo: referenceType
+            ? ["object"]
+            : [],
+
+        constraints:
+            information.kind === "enum"
+                ? ["value", "serializable", "enumOrString"]
+                : referenceType
+                    ? ["reference", "serializable"]
+                    : ["serializable"],
+
         apiCatalogType: csType
       });
 
