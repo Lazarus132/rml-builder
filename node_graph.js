@@ -17446,21 +17446,19 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       ?.();
   }
 
-  function initializeImmediately() {
-    initialize();
+  async function initializeImmediately() {
+    try {
+      await Promise.resolve(
+        window.RMLModNodesReady
+      );
+    } catch (error) {
+      console.error(
+        "Typed mod-node initialization failed.",
+        error
+      );
+    }
 
-    Promise.resolve(
-      window.RMLModNodesReady
-    )
-      .then(
-        refreshAfterNodeModulesReady
-      )
-      .catch(error => {
-        console.error(
-          "Typed mod-node background initialization failed.",
-          error
-        );
-      });
+    initialize();
 
     window.addEventListener(
       "rml-api-node-factory-ready",
