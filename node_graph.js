@@ -7928,6 +7928,105 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         font-size: 9px;
       }
 
+      .rml-graph-compact-search-button {
+        display: none;
+        width: 32px;
+        min-width: 32px;
+        padding: 0 !important;
+        place-items: center;
+        font-size: 19px !important;
+        line-height: 1;
+      }
+
+      .rml-graph-search-overlay {
+        position: absolute;
+        z-index: 120;
+        inset: 0;
+        display: grid;
+        place-items: start center;
+        padding: 58px 10px 10px;
+        background: rgba(4, 5, 9, 0.72);
+        -webkit-backdrop-filter: blur(5px);
+        backdrop-filter: blur(5px);
+      }
+
+      .rml-graph-search-overlay[hidden] {
+        display: none !important;
+      }
+
+      .rml-graph-search-overlay-card {
+        display: grid;
+        width: min(430px, 100%);
+        gap: 10px;
+        padding: 11px;
+        border: 1px solid #3a4552;
+        border-radius: 10px;
+        background: rgba(13, 17, 24, 0.99);
+        box-shadow: 0 20px 58px rgba(0, 0, 0, 0.62);
+      }
+
+      .rml-graph-search-overlay-head,
+      .rml-graph-search-overlay-body {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .rml-graph-search-overlay-head strong {
+        min-width: 0;
+        flex: 1 1 auto;
+        font-size: 11px;
+      }
+
+      .rml-graph-search-overlay-close {
+        display: grid;
+        width: 30px;
+        height: 30px;
+        flex: 0 0 30px;
+        padding: 0 0 2px;
+        place-items: center;
+        border: 1px solid #343b47;
+        border-radius: 7px;
+        background: #181d25;
+        color: #c7d0d8;
+        font-size: 20px;
+        cursor: pointer;
+      }
+
+      .rml-graph-search-overlay-body input {
+        width: auto;
+        min-width: 0;
+        min-height: 36px;
+        flex: 1 1 auto;
+      }
+
+      .rml-graph-search-overlay-next {
+        flex: 0 0 auto;
+      }
+
+      .rml-graph-root.rml-graph-compact-toolbar .rml-graph-node-search {
+        display: none;
+      }
+
+      .rml-graph-root.rml-graph-compact-toolbar .rml-graph-compact-search-button {
+        display: grid;
+      }
+
+      .rml-graph-root.rml-graph-compact-toolbar .rml-graph-source-badge {
+        display: none;
+      }
+
+      .rml-graph-root.rml-graph-tiny-toolbar .rml-graph-toolbar {
+        gap: 4px;
+        padding-inline: 5px;
+      }
+
+      .rml-graph-root.rml-graph-tiny-toolbar .rml-graph-toolbar .button {
+        padding-inline: 7px;
+        font-size: 8px;
+      }
+
       .rml-graph-source-badge {
         overflow: hidden;
         min-width: 0;
@@ -11548,6 +11647,128 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     nodeSearch.append(nodeSearchInput, nodeSearchNext);
     toolbar.appendChild(nodeSearch);
 
+    const compactSearchButton =
+      createToolbarButton("⌕", () => {
+        const overlay = root.querySelector(
+          ":scope > .rml-graph-search-overlay"
+        );
+
+        if (!overlay) {
+          return;
+        }
+
+        overlay.hidden = false;
+        const input = overlay.querySelector("input");
+        if (input instanceof HTMLInputElement) {
+          input.value = nodeSearchInput.value;
+          requestAnimationFrame(() => {
+            input.focus({ preventScroll: true });
+            input.select();
+          });
+        }
+      });
+    compactSearchButton.classList.add(
+      "rml-graph-compact-search-button"
+    );
+    compactSearchButton.title = "Find node in graph";
+    compactSearchButton.setAttribute(
+      "aria-label",
+      "Find node in graph"
+    );
+    toolbar.appendChild(compactSearchButton);
+
+    const searchOverlay =
+      document.createElement("div");
+    searchOverlay.className =
+      "rml-graph-search-overlay";
+    searchOverlay.hidden = true;
+    searchOverlay.innerHTML = `
+      <div class="rml-graph-search-overlay-card" role="dialog" aria-modal="true" aria-label="Find node in graph">
+        <div class="rml-graph-search-overlay-head">
+          <strong>Find node in graph</strong>
+          <button class="rml-graph-search-overlay-close" type="button" aria-label="Close search">×</button>
+        </div>
+        <div class="rml-graph-search-overlay-body">
+          <input type="search" autocomplete="off" placeholder="Find node in graph…">
+          <button class="button secondary rml-graph-search-overlay-next" type="button">Next</button>
+        </div>
+      </div>`;
+
+    const overlayInput =
+      searchOverlay.querySelector("input");
+    const overlayNext =
+      searchOverlay.querySelector(
+        ".rml-graph-search-overlay-next"
+      );
+    const overlayClose =
+      searchOverlay.querySelector(
+        ".rml-graph-search-overlay-close"
+      );
+
+    const closeSearchOverlay = () => {
+      searchOverlay.hidden = true;
+      compactSearchButton.focus({
+        preventScroll: true
+      });
+    };
+
+    const runOverlaySearch = () => {
+      if (!(overlayInput instanceof HTMLInputElement)) {
+        return;
+      }
+
+      nodeSearchInput.value = overlayInput.value;
+      focusGraphNodeSearch(
+        overlayInput.value,
+        true
+      );
+    };
+
+    overlayInput?.addEventListener(
+      "input",
+      () => {
+        if (!(overlayInput instanceof HTMLInputElement)) {
+          return;
+        }
+
+        if (
+          overlayInput.value.trim() !==
+          graphNodeSearchQuery
+        ) {
+          graphNodeSearchIndex = -1;
+        }
+      }
+    );
+    overlayInput?.addEventListener(
+      "keydown",
+      event => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          runOverlaySearch();
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          closeSearchOverlay();
+        }
+      }
+    );
+    overlayNext?.addEventListener(
+      "click",
+      runOverlaySearch
+    );
+    overlayClose?.addEventListener(
+      "click",
+      closeSearchOverlay
+    );
+    searchOverlay.addEventListener(
+      "pointerdown",
+      event => {
+        if (event.target === searchOverlay) {
+          closeSearchOverlay();
+        }
+      }
+    );
+    root.appendChild(searchOverlay);
+
     const badge =
       document.createElement("div");
     badge.className =
@@ -11614,6 +11835,32 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     dom.nodesHost = nodesHost;
     dom.toast = toast;
     dom.sourceBadge = badge;
+
+    const updateToolbarLayout = () => {
+      const width = root.getBoundingClientRect().width;
+      root.classList.toggle(
+        "rml-graph-compact-toolbar",
+        width < 760
+      );
+      root.classList.toggle(
+        "rml-graph-tiny-toolbar",
+        width < 520
+      );
+    };
+
+    updateToolbarLayout();
+
+    if (typeof ResizeObserver === "function") {
+      const toolbarResizeObserver =
+        new ResizeObserver(updateToolbarLayout);
+      toolbarResizeObserver.observe(root);
+    } else {
+      window.addEventListener(
+        "resize",
+        updateToolbarLayout,
+        { passive: true }
+      );
+    }
 
     viewport.addEventListener(
       "pointerdown",

@@ -11214,7 +11214,12 @@ function renderInspector() {
     ? findNode(state.nodes, state.selectedId)
     : null;
   if (!node) {
-    elements.inspectorContent.replaceChildren();
+    elements.inspectorContent.innerHTML = `
+      <div class="empty-inspector">
+        <span>⌁</span>
+        <h2>Select an outline item</h2>
+        <p>Select a setting or Section enum in Configuration Outline to edit its properties here.</p>
+      </div>`;
     return;
   }
   elements.inspectorContent.innerHTML =
