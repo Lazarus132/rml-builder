@@ -164,9 +164,13 @@
                   when building.
                 </p>
                 <p>
-                  Multiple selected files are bundled into one ZIP. Dynamic export
-                  status remains in the Export dialog because it describes the current
-                  selection rather than general documentation.
+                  Multiple selected files are bundled into one ZIP. When an early
+                  Harmony patch library is present, the ZIP contains separate
+                  <code>Mod</code> and <code>Patches</code> project folders plus build
+                  scripts. Their project files deploy the compiled DLLs to
+                  <code>rml_mods</code> and <code>rml_libs</code> respectively. Dynamic
+                  export status remains in the Export dialog because it describes the
+                  current selection rather than general documentation.
                 </p>
               </section>
 
@@ -185,6 +189,7 @@
               <a href="#info-library">Node library</a>
               <a href="#info-wires">Sockets & wires</a>
               <a href="#info-editing">Graph editing</a>
+              <a href="#info-harmony">Harmony projects</a>
               <a href="#info-advanced">Advanced / Raw C#</a>
             </nav>
 
@@ -232,6 +237,36 @@
                   Wires can contain movable bend points and branches. The graph toolbar
                   can center the graph or clear operator nodes while retaining the
                   packed configuration node.
+                </p>
+              </section>
+
+              <section id="info-harmony" class="information-section">
+                <span class="information-kicker">Harmony load phases</span>
+                <h3>Main mod patches and early rml_libs patches</h3>
+                <p>
+                  <strong>Harmony Patch Event</strong>, lifecycle patch presets and
+                  scanner-generated Harmony API calls stay in the main mod project.
+                  They are registered when the mod reaches <code>OnEngineInit</code>,
+                  because their callbacks may emit graph impulses and access generated
+                  runtime state.
+                </p>
+                <p>
+                  <strong>Harmony Exact Patch Source</strong> also stays in the main
+                  project, but its attribute patches are now registered automatically
+                  with one guarded <code>PatchAll</code> call. Use
+                  <strong>Early Harmony Patch Library (rml_libs)</strong> only when a
+                  patch must be active before normal <code>rml_mods</code> are loaded.
+                  That node creates an independent project and DLL and cannot depend on
+                  graph sockets or main-mod configuration state. It can only target
+                  assemblies already available before <code>rml_mods</code> are loaded;
+                  patches for another normal mod belong in the main mod phase. Automatic
+                  discovery of the early DLL requires the matching custom ResoniteModLoader
+                  build containing the generated-library marker support.
+                </p>
+                <p>
+                  Low-level HarmonyLib nodes produced by the API scanner are kept under
+                  Advanced / Raw C#. They expose the scanned API but do not infer patch
+                  signatures, callback methods or load phase automatically.
                 </p>
               </section>
 

@@ -1813,7 +1813,7 @@ private static void RunGraphBackground(Action action)
     api.addReference({
       include: "0Harmony",
       hintPath:
-        "$(ResonitePath)Libraries/0Harmony.dll",
+        "$(ResonitePath)rml_libs/0Harmony.dll",
       private: false
     });
     api.addField(
@@ -1920,6 +1920,21 @@ private static bool RegisterGeneratedHarmonyPatch(
             $"Harmony patch failed for {typeName}.{methodName}: {exception}");
         return false;
     }
+}
+
+private static int _generatedHarmonyAttributePatchesApplied;
+
+private static void RegisterGeneratedHarmonyAttributePatches()
+{
+    if (System.Threading.Interlocked.Exchange(
+            ref _generatedHarmonyAttributePatchesApplied,
+            1) != 0)
+    {
+        return;
+    }
+
+    _graphHarmony.PatchAll(
+        typeof(__GRAPH_CLASS__).Assembly);
 }
 
 private static void CreateGeneratedReversePatch(
@@ -8596,7 +8611,7 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
       api.addReference({
         include: "0Harmony",
         hintPath:
-          "$(ResonitePath)Libraries/0Harmony.dll",
+          "$(ResonitePath)rml_libs/0Harmony.dll",
         private: false
       });
     }
@@ -8827,7 +8842,7 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
     expertOnly: true,
     symbol: "H.CS",
     description:
-      "Exports a complete Harmony patch source file for exact signatures, transpilers, reverse-patch stand-ins, ref returns and advanced state handling.",
+      "Exports a complete Harmony patch source file into the main mod project. Attribute patches are applied exactly once from the generated mod's OnEngineInit. Use the Early Harmony Patch Library node only when a patch must be active before rml_mods are loaded.",
     parameters: [
       pText(
         "fileName",
@@ -8838,7 +8853,36 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
         "content",
         "Complete patch source",
         "using HarmonyLib;\n\nnamespace {NAMESPACE};\n\n[HarmonyPatch]\ninternal static class ExactHarmonyPatches\n{\n    // Add [HarmonyPatch] targets and exact Prefix/Postfix/Finalizer/Transpiler methods here.\n}\n",
-        "This file is exported verbatim and automatically adds the 0Harmony reference.",
+        "This file is compiled into the main mod DLL and automatically registered with PatchAll during OnEngineInit.",
+        24
+      )
+    ]
+  });
+
+  registerNode("harmony.earlyPatchSource", {
+    title: "Early Harmony Patch Library (rml_libs)",
+    group: RAW_CSHARP_GROUP,
+    expertOnly: true,
+    symbol: "H.LIB",
+    description:
+      "Exports exact [HarmonyPatch] source into a separate class-library project. Its DLL is deployed to rml_libs and is discovered and patched immediately before normal rml_mods are loaded. This source is intentionally independent from graph sockets and mod configuration state and may only target assemblies available at that early phase.",
+    parameters: [
+      pText(
+        "fileName",
+        "Patch source file",
+        "EarlyHarmonyPatches.cs"
+      ),
+      pNumber(
+        "loadOrder",
+        "Patch order",
+        0,
+        "Lower values are applied first when multiple marked rml_libs patch assemblies are present."
+      ),
+      pCode(
+        "content",
+        "Complete early patch source",
+        "using HarmonyLib;\n\nnamespace {NAMESPACE}.EarlyPatches;\n\n[HarmonyPatch]\ninternal static class EarlyHarmonyPatches\n{\n    // Add exact [HarmonyPatch] declarations here.\n    // This project cannot call graph Emit... methods or read generated mod state.\n}\n",
+        "The generated patch project is built separately and copied to rml_libs. It requires the matching custom RML loader with RmlPatchAssemblyAttribute support.",
         24
       )
     ]
@@ -9002,6 +9046,80 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
           "ResoniteModLoader"
         ]);
       let advancedCodeUsed = false;
+      const earlyPatchFiles = [];
+      const earlyPatchOrders = new Set();
+      const earlyPatchPackageReferences =
+        new Map();
+      const earlyPatchFrameworkReferences =
+        new Set();
+      const earlyPatchRequirements = {
+        allowUnsafeBlocks: false,
+        useWindowsForms: false,
+        usesElements: false,
+        usesRenderiteShared: false
+      };
+
+      const manualProjectReferences =
+        nodes
+          .filter(node =>
+            node?.kind === "operator" &&
+            node.operatorId ===
+              "csharp.assemblyReference"
+          )
+          .map(node => ({
+            include: String(
+              node.parameters?.include || ""
+            ).trim(),
+            hintPath: String(
+              node.parameters?.hintPath || ""
+            ).trim(),
+            private:
+              node.parameters?.copyLocal ===
+              true
+          }))
+          .filter(reference =>
+            reference.include
+          );
+
+      const manualProjectPackages =
+        nodes
+          .filter(node =>
+            node?.kind === "operator" &&
+            node.operatorId ===
+              "csharp.packageReference"
+          )
+          .map(node => ({
+            include: String(
+              node.parameters?.include || ""
+            ).trim(),
+            version: String(
+              node.parameters?.version || ""
+            ).trim(),
+            privateAssets: String(
+              node.parameters?.privateAssets || ""
+            ).trim(),
+            includeAssets: String(
+              node.parameters?.includeAssets || ""
+            ).trim()
+          }))
+          .filter(packageReference =>
+            packageReference.include &&
+            packageReference.version
+          );
+
+      const manualProjectFrameworks =
+        nodes
+          .filter(node =>
+            node?.kind === "operator" &&
+            node.operatorId ===
+              "csharp.frameworkReference"
+          )
+          .map(node =>
+            String(
+              node.parameters?.include || ""
+            ).trim()
+          )
+          .filter(Boolean);
 
       for (const node of nodes) {
         if (
@@ -9018,7 +9136,8 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
           node.operatorId === "csharp.mainMember"
             ? node.parameters?.code
             : node.operatorId === "csharp.additionalSource" ||
-                node.operatorId === "harmony.exactPatchSource"
+                node.operatorId === "harmony.exactPatchSource" ||
+                node.operatorId === "harmony.earlyPatchSource"
               ? node.parameters?.content
               : "";
 
@@ -9033,17 +9152,25 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
                 node.operatorId
               ]
           };
+          const earlyPatchSource =
+            node.operatorId ===
+              "harmony.earlyPatchSource";
           const addUsings =
             node.operatorId !== "csharp.additionalSource" &&
             node.operatorId !== "harmony.exactPatchSource" &&
+            node.operatorId !== "harmony.earlyPatchSource" &&
             node.operatorId !== "csharp.mainMember";
 
           rawDependencies =
-            applyRawCSharpDependencies(
-              nodeApi,
-              rawSource,
-              { addUsings }
-            );
+            earlyPatchSource
+              ? analyzeRawCSharpDependencies(
+                  rawSource
+                )
+              : applyRawCSharpDependencies(
+                  nodeApi,
+                  rawSource,
+                  { addUsings }
+                );
 
           if (
             node.operatorId ===
@@ -9185,6 +9312,88 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
               name: fileName,
               content
             });
+            api.addEngineInit(
+              "RegisterGeneratedHarmonyAttributePatches();"
+            );
+            advancedCodeUsed = true;
+            break;
+          }
+
+          case "harmony.earlyPatchSource": {
+            const fileName = String(
+              node.parameters?.fileName ||
+                "EarlyHarmonyPatches.cs"
+            ).trim();
+            const content =
+              replaceCodePlaceholders(
+                node.parameters?.content,
+                {
+                  ...api,
+                  node,
+                  definition:
+                    api.definitions?.[
+                      node.operatorId
+                    ]
+                }
+              );
+
+            earlyPatchFiles.push({
+              name: fileName,
+              content
+            });
+            earlyPatchOrders.add(
+              Number.isFinite(
+                Number(
+                  node.parameters?.loadOrder
+                )
+              )
+                ? Math.trunc(
+                    Number(
+                      node.parameters?.loadOrder
+                    )
+                  )
+                : 0
+            );
+
+            if (rawDependencies) {
+              earlyPatchRequirements
+                .allowUnsafeBlocks ||=
+                  rawDependencies
+                    .allowUnsafeBlocks;
+              earlyPatchRequirements
+                .useWindowsForms ||=
+                  rawDependencies
+                    .useWindowsForms;
+              earlyPatchRequirements
+                .usesElements ||=
+                  rawDependencies
+                    .usesElements;
+              earlyPatchRequirements
+                .usesRenderiteShared ||=
+                  rawDependencies
+                    .usesRenderiteShared;
+
+              for (const packageReference of
+                rawDependencies
+                  .packageReferences || []) {
+                earlyPatchPackageReferences.set(
+                  String(
+                    packageReference.include ||
+                    ""
+                  ).toLowerCase(),
+                  packageReference
+                );
+              }
+
+              for (const frameworkReference of
+                rawDependencies
+                  .frameworkReferences || []) {
+                earlyPatchFrameworkReferences.add(
+                  frameworkReference
+                );
+              }
+            }
+
             advancedCodeUsed = true;
             break;
           }
@@ -9195,6 +9404,144 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
             advancedCodeUsed = true;
             break;
         }
+      }
+
+      if (earlyPatchFiles.length > 0) {
+        const projectName =
+          `${api.className}.HarmonyPatches`;
+        const harmonyId =
+          `${api.namespaceName}.${projectName}`;
+        const loadOrder =
+          Math.min(...earlyPatchOrders);
+
+        if (earlyPatchOrders.size > 1) {
+          api.warning(
+            `All Early Harmony Patch Source nodes are compiled into one rml_libs assembly. Their differing patch orders were reduced to the earliest value (${loadOrder}).`
+          );
+        }
+
+        for (const packageReference of
+          manualProjectPackages) {
+          earlyPatchPackageReferences.set(
+            packageReference.include
+              .toLowerCase(),
+            packageReference
+          );
+        }
+
+        for (const frameworkReference of
+          manualProjectFrameworks) {
+          earlyPatchFrameworkReferences.add(
+            frameworkReference
+          );
+        }
+
+        const buildOptions =
+          nodes.find(node =>
+            node?.kind === "operator" &&
+            node.operatorId ===
+              "csharp.buildOptions"
+          );
+
+        earlyPatchRequirements
+          .allowUnsafeBlocks ||=
+            buildOptions?.parameters?.unsafe ===
+            true;
+        earlyPatchRequirements
+          .useWindowsForms ||=
+            buildOptions?.parameters
+              ?.windowsForms === true;
+
+        const references = [
+          {
+            include: "0Harmony",
+            hintPath:
+              "$(ResonitePath)rml_libs/0Harmony.dll",
+            private: false
+          },
+          ...manualProjectReferences
+        ];
+
+        if (
+          earlyPatchRequirements.usesElements
+        ) {
+          references.push({
+            include: "Elements.Core",
+            hintPath:
+              "$(ResonitePath)Elements.Core.dll",
+            private: false
+          });
+        }
+
+        if (
+          earlyPatchRequirements
+            .usesRenderiteShared
+        ) {
+          references.push({
+            include: "Renderite.Shared",
+            hintPath:
+              "$(ResonitePath)Renderite.Shared.dll",
+            private: false
+          });
+        }
+
+        api.addProject({
+          id: "generated-early-harmony-patches",
+          role: "rml-lib-harmony-patches",
+          name: projectName,
+          assemblyName: projectName,
+          rootNamespace:
+            `${api.namespaceName}.EarlyPatches`,
+          folder: "Patches",
+          deployDirectory: "rml_libs",
+          files: [
+            {
+              name:
+                "GeneratedPatchAssemblyInfo.cs",
+              content:
+`// Generated registration marker for the matching custom RML loader.
+[assembly: ResoniteModLoader.RmlPatchAssembly(
+    "${api.escapeString(harmonyId)}",
+    ${loadOrder})]
+`
+            },
+            ...earlyPatchFiles
+          ],
+          requirements: {
+            ...earlyPatchRequirements,
+            references,
+            packageReferences:
+              [...earlyPatchPackageReferences
+                .values()],
+            frameworkReferences:
+              [...earlyPatchFrameworkReferences]
+          }
+        });
+
+        api.warning(
+          "Early Harmony patch sources are exported as a separate rml_libs project. They are applied immediately before rml_mods and therefore cannot call graph Emit methods, depend on generated mod configuration state, or patch another normal mod assembly that has not been loaded yet. The generated library requires the matching custom ResoniteModLoader build with RmlPatchAssemblyAttribute discovery support."
+        );
+      }
+
+      const scannedHarmonyApiNodes =
+        nodes.filter(node =>
+          node?.kind === "operator" &&
+          api.definitions?.[
+            node.operatorId
+          ]?.harmonyApiNode === true
+        );
+
+      if (scannedHarmonyApiNodes.length > 0) {
+        api.addReference({
+          include: "0Harmony",
+          hintPath:
+            "$(ResonitePath)rml_libs/0Harmony.dll",
+          private: false
+        });
+
+        api.warning(
+          `${scannedHarmonyApiNodes.length} scanner-generated HarmonyLib API node${scannedHarmonyApiNodes.length === 1 ? " is" : "s are"} used as low-level runtime calls in the main mod project. They are not automatically converted into early rml_libs patches; use Harmony Patch Event for graph callbacks or Early Harmony Patch Library for pre-mod attribute patches.`
+        );
       }
 
       if (mainMembers.length > 0) {

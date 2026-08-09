@@ -5827,6 +5827,7 @@
         diagnostics: [],
         warnings: [],
         files: [],
+        projects: [],
         applyStatements: {},
         requirements: {
           usesElements: false,
@@ -5871,6 +5872,7 @@
     const extensionEngineInitStatements =
       [];
     const extensionFiles = [];
+    const extensionProjects = [];
     const extensionReferences =
       new Map();
     const extensionPackageReferences =
@@ -6158,6 +6160,7 @@
       definition,
       graph,
       metadata,
+      stateSnapshot,
       className,
       graphClassName,
       namespaceName,
@@ -6244,6 +6247,78 @@
               "text/plain;charset=utf-8"
           });
         }
+      },
+      addProject(project) {
+        if (
+          !project ||
+          typeof project !== "object" ||
+          Array.isArray(project)
+        ) {
+          return;
+        }
+
+        const id = String(
+          project.id ||
+          project.name ||
+          ""
+        ).trim();
+        const name = String(
+          project.name ||
+          project.assemblyName ||
+          id
+        ).trim();
+        const files = Array.isArray(
+          project.files
+        )
+          ? project.files
+              .filter(file =>
+                file &&
+                typeof file.name === "string" &&
+                file.name.trim() &&
+                typeof file.content === "string"
+              )
+              .map(file => ({
+                name: file.name.trim(),
+                content: file.content,
+                type:
+                  file.type ||
+                  "text/plain;charset=utf-8"
+              }))
+          : [];
+
+        if (!id || !name || files.length === 0) {
+          diagnostics.push(
+            "A generated auxiliary project requires an id, name and at least one source file."
+          );
+          return;
+        }
+
+        extensionProjects.push({
+          ...project,
+          id,
+          name,
+          assemblyName: String(
+            project.assemblyName || name
+          ).trim(),
+          rootNamespace: String(
+            project.rootNamespace ||
+            namespaceName
+          ).trim(),
+          folder: String(
+            project.folder || name
+          ).trim(),
+          deployDirectory: String(
+            project.deployDirectory ||
+            "rml_libs"
+          ).trim(),
+          files,
+          requirements:
+            project.requirements &&
+            typeof project.requirements === "object" &&
+            !Array.isArray(project.requirements)
+              ? project.requirements
+              : {}
+        });
       },
       addReference:
         registerReference,
@@ -7567,6 +7642,39 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
           usedNames.add(key);
           file.name = name;
+          return true;
+        });
+      })(),
+      projects: (() => {
+        const usedIds = new Set();
+        const usedNames = new Set();
+
+        return extensionProjects.filter(project => {
+          const id = String(project.id || "")
+            .trim()
+            .toLowerCase();
+          const name = String(
+            project.name ||
+            project.assemblyName ||
+            ""
+          )
+            .trim()
+            .toLowerCase();
+
+          if (
+            !id ||
+            !name ||
+            usedIds.has(id) ||
+            usedNames.has(name)
+          ) {
+            diagnostics.push(
+              `Generated auxiliary project '${project.name || project.id || "<unnamed>"}' occurs more than once.`
+            );
+            return false;
+          }
+
+          usedIds.add(id);
+          usedNames.add(name);
           return true;
         });
       })(),

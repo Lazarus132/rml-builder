@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const FACTORY_VERSION = 2;
+  const FACTORY_VERSION = 3;
   const ADVANCED_GROUP = "Advanced / Raw C#";
   const API_GROUPS = Object.freeze({
     types: "API · Types & Enums",
@@ -424,7 +424,10 @@
 
       registerGeneratedNode(id, {
         title: `Enum · ${shortTypeName(csType)}`,
-        group: API_GROUPS.types,
+        group: groupForType(
+          { fullName: csType },
+          API_GROUPS.types
+        ),
         symbol: "E",
         description: `Typed constant for ${csType}.`,
         parameters: [{
@@ -597,6 +600,21 @@
       if (generatedNodeIds.has(id) || definitions[id]) {
         return;
       }
+
+      if (
+        isHarmonyCatalogType(
+          definition?.catalogType
+        )
+      ) {
+        definition.group = ADVANCED_GROUP;
+        definition.harmonyApiNode = true;
+        definition.description =
+          `${String(
+            definition.description ||
+            "Low-level Harmony API node."
+          )} This scanner-generated node executes as a low-level runtime call in the main mod project. It does not create or deploy an early rml_libs patch assembly automatically.`;
+      }
+
       generatedNodeIds.add(id);
       registerNode(id, definition);
     }
@@ -1293,9 +1311,27 @@ private static System.Reflection.MethodInfo? ResolveApiCatalogMethod(
     }
 
     function groupForType(row, normalGroup) {
-      return isNoisyType(row)
+      return (
+        isNoisyType(row) ||
+        isHarmonyCatalogType(
+          row?.fullName || row
+        )
+      )
         ? ADVANCED_GROUP
         : normalGroup;
+    }
+
+    function isHarmonyCatalogType(value) {
+      const fullName = normalizeCsType(
+        value?.fullName || value
+      );
+
+      return (
+        fullName === "HarmonyLib" ||
+        fullName.startsWith(
+          "HarmonyLib."
+        )
+      );
     }
 
     function isNoisyType(row) {

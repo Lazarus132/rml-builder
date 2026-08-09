@@ -2729,6 +2729,35 @@ function getAdditionalGeneratedSourceFiles() {
     }));
 }
 
+function getAdditionalGeneratedProjects() {
+  const contribution =
+    getTypedNodeGraphContribution();
+
+  if (
+    !contribution?.active ||
+    !Array.isArray(
+      contribution.projects
+    )
+  ) {
+    return [];
+  }
+
+  return contribution.projects
+    .filter(project =>
+      project &&
+      typeof project === "object" &&
+      !Array.isArray(project) &&
+      String(
+        project.name ||
+        project.assemblyName ||
+        ""
+      ).trim() &&
+      Array.isArray(project.files) &&
+      project.files.length > 0
+    )
+    .map(project => clone(project));
+}
+
 function indentGeneratedStatement(
   statement,
   spaces
@@ -3563,7 +3592,8 @@ function generateProjectFile() {
     <TargetFramework>${targetFramework}</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>${allowUnsafeBlocks
+    <ImplicitUsings>enable</ImplicitUsings>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>${allowUnsafeBlocks
       ? "\n    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>"
       : ""}${useWindowsForms
       ? "\n    <UseWindowsForms>true</UseWindowsForms>\n    <EnableWindowsTargeting>true</EnableWindowsTargeting>"
@@ -3574,6 +3604,7 @@ function generateProjectFile() {
 
     <ResonitePath Condition="'$(ResonitePath)' == ''">${resonitePath}</ResonitePath>
     <ResonitePath>$([MSBuild]::NormalizeDirectory('$(ResonitePath)'))</ResonitePath>
+    <DeployToResonite Condition="'$(DeployToResonite)' == ''">true</DeployToResonite>
   </PropertyGroup>
 
   <ItemGroup>
@@ -3593,6 +3624,272 @@ function generateProjectFile() {
     : ""}${frameworkReferences
     ? `\n\n  <ItemGroup>\n${frameworkReferences}\n  </ItemGroup>`
     : ""}
+
+  <Target
+    Name="DeployRmlMod"
+    AfterTargets="Build"
+    Condition="'$(DeployToResonite)' == 'true'">
+    <MakeDir Directories="$(ResonitePath)rml_mods" />
+    <MakeDir Directories="$(ResonitePath)rml_libs" />
+    <Copy
+      SourceFiles="$(TargetPath)"
+      DestinationFolder="$(ResonitePath)rml_mods"
+      SkipUnchangedFiles="true" />
+    <Copy
+      SourceFiles="@(ReferenceCopyLocalPaths)"
+      DestinationFolder="$(ResonitePath)rml_libs"
+      SkipUnchangedFiles="true" />
+  </Target>
+</Project>
+`;
+}
+
+function generateAuxiliaryProjectFile(
+  project
+) {
+  const requirements =
+    isPlainObject(project?.requirements)
+      ? project.requirements
+      : {};
+  const assemblyName = String(
+    project?.assemblyName ||
+    project?.name ||
+    `${generatedBaseName()}.Library`
+  ).trim();
+  const rootNamespace = String(
+    project?.rootNamespace ||
+    state.metadata.namespaceName ||
+    "GeneratedLibrary"
+  ).trim();
+  const deployDirectory = String(
+    project?.deployDirectory ||
+    "rml_libs"
+  )
+    .replace(/[\\/]+/g, "")
+    .trim() ||
+    "rml_libs";
+  const resonitePath = escapeXml(
+    normalizedResonitePath(
+      state.exportOptions.resonitePath
+    )
+  );
+  const referenceMap = new Map();
+
+  const addReference = reference => {
+    if (
+      !reference ||
+      typeof reference !== "object"
+    ) {
+      return;
+    }
+
+    const include = String(
+      reference.include || ""
+    ).trim();
+
+    if (!include) {
+      return;
+    }
+
+    referenceMap.set(
+      include.toLowerCase(),
+      {
+        include,
+        hintPath: String(
+          reference.hintPath || ""
+        ).trim(),
+        private:
+          reference.private === true
+      }
+    );
+  };
+
+  addReference({
+    include: "ResoniteModLoader",
+    hintPath:
+      "$(ResonitePath)Libraries/ResoniteModLoader.dll",
+    private: false
+  });
+  addReference({
+    include: "FrooxEngine",
+    hintPath:
+      "$(ResonitePath)FrooxEngine.dll",
+    private: false
+  });
+
+  if (requirements.usesElements === true) {
+    addReference({
+      include: "Elements.Core",
+      hintPath:
+        "$(ResonitePath)Elements.Core.dll",
+      private: false
+    });
+  }
+
+  if (
+    requirements.usesRenderiteShared ===
+    true
+  ) {
+    addReference({
+      include: "Renderite.Shared",
+      hintPath:
+        "$(ResonitePath)Renderite.Shared.dll",
+      private: false
+    });
+  }
+
+  for (
+    const reference of
+    Array.isArray(requirements.references)
+      ? requirements.references
+      : []
+  ) {
+    addReference(reference);
+  }
+
+  const references =
+    [...referenceMap.values()]
+      .map(reference => {
+        const include = escapeXml(
+          reference.include
+        );
+        const hintPath = escapeXml(
+          reference.hintPath
+        );
+        const privateValue =
+          reference.private
+            ? "True"
+            : "False";
+
+        return hintPath
+          ? `    <Reference Include="${include}">
+      <HintPath>${hintPath}</HintPath>
+      <Private>${privateValue}</Private>
+    </Reference>`
+          : `    <Reference Include="${include}" />`;
+      })
+      .join("\n\n");
+
+  const packageReferences =
+    (Array.isArray(
+      requirements.packageReferences
+    )
+      ? requirements.packageReferences
+      : [])
+      .filter(packageReference =>
+        packageReference &&
+        String(
+          packageReference.include || ""
+        ).trim() &&
+        String(
+          packageReference.version || ""
+        ).trim()
+      )
+      .map(packageReference => {
+        const attributes = [
+          `Include="${escapeXml(
+            packageReference.include
+          )}"`,
+          `Version="${escapeXml(
+            packageReference.version
+          )}"`
+        ];
+
+        if (packageReference.privateAssets) {
+          attributes.push(
+            `PrivateAssets="${escapeXml(
+              packageReference.privateAssets
+            )}"`
+          );
+        }
+
+        if (packageReference.includeAssets) {
+          attributes.push(
+            `IncludeAssets="${escapeXml(
+              packageReference.includeAssets
+            )}"`
+          );
+        }
+
+        return `    <PackageReference ${attributes.join(
+          " "
+        )} />`;
+      })
+      .join("\n");
+
+  const frameworkReferences =
+    (Array.isArray(
+      requirements.frameworkReferences
+    )
+      ? requirements.frameworkReferences
+      : [])
+      .map(value => String(value || "").trim())
+      .filter(Boolean)
+      .map(value =>
+        `    <FrameworkReference Include="${escapeXml(
+          value
+        )}" />`
+      )
+      .join("\n");
+
+  const useWindowsForms =
+    requirements.useWindowsForms === true;
+  const targetFramework =
+    useWindowsForms
+      ? "net10.0-windows"
+      : "net10.0";
+
+  return `<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>${targetFramework}</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>${requirements.allowUnsafeBlocks === true
+      ? "\n    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>"
+      : ""}${useWindowsForms
+      ? "\n    <UseWindowsForms>true</UseWindowsForms>\n    <EnableWindowsTargeting>true</EnableWindowsTargeting>"
+      : ""}
+
+    <AssemblyName>${escapeXml(
+      assemblyName
+    )}</AssemblyName>
+    <RootNamespace>${escapeXml(
+      rootNamespace
+    )}</RootNamespace>
+
+    <ResonitePath Condition="'$(ResonitePath)' == ''">${resonitePath}</ResonitePath>
+    <ResonitePath>$([MSBuild]::NormalizeDirectory('$(ResonitePath)'))</ResonitePath>
+    <DeployToResonite Condition="'$(DeployToResonite)' == ''">true</DeployToResonite>
+  </PropertyGroup>
+
+  <ItemGroup>
+${references}
+  </ItemGroup>${packageReferences
+    ? `\n\n  <ItemGroup>\n${packageReferences}\n  </ItemGroup>`
+    : ""}${frameworkReferences
+    ? `\n\n  <ItemGroup>\n${frameworkReferences}\n  </ItemGroup>`
+    : ""}
+
+  <Target
+    Name="DeployRmlLibrary"
+    AfterTargets="Build"
+    Condition="'$(DeployToResonite)' == 'true'">
+    <MakeDir Directories="$(ResonitePath)${escapeXml(
+      deployDirectory
+    )}" />
+    <MakeDir Directories="$(ResonitePath)rml_libs" />
+    <Copy
+      SourceFiles="$(TargetPath)"
+      DestinationFolder="$(ResonitePath)${escapeXml(
+        deployDirectory
+      )}"
+      SkipUnchangedFiles="true" />
+    <Copy
+      SourceFiles="@(ReferenceCopyLocalPaths)"
+      DestinationFolder="$(ResonitePath)rml_libs"
+      SkipUnchangedFiles="true" />
+  </Target>
 </Project>
 `;
 }
@@ -14536,6 +14833,379 @@ function createZipBlob(files) {
   );
 }
 
+function safeArchiveSegment(
+  value,
+  fallback = "Generated"
+) {
+  const normalized = String(value || "")
+    .trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, "_")
+    .replace(/[. ]+$/g, "")
+    .slice(0, 120);
+
+  return normalized || fallback;
+}
+
+function safeArchiveRelativePath(
+  value,
+  fallback = "Generated.cs"
+) {
+  const parts = String(value || "")
+    .replace(/\\/g, "/")
+    .split("/")
+    .map(part => part.trim())
+    .filter(part =>
+      part &&
+      part !== "." &&
+      part !== ".."
+    )
+    .map(part =>
+      safeArchiveSegment(
+        part,
+        "Generated"
+      )
+    );
+
+  return parts.join("/") ||
+    safeArchiveSegment(
+      fallback,
+      "Generated.cs"
+    );
+}
+
+function auxiliaryProjectFolder(
+  project,
+  index
+) {
+  return safeArchiveRelativePath(
+    project?.folder ||
+      project?.name ||
+      `Library-${index + 1}`,
+    `Library-${index + 1}`
+  );
+}
+
+function generateMultiProjectReadme(
+  baseName,
+  auxiliaryProjects
+) {
+  const projectLines = auxiliaryProjects
+    .map((project, index) => {
+      const folder = auxiliaryProjectFolder(
+        project,
+        index
+      );
+      const name = safeArchiveSegment(
+        project.name ||
+        project.assemblyName,
+        `Library-${index + 1}`
+      );
+      const deployment = String(
+        project.deployDirectory ||
+        "rml_libs"
+      );
+
+      return `- \`${folder}/${name}.csproj\` → builds \`${name}.dll\` and deploys it to \`${deployment}\`.`;
+    })
+    .join("\n");
+
+  return `# ${baseName} generated RML project
+
+This archive contains independently compiled projects because early Harmony patches must be loaded before normal RML mods.
+
+## Projects
+
+- \`Mod/${baseName}.csproj\` → builds \`${baseName}.dll\` and deploys it to \`rml_mods\`.
+${projectLines}
+
+## Build
+
+Run \`build.ps1\` on Windows or \`build.sh\` on Linux/macOS. Each project also supports a custom Resonite path:
+
+\`dotnet build <project.csproj> -c Release -p:ResonitePath="<Resonite installation>"\`
+
+Set \`-p:DeployToResonite=false\` to compile without copying the resulting DLL.
+
+## Harmony load phases
+
+- Graph-driven Harmony Patch Event and scanner-generated Harmony API calls remain in the main mod DLL and register at mod \`OnEngineInit\`.
+- Early Harmony Patch Library sources compile into the separate \`rml_libs\` DLL and are discovered through \`RmlPatchAssemblyAttribute\` before \`rml_mods\` are loaded.
+- Early patch libraries cannot call generated graph \`Emit...\` methods or depend on runtime configuration values from the main mod.
+`;
+}
+
+function generateBuildPowerShell(
+  baseName,
+  auxiliaryProjects
+) {
+  const projects = [
+    ...auxiliaryProjects.map((project, index) => {
+      const folder = auxiliaryProjectFolder(
+        project,
+        index
+      );
+      const name = safeArchiveSegment(
+        project.name ||
+        project.assemblyName,
+        `Library-${index + 1}`
+      );
+      return `./${folder}/${name}.csproj`;
+    }),
+    `./Mod/${baseName}.csproj`
+  ];
+
+  return `$ErrorActionPreference = "Stop"
+
+$projects = @(
+${projects.map(project => `    "${project}"`).join(",\n")}
+)
+
+foreach ($project in $projects) {
+    dotnet build $project -c Release @args
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+}
+`;
+}
+
+function generateBuildShell(
+  baseName,
+  auxiliaryProjects
+) {
+  const projects = [
+    ...auxiliaryProjects.map((project, index) => {
+      const folder = auxiliaryProjectFolder(
+        project,
+        index
+      );
+      const name = safeArchiveSegment(
+        project.name ||
+        project.assemblyName,
+        `Library-${index + 1}`
+      );
+      return `./${folder}/${name}.csproj`;
+    }),
+    `./Mod/${baseName}.csproj`
+  ];
+
+  return `#!/usr/bin/env sh
+set -eu
+
+${projects
+    .map(project =>
+      `dotnet build "${project}" -c Release "$@"`
+    )
+    .join("\n")}
+`;
+}
+
+function buildSelectedExportFiles(
+  includeCs,
+  includeCsproj
+) {
+  const baseName = generatedBaseName();
+  const graphFiles =
+    getAdditionalGeneratedSourceFiles();
+  const auxiliaryProjects =
+    getAdditionalGeneratedProjects();
+
+  if (!includeCs && !includeCsproj) {
+    return {
+      files: [],
+      multiProject:
+        auxiliaryProjects.length > 0,
+      auxiliaryProjects
+    };
+  }
+
+  if (auxiliaryProjects.length === 0) {
+    const files = [];
+
+    if (includeCs) {
+      files.push({
+        name: `${baseName}.cs`,
+        content: generateCode(),
+        type:
+          "text/plain;charset=utf-8"
+      });
+      files.push(...graphFiles);
+    }
+
+    if (includeCsproj) {
+      files.push({
+        name: `${baseName}.csproj`,
+        content: generateProjectFile(),
+        type:
+          "application/xml;charset=utf-8"
+      });
+    }
+
+    return {
+      files,
+      multiProject: false,
+      auxiliaryProjects
+    };
+  }
+
+  const root = safeArchiveSegment(
+    `${baseName}-RML-Project`,
+    "RML-Project"
+  );
+  const files = [];
+  const usedPaths = new Set();
+
+  const addFile = file => {
+    const requested = safeArchiveRelativePath(
+      file.name,
+      "Generated.txt"
+    );
+    const extensionIndex =
+      requested.lastIndexOf(".");
+    const stem = extensionIndex > 0
+      ? requested.slice(0, extensionIndex)
+      : requested;
+    const extension = extensionIndex > 0
+      ? requested.slice(extensionIndex)
+      : "";
+    let unique = requested;
+    let suffix = 2;
+
+    while (
+      usedPaths.has(
+        unique.toLowerCase()
+      )
+    ) {
+      unique = `${stem}-${suffix}${extension}`;
+      suffix += 1;
+    }
+
+    usedPaths.add(
+      unique.toLowerCase()
+    );
+    files.push({
+      ...file,
+      name: `${root}/${unique}`
+    });
+  };
+
+  if (includeCs) {
+    addFile({
+      name: `Mod/${baseName}.cs`,
+      content: generateCode(),
+      type:
+        "text/plain;charset=utf-8"
+    });
+
+    for (const graphFile of graphFiles) {
+      addFile({
+        ...graphFile,
+        name:
+          `Mod/${safeArchiveRelativePath(
+            graphFile.name,
+            `${baseName}.NodeGraph.cs`
+          )}`
+      });
+    }
+
+    auxiliaryProjects.forEach(
+      (project, index) => {
+        const folder =
+          auxiliaryProjectFolder(
+            project,
+            index
+          );
+
+        for (const file of
+          project.files || []) {
+          addFile({
+            ...file,
+            name:
+              `${folder}/${safeArchiveRelativePath(
+                file.name,
+                "GeneratedPatch.cs"
+              )}`
+          });
+        }
+      }
+    );
+  }
+
+  if (includeCsproj) {
+    addFile({
+      name: `Mod/${baseName}.csproj`,
+      content: generateProjectFile(),
+      type:
+        "application/xml;charset=utf-8"
+    });
+
+    auxiliaryProjects.forEach(
+      (project, index) => {
+        const folder =
+          auxiliaryProjectFolder(
+            project,
+            index
+          );
+        const projectName =
+          safeArchiveSegment(
+            project.name ||
+            project.assemblyName,
+            `Library-${index + 1}`
+          );
+
+        addFile({
+          name:
+            `${folder}/${projectName}.csproj`,
+          content:
+            generateAuxiliaryProjectFile(
+              project
+            ),
+          type:
+            "application/xml;charset=utf-8"
+        });
+      }
+    );
+
+    addFile({
+      name: "build.ps1",
+      content:
+        generateBuildPowerShell(
+          baseName,
+          auxiliaryProjects
+        ),
+      type:
+        "text/plain;charset=utf-8"
+    });
+    addFile({
+      name: "build.sh",
+      content:
+        generateBuildShell(
+          baseName,
+          auxiliaryProjects
+        ),
+      type:
+        "text/plain;charset=utf-8"
+    });
+  }
+
+  addFile({
+    name: "README.md",
+    content:
+      generateMultiProjectReadme(
+        baseName,
+        auxiliaryProjects
+      ),
+    type:
+      "text/markdown;charset=utf-8"
+  });
+
+  return {
+    files,
+    multiProject: true,
+    auxiliaryProjects
+  };
+}
+
 function updateExportDialog() {
   const baseName = generatedBaseName();
   const platform =
@@ -14546,6 +15216,8 @@ function updateExportDialog() {
     elements.exportIncludeCsproj.checked;
   const graphFiles =
     getAdditionalGeneratedSourceFiles();
+  const auxiliaryProjects =
+    getAdditionalGeneratedProjects();
   const graphFile =
     graphFiles[0] || null;
   const includeGraphCs =
@@ -14561,7 +15233,13 @@ function updateExportDialog() {
           {
             name: `${baseName}.cs`
           },
-          ...graphFiles
+          ...graphFiles,
+          ...auxiliaryProjects.flatMap(
+            project =>
+              Array.isArray(project.files)
+                ? project.files
+                : []
+          )
         ]
       : []),
     ...(includeCsproj
@@ -14569,9 +15247,27 @@ function updateExportDialog() {
           {
             name:
               `${baseName}.csproj`
-          }
+          },
+          ...auxiliaryProjects.map(
+            project => ({
+              name:
+                `${project.name}.csproj`
+            })
+          ),
+          ...(auxiliaryProjects.length > 0
+            ? [
+                { name: "build.ps1" },
+                { name: "build.sh" }
+              ]
+            : [])
         ]
-      : [])
+      : []),
+    ...(
+      auxiliaryProjects.length > 0 &&
+      (includeCs || includeCsproj)
+        ? [{ name: "README.md" }]
+        : []
+    )
   ];
   const hasSelection =
     selectedFiles.length > 0;
@@ -14653,6 +15349,14 @@ function updateExportDialog() {
       "Select a file";
     elements.exportDownloadHint.textContent =
       "Select at least one file to download.";
+    return;
+  }
+
+  if (auxiliaryProjects.length > 0) {
+    elements.exportDownloadSelected.textContent =
+      "Download multi-project ZIP";
+    elements.exportDownloadHint.textContent =
+      `The ZIP contains a Mod project for rml_mods and ${auxiliaryProjects.length} independently compiled library project${auxiliaryProjects.length === 1 ? "" : "s"} for rml_libs. Build scripts deploy each DLL to the correct folder.`;
     return;
   }
 
@@ -14798,39 +15502,21 @@ function downloadSelectedExport() {
 
   const baseName =
     generatedBaseName();
-  const includeCs =
-    state.exportOptions.includeCs;
-  const includeCsproj =
-    state.exportOptions.includeCsproj;
-  const files = [];
-
-  if (includeCs) {
-    files.push({
-      name: `${baseName}.cs`,
-      content: generateCode(),
-      type:
-        "text/plain;charset=utf-8"
-    });
-
-    files.push(
-      ...getAdditionalGeneratedSourceFiles()
+  const result =
+    buildSelectedExportFiles(
+      state.exportOptions.includeCs,
+      state.exportOptions.includeCsproj
     );
-  }
-
-  if (includeCsproj) {
-    files.push({
-      name: `${baseName}.csproj`,
-      content: generateProjectFile(),
-      type:
-        "application/xml;charset=utf-8"
-    });
-  }
+  const files = result.files;
 
   if (files.length === 0) {
     return;
   }
 
-  if (files.length === 1) {
+  if (
+    files.length === 1 &&
+    !result.multiProject
+  ) {
     const file = files[0];
 
     downloadBlob(
@@ -15276,8 +15962,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "help_template.html",
-    "help_template.js",
+    "help_template.html?v=2",
+    "help_template.js?v=2",
     "help-template",
     "RMLHelpTemplateMarkup"
   )
