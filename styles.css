@@ -6379,9 +6379,9 @@ body:has(.node-pointer-ghost) .builder-canvas {
   }
 }
 
-/* Graph usability: variadic ports, inspector filtering and graph-node search. */
 .api-catalog-state[role="button"] {
   cursor: pointer;
+  -webkit-user-select: none;
   user-select: none;
 }
 
@@ -6450,4 +6450,206 @@ body:has(.node-pointer-ghost) .builder-canvas {
   min-width: 34px;
   min-height: 32px;
   padding: 0;
+}
+
+.rml-graph-searchable-select {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.rml-graph-searchable-native-select {
+  display: none !important;
+}
+
+.rml-graph-searchable-trigger {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  align-items: center;
+  padding: 9px 34px 9px 10px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  outline: none;
+  background: var(--panel-deep);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 520;
+  letter-spacing: 0;
+  text-align: left;
+  text-transform: none;
+  cursor: pointer;
+}
+
+.rml-graph-searchable-trigger::after {
+  position: absolute;
+  top: 50%;
+  right: 11px;
+  color: #f2f0fa;
+  content: "▼";
+  font-size: 10px;
+  line-height: 1;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.rml-graph-searchable-trigger:hover {
+  border-color: var(--line-strong);
+  background: #12101a;
+}
+
+.rml-graph-searchable-trigger:focus-visible,
+.rml-graph-searchable-select.open .rml-graph-searchable-trigger {
+  border-color: var(--accent-dark);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.rml-graph-searchable-trigger-text {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rml-graph-searchable-popup {
+  position: fixed;
+  z-index: 10000;
+  display: grid;
+  min-width: 180px;
+  max-width: calc(100vw - 16px);
+  max-height: min(360px, calc(100vh - 16px));
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0;
+  padding: 6px;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--panel-deep);
+  color: var(--text);
+  box-shadow:
+    0 18px 55px rgba(0, 0, 0, 0.62),
+    0 0 0 1px rgba(164, 118, 255, 0.08);
+}
+
+.rml-graph-searchable-popup[hidden] {
+  display: none !important;
+}
+
+.rml-graph-searchable-search {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  margin: 0 0 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  outline: none;
+  background: #09080f;
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 520;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.rml-graph-searchable-search::placeholder {
+  color: var(--faint);
+  opacity: 1;
+}
+
+.rml-graph-searchable-search:focus {
+  border-color: var(--accent-dark);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.rml-graph-searchable-options {
+  min-height: 0;
+  max-height: 292px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 1px;
+}
+
+@supports (scrollbar-color: auto) {
+  .rml-graph-searchable-options {
+    scrollbar-color: var(--line-strong) transparent;
+    scrollbar-width: thin;
+  }
+}
+
+.rml-graph-searchable-options::-webkit-scrollbar {
+  width: 9px;
+}
+
+.rml-graph-searchable-options::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.rml-graph-searchable-options::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--line-strong);
+  background-clip: padding-box;
+}
+
+.rml-graph-searchable-option {
+  display: block;
+  width: 100%;
+  min-height: 34px;
+  margin: 0;
+  padding: 8px 9px;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  outline: none;
+  background: transparent;
+  color: #d9d4e8;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.35;
+  text-align: left;
+  text-overflow: ellipsis;
+  text-transform: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.rml-graph-searchable-option + .rml-graph-searchable-option {
+  margin-top: 2px;
+}
+
+.rml-graph-searchable-option:hover,
+.rml-graph-searchable-option:focus-visible {
+  border-color: rgba(164, 118, 255, 0.34);
+  background: rgba(164, 118, 255, 0.12);
+  color: var(--text);
+}
+
+.rml-graph-searchable-option.selected {
+  border-color: rgba(164, 118, 255, 0.58);
+  background: rgba(164, 118, 255, 0.18);
+  color: #e3d6ff;
+}
+
+.rml-graph-searchable-option.selected:hover,
+.rml-graph-searchable-option.selected:focus-visible {
+  background: rgba(164, 118, 255, 0.24);
+}
+
+.rml-graph-searchable-empty {
+  padding: 13px 10px;
+  color: var(--faint);
+  font-size: 10px;
+  line-height: 1.45;
+  text-align: center;
 }

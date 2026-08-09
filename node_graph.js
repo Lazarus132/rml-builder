@@ -8806,24 +8806,205 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       }
 
       .rml-graph-searchable-select {
-        display: grid;
-        gap: 6px;
+        position: relative;
+        display: block;
+        width: 100%;
+        min-width: 0;
       }
 
-      .rml-graph-searchable-select > input[type=search] {
+      .rml-graph-searchable-native-select {
+        position: absolute !important;
+        width: 1px !important;
+        height: 1px !important;
+        min-height: 0 !important;
+        margin: -1px !important;
+        padding: 0 !important;
+        overflow: hidden !important;
+        clip: rect(0 0 0 0) !important;
+        clip-path: inset(50%) !important;
+        border: 0 !important;
+        white-space: nowrap !important;
+        pointer-events: none !important;
+      }
+
+      .rml-graph-searchable-trigger {
+        position: relative;
+        display: flex;
+        width: 100%;
+        min-width: 0;
+        min-height: 35px;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 34px 8px 10px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        outline: none;
+        background: var(--panel-deep);
+        color: var(--text);
+        font-size: 11px;
+        font-weight: 520;
+        line-height: 1.2;
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .rml-graph-searchable-trigger:hover {
+        border-color: var(--line-strong);
+        background: #12101a;
+      }
+
+      .rml-graph-searchable-trigger:focus-visible,
+      .rml-graph-searchable-select.open .rml-graph-searchable-trigger {
+        border-color: var(--accent-dark);
+        box-shadow: 0 0 0 3px var(--accent-soft);
+      }
+
+      .rml-graph-searchable-trigger::after {
+        position: absolute;
+        top: 50%;
+        right: 11px;
+        width: 7px;
+        height: 7px;
+        border-right: 2px solid var(--muted);
+        border-bottom: 2px solid var(--muted);
+        content: "";
+        transform: translateY(-67%) rotate(45deg);
+        transition:
+          transform 120ms ease,
+          border-color 120ms ease;
+        pointer-events: none;
+      }
+
+      .rml-graph-searchable-select.open .rml-graph-searchable-trigger::after {
+        border-color: #d0bbff;
+        transform: translateY(-30%) rotate(225deg);
+      }
+
+      .rml-graph-searchable-trigger-text {
+        display: block;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .rml-graph-searchable-popup {
+        position: fixed;
+        z-index: 100000;
+        display: grid;
+        min-width: 180px;
+        max-width: min(560px, calc(100vw - 16px));
+        gap: 6px;
+        padding: 7px;
+        border: 1px solid var(--line-strong);
+        border-radius: 9px;
+        background:
+          linear-gradient(
+            180deg,
+            rgba(24, 22, 34, 0.995),
+            rgba(13, 12, 19, 0.995)
+          );
+        box-shadow:
+          0 18px 48px rgba(0, 0, 0, 0.58),
+          inset 0 1px rgba(255, 255, 255, 0.035);
+      }
+
+      .rml-graph-searchable-popup[hidden] {
+        display: none;
+      }
+
+      .rml-graph-searchable-search {
+        width: 100%;
         min-height: 34px;
         padding: 7px 9px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        outline: none;
+        background: #0b0a11;
+        color: var(--text);
+        font-size: 10px;
+        font-weight: 520;
+      }
+
+      .rml-graph-searchable-search:focus {
+        border-color: var(--accent-dark);
+        box-shadow: 0 0 0 3px var(--accent-soft);
+      }
+
+      .rml-graph-searchable-options {
+        display: grid;
+        max-height: min(280px, 46vh);
+        gap: 3px;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        padding: 1px;
+        scrollbar-width: thin;
+        scrollbar-color: var(--line-strong) transparent;
+      }
+
+      .rml-graph-searchable-options::-webkit-scrollbar {
+        width: 8px;
+      }
+
+      .rml-graph-searchable-options::-webkit-scrollbar-thumb {
+        border: 2px solid transparent;
+        border-radius: 8px;
+        background: var(--line-strong);
+        background-clip: padding-box;
+      }
+
+      .rml-graph-searchable-option {
+        display: block;
+        width: 100%;
+        min-height: 30px;
+        padding: 7px 9px;
+        overflow: hidden;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        background: transparent;
+        color: #d9d4e8;
+        font-size: 10px;
+        font-weight: 520;
+        line-height: 1.25;
+        text-align: left;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        cursor: pointer;
+      }
+
+      .rml-graph-searchable-option:hover,
+      .rml-graph-searchable-option:focus-visible {
+        border-color: rgba(164, 118, 255, 0.38);
+        outline: none;
+        background: rgba(164, 118, 255, 0.10);
+        color: #f2edff;
+      }
+
+      .rml-graph-searchable-option.selected {
+        border-color: rgba(164, 118, 255, 0.64);
+        background:
+          linear-gradient(
+            145deg,
+            rgba(164, 118, 255, 0.20),
+            rgba(125, 87, 216, 0.11)
+          );
+        color: #e5d9ff;
+      }
+
+      .rml-graph-searchable-option.selected::after {
+        float: right;
+        margin-left: 8px;
+        color: #c6abff;
+        content: "✓";
+        font-weight: 900;
+      }
+
+      .rml-graph-searchable-empty {
+        padding: 12px 10px;
+        color: var(--faint);
         font-size: 9px;
-      }
-
-      .rml-graph-searchable-select > select {
-        min-height: 0;
-        max-height: 220px;
-        padding: 4px;
-      }
-
-      .rml-graph-searchable-select > select option {
-        padding: 5px 7px;
+        line-height: 1.4;
+        text-align: center;
       }
 
       @media (max-width: 1180px) {
@@ -14515,14 +14696,13 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     wrapper.className =
       "rml-graph-searchable-select";
 
-    const search =
-      document.createElement("input");
-    search.type = "search";
-    search.placeholder = placeholder;
-    search.autocomplete = "off";
-    search.setAttribute(
-      "aria-label",
-      placeholder
+    select.classList.add(
+      "rml-graph-searchable-native-select"
+    );
+    select.tabIndex = -1;
+    select.setAttribute(
+      "aria-hidden",
+      "true"
     );
 
     const normalized = optionEntries.map(
@@ -14532,11 +14712,293 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       })
     );
 
+    const trigger =
+      document.createElement("button");
+    trigger.type = "button";
+    trigger.className =
+      "rml-graph-searchable-trigger";
+    trigger.setAttribute(
+      "aria-haspopup",
+      "listbox"
+    );
+    trigger.setAttribute(
+      "aria-expanded",
+      "false"
+    );
+
+    const triggerText =
+      document.createElement("span");
+    triggerText.className =
+      "rml-graph-searchable-trigger-text";
+    trigger.appendChild(triggerText);
+
+    const popup =
+      document.createElement("div");
+    popup.className =
+      "rml-graph-searchable-popup";
+    popup.hidden = true;
+
+    const search =
+      document.createElement("input");
+    search.type = "search";
+    search.className =
+      "rml-graph-searchable-search";
+    search.placeholder = placeholder;
+    search.autocomplete = "off";
+    search.spellcheck = false;
+    search.setAttribute(
+      "aria-label",
+      placeholder
+    );
+
+    const optionsHost =
+      document.createElement("div");
+    optionsHost.className =
+      "rml-graph-searchable-options";
+    optionsHost.setAttribute(
+      "role",
+      "listbox"
+    );
+
+    popup.append(
+      search,
+      optionsHost
+    );
+
+    let opened = false;
+    let renderedButtons = [];
+
+    const selectedValue = () =>
+      String(
+        currentValue?.() ??
+        select.value ??
+        ""
+      );
+
+    const selectedEntry = () => {
+      const value = selectedValue();
+      return (
+        normalized.find(
+          entry => entry.value === value
+        ) ||
+        normalized[0] ||
+        {
+          value: "",
+          text: ""
+        }
+      );
+    };
+
+    const updateTriggerText = () => {
+      const entry = selectedEntry();
+      triggerText.textContent =
+        entry.text || entry.value || "Select…";
+      trigger.title =
+        triggerText.textContent;
+    };
+
+    const positionPopup = () => {
+      if (!opened) {
+        return;
+      }
+
+      const rectangle =
+        trigger.getBoundingClientRect();
+      const viewportWidth =
+        window.visualViewport?.width ||
+        window.innerWidth;
+      const viewportHeight =
+        window.visualViewport?.height ||
+        window.innerHeight;
+      const viewportLeft =
+        window.visualViewport?.offsetLeft ||
+        0;
+      const viewportTop =
+        window.visualViewport?.offsetTop ||
+        0;
+      const margin = 8;
+      const gap = 5;
+      const desiredWidth =
+        Math.max(
+          rectangle.width,
+          220
+        );
+      const width =
+        Math.min(
+          desiredWidth,
+          Math.max(
+            180,
+            viewportWidth - margin * 2
+          )
+        );
+
+      popup.style.width =
+        `${width}px`;
+
+      const measuredHeight =
+        popup.offsetHeight || 240;
+      const spaceBelow =
+        viewportTop +
+        viewportHeight -
+        rectangle.bottom -
+        gap -
+        margin;
+      const spaceAbove =
+        rectangle.top -
+        viewportTop -
+        gap -
+        margin;
+      const openAbove =
+        spaceBelow <
+          Math.min(measuredHeight, 220) &&
+        spaceAbove > spaceBelow;
+
+      const left =
+        Math.min(
+          viewportLeft +
+            viewportWidth -
+            width -
+            margin,
+          Math.max(
+            viewportLeft + margin,
+            rectangle.left
+          )
+        );
+
+      const top = openAbove
+        ? Math.max(
+            viewportTop + margin,
+            rectangle.top -
+              measuredHeight -
+              gap
+          )
+        : Math.min(
+            viewportTop +
+              viewportHeight -
+              measuredHeight -
+              margin,
+            rectangle.bottom + gap
+          );
+
+      popup.style.left =
+        `${Math.round(left)}px`;
+      popup.style.top =
+        `${Math.round(
+          Math.max(
+            viewportTop + margin,
+            top
+          )
+        )}px`;
+    };
+
+    const focusSelectedOption = () => {
+      const selected =
+        renderedButtons.find(button =>
+          button.classList.contains(
+            "selected"
+          )
+        );
+      const target =
+        selected ||
+        renderedButtons[0];
+
+      target?.focus({
+        preventScroll: true
+      });
+      target?.scrollIntoView({
+        block: "nearest"
+      });
+    };
+
+    const closePopup = (
+      restoreTriggerFocus = false
+    ) => {
+      if (!opened) {
+        return;
+      }
+
+      opened = false;
+      wrapper.classList.remove(
+        "open"
+      );
+      trigger.setAttribute(
+        "aria-expanded",
+        "false"
+      );
+      popup.hidden = true;
+      popup.remove();
+
+      document.removeEventListener(
+        "pointerdown",
+        onDocumentPointerDown,
+        true
+      );
+      window.removeEventListener(
+        "resize",
+        onWindowResize
+      );
+      window.visualViewport
+        ?.removeEventListener(
+          "resize",
+          onWindowResize
+        );
+      wrapper.closest(".inspector")
+        ?.removeEventListener(
+          "scroll",
+          onInspectorScroll
+        );
+
+      if (
+        restoreTriggerFocus &&
+        trigger.isConnected
+      ) {
+        trigger.focus({
+          preventScroll: true
+        });
+      }
+    };
+
+    const choose = value => {
+      const nextValue =
+        String(value ?? "");
+
+      if (
+        !normalized.some(
+          entry =>
+            entry.value === nextValue
+        )
+      ) {
+        return;
+      }
+
+      const changed =
+        select.value !== nextValue;
+
+      // First update the native select. If its change handler synchronizes
+      // node.parameters / the backing input, that must happen BEFORE the
+      // trigger text and selected-row state are read again.
+      select.value = nextValue;
+
+      if (changed) {
+        select.dispatchEvent(
+          new Event(
+            "change",
+            { bubbles: true }
+          )
+        );
+      }
+
+      updateTriggerText();
+      closePopup(true);
+    };
+
     const renderOptions = () => {
       const query =
-        search.value.trim().toLowerCase();
-      const previousValue =
-        String(currentValue?.() ?? select.value ?? "");
+        search.value
+          .trim()
+          .toLowerCase();
+      const value =
+        selectedValue();
       const matches = query
         ? normalized.filter(entry =>
             `${entry.text} ${entry.value}`
@@ -14545,32 +15007,486 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           )
         : normalized;
 
-      select.replaceChildren();
-      for (const entry of matches) {
-        const option =
-          document.createElement("option");
-        option.value = entry.value;
-        option.textContent = entry.text;
-        option.selected =
-          entry.value === previousValue;
-        select.appendChild(option);
+      optionsHost.replaceChildren();
+      renderedButtons = [];
+
+      if (matches.length === 0) {
+        const empty =
+          document.createElement("div");
+        empty.className =
+          "rml-graph-searchable-empty";
+        empty.textContent =
+          "No matching entries";
+        optionsHost.appendChild(empty);
+        positionPopup();
+        return;
       }
 
-      select.size = Math.max(
-        2,
-        Math.min(8, matches.length || 2)
-      );
+      for (const entry of matches) {
+        const option =
+          document.createElement(
+            "button"
+          );
+        option.type = "button";
+        option.className =
+          "rml-graph-searchable-option";
+        option.textContent =
+          entry.text;
+        option.title =
+          entry.text;
+        option.dataset.value =
+          entry.value;
+        option.setAttribute(
+          "role",
+          "option"
+        );
+
+        const selected =
+          entry.value === value;
+        option.classList.toggle(
+          "selected",
+          selected
+        );
+        option.setAttribute(
+          "aria-selected",
+          selected
+            ? "true"
+            : "false"
+        );
+
+        option.addEventListener(
+          "click",
+          event => {
+            // Commit on the actual click. Removing the fixed popup during
+            // pointerdown causes pointer-up/click-through onto content below it.
+            event.preventDefault();
+            event.stopPropagation();
+
+            const clickedOption =
+              event.currentTarget;
+
+            choose(
+              clickedOption instanceof HTMLElement
+                ? clickedOption.dataset.value
+                : option.dataset.value
+            );
+          }
+        );
+
+        option.addEventListener(
+          "keydown",
+          event => {
+            const index =
+              renderedButtons.indexOf(
+                option
+              );
+
+            if (
+              event.key ===
+                "ArrowDown" ||
+              event.key ===
+                "ArrowUp"
+            ) {
+              event.preventDefault();
+              const direction =
+                event.key ===
+                  "ArrowDown"
+                  ? 1
+                  : -1;
+              const next =
+                renderedButtons[
+                  Math.max(
+                    0,
+                    Math.min(
+                      renderedButtons.length -
+                        1,
+                      index + direction
+                    )
+                  )
+                ];
+              next?.focus({
+                preventScroll: true
+              });
+              next?.scrollIntoView({
+                block: "nearest"
+              });
+            } else if (
+              event.key === "Home"
+            ) {
+              event.preventDefault();
+              renderedButtons[0]
+                ?.focus({
+                  preventScroll: true
+                });
+            } else if (
+              event.key === "End"
+            ) {
+              event.preventDefault();
+              renderedButtons[
+                renderedButtons.length - 1
+              ]?.focus({
+                preventScroll: true
+              });
+            } else if (
+              event.key === "Enter" ||
+              event.key === " "
+            ) {
+              event.preventDefault();
+              choose(entry.value);
+            }
+          }
+        );
+
+        renderedButtons.push(option);
+        optionsHost.appendChild(option);
+      }
+
+      positionPopup();
     };
+
+    const onDocumentPointerDown =
+      event => {
+        if (
+          !wrapper.contains(
+            event.target
+          ) &&
+          !popup.contains(
+            event.target
+          )
+        ) {
+          closePopup(false);
+        }
+      };
+
+    const onWindowResize =
+      () => positionPopup();
+
+    const onInspectorScroll =
+      () => closePopup(false);
+
+    const openPopup = (
+      focusOptions = false
+    ) => {
+      if (opened) {
+        return;
+      }
+
+      opened = true;
+      wrapper.classList.add(
+        "open"
+      );
+      trigger.setAttribute(
+        "aria-expanded",
+        "true"
+      );
+      search.value = "";
+      popup.hidden = false;
+      document.body.appendChild(
+        popup
+      );
+      renderOptions();
+      positionPopup();
+
+      document.addEventListener(
+        "pointerdown",
+        onDocumentPointerDown,
+        true
+      );
+      window.addEventListener(
+        "resize",
+        onWindowResize
+      );
+      window.visualViewport
+        ?.addEventListener(
+          "resize",
+          onWindowResize
+        );
+      wrapper.closest(".inspector")
+        ?.addEventListener(
+          "scroll",
+          onInspectorScroll,
+          { passive: true }
+        );
+
+      requestAnimationFrame(() => {
+        positionPopup();
+
+        if (focusOptions) {
+          focusSelectedOption();
+        } else {
+          search.focus({
+            preventScroll: true
+          });
+          search.select();
+        }
+      });
+    };
+
+    trigger.addEventListener(
+      "click",
+      () => {
+        if (opened) {
+          closePopup(false);
+        } else {
+          openPopup(false);
+        }
+      }
+    );
+
+    trigger.addEventListener(
+      "keydown",
+      event => {
+        if (
+          event.key ===
+            "ArrowDown" ||
+          event.key ===
+            "ArrowUp"
+        ) {
+          event.preventDefault();
+          if (!opened) {
+            openPopup(true);
+          } else {
+            focusSelectedOption();
+          }
+        } else if (
+          event.key === "Escape" &&
+          opened
+        ) {
+          event.preventDefault();
+          closePopup(true);
+        }
+      }
+    );
 
     search.addEventListener(
       "input",
       renderOptions
     );
 
-    renderOptions();
-    wrapper.append(search, select);
+    search.addEventListener(
+      "keydown",
+      event => {
+        if (
+          event.key === "Escape"
+        ) {
+          event.preventDefault();
+          closePopup(true);
+        } else if (
+          event.key ===
+            "ArrowDown" ||
+          event.key ===
+            "ArrowUp"
+        ) {
+          event.preventDefault();
+
+          if (
+            renderedButtons.length === 0
+          ) {
+            return;
+          }
+
+          const target =
+            event.key ===
+              "ArrowDown"
+              ? renderedButtons[0]
+              : renderedButtons[
+                  renderedButtons.length - 1
+                ];
+          target?.focus({
+            preventScroll: true
+          });
+        } else if (
+          event.key === "Enter" &&
+          renderedButtons.length === 1
+        ) {
+          event.preventDefault();
+          choose(
+            renderedButtons[0]
+              .dataset.value
+          );
+        }
+      }
+    );
+
+    select.addEventListener(
+      "change",
+      updateTriggerText
+    );
+
+    updateTriggerText();
+    wrapper.append(
+      select,
+      trigger
+    );
+
     return wrapper;
   }
+
+
+  function searchableSuggestionWrapper(
+    input,
+    suggestions,
+    placeholder = "Search list…"
+  ) {
+    if (
+      !input ||
+      !Array.isArray(suggestions) ||
+      suggestions.length === 0
+    ) {
+      return input;
+    }
+
+    const normalized = [];
+    const used = new Set();
+
+    for (const suggestion of suggestions) {
+      const value = String(
+        typeof suggestion === "object" &&
+        suggestion !== null
+          ? suggestion.value ??
+            suggestion.label ??
+            ""
+          : suggestion ?? ""
+      ).trim();
+
+      if (!value || used.has(value)) {
+        continue;
+      }
+
+      used.add(value);
+      normalized.push({
+        value,
+        text: String(
+          typeof suggestion === "object" &&
+          suggestion !== null &&
+          suggestion.label
+            ? suggestion.label
+            : value
+        )
+      });
+    }
+
+    if (
+      normalized.length <=
+      GRAPH_SEARCHABLE_LIST_THRESHOLD
+    ) {
+      return input;
+    }
+
+    const select =
+      document.createElement("select");
+
+    for (const entry of normalized) {
+      const option =
+        document.createElement("option");
+      option.value = entry.value;
+      option.textContent = entry.text;
+      select.appendChild(option);
+    }
+
+    const current =
+      String(input.value || "").trim();
+
+    if (
+      current &&
+      !normalized.some(
+        entry => entry.value === current
+      )
+    ) {
+      const currentOption =
+        document.createElement("option");
+      currentOption.value = current;
+      currentOption.textContent = current;
+      select.insertBefore(
+        currentOption,
+        select.firstChild
+      );
+    }
+
+    select.value =
+      current ||
+      normalized[0]?.value ||
+      "";
+
+    const wrapper =
+      searchableSelectWrapper(
+        select,
+        [
+          ...(current &&
+          !normalized.some(
+            entry =>
+              entry.value === current
+          )
+            ? [{
+                value: current,
+                text: current
+              }]
+            : []),
+          ...normalized
+        ],
+        () => input.value,
+        placeholder
+      );
+
+    if (
+      wrapper === select
+    ) {
+      return input;
+    }
+
+    input.classList.add(
+      "rml-graph-searchable-native-select"
+    );
+    input.tabIndex = -1;
+    input.setAttribute(
+      "aria-hidden",
+      "true"
+    );
+
+    select.addEventListener(
+      "change",
+      () => {
+        const nextValue =
+          String(select.value || "");
+
+        if (
+          input.value === nextValue
+        ) {
+          return;
+        }
+
+        input.value = nextValue;
+        input.dispatchEvent(
+          new Event(
+            "input",
+            { bubbles: true }
+          )
+        );
+        input.dispatchEvent(
+          new Event(
+            "change",
+            { bubbles: true }
+          )
+        );
+      }
+    );
+
+    input.addEventListener(
+      "input",
+      () => {
+        const value =
+          String(input.value || "");
+
+        if (select.value !== value) {
+          select.value = value;
+        }
+      }
+    );
+
+    wrapper.appendChild(input);
+    return wrapper;
+  }
+
 
   function nodeInspectorCard(node) {
     const definition =
@@ -15520,93 +16436,42 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         update
       );
 
-      label.appendChild(
+      if (
         kind === "select" &&
         Array.isArray(selectEntries)
-          ? searchableSelectWrapper(
-              control,
-              selectEntries,
-              () => node.parameters[
-                specification.key
-              ],
-              `Search ${String(
-                specification.label ||
-                specification.key
-              ).toLowerCase()}…`
-            )
-          : control
-      );
-
-      if (
+      ) {
+        label.appendChild(
+          searchableSelectWrapper(
+            control,
+            selectEntries,
+            () => node.parameters[
+              specification.key
+            ],
+            `Search ${String(
+              specification.label ||
+              specification.key
+            ).toLowerCase()}…`
+          )
+        );
+      } else if (
         control.tagName === "INPUT" &&
         Array.isArray(
           specification.suggestions
         ) &&
         specification.suggestions.length > 0
       ) {
-        const list =
-          document.createElement(
-            "datalist"
-          );
-        const listId =
-          `rml-graph-suggestions-${node.id}-${specification.key}`
-            .replace(
-              /[^A-Za-z0-9_-]/g,
-              "-"
-            );
-        const usedSuggestions =
-          new Set();
-
-        list.id = listId;
-        control.setAttribute(
-          "list",
-          listId
+        label.appendChild(
+          searchableSuggestionWrapper(
+            control,
+            specification.suggestions,
+            `Search ${String(
+              specification.label ||
+              specification.key
+            ).toLowerCase()}…`
+          )
         );
-
-        for (
-          const suggestion of
-          specification.suggestions
-        ) {
-          const value = String(
-            typeof suggestion ===
-                "object" &&
-              suggestion !== null
-              ? suggestion.value ??
-                suggestion.label ??
-                ""
-              : suggestion ?? ""
-          ).trim();
-
-          if (
-            !value ||
-            usedSuggestions.has(value)
-          ) {
-            continue;
-          }
-
-          usedSuggestions.add(value);
-
-          const option =
-            document.createElement(
-              "option"
-            );
-          option.value = value;
-
-          if (
-            typeof suggestion ===
-              "object" &&
-            suggestion !== null &&
-            suggestion.label
-          ) {
-            option.label = String(
-              suggestion.label
-            );
-          }
-
-          list.appendChild(option);
-        }
-
-        label.appendChild(list);
+      } else {
+        label.appendChild(control);
       }
 
       if (specification.help) {
