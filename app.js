@@ -11284,10 +11284,11 @@ function updateGeneratedOutput() {
     : "";
   [
     elements.copyCodeBottom,
-    elements.downloadCode,
-    elements.downloadCodeBottom
+    elements.downloadCode
   ].forEach(button => {
-    button.disabled = errors.length > 0;
+    if (button) {
+      button.disabled = errors.length > 0;
+    }
   });
 }
 
@@ -13843,7 +13844,28 @@ function closeSettingsPreview(
 }
 
 async function copyText(text, button) {
-  const original = button.textContent;
+  const iconOnlyCopyButton =
+    button?.classList.contains(
+      "code-copy-button"
+    );
+
+  const originalText =
+    iconOnlyCopyButton
+      ? ""
+      : button.textContent;
+
+  const originalAriaLabel =
+    button?.getAttribute(
+      "aria-label"
+    ) || "";
+
+  if (iconOnlyCopyButton) {
+    button.classList.remove(
+      "is-copied",
+      "copy-failed"
+    );
+  }
+
   try {
     if (navigator.clipboard && window.isSecureContext) {
       await navigator.clipboard.writeText(text);
@@ -13860,13 +13882,52 @@ async function copyText(text, button) {
       }
       temporary.remove();
     }
-    button.textContent = "Copied";
+
+    if (iconOnlyCopyButton) {
+      // Restart the SVG stroke animation even on rapid repeated clicks.
+      void button.offsetWidth;
+      button.classList.add("is-copied");
+      button.setAttribute(
+        "aria-label",
+        "C# copied"
+      );
+    } else {
+      button.textContent = "Copied";
+    }
   } catch (error) {
     console.error(error);
-    button.textContent = "Copy failed";
+
+    if (iconOnlyCopyButton) {
+      button.classList.add("copy-failed");
+      button.setAttribute(
+        "aria-label",
+        "Copy failed"
+      );
+    } else {
+      button.textContent = "Copy failed";
+    }
   }
+
   window.setTimeout(() => {
-    button.textContent = original;
+    if (iconOnlyCopyButton) {
+      button.classList.remove(
+        "is-copied",
+        "copy-failed"
+      );
+
+      if (originalAriaLabel) {
+        button.setAttribute(
+          "aria-label",
+          originalAriaLabel
+        );
+      } else {
+        button.removeAttribute(
+          "aria-label"
+        );
+      }
+    } else {
+      button.textContent = originalText;
+    }
   }, 1400);
 }
 
@@ -14605,7 +14666,280 @@ function toggleTopMenu() {
   );
 }
 
+function nodeReferencePortText(port) {
+  if (!port || typeof port !== "object") {
+    return "";
+  }
+
+  const label = String(port.label || port.id || "Value");
+  const type = String(port.type || port.typeVar || "T");
+  return `${label}: ${type}`;
+}
+
+function renderInformationNodeReference() {
+  const host = elements.informationNodeReference;
+  const registry = window.RMLModNodeRegistry;
+
+  if (!host) {
+    return;
+  }
+
+  if (!registry || typeof registry.getNodeDefinitions !== "function") {
+    host.innerHTML = `
+      <p class="information-node-reference-status">
+        The runtime node registry is still loading. Open Help again after the node library has initialized.
+      </p>`;
+    return;
+  }
+
+  const definitions = registry.getNodeDefinitions();
+  const entries = Object.entries(definitions || {})
+    .filter(([, definition]) =>
+      definition &&
+      typeof definition === "object" &&
+      definition.catalogGenerated !== true &&
+      definition.hiddenFromPalette !== true
+    );
+
+  const groups = new Map();
+
+  for (const [operatorId, definition] of entries) {
+    const group = String(definition.group || "Other");
+    if (!groups.has(group)) {
+      groups.set(group, []);
+    }
+    groups.get(group).push({ operatorId, definition });
+  }
+
+  const fragment = document.createDocumentFragment();
+
+  const configurationGroup = document.createElement("section");
+  configurationGroup.className = "information-node-group";
+  configurationGroup.innerHTML = `
+    <h4>Configuration</h4>
+    <div class="information-node-grid">
+      <article class="information-node-card">
+        <span class="information-node-symbol">◆</span>
+        <div>
+          <strong>Configuration</strong>
+          <small>Packed configuration source</small>
+          <p>Publishes the typed RML configuration values. Stored sockets provide values; Startup and Saved variants can also emit impulses according to the configured runtime behavior.</p>
+        </div>
+      </article>
+    </div>`;
+  fragment.appendChild(configurationGroup);
+
+  for (const [groupName, groupEntries] of groups) {
+    groupEntries.sort((left, right) =>
+      String(left.definition.title || left.operatorId).localeCompare(
+        String(right.definition.title || right.operatorId)
+      )
+    );
+
+    const section = document.createElement("section");
+    section.className = "information-node-group";
+
+    const heading = document.createElement("h4");
+    heading.textContent = groupName;
+    section.appendChild(heading);
+
+    const grid = document.createElement("div");
+    grid.className = "information-node-grid";
+
+    for (const { operatorId, definition } of groupEntries) {
+      const card = document.createElement("article");
+      card.className = "information-node-card";
+
+      const symbol = document.createElement("span");
+      symbol.className = "information-node-symbol";
+      symbol.textContent = String(definition.symbol || "•");
+
+      const content = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = String(definition.title || operatorId);
+      const id = document.createElement("small");
+      id.textContent = operatorId;
+      const description = document.createElement("p");
+      description.textContent = String(
+        definition.description || "Built-in typed runtime node."
+      );
+
+      content.append(title, id, description);
+
+      const inputs = Array.isArray(definition.inputs)
+        ? definition.inputs.map(nodeReferencePortText).filter(Boolean)
+        : [];
+      const outputs = Array.isArray(definition.outputs)
+        ? definition.outputs.map(nodeReferencePortText).filter(Boolean)
+        : [];
+
+      if (inputs.length || outputs.length || definition.variadicInputs || definition.variadicOutputs) {
+        const ports = document.createElement("div");
+        ports.className = "information-node-ports";
+
+        if (inputs.length) {
+          const row = document.createElement("span");
+          row.innerHTML = `<b>In</b> ${escapeHtml(inputs.join(" · "))}`;
+          ports.appendChild(row);
+        }
+        if (outputs.length) {
+          const row = document.createElement("span");
+          row.innerHTML = `<b>Out</b> ${escapeHtml(outputs.join(" · "))}`;
+          ports.appendChild(row);
+        }
+        if (definition.variadicInputs || definition.variadicOutputs) {
+          const row = document.createElement("span");
+          row.innerHTML = `<b>Dynamic</b> ${definition.variadicInputs ? "inputs" : "outputs"} can be extended in the Node Inspector.`;
+          ports.appendChild(row);
+        }
+
+        content.appendChild(ports);
+      }
+
+      card.append(symbol, content);
+      grid.appendChild(card);
+    }
+
+    section.appendChild(grid);
+    fragment.appendChild(section);
+  }
+
+  host.replaceChildren(fragment);
+}
+
+let delayedButtonHelpTimer = 0;
+let delayedButtonHelpTarget = null;
+let delayedButtonHelpBubble = null;
+
+function buttonHelpText(button) {
+  return String(
+    button?.dataset?.help ||
+    button?.getAttribute?.("aria-label") ||
+    button?.getAttribute?.("title") ||
+    button?.textContent ||
+    ""
+  ).replace(/\s+/g, " ").trim();
+}
+
+function hideDelayedButtonHelp() {
+  window.clearTimeout(delayedButtonHelpTimer);
+  delayedButtonHelpTimer = 0;
+  delayedButtonHelpTarget = null;
+  delayedButtonHelpBubble?.remove();
+  delayedButtonHelpBubble = null;
+}
+
+function showDelayedButtonHelp(button) {
+  const text = buttonHelpText(button);
+  if (!text || !button?.isConnected) {
+    return;
+  }
+
+  hideDelayedButtonHelp();
+
+  const bubble = document.createElement("div");
+  bubble.className = "rml-button-help-bubble";
+  bubble.setAttribute("role", "tooltip");
+  bubble.textContent = text;
+  document.body.appendChild(bubble);
+
+  const rect = button.getBoundingClientRect();
+  const bubbleRect = bubble.getBoundingClientRect();
+  const gap = 9;
+  const left = Math.min(
+    window.innerWidth - bubbleRect.width - 8,
+    Math.max(8, rect.left + rect.width / 2 - bubbleRect.width / 2)
+  );
+  let top = rect.bottom + gap;
+  if (top + bubbleRect.height > window.innerHeight - 8) {
+    top = Math.max(8, rect.top - bubbleRect.height - gap);
+  }
+
+  bubble.style.left = `${left}px`;
+  bubble.style.top = `${top}px`;
+  delayedButtonHelpBubble = bubble;
+}
+
+function scheduleDelayedButtonHelp(button) {
+  hideDelayedButtonHelp();
+  delayedButtonHelpTarget = button;
+  delayedButtonHelpTimer = window.setTimeout(() => {
+    if (delayedButtonHelpTarget === button) {
+      showDelayedButtonHelp(button);
+    }
+  }, 700);
+}
+
+function installDelayedButtonHelp() {
+  document.addEventListener("pointerover", event => {
+    if (event.pointerType && event.pointerType !== "mouse") {
+      return;
+    }
+    const button = event.target.closest?.("button");
+    if (!(button instanceof HTMLButtonElement) || button.disabled) {
+      return;
+    }
+    if (button.contains(event.relatedTarget)) {
+      return;
+    }
+    scheduleDelayedButtonHelp(button);
+  });
+
+  document.addEventListener("pointerout", event => {
+    const button = event.target.closest?.("button");
+    if (!(button instanceof HTMLButtonElement)) {
+      return;
+    }
+    if (button.contains(event.relatedTarget)) {
+      return;
+    }
+    hideDelayedButtonHelp();
+  });
+
+  document.addEventListener("pointerdown", hideDelayedButtonHelp, true);
+  document.addEventListener("scroll", hideDelayedButtonHelp, true);
+  window.addEventListener("blur", hideDelayedButtonHelp);
+}
+
+function setInformationPage(pageName) {
+  const dialog = elements.informationDialog;
+  if (!dialog) {
+    return;
+  }
+
+  const targetName = ["general", "technical", "nodes"].includes(pageName)
+    ? pageName
+    : "general";
+
+  dialog.querySelectorAll("[data-information-page]").forEach(page => {
+    const active = page.dataset.informationPage === targetName;
+    page.hidden = !active;
+    page.classList.toggle("active", active);
+  });
+
+  dialog.querySelectorAll("[data-information-page-target]").forEach(button => {
+    const active = button.dataset.informationPageTarget === targetName;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+
+  const activeContent = dialog.querySelector(
+    `[data-information-page="${targetName}"] .information-content, ` +
+    `[data-information-page="${targetName}"] .information-node-page-content`
+  );
+
+  if (activeContent) {
+    activeContent.scrollTop = 0;
+  }
+
+  if (targetName === "nodes") {
+    renderInformationNodeReference();
+  }
+}
+
 function openInformationDialog() {
+  setInformationPage("general");
+
   if (!elements.informationDialog?.open) {
     elements.informationDialog.showModal();
   }
@@ -14638,12 +14972,12 @@ function cacheElements() {
     codeSummary: document.getElementById("code-summary"),
     copyCodeBottom: document.getElementById("copy-code-bottom"),
     downloadCode: document.getElementById("download-code"),
-    downloadCodeBottom: document.getElementById("download-code-bottom"),
     topMenuToggle: document.getElementById("top-menu-toggle"),
     topActions: document.getElementById("top-actions"),
     informationOpen: document.getElementById("information-open"),
     informationDialog: document.getElementById("information-dialog"),
     informationClose: document.getElementById("information-close"),
+    informationNodeReference: document.getElementById("information-node-reference"),
     settingsPreviewOpen: document.getElementById("preview-open"),
     settingsPreviewDialog: document.getElementById(
       "settings-preview-dialog"
@@ -15806,6 +16140,8 @@ function initialize() {
     { passive: true }
   );
 
+  installDelayedButtonHelp();
+
   elements.informationOpen.addEventListener(
     "click",
     openInformationDialog
@@ -15813,6 +16149,22 @@ function initialize() {
   elements.informationClose.addEventListener(
     "click",
     closeInformationDialog
+  );
+  elements.informationDialog.addEventListener(
+    "click",
+    event => {
+      const pageButton = event.target.closest(
+        "[data-information-page-target]"
+      );
+
+      if (!pageButton) {
+        return;
+      }
+
+      setInformationPage(
+        pageButton.dataset.informationPageTarget
+      );
+    }
   );
   elements.informationDialog.addEventListener(
     "cancel",
@@ -15941,10 +16293,6 @@ function initialize() {
     }
   );
   elements.downloadCode.addEventListener("click", openExportDialog);
-  elements.downloadCodeBottom.addEventListener(
-    "click",
-    openExportDialog
-  );
   elements.exportClose.addEventListener("click", closeExportDialog);
   elements.exportCancel.addEventListener("click", closeExportDialog);
   elements.exportPlatform.addEventListener(

@@ -9269,7 +9269,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       button.id =
         "pack-into-node";
       button.className =
-        "button secondary";
+        "button secondary top-action-button rml-pack-button";
       button.type = "button";
       button.addEventListener(
         "click",
@@ -9297,10 +9297,21 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       return;
     }
 
-    dom.packButton.textContent =
-      graph?.active
-        ? "Back to Outline"
-        : "Pack into Node";
+    const active = Boolean(graph?.active);
+
+    dom.packButton.innerHTML = active
+      ? `<svg class="rml-pack-back-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5 M10 7l-5 5 5 5"></path></svg><span class="top-action-label">Back to Outline</span>`
+      : `<span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">Pack into Node</span>`;
+
+    dom.packButton.setAttribute(
+      "aria-label",
+      active ? "Back to Configuration Outline" : "Pack into Node"
+    );
+
+    dom.packButton.dataset.help =
+      active
+        ? "Return to the Configuration Outline. The packed graph is preserved."
+        : "Pack the Configuration Outline into the synchronized typed runtime graph.";
 
     dom.packButton.classList.toggle(
       "graph-active",
@@ -9314,12 +9325,13 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     dom.packButton.disabled =
       sourceNodes.length === 0;
 
-    dom.packButton.title =
+    dom.packButton.dataset.help =
       sourceNodes.length === 0
         ? "Add at least one configuration item first."
         : graph?.active
           ? "Return to the Configuration Outline. The packed graph is preserved."
           : "Replace the visual outline with an automatically synchronized typed node graph.";
+    dom.packButton.removeAttribute("title");
   }
 
   function sourceIsOutdated() {
