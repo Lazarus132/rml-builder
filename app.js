@@ -278,6 +278,65 @@ let suppressNodeClickId = null;
 let suppressNodeClickUntil = 0;
 let rootCanvasInteractionController = null;
 
+// The runtime graph is restored from local storage before the dynamically
+// registered graph node modules have necessarily finished booting. Keep this
+// transient state out of user-facing diagnostics and refresh output once the
+// loader has actually settled.
+let typedNodeGraphModulesState = "pending";
+let typedNodeGraphModulesError = null;
+let typedNodeGraphModulesTrackingStarted = false;
+
+function scheduleTypedNodeGraphOutputRefresh() {
+  requestAnimationFrame(() => {
+    if (elements.generatedCode) {
+      updateGeneratedOutput();
+    }
+  });
+}
+
+function beginTypedNodeGraphModulesTracking() {
+  if (typedNodeGraphModulesTrackingStarted) {
+    return;
+  }
+
+  typedNodeGraphModulesTrackingStarted = true;
+
+  const ready = window.RMLModNodesReady;
+
+  if (!ready || typeof ready.then !== "function") {
+    typedNodeGraphModulesState =
+      window.RMLTypedNodeGraphGenerator &&
+      typeof window.RMLTypedNodeGraphGenerator.build === "function"
+        ? "ready"
+        : "failed";
+
+    if (typedNodeGraphModulesState === "failed") {
+      typedNodeGraphModulesError =
+        new Error(
+          "The typed node graph loader did not expose RMLModNodesReady."
+        );
+    }
+
+    scheduleTypedNodeGraphOutputRefresh();
+    return;
+  }
+
+  Promise.resolve(ready)
+    .then(() => {
+      typedNodeGraphModulesState = "ready";
+      typedNodeGraphModulesError = null;
+      scheduleTypedNodeGraphOutputRefresh();
+    })
+    .catch(error => {
+      typedNodeGraphModulesState = "failed";
+      typedNodeGraphModulesError =
+        error instanceof Error
+          ? error
+          : new Error(String(error));
+      scheduleTypedNodeGraphOutputRefresh();
+    });
+}
+
 function scheduleOptionPointerTargetUpdate(
   clientX,
   clientY
@@ -2509,6 +2568,37 @@ function getTypedNodeGraphContribution() {
 
   if (!hasPackedRuntimeGraph) {
     return null;
+  }
+
+  // A packed graph can already be present in restored state while
+  // catalog_loader.js is still loading/registering mod_nodes.js and
+  // api_nodes.js. That is an expected boot phase, not a project error.
+  if (typedNodeGraphModulesState === "pending") {
+    return null;
+  }
+
+  if (typedNodeGraphModulesState === "failed") {
+    return {
+      active: true,
+      diagnostics: [
+        `The typed node graph modules could not be initialized: ${
+          typedNodeGraphModulesError?.message ||
+          "Unknown loader error."
+        }`
+      ],
+      warnings: [],
+      files: [],
+      applyStatements: {},
+      syncStatements: {},
+      reactionStatements: {},
+      initializeStatement: "",
+      onEngineInitializedStatement: "",
+      onConfigurationSynchronizedStatement: "",
+      requirements: {
+        usesElements: false,
+        usesRenderiteShared: false
+      }
+    };
   }
 
   const generator =
@@ -11230,25 +11320,45 @@ function renderInspector() {
 }
 
 function generatedCodeForCurrentView() {
-  const graphFiles =
-    getAdditionalGeneratedSourceFiles();
+  // The lower Generated C# panel follows the page the user is currently
+  // looking at. A packed runtime graph may stay preserved while the builder
+  // is back on Configuration Outline, so the mere existence of generated
+  // graph files must NOT switch this panel to NodeGraph.cs.
+  const graphViewActive =
+    Boolean(
+      isPlainObject(state.extensions) &&
+      isPlainObject(
+        state.extensions.typedNodeGraph
+      ) &&
+      state.extensions.typedNodeGraph
+        .active === true
+    );
 
-  if (graphFiles.length > 0) {
+  if (graphViewActive) {
+    const graphFiles =
+      getAdditionalGeneratedSourceFiles();
+
     return {
       graphActive: true,
       files: graphFiles,
-      code: graphFiles
-        .map(
-          file =>
-            `// ============================================================\n` +
-            `// FILE: ${file.name}\n` +
-            `// ============================================================\n\n` +
-            file.content.trimEnd()
-        )
-        .join("\n\n") + "\n"
+      code: graphFiles.length > 0
+        ? graphFiles
+            .map(
+              file =>
+                `// ============================================================\n` +
+                `// FILE: ${file.name}\n` +
+                `// ============================================================\n\n` +
+                file.content.trimEnd()
+            )
+            .join("\n\n") + "\n"
+        : "// Typed Runtime Graph C# is not available yet.\n"
     };
   }
 
+  // Configuration Outline always shows the generated main mod source, even
+  // when a packed graph exists in the project and is merely preserved in the
+  // background. generateCode() still includes the required graph integration
+  // hooks when such a packed runtime graph exists.
   return {
     graphActive: false,
     files: [],
@@ -16369,6 +16479,7 @@ function initialize() {
   );
 
   exposeBuilderBridge();
+  beginTypedNodeGraphModulesTracking();
   renderAll();
 
   document.dispatchEvent(
