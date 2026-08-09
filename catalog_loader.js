@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const LOADER_VERSION = 5;
+  const LOADER_VERSION = 8;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
   const CATALOG_PATH = "/resonite_api_catalog.json";
@@ -9,7 +9,6 @@
   const POLL_INTERVAL_MS = 30000;
   const PROBE_TIMEOUT_MS = 900;
   const CATALOG_FETCH_TIMEOUT_MS = 45000;
-  const FALLBACK_FETCH_TIMEOUT_MS = 5000;
   const CACHE_DATABASE_NAME =
     "rml-resonite-api-catalog";
   const CACHE_DATABASE_VERSION = 1;
@@ -19,12 +18,8 @@
   const scriptUrl =
     document.currentScript?.src ||
     window.location.href;
-  const fallbackUrl = new URL(
-    "resonite_api_catalog.fallback.json?v=3",
-    scriptUrl
-  ).href;
   const modNodesUrl = new URL(
-    "mod_nodes.js?v=18",
+    "mod_nodes.js?v=19",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
@@ -32,40 +27,6 @@
     scriptUrl
   ).href;
 
-  const minimalFallback = Object.freeze({
-    schemaVersion: 3,
-    catalogKind: "embedded-minimal-fallback",
-    engineVersion: "unknown",
-    sourceAssembly: "FrooxEngine.dll",
-    assemblyFingerprint: "embedded-minimal",
-    catalogFingerprint: "embedded-minimal",
-    assemblies: [],
-    components: [
-      "FrooxEngine.Grabbable",
-      "FrooxEngine.PBS_Metallic",
-      "FrooxEngine.BoxMesh"
-    ],
-    materials: [
-      "FrooxEngine.PBS_Metallic",
-      "FrooxEngine.PBS_Specular",
-      "FrooxEngine.UnlitMaterial"
-    ],
-    commonMaterials: [
-      "FrooxEngine.PBS_Metallic",
-      "FrooxEngine.PBS_Specular",
-      "FrooxEngine.UnlitMaterial"
-    ],
-    meshes: [
-      "FrooxEngine.QuadMesh",
-      "FrooxEngine.BoxMesh",
-      "FrooxEngine.SphereMesh",
-      "FrooxEngine.CylinderMesh",
-      "FrooxEngine.ArrowMesh"
-    ],
-    slotAttachOverloads: [],
-    types: [],
-    enums: []
-  });
 
   let resolveRegistryReady;
   let registryResolved = false;
@@ -165,12 +126,17 @@
     source,
     sourceUrl = ""
   ) {
-    const value =
-      raw &&
-      typeof raw === "object" &&
-      !Array.isArray(raw)
-        ? raw
-        : minimalFallback;
+    if (
+      !raw ||
+      typeof raw !== "object" ||
+      Array.isArray(raw)
+    ) {
+      throw new TypeError(
+        "Resonite API catalog is not a JSON object."
+      );
+    }
+
+    const value = raw;
 
     const components = uniqueSorted(
       Array.isArray(value.components)
@@ -225,26 +191,10 @@
           value.sourceAssembly ||
           "FrooxEngine.dll"
         ),
-      components: Object.freeze(
-        components.length > 0
-          ? components
-          : [...minimalFallback.components]
-      ),
-      materials: Object.freeze(
-        materials.length > 0
-          ? materials
-          : [...minimalFallback.materials]
-      ),
-      commonMaterials: Object.freeze(
-        commonMaterials.length > 0
-          ? commonMaterials
-          : [...minimalFallback.commonMaterials]
-      ),
-      meshes: Object.freeze(
-        meshes.length > 0
-          ? meshes
-          : [...minimalFallback.meshes]
-      ),
+      components: Object.freeze(components),
+      materials: Object.freeze(materials),
+      commonMaterials: Object.freeze(commonMaterials),
+      meshes: Object.freeze(meshes),
       slotAttachOverloads:
         Object.freeze(
           Array.isArray(
@@ -306,18 +256,15 @@
         "api-catalog-state"
       );
 
-    if (!element) {
+    if (!element || !catalog) {
       return;
     }
 
-    const source =
-      String(
-        catalog.catalogSource ||
-        "fallback"
-      );
+    const source = String(
+      catalog.catalogSource || ""
+    );
     const live = source === "scanner";
-    const cached =
-      source === "scanner-cache";
+    const cached = source === "scanner-cache";
     const count =
       catalog.components?.length || 0;
 
@@ -325,19 +272,37 @@
       ? "scanner"
       : cached
         ? "cache"
-        : "fallback";
+        : "unavailable";
 
     element.textContent = live
       ? `Resonite API ${catalog.engineVersion} · live · ${count} components`
       : cached
         ? `Resonite API ${catalog.engineVersion} · cached live catalog · ${count} components`
-        : `Resonite API ${catalog.engineVersion} · fallback · ${count} components`;
+        : "Resonite API · unavailable";
 
     element.title = live
-      ? `Live catalog from ${catalog.catalogSourceUrl}`
+      ? `Live catalog from ${catalog.catalogSourceUrl}. Click to scan again.`
       : cached
-        ? "The last live scanner catalog is loaded from this browser's IndexedDB cache. Resonite does not need to stay open."
-        : "The Resonite scanner endpoint and the browser's last-live cache were unavailable. The packaged fallback catalog is active.";
+        ? "The last live scanner catalog is loaded from this browser's IndexedDB cache. Click to look for a newer running scanner."
+        : "No live or cached Resonite API catalog is available.";
+  }
+
+  function updateUnavailableStatus(
+    message = "No live or cached Resonite API catalog is available. Click to look for a running scanner."
+  ) {
+    const element =
+      document.getElementById(
+        "api-catalog-state"
+      );
+
+    if (!element) {
+      return;
+    }
+
+    element.dataset.source = "unavailable";
+    element.textContent =
+      "Resonite API · no live/cache catalog";
+    element.title = message;
   }
 
   function safeLocalStorageValue(key) {
@@ -705,27 +670,35 @@
   }
 
   async function loadCatalog() {
-    // Read the browser cache in parallel with one fast live probe. This keeps
-    // the builder responsive when Resonite is closed, while still preferring
-    // a scanner that is already ready.
+    // Do not probe localhost port ranges automatically. Chromium logs every
+    // refused fetch at network level even when JavaScript catches the error,
+    // so a stopped scanner would otherwise flood DevTools with expected
+    // ERR_CONNECTION_REFUSED messages. A specifically configured scanner URL
+    // is still tried automatically; unconfigured live discovery is manual.
     const cachedPromise =
       readCachedLiveCatalog();
-    const live =
-      await tryScannerCatalog([0]);
 
-    if (live) {
-      void writeCachedLiveCatalog(
-        live.raw,
-        live.url
-      );
+    const configured =
+      configuredCatalogUrl();
 
-      return installCatalog(
-        normalizeCatalog(
+    if (configured) {
+      const live =
+        await tryScannerCatalog([0]);
+
+      if (live) {
+        void writeCachedLiveCatalog(
           live.raw,
-          "scanner",
           live.url
-        )
-      );
+        );
+
+        return installCatalog(
+          normalizeCatalog(
+            live.raw,
+            "scanner",
+            live.url
+          )
+        );
+      }
     }
 
     const cached =
@@ -741,34 +714,8 @@
       );
     }
 
-    try {
-      const fallback =
-        await fetchJson(
-          fallbackUrl,
-          FALLBACK_FETCH_TIMEOUT_MS
-        );
-
-      return installCatalog(
-        normalizeCatalog(
-          fallback,
-          "fallback-file",
-          fallbackUrl
-        )
-      );
-    } catch (error) {
-      console.warn(
-        "The packaged Resonite API fallback catalog could not be loaded. The embedded minimal catalog is used.",
-        error
-      );
-
-      return installCatalog(
-        normalizeCatalog(
-          minimalFallback,
-          "fallback-embedded",
-          ""
-        )
-      );
-    }
+    updateUnavailableStatus();
+    return null;
   }
 
   function loadScript(
@@ -855,93 +802,94 @@
     );
   }
 
-  function startCatalogPolling(
-    initialCatalog
-  ) {
-    let currentIdentity =
-      catalogIdentity(initialCatalog);
-    let currentSource =
-      initialCatalog.catalogSource;
-    let pollActive = false;
+  async function refreshLiveCatalogManually() {
+    const status =
+      document.getElementById(
+        "api-catalog-state"
+      );
 
-    const poll = async () => {
-      if (pollActive) {
-        return;
-      }
+    if (status) {
+      status.dataset.source = "updating";
+      status.textContent =
+        "Resonite API · checking local scanner…";
+    }
 
-      pollActive = true;
+    const live =
+      await tryScannerCatalog([0]);
 
-      try {
-        const live =
-          await tryScannerCatalog([0]);
-
-        if (!live) {
-          return;
-        }
-
-        const normalized =
-          normalizeCatalog(
-            live.raw,
-            "scanner",
-            live.url
-          );
-        const nextIdentity =
-          catalogIdentity(normalized);
-
-        if (
-          currentSource !== "scanner" ||
-          nextIdentity !==
-            currentIdentity
-        ) {
-          void writeCachedLiveCatalog(
-            live.raw,
-            live.url
-          );
-
-          const status =
-            document.getElementById(
-              "api-catalog-state"
-            );
-
-          if (status) {
-            status.dataset.source =
-              "updating";
-            status.textContent =
-              `Resonite API ${normalized.engineVersion} · catalog updated · reloading…`;
-          }
-
-          currentIdentity =
-            nextIdentity;
-          currentSource = "scanner";
-          window.setTimeout(
-            () =>
-              window.location.reload(),
-            350
+    if (!live) {
+      if (status) {
+        const current =
+          window.RMLResoniteApiCatalog;
+        if (current) {
+          updateStatus(current);
+          status.title =
+            "No newer running scanner was found. The current live/cache catalog remains active.";
+        } else {
+          updateUnavailableStatus(
+            "No running scanner was found and no cached live catalog exists yet."
           );
         }
-      } catch (error) {
-        console.debug(
-          "Resonite API catalog poll failed.",
-          error
-        );
-      } finally {
-        pollActive = false;
       }
-    };
+      return false;
+    }
 
-    // A scanner that is still completing its startup scan is picked up soon,
-    // rather than making the initial builder render wait for several retries.
-    for (const delayMs of [1500, 4000, 8000]) {
+    void writeCachedLiveCatalog(
+      live.raw,
+      live.url
+    );
+
+    const normalized =
+      normalizeCatalog(
+        live.raw,
+        "scanner",
+        live.url
+      );
+
+    const currentIdentity =
+      catalogIdentity(
+        window.RMLResoniteApiCatalog
+      );
+    const nextIdentity =
+      catalogIdentity(normalized);
+
+    installCatalog(normalized);
+
+    if (nextIdentity !== currentIdentity) {
       window.setTimeout(
-        poll,
-        delayMs
+        () => window.location.reload(),
+        250
       );
     }
 
-    window.setInterval(
-      poll,
-      POLL_INTERVAL_MS
-    );
+    return true;
+  }
+
+  function installManualScannerRefresh() {
+    const status =
+      document.getElementById(
+        "api-catalog-state"
+      );
+
+    if (!status || status.dataset.manualScannerBound === "true") {
+      return;
+    }
+
+    status.dataset.manualScannerBound = "true";
+    status.tabIndex = 0;
+    status.setAttribute("role", "button");
+
+    const run = () => {
+      void refreshLiveCatalogManually();
+    };
+
+    status.addEventListener("click", run);
+    status.addEventListener("keydown", event => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        run();
+      }
+    });
   }
 
   const catalogReady =
@@ -952,17 +900,25 @@
       catalogReady,
       registryReady
     ])
-      .then(async () => {
+      .then(async ([catalog]) => {
         await loadScript(
           modNodesUrl,
           "mod-nodes",
           "mod_nodes.js"
         );
-        await loadScript(
-          apiNodesUrl,
-          "api-nodes",
-          "api_nodes.js"
-        );
+
+        if (catalog) {
+          await loadScript(
+            apiNodesUrl,
+            "api-nodes",
+            "api_nodes.js"
+          );
+        } else {
+          console.info(
+            "RML API catalog nodes are disabled until a live or cached catalog is available."
+          );
+        }
+
         return true;
       })
       .catch(error => {
@@ -996,7 +952,9 @@
   );
 
   catalogReady
-    .then(startCatalogPolling)
+    .then(() => {
+      installManualScannerRefresh();
+    })
     .catch(() => {});
 
   Object.defineProperty(

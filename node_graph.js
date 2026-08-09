@@ -2,10 +2,10 @@
   "use strict";
 
   const EXTENSION_NAME = "typedNodeGraph";
-  const GRAPH_SCHEMA_VERSION = 14;
+  const GRAPH_SCHEMA_VERSION = 15;
   const GRAPH_STAGE_WIDTH = 5200;
   const GRAPH_STAGE_HEIGHT = 3400;
-  const GRAPH_MIN_ZOOM = 0.35;
+  const GRAPH_MIN_ZOOM = 0.005;
   const GRAPH_MAX_ZOOM = 1.65;
   const GRAPH_GRID = 12;
   const GRAPH_AUTOPAN_EDGE = 54;
@@ -305,11 +305,18 @@
       group: "Math",
       symbol: "+",
       description:
-        "Adds two values of the same numeric or vector type.",
+        "Adds two or more values of the same numeric or vector type. Select the node and use + / − in the inspector to change the input count.",
       inputs: [
         genericPort("a", "A", "T", "arithmetic"),
         genericPort("b", "B", "T", "arithmetic")
       ],
+      variadicInputs: {
+        minimum: 2,
+        defaultCount: 2,
+        maximum: 64,
+        preserveAB: true,
+        template: genericPort("a", "A", "T", "arithmetic")
+      },
       outputs: [
         genericPort("result", "Result", "T", "arithmetic")
       ]
@@ -333,11 +340,18 @@
       group: "Math",
       symbol: "×",
       description:
-        "Multiplies two values of the same arithmetic type.",
+        "Multiplies two or more values of the same arithmetic type. Select the node and use + / − in the inspector to change the input count.",
       inputs: [
         genericPort("a", "A", "T", "arithmetic"),
         genericPort("b", "B", "T", "arithmetic")
       ],
+      variadicInputs: {
+        minimum: 2,
+        defaultCount: 2,
+        maximum: 64,
+        preserveAB: true,
+        template: genericPort("a", "A", "T", "arithmetic")
+      },
       outputs: [
         genericPort("result", "Result", "T", "arithmetic")
       ]
@@ -361,11 +375,18 @@
       group: "Math",
       symbol: "min",
       description:
-        "Returns the lower of two scalar numeric values.",
+        "Returns the minimum of two or more scalar numeric values. Select the node and use + / − in the inspector to change the input count.",
       inputs: [
         genericPort("a", "A", "T", "scalar"),
         genericPort("b", "B", "T", "scalar")
       ],
+      variadicInputs: {
+        minimum: 2,
+        defaultCount: 2,
+        maximum: 64,
+        preserveAB: true,
+        template: genericPort("a", "A", "T", "scalar")
+      },
       outputs: [
         genericPort("result", "Result", "T", "scalar")
       ]
@@ -375,11 +396,18 @@
       group: "Math",
       symbol: "max",
       description:
-        "Returns the higher of two scalar numeric values.",
+        "Returns the maximum of two or more scalar numeric values. Select the node and use + / − in the inspector to change the input count.",
       inputs: [
         genericPort("a", "A", "T", "scalar"),
         genericPort("b", "B", "T", "scalar")
       ],
+      variadicInputs: {
+        minimum: 2,
+        defaultCount: 2,
+        maximum: 64,
+        preserveAB: true,
+        template: genericPort("a", "A", "T", "scalar")
+      },
       outputs: [
         genericPort("result", "Result", "T", "scalar")
       ]
@@ -446,11 +474,18 @@
       group: "Logic",
       symbol: "∧",
       description:
-        "True only when both Boolean inputs are true.",
+        "True only when every Boolean input is true. Select the node and use + / − in the inspector to change the input count.",
       inputs: [
         port("a", "A", "bool"),
         port("b", "B", "bool")
       ],
+      variadicInputs: {
+        minimum: 2,
+        defaultCount: 2,
+        maximum: 64,
+        preserveAB: true,
+        template: port("a", "A", "bool")
+      },
       outputs: [
         port("result", "Result", "bool")
       ]
@@ -460,11 +495,18 @@
       group: "Logic",
       symbol: "∨",
       description:
-        "True when either Boolean input is true.",
+        "True when at least one Boolean input is true. Select the node and use + / − in the inspector to change the input count.",
       inputs: [
         port("a", "A", "bool"),
         port("b", "B", "bool")
       ],
+      variadicInputs: {
+        minimum: 2,
+        defaultCount: 2,
+        maximum: 64,
+        preserveAB: true,
+        template: port("a", "A", "bool")
+      },
       outputs: [
         port("result", "Result", "bool")
       ]
@@ -870,6 +912,13 @@
   let lastPersistedGraphJson = "";
   let persistTimer = 0;
   let graphMessageTimer = 0;
+  let graphNodeSearchQuery = "";
+  let graphNodeSearchIndex = -1;
+  const GRAPH_SEARCHABLE_LIST_THRESHOLD = 8;
+  const GRAPH_PANEL_LAYOUT_STORAGE_KEY =
+    "rml-node-graph-panel-layout-v1";
+  let graphLeftPanelCollapsed = false;
+  let graphRightPanelCollapsed = false;
   let autoPanFrame = 0;
   let autoPanState = null;
   let activeInteraction = null;
@@ -910,7 +959,9 @@
     wires: null,
     nodesHost: null,
     toast: null,
-    sourceBadge: null
+    sourceBadge: null,
+    leftPanelToggle: null,
+    rightPanelToggle: null
   };
 
   function clone(value) {
@@ -2308,6 +2359,70 @@
       });
     }
 
+    // Preserve older fixed-port graphs when a node becomes variadic. This is
+    // symmetric for inputs and outputs, so conversions such as Sequence's old
+    // First/Second/Third/Fourth outputs retain every existing wire.
+    for (const node of result.nodes) {
+      if (node.kind !== "operator") continue;
+      const definition = OPERATOR_DEFINITIONS[node.operatorId];
+
+      const inferLegacyVariadicCount = (direction, descriptor) => {
+        if (!descriptor) return;
+        const key = direction === "input"
+          ? "variadicInputCount"
+          : "variadicOutputCount";
+        if (Number.isFinite(Number(node.parameters?.[key]))) {
+          return;
+        }
+
+        let required = Number(descriptor.defaultCount) ||
+          Number(descriptor.minimum) || 2;
+        const legacyIds = Array.isArray(descriptor.ids)
+          ? descriptor.ids.map(value => String(value || ""))
+          : [];
+
+        for (const connection of result.connections) {
+          const applies = direction === "input"
+            ? connection.toNode === node.id
+            : connection.fromNode === node.id;
+          if (!applies) continue;
+
+          const portId = String(
+            direction === "input"
+              ? connection.toPort
+              : connection.fromPort
+          );
+          const legacyIndex = legacyIds.indexOf(portId);
+          if (legacyIndex >= 0) {
+            required = Math.max(required, legacyIndex + 1);
+            continue;
+          }
+
+          if (direction === "input") {
+            if (/^[a-z]$/.test(portId)) {
+              required = Math.max(required, portId.charCodeAt(0) - 96);
+              continue;
+            }
+            const match = /^input(\d+)$/.exec(portId);
+            if (match) required = Math.max(required, Number(match[1]));
+          } else {
+            const prefix = String(descriptor.idPrefix || "output");
+            const match = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\d+)$`).exec(portId);
+            if (match) required = Math.max(required, Number(match[1]));
+          }
+        }
+
+        node.parameters[key] = clamp(
+          required,
+          Math.max(2, Number(descriptor.minimum) || 2),
+          Math.max(2, Number(descriptor.maximum) || 64)
+        );
+      };
+
+      inferLegacyVariadicCount("input", definition?.variadicInputs);
+      inferLegacyVariadicCount("output", definition?.variadicOutputs);
+    }
+
     normalizeConnectionRouting(
       result.connections
     );
@@ -2776,7 +2891,131 @@
       }
     }
 
-    return definition;
+    return expandVariadicDefinition(node, definition);
+  }
+
+  function variadicCount(node, direction, descriptor) {
+    const key = direction === "input"
+      ? "variadicInputCount"
+      : "variadicOutputCount";
+    const minimum = Math.max(2, Number(descriptor?.minimum) || 2);
+    const maximum = Math.max(minimum, Number(descriptor?.maximum) || 64);
+    const fallback = Math.max(minimum, Number(descriptor?.defaultCount) || minimum);
+    return clamp(
+      Math.trunc(Number(node?.parameters?.[key]) || fallback),
+      minimum,
+      maximum
+    );
+  }
+
+  function variadicPortLabel(index) {
+    return index < 26
+      ? String.fromCharCode(65 + index)
+      : `Input ${index + 1}`;
+  }
+
+  function variadicPortId(index) {
+    return index < 26
+      ? String.fromCharCode(97 + index)
+      : `input${index + 1}`;
+  }
+
+  function expandVariadicDefinition(node, definition) {
+    if (!definition || node?.kind !== "operator") {
+      return definition;
+    }
+
+    let inputs = definition.inputs || [];
+    let outputs = definition.outputs || [];
+
+    const inputDescriptor = definition.variadicInputs;
+    if (inputDescriptor) {
+      const count = variadicCount(node, "input", inputDescriptor);
+      const template = inputDescriptor.template || inputs[0] || port("a", "A", "object");
+      const preserved = Number(inputDescriptor.preserved || 0);
+      const fixed = inputs.slice(0, preserved);
+      const repeated = [];
+      for (let index = 0; index < count; index += 1) {
+        const id = inputDescriptor.idPrefix
+          ? `${inputDescriptor.idPrefix}${index + 1}`
+          : variadicPortId(index);
+        const label = inputDescriptor.labelMode === "number"
+          ? `${inputDescriptor.label || "Input"} ${index + 1}`
+          : variadicPortLabel(index);
+        repeated.push({
+          ...template,
+          id,
+          label
+        });
+      }
+      inputs = [...fixed, ...repeated];
+    }
+
+    const outputDescriptor = definition.variadicOutputs;
+    if (outputDescriptor) {
+      const count = variadicCount(node, "output", outputDescriptor);
+      const template = outputDescriptor.template || outputs[0] || port("out1", "Output 1", "impulse");
+      const preserved = Number(outputDescriptor.preserved || 0);
+      const fixed = outputs.slice(0, preserved);
+      const repeated = [];
+      const configuredIds = Array.isArray(outputDescriptor.ids)
+        ? outputDescriptor.ids
+        : [];
+      const configuredLabels = Array.isArray(outputDescriptor.labels)
+        ? outputDescriptor.labels
+        : [];
+      for (let index = 0; index < count; index += 1) {
+        repeated.push({
+          ...template,
+          id: configuredIds[index] ||
+            `${outputDescriptor.idPrefix || "output"}${index + 1}`,
+          label: configuredLabels[index] ||
+            `${outputDescriptor.label || "Output"} ${index + 1}`
+        });
+      }
+      outputs = [...fixed, ...repeated];
+    }
+
+    return {
+      ...definition,
+      inputs,
+      outputs
+    };
+  }
+
+  function variadicInputIds(node) {
+    const definition = nodeDefinition(node);
+    return (definition?.inputs || []).map(spec => spec.id);
+  }
+
+  function variadicReducePreview(node, context, operation, type) {
+    const ids = variadicInputIds(node);
+    let result = ids.length > 0
+      ? previewInputValue(node, (nodeDefinition(node).inputs || [])[0], context)
+      : previewDefaultValue(type);
+
+    for (let index = 1; index < ids.length; index += 1) {
+      const spec = nodeDefinition(node).inputs.find(item => item.id === ids[index]);
+      result = previewMapBinary(
+        result,
+        spec ? previewInputValue(node, spec, context) : previewDefaultValue(type),
+        operation,
+        type
+      );
+    }
+    return result;
+  }
+
+  function variadicReduceCode(node, input, helperName, csType) {
+    const ids = variadicInputIds(node);
+    if (ids.length === 0) {
+      return graphCsDefault("float");
+    }
+    let code = input(ids[0]).code;
+    for (let index = 1; index < ids.length; index += 1) {
+      code = `${helperName}<${csType}>(${code}, ${input(ids[index]).code})`;
+    }
+    return code;
   }
 
   function definitionHasSockets(
@@ -4858,11 +5097,8 @@
           break;
 
         case "math.add":
-          result = previewMapBinary(
-            input("a"),
-            input("b"),
-            (a, b) => a + b,
-            type
+          result = variadicReducePreview(
+            node, context, (a, b) => a + b, type
           );
           break;
 
@@ -4876,11 +5112,8 @@
           break;
 
         case "math.multiply":
-          result = previewMapBinary(
-            input("a"),
-            input("b"),
-            (a, b) => a * b,
-            type
+          result = variadicReducePreview(
+            node, context, (a, b) => a * b, type
           );
           break;
 
@@ -4897,20 +5130,14 @@
           break;
 
         case "math.minimum":
-          result = previewMapBinary(
-            input("a"),
-            input("b"),
-            Math.min,
-            type
+          result = variadicReducePreview(
+            node, context, Math.min, type
           );
           break;
 
         case "math.maximum":
-          result = previewMapBinary(
-            input("a"),
-            input("b"),
-            Math.max,
-            type
+          result = variadicReducePreview(
+            node, context, Math.max, type
           );
           break;
 
@@ -6168,8 +6395,7 @@
             break;
 
           case "math.add":
-            code =
-              `GraphAdd<${csType}>(${input("a").code}, ${input("b").code})`;
+            code = variadicReduceCode(node, input, "GraphAdd", csType);
             break;
 
           case "math.subtract":
@@ -6178,8 +6404,7 @@
             break;
 
           case "math.multiply":
-            code =
-              `GraphMultiply<${csType}>(${input("a").code}, ${input("b").code})`;
+            code = variadicReduceCode(node, input, "GraphMultiply", csType);
             break;
 
           case "math.divide":
@@ -6188,13 +6413,11 @@
             break;
 
           case "math.minimum":
-            code =
-              `GraphMinimum<${csType}>(${input("a").code}, ${input("b").code})`;
+            code = variadicReduceCode(node, input, "GraphMinimum", csType);
             break;
 
           case "math.maximum":
-            code =
-              `GraphMaximum<${csType}>(${input("a").code}, ${input("b").code})`;
+            code = variadicReduceCode(node, input, "GraphMaximum", csType);
             break;
 
           case "math.clamp":
@@ -6217,15 +6440,17 @@
               `GraphLerp<${csType}>(${input("a").code}, ${input("b").code}, ${input("t").code})`;
             break;
 
-          case "logic.and":
-            code =
-              `(${input("a").code} && ${input("b").code})`;
+          case "logic.and": {
+            const ids = variadicInputIds(node);
+            code = `(${ids.map(id => input(id).code).join(" && ")})`;
             break;
+          }
 
-          case "logic.or":
-            code =
-              `(${input("a").code} || ${input("b").code})`;
+          case "logic.or": {
+            const ids = variadicInputIds(node);
+            code = `(${ids.map(id => input(id).code).join(" || ")})`;
             break;
+          }
 
           case "logic.not":
             code =
@@ -8500,6 +8725,107 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         font-size: 9px;
       }
 
+      .rml-workspace-toggle-title {
+        display: grid !important;
+        grid-template-columns: auto max-content minmax(0, 1fr) max-content auto;
+        align-items: center;
+        justify-content: stretch !important;
+        column-gap: 8px !important;
+      }
+
+      .rml-workspace-toggle-title > .rml-graph-panel-toggle-left {
+        grid-column: 1;
+      }
+
+      .rml-workspace-toggle-title > span {
+        grid-column: 2;
+        justify-self: start;
+      }
+
+      .rml-workspace-toggle-title > em {
+        grid-column: 4;
+        min-width: 0;
+        max-width: none;
+        width: auto;
+        justify-self: end;
+      }
+
+      .rml-workspace-toggle-title > .rml-graph-panel-toggle-right {
+        grid-column: 5;
+      }
+
+      .rml-graph-panel-toggle {
+        display: grid;
+        width: 28px;
+        height: 28px;
+        min-height: 28px;
+        flex: 0 0 28px;
+        place-items: center;
+        padding: 0;
+        border: 1px solid rgba(64, 58, 85, 0.72);
+        border-radius: 7px;
+        background: rgba(13, 12, 19, 0.42);
+        color: #bda9eb;
+        font-size: 14px;
+        font-weight: 900;
+        line-height: 1;
+        cursor: pointer;
+        box-shadow: inset 0 1px rgba(255, 255, 255, 0.025);
+        transition:
+          border-color 0.12s ease,
+          background 0.12s ease,
+          color 0.12s ease;
+      }
+
+      .rml-graph-panel-toggle:hover {
+        border-color: var(--accent-dark);
+        background: rgba(164, 118, 255, 0.1);
+        color: #eadfff;
+      }
+
+      .rml-graph-panel-toggle:focus-visible {
+        outline: 2px solid var(--accent-dark);
+        outline-offset: 2px;
+      }
+
+      body.rml-graph-left-collapsed .workspace > .palette,
+      body.rml-graph-right-collapsed .workspace > .inspector {
+        display: none !important;
+      }
+
+      body.rml-graph-left-collapsed:not(.rml-graph-right-collapsed) .workspace {
+        grid-template-columns: minmax(470px, 1fr) 320px;
+      }
+
+      body.rml-graph-right-collapsed:not(.rml-graph-left-collapsed) .workspace {
+        grid-template-columns: 230px minmax(470px, 1fr);
+      }
+
+      body.rml-graph-left-collapsed.rml-graph-right-collapsed .workspace {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .rml-graph-searchable-select {
+        display: grid;
+        gap: 6px;
+      }
+
+      .rml-graph-searchable-select > input[type=search] {
+        min-height: 34px;
+        padding: 7px 9px;
+        font-size: 9px;
+      }
+
+      .rml-graph-searchable-select > select {
+        min-height: 0;
+        max-height: 220px;
+        padding: 4px;
+      }
+
+      .rml-graph-searchable-select > select option {
+        padding: 5px 7px;
+      }
+
       @media (max-width: 1180px) {
         body.rml-node-graph-mode .workspace {
           grid-template-columns: 220px minmax(0, 1fr);
@@ -8511,6 +8837,20 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
         body.rml-node-graph-mode #inspector-content {
           min-height: 0;
+        }
+      }
+
+      @media (max-width: 1180px) {
+        body.rml-node-graph-mode.rml-graph-left-collapsed:not(.rml-graph-right-collapsed) .workspace {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        body.rml-node-graph-mode.rml-graph-right-collapsed:not(.rml-graph-left-collapsed) .workspace {
+          grid-template-columns: 220px minmax(0, 1fr);
+        }
+
+        body.rml-node-graph-mode.rml-graph-left-collapsed.rml-graph-right-collapsed .workspace {
+          grid-template-columns: minmax(0, 1fr);
         }
       }
 
@@ -8945,12 +9285,169 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     renderGraphInspector();
   }
 
+  function loadGraphPanelLayout() {
+    try {
+      const stored = JSON.parse(
+        localStorage.getItem(
+          GRAPH_PANEL_LAYOUT_STORAGE_KEY
+        ) || "{}"
+      );
+      graphLeftPanelCollapsed =
+        stored.left === true;
+      graphRightPanelCollapsed =
+        stored.right === true;
+    } catch {
+      graphLeftPanelCollapsed = false;
+      graphRightPanelCollapsed = false;
+    }
+  }
+
+  function persistGraphPanelLayout() {
+    try {
+      localStorage.setItem(
+        GRAPH_PANEL_LAYOUT_STORAGE_KEY,
+        JSON.stringify({
+          left: graphLeftPanelCollapsed,
+          right: graphRightPanelCollapsed
+        })
+      );
+    } catch {
+      // Layout persistence is optional.
+    }
+  }
+
+  function applyGraphPanelLayout() {
+    document.body.classList.toggle(
+      "rml-graph-left-collapsed",
+      graphLeftPanelCollapsed
+    );
+    document.body.classList.toggle(
+      "rml-graph-right-collapsed",
+      graphRightPanelCollapsed
+    );
+
+    if (dom.leftPanelToggle) {
+      dom.leftPanelToggle.textContent =
+        graphLeftPanelCollapsed
+          ? "▶"
+          : "◀";
+      dom.leftPanelToggle.title =
+        graphLeftPanelCollapsed
+          ? "Show node library"
+          : "Hide node library";
+      dom.leftPanelToggle.setAttribute(
+        "aria-label",
+        dom.leftPanelToggle.title
+      );
+      dom.leftPanelToggle.setAttribute(
+        "aria-expanded",
+        String(!graphLeftPanelCollapsed)
+      );
+    }
+
+    if (dom.rightPanelToggle) {
+      dom.rightPanelToggle.textContent =
+        graphRightPanelCollapsed
+          ? "◀"
+          : "▶";
+      dom.rightPanelToggle.title =
+        graphRightPanelCollapsed
+          ? "Show node inspector"
+          : "Hide node inspector";
+      dom.rightPanelToggle.setAttribute(
+        "aria-label",
+        dom.rightPanelToggle.title
+      );
+      dom.rightPanelToggle.setAttribute(
+        "aria-expanded",
+        String(!graphRightPanelCollapsed)
+      );
+    }
+
+    requestAnimationFrame(() => {
+      renderGraphWires();
+    });
+  }
+
+  function ensureGraphPanelToggles() {
+    const title =
+      dom.canvasPanel?.querySelector(
+        ":scope > .panel-title"
+      );
+
+    if (!title) return;
+
+    let left = title.querySelector(
+      ":scope > .rml-graph-panel-toggle-left"
+    );
+    if (!left) {
+      left = document.createElement("button");
+      left.type = "button";
+      left.className =
+        "rml-graph-panel-toggle rml-graph-panel-toggle-left";
+      left.addEventListener("click", () => {
+        graphLeftPanelCollapsed =
+          !graphLeftPanelCollapsed;
+        persistGraphPanelLayout();
+        applyGraphPanelLayout();
+      });
+      title.insertBefore(left, title.firstChild);
+    }
+
+    let right = title.querySelector(
+      ":scope > .rml-graph-panel-toggle-right"
+    );
+    if (!right) {
+      right = document.createElement("button");
+      right.type = "button";
+      right.className =
+        "rml-graph-panel-toggle rml-graph-panel-toggle-right";
+      right.addEventListener("click", () => {
+        graphRightPanelCollapsed =
+          !graphRightPanelCollapsed;
+        persistGraphPanelLayout();
+        applyGraphPanelLayout();
+      });
+      title.appendChild(right);
+    }
+
+    title.classList.add(
+      "rml-workspace-toggle-title"
+    );
+
+    dom.leftPanelToggle = left;
+    dom.rightPanelToggle = right;
+    applyGraphPanelLayout();
+  }
+
+  function removeGraphPanelToggles() {
+    const title =
+      dom.canvasPanel?.querySelector(
+        ":scope > .panel-title"
+      );
+
+    dom.leftPanelToggle?.remove();
+    dom.rightPanelToggle?.remove();
+    title?.classList.remove(
+      "rml-workspace-toggle-title"
+    );
+    dom.leftPanelToggle = null;
+    dom.rightPanelToggle = null;
+    document.body.classList.remove(
+      "rml-graph-left-collapsed",
+      "rml-graph-right-collapsed"
+    );
+  }
+
   function activateGraphMode() {
     cacheDom();
 
     document.body.classList.add(
       "rml-node-graph-mode"
     );
+
+    loadGraphPanelLayout();
+    ensureGraphPanelToggles();
 
     if (dom.paletteTitle) {
       dom.paletteTitle.innerHTML =
@@ -8982,6 +9479,9 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     document.body.classList.remove(
       "rml-node-graph-mode"
     );
+
+    loadGraphPanelLayout();
+    ensureGraphPanelToggles();
 
     if (dom.paletteTitle) {
       dom.paletteTitle.innerHTML =
@@ -10719,6 +11219,70 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     return button;
   }
 
+  function graphNodeSearchText(node) {
+    const definition = nodeDefinition(node);
+    return [
+      node.label,
+      definition?.title,
+      definition?.group,
+      node.operatorId
+    ].filter(Boolean).join(" ").toLowerCase();
+  }
+
+  function focusGraphNodeSearch(query, advance = true) {
+    const normalized = String(query || "").trim().toLowerCase();
+    if (!normalized) {
+      graphNodeSearchQuery = "";
+      graphNodeSearchIndex = -1;
+      return 0;
+    }
+
+    const matches = graph.nodes.filter(node =>
+      graphNodeSearchText(node).includes(normalized)
+    );
+    if (matches.length === 0) {
+      graphNodeSearchQuery = normalized;
+      graphNodeSearchIndex = -1;
+      showGraphMessage("No graph node matches this search.", "error");
+      return 0;
+    }
+
+    if (graphNodeSearchQuery !== normalized) {
+      graphNodeSearchQuery = normalized;
+      graphNodeSearchIndex = 0;
+    } else if (advance) {
+      graphNodeSearchIndex = (graphNodeSearchIndex + 1) % matches.length;
+    } else if (graphNodeSearchIndex < 0 || graphNodeSearchIndex >= matches.length) {
+      graphNodeSearchIndex = 0;
+    }
+
+    const node = matches[graphNodeSearchIndex];
+    graph.selectedNodeId = node.id;
+    graph.selectedConnectionId = null;
+    clearSelectedWirePoint();
+    renderGraphNodesAndWires();
+    renderGraphInspector();
+
+    const element = dom.nodesHost?.querySelector(
+      `[data-graph-node-id="${CSS.escape(node.id)}"]`
+    );
+    const rectangle = dom.viewport?.getBoundingClientRect();
+    if (element && rectangle) {
+      const width = element.offsetWidth || 280;
+      const height = element.offsetHeight || 180;
+      graph.viewport.x = rectangle.width / 2 - (node.x + width / 2) * graph.viewport.scale;
+      graph.viewport.y = rectangle.height / 2 - (node.y + height / 2) * graph.viewport.scale;
+      applyViewportTransform();
+      persistGraph();
+    }
+
+    showGraphMessage(
+      `Node ${graphNodeSearchIndex + 1} of ${matches.length}: ${node.label || nodeDefinition(node).title}`,
+      "success"
+    );
+    return matches.length;
+  }
+
   function renderGraphCanvas() {
     if (
       !graph.active ||
@@ -10778,6 +11342,30 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       zoomOut,
       zoomIn
     );
+
+    const nodeSearch = document.createElement("div");
+    nodeSearch.className = "rml-graph-node-search";
+    const nodeSearchInput = document.createElement("input");
+    nodeSearchInput.type = "search";
+    nodeSearchInput.placeholder = "Find node in graph…";
+    nodeSearchInput.autocomplete = "off";
+    const nodeSearchNext = createToolbarButton("Next", () =>
+      focusGraphNodeSearch(nodeSearchInput.value, true)
+    );
+    nodeSearchNext.title = "Jump to the next matching node";
+    nodeSearchInput.addEventListener("keydown", event => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        focusGraphNodeSearch(nodeSearchInput.value, true);
+      }
+    });
+    nodeSearchInput.addEventListener("input", () => {
+      if (nodeSearchInput.value.trim() !== graphNodeSearchQuery) {
+        graphNodeSearchIndex = -1;
+      }
+    });
+    nodeSearch.append(nodeSearchInput, nodeSearchNext);
+    toolbar.appendChild(nodeSearch);
 
     const badge =
       document.createElement("div");
@@ -13869,6 +14457,119 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       nodeInspectorCard(node)
     );
     dom.inspectorContent.appendChild(root);
+    installInspectorOverflowSearch(root);
+  }
+
+  function installInspectorOverflowSearch(root) {
+    if (!root || !dom.inspectorContent) return;
+    requestAnimationFrame(() => {
+      const host = dom.inspectorContent;
+      const overflow = host.scrollHeight > host.clientHeight + 4;
+      const existing = root.querySelector(":scope > .rml-graph-inspector-search");
+      if (!overflow) {
+        existing?.remove();
+        return;
+      }
+      if (existing) return;
+
+      const wrap = document.createElement("label");
+      wrap.className = "rml-graph-inspector-search";
+      wrap.textContent = "Search inspector";
+      const input = document.createElement("input");
+      input.type = "search";
+      input.placeholder = "Filter visible inspector entries…";
+      input.autocomplete = "off";
+      wrap.appendChild(input);
+      root.insertBefore(wrap, root.firstChild);
+
+      const apply = () => {
+        const query = input.value.trim().toLowerCase();
+        const entries = root.querySelectorAll(
+          ".rml-graph-inspector-card > label, .rml-graph-inspector-type-row, .rml-graph-display-value, .rml-graph-variadic-row, .rml-graph-inspector-actions > button"
+        );
+        for (const entry of entries) {
+          entry.hidden = Boolean(query) && !String(entry.textContent || "").toLowerCase().includes(query);
+        }
+      };
+      input.addEventListener("input", apply);
+    });
+  }
+
+  function searchableSelectWrapper(
+    select,
+    optionEntries,
+    currentValue,
+    placeholder = "Search list…"
+  ) {
+    if (
+      !select ||
+      !Array.isArray(optionEntries) ||
+      optionEntries.length <=
+        GRAPH_SEARCHABLE_LIST_THRESHOLD
+    ) {
+      return select;
+    }
+
+    const wrapper =
+      document.createElement("div");
+    wrapper.className =
+      "rml-graph-searchable-select";
+
+    const search =
+      document.createElement("input");
+    search.type = "search";
+    search.placeholder = placeholder;
+    search.autocomplete = "off";
+    search.setAttribute(
+      "aria-label",
+      placeholder
+    );
+
+    const normalized = optionEntries.map(
+      entry => ({
+        value: String(entry.value ?? ""),
+        text: String(entry.text ?? entry.value ?? "")
+      })
+    );
+
+    const renderOptions = () => {
+      const query =
+        search.value.trim().toLowerCase();
+      const previousValue =
+        String(currentValue?.() ?? select.value ?? "");
+      const matches = query
+        ? normalized.filter(entry =>
+            `${entry.text} ${entry.value}`
+              .toLowerCase()
+              .includes(query)
+          )
+        : normalized;
+
+      select.replaceChildren();
+      for (const entry of matches) {
+        const option =
+          document.createElement("option");
+        option.value = entry.value;
+        option.textContent = entry.text;
+        option.selected =
+          entry.value === previousValue;
+        select.appendChild(option);
+      }
+
+      select.size = Math.max(
+        2,
+        Math.min(8, matches.length || 2)
+      );
+    };
+
+    search.addEventListener(
+      "input",
+      renderOptions
+    );
+
+    renderOptions();
+    wrapper.append(search, select);
+    return wrapper;
   }
 
   function nodeInspectorCard(node) {
@@ -13988,6 +14689,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         "Generic value type";
       const select =
         document.createElement("select");
+      const typeOptions = [];
 
       if (
         definitionAllowsAutoType(
@@ -14007,6 +14709,10 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         select.appendChild(
           automatic
         );
+        typeOptions.push({
+          value: "auto",
+          text: "Auto · infer safely from wires"
+        });
       }
 
       for (
@@ -14023,6 +14729,10 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           node.parameters.valueType ===
           type;
         select.appendChild(option);
+        typeOptions.push({
+          value: type,
+          text: typeLabel(type)
+        });
       }
 
       select.addEventListener(
@@ -14046,7 +14756,14 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           );
         }
       );
-      label.appendChild(select);
+      label.appendChild(
+        searchableSelectWrapper(
+          select,
+          typeOptions,
+          () => node.parameters.valueType,
+          "Search generic value types…"
+        )
+      );
       card.appendChild(label);
 
       if (
@@ -14095,6 +14812,46 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       node,
       definition
     );
+
+    if (definition.variadicInputs || definition.variadicOutputs) {
+      const variadic = document.createElement("div");
+      variadic.className = "rml-graph-variadic-controls";
+
+      const addControl = (direction, descriptor) => {
+        if (!descriptor) return;
+        const key = direction === "input"
+          ? "variadicInputCount"
+          : "variadicOutputCount";
+        const count = variadicCount(node, direction, descriptor);
+        const minimum = Math.max(2, Number(descriptor.minimum) || 2);
+        const maximum = Math.max(minimum, Number(descriptor.maximum) || 64);
+        const row = document.createElement("div");
+        row.className = "rml-graph-variadic-row";
+        const label = document.createElement("span");
+        label.textContent = `${direction === "input" ? "Inputs" : "Outputs"}: ${count}`;
+        const minus = inspectorButton("−", () => {
+          node.parameters[key] = Math.max(minimum, count - 1);
+          pruneConnections();
+          persistGraph(true);
+          renderGraphNodesAndWires();
+          renderGraphInspector();
+        });
+        minus.disabled = count <= minimum;
+        const plus = inspectorButton("+", () => {
+          node.parameters[key] = Math.min(maximum, count + 1);
+          persistGraph(true);
+          renderGraphNodesAndWires();
+          renderGraphInspector();
+        }, "primary");
+        plus.disabled = count >= maximum;
+        row.append(label, minus, plus);
+        variadic.appendChild(row);
+      };
+
+      addControl("input", definition.variadicInputs);
+      addControl("output", definition.variadicOutputs);
+      card.appendChild(variadic);
+    }
 
     const typeList =
       document.createElement("div");
@@ -14556,6 +15313,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         specification.key;
 
       let control;
+      let selectEntries = null;
 
       if (kind === "bool") {
         control =
@@ -14583,6 +15341,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       } else if (kind === "select") {
         control =
           document.createElement("select");
+        selectEntries = [];
         const sourceOptions =
           typeof specification.options ===
             "function"
@@ -14627,6 +15386,10 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
               ] ?? ""
             ) === option.value;
           control.appendChild(option);
+          selectEntries.push({
+            value: option.value,
+            text: option.textContent
+          });
         }
       } else if (
         kind === "textarea" ||
@@ -14757,7 +15520,22 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         update
       );
 
-      label.appendChild(control);
+      label.appendChild(
+        kind === "select" &&
+        Array.isArray(selectEntries)
+          ? searchableSelectWrapper(
+              control,
+              selectEntries,
+              () => node.parameters[
+                specification.key
+              ],
+              `Search ${String(
+                specification.label ||
+                specification.key
+              ).toLowerCase()}…`
+            )
+          : control
+      );
 
       if (
         control.tagName === "INPUT" &&
@@ -17452,6 +18230,8 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     persistGraph(true);
 
     ensurePackButton();
+    loadGraphPanelLayout();
+    ensureGraphPanelToggles();
 
     document.addEventListener(
       "rml-builder:rendered",

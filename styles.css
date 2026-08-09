@@ -172,7 +172,7 @@ button {
   box-shadow: 0 0 12px rgba(89, 183, 255, 0.65);
 }
 
-.api-catalog-state[data-source="fallback"] {
+.api-catalog-state[data-source="unavailable"] {
   border-color: rgba(255, 209, 129, 0.26);
   color: #e5cf9e;
 }
@@ -6377,4 +6377,77 @@ body:has(.node-pointer-ghost) .builder-canvas {
     right: max(6px, env(safe-area-inset-right));
     left: max(6px, env(safe-area-inset-left));
   }
+}
+
+/* Graph usability: variadic ports, inspector filtering and graph-node search. */
+.api-catalog-state[role="button"] {
+  cursor: pointer;
+  user-select: none;
+}
+
+.api-catalog-state[role="button"]:focus-visible {
+  outline: 2px solid var(--accent-dark);
+  outline-offset: 2px;
+}
+
+.rml-graph-node-search {
+  display: flex;
+  min-width: 210px;
+  align-items: center;
+  gap: 6px;
+}
+
+.rml-graph-node-search input {
+  width: min(260px, 26vw);
+  min-width: 150px;
+  min-height: 32px;
+  padding: 6px 9px;
+}
+
+.rml-graph-node-search .button {
+  min-height: 32px;
+  padding-inline: 10px;
+}
+
+.rml-graph-inspector-search {
+  position: sticky;
+  z-index: 3;
+  top: 0;
+  display: grid;
+  gap: 5px;
+  padding: 9px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(13, 12, 19, 0.97);
+}
+
+.rml-graph-inspector-search input {
+  min-height: 34px;
+}
+
+.rml-graph-variadic-controls {
+  display: grid;
+  gap: 7px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(8, 7, 12, 0.3);
+}
+
+.rml-graph-variadic-row {
+  display: grid;
+  grid-template-columns: 1fr 34px 34px;
+  align-items: center;
+  gap: 6px;
+}
+
+.rml-graph-variadic-row > span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.rml-graph-variadic-row .button {
+  min-width: 34px;
+  min-height: 32px;
+  padding: 0;
 }

@@ -135,30 +135,12 @@
     window.RMLFrooxComponentCatalog ||
     Object.freeze({
       schemaVersion: 3,
-      catalogSource: "embedded-fallback",
+      catalogSource: "unavailable",
       engineVersion: "unknown",
-      components: Object.freeze([
-        "FrooxEngine.Grabbable",
-        "FrooxEngine.PBS_Metallic",
-        "FrooxEngine.BoxMesh"
-      ]),
-      materials: Object.freeze([
-        "FrooxEngine.PBS_Metallic",
-        "FrooxEngine.PBS_Specular",
-        "FrooxEngine.UnlitMaterial"
-      ]),
-      commonMaterials: Object.freeze([
-        "FrooxEngine.PBS_Metallic",
-        "FrooxEngine.PBS_Specular",
-        "FrooxEngine.UnlitMaterial"
-      ]),
-      meshes: Object.freeze([
-        "FrooxEngine.QuadMesh",
-        "FrooxEngine.BoxMesh",
-        "FrooxEngine.SphereMesh",
-        "FrooxEngine.CylinderMesh",
-        "FrooxEngine.ArrowMesh"
-      ]),
+      components: Object.freeze([]),
+      materials: Object.freeze([]),
+      commonMaterials: Object.freeze([]),
+      meshes: Object.freeze([]),
       slotAttachOverloads: Object.freeze([]),
       types: Object.freeze([]),
       enums: Object.freeze([])
@@ -220,8 +202,7 @@
 
   function catalogNames(
     directProperty,
-    typeFlag,
-    fallback
+    typeFlag
   ) {
     const direct =
       uniqueCatalogNames(
@@ -243,52 +224,28 @@
           )
       );
 
-    return derived.length > 0
-      ? derived
-      : [...fallback];
+    return derived;
   }
 
   const FROOX_COMPONENT_TYPES =
     catalogNames(
       "components",
-      "isAttachableComponent",
-      [
-        "FrooxEngine.Grabbable",
-        "FrooxEngine.PBS_Metallic",
-        "FrooxEngine.BoxMesh"
-      ]
+      "isAttachableComponent"
     );
   const FROOX_MATERIAL_TYPES =
     catalogNames(
       "materials",
-      "isMaterial",
-      [
-        "FrooxEngine.PBS_Metallic",
-        "FrooxEngine.PBS_Specular",
-        "FrooxEngine.UnlitMaterial"
-      ]
+      "isMaterial"
     );
   const FROOX_COMMON_MATERIAL_TYPES =
     catalogNames(
       "commonMaterials",
-      "isCommonMaterial",
-      [
-        "FrooxEngine.PBS_Metallic",
-        "FrooxEngine.PBS_Specular",
-        "FrooxEngine.UnlitMaterial"
-      ]
+      "isCommonMaterial"
     );
   const FROOX_MESH_TYPES =
     catalogNames(
       "meshes",
-      "isMeshProvider",
-      [
-        "FrooxEngine.QuadMesh",
-        "FrooxEngine.BoxMesh",
-        "FrooxEngine.SphereMesh",
-        "FrooxEngine.CylinderMesh",
-        "FrooxEngine.ArrowMesh"
-      ]
+      "isMeshProvider"
     );
   const FROOX_SLOT_ATTACH_OVERLOADS =
     Array.isArray(
@@ -313,7 +270,7 @@
       : componentCatalog.catalogSource ===
           "scanner-cache"
         ? "cached live scanner catalog"
-        : "fallback catalog";
+        : "currently unavailable API catalog";
 
   const RAW_CSHARP_GROUP =
     "Advanced / Raw C#";
@@ -3575,29 +3532,30 @@ private static void CreateGeneratedReversePatch(
     group: "Values",
     symbol: "OBJ[]",
     description:
-      "Packs up to eight differently typed values into object?[].",
+      "Packs two or more independently typed values into object?[]. Select the node and use + / − in the inspector to change the item count.",
     inputs: [
       port("a", "A", "object"),
-      port("b", "B", "object"),
-      port("c", "C", "object"),
-      port("d", "D", "object"),
-      port("e", "E", "object"),
-      port("f", "F", "object"),
-      port("g", "G", "object"),
-      port("h", "H", "object")
+      port("b", "B", "object")
     ],
+    variadicInputs: {
+      minimum: 2,
+      defaultCount: 2,
+      maximum: 64,
+      preserveAB: true,
+      template: port("a", "A", "object")
+    },
     outputs: [port("value", "Array", "objectArray")],
     codegenExpression(api) {
-      return `new object?[] { ${[
-        "a",
-        "b",
-        "c",
-        "d",
-        "e",
-        "f",
-        "g",
-        "h"
-      ].map(id => api.input(id).code).join(", ")} }`;
+      const count = Math.max(
+        2,
+        Math.min(64, Number(api.node.parameters?.variadicInputCount) || 2)
+      );
+      const ids = Array.from({ length: count }, (_, index) =>
+        index < 26
+          ? String.fromCharCode(97 + index)
+          : `input${index + 1}`
+      );
+      return `new object?[] { ${ids.map(id => api.input(id).code).join(", ")} }`;
     }
   });
 
@@ -3960,18 +3918,32 @@ private static T ReadNumericComponent<T>(
   registerNode("flow.sequence", {
     title: "Sequence",
     group: "Flow",
-    symbol: "1→3",
+    symbol: "1→N",
     description:
-      "Invokes up to four impulse paths in deterministic order.",
+      "Invokes two or more impulse paths in deterministic order. Select the node and use + / − in the inspector to change the output count.",
     inputs: [port("call", "Call", "impulse")],
     outputs: [
       port("first", "First", "impulse"),
-      port("second", "Second", "impulse"),
-      port("third", "Third", "impulse"),
-      port("fourth", "Fourth", "impulse")
+      port("second", "Second", "impulse")
     ],
+    variadicOutputs: {
+      minimum: 2,
+      defaultCount: 2,
+      maximum: 64,
+      template: port("first", "First", "impulse"),
+      ids: ["first", "second", "third", "fourth"],
+      labels: ["First", "Second", "Third", "Fourth"]
+    },
     codegenAction(api) {
-      return ["first", "second", "third", "fourth"]
+      const count = Math.max(
+        2,
+        Math.min(64, Number(api.node.parameters?.variadicOutputCount) || 2)
+      );
+      const legacy = ["first", "second", "third", "fourth"];
+      const ids = Array.from({ length: count }, (_, index) =>
+        legacy[index] || `output${index + 1}`
+      );
+      return ids
         .map(api.emit)
         .filter(Boolean)
         .map(method => `${method}();`)
@@ -3984,17 +3956,18 @@ private static T ReadNumericComponent<T>(
     group: "Flow",
     symbol: "↯∨",
     description:
-      "Merges up to eight independent impulse sources into one typed impulse path. Every input invokes the same Output; values are never merged implicitly.",
+      "Merges two or more independent impulse sources into one typed impulse path. The node starts with two inputs; select it and use + / − in the inspector to extend or shrink the input list.",
     inputs: [
       port("a", "A", "impulse"),
-      port("b", "B", "impulse"),
-      port("c", "C", "impulse"),
-      port("d", "D", "impulse"),
-      port("e", "E", "impulse"),
-      port("f", "F", "impulse"),
-      port("g", "G", "impulse"),
-      port("h", "H", "impulse")
+      port("b", "B", "impulse")
     ],
+    variadicInputs: {
+      minimum: 2,
+      defaultCount: 2,
+      maximum: 64,
+      preserveAB: true,
+      template: port("a", "A", "impulse")
+    },
     outputs: [port("out", "Output", "impulse")],
     codegenAction(api) {
       const next = api.emit("out");
@@ -5227,7 +5200,7 @@ private static T ReadNumericComponent<T>(
         "componentType",
         "Component type",
         "FrooxEngine.Grabbable",
-        "Choose from the live scanner catalog when Resonite is running; otherwise the packaged fallback catalog is used.",
+        "Choose from the current live scanner catalog or its cached copy. No packaged static API fallback is used.",
         {
           suggestions: FROOX_COMPONENT_TYPES,
           placeholder: "FrooxEngine.Grabbable"
@@ -7542,19 +7515,33 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
     group: "Files & JSON",
     symbol: "PATH",
     description:
-      "Combines up to four filesystem path segments.",
+      "Combines two or more filesystem path segments. Select the node and use + / − in the inspector to change the segment count.",
     inputs: [
       port("a", "A", "string"),
-      port("b", "B", "string"),
-      port("c", "C", "string"),
-      port("d", "D", "string")
+      port("b", "B", "string")
     ],
+    variadicInputs: {
+      minimum: 2,
+      defaultCount: 2,
+      maximum: 64,
+      preserveAB: true,
+      template: port("a", "A", "string")
+    },
     outputs: [port("path", "Path", "string")],
     codegenCollect(api) {
       api.addUsing("System.IO");
     },
     codegenExpression(api) {
-      return `Path.Combine(${api.input("a").code}, ${api.input("b").code}, ${api.input("c").code}, ${api.input("d").code})`;
+      const count = Math.max(
+        2,
+        Math.min(64, Number(api.node.parameters?.variadicInputCount) || 2)
+      );
+      const ids = Array.from({ length: count }, (_, index) =>
+        index < 26
+          ? String.fromCharCode(97 + index)
+          : `input${index + 1}`
+      );
+      return `Path.Combine(${ids.map(id => api.input(id).code).join(", ")})`;
     }
   });
 
@@ -8637,7 +8624,7 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
     expertOnly: true,
     symbol: "C#=",
     description:
-      "Universal typed expression escape hatch. Placeholders {A}…{H}, {MOD}, {GRAPH}, {NAMESPACE} and {NODE} are replaced during export.",
+      "Universal typed expression escape hatch. Starts with {A} and {B}; add more object inputs in the inspector. Placeholders {A}…{Z}, then {INPUT27}… plus {MOD}, {GRAPH}, {NAMESPACE} and {NODE} are replaced during export.",
     configurableTypeVar: "T",
     configurableTypes: COMMON_VALUE_TYPES,
     defaultType: "object",
@@ -8652,14 +8639,15 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
     ],
     inputs: [
       port("a", "A", "object"),
-      port("b", "B", "object"),
-      port("c", "C", "object"),
-      port("d", "D", "object"),
-      port("e", "E", "object"),
-      port("f", "F", "object"),
-      port("g", "G", "object"),
-      port("h", "H", "object")
+      port("b", "B", "object")
     ],
+    variadicInputs: {
+      minimum: 2,
+      defaultCount: 2,
+      maximum: 64,
+      preserveAB: true,
+      template: port("a", "A", "object")
+    },
     outputs: [
       genericPort(
         "result",
@@ -8672,10 +8660,19 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
       api.warning(
         "C# Expression nodes are exported verbatim and cannot be fully type-checked by the browser."
       );
+      const count = Math.max(
+        2,
+        Math.min(64, Number(api.node.parameters?.variadicInputCount) || 2)
+      );
+      const ids = Array.from({ length: count }, (_, index) =>
+        index < 26
+          ? String.fromCharCode(97 + index)
+          : `input${index + 1}`
+      );
       const code = replaceInputPlaceholders(
         api.node.parameters.code,
         api,
-        ["a", "b", "c", "d", "e", "f", "g", "h"]
+        ids
       ).trim();
       return code || api.csDefault(
         api.node.parameters.valueType
@@ -8689,7 +8686,7 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
     expertOnly: true,
     symbol: "C#;",
     description:
-      "Universal statement escape hatch. {A}…{H} are input expressions; {NEXT} calls the Done output. When {NEXT} is absent, Done is appended automatically.",
+      "Universal statement escape hatch. Starts with {A} and {B}; add more object inputs in the inspector. {A}…{Z}, then {INPUT27}… are input expressions; {NEXT} calls Done.",
     parameters: [
       pCode(
         "code",
@@ -8702,14 +8699,15 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
     inputs: [
       port("call", "Call", "impulse"),
       port("a", "A", "object"),
-      port("b", "B", "object"),
-      port("c", "C", "object"),
-      port("d", "D", "object"),
-      port("e", "E", "object"),
-      port("f", "F", "object"),
-      port("g", "G", "object"),
-      port("h", "H", "object")
+      port("b", "B", "object")
     ],
+    variadicInputs: {
+      minimum: 2,
+      defaultCount: 2,
+      maximum: 64,
+      preserved: 1,
+      template: port("a", "A", "object")
+    },
     outputs: [port("done", "Done", "impulse")],
     codegenAction(api) {
       api.warning(
@@ -8719,10 +8717,19 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
       const next = nextMethod
         ? `${nextMethod}();`
         : "";
+      const count = Math.max(
+        2,
+        Math.min(64, Number(api.node.parameters?.variadicInputCount) || 2)
+      );
+      const ids = Array.from({ length: count }, (_, index) =>
+        index < 26
+          ? String.fromCharCode(97 + index)
+          : `input${index + 1}`
+      );
       let code = replaceInputPlaceholders(
         api.node.parameters.code,
         api,
-        ["a", "b", "c", "d", "e", "f", "g", "h"]
+        ids
       );
       const containedNext =
         code.includes("{NEXT}");
