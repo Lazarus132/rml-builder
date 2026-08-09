@@ -576,6 +576,7 @@ fieldset legend {
 
 .empty-canvas > span,
 .empty-inspector > span {
+  transform: rotate(90deg);
   display: grid;
   width: 54px;
   height: 54px;
