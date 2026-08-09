@@ -7,7 +7,7 @@
       name="description"
       content="Build complete typed ResoniteModLoader projects visually with automatic dependencies; optional Raw C# tools remain an expert fallback.">
     <title>RML Universal Mod Builder</title>
-    <link rel="stylesheet" href="styles.css?v=101">
+    <link rel="stylesheet" href="styles.css?v=109">
     <link rel="shortcut icon" href="./favicon.svg">
     <link rel="icon" href="./favicon.svg">
   </head>
@@ -55,6 +55,11 @@
           aria-label="Help" data-help="Open the builder help and node reference.">
           <span class="top-action-question" aria-hidden="true">?</span>
           <span class="top-action-label">Help</span>
+        </button>
+        <button id="setup-guide-open" class="button secondary top-action-button" type="button"
+          aria-label="Start guided tour" data-help="Start the interactive first-steps assistant again.">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z M8 9h8 M8 12h5"></path></svg>
+          <span class="top-action-label">Tour</span>
         </button>
         <button id="preview-open" class="button secondary top-action-button" type="button"
           aria-label="Preview settings" data-help="Preview the generated RML settings interface.">
@@ -189,269 +194,9 @@
     </main>
 
     
+    <div id="lazy-dialog-host"></div>
+
     <dialog
-      id="information-dialog"
-      class="information-dialog"
-      tabindex="-1"
-      aria-labelledby="information-dialog-title">
-      <div class="information-shell">
-        <header class="information-header">
-          <div>
-            <small>Builder reference</small>
-            <h2 id="information-dialog-title">Help</h2>
-          </div>
-          <button
-            id="information-close"
-            class="dialog-close"
-            type="button"
-            aria-label="Close help"
-            data-help="Close Help">×</button>
-        </header>
-
-        <nav class="information-page-tabs" aria-label="Help pages">
-          <button
-            class="information-page-tab active"
-            type="button"
-            data-information-page-target="general"
-            aria-selected="true"
-            data-help="General help for the configuration builder.">
-            <span class="information-page-tab-icon" aria-hidden="true">?</span>
-            <span>General</span>
-          </button>
-          <button
-            class="information-page-tab"
-            type="button"
-            data-information-page-target="technical"
-            aria-selected="false"
-            data-help="Detailed technical information about the runtime graph.">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4 7h10 M4 12h16 M4 17h8"></path>
-              <circle cx="17" cy="7" r="2"></circle>
-              <circle cx="15" cy="17" r="2"></circle>
-            </svg>
-            <span>Technical</span>
-          </button>
-          <button
-            class="information-page-tab"
-            type="button"
-            data-information-page-target="nodes"
-            aria-selected="false"
-            data-help="Open the separate built-in node reference.">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <rect x="3" y="5" width="7" height="6" rx="1.5"></rect>
-              <rect x="14" y="13" width="7" height="6" rx="1.5"></rect>
-              <path d="M10 8h4a3 3 0 0 1 3 3v2"></path>
-            </svg>
-            <span>Nodes</span>
-          </button>
-        </nav>
-
-        <section class="information-page active" data-information-page="general">
-          <div class="information-layout">
-            <nav class="information-nav" aria-label="General help sections">
-              <a href="#info-outline">Outline</a>
-              <a href="#info-sections">Section enums</a>
-              <a href="#info-inspector">Properties</a>
-              <a href="#info-graph">Pack into Node</a>
-              <a href="#info-preview">Preview</a>
-              <a href="#info-projects">Projects & storage</a>
-              <a href="#info-export">Export</a>
-            </nav>
-
-            <article class="information-content">
-              <section id="info-outline" class="information-section">
-                <span class="information-kicker">Configuration Outline</span>
-                <h3>Build the settings structure</h3>
-                <p>
-                  Click a type to add it to the active section, or drag it directly
-                  into a target section. Selecting an item activates the section
-                  containing it. While dragging, moving near the top or bottom edge
-                  scrolls the page automatically.
-                </p>
-                <p>
-                  Dropping on the canvas background moves an existing item back to
-                  the root. Empty builder and inspector areas intentionally contain
-                  no instructional text so the workspace stays as large as possible.
-                </p>
-              </section>
-
-              <section id="info-sections" class="information-section">
-                <span class="information-kicker">Structure</span>
-                <h3>Section enums</h3>
-                <p>
-                  A Section enum is an enum controller whose values become visible
-                  settings pages. Section enums can be nested. Their sections can be
-                  reordered horizontally and moved between containers.
-                </p>
-              </section>
-
-              <section id="info-inspector" class="information-section">
-                <span class="information-kicker">Properties</span>
-                <h3>Settings and runtime behavior</h3>
-                <p>
-                  The Properties panel edits the selected item. Section enums normally
-                  use <strong>Stored only</strong>, because RML already handles their
-                  navigation. Numeric range validation can require a maximum value and
-                  enables the scalar slider. Hidden settings remain stored in the
-                  configuration even when they are not editable in the RML UI.
-                </p>
-                <p>
-                  Vector editors use one field per component. List-style editors use
-                  one value per line where applicable.
-                </p>
-              </section>
-
-              <section id="info-graph" class="information-section">
-                <span class="information-kicker">Typed runtime graph</span>
-                <h3>Pack into Node</h3>
-                <p>
-                  <strong>Pack into Node</strong> replaces the visual configuration
-                  outline with an automatically synchronized typed runtime graph.
-                  Returning to the outline preserves the packed graph. Reloading starts
-                  in the outline while keeping graph nodes and wires saved.
-                </p>
-              </section>
-
-              <section id="info-preview" class="information-section">
-                <span class="information-kicker">Settings preview</span>
-                <h3>Preview behavior</h3>
-                <p>
-                  Preview changes remain session-local until applied or saved. The Full
-                  Color Picker keeps its profile and strength behavior. The adaptive
-                  color-picker fit script is loaded only on viewports that need it.
-                </p>
-              </section>
-
-              <section id="info-projects" class="information-section">
-                <span class="information-kicker">Local data</span>
-                <h3>Projects, autosave and privacy</h3>
-                <p>
-                  The current draft is saved automatically in this browser. A JSON
-                  project file creates a portable backup that can be reopened on this
-                  or another device. The builder runs entirely in the browser; source
-                  code and configuration data are not uploaded by the builder.
-                </p>
-              </section>
-
-              <section id="info-export" class="information-section">
-                <span class="information-kicker">Generated project</span>
-                <h3>Export</h3>
-                <p>
-                  Generated projects target <strong>.NET 10</strong> for the current
-                  Resonite/RML setup. The Resonite installation path is used for local
-                  assembly references. MSBuild variables such as <code>$(HOME)</code>
-                  are supported, and <code>ResonitePath</code> can still be overridden
-                  when building.
-                </p>
-                <p>
-                  Multiple selected files are bundled into one ZIP. Dynamic export
-                  status remains in the Export dialog because it describes the current
-                  selection rather than general documentation.
-                </p>
-              </section>
-            </article>
-          </div>
-        </section>
-
-        <section class="information-page" data-information-page="technical" hidden>
-          <div class="information-layout">
-            <nav class="information-nav" aria-label="Technical help sections">
-              <a href="#info-library">Node library</a>
-              <a href="#info-wires">Sockets & wires</a>
-              <a href="#info-editing">Graph editing</a>
-              <a href="#info-advanced">Advanced / Raw C#</a>
-            </nav>
-
-            <article class="information-content">
-              <section id="info-library" class="information-section">
-                <span class="information-kicker">Node library</span>
-                <h3>Search-on-demand API catalog</h3>
-                <p>
-                  The live Resonite API catalog is searched on demand so opening the
-                  graph does not create thousands of DOM buttons. Enter at least two
-                  characters in the node search to query catalog-generated API nodes.
-                  Search results are capped; refine broad searches when necessary.
-                </p>
-              </section>
-
-              <section id="info-wires" class="information-section">
-                <span class="information-kicker">Typed connections</span>
-                <h3>Configuration sockets and wires</h3>
-                <div class="information-symbol-grid">
-                  <span><b>●</b> Stored value</span>
-                  <span><b>▶</b> Startup</span>
-                  <span><b>■</b> Saved</span>
-                  <span><b>◆</b> Startup + saved</span>
-                </div>
-                <p>
-                  Wire colors represent value types. Startup and Saved configuration
-                  sockets can connect to matching value inputs and impulse inputs;
-                  Stored sockets remain value-only. Incompatible sockets are disabled
-                  while a connection is being created.
-                </p>
-                <p>
-                  Dropping an output wire on empty graph space creates a monitor.
-                  Dropping a value-input wire can create a self-contained constant or
-                  context source. Impulse inputs and multi-input runtime operations must
-                  be connected explicitly.
-                </p>
-              </section>
-
-              <section id="info-editing" class="information-section">
-                <span class="information-kicker">Graph interaction</span>
-                <h3>Move, resize and route</h3>
-                <p>
-                  Drag nodes to move them. Resize from the right edge, bottom edge or
-                  lower-right corner. Double-click a resize grip to reset that axis.
-                  Wires can contain movable bend points and branches. The graph toolbar
-                  can center the graph or clear operator nodes while retaining the
-                  packed configuration node.
-                </p>
-              </section>
-
-              <section id="info-advanced" class="information-section">
-                <span class="information-kicker">Expert fallback</span>
-                <h3>Advanced / Raw C#</h3>
-                <p>
-                  Manual usings, references, source files, compiler overrides and
-                  reflection-oriented fallback nodes stay hidden unless
-                  <strong>Show Advanced / Raw C#</strong> is enabled. Prefer normal
-                  typed catalog nodes whenever a direct node exists.
-                </p>
-              </section>
-            </article>
-          </div>
-        </section>
-
-        <section class="information-page information-node-page" data-information-page="nodes" hidden>
-          <div class="information-node-page-layout">
-            <aside class="information-node-page-intro">
-              <span class="information-kicker">Built-in runtime nodes</span>
-              <h3>Node reference</h3>
-              <p>
-                This is a separate reference for the builder's built-in runtime nodes.
-                Symbols, node names, internal IDs, descriptions and static ports are
-                derived from the active node registry.
-              </p>
-              <p class="information-api-note">
-                Catalog-generated Resonite API nodes are intentionally not duplicated
-                here. They are generated from the currently loaded Resonite/FrooxEngine
-                catalog and can change between Resonite versions. Use their generated
-                title, signature and description and consult the matching Resonite
-                documentation or API information for version-specific behavior.
-              </p>
-            </aside>
-            <article class="information-node-page-content">
-              <div id="information-node-reference" class="information-node-reference" aria-live="polite"></div>
-            </article>
-          </div>
-        </section>
-      </div>
-    </dialog>
-
-    </dialog>
-
-<dialog
       id="settings-preview-dialog"
       class="settings-preview-dialog"
       tabindex="-1"
@@ -679,8 +424,8 @@
         </button>
       </div>
     </dialog>
-    <script src="app.js?v=102"></script>
+    <script src="app.js?v=113"></script>
     <script src="catalog_loader.js?v=13"></script>
-    <script src="node_graph.js?v=48"></script>
+    <script src="node_graph.js?v=49"></script>
   </body>
 </html>

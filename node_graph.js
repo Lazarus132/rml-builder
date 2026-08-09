@@ -19317,6 +19317,58 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
   Object.defineProperty(
     window,
+    "RMLTypedNodeGraphTourBridge",
+    {
+      value: Object.freeze({
+        ensureConnection(fromNodeId, fromPortId, toNodeId, toPortId) {
+          const fromNode = findGraphNode(fromNodeId);
+          const toNode = findGraphNode(toNodeId);
+          if (!fromNode || !toNode) return false;
+
+          const existing = graph.connections.find(connection =>
+            connection.fromNode === fromNodeId &&
+            connection.fromPort === fromPortId &&
+            connection.toNode === toNodeId &&
+            connection.toPort === toPortId
+          );
+          if (existing) {
+            renderGraphNodesAndWires();
+            return existing.id;
+          }
+
+          const proposal = connectionProposal(
+            graphPortReference(fromNode, fromPortId, "output"),
+            graphPortReference(toNode, toPortId, "input"),
+            graph.connections
+          );
+          if (!proposal.valid) return false;
+
+          applyAutoVectorUpdates(proposal.autoVectorUpdates);
+          graph.connections = proposal.nextConnections;
+          normalizeConnectionRouting(graph.connections);
+          graph.selectedConnectionId = proposal.candidate.id;
+          graph.selectedNodeId = null;
+          clearSelectedWirePoint();
+          currentAnalysis = proposal.analysis;
+          persistGraph(true);
+          renderGraphNodesAndWires();
+          renderGraphInspector();
+          return proposal.candidate.id;
+        },
+        refresh() {
+          renderGraphNodesAndWires();
+          renderGraphInspector();
+          return true;
+        }
+      }),
+      writable: false,
+      enumerable: false,
+      configurable: true
+    }
+  );
+
+  Object.defineProperty(
+    window,
     "RMLTypedNodeGraphGenerator",
     {
       value: Object.freeze({

@@ -394,6 +394,9 @@ const APP_SCRIPT_BASE_URL =
   window.location.href;
 
 let colorPickerAdaptiveFitLoadPromise = null;
+let informationTemplateLoadPromise = null;
+let setupAssistantLoadPromise = null;
+const SETUP_ASSISTANT_STORAGE_KEY = "rml-builder-setup-tour-v1-complete";
 
 function ensureColorPickerAdaptiveFitLoaded() {
   if (
@@ -5298,6 +5301,100 @@ function ensureDragPlaceholder() {
 }
 
 
+function nodeInsertionGeometry(
+  host,
+  insertionIndex
+) {
+  const cards = directNodeCards(host);
+  const hostRectangle = host.getBoundingClientRect();
+  const ordered = [...cards].sort(
+    (left, right) =>
+      (Number(left.dataset.siblingIndex) || 0) -
+      (Number(right.dataset.siblingIndex) || 0)
+  );
+
+  const index = clamp(
+    Number.isFinite(insertionIndex)
+      ? Math.trunc(insertionIndex)
+      : ordered.length,
+    0,
+    ordered.length
+  );
+
+  const before = index > 0 ? ordered[index - 1] : null;
+  const after = index < ordered.length ? ordered[index] : null;
+  const beforeRectangle = before?.getBoundingClientRect() || null;
+  const afterRectangle = after?.getBoundingClientRect() || null;
+
+  let top;
+  if (beforeRectangle && afterRectangle) {
+    top = (beforeRectangle.bottom + afterRectangle.top) / 2;
+  } else if (afterRectangle) {
+    top = afterRectangle.top - 4;
+  } else if (beforeRectangle) {
+    top = beforeRectangle.bottom + 4;
+  } else {
+    top = hostRectangle.top + 7;
+  }
+
+  let left = hostRectangle.left + host.clientLeft + 7;
+  let right = hostRectangle.right - host.clientLeft - 7;
+
+  if (beforeRectangle && afterRectangle) {
+    const overlapLeft = Math.max(
+      beforeRectangle.left,
+      afterRectangle.left
+    );
+    const overlapRight = Math.min(
+      beforeRectangle.right,
+      afterRectangle.right
+    );
+
+    if (overlapRight - overlapLeft >= 24) {
+      left = overlapLeft;
+      right = overlapRight;
+    } else {
+      const anchor =
+        beforeRectangle.width <= afterRectangle.width
+          ? beforeRectangle
+          : afterRectangle;
+      left = anchor.left;
+      right = anchor.right;
+    }
+  } else {
+    const anchor = afterRectangle || beforeRectangle;
+    if (anchor) {
+      left = anchor.left;
+      right = anchor.right;
+    }
+  }
+
+  const hostContentLeft =
+    hostRectangle.left + host.clientLeft;
+
+  return {
+    left: Math.max(
+      0,
+      left - hostContentLeft + host.scrollLeft
+    ),
+    top: Math.max(
+      0,
+      top -
+        hostRectangle.top +
+        host.scrollTop -
+        host.clientTop -
+        2
+    ),
+    width: Math.max(
+      24,
+      Math.min(
+        host.clientWidth,
+        right - left
+      )
+    )
+  };
+}
+
 function positionNodeInsertPlaceholder(
   host,
   insertionIndex
@@ -5306,82 +5403,28 @@ function positionNodeInsertPlaceholder(
     return;
   }
 
-  const placeholder =
-    ensureDragPlaceholder();
+  const placeholder = ensureDragPlaceholder();
 
-  if (
-    placeholder.parentElement !==
-    host
-  ) {
-    host.appendChild(
-      placeholder
-    );
+  if (placeholder.parentElement !== host) {
+    host.appendChild(placeholder);
   }
 
-  const cards =
-    directNodeCards(
-      host
-    );
-
-  const hostRectangle =
-    host.getBoundingClientRect();
-
-  const referenceCard =
-    cards.find(
-      card =>
-        (
-          Number(
-            card.dataset.siblingIndex
-          ) || 0
-        ) >= insertionIndex
-    );
-
-  const lastCard =
-    cards.at(-1) || null;
-
-  let top;
-
-  if (referenceCard) {
-    const rectangle =
-      referenceCard.getBoundingClientRect();
-
-    top =
-      rectangle.top -
-      hostRectangle.top +
-      host.scrollTop -
-      host.clientTop;
-  } else if (lastCard) {
-    const rectangle =
-      lastCard.getBoundingClientRect();
-
-    top =
-      rectangle.bottom -
-      hostRectangle.top +
-      host.scrollTop -
-      host.clientTop;
-  } else {
-    top = 7;
-  }
+  const geometry = nodeInsertionGeometry(
+    host,
+    insertionIndex
+  );
 
   placeholder.style.setProperty(
     "--node-placeholder-left",
-    `${Math.max(
-      0,
-      host.scrollLeft + 7
-    )}px`
+    `${geometry.left}px`
   );
-
   placeholder.style.setProperty(
     "--node-placeholder-top",
-    `${Math.max(0, top - 2)}px`
+    `${geometry.top}px`
   );
-
   placeholder.style.setProperty(
     "--node-placeholder-width",
-    `${Math.max(
-      12,
-      host.clientWidth - 14
-    )}px`
+    `${geometry.width}px`
   );
 
   requestDragPlaceholderVisibility();
@@ -5626,41 +5669,85 @@ function positionOptionInsertPlaceholder(
     lanes.at(-1) || null;
 
   if (nestedController) {
+    const ordered =
+      [...lanes].sort(
+        (left, right) =>
+          (Number(left.dataset.optionIndex) || 0) -
+          (Number(right.dataset.optionIndex) || 0)
+      );
+
+    const index =
+      clamp(
+        Number.isFinite(insertionIndex)
+          ? Math.trunc(insertionIndex)
+          : ordered.length,
+        0,
+        ordered.length
+      );
+
+    const before =
+      index > 0
+        ? ordered[index - 1]
+        : null;
+    const after =
+      index < ordered.length
+        ? ordered[index]
+        : null;
+
+    const beforeRectangle =
+      before?.getBoundingClientRect() || null;
+    const afterRectangle =
+      after?.getBoundingClientRect() || null;
 
     const top =
-      referenceLane
-        ? referenceLane
-            .getBoundingClientRect()
-            .top -
-          hostRectangle.top +
-          host.scrollTop -
-          host.clientTop
-        : lastLane
-          ? lastLane
-              .getBoundingClientRect()
-              .bottom -
-            hostRectangle.top +
-            host.scrollTop -
-            host.clientTop
-          : 8;
+      beforeRectangle && afterRectangle
+        ? (
+            beforeRectangle.bottom +
+            afterRectangle.top
+          ) / 2
+        : afterRectangle
+          ? afterRectangle.top - 4
+          : beforeRectangle
+            ? beforeRectangle.bottom + 4
+            : hostRectangle.top + 8;
+
+    const anchor =
+      afterRectangle || beforeRectangle;
+
+    const left =
+      anchor
+        ? anchor.left -
+          hostRectangle.left +
+          host.scrollLeft -
+          host.clientLeft
+        : host.scrollLeft + 8;
+
+    const width =
+      anchor
+        ? anchor.width
+        : Math.max(
+            24,
+            host.clientWidth - 16
+          );
 
     placeholder.style.setProperty(
       "--option-placeholder-left",
-      `${Math.max(
-        0,
-        host.scrollLeft + 8
-      )}px`
+      `${Math.max(0, left)}px`
     );
     placeholder.style.setProperty(
       "--option-placeholder-top",
-      `${Math.max(0, top - 2)}px`
+      `${Math.max(
+        0,
+        top -
+          hostRectangle.top +
+          host.scrollTop -
+          host.clientTop -
+          2
+      )}px`
     );
     placeholder.style.setProperty(
       "--option-placeholder-width",
-      `${Math.max(
-        12,
-        host.clientWidth - 16
-      )}px`
+      `${Math.max(24, width)}px`
     );
     placeholder.style.setProperty(
       "--option-placeholder-height",
@@ -5671,39 +5758,88 @@ function positionOptionInsertPlaceholder(
     return;
   }
 
+  const ordered =
+    [...lanes].sort(
+      (left, right) =>
+        (Number(left.dataset.optionIndex) || 0) -
+        (Number(right.dataset.optionIndex) || 0)
+    );
+
+  const index =
+    clamp(
+      Number.isFinite(insertionIndex)
+        ? Math.trunc(insertionIndex)
+        : ordered.length,
+      0,
+      ordered.length
+    );
+
+  const before =
+    index > 0
+      ? ordered[index - 1]
+      : null;
+  const after =
+    index < ordered.length
+      ? ordered[index]
+      : null;
+
+  const beforeRectangle =
+    before?.getBoundingClientRect() || null;
+  const afterRectangle =
+    after?.getBoundingClientRect() || null;
+
+  const leftViewport =
+    beforeRectangle && afterRectangle
+      ? (
+          beforeRectangle.right +
+          afterRectangle.left
+        ) / 2
+      : afterRectangle
+        ? afterRectangle.left - 4
+        : beforeRectangle
+          ? beforeRectangle.right + 4
+          : hostRectangle.left + 8;
+
   const anchorRectangle =
-    referenceLane
-      ? referenceLane
-          .getBoundingClientRect()
-      : lastLane
-        ? lastLane
-            .getBoundingClientRect()
-        : null;
+    afterRectangle || beforeRectangle;
+
+  const topViewport =
+    beforeRectangle && afterRectangle
+      ? Math.max(
+          beforeRectangle.top,
+          afterRectangle.top
+        )
+      : anchorRectangle
+        ? anchorRectangle.top
+        : hostRectangle.top + 8;
+
+  const bottomViewport =
+    beforeRectangle && afterRectangle
+      ? Math.min(
+          beforeRectangle.bottom,
+          afterRectangle.bottom
+        )
+      : anchorRectangle
+        ? anchorRectangle.bottom
+        : hostRectangle.bottom - 8;
 
   const left =
-    referenceLane
-      ? anchorRectangle.left -
-        hostRectangle.left -
-        3
-      : anchorRectangle
-        ? anchorRectangle.right -
-          hostRectangle.left +
-          3
-        : 8;
+    leftViewport -
+    hostRectangle.left +
+    host.scrollLeft -
+    2;
 
   const top =
-    anchorRectangle
-      ? anchorRectangle.top -
-        hostRectangle.top
-      : 8;
+    topViewport -
+    hostRectangle.top +
+    host.scrollTop;
 
   const height =
-    anchorRectangle
-      ? anchorRectangle.height
-      : Math.max(
-          40,
-          host.clientHeight - 16
-        );
+    Math.max(
+      24,
+      bottomViewport -
+      topViewport
+    );
 
   placeholder.style.setProperty(
     "--option-placeholder-left",
@@ -14737,6 +14873,26 @@ function newBlank() {
   ) {
     return;
   }
+
+  // A new project always starts in the Configuration Outline.
+  // Leave the session-only Typed Runtime Graph mode BEFORE clearing state,
+  // while its real Back-to-Outline action is still available.
+  if (
+    document.body.classList.contains(
+      "rml-node-graph-mode"
+    )
+  ) {
+    const packButton =
+      document.getElementById(
+        "pack-into-node"
+      ) ||
+      document.querySelector(
+        ".rml-pack-button"
+      );
+
+    packButton?.click();
+  }
+
   state.metadata = { ...DEFAULT_METADATA };
   state.extensions = {};
   state.nodes = [];
@@ -15017,7 +15173,7 @@ function setInformationPage(pageName) {
     return;
   }
 
-  const targetName = ["general", "technical", "nodes"].includes(pageName)
+  const targetName = ["general", "technical", "shortcuts", "nodes"].includes(pageName)
     ? pageName
     : "general";
 
@@ -15047,19 +15203,137 @@ function setInformationPage(pageName) {
   }
 }
 
-function openInformationDialog() {
+function loadLazyTemplateScript(fileName, marker, globalName) {
+  if (typeof window[globalName] === "string") {
+    return Promise.resolve(window[globalName]);
+  }
+
+  return new Promise((resolve, reject) => {
+    const attribute = `data-rml-${marker}`;
+    let script = document.querySelector(`script[${attribute}="true"]`);
+
+    const finish = () => {
+      const markup = window[globalName];
+      if (typeof markup === "string") {
+        resolve(markup);
+      } else {
+        reject(new Error(`${fileName} loaded without exposing ${globalName}.`));
+      }
+    };
+
+    if (script) {
+      if (script.dataset.loaded === "true") {
+        finish();
+        return;
+      }
+      script.addEventListener("load", finish, { once: true });
+      script.addEventListener("error", () => reject(new Error(`${fileName} could not be loaded.`)), { once: true });
+      return;
+    }
+
+    script = document.createElement("script");
+    script.src = new URL(fileName, APP_SCRIPT_BASE_URL).href;
+    script.async = true;
+    script.setAttribute(attribute, "true");
+    script.addEventListener("load", () => {
+      script.dataset.loaded = "true";
+      finish();
+    }, { once: true });
+    script.addEventListener("error", () => reject(new Error(`${fileName} could not be loaded.`)), { once: true });
+    document.body.appendChild(script);
+  });
+}
+
+function loadLazyHtmlTemplate(htmlFileName, jsFileName, marker, globalName) {
+  // fetch(file://...) is blocked by Chromium because every local file has an
+  // opaque origin. In local-file mode, never issue the failing fetch at all.
+  if (window.location.protocol === "file:") {
+    return loadLazyTemplateScript(jsFileName, marker, globalName);
+  }
+
+  return fetch(
+    new URL(htmlFileName, APP_SCRIPT_BASE_URL).href,
+    { cache: "no-store" }
+  )
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`${htmlFileName}: ${response.status} ${response.statusText}`);
+      }
+      return response.text();
+    })
+    .catch(() =>
+      loadLazyTemplateScript(jsFileName, marker, globalName)
+    );
+}
+
+async function ensureInformationDialogLoaded() {
+  if (elements.informationDialog?.isConnected) {
+    return elements.informationDialog;
+  }
+
+  if (informationTemplateLoadPromise) {
+    return informationTemplateLoadPromise;
+  }
+
+  informationTemplateLoadPromise = loadLazyHtmlTemplate(
+    "help_template.html",
+    "help_template.js",
+    "help-template",
+    "RMLHelpTemplateMarkup"
+  )
+    .then(markup => {
+      const host = document.getElementById("lazy-dialog-host") || document.body;
+      host.insertAdjacentHTML("beforeend", markup);
+      elements.informationDialog = document.getElementById("information-dialog");
+      elements.informationClose = document.getElementById("information-close");
+      elements.informationNodeReference = document.getElementById("information-node-reference");
+      bindInformationDialogEvents();
+      return elements.informationDialog;
+    })
+    .catch(error => {
+      informationTemplateLoadPromise = null;
+      console.error("Help could not be loaded.", error);
+      throw error;
+    });
+
+  return informationTemplateLoadPromise;
+}
+
+function bindInformationDialogEvents() {
+  const dialog = elements.informationDialog;
+  if (!dialog || dialog.dataset.bound === "true") {
+    return;
+  }
+  dialog.dataset.bound = "true";
+  elements.informationClose?.addEventListener("click", closeInformationDialog);
+  dialog.addEventListener("click", event => {
+    const pageButton = event.target.closest("[data-information-page-target]");
+    if (pageButton) {
+      setInformationPage(pageButton.dataset.informationPageTarget);
+      return;
+    }
+    if (event.target === dialog) {
+      closeInformationDialog();
+    }
+  });
+  dialog.addEventListener("cancel", event => {
+    event.preventDefault();
+    closeInformationDialog();
+  });
+}
+
+async function openInformationDialog() {
+  const dialog = await ensureInformationDialogLoaded();
   setInformationPage("general");
 
-  if (!elements.informationDialog?.open) {
-    elements.informationDialog.showModal();
+  if (!dialog?.open) {
+    dialog.showModal();
   }
 
   try {
-    elements.informationDialog.focus({
-      preventScroll: true
-    });
+    dialog.focus({ preventScroll: true });
   } catch {
-    elements.informationDialog.focus();
+    dialog.focus();
   }
 }
 
@@ -15067,6 +15341,156 @@ function closeInformationDialog() {
   if (elements.informationDialog?.open) {
     elements.informationDialog.close();
   }
+}
+
+function setupAssistantCompleted() {
+  try {
+    return window.localStorage?.getItem(SETUP_ASSISTANT_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function ensureSetupAssistantLoaded(firstRun = false) {
+  if (firstRun && setupAssistantCompleted()) {
+    return Promise.resolve(false);
+  }
+
+  if (window.RMLBuilderSetupAssistant?.start) {
+    window.RMLBuilderSetupAssistant.start({ firstRun });
+    return Promise.resolve(true);
+  }
+
+  if (setupAssistantLoadPromise) {
+    return setupAssistantLoadPromise.then(() => {
+      window.RMLBuilderSetupAssistant?.start?.({ firstRun });
+      return true;
+    });
+  }
+
+  setupAssistantLoadPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = new URL("setup_assistant.js?v=13", APP_SCRIPT_BASE_URL).href;
+    script.async = true;
+    script.dataset.rmlSetupAssistant = "true";
+    script.addEventListener("load", () => resolve(true), { once: true });
+    script.addEventListener("error", () => {
+      setupAssistantLoadPromise = null;
+      reject(new Error("setup_assistant.js could not be loaded."));
+    }, { once: true });
+    document.body.appendChild(script);
+  });
+
+  return setupAssistantLoadPromise
+    .then(() => {
+      window.RMLBuilderSetupAssistant?.start?.({ firstRun });
+      return true;
+    })
+    .catch(error => {
+      console.warn("Guided tour could not be loaded.", error);
+      return false;
+    });
+}
+
+function installSetupAssistantBridge() {
+  if (window.RMLBuilderSetupBridge) {
+    return;
+  }
+
+  Object.defineProperty(window, "RMLBuilderSetupBridge", {
+    value: Object.freeze({
+      capture() {
+        return clone({
+          metadata: state.metadata,
+          exportOptions: state.exportOptions,
+          nodes: state.nodes,
+          extensions: state.extensions,
+          selectedId: state.selectedId,
+          activeContainerId: state.activeContainerId,
+          collapsedPaletteGroups: state.collapsedPaletteGroups
+        });
+      },
+      restore(snapshot) {
+        if (!snapshot || typeof snapshot !== "object") return;
+        state.metadata = clone(snapshot.metadata || DEFAULT_METADATA);
+        state.exportOptions = clone(snapshot.exportOptions || DEFAULT_EXPORT_OPTIONS);
+        state.nodes = normalizeNodes(clone(snapshot.nodes || []));
+        state.extensions = clone(snapshot.extensions || {});
+        state.selectedId = snapshot.selectedId || null;
+        state.activeContainerId = snapshot.activeContainerId || ROOT_CONTAINER;
+        state.collapsedPaletteGroups = clone(snapshot.collapsedPaletteGroups || []);
+        renderMetadata();
+        renderAll();
+        persist();
+      },
+      prepareTourDemo() {
+        const nested = makeController();
+        nested.fieldName = "DetailSection";
+        nested.keyName = "detail_section";
+        nested.enumName = "DetailSectionPage";
+        nested.options[0].name = "Visual";
+        nested.options[1].name = "Behavior";
+        nested.defaultOption = "Visual";
+        nested.options[0].children = [makeSetting("colorX")];
+        nested.options[0].children[0].fieldName = "Tint";
+        nested.options[0].children[0].keyName = "tint";
+        nested.options[1].children = [makeSetting("bool")];
+        nested.options[1].children[0].fieldName = "Interactable";
+        nested.options[1].children[0].keyName = "interactable";
+
+        const controller = makeController();
+        controller.fieldName = "DisplayMode";
+        controller.keyName = "display_mode";
+        controller.enumName = "DisplayModePage";
+        controller.options[0].name = "General";
+        controller.options[1].name = "Advanced";
+        controller.defaultOption = "General";
+
+        const enabled = makeSetting("bool");
+        enabled.fieldName = "Enabled";
+        enabled.keyName = "enabled";
+        enabled.reaction = "startup-saved";
+
+        const scale = makeSetting("float");
+        scale.fieldName = "Scale";
+        scale.keyName = "scale";
+        scale.defaultValue = "1";
+        scale.validatorMode = "range";
+        scale.useSlider = true;
+        scale.minimum = "0.1";
+        scale.maximum = "10";
+
+        const quality = makeSetting("enum");
+        quality.fieldName = "Quality";
+        quality.keyName = "quality";
+        quality.enumName = "QualityOption";
+        quality.enumOptions = ["Low", "Medium", "High"];
+        quality.defaultValue = "Medium";
+
+        controller.options[0].children = [enabled, scale];
+        controller.options[1].children = [quality, nested];
+
+        const resource = makeSetting("Uri");
+        resource.fieldName = "ResourceUri";
+        resource.keyName = "resource_uri";
+
+        state.nodes = [controller, resource];
+        state.selectedId = enabled.id;
+        state.activeContainerId = controller.options[0].id;
+        state.collapsedPaletteGroups = [];
+        state.extensions = {};
+        flattenedNodesCacheSource = null;
+        renderAll();
+      },
+      markComplete() {
+        try {
+          window.localStorage?.setItem(SETUP_ASSISTANT_STORAGE_KEY, "true");
+        } catch {}
+      }
+    }),
+    writable: false,
+    configurable: true
+  });
 }
 
 function cacheElements() {
@@ -15085,6 +15509,7 @@ function cacheElements() {
     topMenuToggle: document.getElementById("top-menu-toggle"),
     topActions: document.getElementById("top-actions"),
     informationOpen: document.getElementById("information-open"),
+    setupGuideOpen: document.getElementById("setup-guide-open"),
     informationDialog: document.getElementById("information-dialog"),
     informationClose: document.getElementById("information-close"),
     informationNodeReference: document.getElementById("information-node-reference"),
@@ -15752,6 +16177,113 @@ function exposeBuilderBridge() {
   );
 }
 
+
+// When an inner builder surface reaches its vertical scroll boundary, continue
+// the same wheel/trackpad gesture on the document root instead of trapping it.
+function installRootScrollChaining() {
+  const chainedSelector = [
+    ".workspace .palette",
+    ".workspace .inspector",
+    ".code-panel pre"
+  ].join(", ");
+
+  const wheelPixels = event => {
+    if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+      return event.deltaY * 18;
+    }
+
+    if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+      return event.deltaY * Math.max(
+        1,
+        window.innerHeight ||
+          document.documentElement.clientHeight
+      );
+    }
+
+    return event.deltaY;
+  };
+
+  document.addEventListener(
+    "wheel",
+    event => {
+      if (
+        event.defaultPrevented ||
+        event.ctrlKey ||
+        event.deltaY === 0 ||
+        dragScrollActive ||
+        nodePointerDragActive ||
+        optionPointerDragActive
+      ) {
+        return;
+      }
+
+      const target =
+        event.target instanceof Element
+          ? event.target
+          : null;
+      const inner = target?.closest(
+        chainedSelector
+      );
+
+      if (!(inner instanceof HTMLElement)) {
+        return;
+      }
+
+      // A modal owns its own scrolling; never move the page behind it.
+      if (inner.closest("dialog[open]")) {
+        return;
+      }
+
+      const maximumInnerScroll = Math.max(
+        0,
+        inner.scrollHeight - inner.clientHeight
+      );
+
+      if (maximumInnerScroll <= 1) {
+        return;
+      }
+
+      const delta = wheelPixels(event);
+      const goingDown = delta > 0;
+      const atStart = inner.scrollTop <= 1;
+      const atEnd =
+        inner.scrollTop >= maximumInnerScroll - 1;
+
+      if (
+        (!goingDown && !atStart) ||
+        (goingDown && !atEnd)
+      ) {
+        return;
+      }
+
+      const root =
+        document.scrollingElement ||
+        document.documentElement;
+      const maximumRootScroll = Math.max(
+        0,
+        root.scrollHeight - root.clientHeight
+      );
+      const rootCanMove = goingDown
+        ? root.scrollTop < maximumRootScroll - 1
+        : root.scrollTop > 1;
+
+      if (!rootCanMove) {
+        return;
+      }
+
+      event.preventDefault();
+      root.scrollTop = clamp(
+        root.scrollTop + delta,
+        0,
+        maximumRootScroll
+      );
+    },
+    {
+      passive: false
+    }
+  );
+}
+
 function initialize() {
 
   if (
@@ -15765,6 +16297,7 @@ function initialize() {
     .rmlBuilderInitialized = "true";
 
   ensureColorPickerAdaptiveFitLoaded();
+  installRootScrollChaining();
 
   cacheElements();
 
@@ -15772,6 +16305,10 @@ function initialize() {
   restore();
   renderMetadata();
   renderPalette();
+  installSetupAssistantBridge();
+  window.setTimeout(() => {
+    void ensureSetupAssistantLoaded(true);
+  }, 250);
 
   const structureButton = document.querySelector(
     '[data-palette="controller"]'
@@ -16091,8 +16628,14 @@ function initialize() {
   document.addEventListener(
     "wheel",
     event => {
+      const dominantWheelDelta =
+        Math.abs(event.deltaX) >
+        Math.abs(event.deltaY)
+          ? event.deltaX
+          : event.deltaY;
+
       const direction =
-        Math.sign(event.deltaY);
+        Math.sign(dominantWheelDelta);
 
       if (direction === 0) {
         return;
@@ -16109,7 +16652,7 @@ function initialize() {
         event.stopImmediatePropagation();
 
         nodeWheelDelta +=
-          event.deltaY;
+          dominantWheelDelta;
 
         if (
           Math.abs(nodeWheelDelta) < 30
@@ -16137,7 +16680,7 @@ function initialize() {
           event.stopImmediatePropagation();
 
           optionWheelDelta +=
-            event.deltaY;
+            dominantWheelDelta;
 
           if (
             Math.abs(optionWheelDelta) < 30
@@ -16166,7 +16709,7 @@ function initialize() {
           event.stopImmediatePropagation();
 
           optionContainerWheelDelta +=
-            event.deltaY;
+            dominantWheelDelta;
 
           if (
             Math.abs(
@@ -16254,45 +16797,11 @@ function initialize() {
 
   elements.informationOpen.addEventListener(
     "click",
-    openInformationDialog
+    () => void openInformationDialog()
   );
-  elements.informationClose.addEventListener(
+  elements.setupGuideOpen?.addEventListener(
     "click",
-    closeInformationDialog
-  );
-  elements.informationDialog.addEventListener(
-    "click",
-    event => {
-      const pageButton = event.target.closest(
-        "[data-information-page-target]"
-      );
-
-      if (!pageButton) {
-        return;
-      }
-
-      setInformationPage(
-        pageButton.dataset.informationPageTarget
-      );
-    }
-  );
-  elements.informationDialog.addEventListener(
-    "cancel",
-    event => {
-      event.preventDefault();
-      closeInformationDialog();
-    }
-  );
-  elements.informationDialog.addEventListener(
-    "click",
-    event => {
-      if (
-        event.target ===
-        elements.informationDialog
-      ) {
-        closeInformationDialog();
-      }
-    }
+    () => void ensureSetupAssistantLoaded(false)
   );
   elements.settingsPreviewOpen.addEventListener(
     "click",
