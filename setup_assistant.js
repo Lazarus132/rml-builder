@@ -251,7 +251,7 @@
       mode: "graph",
       title: "9. Connect typed sockets",
       text: "Create a wire by dragging from one socket to another. Compatible sockets light up, incompatible sockets are rejected, and wire color communicates the concrete value type. You can also drop a wire on empty graph space: an output creates a typed Display monitor automatically, while a compatible value input creates a safe typed source such as a constant/context helper. Impulse inputs and inputs that cannot be safely synthesized still require an explicit connection.",
-      hint: "The animation shows socket-to-socket wiring first, then output → empty space and value input → empty space so the automatic helper behavior is visible.",
+      hint: "The animation shows socket-to-socket wiring first, then REAL output → empty-space and input → empty-space drops. The automatically created helper nodes appear live in safe visible graph positions.",
       demo: "graph-wire"
     },
     {
@@ -265,18 +265,18 @@
     {
       target: ".rml-graph-viewport",
       mode: "graph",
-      title: "11. Move nodes and route wires",
-      text: "Drag node headers to reorganize the graph. Drag an input onto an existing wire to create a branch, and pull a wire segment to create a movable bend point.",
-      hint: "This step focuses only on routing: node movement, a branch/junction and a bend point.",
-      demo: "graph-route"
+      title: "11. Navigate large graphs",
+      text: "The packed Start/configuration node is expanded in this demonstration so its own vertical and horizontal scrollbars are visible. Wheel over the node scrolls inside it, Shift + Wheel scrolls that node horizontally, and Ctrl + Wheel bypasses the node and pans the graph root. Dragging empty graph space pans the root directly.",
+      hint: "Watch the Start-node scrollbars move while the Shift and Ctrl keycaps are shown live; Center Graph then fits the structure again.",
+      demo: "graph-pan"
     },
     {
       target: ".rml-graph-viewport",
       mode: "graph",
-      title: "12. Navigate large graphs",
-      text: "The packed Start/configuration node is expanded in this demonstration so its own vertical and horizontal scrollbars are visible. Wheel over the node scrolls inside it, Shift + Wheel scrolls that node horizontally, and Ctrl + Wheel bypasses the node and pans the graph root. Dragging empty graph space pans the root directly.",
-      hint: "Watch the Start-node scrollbars move while the Shift and Ctrl keycaps are shown live; Center Graph then fits the structure again.",
-      demo: "graph-pan"
+      title: "12. Move nodes and route wires",
+      text: "Drag node headers to reorganize the graph. Drag an input onto an existing wire to create a branch, and pull a wire segment to create a movable bend point.",
+      hint: "This step focuses only on routing: node movement, a branch/junction and a bend point.",
+      demo: "graph-route"
     },
     {
       target: ".inspector",
@@ -541,6 +541,9 @@
     ).forEach(element => element.remove());
     document.querySelectorAll(".rml-graph-node.rml-setup-flip-active")
       .forEach(element => element.classList.remove("rml-setup-flip-active"));
+    document.querySelectorAll(".rml-setup-control-highlight")
+      .forEach(element => element.classList.remove("rml-setup-control-highlight"));
+    clearRealPortGlows();
   }
 
   function cancelDemo() {
@@ -803,6 +806,144 @@
     return runId === demoRunId;
   }
 
+  async function nativeGraphViewportPan(
+    viewport,
+    from,
+    to,
+    duration = 1150,
+    runId = demoRunId
+  ) {
+    if (!viewport || !from || !to || runId !== demoRunId) {
+      return false;
+    }
+
+    const pointerId = 9120;
+    const mouse = elements().mouse;
+
+    // First make it obvious where the pan begins.
+    if (!(await moveMouse(from, 420, runId))) {
+      return false;
+    }
+
+    showDemoLabel(
+      "Hold empty ROOT and drag → the whole graph moves",
+      from
+    );
+
+    viewport.dispatchEvent(
+      new PointerEvent(
+        "pointerdown",
+        {
+          bubbles: true,
+          cancelable: true,
+          pointerId,
+          pointerType: "mouse",
+          isPrimary: true,
+          button: 0,
+          buttons: 1,
+          clientX: from.x,
+          clientY: from.y
+        }
+      )
+    );
+
+    mouse?.classList.add(
+      "active",
+      "pressed"
+    );
+
+    await wait(180);
+    if (runId !== demoRunId) return false;
+
+    const started = performance.now();
+
+    while (runId === demoRunId) {
+      const raw = Math.min(
+        1,
+        (performance.now() - started) /
+          Math.max(1, duration)
+      );
+
+      // Smooth in/out so the graph movement can actually be followed.
+      const eased =
+        raw < 0.5
+          ? 2 * raw * raw
+          : 1 -
+            Math.pow(-2 * raw + 2, 2) / 2;
+
+      const point = {
+        x: from.x + (to.x - from.x) * eased,
+        y: from.y + (to.y - from.y) * eased
+      };
+
+      mouse?.style.setProperty(
+        "--mouse-x",
+        `${point.x}px`
+      );
+      mouse?.style.setProperty(
+        "--mouse-y",
+        `${point.y}px`
+      );
+      mouse?.style.setProperty(
+        "--mouse-duration",
+        "0ms"
+      );
+
+      // This is the important difference from dragMouse(): the REAL graph
+      // pointer handler receives the move, so .rml-graph-stage itself pans.
+      document.dispatchEvent(
+        new PointerEvent(
+          "pointermove",
+          {
+            bubbles: true,
+            cancelable: true,
+            pointerId,
+            pointerType: "mouse",
+            isPrimary: true,
+            button: -1,
+            buttons: 1,
+            clientX: point.x,
+            clientY: point.y
+          }
+        )
+      );
+
+      if (raw >= 1) break;
+
+      await new Promise(resolve =>
+        requestAnimationFrame(resolve)
+      );
+    }
+
+    document.dispatchEvent(
+      new PointerEvent(
+        "pointerup",
+        {
+          bubbles: true,
+          cancelable: true,
+          pointerId,
+          pointerType: "mouse",
+          isPrimary: true,
+          button: 0,
+          buttons: 0,
+          clientX: to.x,
+          clientY: to.y
+        }
+      )
+    );
+
+    mouse?.classList.remove("pressed");
+
+    showDemoLabel(
+      "ROOT panned — nodes and wires moved with the canvas",
+      to
+    );
+
+    await wait(520);
+
+    return runId === demoRunId;
+  }
+
   function showGhost(text, point, kind = "setting") {
     const { dragGhost } = elements();
     if (!dragGhost) return;
@@ -830,6 +971,37 @@
     pulse.style.height = `${rect.height}px`;
     document.body.appendChild(pulse);
     return pulse;
+  }
+
+  function setTourControlHighlight(element, active) {
+    const styleId = "rml-setup-control-highlight-style";
+    let style = document.getElementById(styleId);
+
+    if (!style) {
+      style = document.createElement("style");
+      style.id = styleId;
+      style.textContent = `
+        .rml-setup-control-highlight {
+          position: relative !important;
+          z-index: 100020 !important;
+          isolation: isolate;
+          box-shadow:
+            0 0 0 2px rgba(168, 100, 255, 0.95),
+            0 0 18px rgba(168, 100, 255, 0.9),
+            0 0 34px rgba(89, 183, 255, 0.48) !important;
+          filter:
+            brightness(1.35)
+            saturate(1.18)
+            drop-shadow(0 0 8px rgba(168, 100, 255, 0.7)) !important;
+          opacity: 1 !important;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    if (element instanceof Element) {
+      element.classList.toggle("rml-setup-control-highlight", active === true);
+    }
   }
 
   function showDemoLabel(text, point) {
@@ -1616,16 +1788,56 @@
 
   async function nativeGraphPointerDrag(startElement, targetPoint, duration, runId, pointerId = 9110) {
     if (!startElement || !targetPoint || runId !== demoRunId) return false;
+
+    // Never animate from a stale socket. Graph renders replace the socket DOM,
+    // and getBoundingClientRect() on an old/disconnected element collapses to
+    // the page origin — which is why the tour mouse previously appeared to
+    // "start" in the upper-left corner.
+    if (
+      !startElement.isConnected ||
+      !graphDemoVisible(startElement)
+    ) {
+      graphDemoError(
+        "Pointer drag was asked to start from a stale or invisible graph socket.",
+        {
+          connected: Boolean(startElement.isConnected),
+          visible: graphDemoVisible(startElement),
+          nodeId: startElement.dataset?.nodeId || "",
+          portId: startElement.dataset?.portId || "",
+          direction: startElement.dataset?.direction || ""
+        }
+      );
+    }
+
     const from = centerOf(startElement);
-    await moveMouse(from, 220, runId);
+
+    // Visually establish the REAL source first: move onto the socket, pulse it,
+    // pause briefly, and only then press/drag.
+    pulseAt(startElement);
+    showDemoLabel(
+      `Start on the real ${String(startElement.dataset.direction || "socket").toUpperCase()} port`,
+      from
+    );
+
+    await moveMouse(from, 360, runId);
     if (runId !== demoRunId) return false;
+
+    await wait(180);
+    if (runId !== demoRunId) return false;
+
     startElement.dispatchEvent(new PointerEvent("pointerdown", {
       bubbles: true, cancelable: true, pointerId, pointerType: "mouse",
       isPrimary: true, button: 0, buttons: 1, clientX: from.x, clientY: from.y
     }));
+
     const { mouse } = elements();
     mouse?.classList.add("pressed");
+
+    await wait(100);
+    if (runId !== demoRunId) return false;
+
     const started = performance.now();
+
     while (runId === demoRunId) {
       const raw = Math.min(1, (performance.now() - started) / Math.max(1, duration));
       const eased = 1 - Math.pow(1 - raw, 2.4);
@@ -1633,22 +1845,33 @@
         x: from.x + (targetPoint.x - from.x) * eased,
         y: from.y + (targetPoint.y - from.y) * eased
       };
+
       mouse?.style.setProperty("--mouse-x", `${point.x}px`);
       mouse?.style.setProperty("--mouse-y", `${point.y}px`);
       mouse?.style.setProperty("--mouse-duration", "0ms");
+
       document.dispatchEvent(new PointerEvent("pointermove", {
         bubbles: true, cancelable: true, pointerId, pointerType: "mouse",
         isPrimary: true, button: -1, buttons: 1, clientX: point.x, clientY: point.y
       }));
+
       if (raw >= 1) break;
       await new Promise(resolve => requestAnimationFrame(resolve));
     }
+
     document.dispatchEvent(new PointerEvent("pointerup", {
       bubbles: true, cancelable: true, pointerId, pointerType: "mouse",
       isPrimary: true, button: 0, buttons: 0, clientX: targetPoint.x, clientY: targetPoint.y
     }));
+
     mouse?.classList.remove("pressed");
-    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+    await new Promise(resolve =>
+      requestAnimationFrame(() =>
+        requestAnimationFrame(resolve)
+      )
+    );
+
     return runId === demoRunId;
   }
 
@@ -1660,6 +1883,602 @@
     if (!matrix) return { x: local.x, y: local.y };
     const point = new DOMPoint(local.x, local.y).matrixTransform(matrix);
     return { x: point.x, y: point.y };
+  }
+
+  function graphDemoRectDistance(point, rect, padding = 0) {
+    if (!rect) return Infinity;
+
+    const left = rect.left - padding;
+    const right = rect.right + padding;
+    const top = rect.top - padding;
+    const bottom = rect.bottom + padding;
+
+    const dx =
+      point.x < left
+        ? left - point.x
+        : point.x > right
+          ? point.x - right
+          : 0;
+
+    const dy =
+      point.y < top
+        ? top - point.y
+        : point.y > bottom
+          ? point.y - bottom
+          : 0;
+
+    if (dx === 0 && dy === 0) return 0;
+    return Math.hypot(dx, dy);
+  }
+
+  function graphDemoSafeEmptyDropPoint(
+    viewport,
+    sourcePoint,
+    {
+      prefer = "right",
+      reserveWidth = 300,
+      reserveHeight = 190
+    } = {}
+  ) {
+    const viewportRect =
+      viewport?.getBoundingClientRect();
+
+    if (!viewportRect) {
+      return sourcePoint;
+    }
+
+    const cardRect =
+      elements().card?.getBoundingClientRect();
+
+    const margin = 18;
+    const halfWidth =
+      Math.max(110, reserveWidth * .5);
+    const halfHeight =
+      Math.max(80, reserveHeight * .5);
+
+    // The CREATED node itself must fit, not only the mouse/drop point.
+    const allowed = {
+      left:
+        viewportRect.left +
+        halfWidth +
+        margin,
+      right:
+        viewportRect.right -
+        halfWidth -
+        margin,
+      top:
+        viewportRect.top +
+        halfHeight +
+        margin,
+      bottom:
+        viewportRect.bottom -
+        halfHeight -
+        margin
+    };
+
+    const visibleNodes =
+      [...document.querySelectorAll(
+        ".rml-graph-node"
+      )]
+        .filter(graphDemoVisible);
+
+    const nodeRects =
+      visibleNodes.map(node =>
+        node.getBoundingClientRect()
+      );
+
+    // Determine which REAL node contains the source socket point.
+    // The drag path obviously starts inside/on this node, so that node must NOT
+    // invalidate the corridor test. It still remains blocked for placement of
+    // the newly-created helper node.
+    const sourceNode =
+      visibleNodes.find(node => {
+        const rect =
+          node.getBoundingClientRect();
+
+        return (
+          sourcePoint.x >= rect.left - 3 &&
+          sourcePoint.x <= rect.right + 3 &&
+          sourcePoint.y >= rect.top - 3 &&
+          sourcePoint.y <= rect.bottom + 3
+        );
+      }) || null;
+
+    const placementBlockedRects =
+      [
+        cardRect,
+        ...nodeRects
+      ].filter(Boolean);
+
+    const corridorBlockedRects =
+      [
+        cardRect,
+        ...visibleNodes
+          .filter(node =>
+            node !== sourceNode
+          )
+          .map(node =>
+            node.getBoundingClientRect()
+          )
+      ].filter(Boolean);
+
+    const pointToRectOverlap =
+      (point, rect, extra = 0) => {
+        const candidate = {
+          left:
+            point.x -
+            halfWidth -
+            extra,
+          right:
+            point.x +
+            halfWidth +
+            extra,
+          top:
+            point.y -
+            halfHeight -
+            extra,
+          bottom:
+            point.y +
+            halfHeight +
+            extra
+        };
+
+        return !(
+          candidate.right < rect.left ||
+          candidate.left > rect.right ||
+          candidate.bottom < rect.top ||
+          candidate.top > rect.bottom
+        );
+      };
+
+    const segmentIntersectsRect =
+      (from, to, rect, padding = 18) => {
+        const expanded = {
+          left: rect.left - padding,
+          right: rect.right + padding,
+          top: rect.top - padding,
+          bottom: rect.bottom + padding
+        };
+
+        // Sample the ACTUAL drag corridor. This intentionally rejects drops
+        // whose wire/mouse path would visually pass underneath another node/card.
+        const dx = to.x - from.x;
+        const dy = to.y - from.y;
+        const distance =
+          Math.hypot(dx, dy);
+        const samples =
+          Math.max(
+            12,
+            Math.ceil(distance / 24)
+          );
+
+        for (
+          let index = 1;
+          index < samples;
+          index += 1
+        ) {
+          const t =
+            index / samples;
+          const x =
+            from.x + dx * t;
+          const y =
+            from.y + dy * t;
+
+          if (
+            x >= expanded.left &&
+            x <= expanded.right &&
+            y >= expanded.top &&
+            y <= expanded.bottom
+          ) {
+            return true;
+          }
+        }
+
+        return false;
+      };
+
+    const viewportTooSmall =
+      allowed.left >= allowed.right ||
+      allowed.top >= allowed.bottom;
+
+    if (viewportTooSmall) {
+      // On very small/mobile views, use the largest possible safe center
+      // rather than returning an edge point.
+      return {
+        x:
+          viewportRect.left +
+          viewportRect.width * .5,
+        y:
+          viewportRect.top +
+          viewportRect.height * .58
+      };
+    }
+
+    // Dense dynamic grid instead of a few hard-coded fractions.
+    // This adapts to portrait/landscape, desktop/mobile and the current
+    // assistant-card position at the exact moment Step 9 runs.
+    const stepX =
+      Math.max(
+        42,
+        Math.min(
+          76,
+          (allowed.right -
+            allowed.left) / 8
+        )
+      );
+
+    const stepY =
+      Math.max(
+        38,
+        Math.min(
+          68,
+          (allowed.bottom -
+            allowed.top) / 7
+        )
+      );
+
+    const candidates = [];
+
+    for (
+      let y = allowed.top;
+      y <= allowed.bottom + .5;
+      y += stepY
+    ) {
+      for (
+        let x = allowed.left;
+        x <= allowed.right + .5;
+        x += stepX
+      ) {
+        const point = { x, y };
+
+        const createdNodeOverlaps =
+          placementBlockedRects.some(rect =>
+            pointToRectOverlap(
+              point,
+              rect,
+              24
+            )
+          );
+
+        const dragPathBlocked =
+          corridorBlockedRects.some(rect =>
+            segmentIntersectsRect(
+              sourcePoint,
+              point,
+              rect,
+              20
+            )
+          );
+
+        if (
+          createdNodeOverlaps ||
+          dragPathBlocked
+        ) {
+          continue;
+        }
+
+        const edgeClearance =
+          Math.min(
+            point.x -
+              allowed.left,
+            allowed.right -
+              point.x,
+            point.y -
+              allowed.top,
+            allowed.bottom -
+              point.y
+          );
+
+        const nearestBlocked =
+          placementBlockedRects.reduce(
+            (best, rect) =>
+              Math.min(
+                best,
+                graphDemoRectDistance(
+                  point,
+                  rect,
+                  Math.max(
+                    halfWidth,
+                    halfHeight
+                  ) * .45
+                )
+              ),
+            Infinity
+          );
+
+        const sourceDistance =
+          Math.hypot(
+            point.x -
+              sourcePoint.x,
+            point.y -
+              sourcePoint.y
+          );
+
+        // Prefer a readable drag length, but not an absurdly long one.
+        const idealDistance =
+          Math.min(
+            420,
+            Math.max(
+              220,
+              viewportRect.width * .34
+            )
+          );
+
+        const distancePenalty =
+          Math.abs(
+            sourceDistance -
+            idealDistance
+          );
+
+        const directionGain =
+          prefer === "left"
+            ? sourcePoint.x - point.x
+            : point.x - sourcePoint.x;
+
+        const verticalPenalty =
+          Math.abs(
+            point.y -
+            sourcePoint.y
+          ) * .15;
+
+        const score =
+          Math.min(
+            nearestBlocked,
+            500
+          ) * 5.0 +
+          Math.min(
+            edgeClearance,
+            220
+          ) * 2.4 +
+          directionGain * .55 -
+          distancePenalty * .9 -
+          verticalPenalty;
+
+        candidates.push({
+          point,
+          score
+        });
+      }
+    }
+
+    if (candidates.length > 0) {
+      candidates.sort(
+        (a, b) =>
+          b.score - a.score
+      );
+      return candidates[0].point;
+    }
+
+    // Last-resort adaptive ring search around the source. Still keeps the
+    // complete future node inside the viewport and avoids the tour card.
+    const radii =
+      [220, 280, 340, 400, 460];
+    const angles =
+      prefer === "left"
+        ? [Math.PI, 2.55, 3.72, 2.2, 4.05]
+        : [0, .58, -.58, .92, -.92];
+
+    for (const radius of radii) {
+      for (const angle of angles) {
+        const point = {
+          x:
+            Math.min(
+              allowed.right,
+              Math.max(
+                allowed.left,
+                sourcePoint.x +
+                  Math.cos(angle) *
+                  radius
+              )
+            ),
+          y:
+            Math.min(
+              allowed.bottom,
+              Math.max(
+                allowed.top,
+                sourcePoint.y +
+                  Math.sin(angle) *
+                  radius
+              )
+            )
+        };
+
+        if (
+          placementBlockedRects.some(rect =>
+            pointToRectOverlap(
+              point,
+              rect,
+              18
+            )
+          )
+        ) {
+          continue;
+        }
+
+        if (
+          corridorBlockedRects.some(rect =>
+            segmentIntersectsRect(
+              sourcePoint,
+              point,
+              rect,
+              14
+            )
+          )
+        ) {
+          continue;
+        }
+
+        return point;
+      }
+    }
+
+    graphDemoError(
+      "Step 9 could not find a fully visible free drop area for the automatic helper node at the current viewport size.",
+      {
+        viewport:
+          viewportRect.toJSON?.() ||
+          viewportRect,
+        sourcePoint,
+        reserveWidth,
+        reserveHeight,
+        visibleNodes:
+          nodeRects.length,
+        sourceNode:
+          sourceNode
+            ? {
+                id:
+                  sourceNode.dataset.graphNodeId ||
+                  "",
+                title:
+                  graphDemoNodeTitle(sourceNode)
+              }
+            : null,
+        corridorObstacles:
+          corridorBlockedRects.length,
+        card:
+          cardRect?.toJSON?.() ||
+          cardRect ||
+          null
+      }
+    );
+  }
+
+  async function graphDemoWaitForNewNode(
+    beforeIds,
+    runId,
+    titlePattern = null
+  ) {
+    for (
+      let attempt = 0;
+      attempt < 30 &&
+      runId === demoRunId;
+      attempt += 1
+    ) {
+      const created =
+        [...document.querySelectorAll(
+          ".rml-graph-node"
+        )].find(node => {
+          const id =
+            node.dataset.graphNodeId;
+
+          if (
+            !id ||
+            beforeIds.has(id)
+          ) {
+            return false;
+          }
+
+          return (
+            !titlePattern ||
+            titlePattern.test(
+              graphDemoNodeTitle(node)
+            )
+          );
+        });
+
+      if (
+        created &&
+        graphDemoVisible(created)
+      ) {
+        return created;
+      }
+
+      await new Promise(resolve =>
+        requestAnimationFrame(resolve)
+      );
+    }
+
+    return null;
+  }
+
+  async function graphDemoRealDropToEmpty(
+    socket,
+    dropPoint,
+    runId,
+    {
+      pointerId,
+      expectedTitle = null,
+      label = "Drop on empty graph"
+    } = {}
+  ) {
+    if (
+      !socket ||
+      !dropPoint ||
+      runId !== demoRunId
+    ) {
+      return null;
+    }
+
+    const beforeIds =
+      new Set(
+        [...document.querySelectorAll(
+          ".rml-graph-node"
+        )].map(
+          node =>
+            node.dataset.graphNodeId
+        )
+      );
+
+    showDemoLabel(
+      label,
+      dropPoint
+    );
+
+    const ok =
+      await nativeGraphPointerDrag(
+        socket,
+        dropPoint,
+        700,
+        runId,
+        pointerId
+      );
+
+    if (
+      !ok ||
+      runId !== demoRunId
+    ) {
+      return null;
+    }
+
+    const created =
+      await graphDemoWaitForNewNode(
+        beforeIds,
+        runId,
+        expectedTitle
+      );
+
+    if (!created) {
+      graphDemoError(
+        `Dropping ${socket.dataset.direction || "socket"} on empty graph did not create the expected automatic helper node.`,
+        {
+          socket:
+            socket.dataset,
+          dropPoint,
+          expectedTitle:
+            expectedTitle?.source ||
+            null
+        }
+      );
+    }
+
+    created.scrollIntoView?.({
+      block: "nearest",
+      inline: "nearest",
+      behavior: "auto"
+    });
+
+    await new Promise(resolve =>
+      requestAnimationFrame(() =>
+        requestAnimationFrame(resolve)
+      )
+    );
+
+    pulseAt(
+      created,
+      "rml-setup-demo-drop"
+    );
+
+    return created;
   }
 
   async function runGraphWireDemo(runId) {
@@ -1851,139 +2670,187 @@
     hideDemoCanvasWire(ui.wire);
     await wait(180);
 
-    // 4) Output -> empty graph space: the real graph creates a typed monitor.
+    // The connection commit rerenders graph nodes. The original `output` /
+    // `input` variables now point at old DOM sockets, so resolve the live ports
+    // again before any further animated drag.
+    const livePairAfterConnection =
+      graphDemoSocketPair(true);
+
+    const liveOutput =
+      livePairAfterConnection.output;
+
+    if (
+      !liveOutput ||
+      !liveOutput.isConnected ||
+      !graphDemoVisible(liveOutput)
+    ) {
+      graphDemoError(
+        "Step 9 could not re-resolve the live output socket after committing the first wire."
+      );
+    }
+
+    const liveOutputPoint =
+      centerOf(liveOutput);
+
+    // 4) OUTPUT -> empty graph space.
+    //
+    // Use the REAL graph interaction here. node_graph.js will create the
+    // automatic Display Value monitor itself. The assistant no longer fakes
+    // this with a floating ghost.
     const viewport =
       document.querySelector(
         ".rml-graph-viewport"
       );
-    if (!viewport) graphDemoError("Graph viewport .rml-graph-viewport disappeared during Step 9.");
-    const viewportRect = viewport.getBoundingClientRect();
 
-    {
-      const emptyOutputPoint = {
-        x: Math.min(
-          viewportRect.right - 72,
-          Math.max(
-            viewportRect.left + 72,
-            a.x + viewportRect.width * .28
-          )
-        ),
-        y: Math.min(
-          viewportRect.bottom - 72,
-          Math.max(
-            viewportRect.top + 72,
-            a.y + 128
-          )
-        )
-      };
-
-      ui.wireSecondary.style.stroke =
-        ui.wire?.style.stroke ||
-        "#6ce89b";
-
-      showDemoLabel(
-        "4 · Drop OUTPUT on empty graph → auto-create typed Display monitor",
-        emptyOutputPoint
+    if (!viewport) {
+      graphDemoError(
+        "Graph viewport .rml-graph-viewport disappeared during Step 9."
       );
+    }
 
-      await moveMouse(a, 260, runId);
-      if (runId !== demoRunId) return;
-      ui.mouse?.classList.add("pressed");
-
-      await animatePathDrawing(
-        ui.wireSecondary,
-        a,
-        emptyOutputPoint,
-        620,
-        runId,
-        28,
+    let outputDropPoint =
+      graphDemoSafeEmptyDropPoint(
+        viewport,
+        liveOutputPoint,
         {
-          followMouse: true,
-          className: "dragging"
+          prefer: "right",
+          reserveWidth: 300,
+          reserveHeight: 185
         }
       );
 
-      ui.mouse?.classList.remove("pressed");
-      if (runId !== demoRunId) return;
+    showDemoLabel(
+      "4 · Start at the REAL OUTPUT port, then drag into empty space",
+      liveOutputPoint
+    );
 
-      showGhost(
-        "Display Value · auto-created",
-        emptyOutputPoint,
-        "graph-node"
-      );
-      pulseAt(viewport, "rml-setup-demo-drop");
-      await wait(380);
-      hideGhost();
-      ui.wireSecondary.hidden = true;
-      ui.wireSecondary.setAttribute("d", "");
-      hideDemoCanvasWire(ui.wireSecondary);
-    }
-
-    if (runId !== demoRunId) return;
-
-    // 5) Value input -> empty graph space: a safe typed source is synthesized.
-    {
-      const emptyInputPoint = {
-        x: Math.min(
-          viewportRect.right - 72,
-          Math.max(
-            viewportRect.left + 72,
-            b.x - viewportRect.width * .30
-          )
-        ),
-        y: Math.min(
-          viewportRect.bottom - 72,
-          Math.max(
-            viewportRect.top + 72,
-            b.y + 176
-          )
-        )
-      };
-
-      ui.wireTertiary.style.stroke =
-        getComputedStyle(input)
-          .getPropertyValue(
-            "--port-color"
-          )
-          .trim() ||
-        "#6ce89b";
-
-      showDemoLabel(
-        "5 · Drag VALUE INPUT to empty graph → auto-create compatible typed source",
-        emptyInputPoint
-      );
-
-      await moveMouse(b, 260, runId);
-      if (runId !== demoRunId) return;
-      ui.mouse?.classList.add("pressed");
-
-      await animatePathDrawing(
-        ui.wireTertiary,
-        b,
-        emptyInputPoint,
-        620,
-        runId,
-        -26,
+    // Re-evaluate at the last possible moment. The tour card, viewport and
+    // nodes may have moved since this Step started.
+    outputDropPoint =
+      graphDemoSafeEmptyDropPoint(
+        viewport,
+        centerOf(liveOutput),
         {
-          followMouse: true,
-          className: "dragging"
+          prefer: "right",
+          reserveWidth: 300,
+          reserveHeight: 185
         }
       );
 
-      ui.mouse?.classList.remove("pressed");
-      if (runId !== demoRunId) return;
-
-      showGhost(
-        "Typed constant / context source",
-        emptyInputPoint,
-        "graph-node"
+    const createdDisplay =
+      await graphDemoRealDropToEmpty(
+        liveOutput,
+        outputDropPoint,
+        runId,
+        {
+          pointerId: 9114,
+          expectedTitle:
+            /^Display Value$/i,
+          label:
+            "Release here — safely away from the Help card and viewport edges"
+        }
       );
-      await wait(380);
-      hideGhost();
-      ui.wireTertiary.hidden = true;
-      ui.wireTertiary.setAttribute("d", "");
-      hideDemoCanvasWire(ui.wireTertiary);
+
+    if (
+      runId !== demoRunId
+    ) {
+      return;
     }
+
+    showDemoLabel(
+      "Display Value appeared automatically and is already connected",
+      centerOf(createdDisplay)
+    );
+
+    await wait(760);
+
+    if (
+      runId !== demoRunId
+    ) {
+      return;
+    }
+
+    // Re-resolve the original input because creating the real monitor rerenders
+    // the graph DOM.
+    const refreshedPairAfterDisplay =
+      graphDemoSocketPair(true);
+
+    const refreshedInput =
+      refreshedPairAfterDisplay.input;
+
+    if (
+      !refreshedInput ||
+      !refreshedInput.isConnected ||
+      !graphDemoVisible(refreshedInput)
+    ) {
+      graphDemoError(
+        "Step 9 could not re-resolve the live input socket after creating Display Value."
+      );
+    }
+
+    const refreshedInputPoint =
+      centerOf(refreshedInput);
+
+    // 5) VALUE INPUT -> empty graph space.
+    //
+    // Again use the actual graph drop handler so the real safe typed source
+    // (for this bool demo: Boolean Constant) appears exactly as it does outside
+    // the assistant.
+    let inputDropPoint =
+      graphDemoSafeEmptyDropPoint(
+        viewport,
+        refreshedInputPoint,
+        {
+          prefer: "left",
+          reserveWidth: 300,
+          reserveHeight: 185
+        }
+      );
+
+    showDemoLabel(
+      "5 · Start at the REAL VALUE INPUT port, then drag into empty space",
+      refreshedInputPoint
+    );
+
+    inputDropPoint =
+      graphDemoSafeEmptyDropPoint(
+        viewport,
+        centerOf(refreshedInput),
+        {
+          prefer: "left",
+          reserveWidth: 300,
+          reserveHeight: 185
+        }
+      );
+
+    const createdSource =
+      await graphDemoRealDropToEmpty(
+        refreshedInput,
+        inputDropPoint,
+        runId,
+        {
+          pointerId: 9115,
+          // For this Step-9 bool example the automatic safe source is a
+          // Boolean Constant. Keep the lookup strict so failures are visible.
+          expectedTitle:
+            /^Boolean Constant$/i,
+          label:
+            "Release here — the real typed source will appear at this position"
+        }
+      );
+
+    if (
+      runId !== demoRunId
+    ) {
+      return;
+    }
+
+    showDemoLabel(
+      `${graphDemoNodeTitle(createdSource) || "Typed source"} appeared automatically and is connected`,
+      centerOf(createdSource)
+    );
+
+    await wait(760);
 
     showDemoLabel(
       "Impulse / unsafe inputs still need an explicit compatible source",
@@ -1995,26 +2862,92 @@
     console.info("[RML Tour · Step 9] Typed socket animation completed successfully.", { runId });
   }
 
-  function createPortTravelMarker(point, direction, color) {
-    const marker = document.createElement("div");
-    marker.className = `rml-setup-port-travel ${direction}`;
-    marker.dataset.direction = direction;
-    marker.style.setProperty("--travel-color", color);
-    marker.style.left = `${point.x}px`;
-    marker.style.top = `${point.y}px`;
-    marker.innerHTML = `<span></span><b>${direction === "input" ? "INPUT" : "OUTPUT"}</b>`;
-    document.body.appendChild(marker);
-    return marker;
+
+  function setRealPortGlow(socket, active) {
+    if (!(socket instanceof Element)) return;
+
+    const styleId = "rml-setup-real-port-glow-style";
+    let style = document.getElementById(styleId);
+
+    if (!style) {
+      style = document.createElement("style");
+      style.id = styleId;
+      style.textContent = `
+        .rml-graph-port-row.rml-setup-real-port-glow {
+          position: relative;
+          z-index: 8;
+          border-radius: 8px;
+          filter:
+            brightness(1.18)
+            drop-shadow(0 0 7px var(--rml-setup-port-glow))
+            drop-shadow(0 0 15px var(--rml-setup-port-glow));
+        }
+
+        .rml-graph-port-row.rml-setup-real-port-glow .rml-graph-socket {
+          box-shadow:
+            0 0 0 2px rgba(255, 255, 255, 0.82),
+            0 0 10px var(--rml-setup-port-glow),
+            0 0 22px var(--rml-setup-port-glow) !important;
+          transform: scale(1.12);
+        }
+
+        .rml-graph-port-row.rml-setup-real-port-glow .rml-graph-port-copy > strong {
+          color: #fff !important;
+          text-shadow:
+            0 0 5px var(--rml-setup-port-glow),
+            0 0 12px var(--rml-setup-port-glow),
+            0 0 20px var(--rml-setup-port-glow);
+        }
+
+        .rml-graph-port-row.rml-setup-real-port-glow .rml-graph-port-copy > small {
+          filter: brightness(1.22);
+          text-shadow: 0 0 8px var(--rml-setup-port-glow);
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    const row = socket.closest(".rml-graph-port-row");
+    if (!row) return;
+
+    if (active) {
+      const color =
+        getComputedStyle(socket)
+          .getPropertyValue("--port-color")
+          .trim() ||
+        socket.style.getPropertyValue("--port-color") ||
+        "#6ce89b";
+
+      row.style.setProperty(
+        "--rml-setup-port-glow",
+        color
+      );
+      row.classList.add(
+        "rml-setup-real-port-glow"
+      );
+    } else {
+      row.classList.remove(
+        "rml-setup-real-port-glow"
+      );
+      row.style.removeProperty(
+        "--rml-setup-port-glow"
+      );
+    }
   }
 
-  async function travelPortMarker(marker, point, duration, runId) {
-    if (!marker || runId !== demoRunId) return false;
-    marker.style.setProperty("--travel-duration", `${duration}ms`);
-    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    marker.style.left = `${point.x}px`;
-    marker.style.top = `${point.y}px`;
-    await wait(duration + 70);
-    return runId === demoRunId;
+  function clearRealPortGlows() {
+    document
+      .querySelectorAll(
+        ".rml-graph-port-row.rml-setup-real-port-glow"
+      )
+      .forEach(row => {
+        row.classList.remove(
+          "rml-setup-real-port-glow"
+        );
+        row.style.removeProperty(
+          "--rml-setup-port-glow"
+        );
+      });
   }
 
   async function runGraphPortFlipDemo(runId) {
@@ -2031,83 +2964,202 @@
       );
 
     if (!article) return;
+
     const nodeId = article.dataset.graphNodeId;
     let flip = article.querySelector(".rml-graph-node-flip");
-    let beforeInput = article.querySelector('.rml-graph-socket[data-direction="input"]');
-    let beforeOutput = article.querySelector('.rml-graph-socket[data-direction="output"]');
+    let beforeInput =
+      article.querySelector(
+        '.rml-graph-socket[data-direction="input"]'
+      );
+    let beforeOutput =
+      article.querySelector(
+        '.rml-graph-socket[data-direction="output"]'
+      );
+
     if (!flip || !beforeInput || !beforeOutput) return;
 
-    const inputA = centerOf(beforeInput);
-    const outputA = centerOf(beforeOutput);
-    const inputColor = getComputedStyle(beforeInput).getPropertyValue("--port-color").trim() || "#59b7ff";
-    const outputColor = getComputedStyle(beforeOutput).getPropertyValue("--port-color").trim() || "#6ce89b";
     const flipPoint = centerOf(flip);
 
-    showDemoLabel("⇄ mirrors the socket layout", flipPoint);
-    await moveMouse(flipPoint, 430, runId);
+    // IMPORTANT: no artificial INPUT/OUTPUT labels are created here.
+    // Highlight the actual rendered port rows, including their real names.
+    clearRealPortGlows();
+    setRealPortGlow(beforeInput, true);
+    setRealPortGlow(beforeOutput, true);
+
+    showDemoLabel(
+      "These REAL input / output ports will switch sides",
+      centerOf(article)
+    );
+
+    await wait(620);
     if (runId !== demoRunId) return;
-    await wait(220);
-    showDemoLabel("Click ⇄", flipPoint);
+
+    showDemoLabel(
+      "Click ⇄ — watch the real named ports move",
+      flipPoint
+    );
+
+    await moveMouse(
+      flipPoint,
+      430,
+      runId
+    );
+
+    if (runId !== demoRunId) return;
+
+    await wait(180);
     await clickMouse(runId);
 
-    const inputMarker = createPortTravelMarker(inputA, "input", inputColor);
-    const outputMarker = createPortTravelMarker(outputA, "output", outputColor);
+    // Remove the old-row highlight immediately before the graph rerenders.
+    clearRealPortGlows();
     flip.click();
-    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+    await new Promise(resolve =>
+      requestAnimationFrame(() =>
+        requestAnimationFrame(resolve)
+      )
+    );
+
     if (runId !== demoRunId) return;
 
-    article = document.querySelector(`.rml-graph-node[data-graph-node-id="${CSS.escape(nodeId)}"]`);
+    article =
+      document.querySelector(
+        `.rml-graph-node[data-graph-node-id="${CSS.escape(nodeId)}"]`
+      );
+
     if (!article) return;
-    article.classList.add("rml-setup-flip-active");
-    let afterInput = article.querySelector('.rml-graph-socket[data-direction="input"]');
-    let afterOutput = article.querySelector('.rml-graph-socket[data-direction="output"]');
-    if (!afterInput || !afterOutput) return;
-    const inputB = centerOf(afterInput);
-    const outputB = centerOf(afterOutput);
 
-    showDemoLabel("INPUT → opposite side   ·   OUTPUT → opposite side", centerOf(article));
-    await Promise.all([
-      travelPortMarker(inputMarker, inputB, 700, runId),
-      travelPortMarker(outputMarker, outputB, 700, runId)
-    ]);
-    if (runId !== demoRunId) return;
+    article.classList.add(
+      "rml-setup-flip-active"
+    );
+
+    let afterInput =
+      article.querySelector(
+        '.rml-graph-socket[data-direction="input"]'
+      );
+    let afterOutput =
+      article.querySelector(
+        '.rml-graph-socket[data-direction="output"]'
+      );
+
+    if (!afterInput || !afterOutput) return;
+
+    // Glow the NEW REAL DOM rows at their actual opposite-side positions.
+    setRealPortGlow(afterInput, true);
+    setRealPortGlow(afterOutput, true);
+
+    const inputName =
+      afterInput
+        .closest(".rml-graph-port-row")
+        ?.querySelector(".rml-graph-port-copy > strong")
+        ?.textContent
+        ?.trim() ||
+      "Input";
+
+    const outputName =
+      afterOutput
+        .closest(".rml-graph-port-row")
+        ?.querySelector(".rml-graph-port-copy > strong")
+        ?.textContent
+        ?.trim() ||
+      "Output";
+
+    showDemoLabel(
+      `${inputName} / ${outputName} — real ports are now on the opposite sides`,
+      centerOf(article)
+    );
+
     pulseAt(afterInput);
     pulseAt(afterOutput);
-    await wait(650);
 
-    flip = article.querySelector(".rml-graph-node-flip");
-    if (!flip || runId !== demoRunId) return;
-    const restorePoint = centerOf(flip);
-    showDemoLabel("Click ⇄ again → restore", restorePoint);
-    await moveMouse(restorePoint, 430, runId);
-    await wait(220);
-    await clickMouse(runId);
-
-    inputMarker.style.left = `${inputB.x}px`;
-    inputMarker.style.top = `${inputB.y}px`;
-    outputMarker.style.left = `${outputB.x}px`;
-    outputMarker.style.top = `${outputB.y}px`;
-    flip.click();
-    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    await wait(900);
     if (runId !== demoRunId) return;
 
-    const restored = document.querySelector(`.rml-graph-node[data-graph-node-id="${CSS.escape(nodeId)}"]`);
-    restored?.classList.add("rml-setup-flip-active");
-    const restoredInput = restored?.querySelector('.rml-graph-socket[data-direction="input"]');
-    const restoredOutput = restored?.querySelector('.rml-graph-socket[data-direction="output"]');
-    const inputRestore = restoredInput ? centerOf(restoredInput) : inputA;
-    const outputRestore = restoredOutput ? centerOf(restoredOutput) : outputA;
+    flip =
+      article.querySelector(
+        ".rml-graph-node-flip"
+      );
 
-    showDemoLabel("Original socket sides restored", centerOf(restored || article));
-    await Promise.all([
-      travelPortMarker(inputMarker, inputRestore, 700, runId),
-      travelPortMarker(outputMarker, outputRestore, 700, runId)
-    ]);
-    await wait(420);
-    inputMarker.remove();
-    outputMarker.remove();
-    restored?.classList.remove("rml-setup-flip-active");
-    article?.classList.remove("rml-setup-flip-active");
+    if (!flip) return;
+
+    const restorePoint =
+      centerOf(flip);
+
+    showDemoLabel(
+      "Click ⇄ again → restore the real ports",
+      restorePoint
+    );
+
+    await moveMouse(
+      restorePoint,
+      430,
+      runId
+    );
+
+    if (runId !== demoRunId) return;
+
+    await wait(180);
+    await clickMouse(runId);
+
+    clearRealPortGlows();
+    flip.click();
+
+    await new Promise(resolve =>
+      requestAnimationFrame(() =>
+        requestAnimationFrame(resolve)
+      )
+    );
+
+    if (runId !== demoRunId) return;
+
+    const restored =
+      document.querySelector(
+        `.rml-graph-node[data-graph-node-id="${CSS.escape(nodeId)}"]`
+      );
+
+    const restoredInput =
+      restored?.querySelector(
+        '.rml-graph-socket[data-direction="input"]'
+      );
+    const restoredOutput =
+      restored?.querySelector(
+        '.rml-graph-socket[data-direction="output"]'
+      );
+
+    if (restoredInput) {
+      setRealPortGlow(
+        restoredInput,
+        true
+      );
+      pulseAt(restoredInput);
+    }
+
+    if (restoredOutput) {
+      setRealPortGlow(
+        restoredOutput,
+        true
+      );
+      pulseAt(restoredOutput);
+    }
+
+    restored?.classList.add(
+      "rml-setup-flip-active"
+    );
+
+    showDemoLabel(
+      "Original sides restored — glow is on the REAL named ports",
+      centerOf(restored || article)
+    );
+
+    await wait(720);
+
+    clearRealPortGlows();
+    restored?.classList.remove(
+      "rml-setup-flip-active"
+    );
+    article?.classList.remove(
+      "rml-setup-flip-active"
+    );
     hideMouse();
   }
 
@@ -2514,23 +3566,77 @@
       }
 
       if (runId !== demoRunId) return;
-      showDemoLabel("Drag empty ROOT canvas → pan", emptyPoint);
-      await dragMouse(
+
+      // Demonstrate REAL ROOT panning, not just a cosmetic mouse movement.
+      // Use a large diagonal displacement so the movement of nodes + wires is
+      // unmistakable before Center Graph restores the overview.
+      const rootPanTarget = {
+        x: Math.max(
+          rect.left + 72,
+          emptyPoint.x - rect.width * .32
+        ),
+        y: Math.max(
+          rect.top + 72,
+          emptyPoint.y - rect.height * .27
+        )
+      };
+
+      showDemoLabel(
+        "Drag empty ROOT canvas → pan the complete graph",
+        emptyPoint
+      );
+
+      await nativeGraphViewportPan(
+        viewport,
         emptyPoint,
-        { x: rect.left + rect.width * .50, y: rect.top + rect.height * .54 },
-        1150,
+        rootPanTarget,
+        1250,
         runId
       );
+
+      if (runId !== demoRunId) return;
+
       hideMouse();
-      await wait(280);
+      await wait(320);
 
       const centerButton = [...document.querySelectorAll(".rml-graph-toolbar .button")].find(button =>
         /Center Graph/i.test(button.textContent || "")
       );
       if (centerButton && runId === demoRunId) {
+        // Temporarily move the tour's actual spotlight cutout onto Center Graph.
+        // A z-index/glow alone cannot remove the translucent shade because the
+        // assistant uses four real overlay panes around the current target.
+        // Recomputing those panes around the button creates a genuine clear hole.
+        positionShades(centerButton);
+        setTourControlHighlight(centerButton, true);
+        pulseAt(centerButton);
+
+        showDemoLabel(
+          "Center Graph → fit everything again",
+          centerOf(centerButton)
+        );
+
+        await wait(220);
+        if (runId !== demoRunId) return;
+
         await moveMouse(centerOf(centerButton), 620, runId);
-        showDemoLabel("Center Graph → fit everything again", centerOf(centerButton));
+        if (runId !== demoRunId) return;
+
         await clickMouse(runId);
+        centerButton.click();
+
+        await wait(420);
+
+        setTourControlHighlight(centerButton, false);
+
+        // Restore the normal spotlight for this tour step after the short
+        // Center Graph demonstration.
+        if (runId === demoRunId) {
+          positionShades(
+            currentTarget ||
+            document.querySelector(".rml-graph-viewport")
+          );
+        }
       }
       hideMouse();
     } finally {
