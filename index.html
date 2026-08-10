@@ -7,7 +7,7 @@
       name="description"
       content="Build complete typed ResoniteModLoader projects visually with automatic dependencies; optional Raw C# tools remain an expert fallback.">
     <title>RML Universal Mod Builder</title>
-    <link rel="stylesheet" href="styles.css?v=109">
+    <link rel="stylesheet" href="styles.css?v=110">
     <link rel="shortcut icon" href="./favicon.svg">
     <link rel="icon" href="./favicon.svg">
   </head>
@@ -163,10 +163,19 @@
 
       <section class="code-panel panel">
         <div class="code-toolbar">
-          <div>
+          <div class="code-heading">
             <small>Step 5</small>
-            <h2>Generated C#</h2>
+            <h2 id="generated-code-title">Generated C#</h2>
             <span id="code-summary"></span>
+          </div>
+          <div
+            id="generated-file-switcher"
+            class="generated-file-switcher"
+            hidden>
+            <label for="generated-file-select">Generated file</label>
+            <select
+              id="generated-file-select"
+              aria-label="Select generated project file"></select>
           </div>
           <label class="guide-toggle">
             <input id="include-guide" type="checkbox">
@@ -351,63 +360,57 @@
         </label>
 
         <fieldset class="export-selection">
-          <legend>Files to download</legend>
+          <legend>Generated file groups</legend>
 
           <label class="export-option">
             <input id="export-include-cs" type="checkbox">
             <span>
-              <strong>Main mod C# source</strong>
-              <small id="export-cs-filename">YourMod.cs</small>
+              <strong>C# source files</strong>
+              <small id="export-cs-filename">Generated sources</small>
             </span>
           </label>
 
           <label class="export-option">
             <input id="export-include-csproj" type="checkbox">
             <span>
-              <strong>Project file</strong>
-              <small id="export-csproj-filename">YourMod.csproj</small>
-            </span>
-          </label>
-
-          <label
-            id="export-node-graph-option"
-            class="export-option"
-            hidden>
-            <input
-              id="export-include-node-graph"
-              type="checkbox"
-              checked
-              disabled>
-            <span>
-              <strong>Generated mod runtime sources</strong>
-              <small id="export-node-graph-filename">YourMod.NodeGraph.cs</small>
+              <strong>Projects, build scripts & support</strong>
+              <small id="export-csproj-filename">Generated project files</small>
             </span>
           </label>
         </fieldset>
 
+        <section class="export-generated-package" aria-live="polite">
+          <div class="export-generated-package-heading">
+            <div>
+              <small>Exact generated package</small>
+              <strong id="export-package-summary">0 projects · 0 files</strong>
+            </div>
+            <span id="export-package-mode" data-mode="single">Single project</span>
+          </div>
+          <div
+            id="export-project-summary"
+            class="export-project-summary"></div>
+          <div
+            id="export-generated-files"
+            class="export-generated-files"></div>
+        </section>
+
         <p id="export-download-hint" class="export-hint">
-          Both selected files will be bundled into one ZIP archive.
+          The exact generated package contents are shown above.
         </p>
 
-        <div class="export-copy-row" aria-label="Copy generated files">
+        <div class="export-copy-row" aria-label="Copy a generated file">
+          <label class="export-copy-select-field">
+            Copy generated file
+            <select
+              id="export-copy-file-select"
+              aria-label="Select generated file to copy"></select>
+          </label>
           <button
-            id="export-copy-cs"
+            id="export-copy-selected-file"
             class="button secondary"
             type="button">
-            Copy C#
-          </button>
-          <button
-            id="export-copy-node-graph"
-            class="button secondary"
-            type="button"
-            hidden>
-            Copy Graph C#
-          </button>
-          <button
-            id="export-copy-csproj"
-            class="button secondary"
-            type="button">
-            Copy .csproj
+            Copy selected file
           </button>
         </div>
       </div>
@@ -424,8 +427,8 @@
         </button>
       </div>
     </dialog>
-    <script src="app.js?v=114"></script>
+    <script src="app.js?v=118"></script>
     <script src="catalog_loader.js?v=14"></script>
-    <script src="node_graph.js?v=50"></script>
+    <script src="node_graph.js?v=52"></script>
   </body>
 </html>

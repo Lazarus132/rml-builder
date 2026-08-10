@@ -130,6 +130,14 @@
                   Returning to the outline preserves the packed graph. Reloading starts
                   in the outline while keeping graph nodes and wires saved.
                 </p>
+                <p>
+                  The Generated file selector is available in both Configuration Outline
+                  and Typed Runtime Graph. Both views expose the same live generated
+                  project manifest, but keep independent selections: the Outline defaults
+                  to the main configuration/mod source, while the graph defaults to its
+                  generated runtime-graph source. The selector updates automatically when
+                  graph nodes add, remove or rename generated outputs.
+                </p>
               </section>
 
               <section id="info-preview" class="information-section">
@@ -168,9 +176,9 @@
                   Harmony patch library is present, the ZIP contains separate
                   <code>Mod</code> and <code>Patches</code> project folders plus build
                   scripts. Their project files deploy the compiled DLLs to
-                  <code>rml_mods</code> and <code>rml_libs</code> respectively. Dynamic
-                  export status remains in the Export dialog because it describes the
-                  current selection rather than general documentation.
+                  <code>rml_mods</code> and <code>rml_libs</code> respectively. The
+                  Export dialog renders the exact live package manifest rather than a
+                  hard-coded list, so later generator extensions appear automatically.
                 </p>
               </section>
 

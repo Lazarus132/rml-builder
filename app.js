@@ -286,6 +286,13 @@ let typedNodeGraphModulesState = "pending";
 let typedNodeGraphModulesError = null;
 let typedNodeGraphModulesTrackingStarted = false;
 
+// Session-only UI selections. Every refresh resolves them against the actual
+// generated artifact manifest, so removed or renamed generator outputs can
+// never leave either selector pointing at a stale file.
+let generatedOutlineArtifactKey = "";
+let generatedGraphArtifactKey = "";
+let exportCopyArtifactKey = "";
+
 function scheduleTypedNodeGraphOutputRefresh() {
   requestAnimationFrame(() => {
     if (elements.generatedCode) {
@@ -11752,11 +11759,464 @@ function renderInspector() {
   bindInspectorInteractions();
 }
 
+function preferredGraphArtifact(
+  artifacts,
+  graphFiles
+) {
+  const graphNames = new Set(
+    graphFiles.map(file =>
+      String(file.name || "")
+        .replace(/\\/g, "/")
+        .toLowerCase()
+    )
+  );
+
+  return (
+    artifacts.find(artifact =>
+      artifact.kind === "source" &&
+      [...graphNames].some(name =>
+        artifact.relativePath
+          .toLowerCase()
+          .endsWith(`/${name}`) ||
+        artifact.relativePath
+          .toLowerCase() === name
+      )
+    ) ||
+    artifacts.find(artifact =>
+      artifact.kind === "source" &&
+      /\.nodegraph\.cs$/i.test(
+        artifact.relativePath
+      )
+    ) ||
+    artifacts.find(artifact =>
+      artifact.kind === "source"
+    ) ||
+    artifacts[0] ||
+    null
+  );
+}
+
+function preferredOutlineArtifact(
+  artifacts
+) {
+  const mainSourceName =
+    `${generatedBaseName()}.cs`.toLowerCase();
+
+  return (
+    artifacts.find(artifact =>
+      artifact.kind === "source" &&
+      artifact.projectId === "main-mod" &&
+      artifact.fileName.toLowerCase() ===
+        mainSourceName
+    ) ||
+    artifacts.find(artifact =>
+      artifact.kind === "source" &&
+      artifact.projectId === "main-mod"
+    ) ||
+    artifacts.find(artifact =>
+      artifact.kind === "source"
+    ) ||
+    artifacts[0] ||
+    null
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Universal custom dropdown layer
+// ---------------------------------------------------------------------------
+// Native <select> popups are rendered by the browser/OS and therefore keep the
+// unwanted black system menu. Every ordinary select in the builder is upgraded
+// to the same in-page dropdown used by the typed graph. The MutationObserver is
+// intentional: inspector and graph controls are rebuilt dynamically.
+function ensureUniversalCustomSelect(select) {
+  if (
+    !(select instanceof HTMLSelectElement) ||
+    select.dataset.rmlNativeSelect === "true" ||
+    select.classList.contains("rml-graph-searchable-native-select") ||
+    select._rmlUniversalCustomSelect ||
+    select._rmlGeneratedCustomSelect
+  ) {
+    return select?._rmlUniversalCustomSelect || null;
+  }
+
+  // The generated-file selector already has a specialized wrapper with grouped
+  // entries. Leave those three controls to that implementation.
+  if (
+    select.id === "generated-file-select" ||
+    select.id === "graph-generated-file-select"
+  ) {
+    return null;
+  }
+
+  const wrapper = document.createElement("div");
+  wrapper.className =
+    "rml-graph-searchable-select rml-universal-custom-select";
+
+  select.parentNode?.insertBefore(wrapper, select);
+  wrapper.appendChild(select);
+
+  select.classList.add("rml-graph-searchable-native-select");
+  select.tabIndex = -1;
+  select.setAttribute("aria-hidden", "true");
+
+  const trigger = document.createElement("button");
+  trigger.type = "button";
+  trigger.className =
+    "rml-graph-searchable-trigger rml-universal-select-trigger";
+  trigger.setAttribute("aria-haspopup", "listbox");
+  trigger.setAttribute("aria-expanded", "false");
+
+  const triggerText = document.createElement("span");
+  triggerText.className = "rml-graph-searchable-trigger-text";
+  trigger.appendChild(triggerText);
+  wrapper.appendChild(trigger);
+
+  const popup = document.createElement("div");
+  popup.className =
+    "rml-graph-searchable-popup rml-universal-select-popup";
+  popup.hidden = true;
+
+  const search = document.createElement("input");
+  search.type = "search";
+  search.className = "rml-graph-searchable-search";
+  search.placeholder = "Search…";
+  search.autocomplete = "off";
+  search.spellcheck = false;
+  search.setAttribute("aria-label", "Search options");
+
+  const optionsHost = document.createElement("div");
+  optionsHost.className = "rml-graph-searchable-options";
+  optionsHost.setAttribute("role", "listbox");
+
+  popup.append(search, optionsHost);
+
+  let opened = false;
+  let entries = [];
+  let renderedButtons = [];
+  let focusedIndex = -1;
+
+  const readEntries = () => {
+    entries = [...select.options].map(option => ({
+      value: option.value,
+      text: option.textContent || option.label || option.value,
+      disabled: option.disabled,
+      group: option.parentElement instanceof HTMLOptGroupElement
+        ? option.parentElement.label
+        : ""
+    }));
+
+    // Tiny True/False style dropdowns should still use the exact same popup,
+    // just without a pointless search field.
+    search.hidden = entries.length <= 8;
+  };
+
+  const selectedEntry = () => {
+    const value = String(select.value ?? "");
+    return entries.find(entry => entry.value === value) || entries[0] || null;
+  };
+
+  const updateTrigger = () => {
+    readEntries();
+    const entry = selectedEntry();
+    const text = entry?.text || "Select…";
+    triggerText.textContent = text;
+    trigger.title = text;
+    trigger.disabled = select.disabled || entries.length === 0;
+  };
+
+  const positionPopup = () => {
+    if (!opened) return;
+
+    const rect = trigger.getBoundingClientRect();
+    const viewport = window.visualViewport;
+    const viewportLeft = viewport?.offsetLeft || 0;
+    const viewportTop = viewport?.offsetTop || 0;
+    const viewportWidth = viewport?.width || window.innerWidth;
+    const viewportHeight = viewport?.height || window.innerHeight;
+    const margin = 8;
+    const gap = 5;
+    const desiredWidth = Math.max(rect.width, 180);
+    const width = Math.min(
+      desiredWidth,
+      Math.max(160, viewportWidth - margin * 2)
+    );
+
+    popup.style.width = `${Math.round(width)}px`;
+    popup.style.maxWidth =
+      `${Math.max(160, viewportWidth - margin * 2)}px`;
+
+    const left = Math.min(
+      viewportLeft + viewportWidth - width - margin,
+      Math.max(viewportLeft + margin, rect.left)
+    );
+
+    popup.style.left = `${Math.round(left)}px`;
+    popup.style.top = `${Math.round(rect.bottom + gap)}px`;
+
+    const measuredHeight = popup.getBoundingClientRect().height || 180;
+    const below =
+      viewportTop + viewportHeight - rect.bottom - margin - gap;
+    const above = rect.top - viewportTop - margin - gap;
+
+    const top = measuredHeight > below && above > below
+      ? rect.top - measuredHeight - gap
+      : Math.min(
+          viewportTop + viewportHeight - measuredHeight - margin,
+          rect.bottom + gap
+        );
+
+    popup.style.top = `${Math.round(
+      Math.max(viewportTop + margin, top)
+    )}px`;
+  };
+
+  const closePopup = (restoreFocus = false) => {
+    if (!opened) return;
+
+    opened = false;
+    wrapper.classList.remove("open");
+    trigger.setAttribute("aria-expanded", "false");
+    popup.hidden = true;
+    popup.remove();
+
+    document.removeEventListener("pointerdown", onDocumentPointerDown, true);
+    window.removeEventListener("resize", positionPopup);
+    window.visualViewport?.removeEventListener("resize", positionPopup);
+    window.visualViewport?.removeEventListener("scroll", closeOnRootScroll);
+    document.removeEventListener("scroll", closeOnRootScroll, true);
+    window.removeEventListener("scroll", closeOnRootScroll, true);
+
+    if (restoreFocus) {
+      trigger.focus({ preventScroll: true });
+    }
+  };
+
+  const choose = value => {
+    const next = String(value ?? "");
+    const entry = entries.find(item => item.value === next);
+    if (!entry || entry.disabled) return;
+
+    const changed = select.value !== next;
+    select.value = next;
+    updateTrigger();
+    closePopup(true);
+
+    if (changed) {
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  };
+
+  const renderOptions = () => {
+    const query = search.value.trim().toLowerCase();
+    const selectedValue = String(select.value ?? "");
+
+    optionsHost.replaceChildren();
+    renderedButtons = [];
+    focusedIndex = -1;
+    let lastGroup = null;
+
+    for (const entry of entries) {
+      if (
+        query &&
+        !entry.text.toLowerCase().includes(query) &&
+        !entry.value.toLowerCase().includes(query)
+      ) {
+        continue;
+      }
+
+      if (entry.group && entry.group !== lastGroup) {
+        const heading = document.createElement("div");
+        heading.className = "rml-universal-select-group";
+        heading.textContent = entry.group;
+        optionsHost.appendChild(heading);
+        lastGroup = entry.group;
+      }
+
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "rml-graph-searchable-option";
+      button.textContent = entry.text;
+      button.dataset.value = entry.value;
+      button.disabled = entry.disabled;
+      button.setAttribute("role", "option");
+      button.setAttribute(
+        "aria-selected",
+        entry.value === selectedValue ? "true" : "false"
+      );
+      button.classList.toggle("selected", entry.value === selectedValue);
+      button.addEventListener("click", () => choose(entry.value));
+      optionsHost.appendChild(button);
+      renderedButtons.push(button);
+    }
+
+    if (renderedButtons.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "rml-graph-searchable-empty";
+      empty.textContent = "No matching options";
+      optionsHost.appendChild(empty);
+    }
+
+    const selectedIndex = renderedButtons.findIndex(button =>
+      button.dataset.value === selectedValue
+    );
+    focusedIndex = selectedIndex >= 0 ? selectedIndex : 0;
+    renderedButtons[focusedIndex]?.focus({ preventScroll: true });
+  };
+
+  const closeOnRootScroll = event => {
+    if (
+      event?.target instanceof Node &&
+      popup.contains(event.target)
+    ) {
+      return;
+    }
+    closePopup(false);
+  };
+
+  const openPopup = () => {
+    if (opened || trigger.disabled) return;
+
+    updateTrigger();
+    opened = true;
+    wrapper.classList.add("open");
+    trigger.setAttribute("aria-expanded", "true");
+    popup.hidden = false;
+    document.body.appendChild(popup);
+    search.value = "";
+    renderOptions();
+    positionPopup();
+
+    document.addEventListener("pointerdown", onDocumentPointerDown, true);
+    window.addEventListener("resize", positionPopup);
+    window.visualViewport?.addEventListener("resize", positionPopup);
+    window.visualViewport?.addEventListener("scroll", closeOnRootScroll, { passive: true });
+    document.addEventListener("scroll", closeOnRootScroll, { capture: true, passive: true });
+    window.addEventListener("scroll", closeOnRootScroll, { capture: true, passive: true });
+
+    if (!search.hidden) {
+      search.focus({ preventScroll: true });
+    }
+  };
+
+  function onDocumentPointerDown(event) {
+    if (
+      !wrapper.contains(event.target) &&
+      !popup.contains(event.target)
+    ) {
+      closePopup(false);
+    }
+  }
+
+  const moveFocus = delta => {
+    if (!renderedButtons.length) return;
+    focusedIndex = Math.max(
+      0,
+      Math.min(renderedButtons.length - 1, focusedIndex + delta)
+    );
+    renderedButtons[focusedIndex]?.focus({ preventScroll: true });
+  };
+
+  const popupKeyDown = event => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closePopup(true);
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault();
+      moveFocus(1);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      moveFocus(-1);
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      focusedIndex = 0;
+      renderedButtons[0]?.focus({ preventScroll: true });
+    } else if (event.key === "End") {
+      event.preventDefault();
+      focusedIndex = renderedButtons.length - 1;
+      renderedButtons[focusedIndex]?.focus({ preventScroll: true });
+    }
+  };
+
+  trigger.addEventListener("click", () => {
+    opened ? closePopup(true) : openPopup();
+  });
+  trigger.addEventListener("keydown", event => {
+    if (
+      event.key === "ArrowDown" ||
+      event.key === "ArrowUp" ||
+      event.key === "Enter" ||
+      event.key === " "
+    ) {
+      event.preventDefault();
+      openPopup();
+    }
+  });
+  search.addEventListener("input", renderOptions);
+  search.addEventListener("keydown", popupKeyDown);
+  optionsHost.addEventListener("keydown", popupKeyDown);
+  select.addEventListener("change", updateTrigger);
+
+  const optionObserver = new MutationObserver(updateTrigger);
+  optionObserver.observe(select, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["disabled", "label", "value", "selected"]
+  });
+
+  const api = {
+    wrapper,
+    trigger,
+    popup,
+    refresh: updateTrigger,
+    close: closePopup
+  };
+
+  select._rmlUniversalCustomSelect = api;
+  updateTrigger();
+  return api;
+}
+
+function installUniversalCustomSelects(root = document) {
+  if (root instanceof HTMLSelectElement) {
+    ensureUniversalCustomSelect(root);
+    return;
+  }
+
+  root.querySelectorAll?.("select").forEach(
+    ensureUniversalCustomSelect
+  );
+}
+
+let universalCustomSelectObserver = null;
+
+function startUniversalCustomSelectObserver() {
+  installUniversalCustomSelects(document);
+
+  if (universalCustomSelectObserver) return;
+
+  universalCustomSelectObserver = new MutationObserver(records => {
+    for (const record of records) {
+      for (const node of record.addedNodes) {
+        if (!(node instanceof Element)) continue;
+        installUniversalCustomSelects(node);
+      }
+    }
+  });
+
+  universalCustomSelectObserver.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+}
+
 function generatedCodeForCurrentView() {
-  // The lower Generated C# panel follows the page the user is currently
-  // looking at. A packed runtime graph may stay preserved while the builder
-  // is back on Configuration Outline, so the mere existence of generated
-  // graph files must NOT switch this panel to NodeGraph.cs.
+  // Both workspaces expose the exact same generated artifact manifest.
+  // Their selector state is intentionally independent: Configuration Outline
+  // defaults to the main configuration/mod source while Typed Runtime Graph
+  // defaults to its generated runtime-graph source. Switching files in one
+  // workspace therefore never changes the preferred file in the other.
   const graphViewActive =
     Boolean(
       isPlainObject(state.extensions) &&
@@ -11767,36 +12227,677 @@ function generatedCodeForCurrentView() {
         .active === true
     );
 
-  if (graphViewActive) {
-    const graphFiles =
-      getAdditionalGeneratedSourceFiles();
+  const catalog =
+    buildGeneratedArtifactCatalog(
+      true,
+      true
+    );
+  const artifacts = catalog.artifacts;
+  const graphFiles =
+    getAdditionalGeneratedSourceFiles();
+  const currentKey = graphViewActive
+    ? generatedGraphArtifactKey
+    : generatedOutlineArtifactKey;
 
-    return {
-      graphActive: true,
-      files: graphFiles,
-      code: graphFiles.length > 0
-        ? graphFiles
-            .map(
-              file =>
-                `// ============================================================\n` +
-                `// FILE: ${file.name}\n` +
-                `// ============================================================\n\n` +
-                file.content.trimEnd()
-            )
-            .join("\n\n") + "\n"
-        : "// Typed Runtime Graph C# is not available yet.\n"
-    };
+  let selected = artifacts.find(
+    artifact =>
+      artifact.key === currentKey
+  );
+
+  if (!selected) {
+    selected = graphViewActive
+      ? preferredGraphArtifact(
+          artifacts,
+          graphFiles
+        )
+      : preferredOutlineArtifact(
+          artifacts
+        );
   }
 
-  // Configuration Outline always shows the generated main mod source, even
-  // when a packed graph exists in the project and is merely preserved in the
-  // background. generateCode() still includes the required graph integration
-  // hooks when such a packed runtime graph exists.
+  if (graphViewActive) {
+    generatedGraphArtifactKey =
+      selected?.key || "";
+  } else {
+    generatedOutlineArtifactKey =
+      selected?.key || "";
+  }
+
   return {
-    graphActive: false,
-    files: [],
-    code: generateCode()
+    graphActive: graphViewActive,
+    artifacts,
+    selectedArtifact: selected,
+    code:
+      selected?.content ||
+      "// No generated project file is available yet.\n"
   };
+}
+
+function ensureGeneratedArtifactCustomSelect(select) {
+  if (!select) {
+    return null;
+  }
+
+  if (select._rmlGeneratedCustomSelect) {
+    return select._rmlGeneratedCustomSelect;
+  }
+
+  const wrapper =
+    document.createElement("div");
+  wrapper.className =
+    "rml-graph-searchable-select rml-generated-file-custom-select";
+
+  select.parentNode?.insertBefore(
+    wrapper,
+    select
+  );
+  wrapper.appendChild(select);
+
+  select.classList.add(
+    "rml-graph-searchable-native-select"
+  );
+  select.tabIndex = -1;
+  select.setAttribute(
+    "aria-hidden",
+    "true"
+  );
+
+  const trigger =
+    document.createElement("button");
+  trigger.type = "button";
+  trigger.className =
+    "rml-graph-searchable-trigger rml-generated-file-trigger";
+  trigger.setAttribute(
+    "aria-haspopup",
+    "listbox"
+  );
+  trigger.setAttribute(
+    "aria-expanded",
+    "false"
+  );
+
+  const triggerText =
+    document.createElement("span");
+  triggerText.className =
+    "rml-graph-searchable-trigger-text";
+  trigger.appendChild(triggerText);
+  wrapper.appendChild(trigger);
+
+  const popup =
+    document.createElement("div");
+  popup.className =
+    "rml-graph-searchable-popup rml-generated-file-popup";
+  popup.hidden = true;
+
+  const search =
+    document.createElement("input");
+  search.type = "search";
+  search.className =
+    "rml-graph-searchable-search";
+  search.placeholder = "Search generated file…";
+  search.autocomplete = "off";
+  search.spellcheck = false;
+  search.setAttribute(
+    "aria-label",
+    "Search generated file"
+  );
+
+  const optionsHost =
+    document.createElement("div");
+  optionsHost.className =
+    "rml-graph-searchable-options rml-generated-file-options";
+  optionsHost.setAttribute(
+    "role",
+    "listbox"
+  );
+
+  popup.append(
+    search,
+    optionsHost
+  );
+
+  let opened = false;
+  let entries = [];
+  let renderedButtons = [];
+
+  const selectedEntry = () => {
+    const value = String(select.value || "");
+    return (
+      entries.find(entry =>
+        entry.value === value
+      ) ||
+      entries[0] ||
+      null
+    );
+  };
+
+  const updateTrigger = () => {
+    const entry = selectedEntry();
+    const text =
+      entry?.text ||
+      "Select generated file…";
+
+    triggerText.textContent = text;
+    trigger.title = text;
+    trigger.disabled =
+      entries.length === 0;
+  };
+
+  const positionPopup = () => {
+    if (!opened) {
+      return;
+    }
+
+    const rectangle =
+      trigger.getBoundingClientRect();
+    const viewport =
+      window.visualViewport;
+    const viewportLeft =
+      viewport?.offsetLeft || 0;
+    const viewportTop =
+      viewport?.offsetTop || 0;
+    const viewportWidth =
+      viewport?.width || window.innerWidth;
+    const viewportHeight =
+      viewport?.height || window.innerHeight;
+    const margin = 8;
+    const gap = 5;
+    const desiredWidth =
+      Math.max(
+        rectangle.width,
+        260
+      );
+    const width =
+      Math.min(
+        desiredWidth,
+        Math.max(
+          180,
+          viewportWidth - margin * 2
+        )
+      );
+
+    popup.style.width = `${Math.round(width)}px`;
+    popup.style.maxWidth =
+      `${Math.max(180, viewportWidth - margin * 2)}px`;
+
+    const left = Math.min(
+      viewportLeft + viewportWidth - width - margin,
+      Math.max(
+        viewportLeft + margin,
+        rectangle.left
+      )
+    );
+
+    popup.style.left =
+      `${Math.round(left)}px`;
+    popup.style.top =
+      `${Math.round(rectangle.bottom + gap)}px`;
+
+    const measuredHeight =
+      popup.getBoundingClientRect().height;
+    const below =
+      viewportTop + viewportHeight -
+      rectangle.bottom - margin - gap;
+    const above =
+      rectangle.top - viewportTop - margin - gap;
+
+    const top =
+      measuredHeight > below && above > below
+        ? rectangle.top - measuredHeight - gap
+        : Math.min(
+            viewportTop + viewportHeight -
+              measuredHeight - margin,
+            rectangle.bottom + gap
+          );
+
+    popup.style.top =
+      `${Math.round(
+        Math.max(
+          viewportTop + margin,
+          top
+        )
+      )}px`;
+  };
+
+  const closePopup = (
+    restoreFocus = false
+  ) => {
+    if (!opened) {
+      return;
+    }
+
+    opened = false;
+    wrapper.classList.remove("open");
+    trigger.setAttribute(
+      "aria-expanded",
+      "false"
+    );
+    popup.hidden = true;
+    popup.remove();
+
+    document.removeEventListener(
+      "pointerdown",
+      onDocumentPointerDown,
+      true
+    );
+    window.removeEventListener(
+      "resize",
+      positionPopup
+    );
+    window.visualViewport
+      ?.removeEventListener(
+        "resize",
+        positionPopup
+      );
+    window.visualViewport
+      ?.removeEventListener(
+        "scroll",
+        closeOnRootScroll
+      );
+    document.removeEventListener(
+      "scroll",
+      closeOnRootScroll,
+      true
+    );
+    window.removeEventListener(
+      "scroll",
+      closeOnRootScroll,
+      true
+    );
+
+    if (restoreFocus) {
+      trigger.focus({
+        preventScroll: true
+      });
+    }
+  };
+
+  const choose = value => {
+    const nextValue =
+      String(value ?? "");
+
+    if (
+      !entries.some(entry =>
+        entry.value === nextValue
+      )
+    ) {
+      return;
+    }
+
+    const changed =
+      select.value !== nextValue;
+
+    select.value = nextValue;
+    updateTrigger();
+    closePopup(true);
+
+    if (changed) {
+      select.dispatchEvent(
+        new Event(
+          "change",
+          { bubbles: true }
+        )
+      );
+    }
+  };
+
+  const renderOptions = () => {
+    const query =
+      search.value
+        .trim()
+        .toLowerCase();
+    const selectedValue =
+      String(select.value || "");
+
+    optionsHost.replaceChildren();
+    renderedButtons = [];
+
+    let lastGroup = null;
+    let matchCount = 0;
+
+    for (const entry of entries) {
+      if (
+        query &&
+        !`${entry.group} ${entry.text} ${entry.value}`
+          .toLowerCase()
+          .includes(query)
+      ) {
+        continue;
+      }
+
+      if (entry.group !== lastGroup) {
+        const heading =
+          document.createElement("div");
+        heading.className =
+          "rml-generated-file-group";
+        heading.textContent = entry.group;
+        optionsHost.appendChild(heading);
+        lastGroup = entry.group;
+      }
+
+      const option =
+        document.createElement("button");
+      option.type = "button";
+      option.className =
+        "rml-graph-searchable-option rml-generated-file-option";
+      option.textContent = entry.text;
+      option.title = entry.text;
+      option.dataset.value = entry.value;
+      option.setAttribute(
+        "role",
+        "option"
+      );
+
+      const selected =
+        entry.value === selectedValue;
+      option.classList.toggle(
+        "selected",
+        selected
+      );
+      option.setAttribute(
+        "aria-selected",
+        selected ? "true" : "false"
+      );
+
+      option.addEventListener(
+        "click",
+        event => {
+          event.preventDefault();
+          event.stopPropagation();
+          choose(entry.value);
+        }
+      );
+
+      optionsHost.appendChild(option);
+      renderedButtons.push(option);
+      matchCount += 1;
+    }
+
+    if (matchCount === 0) {
+      const empty =
+        document.createElement("div");
+      empty.className =
+        "rml-graph-searchable-empty";
+      empty.textContent =
+        "No matching generated files";
+      optionsHost.appendChild(empty);
+    }
+
+    requestAnimationFrame(
+      positionPopup
+    );
+  };
+
+  const closeOnRootScroll = event => {
+    if (
+      event?.target instanceof Node &&
+      popup.contains(event.target)
+    ) {
+      return;
+    }
+    closePopup(false);
+  };
+
+  const openPopup = () => {
+    if (
+      opened ||
+      entries.length === 0
+    ) {
+      return;
+    }
+
+    opened = true;
+    wrapper.classList.add("open");
+    trigger.setAttribute(
+      "aria-expanded",
+      "true"
+    );
+    popup.hidden = false;
+    document.body.appendChild(popup);
+    search.value = "";
+    renderOptions();
+    positionPopup();
+
+    document.addEventListener(
+      "pointerdown",
+      onDocumentPointerDown,
+      true
+    );
+    window.addEventListener(
+      "resize",
+      positionPopup
+    );
+    window.visualViewport
+      ?.addEventListener(
+        "resize",
+        positionPopup
+      );
+    window.visualViewport
+      ?.addEventListener(
+        "scroll",
+        closeOnRootScroll,
+        { passive: true }
+      );
+    document.addEventListener(
+      "scroll",
+      closeOnRootScroll,
+      { capture: true, passive: true }
+    );
+    window.addEventListener(
+      "scroll",
+      closeOnRootScroll,
+      { capture: true, passive: true }
+    );
+
+    requestAnimationFrame(() => {
+      search.focus({
+        preventScroll: true
+      });
+    });
+  };
+
+  function onDocumentPointerDown(event) {
+    if (
+      popup.contains(event.target) ||
+      wrapper.contains(event.target)
+    ) {
+      return;
+    }
+
+    closePopup(false);
+  }
+
+  trigger.addEventListener(
+    "click",
+    event => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (opened) {
+        closePopup(true);
+      } else {
+        openPopup();
+      }
+    }
+  );
+
+  search.addEventListener(
+    "input",
+    renderOptions
+  );
+
+  search.addEventListener(
+    "keydown",
+    event => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closePopup(true);
+        return;
+      }
+
+      const active =
+        document.activeElement;
+      let index =
+        renderedButtons.indexOf(active);
+
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        index = Math.min(
+          renderedButtons.length - 1,
+          index + 1
+        );
+        renderedButtons[index]
+          ?.focus({ preventScroll: true });
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        index = index < 0
+          ? renderedButtons.length - 1
+          : Math.max(0, index - 1);
+        renderedButtons[index]
+          ?.focus({ preventScroll: true });
+      } else if (
+        event.key === "Enter" &&
+        renderedButtons.length > 0
+      ) {
+        event.preventDefault();
+        const selected =
+          renderedButtons.find(button =>
+            button.classList.contains(
+              "selected"
+            )
+          ) || renderedButtons[0];
+        selected?.click();
+      }
+    }
+  );
+
+  popup.addEventListener(
+    "keydown",
+    event => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closePopup(true);
+      }
+    }
+  );
+
+  const api = {
+    sync() {
+      entries = [];
+
+      for (const child of select.children) {
+        if (child instanceof HTMLOptGroupElement) {
+          for (const option of child.children) {
+            if (!(option instanceof HTMLOptionElement)) {
+              continue;
+            }
+
+            entries.push({
+              value: option.value,
+              text: option.textContent || option.value,
+              group: child.label || "Generated files"
+            });
+          }
+        } else if (child instanceof HTMLOptionElement) {
+          entries.push({
+            value: child.value,
+            text: child.textContent || child.value,
+            group: "Generated files"
+          });
+        }
+      }
+
+      updateTrigger();
+
+      if (opened) {
+        renderOptions();
+      }
+    },
+    close() {
+      closePopup(false);
+    }
+  };
+
+  select._rmlGeneratedCustomSelect = api;
+  api.sync();
+  return api;
+}
+
+function syncGeneratedArtifactCustomSelect(
+  select
+) {
+  ensureGeneratedArtifactCustomSelect(
+    select
+  )?.sync();
+}
+
+function populateGeneratedArtifactSelect(
+  select,
+  artifacts,
+  selectedKey
+) {
+  if (!select) {
+    return;
+  }
+
+  const groups = new Map();
+
+  for (const artifact of artifacts) {
+    const groupLabel =
+      artifact.projectLabel ||
+      "Generated support files";
+
+    if (!groups.has(groupLabel)) {
+      groups.set(groupLabel, []);
+    }
+
+    groups.get(groupLabel).push(artifact);
+  }
+
+  const fragment =
+    document.createDocumentFragment();
+
+  for (const [groupLabel, files] of groups) {
+    const group =
+      document.createElement("optgroup");
+    const deployment =
+      files.find(file =>
+        file.deployDirectory
+      )?.deployDirectory;
+
+    group.label = deployment
+      ? `${groupLabel} → ${deployment}`
+      : groupLabel;
+
+    for (const artifact of files) {
+      const option =
+        document.createElement("option");
+
+      option.value = artifact.key;
+      option.textContent =
+        `${artifact.relativePath} · ${artifact.kindLabel}`;
+      option.selected =
+        artifact.key === selectedKey;
+      group.appendChild(option);
+    }
+
+    fragment.appendChild(group);
+  }
+
+  select.replaceChildren(fragment);
+
+  if (
+    selectedKey &&
+    [...select.options].some(option =>
+      option.value === selectedKey
+    )
+  ) {
+    select.value = selectedKey;
+  }
+
+  syncGeneratedArtifactCustomSelect(
+    select
+  );
 }
 
 function updateGeneratedOutput() {
@@ -11804,35 +12905,81 @@ function updateGeneratedOutput() {
   const output =
     generatedCodeForCurrentView();
   const code = output.code;
+  const selected =
+    output.selectedArtifact;
 
   elements.generatedCode.textContent = code;
 
-  if (output.graphActive) {
-    elements.codeSummary.textContent =
-      `${output.files.length} graph C# file${
-        output.files.length === 1 ? "" : "s"
-      } · ${code.split("\n").length} lines`;
-  } else {
-    elements.codeSummary.textContent =
-      `${currentFlattenedNodes().length} item${
-        currentFlattenedNodes().length === 1 ? "" : "s"
-      } · main: ${code.split("\n").length} lines`;
+  if (elements.generatedCodeTitle) {
+    elements.generatedCodeTitle.textContent =
+      output.graphActive
+        ? "Generated project files"
+        : "Generated C#";
   }
 
-  elements.diagnostics.hidden = errors.length === 0;
-  elements.diagnostics.innerHTML = errors.length
-    ? `<strong>Fix these issues before copying:</strong><ul>${errors
-        .map(error => `<li>${escapeHtml(error)}</li>`)
-        .join("")}</ul>`
-    : "";
+  if (elements.generatedFileSwitcher) {
+    elements.generatedFileSwitcher.hidden =
+      output.artifacts.length === 0;
+  }
+
+  populateGeneratedArtifactSelect(
+    elements.generatedFileSelect,
+    output.artifacts,
+    selected?.key || ""
+  );
+
+  if (output.graphActive) {
+    elements.codeSummary.textContent =
+      selected
+        ? `${selected.relativePath} · ${selected.kindLabel} · ${code.split("\n").length} lines · ${output.artifacts.length} generated files`
+        : "No generated project file is available yet.";
+  } else {
+    elements.codeSummary.textContent =
+      selected
+        ? `${selected.relativePath} · ${selected.kindLabel} · ${code.split("\n").length} lines · ${currentFlattenedNodes().length} outline item${currentFlattenedNodes().length === 1 ? "" : "s"}`
+        : "No generated project file is available yet.";
+  }
+
+  if (elements.copyCodeBottom) {
+    const path =
+      selected?.relativePath ||
+      `${generatedBaseName()}.cs`;
+
+    elements.copyCodeBottom.setAttribute(
+      "aria-label",
+      `Copy ${path}`
+    );
+    elements.copyCodeBottom.dataset.help =
+      `Copy ${path} to the clipboard.`;
+  }
+
+  elements.diagnostics.hidden =
+    errors.length === 0;
+  elements.diagnostics.innerHTML =
+    errors.length
+      ? `<strong>Fix these issues before copying:</strong><ul>${errors
+          .map(error =>
+            `<li>${escapeHtml(error)}</li>`
+          )
+          .join("")}</ul>`
+      : "";
+
   [
     elements.copyCodeBottom,
     elements.downloadCode
   ].forEach(button => {
     if (button) {
-      button.disabled = errors.length > 0;
+      button.disabled =
+        errors.length > 0;
     }
   });
+
+  // Keep an already open Export dialog synchronized with every graph,
+  // metadata and generator change. It is sourced from the real generated
+  // manifest rather than a node-specific condition.
+  if (elements.exportDialog?.open) {
+    updateExportDialog();
+  }
 }
 
 function renderAll() {
@@ -15206,123 +16353,587 @@ function buildSelectedExportFiles(
   };
 }
 
-function updateExportDialog() {
+function generatedArtifactKind(
+  fileName,
+  mimeType = ""
+) {
+  const name = String(fileName || "")
+    .toLowerCase();
+  const type = String(mimeType || "")
+    .toLowerCase();
+
+  if (name.endsWith(".cs")) {
+    return {
+      kind: "source",
+      kindLabel: "C# source",
+      badge: "CS"
+    };
+  }
+
+  if (
+    name.endsWith(".csproj") ||
+    type.includes("xml")
+  ) {
+    return {
+      kind: "project",
+      kindLabel: ".NET project",
+      badge: "PROJ"
+    };
+  }
+
+  if (
+    name.endsWith(".ps1") ||
+    name.endsWith(".sh")
+  ) {
+    return {
+      kind: "build",
+      kindLabel: "Build script",
+      badge: "BUILD"
+    };
+  }
+
+  if (
+    name.endsWith(".md") ||
+    type.includes("markdown")
+  ) {
+    return {
+      kind: "documentation",
+      kindLabel: "Documentation",
+      badge: "DOC"
+    };
+  }
+
+  return {
+    kind: "file",
+    kindLabel: "Generated file",
+    badge: "FILE"
+  };
+}
+
+function stripGeneratedArchiveRoot(
+  archivePath,
+  multiProject
+) {
+  const normalized =
+    String(archivePath || "")
+      .replace(/\\/g, "/")
+      .replace(/^\/+/, "");
+
+  if (!multiProject) {
+    return normalized;
+  }
+
+  const separator =
+    normalized.indexOf("/");
+
+  return separator >= 0
+    ? normalized.slice(separator + 1)
+    : normalized;
+}
+
+function generatedProjectDescriptors(
+  result
+) {
   const baseName = generatedBaseName();
+  const descriptors = [
+    {
+      id: "main-mod",
+      folder: result.multiProject
+        ? "Mod"
+        : "",
+      label: `${baseName} · Main mod`,
+      assemblyName: baseName,
+      deployDirectory: "rml_mods",
+      role: "rml-mod"
+    }
+  ];
+
+  result.auxiliaryProjects.forEach(
+    (project, index) => {
+      descriptors.push({
+        id:
+          String(
+            project.id ||
+            `auxiliary-${index + 1}`
+          ),
+        folder:
+          auxiliaryProjectFolder(
+            project,
+            index
+          ),
+        label:
+          String(
+            project.name ||
+            project.assemblyName ||
+            `Library ${index + 1}`
+          ),
+        assemblyName:
+          String(
+            project.assemblyName ||
+            project.name ||
+            `Library-${index + 1}`
+          ),
+        deployDirectory:
+          String(
+            project.deployDirectory ||
+            "rml_libs"
+          ),
+        role:
+          String(
+            project.role ||
+            "auxiliary-library"
+          )
+      });
+    }
+  );
+
+  return descriptors;
+}
+
+function buildGeneratedArtifactCatalog(
+  includeCs = true,
+  includeCsproj = true
+) {
+  const result =
+    buildSelectedExportFiles(
+      includeCs,
+      includeCsproj
+    );
+  const projects =
+    generatedProjectDescriptors(result);
+  const projectFolders = projects
+    .filter(project => project.folder)
+    .sort(
+      (left, right) =>
+        right.folder.length -
+        left.folder.length
+    );
+
+  const artifacts = result.files.map(
+    (file, index) => {
+      const relativePath =
+        stripGeneratedArchiveRoot(
+          file.name,
+          result.multiProject
+        );
+      const normalizedPath =
+        relativePath.replace(/\\/g, "/");
+      let project = null;
+
+      if (!result.multiProject) {
+        project = projects[0];
+      } else {
+        project = projectFolders.find(
+          candidate =>
+            normalizedPath ===
+              candidate.folder ||
+            normalizedPath.startsWith(
+              `${candidate.folder}/`
+            )
+        ) || null;
+      }
+
+      const kind =
+        generatedArtifactKind(
+          normalizedPath,
+          file.type
+        );
+
+      return {
+        key:
+          String(file.name ||
+            `generated-${index}`),
+        archivePath:
+          String(file.name || ""),
+        relativePath:
+          normalizedPath,
+        fileName:
+          normalizedPath
+            .split("/")
+            .pop() ||
+          normalizedPath,
+        content:
+          String(file.content || ""),
+        type:
+          file.type ||
+          "text/plain;charset=utf-8",
+        ...kind,
+        projectId:
+          project?.id ||
+          "support",
+        projectLabel:
+          project?.label ||
+          "Build & documentation",
+        deployDirectory:
+          project?.deployDirectory ||
+          "",
+        projectRole:
+          project?.role ||
+          "support",
+        requiresResonitePath:
+          kind.kind === "project"
+      };
+    }
+  );
+
+  return {
+    ...result,
+    projects,
+    artifacts
+  };
+}
+
+function renderExportProjectSummary(
+  catalog
+) {
+  const host =
+    elements.exportProjectSummary;
+
+  if (!host) {
+    return;
+  }
+
+  const fragment =
+    document.createDocumentFragment();
+  const projectPaths = new Set(
+    catalog.artifacts
+      .map(artifact => artifact.projectId)
+  );
+
+  for (const project of catalog.projects) {
+    if (!projectPaths.has(project.id)) {
+      continue;
+    }
+
+    const card =
+      document.createElement("div");
+    const title =
+      document.createElement("strong");
+    const detail =
+      document.createElement("small");
+    const target =
+      document.createElement("b");
+
+    card.className =
+      "export-generated-project";
+    title.textContent =
+      project.label;
+    detail.textContent =
+      project.folder
+        ? `${project.folder}/${project.assemblyName}.csproj`
+        : `${project.assemblyName}.csproj`;
+    target.textContent =
+      `→ ${project.deployDirectory}`;
+
+    card.append(
+      title,
+      detail,
+      target
+    );
+    fragment.appendChild(card);
+  }
+
+  host.replaceChildren(fragment);
+  host.hidden =
+    host.childElementCount === 0;
+}
+
+function renderExportGeneratedFiles(
+  catalog
+) {
+  const host =
+    elements.exportGeneratedFiles;
+
+  if (!host) {
+    return;
+  }
+
+  if (catalog.artifacts.length === 0) {
+    const empty =
+      document.createElement("p");
+
+    empty.className =
+      "export-generated-empty";
+    empty.textContent =
+      "No files are selected for export.";
+    host.replaceChildren(empty);
+    return;
+  }
+
+  const fragment =
+    document.createDocumentFragment();
+
+  for (const artifact of
+    catalog.artifacts) {
+    const row =
+      document.createElement("button");
+    const badge =
+      document.createElement("span");
+    const copy =
+      document.createElement("span");
+    const path =
+      document.createElement("strong");
+    const detail =
+      document.createElement("small");
+    const target =
+      document.createElement("b");
+
+    row.type = "button";
+    row.className =
+      "export-generated-file";
+    row.dataset.kind = artifact.kind;
+    row.dataset.artifactKey =
+      artifact.key;
+    row.title =
+      `Select ${artifact.relativePath} for copying`;
+
+    badge.className =
+      "export-generated-file-badge";
+    badge.textContent = artifact.badge;
+    copy.className =
+      "export-generated-file-copy";
+    path.textContent =
+      artifact.relativePath;
+    detail.textContent =
+      `${artifact.kindLabel} · ${artifact.projectLabel}`;
+    copy.append(path, detail);
+
+    target.className =
+      "export-generated-file-target";
+    target.textContent =
+      artifact.deployDirectory
+        ? artifact.deployDirectory
+        : "support";
+
+    row.append(
+      badge,
+      copy,
+      target
+    );
+    row.addEventListener(
+      "click",
+      () => {
+        exportCopyArtifactKey =
+          artifact.key;
+
+        if (
+          elements.exportCopyFileSelect
+        ) {
+          elements.exportCopyFileSelect.value =
+            artifact.key;
+        }
+
+        updateExportCopyButtonState();
+      }
+    );
+    fragment.appendChild(row);
+  }
+
+  host.replaceChildren(fragment);
+}
+
+function currentExportCopyArtifact(
+  existingCatalog = null
+) {
+  const catalog =
+    existingCatalog ||
+    buildGeneratedArtifactCatalog(
+      true,
+      true
+    );
+  let artifact = catalog.artifacts.find(
+    candidate =>
+      candidate.key ===
+      exportCopyArtifactKey
+  );
+
+  if (!artifact) {
+    const graphFiles =
+      getAdditionalGeneratedSourceFiles();
+
+    artifact =
+      preferredGraphArtifact(
+        catalog.artifacts,
+        graphFiles
+      ) ||
+      catalog.artifacts[0] ||
+      null;
+  }
+
+  exportCopyArtifactKey =
+    artifact?.key || "";
+
+  return {
+    catalog,
+    artifact
+  };
+}
+
+function updateExportCopyButtonState(
+  existingCatalog = null,
+  existingPathAvailable = null,
+  existingHasDiagnostics = null
+) {
+  const { catalog, artifact } =
+    currentExportCopyArtifact(
+      existingCatalog
+    );
+  const pathAvailable =
+    existingPathAvailable === null
+      ? Boolean(
+          elements.exportResonitePath
+            ?.value.trim()
+        )
+      : existingPathAvailable;
+  const hasDiagnostics =
+    existingHasDiagnostics === null
+      ? getDiagnostics().length > 0
+      : existingHasDiagnostics;
+
+  populateGeneratedArtifactSelect(
+    elements.exportCopyFileSelect,
+    catalog.artifacts,
+    artifact?.key || ""
+  );
+
+  elements.exportGeneratedFiles
+    ?.querySelectorAll(
+      ".export-generated-file"
+    )
+    .forEach(row => {
+      row.classList.toggle(
+        "selected",
+        row.dataset.artifactKey ===
+          artifact?.key
+      );
+    });
+
+  if (elements.exportCopySelectedFile) {
+    elements.exportCopySelectedFile.disabled =
+      hasDiagnostics ||
+      !artifact ||
+      (
+        artifact.requiresResonitePath &&
+        !pathAvailable
+      );
+    elements.exportCopySelectedFile.textContent =
+      artifact
+        ? `Copy ${artifact.fileName}`
+        : "Copy selected file";
+    elements.exportCopySelectedFile.title =
+      artifact
+        ? artifact.relativePath
+        : "No generated file is available.";
+  }
+}
+
+function copySelectedExportArtifact(
+  button
+) {
+  const { artifact } =
+    currentExportCopyArtifact();
+
+  if (!artifact || button.disabled) {
+    return Promise.resolve();
+  }
+
+  return copyText(
+    artifact.content,
+    button
+  );
+}
+
+function updateExportDialog() {
   const platform =
     elements.exportPlatform.value;
   const includeCs =
     elements.exportIncludeCs.checked;
   const includeCsproj =
     elements.exportIncludeCsproj.checked;
-  const graphFiles =
-    getAdditionalGeneratedSourceFiles();
-  const auxiliaryProjects =
-    getAdditionalGeneratedProjects();
-  const graphFile =
-    graphFiles[0] || null;
-  const includeGraphCs =
-    includeCs &&
-    Boolean(graphFile);
+  const catalog =
+    buildGeneratedArtifactCatalog(
+      includeCs,
+      includeCsproj
+    );
+  const completeCatalog =
+    buildGeneratedArtifactCatalog(
+      true,
+      true
+    );
   const pathAvailable =
     elements.exportResonitePath.value
       .trim()
       .length > 0;
-  const selectedFiles = [
-    ...(includeCs
-      ? [
-          {
-            name: `${baseName}.cs`
-          },
-          ...graphFiles,
-          ...auxiliaryProjects.flatMap(
-            project =>
-              Array.isArray(project.files)
-                ? project.files
-                : []
-          )
-        ]
-      : []),
-    ...(includeCsproj
-      ? [
-          {
-            name:
-              `${baseName}.csproj`
-          },
-          ...auxiliaryProjects.map(
-            project => ({
-              name:
-                `${project.name}.csproj`
-            })
-          ),
-          ...(auxiliaryProjects.length > 0
-            ? [
-                { name: "build.ps1" },
-                { name: "build.sh" }
-              ]
-            : [])
-        ]
-      : []),
-    ...(
-      auxiliaryProjects.length > 0 &&
-      (includeCs || includeCsproj)
-        ? [{ name: "README.md" }]
-        : []
-    )
-  ];
   const hasSelection =
-    selectedFiles.length > 0;
+    catalog.artifacts.length > 0;
   const projectPathMissing =
     includeCsproj &&
     !pathAvailable;
   const hasDiagnostics =
     getDiagnostics().length > 0;
+  const sourceCount =
+    completeCatalog.artifacts.filter(
+      artifact =>
+        artifact.kind === "source"
+    ).length;
+  const projectBuildCount =
+    completeCatalog.artifacts.filter(
+      artifact =>
+        artifact.kind !== "source"
+    ).length;
+  const activeProjectIds = new Set(
+    catalog.artifacts
+      .map(artifact => artifact.projectId)
+      .filter(projectId =>
+        projectId !== "support"
+      )
+  );
+  const activeProjectCount =
+    activeProjectIds.size;
+  const effectiveMultiProject =
+    activeProjectCount > 1;
 
   elements.exportCsFilename.textContent =
-    `${baseName}.cs`;
+    `${sourceCount} generated source file${
+      sourceCount === 1 ? "" : "s"
+    }`;
   elements.exportCsprojFilename.textContent =
-    `${baseName}.csproj`;
+    `${projectBuildCount} project/build/support file${
+      projectBuildCount === 1
+        ? ""
+        : "s"
+    }`;
 
-  if (
-    elements.exportNodeGraphOption &&
-    elements.exportNodeGraphFilename
-  ) {
-    elements.exportNodeGraphOption.hidden =
-      !graphFile;
-    elements.exportNodeGraphFilename.textContent =
-      graphFiles.length > 1
-        ? `${graphFiles.length} generated C# files`
-        : graphFile?.name ||
-          `${baseName}.NodeGraph.cs`;
-    elements.exportNodeGraphOption.title =
-      includeCs
-        ? "Generated automatically with the main mod C# source."
-        : "Enable Main mod C# source to include the typed node-graph runtime.";
+  if (elements.exportPackageSummary) {
+    elements.exportPackageSummary.textContent =
+      `${activeProjectCount} project${activeProjectCount === 1 ? "" : "s"} · ${catalog.artifacts.length} file${catalog.artifacts.length === 1 ? "" : "s"}`;
   }
 
-  if (elements.exportIncludeNodeGraph) {
-    elements.exportIncludeNodeGraph.checked =
-      includeGraphCs;
-    elements.exportIncludeNodeGraph.disabled =
-      true;
+  if (elements.exportPackageMode) {
+    elements.exportPackageMode.textContent =
+      catalog.artifacts.length === 0
+        ? "No files selected"
+        : effectiveMultiProject
+          ? "Multi-project ZIP"
+          : "Single project";
+    elements.exportPackageMode.dataset.mode =
+      effectiveMultiProject
+        ? "multi"
+        : "single";
   }
 
-  if (elements.exportCopyNodeGraph) {
-    elements.exportCopyNodeGraph.hidden =
-      !graphFile;
-    elements.exportCopyNodeGraph.disabled =
-      hasDiagnostics ||
-      !graphFile;
-  }
+  renderExportProjectSummary(catalog);
+  renderExportGeneratedFiles(catalog);
+  updateExportCopyButtonState(
+    completeCatalog,
+    pathAvailable,
+    hasDiagnostics
+  );
 
   elements.exportResonitePath.setAttribute(
     "aria-invalid",
     String(projectPathMissing)
   );
-  elements.exportCopyCs.disabled =
-    hasDiagnostics;
-  elements.exportCopyCsproj.disabled =
-    hasDiagnostics ||
-    !pathAvailable;
   elements.exportDownloadSelected.disabled =
     hasDiagnostics ||
     !hasSelection ||
@@ -15340,6 +16951,7 @@ function updateExportDialog() {
     custom:
       "Project target: <strong>.NET 10</strong>, matching current Resonite and RML. The custom assembly path remains editable."
   };
+
   elements.exportCompatibilityHint.innerHTML =
     platformNotes[platform] ||
     platformNotes.custom;
@@ -15348,48 +16960,58 @@ function updateExportDialog() {
     elements.exportDownloadSelected.textContent =
       "Select a file";
     elements.exportDownloadHint.textContent =
-      "Select at least one file to download.";
+      "Select at least one generated file group to download.";
     return;
   }
 
-  if (auxiliaryProjects.length > 0) {
+  if (effectiveMultiProject) {
+    const destinations = [
+      ...new Set(
+        catalog.projects
+          .filter(project =>
+            catalog.artifacts.some(
+              artifact =>
+                artifact.projectId ===
+                project.id
+            )
+          )
+          .map(project =>
+            project.deployDirectory
+          )
+      )
+    ];
+
     elements.exportDownloadSelected.textContent =
       "Download multi-project ZIP";
     elements.exportDownloadHint.textContent =
-      `The ZIP contains a Mod project for rml_mods and ${auxiliaryProjects.length} independently compiled library project${auxiliaryProjects.length === 1 ? "" : "s"} for rml_libs. Build scripts deploy each DLL to the correct folder.`;
+      `The live manifest above is the exact ZIP content: ${catalog.artifacts.length} files across ${activeProjectCount} independently compiled projects${destinations.length > 0 ? `, deploying to ${destinations.join(" and ")}` : ""}.`;
     return;
   }
 
-  if (
-    selectedFiles.length === 1 &&
-    !includeCsproj
-  ) {
-    elements.exportDownloadSelected.textContent =
-      "Download .cs";
-    elements.exportDownloadHint.textContent =
-      "The generated C# source will be downloaded directly.";
-    return;
-  }
+  if (catalog.artifacts.length === 1) {
+    const artifact =
+      catalog.artifacts[0];
+    const extension =
+      artifact.fileName.includes(".")
+        ? artifact.fileName.slice(
+            artifact.fileName.lastIndexOf(".")
+          )
+        : " file";
 
-  if (
-    selectedFiles.length === 1 &&
-    includeCsproj
-  ) {
     elements.exportDownloadSelected.textContent =
-      "Download .csproj";
+      `Download ${extension}`;
     elements.exportDownloadHint.textContent =
-      pathAvailable
-        ? "The generated project file will be downloaded directly."
-        : "Enter the Resonite installation path to create the project file.";
+      artifact.requiresResonitePath &&
+      !pathAvailable
+        ? "Enter the Resonite installation path to create the selected project file."
+        : `${artifact.relativePath} will be downloaded directly.`;
     return;
   }
 
   elements.exportDownloadSelected.textContent =
     "Download ZIP";
   elements.exportDownloadHint.textContent =
-    includeGraphCs
-      ? `The ZIP contains ${selectedFiles.length} files, including ${graphFiles.length} generated mod-runtime source file${graphFiles.length === 1 ? "" : "s"}.`
-      : `The ${selectedFiles.length} selected files will be bundled into one ZIP archive.`;
+    `The live manifest above contains the exact ${catalog.artifacts.length} files that will be bundled into the ZIP.`;
 }
 
 function syncExportOptions() {
@@ -15962,8 +17584,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "help_template.html?v=2",
-    "help_template.js?v=2",
+    "help_template.html?v=3",
+    "help_template.js?v=3",
     "help-template",
     "RMLHelpTemplateMarkup"
   )
@@ -16188,6 +17810,15 @@ function cacheElements() {
     inspectorContent: document.getElementById("inspector-content"),
     includeGuide: document.getElementById("include-guide"),
     generatedCode: document.getElementById("generated-code"),
+    generatedCodeTitle: document.getElementById(
+      "generated-code-title"
+    ),
+    generatedFileSwitcher: document.getElementById(
+      "generated-file-switcher"
+    ),
+    generatedFileSelect: document.getElementById(
+      "generated-file-select"
+    ),
     diagnostics: document.getElementById("diagnostics"),
     codeSummary: document.getElementById("code-summary"),
     copyCodeBottom: document.getElementById("copy-code-bottom"),
@@ -16244,24 +17875,26 @@ function cacheElements() {
     exportCsprojFilename: document.getElementById(
       "export-csproj-filename"
     ),
-    exportNodeGraphOption: document.getElementById(
-      "export-node-graph-option"
+    exportPackageSummary: document.getElementById(
+      "export-package-summary"
     ),
-    exportIncludeNodeGraph: document.getElementById(
-      "export-include-node-graph"
+    exportPackageMode: document.getElementById(
+      "export-package-mode"
     ),
-    exportNodeGraphFilename: document.getElementById(
-      "export-node-graph-filename"
+    exportProjectSummary: document.getElementById(
+      "export-project-summary"
+    ),
+    exportGeneratedFiles: document.getElementById(
+      "export-generated-files"
     ),
     exportDownloadHint: document.getElementById(
       "export-download-hint"
     ),
-    exportCopyCs: document.getElementById("export-copy-cs"),
-    exportCopyNodeGraph: document.getElementById(
-      "export-copy-node-graph"
+    exportCopyFileSelect: document.getElementById(
+      "export-copy-file-select"
     ),
-    exportCopyCsproj: document.getElementById(
-      "export-copy-csproj"
+    exportCopySelectedFile: document.getElementById(
+      "export-copy-selected-file"
     ),
     exportDownloadSelected: document.getElementById(
       "export-download-selected"
@@ -17448,6 +19081,26 @@ function initialize() {
       elements.copyCodeBottom
     )
   );
+  elements.generatedFileSelect.addEventListener(
+    "change",
+    () => {
+      const graphViewActive =
+        Boolean(
+          state.extensions?.typedNodeGraph
+            ?.active === true
+        );
+
+      if (graphViewActive) {
+        generatedGraphArtifactKey =
+          elements.generatedFileSelect.value;
+      } else {
+        generatedOutlineArtifactKey =
+          elements.generatedFileSelect.value;
+      }
+
+      updateGeneratedOutput();
+    }
+  );
   elements.topMenuToggle?.addEventListener(
     "click",
     toggleTopMenu
@@ -17623,22 +19276,23 @@ function initialize() {
     "change",
     syncExportOptions
   );
-  elements.exportCopyCs.addEventListener("click", () =>
-    copyGeneratedCode(elements.exportCopyCs)
+  elements.exportCopyFileSelect.addEventListener(
+    "change",
+    () => {
+      exportCopyArtifactKey =
+        elements.exportCopyFileSelect.value;
+      updateExportCopyButtonState();
+    }
   );
-  elements.exportCopyNodeGraph?.addEventListener(
+  elements.exportCopySelectedFile.addEventListener(
     "click",
-    () =>
-      copyGeneratedNodeGraphCode(
-        elements.exportCopyNodeGraph
-      )
+    () => {
+      syncExportOptions();
+      copySelectedExportArtifact(
+        elements.exportCopySelectedFile
+      );
+    }
   );
-  elements.exportCopyCsproj.addEventListener("click", () => {
-    syncExportOptions();
-    copyGeneratedProjectFile(
-      elements.exportCopyCsproj
-    );
-  });
   elements.exportDownloadSelected.addEventListener(
     "click",
     downloadSelectedExport
@@ -17676,6 +19330,7 @@ function initialize() {
   exposeBuilderBridge();
   beginTypedNodeGraphModulesTracking();
   renderAll();
+  startUniversalCustomSelectObserver();
 
   document.dispatchEvent(
     new CustomEvent(

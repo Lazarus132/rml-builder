@@ -15052,8 +15052,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     if (
       !select ||
       !Array.isArray(optionEntries) ||
-      optionEntries.length <=
-        GRAPH_SEARCHABLE_LIST_THRESHOLD
+      optionEntries.length === 0
     ) {
       return select;
     }
@@ -15117,6 +15116,9 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       "aria-label",
       placeholder
     );
+    search.hidden =
+      normalized.length <=
+      GRAPH_SEARCHABLE_LIST_THRESHOLD;
 
     const optionsHost =
       document.createElement("div");
@@ -15314,6 +15316,16 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           "scroll",
           onInspectorScroll
         );
+      document.removeEventListener(
+        "scroll",
+        onRootScroll,
+        true
+      );
+      window.removeEventListener(
+        "scroll",
+        onRootScroll,
+        true
+      );
 
       if (
         restoreTriggerFocus &&
@@ -15531,6 +15543,20 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     const onInspectorScroll =
       () => closePopup(false);
 
+    const onRootScroll = event => {
+      // The popup is portaled to document.body. Any scroll outside the
+      // popup itself moves its trigger without moving the popup, so close
+      // immediately instead of letting the selection visually drift.
+      if (
+        event?.target instanceof Node &&
+        popup.contains(event.target)
+      ) {
+        return;
+      }
+
+      closePopup(false);
+    };
+
     const openPopup = (
       focusOptions = false
     ) => {
@@ -15574,11 +15600,24 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           onInspectorScroll,
           { passive: true }
         );
+      document.addEventListener(
+        "scroll",
+        onRootScroll,
+        { capture: true, passive: true }
+      );
+      window.addEventListener(
+        "scroll",
+        onRootScroll,
+        { capture: true, passive: true }
+      );
 
       requestAnimationFrame(() => {
         positionPopup();
 
-        if (focusOptions) {
+        if (
+          focusOptions ||
+          search.hidden
+        ) {
           focusSelectedOption();
         } else {
           search.focus({
@@ -16601,6 +16640,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       if (kind === "bool") {
         control =
           document.createElement("select");
+        selectEntries = [];
 
         for (const [value, text] of [
           ["true", "True"],
@@ -16620,6 +16660,10 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
             ) ===
             (value === "true");
           control.appendChild(option);
+          selectEntries.push({
+            value: option.value,
+            text: option.textContent
+          });
         }
       } else if (kind === "select") {
         control =
@@ -16804,7 +16848,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       );
 
       if (
-        kind === "select" &&
+        (kind === "bool" || kind === "select") &&
         Array.isArray(selectEntries)
       ) {
         label.appendChild(
