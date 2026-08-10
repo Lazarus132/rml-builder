@@ -359,19 +359,22 @@
         <section class="information-page information-node-page" data-information-page="nodes" hidden>
           <div class="information-node-page-layout">
             <aside class="information-node-page-intro">
-              <span class="information-kicker">Built-in runtime nodes</span>
+              <span class="information-kicker">Complete built-in runtime nodes</span>
               <h3>Node reference</h3>
               <p>
-                This is a separate reference for the builder's built-in runtime nodes.
-                Symbols, node names, internal IDs, descriptions and static ports are
-                derived from the active node registry.
+                This is the complete reference for the builder's fixed built-in runtime nodes.
+                Every registered built-in node is documented here, including palette-hidden
+                helper nodes. Advanced / Raw C# nodes are deliberately separated from the
+                normal typed nodes so it is clear when the builder can no longer provide the
+                same level of type and dependency safety.
               </p>
               <p class="information-api-note">
-                Catalog-generated Resonite API nodes are intentionally not duplicated
-                here. They are generated from the currently loaded Resonite/FrooxEngine
-                catalog and can change between Resonite versions. Use their generated
-                title, signature and description and consult the matching Resonite
-                documentation or API information for version-specific behavior.
+                Catalog-generated Resonite API nodes are version-derived rather than fixed builder
+                nodes. The reference reports the complete currently registered catalog count,
+                while Node Search remains the authoritative live index for each generated Type,
+                Enum, Constructor, Method, Property, Field and Event node. HarmonyLib catalog
+                calls are classified as Advanced / Raw C# because they expose low-level runtime
+                APIs without inferring patch signatures or an early rml_libs load phase.
               </p>
             </aside>
             <article class="information-node-page-content">

@@ -17250,6 +17250,134 @@ function nodeReferencePortText(port) {
   return `${label}: ${type}`;
 }
 
+function informationNodeIsAdvanced(definition) {
+  return Boolean(
+    definition?.expertOnly === true ||
+    String(definition?.group || "") === "Advanced / Raw C#"
+  );
+}
+
+function informationNodeCard(operatorId, definition) {
+  const card = document.createElement("article");
+  card.className = "information-node-card";
+
+  if (informationNodeIsAdvanced(definition)) {
+    card.classList.add("information-node-card-advanced");
+  }
+  if (definition.hiddenFromPalette === true) {
+    card.classList.add("information-node-card-internal");
+  }
+
+  const symbol = document.createElement("span");
+  symbol.className = "information-node-symbol";
+  symbol.textContent = String(definition.symbol || "•");
+
+  const content = document.createElement("div");
+  const heading = document.createElement("div");
+  heading.className = "information-node-card-heading";
+
+  const title = document.createElement("strong");
+  title.textContent = String(definition.title || operatorId);
+  heading.appendChild(title);
+
+  if (definition.hiddenFromPalette === true) {
+    const badge = document.createElement("span");
+    badge.className = "information-node-badge internal";
+    badge.textContent = "Internal helper";
+    badge.title = "This registered node is intentionally not shown as a normal palette button, but it is part of the runtime node system and is documented here for completeness.";
+    heading.appendChild(badge);
+  }
+
+  if (informationNodeIsAdvanced(definition)) {
+    const badge = document.createElement("span");
+    badge.className = "information-node-badge advanced";
+    badge.textContent = "Advanced / Raw C#";
+    badge.title = "Expert-level node: this bypasses part of the normal typed/safe abstraction and can require exact C#, reflection, compiler, assembly or load-phase knowledge.";
+    heading.appendChild(badge);
+  }
+
+  const id = document.createElement("small");
+  id.textContent = operatorId;
+  const description = document.createElement("p");
+  description.textContent = String(
+    definition.description || "Built-in typed runtime node."
+  );
+
+  content.append(heading, id, description);
+
+  const inputs = Array.isArray(definition.inputs)
+    ? definition.inputs.map(nodeReferencePortText).filter(Boolean)
+    : [];
+  const outputs = Array.isArray(definition.outputs)
+    ? definition.outputs.map(nodeReferencePortText).filter(Boolean)
+    : [];
+
+  if (inputs.length || outputs.length || definition.variadicInputs || definition.variadicOutputs) {
+    const ports = document.createElement("div");
+    ports.className = "information-node-ports";
+
+    if (inputs.length) {
+      const row = document.createElement("span");
+      row.innerHTML = `<b>In</b> ${escapeHtml(inputs.join(" · "))}`;
+      ports.appendChild(row);
+    }
+    if (outputs.length) {
+      const row = document.createElement("span");
+      row.innerHTML = `<b>Out</b> ${escapeHtml(outputs.join(" · "))}`;
+      ports.appendChild(row);
+    }
+    if (definition.variadicInputs || definition.variadicOutputs) {
+      const row = document.createElement("span");
+      row.innerHTML = `<b>Dynamic</b> ${definition.variadicInputs ? "inputs" : "outputs"} can be extended in the Node Inspector.`;
+      ports.appendChild(row);
+    }
+    content.appendChild(ports);
+  }
+
+  card.append(symbol, content);
+  return card;
+}
+
+function appendInformationNodeSection(fragment, title, entries, options = {}) {
+  if (!entries.length) {
+    return;
+  }
+
+  const section = document.createElement("section");
+  section.className = "information-node-group";
+  if (options.advanced) {
+    section.classList.add("information-node-group-advanced");
+  }
+
+  const heading = document.createElement("h4");
+  heading.textContent = title;
+  section.appendChild(heading);
+
+  if (options.description) {
+    const note = document.createElement("p");
+    note.className = "information-node-group-note";
+    note.textContent = options.description;
+    section.appendChild(note);
+  }
+
+  const grid = document.createElement("div");
+  grid.className = "information-node-grid";
+
+  entries
+    .slice()
+    .sort((left, right) =>
+      String(left.definition.title || left.operatorId).localeCompare(
+        String(right.definition.title || right.operatorId)
+      )
+    )
+    .forEach(({ operatorId, definition }) => {
+      grid.appendChild(informationNodeCard(operatorId, definition));
+    });
+
+  section.appendChild(grid);
+  fragment.appendChild(section);
+}
+
 function renderInformationNodeReference() {
   const host = elements.informationNodeReference;
   const registry = window.RMLModNodeRegistry;
@@ -17261,31 +17389,94 @@ function renderInformationNodeReference() {
   if (!registry || typeof registry.getNodeDefinitions !== "function") {
     host.innerHTML = `
       <p class="information-node-reference-status">
-        The runtime node registry is still loading. Open Help again after the node library has initialized.
+        The runtime node registry is still loading. The complete built-in node reference will appear automatically when the node library has initialized.
       </p>`;
+    window.RMLModNodesReady?.then?.(() => renderInformationNodeReference()).catch?.(() => {});
     return;
   }
 
   const definitions = registry.getNodeDefinitions();
-  const entries = Object.entries(definitions || {})
+  const builtInEntries = Object.entries(definitions || {})
     .filter(([, definition]) =>
       definition &&
       typeof definition === "object" &&
-      definition.catalogGenerated !== true &&
-      definition.hiddenFromPalette !== true
-    );
+      definition.catalogGenerated !== true
+    )
+    .map(([operatorId, definition]) => ({ operatorId, definition }));
 
-  const groups = new Map();
-
-  for (const [operatorId, definition] of entries) {
-    const group = String(definition.group || "Other");
-    if (!groups.has(group)) {
-      groups.set(group, []);
-    }
-    groups.get(group).push({ operatorId, definition });
+  // mod_nodes.js is loaded asynchronously after the registry itself exists.
+  // If Help is opened during that short window, wait for the complete library
+  // instead of freezing an incomplete reference into the dialog.
+  if (
+    window.RMLModNodesReady &&
+    typeof window.RMLModNodesReady.then === "function" &&
+    !builtInEntries.some(entry => entry.operatorId === "harmony.earlyPatchSource")
+  ) {
+    host.innerHTML = `
+      <p class="information-node-reference-status">
+        Loading the complete built-in node library…
+      </p>`;
+    Promise.resolve(window.RMLModNodesReady)
+      .then(() => renderInformationNodeReference())
+      .catch(() => {});
+    return;
   }
 
+  const standardEntries = builtInEntries.filter(
+    entry => !informationNodeIsAdvanced(entry.definition)
+  );
+  const advancedEntries = builtInEntries.filter(
+    entry => informationNodeIsAdvanced(entry.definition)
+  );
+
+  const standardGroups = new Map();
+  for (const entry of standardEntries) {
+    const group = String(entry.definition.group || "Other");
+    if (!standardGroups.has(group)) {
+      standardGroups.set(group, []);
+    }
+    standardGroups.get(group).push(entry);
+  }
+
+  const groupOrder = Array.isArray(window.RMLModNodeRegistryGroupOrder)
+    ? window.RMLModNodeRegistryGroupOrder
+    : [];
+  const orderedStandardGroups = [...standardGroups.keys()].sort((left, right) => {
+    const leftIndex = groupOrder.indexOf(left);
+    const rightIndex = groupOrder.indexOf(right);
+    if (leftIndex >= 0 || rightIndex >= 0) {
+      if (leftIndex < 0) return 1;
+      if (rightIndex < 0) return -1;
+      return leftIndex - rightIndex;
+    }
+    return left.localeCompare(right);
+  });
+
   const fragment = document.createDocumentFragment();
+
+  const summary = document.createElement("section");
+  summary.className = "information-node-reference-summary";
+  summary.innerHTML = `
+    <div>
+      <strong>${builtInEntries.length + 1}</strong>
+      <span>documented built-in nodes</span>
+    </div>
+    <div>
+      <strong>${standardEntries.length + 1}</strong>
+      <span>typed / normal</span>
+    </div>
+    <div class="advanced">
+      <strong>${advancedEntries.length}</strong>
+      <span>Advanced / Raw C#</span>
+    </div>`;
+  fragment.appendChild(summary);
+
+  const standardIntro = document.createElement("div");
+  standardIntro.className = "information-node-tier-note standard";
+  standardIntro.innerHTML = `
+    <strong>Typed / normal nodes</strong>
+    <span>These are the preferred building blocks. They use the graph's typed sockets, compatibility checks and generated runtime helpers so invalid combinations are rejected wherever the builder can determine that safely.</span>`;
+  fragment.appendChild(standardIntro);
 
   const configurationGroup = document.createElement("section");
   configurationGroup.className = "information-node-group";
@@ -17295,7 +17486,7 @@ function renderInformationNodeReference() {
       <article class="information-node-card">
         <span class="information-node-symbol">◆</span>
         <div>
-          <strong>Configuration</strong>
+          <div class="information-node-card-heading"><strong>Configuration</strong></div>
           <small>Packed configuration source</small>
           <p>Publishes the typed RML configuration values. Stored sockets provide values; Startup and Saved variants can also emit impulses according to the configured runtime behavior.</p>
         </div>
@@ -17303,80 +17494,63 @@ function renderInformationNodeReference() {
     </div>`;
   fragment.appendChild(configurationGroup);
 
-  for (const [groupName, groupEntries] of groups) {
-    groupEntries.sort((left, right) =>
-      String(left.definition.title || left.operatorId).localeCompare(
-        String(right.definition.title || right.operatorId)
-      )
+  for (const groupName of orderedStandardGroups) {
+    appendInformationNodeSection(
+      fragment,
+      groupName,
+      standardGroups.get(groupName) || []
     );
-
-    const section = document.createElement("section");
-    section.className = "information-node-group";
-
-    const heading = document.createElement("h4");
-    heading.textContent = groupName;
-    section.appendChild(heading);
-
-    const grid = document.createElement("div");
-    grid.className = "information-node-grid";
-
-    for (const { operatorId, definition } of groupEntries) {
-      const card = document.createElement("article");
-      card.className = "information-node-card";
-
-      const symbol = document.createElement("span");
-      symbol.className = "information-node-symbol";
-      symbol.textContent = String(definition.symbol || "•");
-
-      const content = document.createElement("div");
-      const title = document.createElement("strong");
-      title.textContent = String(definition.title || operatorId);
-      const id = document.createElement("small");
-      id.textContent = operatorId;
-      const description = document.createElement("p");
-      description.textContent = String(
-        definition.description || "Built-in typed runtime node."
-      );
-
-      content.append(title, id, description);
-
-      const inputs = Array.isArray(definition.inputs)
-        ? definition.inputs.map(nodeReferencePortText).filter(Boolean)
-        : [];
-      const outputs = Array.isArray(definition.outputs)
-        ? definition.outputs.map(nodeReferencePortText).filter(Boolean)
-        : [];
-
-      if (inputs.length || outputs.length || definition.variadicInputs || definition.variadicOutputs) {
-        const ports = document.createElement("div");
-        ports.className = "information-node-ports";
-
-        if (inputs.length) {
-          const row = document.createElement("span");
-          row.innerHTML = `<b>In</b> ${escapeHtml(inputs.join(" · "))}`;
-          ports.appendChild(row);
-        }
-        if (outputs.length) {
-          const row = document.createElement("span");
-          row.innerHTML = `<b>Out</b> ${escapeHtml(outputs.join(" · "))}`;
-          ports.appendChild(row);
-        }
-        if (definition.variadicInputs || definition.variadicOutputs) {
-          const row = document.createElement("span");
-          row.innerHTML = `<b>Dynamic</b> ${definition.variadicInputs ? "inputs" : "outputs"} can be extended in the Node Inspector.`;
-          ports.appendChild(row);
-        }
-
-        content.appendChild(ports);
-      }
-
-      card.append(symbol, content);
-      grid.appendChild(card);
-    }
-
-    section.appendChild(grid);
-    fragment.appendChild(section);
   }
+
+  const advancedIntro = document.createElement("div");
+  advancedIntro.className = "information-node-tier-note advanced";
+  advancedIntro.innerHTML = `
+    <strong>Advanced / Raw C# — intentionally separate</strong>
+    <span>Use these only when the typed node library cannot express the required behavior. They expose exact source, reflection, references, compiler/build settings or Harmony load-phase control. That flexibility also means the builder cannot guarantee the same type-safety, dependency safety or runtime correctness as it can for normal typed nodes.</span>`;
+  fragment.appendChild(advancedIntro);
+
+  const harmonySourceIds = new Set([
+    "harmony.exactPatchSource",
+    "harmony.earlyPatchSource"
+  ]);
+  const harmonySourceEntries = advancedEntries.filter(entry =>
+    harmonySourceIds.has(entry.operatorId)
+  );
+  const remainingAdvanced = advancedEntries.filter(entry =>
+    !harmonySourceIds.has(entry.operatorId)
+  );
+
+  appendInformationNodeSection(
+    fragment,
+    "Harmony source & load phase",
+    harmonySourceEntries,
+    {
+      advanced: true,
+      description:
+        "These two nodes deliberately look similar but solve different load phases: Harmony Exact Patch Source is compiled into the normal rml_mods DLL and PatchAll is invoked from OnEngineInit; Early Harmony Patch Library creates a separate rml_libs DLL for patches that must exist before normal mods load. The early library cannot use graph sockets or generated main-mod state."
+    }
+  );
+
+  appendInformationNodeSection(
+    fragment,
+    "Advanced / Raw C#",
+    remainingAdvanced,
+    {
+      advanced: true,
+      description:
+        "Expert fallbacks for exact C#, reflection, manual dependency declarations and build/project overrides. They are documented even when a node is hidden from the normal palette."
+    }
+  );
+
+  const catalogCount = Object.values(definitions || {}).filter(
+    definition => definition?.catalogGenerated === true
+  ).length;
+  const catalogNote = document.createElement("div");
+  catalogNote.className = "information-node-tier-note catalog";
+  catalogNote.innerHTML = `
+    <strong>Live Resonite API catalog${catalogCount ? ` · ${catalogCount.toLocaleString()} generated nodes` : ""}</strong>
+    <span>Scanner-generated Type, Enum, Constructor, Method, Property, Field and Event nodes are version-derived rather than fixed builder nodes. Their complete live set is available through Node Search and changes with the loaded Resonite/FrooxEngine catalog. HarmonyLib scanner nodes are classified as Advanced / Raw C# because they are low-level runtime API calls; they do not infer a patch signature or an early rml_libs load phase.</span>`;
+  fragment.appendChild(catalogNote);
 
   host.replaceChildren(fragment);
 }
@@ -17584,8 +17758,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "help_template.html?v=3",
-    "help_template.js?v=3",
+    "help_template.html?v=4",
+    "help_template.js?v=4",
     "help-template",
     "RMLHelpTemplateMarkup"
   )
