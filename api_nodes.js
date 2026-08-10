@@ -277,7 +277,6 @@
       return graphType;
     }
 
-    // First pass: create every concrete public catalog type.
     let cooperativeWork = 0;
 
     for (const row of typeRows) {
@@ -290,7 +289,6 @@
       registerApiType(row.fullName, row);
     }
 
-    // Enums can exist in the separate enum list even when omitted from types.
     for (const row of enumRows) {
       if ((cooperativeWork += 1) % 120 === 0) {
         await yieldToBrowser();
@@ -305,7 +303,6 @@
       });
     }
 
-    // Second pass: derive complete base/interface assignability.
     for (const row of typeRows) {
       if ((cooperativeWork += 1) % 80 === 0) {
         await yieldToBrowser();
@@ -371,7 +368,6 @@
     let runtimeBoundMethodCount = 0;
     let skippedCount = 0;
 
-    // One exact Type node for every usable catalog type.
     for (const row of typeRows) {
       if ((cooperativeWork += 1) % 120 === 0) {
         await yieldToBrowser();

@@ -275,8 +275,6 @@
   const RAW_CSHARP_GROUP =
     "Advanced / Raw C#";
 
-  // Attach/create nodes default to the currently selected Resonite world's
-  // RootSlot. A connected Slot wire always overrides this expression.
   const DEFAULT_WORLD_ROOT_SLOT_CS =
     "(FrooxEngine.Engine.Current?.WorldManager?.FocusedWorld ?? FrooxEngine.Userspace.UserspaceWorld)!.RootSlot";
 
@@ -2681,9 +2679,6 @@ private static void CreateGeneratedReversePatch(
       return filtered;
     }
 
-    // Unconstrained Slot.Attach<T> methods can still safely use a
-    // concrete Component. Unknown or unsatisfied constraints are
-    // deliberately rejected rather than producing invalid C#.
     return constraints.length === 0
       ? [...FROOX_COMPONENT_TYPES]
       : [];

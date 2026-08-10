@@ -278,17 +278,10 @@ let suppressNodeClickId = null;
 let suppressNodeClickUntil = 0;
 let rootCanvasInteractionController = null;
 
-// The runtime graph is restored from local storage before the dynamically
-// registered graph node modules have necessarily finished booting. Keep this
-// transient state out of user-facing diagnostics and refresh output once the
-// loader has actually settled.
 let typedNodeGraphModulesState = "pending";
 let typedNodeGraphModulesError = null;
 let typedNodeGraphModulesTrackingStarted = false;
 
-// Session-only UI selections. Every refresh resolves them against the actual
-// generated artifact manifest, so removed or renamed generator outputs can
-// never leave either selector pointing at a stale file.
 let generatedOutlineArtifactKey = "";
 let generatedGraphArtifactKey = "";
 let exportCopyArtifactKey = "";
@@ -2580,9 +2573,6 @@ function getTypedNodeGraphContribution() {
     return null;
   }
 
-  // A packed graph can already be present in restored state while
-  // catalog_loader.js is still loading/registering mod_nodes.js and
-  // api_nodes.js. That is an expected boot phase, not a project error.
   if (typedNodeGraphModulesState === "pending") {
     return null;
   }
@@ -4931,7 +4921,11 @@ const nextOptionDirection =
   let body = "";
 
   if (node.kind === "controller") {
-    body = `<div class="controller-options">
+    body = `<div
+      class="controller-options"
+      data-rml-scroll-layer="auto"
+      data-rml-scroll-layer-key="outline-controller:${escapeHtml(node.id)}"
+      data-scroll-label="${escapeHtml(node.fieldName)} · Section enum contents">
       ${node.options
         .map(
           (option, optionIndex) => `<section
@@ -4946,6 +4940,9 @@ const nextOptionDirection =
             }"
             draggable="false"
             data-container="${escapeHtml(option.id)}"
+            data-rml-scroll-layer="auto"
+            data-rml-scroll-layer-key="outline-section:${escapeHtml(option.id)}"
+            data-scroll-label="${escapeHtml(option.name)} · Section level"
             data-option-id="${escapeHtml(option.id)}"
             data-controller-id="${escapeHtml(node.id)}"
             data-option-index="${optionIndex}">
@@ -4980,7 +4977,11 @@ const nextOptionDirection =
                 }</small>
               </div>
             </header>
-            <div class="drop-zone">
+            <div
+              class="drop-zone"
+              data-rml-scroll-layer="auto"
+              data-rml-scroll-layer-key="outline-section-content:${escapeHtml(option.id)}"
+              data-scroll-label="${escapeHtml(option.name)} · Section contents">
               ${
                 option.children.length
                   ? nodeCardsMarkup(
@@ -11821,14 +11822,6 @@ function preferredOutlineArtifact(
   );
 }
 
-
-// ---------------------------------------------------------------------------
-// Universal custom dropdown layer
-// ---------------------------------------------------------------------------
-// Native <select> popups are rendered by the browser/OS and therefore keep the
-// unwanted black system menu. Every ordinary select in the builder is upgraded
-// to the same in-page dropdown used by the typed graph. The MutationObserver is
-// intentional: inspector and graph controls are rebuilt dynamically.
 function ensureUniversalCustomSelect(select) {
   if (
     !(select instanceof HTMLSelectElement) ||
@@ -11840,8 +11833,6 @@ function ensureUniversalCustomSelect(select) {
     return select?._rmlUniversalCustomSelect || null;
   }
 
-  // The generated-file selector already has a specialized wrapper with grouped
-  // entries. Leave those three controls to that implementation.
   if (
     select.id === "generated-file-select" ||
     select.id === "graph-generated-file-select"
@@ -11905,9 +11896,6 @@ function ensureUniversalCustomSelect(select) {
         ? option.parentElement.label
         : ""
     }));
-
-    // Tiny True/False style dropdowns should still use the exact same popup,
-    // just without a pointless search field.
     search.hidden = entries.length <= 8;
   };
 
@@ -12212,11 +12200,6 @@ function startUniversalCustomSelectObserver() {
 }
 
 function generatedCodeForCurrentView() {
-  // Both workspaces expose the exact same generated artifact manifest.
-  // Their selector state is intentionally independent: Configuration Outline
-  // defaults to the main configuration/mod source while Typed Runtime Graph
-  // defaults to its generated runtime-graph source. Switching files in one
-  // workspace therefore never changes the preferred file in the other.
   const graphViewActive =
     Boolean(
       isPlainObject(state.extensions) &&
@@ -12974,9 +12957,6 @@ function updateGeneratedOutput() {
     }
   });
 
-  // Keep an already open Export dialog synchronized with every graph,
-  // metadata and generator change. It is sourced from the real generated
-  // manifest rather than a node-specific condition.
   if (elements.exportDialog?.open) {
     updateExportDialog();
   }
@@ -15574,7 +15554,6 @@ async function copyText(text, button) {
     }
 
     if (iconOnlyCopyButton) {
-      // Restart the SVG stroke animation even on rapid repeated clicks.
       void button.offsetWidth;
       button.classList.add("is-copied");
       button.setAttribute(
@@ -17182,9 +17161,6 @@ function newBlank() {
     return;
   }
 
-  // A new project always starts in the Configuration Outline.
-  // Leave the session-only Typed Runtime Graph mode BEFORE clearing state,
-  // while its real Back-to-Outline action is still available.
   if (
     document.body.classList.contains(
       "rml-node-graph-mode"
@@ -17404,9 +17380,6 @@ function renderInformationNodeReference() {
     )
     .map(([operatorId, definition]) => ({ operatorId, definition }));
 
-  // mod_nodes.js is loaded asynchronously after the registry itself exists.
-  // If Help is opened during that short window, wait for the complete library
-  // instead of freezing an incomplete reference into the dialog.
   if (
     window.RMLModNodesReady &&
     typeof window.RMLModNodesReady.then === "function" &&
@@ -17727,8 +17700,6 @@ function loadLazyTemplateScript(fileName, marker, globalName) {
 }
 
 function loadLazyHtmlTemplate(htmlFileName, jsFileName, marker, globalName) {
-  // fetch(file://...) is blocked by Chromium because every local file has an
-  // opaque origin. In local-file mode, never issue the failing fetch at all.
   if (window.location.protocol === "file:") {
     return loadLazyTemplateScript(jsFileName, marker, globalName);
   }
@@ -17758,8 +17729,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "help_template.html?v=4",
-    "help_template.js?v=4",
+    "help_template.html?v=8",
+    "help_template.js?v=8",
     "help-template",
     "RMLHelpTemplateMarkup"
   )
@@ -17852,7 +17823,7 @@ function ensureSetupAssistantLoaded(firstRun = false) {
 
   setupAssistantLoadPromise = new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = new URL("setup_assistant.js?v=13", APP_SCRIPT_BASE_URL).href;
+    script.src = new URL("setup_assistant.js?v=17", APP_SCRIPT_BASE_URL).href;
     script.async = true;
     script.dataset.rmlSetupAssistant = "true";
     script.addEventListener("load", () => resolve(true), { once: true });
@@ -18670,109 +18641,1967 @@ function exposeBuilderBridge() {
   );
 }
 
+function installUniversalScrollLayerSelector() {
+  if (window.RMLUniversalScrollLayers) {
+    return;
+  }
 
-// When an inner builder surface reaches its vertical scroll boundary, continue
-// the same wheel/trackpad gesture on the document root instead of trapping it.
-function installRootScrollChaining() {
-  const chainedSelector = [
-    ".workspace .palette",
-    ".workspace .inspector",
-    ".code-panel pre"
-  ].join(", ");
+  const CYCLE_THRESHOLD = 40;
+  const CYCLE_COOLDOWN_MS = 140;
+  const HTML_KEY = "html-root";
+  const DOCUMENT_KEY = "document-scroll-root";
 
-  const wheelPixels = event => {
-    if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) {
-      return event.deltaY * 18;
+  let selection = null;
+  let selectionCandidates = null;
+  let session = null;
+  let cycleAccumulator = 0;
+  let cycleDirection = 0;
+  let lastCycleAt = 0;
+  let visualFrame = 0;
+  let indicatorTimer = 0;
+  let outline = null;
+  let indicator = null;
+
+  const sharedWheelClaims = (() => {
+    const existing =
+      window.__RMLScrollLayerWheelClaims;
+
+    if (existing instanceof WeakSet) {
+      return existing;
     }
 
-    if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
-      return event.deltaY * Math.max(
-        1,
-        window.innerHeight ||
-          document.documentElement.clientHeight
-      );
+    const value = new WeakSet();
+
+    Object.defineProperty(
+      window,
+      "__RMLScrollLayerWheelClaims",
+      {
+        value,
+        writable: false,
+        enumerable: false,
+        configurable: true
+      }
+    );
+
+    return value;
+  })();
+
+  const claimWheelEvent = event => {
+    if (
+      !event ||
+      sharedWheelClaims.has(event)
+    ) {
+      return false;
     }
 
-    return event.deltaY;
+    sharedWheelClaims.add(event);
+
+    if (event.cancelable) {
+      event.preventDefault();
+    }
+
+    event.stopImmediatePropagation();
+
+    return true;
   };
 
-  document.addEventListener(
-    "wheel",
-    event => {
+  const htmlElement = () =>
+    document.documentElement;
+
+  const documentScrollElement = () =>
+    document.scrollingElement ||
+    document.documentElement;
+
+  const visibleViewportRectangle = () => {
+    const visual =
+      window.visualViewport;
+
+    const left =
+      visual?.offsetLeft || 0;
+    const top =
+      visual?.offsetTop || 0;
+    const width =
+      Math.max(
+        1,
+        visual?.width ||
+        window.innerWidth ||
+        document.documentElement.clientWidth ||
+        1
+      );
+    const height =
+      Math.max(
+        1,
+        visual?.height ||
+        window.innerHeight ||
+        document.documentElement.clientHeight ||
+        1
+      );
+
+    return {
+      left,
+      top,
+      right: left + width,
+      bottom: top + height,
+      width,
+      height
+    };
+  };
+
+  const scrollableOverflow = value =>
+    value === "auto" ||
+    value === "scroll" ||
+    value === "overlay";
+
+  const scrollLayerMode = element =>
+    String(
+      element?.getAttribute?.(
+        "data-rml-scroll-layer"
+      ) || ""
+    )
+      .trim()
+      .toLowerCase();
+
+  const scrollLayerAlwaysSelectable =
+    element =>
+      [
+        "always",
+        "true",
+        "empty",
+        "virtual",
+        "programmatic"
+      ].includes(
+        scrollLayerMode(element)
+      );
+
+  const scrollLayerProgrammatic =
+    element =>
+      [
+        "always",
+        "true",
+        "programmatic"
+      ].includes(
+        scrollLayerMode(element)
+      );
+
+  const scrollAxesForElement =
+    element => {
+      if (!(element instanceof HTMLElement)) {
+        return {
+          x: false,
+          y: false
+        };
+      }
+
+      const style =
+        getComputedStyle(element);
+      const programmatic =
+        scrollLayerProgrammatic(element);
+
+      return {
+        x:
+          element.scrollWidth >
+            element.clientWidth + 1 &&
+          (
+            scrollableOverflow(
+              style.overflowX
+            ) ||
+            programmatic
+          ),
+        y:
+          element.scrollHeight >
+            element.clientHeight + 1 &&
+          (
+            scrollableOverflow(
+              style.overflowY
+            ) ||
+            programmatic
+          )
+      };
+    };
+
+  const visibleElement = element => {
+    if (
+      !(element instanceof HTMLElement) ||
+      !element.isConnected
+    ) {
+      return false;
+    }
+
+    const rectangle =
+      element.getBoundingClientRect();
+    const style =
+      getComputedStyle(element);
+
+    return (
+      rectangle.width > 0 &&
+      rectangle.height > 0 &&
+      style.display !== "none" &&
+      style.visibility !== "hidden"
+    );
+  };
+
+  const elementCanScroll = element => {
+    if (!(element instanceof HTMLElement)) {
+      return false;
+    }
+
+    if (element === htmlElement()) {
+      return true;
+    }
+
+    if (
+      element === documentScrollElement() &&
+      element !== htmlElement()
+    ) {
+      return true;
+    }
+
+    if (!visibleElement(element)) {
+      return false;
+    }
+
+    const axes =
+      scrollAxesForElement(element);
+
+    return (
+      axes.x ||
+      axes.y ||
+      scrollLayerAlwaysSelectable(element)
+    );
+  };
+
+  const normalizedWheelDelta = (
+    event,
+    referenceElement
+  ) => {
+    const scale =
+      event.deltaMode ===
+        WheelEvent.DOM_DELTA_LINE
+        ? 16
+        : event.deltaMode ===
+            WheelEvent.DOM_DELTA_PAGE
+          ? Math.max(
+              1,
+              referenceElement?.clientHeight ||
+              visibleViewportRectangle().height
+            )
+          : 1;
+
+    return {
+      x: event.deltaX * scale,
+      y: event.deltaY * scale
+    };
+  };
+
+  const semanticElementLabel =
+    element => {
+      if (element === htmlElement()) {
+        return "<html> · Page ROOT";
+      }
+
       if (
-        event.defaultPrevented ||
-        event.ctrlKey ||
-        event.deltaY === 0 ||
-        dragScrollActive ||
-        nodePointerDragActive ||
-        optionPointerDragActive
+        element === documentScrollElement() &&
+        element !== htmlElement()
       ) {
+        return `${
+          element.tagName.toLowerCase()
+        } · Document scroll surface`;
+      }
+
+      const labelledBy =
+        String(
+          element.getAttribute(
+            "aria-labelledby"
+          ) ||
+          ""
+        )
+          .split(/\s+/)
+          .filter(Boolean)
+          .map(id =>
+            document.getElementById(id)
+              ?.textContent
+          )
+          .filter(Boolean)
+          .join(" ");
+
+      const nearestPanel =
+        element.closest(
+          ".panel, dialog, section, aside, nav, main"
+        );
+
+      const panelTitle =
+        nearestPanel?.querySelector(
+          ":scope > .panel-title, :scope > header h2, :scope > h2, :scope > h3"
+        )?.textContent ||
+        "";
+
+      const wrappingLabel =
+        element.closest("label");
+
+      const explicit =
+        element.getAttribute(
+          "aria-label"
+        ) ||
+        labelledBy ||
+        element.getAttribute(
+          "data-scroll-label"
+        ) ||
+        element.getAttribute(
+          "title"
+        ) ||
+        element.getAttribute(
+          "placeholder"
+        ) ||
+        (wrappingLabel !== element
+          ? wrappingLabel?.childNodes?.[0]
+              ?.textContent
+          : "") ||
+        panelTitle ||
+        "";
+
+      let label =
+        String(explicit)
+          .replace(/\s+/g, " ")
+          .trim();
+
+      if (!label) {
+        if (
+          element instanceof
+            HTMLTextAreaElement
+        ) {
+          label = "Text editor";
+        } else if (
+          element.getAttribute(
+            "role"
+          ) === "listbox"
+        ) {
+          label = "Scrollable list";
+        } else if (
+          element.matches(
+            ".palette"
+          )
+        ) {
+          label = "Add controls";
+        } else if (
+          element.matches(
+            ".inspector"
+          )
+        ) {
+          label = "Properties";
+        } else if (
+          element.matches(
+            ".code-panel pre"
+          )
+        ) {
+          label = "Generated code";
+        } else if (
+          element.matches(
+            ".information-content"
+          )
+        ) {
+          label = "Help content";
+        } else {
+          label = "Scrollable area";
+        }
+      }
+
+      return label.slice(0, 84);
+    };
+
+  const stableScrollLayerIdentity =
+    element => {
+      const explicitKey =
+        String(
+          element.getAttribute(
+            "data-rml-scroll-layer-key"
+          ) || ""
+        ).trim();
+
+      if (explicitKey) {
+        return {
+          kind: "declared-key",
+          value: explicitKey
+        };
+      }
+
+      if (element.id) {
+        return {
+          kind: "dom-id",
+          value: element.id
+        };
+      }
+
+      const nodeScrollId =
+        String(
+          element.getAttribute(
+            "data-node-scroll-id"
+          ) || ""
+        ).trim();
+
+      if (nodeScrollId) {
+        return {
+          kind: "node-scroll-id",
+          value: nodeScrollId
+        };
+      }
+
+      const containerId =
+        String(
+          element.getAttribute(
+            "data-container"
+          ) || ""
+        ).trim();
+
+      if (containerId) {
+        return {
+          kind: "container-id",
+          value: containerId
+        };
+      }
+
+      return null;
+    };
+
+  const resolveStableScrollLayerIdentity =
+    identity => {
+      if (!identity?.value) {
+        return null;
+      }
+
+      if (identity.kind === "dom-id") {
+        return document.getElementById(
+          identity.value
+        );
+      }
+
+      const attribute =
+        identity.kind === "declared-key"
+          ? "data-rml-scroll-layer-key"
+          : identity.kind === "node-scroll-id"
+            ? "data-node-scroll-id"
+            : identity.kind === "container-id"
+              ? "data-container"
+              : "";
+
+      return attribute
+        ? document.querySelector(
+            `[${attribute}="${CSS.escape(identity.value)}"]`
+          )
+        : null;
+    };
+
+  const descriptorFor =
+    element => {
+      if (!(element instanceof HTMLElement)) {
+        return null;
+      }
+
+      if (element === htmlElement()) {
+        return {
+          kind: "html-root",
+          key: HTML_KEY,
+          label:
+            semanticElementLabel(
+              element
+            ),
+          element
+        };
+      }
+
+      if (
+        element === documentScrollElement() &&
+        element !== htmlElement()
+      ) {
+        return {
+          kind: "document-root",
+          key: DOCUMENT_KEY,
+          label:
+            semanticElementLabel(
+              element
+            ),
+          element
+        };
+      }
+
+      const stableIdentity =
+        stableScrollLayerIdentity(
+          element
+        );
+
+      let elementId =
+        element.dataset
+          .rmlScrollLayerId;
+
+      if (!stableIdentity && !elementId) {
+        elementId =
+          createId(
+            "scroll-layer"
+          );
+        element.dataset
+          .rmlScrollLayerId =
+          elementId;
+      }
+
+      return {
+        kind: "element",
+        key:
+          stableIdentity
+            ? `element:${stableIdentity.kind}:${stableIdentity.value}`
+            : `element:${elementId}`,
+        label:
+          semanticElementLabel(
+            element
+          ),
+        stableIdentity,
+        elementId,
+        element
+      };
+    };
+
+  const resolveDescriptor =
+    descriptor => {
+      if (!descriptor) {
+        return null;
+      }
+
+      if (
+        descriptor.kind ===
+          "html-root"
+      ) {
+        return htmlElement();
+      }
+
+      if (
+        descriptor.kind ===
+          "document-root"
+      ) {
+        const scrolling =
+          documentScrollElement();
+
+        return scrolling !==
+          htmlElement()
+          ? scrolling
+          : null;
+      }
+
+      if (
+        descriptor.element
+          ?.isConnected
+      ) {
+        return descriptor.element;
+      }
+
+      const stable =
+        resolveStableScrollLayerIdentity(
+          descriptor.stableIdentity
+        );
+
+      if (stable) {
+        descriptor.element = stable;
+        return stable;
+      }
+
+      if (
+        descriptor.elementId
+      ) {
+        return document.querySelector(
+          `[data-rml-scroll-layer-id="${CSS.escape(descriptor.elementId)}"]`
+        );
+      }
+
+      return null;
+    };
+
+  const descriptorUsable =
+    descriptor => {
+      const element =
+        resolveDescriptor(
+          descriptor
+        );
+
+      if (!element) {
+        return false;
+      }
+
+      if (
+        descriptor.kind ===
+          "html-root"
+      ) {
+        return true;
+      }
+
+      if (
+        descriptor.kind ===
+          "document-root"
+      ) {
+        return true;
+      }
+
+      return elementCanScroll(
+        element
+      );
+    };
+
+  const dynamicAncestorElements =
+    (
+      target,
+      composedPath = null
+    ) => {
+      const result = [];
+      const seen = new Set();
+
+      const add = element => {
+        if (
+          element instanceof HTMLElement &&
+          !seen.has(element)
+        ) {
+          seen.add(element);
+          result.push(element);
+        }
+      };
+
+      if (Array.isArray(composedPath)) {
+        for (const item of composedPath) {
+          if (item === htmlElement()) {
+            break;
+          }
+          add(item);
+        }
+      }
+
+      let current =
+        target instanceof Element
+          ? target
+          : null;
+
+      while (
+        current &&
+        current !== htmlElement()
+      ) {
+        add(current);
+
+        const root =
+          current.getRootNode?.();
+
+        current =
+          current.parentElement ||
+          (
+            root instanceof ShadowRoot
+              ? root.host
+              : null
+          );
+      }
+
+      return result;
+    };
+
+  const candidatesFor =
+    (
+      target,
+      composedPath = null
+    ) => {
+      const candidates = [];
+      const keys = new Set();
+
+      const add = element => {
+        const descriptor =
+          descriptorFor(
+            element
+          );
+
+        if (
+          descriptor &&
+          !keys.has(
+            descriptor.key
+          )
+        ) {
+          keys.add(
+            descriptor.key
+          );
+          candidates.push(
+            descriptor
+          );
+        }
+      };
+
+      for (
+        const current of
+        dynamicAncestorElements(
+          target,
+          composedPath
+        )
+      ) {
+        if (
+          elementCanScroll(
+            current
+          )
+        ) {
+          add(current);
+        }
+      }
+
+      const scrolling =
+        documentScrollElement();
+
+      if (
+        scrolling instanceof
+          HTMLElement &&
+        scrolling !==
+          htmlElement()
+      ) {
+        add(scrolling);
+      }
+
+      add(htmlElement());
+
+      return candidates;
+    };
+
+  const refreshCandidateChain =
+    descriptors => {
+      const refreshed = [];
+      const keys = new Set();
+
+      const add = descriptor => {
+        if (
+          !descriptor ||
+          keys.has(descriptor.key)
+        ) {
+          return;
+        }
+
+        keys.add(descriptor.key);
+        refreshed.push(descriptor);
+      };
+
+      for (
+        const descriptor of
+        Array.isArray(descriptors)
+          ? descriptors
+          : []
+      ) {
+        const element =
+          resolveDescriptor(descriptor);
+        const rebound =
+          element
+            ? descriptorFor(element)
+            : null;
+
+        add(rebound || descriptor);
+      }
+
+      const scrolling =
+        documentScrollElement();
+
+      if (
+        scrolling instanceof HTMLElement &&
+        scrolling !== htmlElement()
+      ) {
+        const documentDescriptor =
+          descriptorFor(scrolling);
+
+        if (
+          descriptors?.some?.(
+            descriptor =>
+              descriptor?.kind ===
+              "document-root"
+          )
+        ) {
+          add(documentDescriptor);
+        }
+      }
+
+      const htmlDescriptor =
+        descriptorFor(htmlElement());
+
+      if (htmlDescriptor) {
+        const withoutHtml =
+          refreshed.filter(
+            descriptor =>
+              descriptor.kind !==
+              "html-root"
+          );
+
+        refreshed.length = 0;
+        keys.clear();
+
+        for (const descriptor of withoutHtml) {
+          add(descriptor);
+        }
+
+        add(htmlDescriptor);
+      }
+
+      return refreshed;
+    };
+
+  const ensureVisuals = () => {
+    if (!document.body) {
+      return;
+    }
+
+    if (
+      !outline?.isConnected
+    ) {
+      outline =
+        document.createElement(
+          "div"
+        );
+      outline.className =
+        "rml-scroll-layer-outline";
+      outline.hidden = true;
+      outline.setAttribute(
+        "aria-hidden",
+        "true"
+      );
+      document.body.appendChild(
+        outline
+      );
+    }
+
+    if (
+      !indicator?.isConnected
+    ) {
+      indicator =
+        document.createElement(
+          "div"
+        );
+      indicator.className =
+        "rml-scroll-layer-indicator";
+      indicator.hidden = true;
+      indicator.setAttribute(
+        "role",
+        "status"
+      );
+      indicator.setAttribute(
+        "aria-live",
+        "polite"
+      );
+      indicator.append(
+        document.createElement(
+          "strong"
+        ),
+        document.createElement(
+          "span"
+        )
+      );
+      document.body.appendChild(
+        indicator
+      );
+    }
+  };
+
+  const hideIndicator = (
+    immediate = false
+  ) => {
+    window.clearTimeout(
+      indicatorTimer
+    );
+    indicatorTimer = 0;
+
+    if (!indicator) {
+      return;
+    }
+
+    indicator.classList.remove(
+      "visible"
+    );
+
+    if (immediate) {
+      indicator.hidden = true;
+      return;
+    }
+
+    indicatorTimer =
+      window.setTimeout(
+        () => {
+          if (indicator) {
+            indicator.hidden = true;
+          }
+        },
+        180
+      );
+  };
+
+  const showIndicator = (
+    mode,
+    descriptor,
+    options = {}
+  ) => {
+    if (!descriptor) {
+      return;
+    }
+
+    ensureVisuals();
+
+    if (!indicator) {
+      return;
+    }
+
+    window.clearTimeout(
+      indicatorTimer
+    );
+    indicatorTimer = 0;
+
+    const heading =
+      indicator.querySelector(
+        ":scope > strong"
+      );
+    const copy =
+      indicator.querySelector(
+        ":scope > span"
+      );
+
+    if (!heading || !copy) {
+      return;
+    }
+
+    heading.textContent = mode;
+    copy.textContent = [
+      options.position || "",
+      descriptor.label
+    ]
+      .filter(Boolean)
+      .join(" · ");
+
+    indicator.dataset.mode =
+      options.variant ||
+      "selected";
+    indicator.hidden = false;
+
+    requestAnimationFrame(
+      () => {
+        indicator?.classList.add(
+          "visible"
+        );
+      }
+    );
+
+    if (
+      options.sticky !== true
+    ) {
+      indicatorTimer =
+        window.setTimeout(
+          () =>
+            hideIndicator(),
+          options.duration ||
+            1350
+        );
+    }
+  };
+
+  const clippedRectangle =
+    (
+      element,
+      descriptor
+    ) => {
+      const viewport =
+        visibleViewportRectangle();
+
+      if (
+        descriptor.kind ===
+          "html-root" ||
+        descriptor.kind ===
+          "document-root"
+      ) {
+        return {
+          ...viewport
+        };
+      }
+
+      const rectangle =
+        element.getBoundingClientRect();
+
+      let left =
+        Math.max(
+          viewport.left,
+          rectangle.left
+        );
+      let top =
+        Math.max(
+          viewport.top,
+          rectangle.top
+        );
+      let right =
+        Math.min(
+          viewport.right,
+          rectangle.right
+        );
+      let bottom =
+        Math.min(
+          viewport.bottom,
+          rectangle.bottom
+        );
+
+      let ancestor =
+        element.parentElement;
+
+      while (
+        ancestor &&
+        ancestor !==
+          document.body &&
+        ancestor !==
+          htmlElement()
+      ) {
+        const style =
+          getComputedStyle(
+            ancestor
+          );
+        const clips =
+          style.overflowX !==
+            "visible" ||
+          style.overflowY !==
+            "visible";
+
+        if (clips) {
+          const clip =
+            ancestor
+              .getBoundingClientRect();
+
+          left =
+            Math.max(
+              left,
+              clip.left
+            );
+          top =
+            Math.max(
+              top,
+              clip.top
+            );
+          right =
+            Math.min(
+              right,
+              clip.right
+            );
+          bottom =
+            Math.min(
+              bottom,
+              clip.bottom
+            );
+        }
+
+        ancestor =
+          ancestor.parentElement;
+      }
+
+      return {
+        left,
+        top,
+        right,
+        bottom,
+        width:
+          Math.max(
+            0,
+            right - left
+          ),
+        height:
+          Math.max(
+            0,
+            bottom - top
+          )
+      };
+    };
+
+  const positionVisual = () => {
+    visualFrame = 0;
+
+    const preview =
+      session?.candidates?.[
+        session.index
+      ] ||
+      null;
+    const descriptor =
+      preview ||
+      selection;
+
+    if (!descriptor) {
+      if (outline) {
+        outline.hidden = true;
+      }
+      return;
+    }
+
+    const element =
+      resolveDescriptor(
+        descriptor
+      );
+
+    const renderable =
+      element &&
+      (
+        descriptor.kind ===
+          "html-root" ||
+        descriptor.kind ===
+          "document-root" ||
+        visibleElement(element)
+      );
+
+    if (!renderable) {
+      if (outline) {
+        outline.hidden = true;
+      }
+      return;
+    }
+
+    ensureVisuals();
+
+    const rectangle =
+      clippedRectangle(
+        element,
+        descriptor
+      );
+
+    const inset =
+      descriptor.kind ===
+        "html-root"
+        ? 5
+        : descriptor.kind ===
+            "document-root"
+          ? 8
+          : 0;
+
+    const left =
+      rectangle.left +
+      inset;
+    const top =
+      rectangle.top +
+      inset;
+    const right =
+      rectangle.right -
+      inset;
+    const bottom =
+      rectangle.bottom -
+      inset;
+    const width =
+      Math.max(
+        0,
+        right - left
+      );
+    const height =
+      Math.max(
+        0,
+        bottom - top
+      );
+
+    if (
+      !outline ||
+      width < 4 ||
+      height < 4
+    ) {
+      if (outline) {
+        outline.hidden = true;
+      }
+      return;
+    }
+
+    const computed =
+      getComputedStyle(
+        element
+      );
+
+    outline.style.left =
+      `${left}px`;
+    outline.style.top =
+      `${top}px`;
+    outline.style.width =
+      `${width}px`;
+    outline.style.height =
+      `${height}px`;
+    outline.style.borderRadius =
+      descriptor.kind ===
+        "html-root"
+        ? "12px"
+        : computed.borderRadius ===
+            "0px"
+          ? "8px"
+          : computed.borderRadius;
+
+    outline.dataset.label =
+      descriptor.label;
+    outline.dataset.kind =
+      descriptor.kind;
+    outline.classList.toggle(
+      "preview",
+      Boolean(preview)
+    );
+    outline.classList.toggle(
+      "selected",
+      !preview
+    );
+    outline.hidden = false;
+  };
+
+  const scheduleVisualRefresh =
+    () => {
+      if (visualFrame) {
         return;
       }
 
+      visualFrame =
+        requestAnimationFrame(
+          positionVisual
+        );
+    };
+
+  const clearSelection = (
+    options = {}
+  ) => {
+    selection = null;
+    selectionCandidates = null;
+    session = null;
+    cycleAccumulator = 0;
+    cycleDirection = 0;
+    lastCycleAt = 0;
+
+    if (visualFrame) {
+      cancelAnimationFrame(
+        visualFrame
+      );
+      visualFrame = 0;
+    }
+
+    if (outline) {
+      outline.hidden = true;
+    }
+
+    if (
+      options.keepIndicator !==
+        true
+    ) {
+      hideIndicator(true);
+    }
+  };
+
+  const commitSelection = () => {
+    const frozenChain =
+      refreshCandidateChain(
+        session?.candidates ||
+        selectionCandidates ||
+        (
+          selection
+            ? [selection]
+            : []
+        )
+      );
+
+    const candidate =
+      session
+        ?.candidates?.[
+          session.index
+        ] ||
+      selection ||
+      null;
+
+    session = null;
+    cycleAccumulator = 0;
+    cycleDirection = 0;
+
+    if (!candidate) {
+      scheduleVisualRefresh();
+      return selection;
+    }
+
+    selection = candidate;
+    selectionCandidates =
+      frozenChain.length > 0
+        ? frozenChain
+        : [candidate];
+
+    scheduleVisualRefresh();
+
+    showIndicator(
+      "GLOBAL SCROLL OVERRIDE LOCKED",
+      selection,
+      {
+        variant:
+          "selected",
+        duration:
+          1650
+      }
+    );
+
+    return selection;
+  };
+
+  const cycleSelection =
+    event => {
+      if (!claimWheelEvent(event)) {
+        return;
+      }
+
+      const previousActiveKey =
+        session
+          ?.candidates?.[
+            session.index
+          ]?.key ||
+        selection?.key ||
+        "";
+
+      let candidates;
+
+      if (
+        session?.candidates?.length
+      ) {
+        candidates =
+          refreshCandidateChain(
+            session.candidates
+          );
+      } else if (
+        selectionCandidates?.length
+      ) {
+        candidates =
+          refreshCandidateChain(
+            selectionCandidates
+          );
+      } else {
+        candidates =
+          candidatesFor(
+            event.target,
+            event.composedPath?.()
+          );
+      }
+
+      if (
+        candidates.length === 0
+      ) {
+        candidates = [
+          descriptorFor(
+            htmlElement()
+          )
+        ].filter(Boolean);
+      }
+
+      const selectedIndex =
+        candidates.findIndex(
+          candidate =>
+            candidate.key ===
+            previousActiveKey
+        );
+
+      if (!session) {
+        session = {
+          candidates,
+          index:
+            selectedIndex >= 0
+              ? selectedIndex
+              : 0,
+          modifierLabel:
+            event.metaKey &&
+            !event.ctrlKey
+              ? "COMMAND + WHEEL"
+              : "CTRL + WHEEL"
+        };
+        cycleAccumulator = 0;
+        cycleDirection = 0;
+        lastCycleAt = 0;
+      } else {
+        session.candidates =
+          candidates;
+        session.index =
+          selectedIndex >= 0
+            ? selectedIndex
+            : clamp(
+                session.index,
+                0,
+                candidates.length - 1
+              );
+      }
+
+      const reference =
+        event.target instanceof
+          HTMLElement
+          ? event.target
+          : htmlElement();
+      const delta =
+        normalizedWheelDelta(
+          event,
+          reference
+        );
+      const dominant =
+        Math.abs(delta.y) >=
+          Math.abs(delta.x)
+          ? delta.y
+          : delta.x;
+      const direction =
+        Math.sign(
+          dominant
+        );
+
+      if (direction !== 0) {
+        if (
+          cycleDirection !==
+          direction
+        ) {
+          cycleAccumulator =
+            0;
+          cycleDirection =
+            direction;
+        }
+
+        cycleAccumulator +=
+          dominant;
+
+        const now =
+          performance.now();
+
+        if (
+          Math.abs(
+            cycleAccumulator
+          ) >=
+            CYCLE_THRESHOLD &&
+          now - lastCycleAt >=
+            CYCLE_COOLDOWN_MS
+        ) {
+          session.index =
+            clamp(
+              session.index +
+                (
+                  direction > 0
+                    ? 1
+                    : -1
+                ),
+              0,
+              candidates.length - 1
+            );
+          cycleAccumulator = 0;
+          lastCycleAt = now;
+        }
+      }
+
+      const active =
+        candidates[
+          session.index
+        ];
+
+      scheduleVisualRefresh();
+      showIndicator(
+        `${session.modifierLabel} · GLOBAL OVERRIDE · ↓ OUTER / ↑ INNER`,
+        active,
+        {
+          position:
+            `Layer ${session.index + 1}/${candidates.length}`,
+          variant:
+            "preview",
+          sticky: true
+        }
+      );
+    };
+
+  const rootScrollBlockedByDialog =
+    target => {
+      const dialog =
+        target instanceof Element
+          ? target.closest(
+              "dialog[open]"
+            )
+          : null;
+
+      return Boolean(dialog);
+    };
+
+  const scrollDescriptor = (
+    event,
+    descriptor,
+    element,
+    options = {}
+  ) => {
+    const delta =
+      normalizedWheelDelta(
+        event,
+        element
+      );
+
+    let horizontal =
+      delta.x;
+    let vertical =
+      delta.y;
+
+    if (
+      event.shiftKey &&
+      Math.abs(horizontal) <
+        Math.abs(vertical)
+    ) {
+      horizontal =
+        vertical;
+      vertical = 0;
+    }
+
+    let target =
+      element;
+    let allowsX = false;
+    let allowsY = false;
+    let blocked = false;
+
+    if (
+      descriptor.kind ===
+        "html-root"
+    ) {
+      target =
+        documentScrollElement() ===
+          htmlElement()
+          ? htmlElement()
+          : null;
+
+      blocked =
+        options.overdrive === true
+          ? false
+          : rootScrollBlockedByDialog(
+              event.target
+            );
+    } else if (
+      descriptor.kind ===
+        "document-root"
+    ) {
+      target =
+        documentScrollElement();
+
+      blocked =
+        options.overdrive === true
+          ? false
+          : rootScrollBlockedByDialog(
+              event.target
+            );
+    }
+
+    if (!target || blocked) {
+      return {
+        moved: false,
+        empty:
+          !target,
+        blocked
+      };
+    }
+
+    if (
+      descriptor.kind ===
+        "html-root" ||
+      descriptor.kind ===
+        "document-root"
+    ) {
+      allowsX =
+        target.scrollWidth >
+        target.clientWidth + 1;
+      allowsY =
+        target.scrollHeight >
+        target.clientHeight + 1;
+    } else {
+      const axes =
+        scrollAxesForElement(
+          target
+        );
+
+      allowsX = axes.x;
+      allowsY = axes.y;
+    }
+
+    if (
+      !allowsY &&
+      allowsX &&
+      Math.abs(horizontal) <
+        Math.abs(vertical)
+    ) {
+      horizontal =
+        vertical;
+      vertical = 0;
+    }
+
+    if (!allowsX) {
+      horizontal = 0;
+    }
+    if (!allowsY) {
+      vertical = 0;
+    }
+
+    const empty =
+      !allowsX &&
+      !allowsY;
+    const beforeLeft =
+      target.scrollLeft;
+    const beforeTop =
+      target.scrollTop;
+
+    target.scrollLeft +=
+      horizontal;
+    target.scrollTop +=
+      vertical;
+
+    const moved =
+      Math.abs(
+        target.scrollLeft -
+        beforeLeft
+      ) > .25 ||
+      Math.abs(
+        target.scrollTop -
+        beforeTop
+      ) > .25;
+
+    scheduleVisualRefresh();
+
+    return {
+      moved,
+      empty,
+      blocked: false
+    };
+  };
+
+  const selectedFor =
+    (
+      target,
+      composedPath = null
+    ) => {
+      if (selection) {
+        return {
+          descriptor:
+            selection,
+          element:
+            resolveDescriptor(
+              selection
+            ),
+          explicit: true
+        };
+      }
+
+      const candidates =
+        candidatesFor(
+          target,
+          composedPath
+        );
+      const descriptor =
+        candidates[0] ||
+        descriptorFor(
+          htmlElement()
+        );
+
+      return {
+        descriptor,
+        element:
+          resolveDescriptor(
+            descriptor
+          ),
+        explicit: false
+      };
+    };
+
+  const handleWheel =
+    event => {
       const target =
-        event.target instanceof Element
+        event.target instanceof
+          Element
           ? event.target
           : null;
-      const inner = target?.closest(
-        chainedSelector
-      );
-
-      if (!(inner instanceof HTMLElement)) {
-        return;
-      }
-
-      // A modal owns its own scrolling; never move the page behind it.
-      if (inner.closest("dialog[open]")) {
-        return;
-      }
-
-      const maximumInnerScroll = Math.max(
-        0,
-        inner.scrollHeight - inner.clientHeight
-      );
-
-      if (maximumInnerScroll <= 1) {
-        return;
-      }
-
-      const delta = wheelPixels(event);
-      const goingDown = delta > 0;
-      const atStart = inner.scrollTop <= 1;
-      const atEnd =
-        inner.scrollTop >= maximumInnerScroll - 1;
+      const universalOwnsWheel =
+        Boolean(
+          selection ||
+          session
+        );
+      const graphState =
+        window
+          .RMLTypedNodeGraphScrollLayers
+          ?.getState?.();
+      const graphOwnsWheel =
+        Boolean(
+          graphState?.active ||
+          graphState?.cycling ||
+          graphState?.selected
+        );
+      const insideGraph =
+        Boolean(
+          target?.closest(
+            ".rml-graph-viewport"
+          )
+        );
 
       if (
-        (!goingDown && !atStart) ||
-        (goingDown && !atEnd)
+        !universalOwnsWheel &&
+        (
+          graphOwnsWheel ||
+          insideGraph
+        )
       ) {
         return;
       }
 
-      const root =
-        document.scrollingElement ||
-        document.documentElement;
-      const maximumRootScroll = Math.max(
-        0,
-        root.scrollHeight - root.clientHeight
-      );
-      const rootCanMove = goingDown
-        ? root.scrollTop < maximumRootScroll - 1
-        : root.scrollTop > 1;
-
-      if (!rootCanMove) {
+      if (
+        !universalOwnsWheel &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        (
+          dragScrollActive ||
+          nodePointerDragActive ||
+          optionPointerDragActive
+        )
+      ) {
         return;
       }
 
-      event.preventDefault();
-      root.scrollTop = clamp(
-        root.scrollTop + delta,
-        0,
-        maximumRootScroll
-      );
-    },
+      if (
+        event.ctrlKey ||
+        event.metaKey
+      ) {
+        cycleSelection(
+          event
+        );
+        return;
+      }
+
+      if (session) {
+        commitSelection();
+      }
+
+      if (!claimWheelEvent(event)) {
+        return;
+      }
+
+      const selected =
+        selectedFor(
+          target,
+          event.composedPath?.()
+        );
+      const descriptor =
+        selected.descriptor;
+      const element =
+        selected.element ||
+        resolveDescriptor(
+          descriptor
+        );
+
+      if (!descriptor) {
+        return;
+      }
+
+      if (!element) {
+        scheduleVisualRefresh();
+
+        if (selected.explicit) {
+          showIndicator(
+            "GLOBAL OVERRIDE · SELECTED LEVEL UNAVAILABLE",
+            descriptor,
+            {
+              variant: "empty",
+              duration: 1100
+            }
+          );
+        }
+        return;
+      }
+
+      const result =
+        scrollDescriptor(
+          event,
+          descriptor,
+          element,
+          {
+            overdrive:
+              selected.explicit
+          }
+        );
+
+      if (
+        selected.explicit
+      ) {
+        showIndicator(
+          result.moved
+            ? "GLOBAL OVERRIDE · SCROLLING LOCKED LEVEL"
+            : result.blocked
+              ? "GLOBAL OVERRIDE · PAGE ROOT BLOCKED"
+              : result.empty
+                ? "GLOBAL OVERRIDE · LOCKED LEVEL EMPTY"
+                : "GLOBAL OVERRIDE · LOCKED LEVEL EDGE",
+          descriptor,
+          {
+            variant:
+              result.moved
+                ? "selected"
+                : result.empty ||
+                    result.blocked
+                  ? "empty"
+                  : "edge",
+            duration: 900
+          }
+        );
+      }
+    };
+
+  const handleSelectionCancelClick =
+    event => {
+      if (
+        event.button !== 0 ||
+        (!selection && !session)
+      ) {
+        return;
+      }
+
+      const previous =
+        session?.candidates?.[
+          session.index
+        ] ||
+        selection;
+
+      clearSelection({
+        keepIndicator: true
+      });
+
+      if (previous) {
+        showIndicator(
+          "SCROLL LEVEL RELEASED",
+          previous,
+          {
+            variant: "cancelled",
+            duration: 900
+          }
+        );
+      }
+    };
+
+  const handleModifierKeyUp =
+    event => {
+      if (
+        !session
+      ) {
+        return;
+      }
+
+      if (
+        event.key === "Control" ||
+        event.key === "Meta"
+      ) {
+        commitSelection();
+      }
+    };
+
+  window.addEventListener(
+    "wheel",
+    handleWheel,
     {
+      capture: true,
       passive: false
+    }
+  );
+
+  document.addEventListener(
+    "keyup",
+    handleModifierKeyUp,
+    {
+      capture: true
+    }
+  );
+
+  document.addEventListener(
+    "pointerdown",
+    handleSelectionCancelClick,
+    {
+      capture: true
+    }
+  );
+
+  document.addEventListener(
+    "click",
+    handleSelectionCancelClick,
+    {
+      capture: true
+    }
+  );
+
+  document.addEventListener(
+    "scroll",
+    scheduleVisualRefresh,
+    {
+      capture: true,
+      passive: true
+    }
+  );
+
+  window.addEventListener(
+    "resize",
+    scheduleVisualRefresh,
+    {
+      passive: true
+    }
+  );
+
+  window.visualViewport
+    ?.addEventListener(
+      "resize",
+      scheduleVisualRefresh,
+      {
+        passive: true
+      }
+    );
+
+  window.visualViewport
+    ?.addEventListener(
+      "scroll",
+      scheduleVisualRefresh,
+      {
+        passive: true
+      }
+    );
+
+  window.addEventListener(
+    "blur",
+    () => {
+      if (session) {
+        commitSelection();
+      }
+    }
+  );
+
+  Object.defineProperty(
+    window,
+    "RMLUniversalScrollLayers",
+    {
+      value: Object.freeze({
+        clear() {
+          clearSelection();
+          return true;
+        },
+        commit() {
+          return Boolean(
+            commitSelection()
+          );
+        },
+        refresh() {
+          scheduleVisualRefresh();
+          return true;
+        },
+        getState() {
+          const preview =
+            session
+              ?.candidates?.[
+                session.index
+              ] ||
+            null;
+
+          return Object.freeze({
+            active:
+              Boolean(
+                selection ||
+                session
+              ),
+            cycling:
+              Boolean(session),
+            preview:
+              preview?.label ||
+              "",
+            previewKey:
+              preview?.key ||
+              "",
+            selected:
+              selection?.label ||
+              "",
+            selectedKey:
+              selection?.key ||
+              "",
+            globalOverride:
+              Boolean(selection),
+            outermost:
+              "<html> · Page ROOT"
+          });
+        }
+      }),
+      writable: false,
+      enumerable: false,
+      configurable: true
     }
   );
 }
@@ -18790,7 +20619,7 @@ function initialize() {
     .rmlBuilderInitialized = "true";
 
   ensureColorPickerAdaptiveFitLoaded();
-  installRootScrollChaining();
+  installUniversalScrollLayerSelector();
 
   cacheElements();
 

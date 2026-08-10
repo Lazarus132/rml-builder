@@ -670,11 +670,6 @@
   }
 
   async function loadCatalog() {
-    // Do not probe localhost port ranges automatically. Chromium logs every
-    // refused fetch at network level even when JavaScript catches the error,
-    // so a stopped scanner would otherwise flood DevTools with expected
-    // ERR_CONNECTION_REFUSED messages. A specifically configured scanner URL
-    // is still tried automatically; unconfigured live discovery is manual.
     const cachedPromise =
       readCachedLiveCatalog();
 

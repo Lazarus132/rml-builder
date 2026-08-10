@@ -145,9 +145,6 @@
         wire.to.y - wire.from.y
       );
 
-      // A Bezier with identical/nearly-identical endpoints plus the enforced
-      // minimum control distance becomes a visible horizontal bar. Treat such
-      // paths as empty instead.
       if (wireDistance < 1.5) {
         ctx.restore();
         continue;
@@ -266,8 +263,8 @@
       target: ".rml-graph-viewport",
       mode: "graph",
       title: "11. Navigate large graphs",
-      text: "The packed Start/configuration node is expanded in this demonstration so its own vertical and horizontal scrollbars are visible. Wheel over the node scrolls inside it, Shift + Wheel scrolls that node horizontally, and Ctrl + Wheel bypasses the node and pans the graph root. Dragging empty graph space pans the root directly.",
-      hint: "Watch the Start-node scrollbars move while the Shift and Ctrl keycaps are shown live; Center Graph then fits the structure again.",
+      text: "The runtime graph and Configuration Outline can contain dynamically rendered nested scroll areas. Hold Ctrl (Command on macOS) and use the wheel to cycle through every currently rendered level—from the innermost area through Node/Section contents and Graph ROOT to the actual &lt;html&gt; page root. Releasing the modifier enables a GLOBAL scroll override: every later Wheel event scrolls only that locked level, even when the mouse is over another node, Properties, Generated Project Files or a dialog. Only a normal primary click/tap releases the override.",
+      hint: "Watch the hierarchy freeze, then see the selected Node body/Graph ROOT continue scrolling while the animated mouse moves onto a completely different surface. One click finally releases it.",
       demo: "graph-pan"
     },
     {
@@ -544,6 +541,8 @@
     document.querySelectorAll(".rml-setup-control-highlight")
       .forEach(element => element.classList.remove("rml-setup-control-highlight"));
     clearRealPortGlows();
+    window.RMLTypedNodeGraphScrollLayers
+      ?.clear?.();
   }
 
   function cancelDemo() {
@@ -820,7 +819,6 @@
     const pointerId = 9120;
     const mouse = elements().mouse;
 
-    // First make it obvious where the pan begins.
     if (!(await moveMouse(from, 420, runId))) {
       return false;
     }
@@ -864,7 +862,6 @@
           Math.max(1, duration)
       );
 
-      // Smooth in/out so the graph movement can actually be followed.
       const eased =
         raw < 0.5
           ? 2 * raw * raw
@@ -889,8 +886,6 @@
         "0ms"
       );
 
-      // This is the important difference from dragMouse(): the REAL graph
-      // pointer handler receives the move, so .rml-graph-stage itself pans.
       document.dispatchEvent(
         new PointerEvent(
           "pointermove",
@@ -1448,9 +1443,7 @@
   }
 
   function graphDemoNodeTitle(node) {
-    // Read ONLY the actual title. The complete header also contains the subtitle,
-    // flip button and delete button without guaranteed whitespace between them
-    // (e.g. "Boolean ConstantValue⇄×"), which made exact title matching fail.
+
     const title =
       node?.querySelector(".rml-graph-node-title > strong")?.textContent ||
       node?.querySelector(".rml-graph-node-title strong")?.textContent ||
@@ -1789,10 +1782,6 @@
   async function nativeGraphPointerDrag(startElement, targetPoint, duration, runId, pointerId = 9110) {
     if (!startElement || !targetPoint || runId !== demoRunId) return false;
 
-    // Never animate from a stale socket. Graph renders replace the socket DOM,
-    // and getBoundingClientRect() on an old/disconnected element collapses to
-    // the page origin — which is why the tour mouse previously appeared to
-    // "start" in the upper-left corner.
     if (
       !startElement.isConnected ||
       !graphDemoVisible(startElement)
@@ -1811,8 +1800,6 @@
 
     const from = centerOf(startElement);
 
-    // Visually establish the REAL source first: move onto the socket, pulse it,
-    // pause briefly, and only then press/drag.
     pulseAt(startElement);
     showDemoLabel(
       `Start on the real ${String(startElement.dataset.direction || "socket").toUpperCase()} port`,
@@ -1936,7 +1923,6 @@
     const halfHeight =
       Math.max(80, reserveHeight * .5);
 
-    // The CREATED node itself must fit, not only the mouse/drop point.
     const allowed = {
       left:
         viewportRect.left +
@@ -1967,10 +1953,6 @@
         node.getBoundingClientRect()
       );
 
-    // Determine which REAL node contains the source socket point.
-    // The drag path obviously starts inside/on this node, so that node must NOT
-    // invalidate the corridor test. It still remains blocked for placement of
-    // the newly-created helper node.
     const sourceNode =
       visibleNodes.find(node => {
         const rect =
@@ -2040,8 +2022,6 @@
           bottom: rect.bottom + padding
         };
 
-        // Sample the ACTUAL drag corridor. This intentionally rejects drops
-        // whose wire/mouse path would visually pass underneath another node/card.
         const dx = to.x - from.x;
         const dy = to.y - from.y;
         const distance =
@@ -2082,8 +2062,6 @@
       allowed.top >= allowed.bottom;
 
     if (viewportTooSmall) {
-      // On very small/mobile views, use the largest possible safe center
-      // rather than returning an edge point.
       return {
         x:
           viewportRect.left +
@@ -2094,9 +2072,6 @@
       };
     }
 
-    // Dense dynamic grid instead of a few hard-coded fractions.
-    // This adapts to portrait/landscape, desktop/mobile and the current
-    // assistant-card position at the exact moment Step 9 runs.
     const stepX =
       Math.max(
         42,
@@ -2194,7 +2169,6 @@
               sourcePoint.y
           );
 
-        // Prefer a readable drag length, but not an absurdly long one.
         const idealDistance =
           Math.min(
             420,
@@ -2249,8 +2223,6 @@
       return candidates[0].point;
     }
 
-    // Last-resort adaptive ring search around the source. Still keeps the
-    // complete future node inside the viewport and avoids the tour card.
     const radii =
       [220, 280, 340, 400, 460];
     const angles =
@@ -2651,9 +2623,6 @@
 
     if (runId !== demoRunId) return;
 
-    // Commit the demonstrated socket-to-socket connection to the REAL graph.
-    // Prefer the internal tour bridge so browser pointer-event quirks and a
-    // changed aspect ratio cannot make the educational step nondeterministic.
     showDemoLabel("3 · The demonstrated line is now a real graph wire", b);
     const tourBridge = window.RMLTypedNodeGraphTourBridge;
     const committedWireId = tourBridge?.ensureConnection?.(
@@ -2670,9 +2639,6 @@
     hideDemoCanvasWire(ui.wire);
     await wait(180);
 
-    // The connection commit rerenders graph nodes. The original `output` /
-    // `input` variables now point at old DOM sockets, so resolve the live ports
-    // again before any further animated drag.
     const livePairAfterConnection =
       graphDemoSocketPair(true);
 
@@ -2692,11 +2658,6 @@
     const liveOutputPoint =
       centerOf(liveOutput);
 
-    // 4) OUTPUT -> empty graph space.
-    //
-    // Use the REAL graph interaction here. node_graph.js will create the
-    // automatic Display Value monitor itself. The assistant no longer fakes
-    // this with a floating ghost.
     const viewport =
       document.querySelector(
         ".rml-graph-viewport"
@@ -2724,8 +2685,6 @@
       liveOutputPoint
     );
 
-    // Re-evaluate at the last possible moment. The tour card, viewport and
-    // nodes may have moved since this Step started.
     outputDropPoint =
       graphDemoSafeEmptyDropPoint(
         viewport,
@@ -2770,8 +2729,6 @@
       return;
     }
 
-    // Re-resolve the original input because creating the real monitor rerenders
-    // the graph DOM.
     const refreshedPairAfterDisplay =
       graphDemoSocketPair(true);
 
@@ -2791,11 +2748,6 @@
     const refreshedInputPoint =
       centerOf(refreshedInput);
 
-    // 5) VALUE INPUT -> empty graph space.
-    //
-    // Again use the actual graph drop handler so the real safe typed source
-    // (for this bool demo: Boolean Constant) appears exactly as it does outside
-    // the assistant.
     let inputDropPoint =
       graphDemoSafeEmptyDropPoint(
         viewport,
@@ -2830,8 +2782,6 @@
         runId,
         {
           pointerId: 9115,
-          // For this Step-9 bool example the automatic safe source is a
-          // Boolean Constant. Keep the lookup strict so failures are visible.
           expectedTitle:
             /^Boolean Constant$/i,
           label:
@@ -2980,8 +2930,6 @@
 
     const flipPoint = centerOf(flip);
 
-    // IMPORTANT: no artificial INPUT/OUTPUT labels are created here.
-    // Highlight the actual rendered port rows, including their real names.
     clearRealPortGlows();
     setRealPortGlow(beforeInput, true);
     setRealPortGlow(beforeOutput, true);
@@ -3009,8 +2957,6 @@
 
     await wait(180);
     await clickMouse(runId);
-
-    // Remove the old-row highlight immediately before the graph rerenders.
     clearRealPortGlows();
     flip.click();
 
@@ -3044,7 +2990,6 @@
 
     if (!afterInput || !afterOutput) return;
 
-    // Glow the NEW REAL DOM rows at their actual opposite-side positions.
     setRealPortGlow(afterInput, true);
     setRealPortGlow(afterOutput, true);
 
@@ -3164,12 +3109,6 @@
   }
 
   async function runGraphRouteDemo(runId) {
-    // EXACT Step-10 sequence:
-    //   A) reuse the REAL Boolean -> NOT wire committed by Step 9;
-    //   B) create/reuse ONE second NOT node;
-    //   C) visibly drag that node's INPUT onto the existing REAL wire;
-    //   D) let node_graph.js create the REAL junction/branch;
-    //   E) visibly drag a REAL wire segment so node_graph.js creates a REAL bend.
     const viewport = document.querySelector(".rml-graph-viewport");
     if (!viewport || runId !== demoRunId) return;
 
@@ -3209,7 +3148,6 @@
       return;
     }
 
-    // Never create another demo node merely because Step 10 is revisited.
     let branchNode = document.querySelector('.rml-graph-node[data-rml-tour-step10-branch="true"]');
     if (!branchNode) {
       const paletteNot = document.querySelector('[data-graph-operator="logic.not"]');
@@ -3230,9 +3168,6 @@
     }
 
     const vr = viewport.getBoundingClientRect();
-
-    // Keep the Step-10 branch node deliberately well separated from the first
-    // NOT node. This leaves the branch, junction and later bend fully visible.
     const primaryNot = [...document.querySelectorAll(".rml-graph-node")].find(
       node => node !== branchNode && /^NOT$/i.test(graphDemoNodeTitle(node))
     );
@@ -3259,7 +3194,6 @@
     await nativeGraphNodeDrag(branchNode, desiredBranchCenter, 560, runId);
     if (runId !== demoRunId) return;
 
-    // Re-query after the real node drag because the graph may have rerendered.
     const branchId = branchNode.dataset.graphNodeId;
     branchNode = document.querySelector(`.rml-graph-node[data-graph-node-id="${CSS.escape(branchId)}"]`) || branchNode;
     branchNode.dataset.rmlTourStep10Branch = "true";
@@ -3269,20 +3203,12 @@
     parentHit = realHits()[0] || parentHit;
     const junctionTarget = graphSvgPathPoint(parentHit, .52);
     const inputPoint = centerOf(branchInput);
-
-    // Make the gesture unmissable: draw the same solid type-colored preview that
-    // a real connection drag shows, while the REAL synthetic pointer drag runs.
     const previewKey = ui.wire || ui.wireSecondary || ui.wireTertiary;
     const previewColor = getComputedStyle(branchInput).getPropertyValue("--port-color").trim() || "#6ce89b";
     showDemoLabel("Drag this INPUT onto the existing line → junction", inputPoint);
     await moveMouse(inputPoint, 300, runId);
     if (runId !== demoRunId) return;
 
-    // Start the REAL graph interaction on the socket.
-    //
-    // node_graph.js normally renders its own dashed .rml-graph-wire-preview
-    // during this pointer drag. Step 11 already draws the solid assistant wire,
-    // so hide only that temporary native preview to avoid showing two wires.
     suppressNativeGraphWirePreview(true);
 
     const pointerId = 9112;
@@ -3306,13 +3232,6 @@
       ui.mouse?.style.setProperty("--mouse-y", `${point.y}px`);
       ui.mouse?.style.setProperty("--mouse-duration", "0ms");
       if (previewKey) {
-        // Draw the assistant preview in the SAME direction as the real socket drag:
-        // from the branch input towards the moving mouse pointer.
-        //
-        // IMPORTANT: Never draw a near-zero-length Bezier. drawDemoCanvasWires()
-        // intentionally uses a minimum horizontal control distance, which turns a
-        // collapsed path into the short horizontal "crossbar" that was visible
-        // right before the junction was reached.
         const previewDistance = Math.hypot(
           point.x - inputPoint.x,
           point.y - inputPoint.y
@@ -3349,7 +3268,6 @@
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     if (runId !== demoRunId) return;
 
-    // A REAL branch creates a junction handle. Require it instead of pretending success.
     const junctions = [...document.querySelectorAll(".rml-graph-wire-point")].filter(graphDemoVisible);
     const junction = junctions.find(point => {
       const r = point.getBoundingClientRect();
@@ -3364,8 +3282,6 @@
     showDemoLabel("REAL junction / crossing created", centerOf(junction));
     await wait(520);
 
-    // Bend a REAL segment. Use an actual point ON the SVG path for pointerdown;
-    // using the path element's bounding-box center is not guaranteed to hit the line.
     const segment = realHits().find(hit => hit.dataset.connectionId === parentHit.dataset.connectionId) || realHits()[0];
     if (!segment) graphDemoError("Routing step could not find a real wire segment to bend.");
     const segmentStart = graphSvgPathPoint(segment, .68);
@@ -3460,6 +3376,25 @@
     );
   }
 
+  function releaseTourScrollModifier() {
+    document.dispatchEvent(
+      new KeyboardEvent(
+        "keyup",
+        {
+          key: "Control",
+          code: "ControlLeft",
+          bubbles: true,
+          cancelable: true
+        }
+      )
+    );
+
+    window.RMLTypedNodeGraphScrollLayers
+      ?.commit?.();
+    window.RMLUniversalScrollLayers
+      ?.commit?.();
+  }
+
   async function wheelBurst(
     target,
     options,
@@ -3493,6 +3428,29 @@
     article.classList.add("rml-setup-scroll-demo-node");
     body.classList.add("rml-setup-scroll-demo-body");
 
+    let inner = content.querySelector(".rml-setup-node-inner-scroll");
+    if (!inner) {
+      inner = document.createElement("div");
+      inner.className = "rml-setup-node-inner-scroll";
+      inner.setAttribute("aria-label", "Nested inner scroll area");
+      inner.setAttribute("data-rml-scroll-layer", "auto");
+      inner.setAttribute("data-rml-scroll-layer-key", "tour-dynamic-inner-layer");
+      inner.setAttribute("data-scroll-label", "Tour · Dynamically rendered inner layer");
+
+      const heading = document.createElement("strong");
+      heading.textContent = "Nested scrollable element";
+      const rows = document.createElement("div");
+
+      for (let index = 1; index <= 12; index += 1) {
+        const row = document.createElement("span");
+        row.textContent = `Nested value ${index}`;
+        rows.appendChild(row);
+      }
+
+      inner.append(heading, rows);
+      content.prepend(inner);
+    }
+
     let filler = content.querySelector(".rml-setup-node-scroll-filler");
     if (!filler) {
       filler = document.createElement("div");
@@ -3508,11 +3466,23 @@
     body.style.overflow = "auto";
     body.scrollTop = 0;
     body.scrollLeft = 0;
-    return { article, body, filler };
+    inner.scrollTop = 0;
+    inner.scrollLeft = 0;
+    window.RMLTypedNodeGraphScrollLayers
+      ?.clear?.();
+    window.RMLUniversalScrollLayers
+      ?.clear?.();
+
+    return { article, body, content, inner, filler };
   }
 
   function cleanupStartNodeScrollDemo(demo) {
     if (!demo) return;
+    window.RMLTypedNodeGraphScrollLayers
+      ?.clear?.();
+    window.RMLUniversalScrollLayers
+      ?.clear?.();
+    demo.inner?.remove();
     demo.filler?.remove();
     demo.article?.classList.remove("rml-setup-scroll-demo-node");
     demo.body?.classList.remove("rml-setup-scroll-demo-body");
@@ -3535,41 +3505,345 @@
       y: rect.top + rect.height * .76
     };
 
+    const globalForeignSurface =
+      [
+        document.querySelector(".inspector"),
+        document.querySelector(".rml-graph-toolbar"),
+        document.querySelector(".code-panel pre"),
+        viewport
+      ].find(surface =>
+        surface &&
+        graphDemoVisible(surface)
+      ) ||
+      viewport;
+    const globalForeignPoint =
+      centerOf(
+        globalForeignSurface,
+        .5,
+        .42
+      );
+
     try {
-      if (scrollDemo?.body) {
-        const nodePoint = centerOf(scrollDemo.body, .55, .42);
-        await moveMouse(nodePoint, 600, runId);
+      if (scrollDemo?.body && scrollDemo?.inner) {
+        const innerPoint = centerOf(scrollDemo.inner, .52, .55);
+        await moveMouse(innerPoint, 520, runId);
         if (runId !== demoRunId) return;
 
         elements().mouse?.classList.add("scrolling");
         hideKeys();
-        showDemoLabel("Wheel INSIDE the Start node → scroll its own contents", nodePoint);
-        await wheelBurst(scrollDemo.body, { deltaY: 42 }, 9, 105, runId);
+        showDemoLabel(
+          "Ordinary Wheel starts on the innermost scrollable area",
+          innerPoint
+        );
+        await wheelBurst(scrollDemo.inner, { deltaY: 38 }, 6, 82, runId);
+        await wait(300);
+
+        if (runId !== demoRunId) return;
+        showKeys(["Ctrl"], innerPoint);
+        showDemoLabel(
+          "Hold Ctrl + Wheel ↓ → preview the next OUTER level",
+          innerPoint
+        );
+        dispatchTourWheel(scrollDemo.inner, { deltaY: 120, ctrlKey: true });
+        await wait(620);
+
+        if (runId !== demoRunId) return;
+        showDemoLabel(
+          "Release Ctrl → the glowing Node body becomes selected",
+          innerPoint
+        );
+        releaseTourScrollModifier();
+        hideKeys();
         await wait(420);
 
         if (runId !== demoRunId) return;
-        showKeys(["Shift"], nodePoint);
+
+        await moveMouse(
+          globalForeignPoint,
+          520,
+          runId
+        );
+
+        if (runId !== demoRunId) return;
+
+        showDemoLabel(
+          "Mouse is elsewhere — Wheel STILL scrolls only the locked Node body",
+          globalForeignPoint
+        );
+        await wheelBurst(
+          globalForeignSurface,
+          { deltaY: 46 },
+          6,
+          88,
+          runId
+        );
+        pulseAt(
+          scrollDemo.body,
+          "rml-setup-demo-drop"
+        );
+        await wait(360);
+
+        if (runId !== demoRunId) return;
+        showKeys(["Shift"], globalForeignPoint);
         elements().mouse?.classList.add("horizontal-wheel");
-        showDemoLabel("Shift + Wheel INSIDE node → horizontal node scroll", nodePoint);
-        await wheelBurst(scrollDemo.body, { deltaY: 42, shiftKey: true }, 9, 105, runId);
-        await wait(420);
+        showDemoLabel(
+          "Shift + Wheel here still scrolls that same locked Node body horizontally",
+          globalForeignPoint
+        );
+        await wheelBurst(
+          globalForeignSurface,
+          { deltaY: 48, shiftKey: true },
+          6,
+          88,
+          runId
+        );
+        await wait(320);
         elements().mouse?.classList.remove("horizontal-wheel");
 
         if (runId !== demoRunId) return;
-        showKeys(["Ctrl"], nodePoint);
-        showDemoLabel("Ctrl + Wheel over node → bypass node scrollbar and pan ROOT", nodePoint);
-        await wheelBurst(scrollDemo.body, { deltaY: 34, ctrlKey: true }, 7, 110, runId);
-        await wait(180);
-        await wheelBurst(scrollDemo.body, { deltaY: -34, ctrlKey: true }, 7, 60, runId);
-        elements().mouse?.classList.remove("scrolling");
+        showKeys(["Ctrl"], globalForeignPoint);
+        showDemoLabel(
+          "Ctrl + Wheel here continues the SAME frozen hierarchy → Graph ROOT",
+          globalForeignPoint
+        );
+        dispatchTourWheel(
+          globalForeignSurface,
+          {
+            deltaY: 120,
+            ctrlKey: true
+          }
+        );
+        await wait(620);
+
+        if (runId !== demoRunId) return;
+        showDemoLabel(
+          "Release Ctrl → Graph ROOT is globally locked",
+          globalForeignPoint
+        );
+        releaseTourScrollModifier();
         hideKeys();
+        await wait(420);
+
+        if (runId !== demoRunId) return;
+        showDemoLabel(
+          "Pointer stays outside — Wheel still pans only the locked Graph ROOT",
+          globalForeignPoint
+        );
+        await wheelBurst(
+          globalForeignSurface,
+          { deltaY: 38 },
+          5,
+          90,
+          runId
+        );
+        await wait(180);
+        await wheelBurst(
+          globalForeignSurface,
+          { deltaY: -30 },
+          3,
+          70,
+          runId
+        );
+        await wait(300);
+
+        if (runId !== demoRunId) return;
+        showKeys(["Ctrl"], globalForeignPoint);
+        showDemoLabel(
+          "Ctrl + Wheel remains global → final outer level <html>",
+          globalForeignPoint
+        );
+
+        for (
+          let attempt = 0;
+          attempt < 3 &&
+          runId === demoRunId;
+          attempt += 1
+        ) {
+          dispatchTourWheel(
+            globalForeignSurface,
+            {
+              deltaY: 120,
+              ctrlKey: true
+            }
+          );
+
+          await wait(230);
+
+          const preview =
+            window.RMLTypedNodeGraphScrollLayers
+              ?.getState?.()
+              ?.preview ||
+            "";
+
+          if (
+            /<html>|Page ROOT/i.test(
+              preview
+            )
+          ) {
+            break;
+          }
+        }
+
+        await wait(420);
+
+        if (runId !== demoRunId) return;
+        showDemoLabel(
+          "Release Ctrl → <html> is globally locked",
+          globalForeignPoint
+        );
+        releaseTourScrollModifier();
+        hideKeys();
+        await wait(420);
+
+        if (runId !== demoRunId) return;
+
+        const pageScroller =
+          document.scrollingElement ||
+          document.documentElement;
+        const pageStart = {
+          left: pageScroller.scrollLeft,
+          top: pageScroller.scrollTop
+        };
+
+        showDemoLabel(
+          "Wheel over the foreign surface still targets only <html>",
+          globalForeignPoint
+        );
+
+        await wheelBurst(
+          globalForeignSurface,
+          { deltaY: 36 },
+          4,
+          82,
+          runId
+        );
+        await wait(260);
+
+        const pageMoved =
+          Math.abs(
+            pageScroller.scrollTop -
+            pageStart.top
+          ) > .5 ||
+          Math.abs(
+            pageScroller.scrollLeft -
+            pageStart.left
+          ) > .5;
+
+        showDemoLabel(
+          pageMoved
+            ? "<html> moved the complete document page"
+            : "<html> is selected but currently empty / already at its edge",
+          globalForeignPoint
+        );
+
+        pageScroller.scrollLeft =
+          pageStart.left;
+        pageScroller.scrollTop =
+          pageStart.top;
+
+        await wait(460);
+
+        if (runId !== demoRunId) return;
+
+        elements().mouse?.classList.remove(
+          "scrolling",
+          "horizontal-wheel"
+        );
+        hideKeys();
+
+        showDemoLabel(
+          "Only one normal click/tap releases the global override",
+          globalForeignPoint
+        );
+
+        await moveMouse(
+          globalForeignPoint,
+          380,
+          runId
+        );
+
+        if (runId !== demoRunId) return;
+
+        await clickMouse(runId);
+
+        globalForeignSurface.dispatchEvent(
+          new MouseEvent(
+            "click",
+            {
+              bubbles: true,
+              cancelable: true,
+              button: 0,
+              clientX:
+                globalForeignPoint.x,
+              clientY:
+                globalForeignPoint.y,
+              view: window
+            }
+          )
+        );
+
+        await wait(280);
+
+        const graphState =
+          window.RMLTypedNodeGraphScrollLayers
+            ?.getState?.();
+        const universalState =
+          window.RMLUniversalScrollLayers
+            ?.getState?.();
+
+        if (
+          graphState?.selected ||
+          graphState?.cycling
+        ) {
+          window.RMLTypedNodeGraphScrollLayers
+            ?.clear?.();
+        }
+
+        if (
+          universalState?.selected ||
+          universalState?.cycling
+        ) {
+          window.RMLUniversalScrollLayers
+            ?.clear?.();
+        }
+
+        showDemoLabel(
+          "Override stopped — local hover-based scrolling is active again",
+          globalForeignPoint
+        );
+        pulseAt(
+          scrollDemo.inner,
+          "rml-setup-demo-drop"
+        );
+        await wait(520);
+
+        if (runId !== demoRunId) return;
+
+        scrollDemo.inner.scrollTop = 0;
+        elements().mouse?.classList.add(
+          "scrolling"
+        );
+        showDemoLabel(
+          "No fixed list: ordinary Wheel resolves the current innermost dynamic layer again",
+          innerPoint
+        );
+        await wheelBurst(
+          scrollDemo.inner,
+          { deltaY: 36 },
+          4,
+          82,
+          runId
+        );
+        await wait(330);
+        elements().mouse?.classList.remove(
+          "scrolling"
+        );
+        hideKeys();
+        await wait(280);
       }
 
       if (runId !== demoRunId) return;
 
-      // Demonstrate REAL ROOT panning, not just a cosmetic mouse movement.
-      // Use a large diagonal displacement so the movement of nodes + wires is
-      // unmistakable before Center Graph restores the overview.
       const rootPanTarget = {
         x: Math.max(
           rect.left + 72,
@@ -3603,10 +3877,6 @@
         /Center Graph/i.test(button.textContent || "")
       );
       if (centerButton && runId === demoRunId) {
-        // Temporarily move the tour's actual spotlight cutout onto Center Graph.
-        // A z-index/glow alone cannot remove the translucent shade because the
-        // assistant uses four real overlay panes around the current target.
-        // Recomputing those panes around the button creates a genuine clear hole.
         positionShades(centerButton);
         setTourControlHighlight(centerButton, true);
         pulseAt(centerButton);
@@ -3628,9 +3898,6 @@
         await wait(420);
 
         setTourControlHighlight(centerButton, false);
-
-        // Restore the normal spotlight for this tour step after the short
-        // Center Graph demonstration.
         if (runId === demoRunId) {
           positionShades(
             currentTarget ||
@@ -3718,10 +3985,6 @@
       await wait(pause);
       if (runId !== demoRunId) return;
 
-      // Every visible tour animation repeats automatically.
-      // Mutating graph demos are reset to the exact state from when this step
-      // was entered before the next cycle, so repetitions cannot accumulate
-      // extra nodes, wires, junctions or bend points.
       if (mutatingGraphDemo) {
         restoreTourState(
           stepSnapshots.get(stepIndex)
@@ -3812,8 +4075,6 @@
     document.documentElement.classList.remove("rml-setup-tour-active");
     if (snapshot) window.RMLBuilderSetupBridge?.restore?.(snapshot);
 
-    // Restore the exact UI mode and viewport that existed before the tour.
-    // The assistant is a sandbox: closing it must leave no graph/outline or scroll trace.
     if (originalTourUiState) {
       const wantsGraph = originalTourUiState.graphMode === true;
       const graphActive = document.body.classList.contains("rml-node-graph-mode");
@@ -3853,8 +4114,6 @@
       clearTimeout(viewportRestartTimer);
       viewportRestartTimer = window.setTimeout(() => {
         if (ui.root.hidden) return;
-        // Aspect-ratio changes can invalidate graph DOM geometry. Restore the
-        // current step's clean entry state and rebuild the demonstration from it.
         showStep(stepIndex, { restoreEntry: true, captureEntry: false });
       }, 180);
     };
@@ -3882,8 +4141,6 @@
     const ui = elements();
     if (!ui.root || !window.RMLBuilderSetupBridge || !ui.root.hidden) return;
 
-    // Capture BEFORE changing mode or preparing demo data. This is the immutable
-    // sandbox baseline used whenever the assistant is closed/skipped/finished.
     firstRunSession = options.firstRun === true;
     snapshot = window.RMLBuilderSetupBridge.capture();
     originalTourUiState = {
@@ -3893,8 +4150,6 @@
     };
     stepSnapshots.clear();
 
-    // The tour itself starts in Configuration Outline, but this temporary mode
-    // change is now also undone when the sandbox closes.
     await ensureOutlineBeforeTour();
 
     window.RMLBuilderSetupBridge.prepareTourDemo?.();
