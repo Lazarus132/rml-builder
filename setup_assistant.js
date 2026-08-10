@@ -85,6 +85,29 @@
     drawDemoCanvasWires();
   }
 
+  function suppressNativeGraphWirePreview(suppressed) {
+    const styleId = "rml-setup-native-wire-preview-suppression";
+    let style = document.getElementById(styleId);
+
+    if (!style) {
+      style = document.createElement("style");
+      style.id = styleId;
+      style.textContent = `
+        html.rml-setup-hide-native-wire-preview .rml-graph-wire-preview {
+          display: none !important;
+          visibility: hidden !important;
+          opacity: 0 !important;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    document.documentElement.classList.toggle(
+      "rml-setup-hide-native-wire-preview",
+      suppressed === true
+    );
+  }
+
   function scheduleDemoCanvasWireAnimation() {
     if (demoWireCanvasFrame) return;
     const tick = () => {
@@ -117,6 +140,19 @@
       if (wire.dashed) {
         ctx.lineDashOffset = -((performance.now() / 18) % 23);
       }
+      const wireDistance = Math.hypot(
+        wire.to.x - wire.from.x,
+        wire.to.y - wire.from.y
+      );
+
+      // A Bezier with identical/nearly-identical endpoints plus the enforced
+      // minimum control distance becomes a visible horizontal bar. Treat such
+      // paths as empty instead.
+      if (wireDistance < 1.5) {
+        ctx.restore();
+        continue;
+      }
+
       ctx.beginPath();
       ctx.moveTo(wire.from.x, wire.from.y);
       if (wire.kind === "quadratic" && wire.control) {
@@ -483,6 +519,7 @@
     }
 
     clearDemoCanvasWires();
+    suppressNativeGraphWirePreview(false);
 
     if (ui.crossing) {
       ui.crossing.hidden = true;
@@ -2185,17 +2222,17 @@
     // a real connection drag shows, while the REAL synthetic pointer drag runs.
     const previewKey = ui.wire || ui.wireSecondary || ui.wireTertiary;
     const previewColor = getComputedStyle(branchInput).getPropertyValue("--port-color").trim() || "#6ce89b";
-    if (previewKey) {
-      setDemoCanvasWire(previewKey, junctionTarget, junctionTarget, 0, {
-        color: previewColor, dashed: false, width: 5, visible: true
-      });
-    }
-
     showDemoLabel("Drag this INPUT onto the existing line → junction", inputPoint);
     await moveMouse(inputPoint, 300, runId);
     if (runId !== demoRunId) return;
 
     // Start the REAL graph interaction on the socket.
+    //
+    // node_graph.js normally renders its own dashed .rml-graph-wire-preview
+    // during this pointer drag. Step 11 already draws the solid assistant wire,
+    // so hide only that temporary native preview to avoid showing two wires.
+    suppressNativeGraphWirePreview(true);
+
     const pointerId = 9112;
     branchInput.dispatchEvent(new PointerEvent("pointerdown", {
       bubbles: true, cancelable: true, pointerId, pointerType: "mouse",
@@ -2217,9 +2254,28 @@
       ui.mouse?.style.setProperty("--mouse-y", `${point.y}px`);
       ui.mouse?.style.setProperty("--mouse-duration", "0ms");
       if (previewKey) {
-        setDemoCanvasWire(previewKey, point, junctionTarget, 0, {
-          color: previewColor, dashed: false, width: 5, visible: true
-        });
+        // Draw the assistant preview in the SAME direction as the real socket drag:
+        // from the branch input towards the moving mouse pointer.
+        //
+        // IMPORTANT: Never draw a near-zero-length Bezier. drawDemoCanvasWires()
+        // intentionally uses a minimum horizontal control distance, which turns a
+        // collapsed path into the short horizontal "crossbar" that was visible
+        // right before the junction was reached.
+        const previewDistance = Math.hypot(
+          point.x - inputPoint.x,
+          point.y - inputPoint.y
+        );
+
+        if (previewDistance >= 10) {
+          setDemoCanvasWire(previewKey, inputPoint, point, 0, {
+            color: previewColor,
+            dashed: false,
+            width: 5,
+            visible: true
+          });
+        } else {
+          hideDemoCanvasWire(previewKey);
+        }
       }
       document.dispatchEvent(new PointerEvent("pointermove", {
         bubbles: true, cancelable: true, pointerId, pointerType: "mouse",
@@ -2236,6 +2292,7 @@
       clientX: junctionTarget.x, clientY: junctionTarget.y
     }));
     ui.mouse?.classList.remove("pressed");
+    suppressNativeGraphWirePreview(false);
     if (previewKey) hideDemoCanvasWire(previewKey);
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     if (runId !== demoRunId) return;
