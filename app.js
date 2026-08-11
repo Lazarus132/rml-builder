@@ -17729,8 +17729,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "help_template.html?v=8",
-    "help_template.js?v=8",
+    "help_template.html?v=11",
+    "help_template.js?v=11",
     "help-template",
     "RMLHelpTemplateMarkup"
   )
@@ -17823,7 +17823,7 @@ function ensureSetupAssistantLoaded(firstRun = false) {
 
   setupAssistantLoadPromise = new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = new URL("setup_assistant.js?v=17", APP_SCRIPT_BASE_URL).href;
+    script.src = new URL("setup_assistant.js?v=20", APP_SCRIPT_BASE_URL).href;
     script.async = true;
     script.dataset.rmlSetupAssistant = "true";
     script.addEventListener("load", () => resolve(true), { once: true });
@@ -18658,6 +18658,7 @@ function installUniversalScrollLayerSelector() {
   let cycleDirection = 0;
   let lastCycleAt = 0;
   let visualFrame = 0;
+  let visualFollowFrame = 0;
   let indicatorTimer = 0;
   let outline = null;
   let indicator = null;
@@ -18776,6 +18777,7 @@ function installUniversalScrollLayerSelector() {
   const scrollLayerProgrammatic =
     element =>
       [
+        "auto",
         "always",
         "true",
         "programmatic"
@@ -18800,7 +18802,7 @@ function installUniversalScrollLayerSelector() {
       return {
         x:
           element.scrollWidth >
-            element.clientWidth + 1 &&
+            element.clientWidth &&
           (
             scrollableOverflow(
               style.overflowX
@@ -18809,7 +18811,7 @@ function installUniversalScrollLayerSelector() {
           ),
         y:
           element.scrollHeight >
-            element.clientHeight + 1 &&
+            element.clientHeight &&
           (
             scrollableOverflow(
               style.overflowY
@@ -18838,6 +18840,83 @@ function installUniversalScrollLayerSelector() {
       style.display !== "none" &&
       style.visibility !== "hidden"
     );
+  };
+
+  const elementHitTestVisibleAt = (
+    element,
+    clientX,
+    clientY
+  ) => {
+    if (!(element instanceof HTMLElement)) {
+      return false;
+    }
+
+    const viewport = visibleViewportRectangle();
+
+    if (
+      clientX < viewport.left ||
+      clientX >= viewport.right ||
+      clientY < viewport.top ||
+      clientY >= viewport.bottom
+    ) {
+      return false;
+    }
+
+    const stack =
+      typeof document.elementsFromPoint === "function"
+        ? document.elementsFromPoint(clientX, clientY)
+        : [document.elementFromPoint(clientX, clientY)].filter(Boolean);
+
+    return stack.some(hit =>
+      hit === element ||
+      element.contains(hit)
+    );
+  };
+
+  const elementHasExposedPixels = (
+    element,
+    rectangle = null
+  ) => {
+    if (!(element instanceof HTMLElement)) {
+      return false;
+    }
+
+    const rect = rectangle || element.getBoundingClientRect();
+    const viewport = visibleViewportRectangle();
+    const left = Math.max(viewport.left, rect.left);
+    const top = Math.max(viewport.top, rect.top);
+    const right = Math.min(viewport.right, rect.right);
+    const bottom = Math.min(viewport.bottom, rect.bottom);
+
+    if (right - left < 1 || bottom - top < 1) {
+      return false;
+    }
+
+    const epsilon = 1;
+    const xs = [
+      left + epsilon,
+      left + (right - left) * 0.25,
+      left + (right - left) * 0.5,
+      left + (right - left) * 0.75,
+      right - epsilon
+    ];
+    const ys = [
+      top + epsilon,
+      top + (bottom - top) * 0.25,
+      top + (bottom - top) * 0.5,
+      top + (bottom - top) * 0.75,
+      bottom - epsilon
+    ];
+
+    for (const y of ys) {
+      for (const x of xs) {
+        if (elementHitTestVisibleAt(element, x, y)) {
+          return true;
+        }
+      }
+    }
+
+    return false;
   };
 
   const elementCanScroll = element => {
@@ -19237,8 +19316,12 @@ function installUniversalScrollLayerSelector() {
         return true;
       }
 
-      return elementCanScroll(
-        element
+      return (
+        elementCanScroll(element) &&
+        elementHasExposedPixels(
+          element,
+          clippedRectangle(element, descriptor)
+        )
       );
     };
 
@@ -19295,6 +19378,55 @@ function installUniversalScrollLayerSelector() {
       return result;
     };
 
+  const viewportVisibleScrollElements = () => {
+    const values = [];
+
+    for (const element of document.querySelectorAll("*")) {
+      if (
+        !(element instanceof HTMLElement) ||
+        element === htmlElement() ||
+        element === document.body ||
+        !elementCanScroll(element)
+      ) {
+        continue;
+      }
+
+      const descriptor = descriptorFor(element);
+      if (!descriptor) continue;
+
+      const clipped = clippedRectangle(element, descriptor);
+      const width = Math.max(0, clipped.right - clipped.left);
+      const height = Math.max(0, clipped.bottom - clipped.top);
+
+      if (
+        width < 1 ||
+        height < 1 ||
+        !elementHasExposedPixels(element, clipped)
+      ) {
+        continue;
+      }
+
+      const generatedCode = element.matches(".code-panel pre");
+
+      values.push({
+        element,
+        priority: generatedCode ? -1000 : 0,
+        visibleArea: Math.max(1, width * height),
+        top: clipped.top,
+        left: clipped.left
+      });
+    }
+
+    values.sort((left, right) =>
+      left.priority - right.priority ||
+      left.visibleArea - right.visibleArea ||
+      left.top - right.top ||
+      left.left - right.left
+    );
+
+    return values.map(value => value.element);
+  };
+
   const candidatesFor =
     (
       target,
@@ -19338,6 +19470,10 @@ function installUniversalScrollLayerSelector() {
         ) {
           add(current);
         }
+      }
+
+      for (const current of viewportVisibleScrollElements()) {
+        add(current);
       }
 
       const scrolling =
@@ -19459,36 +19595,6 @@ function installUniversalScrollLayerSelector() {
       );
     }
 
-    if (
-      !indicator?.isConnected
-    ) {
-      indicator =
-        document.createElement(
-          "div"
-        );
-      indicator.className =
-        "rml-scroll-layer-indicator";
-      indicator.hidden = true;
-      indicator.setAttribute(
-        "role",
-        "status"
-      );
-      indicator.setAttribute(
-        "aria-live",
-        "polite"
-      );
-      indicator.append(
-        document.createElement(
-          "strong"
-        ),
-        document.createElement(
-          "span"
-        )
-      );
-      document.body.appendChild(
-        indicator
-      );
-    }
   };
 
   const hideIndicator = (
@@ -19528,66 +19634,7 @@ function installUniversalScrollLayerSelector() {
     descriptor,
     options = {}
   ) => {
-    if (!descriptor) {
-      return;
-    }
-
-    ensureVisuals();
-
-    if (!indicator) {
-      return;
-    }
-
-    window.clearTimeout(
-      indicatorTimer
-    );
-    indicatorTimer = 0;
-
-    const heading =
-      indicator.querySelector(
-        ":scope > strong"
-      );
-    const copy =
-      indicator.querySelector(
-        ":scope > span"
-      );
-
-    if (!heading || !copy) {
-      return;
-    }
-
-    heading.textContent = mode;
-    copy.textContent = [
-      options.position || "",
-      descriptor.label
-    ]
-      .filter(Boolean)
-      .join(" · ");
-
-    indicator.dataset.mode =
-      options.variant ||
-      "selected";
-    indicator.hidden = false;
-
-    requestAnimationFrame(
-      () => {
-        indicator?.classList.add(
-          "visible"
-        );
-      }
-    );
-
-    if (
-      options.sticky !== true
-    ) {
-      indicatorTimer =
-        window.setTimeout(
-          () =>
-            hideIndicator(),
-          options.duration ||
-            1350
-        );
-    }
+    hideIndicator(true);
   };
 
   const clippedRectangle =
@@ -19733,7 +19780,13 @@ function installUniversalScrollLayerSelector() {
           "html-root" ||
         descriptor.kind ===
           "document-root" ||
-        visibleElement(element)
+        (
+          visibleElement(element) &&
+          elementHasExposedPixels(
+            element,
+            clippedRectangle(element, descriptor)
+          )
+        )
       );
 
     if (!renderable) {
@@ -19843,6 +19896,63 @@ function installUniversalScrollLayerSelector() {
         );
     };
 
+  const followVisualDuringViewportMotion =
+    descriptor => {
+      if (visualFollowFrame) {
+        cancelAnimationFrame(visualFollowFrame);
+        visualFollowFrame = 0;
+      }
+
+      const startedAt = performance.now();
+      let lastLeft = Number.NaN;
+      let lastTop = Number.NaN;
+      let stableFrames = 0;
+
+      const tick = () => {
+        visualFollowFrame = 0;
+
+        if (
+          !selection ||
+          !descriptor ||
+          selection.key !== descriptor.key
+        ) {
+          return;
+        }
+
+        positionVisual();
+
+        const element = resolveDescriptor(descriptor);
+        if (!element?.isConnected) {
+          return;
+        }
+
+        const rectangle = element.getBoundingClientRect();
+        const unchanged =
+          Number.isFinite(lastLeft) &&
+          Math.abs(rectangle.left - lastLeft) < 0.1 &&
+          Math.abs(rectangle.top - lastTop) < 0.1;
+
+        stableFrames = unchanged
+          ? stableFrames + 1
+          : 0;
+        lastLeft = rectangle.left;
+        lastTop = rectangle.top;
+
+        if (
+          stableFrames < 4 &&
+          performance.now() - startedAt < 1600
+        ) {
+          visualFollowFrame =
+            requestAnimationFrame(tick);
+        } else {
+          positionVisual();
+        }
+      };
+
+      visualFollowFrame =
+        requestAnimationFrame(tick);
+    };
+
   const clearSelection = (
     options = {}
   ) => {
@@ -19860,6 +19970,13 @@ function installUniversalScrollLayerSelector() {
       visualFrame = 0;
     }
 
+    if (visualFollowFrame) {
+      cancelAnimationFrame(
+        visualFollowFrame
+      );
+      visualFollowFrame = 0;
+    }
+
     if (outline) {
       outline.hidden = true;
     }
@@ -19869,6 +19986,38 @@ function installUniversalScrollLayerSelector() {
         true
     ) {
       hideIndicator(true);
+    }
+  };
+
+  const focusSelectionInViewport = descriptor => {
+    if (
+      !descriptor ||
+      descriptor.kind === "html-root" ||
+      descriptor.kind === "document-root"
+    ) {
+      return;
+    }
+
+    const element = resolveDescriptor(descriptor);
+    if (!element?.isConnected) return;
+
+    const viewport = visibleViewportRectangle();
+    const headerBottom = Math.max(
+      viewport.top,
+      document.querySelector(".topbar")?.getBoundingClientRect().bottom || viewport.top
+    );
+    const availableHeight = Math.max(1, viewport.bottom - headerBottom);
+    const rectangle = element.getBoundingClientRect();
+    const desiredTop = rectangle.height > availableHeight
+      ? headerBottom
+      : headerBottom + (availableHeight - rectangle.height) / 2;
+    const deltaY = rectangle.top - desiredTop;
+
+    if (Math.abs(deltaY) > 1) {
+      followVisualDuringViewportMotion(descriptor);
+      window.scrollBy({ top: deltaY, left: 0, behavior: "smooth" });
+    } else {
+      positionVisual();
     }
   };
 
@@ -19907,6 +20056,7 @@ function installUniversalScrollLayerSelector() {
         ? frozenChain
         : [candidate];
 
+    focusSelectionInViewport(selection);
     scheduleVisualRefresh();
 
     showIndicator(
@@ -19945,13 +20095,6 @@ function installUniversalScrollLayerSelector() {
         candidates =
           refreshCandidateChain(
             session.candidates
-          );
-      } else if (
-        selectionCandidates?.length
-      ) {
-        candidates =
-          refreshCandidateChain(
-            selectionCandidates
           );
       } else {
         candidates =
@@ -20310,6 +20453,56 @@ function installUniversalScrollLayerSelector() {
             ".rml-graph-viewport"
           )
         );
+      const modifierCycling =
+        event.ctrlKey ||
+        event.metaKey;
+
+      if (modifierCycling) {
+        if (session) {
+          cycleSelection(event);
+          return;
+        }
+
+        const graphViewport =
+          document.querySelector(
+            ".rml-graph-viewport"
+          );
+        const visibleViewport =
+          visibleViewportRectangle();
+        const graphRectangle =
+          graphViewport?.getBoundingClientRect();
+        const graphVisible =
+          Boolean(
+            graphRectangle &&
+            graphRectangle.right > visibleViewport.left &&
+            graphRectangle.left < visibleViewport.right &&
+            graphRectangle.bottom > visibleViewport.top &&
+            graphRectangle.top < visibleViewport.bottom
+          );
+
+        if (insideGraph || graphVisible) {
+          if (selection) {
+            clearSelection();
+          }
+          return;
+        }
+
+        if (graphState?.cycling) {
+          return;
+        }
+
+        if (
+          graphState?.selected ||
+          graphState?.globalOverride
+        ) {
+          window
+            .RMLTypedNodeGraphScrollLayers
+            ?.clear?.();
+        }
+
+        cycleSelection(event);
+        return;
+      }
 
       if (
         !universalOwnsWheel &&
@@ -20331,16 +20524,6 @@ function installUniversalScrollLayerSelector() {
           optionPointerDragActive
         )
       ) {
-        return;
-      }
-
-      if (
-        event.ctrlKey ||
-        event.metaKey
-      ) {
-        cycleSelection(
-          event
-        );
         return;
       }
 

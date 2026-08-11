@@ -2,8 +2,8 @@
   "use strict";
 
   const SCRIPT_BASE = document.currentScript?.src || window.location.href;
-  const TEMPLATE_URL = new URL("setup_template.html?v=9", SCRIPT_BASE).href;
-  const TEMPLATE_SCRIPT_URL = new URL("setup_template.js?v=9", SCRIPT_BASE).href;
+  const TEMPLATE_URL = new URL("setup_template.html?v=11", SCRIPT_BASE).href;
+  const TEMPLATE_SCRIPT_URL = new URL("setup_template.js?v=11", SCRIPT_BASE).href;
   let templatePromise = null;
   let snapshot = null;
   let stepSnapshots = new Map();
@@ -15,6 +15,18 @@
   let demoTimers = [];
   const DEMO_REPEAT_PAUSE_MS = 900;
   const DEMO_COMPLEX_REPEAT_PAUSE_MS = 1250;
+
+  const TOUR_SCROLL_TIMING = Object.freeze({
+    wheelInterval: 145,
+    layerStepPause: 390,
+    modifierLeadIn: 330,
+    modifierReleasePause: 380,
+    gestureLeadIn: 260,
+    gestureSettle: 420,
+    autoScrollInterval: 105,
+    returnScrollInterval: 105,
+    pageScrollDuration: 1050
+  });
   let viewportRestartTimer = 0;
 
   let demoWireCanvas = null;
@@ -262,9 +274,9 @@
     {
       target: ".rml-graph-viewport",
       mode: "graph",
-      title: "11. Navigate large graphs",
-      text: "The runtime graph and Configuration Outline can contain dynamically rendered nested scroll areas. Hold Ctrl (Command on macOS) and use the wheel to cycle through every currently rendered level—from the innermost area through Node/Section contents and Graph ROOT to the actual &lt;html&gt; page root. Releasing the modifier enables a GLOBAL scroll override: every later Wheel event scrolls only that locked level, even when the mouse is over another node, Properties, Generated Project Files or a dialog. Only a normal primary click/tap releases the override.",
-      hint: "Watch the hierarchy freeze, then see the selected Node body/Graph ROOT continue scrolling while the animated mouse moves onto a completely different surface. One click finally releases it.",
+      title: "11. Choose the scroll level",
+      text: "First use normal Wheel inside the real Node body, then hold Shift and use Wheel for its horizontal axis. The global layer override is demonstrated only after those ordinary gestures: Ctrl (Command on macOS) + Wheel moves through the <strong>currently visible</strong> real scroll hierarchy, releasing Ctrl locks the glowing level, and ordinary Wheel scrolls only that selected level. Off-screen layers and layers fully hidden behind a higher z-index surface (including the sticky header, dialogs or overlays) are excluded; a partially covered layer remains selectable through its visible area. After the locked <html> page moves to Generated Project Files, Ctrl is pressed again <strong>without any primary click</strong>: the selector recaptures only the newly visible, unobscured hierarchy under the pointer and switches directly to the code viewport. The same no-click live recapture is demonstrated again when returning to the graph and its scrollable Node body.",
+      hint: "Exact order: Node Wheel → Shift + Wheel → Ctrl-select only visible layers → Graph ROOT → Wheel → <html> → Wheel to Generated Project Files → Ctrl again WITHOUT CLICK → recapture the now-visible code viewport → Wheel → reverse through <html> → Ctrl again WITHOUT CLICK → Graph ROOT → visible Node body. Covered/off-screen layers are skipped.",
       demo: "graph-pan"
     },
     {
@@ -416,6 +428,10 @@
       if (!document.body.classList.contains("rml-node-graph-mode")) packButton?.click();
     } else if (wantsOutline && graphActive) {
       packButton?.click();
+    }
+
+    if (wantsGraph) {
+      ensureTourGraphSidebarsVisible();
     }
   }
 
@@ -1308,12 +1324,12 @@
           left: 0,
           behavior: "auto"
         });
-        await wait(120);
+        await wait(TOUR_SCROLL_TIMING.autoScrollInterval + 55);
         slots = verticalInsertionSlots(host);
         currentSlot = slots[Math.min(slotIndex, slots.length - 1)] || currentSlot;
         showLandingGuide(currentSlot, "Same insertion gap after scroll");
       }
-      await wait(180);
+      await wait(280);
     }
 
     for (let phase = 0; phase < 2 && runId === demoRunId; phase += 1) {
@@ -1327,7 +1343,7 @@
       showLandingGuide(currentSlot, "Previous insertion gap");
       showDemoLabel("Wheel ↑ → previous insertion gap", target);
       await moveMouse(target, 240, runId);
-      await wait(160);
+      await wait(260);
     }
 
     mouse?.classList.remove("scrolling", "pressed");
@@ -1346,9 +1362,6 @@
     if (!source || !targetLane) {
       return runOutlineRootDrag(runId);
     }
-
-    targetLane.scrollIntoView({ block: "center", inline: "nearest", behavior: "auto" });
-    await wait(120);
 
     const dropZone = targetLane.querySelector(":scope > .drop-zone") || targetLane;
     const nestedSlots = verticalInsertionSlots(dropZone);
@@ -1409,7 +1422,7 @@
         x: Math.min(window.innerWidth - 36, Math.max(36, point.x - 20)),
         y: point.y
       }, 300, runId);
-      await wait(200);
+      await wait(300);
     }
 
     if (runId === demoRunId) {
@@ -1423,7 +1436,7 @@
         x: Math.min(window.innerWidth - 36, Math.max(36, point.x + 20)),
         y: point.y
       }, 320, runId);
-      await wait(420);
+      await wait(520);
     }
 
     mouse?.classList.remove("pressed", "scrolling", "horizontal-wheel");
@@ -3428,36 +3441,14 @@
     article.classList.add("rml-setup-scroll-demo-node");
     body.classList.add("rml-setup-scroll-demo-body");
 
-    let inner = content.querySelector(".rml-setup-node-inner-scroll");
-    if (!inner) {
-      inner = document.createElement("div");
-      inner.className = "rml-setup-node-inner-scroll";
-      inner.setAttribute("aria-label", "Nested inner scroll area");
-      inner.setAttribute("data-rml-scroll-layer", "auto");
-      inner.setAttribute("data-rml-scroll-layer-key", "tour-dynamic-inner-layer");
-      inner.setAttribute("data-scroll-label", "Tour · Dynamically rendered inner layer");
-
-      const heading = document.createElement("strong");
-      heading.textContent = "Nested scrollable element";
-      const rows = document.createElement("div");
-
-      for (let index = 1; index <= 12; index += 1) {
-        const row = document.createElement("span");
-        row.textContent = `Nested value ${index}`;
-        rows.appendChild(row);
-      }
-
-      inner.append(heading, rows);
-      content.prepend(inner);
-    }
-
     let filler = content.querySelector(".rml-setup-node-scroll-filler");
     if (!filler) {
       filler = document.createElement("div");
       filler.className = "rml-setup-node-scroll-filler";
-      for (let index = 1; index <= 14; index += 1) {
+      filler.setAttribute("aria-hidden", "true");
+      for (let index = 1; index <= 16; index += 1) {
         const row = document.createElement("div");
-        row.innerHTML = `<span>Demo socket ${index}</span><b>${index % 2 ? "INPUT" : "OUTPUT"}</b>`;
+        row.innerHTML = `<span>Runtime port ${index}</span><b>${index % 2 ? "INPUT" : "OUTPUT"}</b>`;
         filler.appendChild(row);
       }
       content.appendChild(filler);
@@ -3466,23 +3457,16 @@
     body.style.overflow = "auto";
     body.scrollTop = 0;
     body.scrollLeft = 0;
-    inner.scrollTop = 0;
-    inner.scrollLeft = 0;
-    window.RMLTypedNodeGraphScrollLayers
-      ?.clear?.();
-    window.RMLUniversalScrollLayers
-      ?.clear?.();
+    window.RMLTypedNodeGraphScrollLayers?.clear?.();
+    window.RMLUniversalScrollLayers?.clear?.();
 
-    return { article, body, content, inner, filler };
+    return { article, body, content, filler };
   }
 
   function cleanupStartNodeScrollDemo(demo) {
     if (!demo) return;
-    window.RMLTypedNodeGraphScrollLayers
-      ?.clear?.();
-    window.RMLUniversalScrollLayers
-      ?.clear?.();
-    demo.inner?.remove();
+    window.RMLTypedNodeGraphScrollLayers?.clear?.();
+    window.RMLUniversalScrollLayers?.clear?.();
     demo.filler?.remove();
     demo.article?.classList.remove("rml-setup-scroll-demo-node");
     demo.body?.classList.remove("rml-setup-scroll-demo-body");
@@ -3493,421 +3477,938 @@
     }
   }
 
-  async function runGraphPanDemo(runId) {
-    const viewport = document.querySelector(".rml-graph-viewport");
-    if (!viewport) return;
+  function scrollLayerState() {
+    const graphState =
+      window.RMLTypedNodeGraphScrollLayers?.getState?.() || null;
+    const universalState =
+      window.RMLUniversalScrollLayers?.getState?.() || null;
 
-    const scrollDemo = prepareStartNodeScrollDemo();
-    await wait(100);
-    const rect = viewport.getBoundingClientRect();
-    const emptyPoint = {
-      x: rect.left + rect.width * .76,
-      y: rect.top + rect.height * .76
+    return {
+      graphState,
+      universalState,
+      preview:
+        graphState?.preview ||
+        universalState?.preview ||
+        "",
+      selected:
+        graphState?.selected ||
+        universalState?.selected ||
+        ""
     };
+  }
 
-    const globalForeignSurface =
-      [
-        document.querySelector(".inspector"),
-        document.querySelector(".rml-graph-toolbar"),
-        document.querySelector(".code-panel pre"),
-        viewport
-      ].find(surface =>
-        surface &&
-        graphDemoVisible(surface)
-      ) ||
-      viewport;
-    const globalForeignPoint =
-      centerOf(
-        globalForeignSurface,
-        .5,
-        .42
+  async function cycleTourScrollLayerUntil(
+    target,
+    matcher,
+    runId,
+    maxAttempts = 8,
+    deltaY = 150
+  ) {
+    for (
+      let attempt = 0;
+      attempt < maxAttempts &&
+      runId === demoRunId;
+      attempt += 1
+    ) {
+      dispatchTourWheel(
+        target,
+        {
+          deltaY,
+          ctrlKey: true
+        }
       );
 
-    try {
-      if (scrollDemo?.body && scrollDemo?.inner) {
-        const innerPoint = centerOf(scrollDemo.inner, .52, .55);
-        await moveMouse(innerPoint, 520, runId);
-        if (runId !== demoRunId) return;
+      await wait(TOUR_SCROLL_TIMING.layerStepPause);
 
-        elements().mouse?.classList.add("scrolling");
-        hideKeys();
-        showDemoLabel(
-          "Ordinary Wheel starts on the innermost scrollable area",
-          innerPoint
-        );
-        await wheelBurst(scrollDemo.inner, { deltaY: 38 }, 6, 82, runId);
-        await wait(300);
+      const label =
+        scrollLayerState().preview;
 
-        if (runId !== demoRunId) return;
-        showKeys(["Ctrl"], innerPoint);
-        showDemoLabel(
-          "Hold Ctrl + Wheel ↓ → preview the next OUTER level",
-          innerPoint
-        );
-        dispatchTourWheel(scrollDemo.inner, { deltaY: 120, ctrlKey: true });
-        await wait(620);
-
-        if (runId !== demoRunId) return;
-        showDemoLabel(
-          "Release Ctrl → the glowing Node body becomes selected",
-          innerPoint
-        );
-        releaseTourScrollModifier();
-        hideKeys();
-        await wait(420);
-
-        if (runId !== demoRunId) return;
-
-        await moveMouse(
-          globalForeignPoint,
-          520,
-          runId
-        );
-
-        if (runId !== demoRunId) return;
-
-        showDemoLabel(
-          "Mouse is elsewhere — Wheel STILL scrolls only the locked Node body",
-          globalForeignPoint
-        );
-        await wheelBurst(
-          globalForeignSurface,
-          { deltaY: 46 },
-          6,
-          88,
-          runId
-        );
-        pulseAt(
-          scrollDemo.body,
-          "rml-setup-demo-drop"
-        );
-        await wait(360);
-
-        if (runId !== demoRunId) return;
-        showKeys(["Shift"], globalForeignPoint);
-        elements().mouse?.classList.add("horizontal-wheel");
-        showDemoLabel(
-          "Shift + Wheel here still scrolls that same locked Node body horizontally",
-          globalForeignPoint
-        );
-        await wheelBurst(
-          globalForeignSurface,
-          { deltaY: 48, shiftKey: true },
-          6,
-          88,
-          runId
-        );
-        await wait(320);
-        elements().mouse?.classList.remove("horizontal-wheel");
-
-        if (runId !== demoRunId) return;
-        showKeys(["Ctrl"], globalForeignPoint);
-        showDemoLabel(
-          "Ctrl + Wheel here continues the SAME frozen hierarchy → Graph ROOT",
-          globalForeignPoint
-        );
-        dispatchTourWheel(
-          globalForeignSurface,
-          {
-            deltaY: 120,
-            ctrlKey: true
-          }
-        );
-        await wait(620);
-
-        if (runId !== demoRunId) return;
-        showDemoLabel(
-          "Release Ctrl → Graph ROOT is globally locked",
-          globalForeignPoint
-        );
-        releaseTourScrollModifier();
-        hideKeys();
-        await wait(420);
-
-        if (runId !== demoRunId) return;
-        showDemoLabel(
-          "Pointer stays outside — Wheel still pans only the locked Graph ROOT",
-          globalForeignPoint
-        );
-        await wheelBurst(
-          globalForeignSurface,
-          { deltaY: 38 },
-          5,
-          90,
-          runId
-        );
-        await wait(180);
-        await wheelBurst(
-          globalForeignSurface,
-          { deltaY: -30 },
-          3,
-          70,
-          runId
-        );
-        await wait(300);
-
-        if (runId !== demoRunId) return;
-        showKeys(["Ctrl"], globalForeignPoint);
-        showDemoLabel(
-          "Ctrl + Wheel remains global → final outer level <html>",
-          globalForeignPoint
-        );
-
-        for (
-          let attempt = 0;
-          attempt < 3 &&
-          runId === demoRunId;
-          attempt += 1
-        ) {
-          dispatchTourWheel(
-            globalForeignSurface,
-            {
-              deltaY: 120,
-              ctrlKey: true
-            }
-          );
-
-          await wait(230);
-
-          const preview =
-            window.RMLTypedNodeGraphScrollLayers
-              ?.getState?.()
-              ?.preview ||
-            "";
-
-          if (
-            /<html>|Page ROOT/i.test(
-              preview
-            )
-          ) {
-            break;
-          }
-        }
-
-        await wait(420);
-
-        if (runId !== demoRunId) return;
-        showDemoLabel(
-          "Release Ctrl → <html> is globally locked",
-          globalForeignPoint
-        );
-        releaseTourScrollModifier();
-        hideKeys();
-        await wait(420);
-
-        if (runId !== demoRunId) return;
-
-        const pageScroller =
-          document.scrollingElement ||
-          document.documentElement;
-        const pageStart = {
-          left: pageScroller.scrollLeft,
-          top: pageScroller.scrollTop
-        };
-
-        showDemoLabel(
-          "Wheel over the foreign surface still targets only <html>",
-          globalForeignPoint
-        );
-
-        await wheelBurst(
-          globalForeignSurface,
-          { deltaY: 36 },
-          4,
-          82,
-          runId
-        );
-        await wait(260);
-
-        const pageMoved =
-          Math.abs(
-            pageScroller.scrollTop -
-            pageStart.top
-          ) > .5 ||
-          Math.abs(
-            pageScroller.scrollLeft -
-            pageStart.left
-          ) > .5;
-
-        showDemoLabel(
-          pageMoved
-            ? "<html> moved the complete document page"
-            : "<html> is selected but currently empty / already at its edge",
-          globalForeignPoint
-        );
-
-        pageScroller.scrollLeft =
-          pageStart.left;
-        pageScroller.scrollTop =
-          pageStart.top;
-
-        await wait(460);
-
-        if (runId !== demoRunId) return;
-
-        elements().mouse?.classList.remove(
-          "scrolling",
-          "horizontal-wheel"
-        );
-        hideKeys();
-
-        showDemoLabel(
-          "Only one normal click/tap releases the global override",
-          globalForeignPoint
-        );
-
-        await moveMouse(
-          globalForeignPoint,
-          380,
-          runId
-        );
-
-        if (runId !== demoRunId) return;
-
-        await clickMouse(runId);
-
-        globalForeignSurface.dispatchEvent(
-          new MouseEvent(
-            "click",
-            {
-              bubbles: true,
-              cancelable: true,
-              button: 0,
-              clientX:
-                globalForeignPoint.x,
-              clientY:
-                globalForeignPoint.y,
-              view: window
-            }
-          )
-        );
-
-        await wait(280);
-
-        const graphState =
-          window.RMLTypedNodeGraphScrollLayers
-            ?.getState?.();
-        const universalState =
-          window.RMLUniversalScrollLayers
-            ?.getState?.();
-
-        if (
-          graphState?.selected ||
-          graphState?.cycling
-        ) {
-          window.RMLTypedNodeGraphScrollLayers
-            ?.clear?.();
-        }
-
-        if (
-          universalState?.selected ||
-          universalState?.cycling
-        ) {
-          window.RMLUniversalScrollLayers
-            ?.clear?.();
-        }
-
-        showDemoLabel(
-          "Override stopped — local hover-based scrolling is active again",
-          globalForeignPoint
-        );
-        pulseAt(
-          scrollDemo.inner,
-          "rml-setup-demo-drop"
-        );
-        await wait(520);
-
-        if (runId !== demoRunId) return;
-
-        scrollDemo.inner.scrollTop = 0;
-        elements().mouse?.classList.add(
-          "scrolling"
-        );
-        showDemoLabel(
-          "No fixed list: ordinary Wheel resolves the current innermost dynamic layer again",
-          innerPoint
-        );
-        await wheelBurst(
-          scrollDemo.inner,
-          { deltaY: 36 },
-          4,
-          82,
-          runId
-        );
-        await wait(330);
-        elements().mouse?.classList.remove(
-          "scrolling"
-        );
-        hideKeys();
-        await wait(280);
+      if (matcher.test(label)) {
+        return true;
       }
+    }
 
-      if (runId !== demoRunId) return;
+    return false;
+  }
 
-      const rootPanTarget = {
-        x: Math.max(
-          rect.left + 72,
-          emptyPoint.x - rect.width * .32
-        ),
-        y: Math.max(
-          rect.top + 72,
-          emptyPoint.y - rect.height * .27
-        )
+  async function animateTourPageScroll(
+    top,
+    duration,
+    runId
+  ) {
+    const scroller =
+      document.scrollingElement ||
+      document.documentElement;
+    const from = scroller.scrollTop;
+    const maxTop = Math.max(
+      0,
+      scroller.scrollHeight -
+        scroller.clientHeight
+    );
+    const to = Math.max(
+      0,
+      Math.min(maxTop, top)
+    );
+
+    if (Math.abs(to - from) < 1) {
+      return;
+    }
+
+    const start = performance.now();
+
+    await new Promise(resolve => {
+      const frame = now => {
+        if (runId !== demoRunId) {
+          resolve();
+          return;
+        }
+
+        const raw = Math.min(
+          1,
+          (now - start) /
+            Math.max(1, duration)
+        );
+        const eased =
+          raw < .5
+            ? 4 * raw * raw * raw
+            : 1 - Math.pow(-2 * raw + 2, 3) / 2;
+
+        scroller.scrollTop =
+          from + (to - from) * eased;
+
+        if (raw >= 1) {
+          resolve();
+          return;
+        }
+
+        requestAnimationFrame(frame);
       };
 
-      showDemoLabel(
-        "Drag empty ROOT canvas → pan the complete graph",
-        emptyPoint
-      );
+      requestAnimationFrame(frame);
+    });
+  }
 
-      await nativeGraphViewportPan(
-        viewport,
-        emptyPoint,
-        rootPanTarget,
-        1250,
+  function releaseTourGlobalScrollOverrideAt(
+    target,
+    point
+  ) {
+    target?.dispatchEvent(
+      new MouseEvent(
+        "click",
+        {
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+          clientX: point.x,
+          clientY: point.y,
+          view: window
+        }
+      )
+    );
+
+    window.RMLTypedNodeGraphScrollLayers?.clear?.();
+    window.RMLUniversalScrollLayers?.clear?.();
+  }
+
+  function tourElementActuallyVisible(element) {
+    if (!(element instanceof Element) || !element.isConnected) return false;
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return (
+      rect.width > 2 &&
+      rect.height > 2 &&
+      style.display !== "none" &&
+      style.visibility !== "hidden"
+    );
+  }
+
+  function tourClickFirstVisible(selectors) {
+    for (const selector of selectors) {
+      const control = [...document.querySelectorAll(selector)]
+        .find(tourElementActuallyVisible);
+      if (control) {
+        control.click();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function ensureTourGraphSidebarsVisible() {
+    const body = document.body;
+
+    const leftCollapsed = [
+      "rml-graph-left-collapsed",
+      "rml-outline-left-collapsed",
+      "rml-builder-left-collapsed",
+      "rml-left-collapsed",
+      "palette-collapsed"
+    ].some(name => body.classList.contains(name));
+
+    const rightCollapsed = [
+      "rml-graph-right-collapsed",
+      "rml-outline-right-collapsed",
+      "rml-builder-right-collapsed",
+      "rml-right-collapsed",
+      "inspector-collapsed"
+    ].some(name => body.classList.contains(name));
+
+    const leftPanels = [
+      document.querySelector(".rml-graph-palette"),
+      document.querySelector(".palette"),
+      document.querySelector('[data-panel="palette"]'),
+      document.querySelector('[data-rml-panel="left"]')
+    ].filter(Boolean);
+
+    const rightPanels = [
+      document.querySelector(".rml-graph-inspector"),
+      document.querySelector(".inspector"),
+      document.querySelector('[data-panel="inspector"]'),
+      document.querySelector('[data-rml-panel="right"]')
+    ].filter(Boolean);
+
+    const leftHidden =
+      leftCollapsed ||
+      (leftPanels.length > 0 && leftPanels.every(panel => !tourElementActuallyVisible(panel)));
+
+    const rightHidden =
+      rightCollapsed ||
+      (rightPanels.length > 0 && rightPanels.every(panel => !tourElementActuallyVisible(panel)));
+
+    if (leftHidden) {
+      tourClickFirstVisible([
+        ".rml-graph-panel-toggle-left",
+        "[data-rml-graph-toggle-left]",
+        "[data-panel-toggle='left']",
+        "[data-rml-panel-toggle='left']",
+        ".palette-toggle",
+        ".left-panel-toggle"
+      ]);
+    }
+
+    if (rightHidden) {
+      tourClickFirstVisible([
+        ".rml-graph-panel-toggle-right",
+        "[data-rml-graph-toggle-right]",
+        "[data-panel-toggle='right']",
+        "[data-rml-panel-toggle='right']",
+        ".inspector-toggle",
+        ".right-panel-toggle"
+      ]);
+    }
+
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const graphLeftStillCollapsed = body.classList.contains("rml-graph-left-collapsed");
+      const graphRightStillCollapsed = body.classList.contains("rml-graph-right-collapsed");
+      if (graphLeftStillCollapsed) {
+        tourClickFirstVisible([".rml-graph-panel-toggle-left", "[data-rml-graph-toggle-left]"]);
+      }
+      if (graphRightStillCollapsed) {
+        tourClickFirstVisible([".rml-graph-panel-toggle-right", "[data-rml-graph-toggle-right]"]);
+      }
+    }));
+  }
+
+  function tourHeaderBottom() {
+    const header =
+      document.querySelector(".topbar") ||
+      document.querySelector("header");
+    if (!tourElementActuallyVisible(header)) {
+      return tourViewport().top;
+    }
+    return Math.max(tourViewport().top, header.getBoundingClientRect().bottom);
+  }
+
+  function tourPageRootScrollState() {
+    const scroller =
+      document.scrollingElement ||
+      document.documentElement;
+
+    if (!scroller) {
+      return {
+        scroller: null,
+        canScrollX: false,
+        canScrollY: false,
+        maxLeft: 0,
+        maxTop: 0
+      };
+    }
+
+    const maxLeft = Math.max(
+      0,
+      scroller.scrollWidth - scroller.clientWidth
+    );
+
+    const maxTop = Math.max(
+      0,
+      scroller.scrollHeight - scroller.clientHeight
+    );
+
+    return {
+      scroller,
+      canScrollX: maxLeft > 1,
+      canScrollY: maxTop > 1,
+      maxLeft,
+      maxTop
+    };
+  }
+
+  function tourPageRootCenteringPlan(target) {
+    if (!target || !tourElementActuallyVisible(target)) {
+      return {
+        useful: false,
+        reason: "target-not-visible"
+      };
+    }
+
+    const {
+      scroller,
+      canScrollY,
+      maxTop
+    } = tourPageRootScrollState();
+
+    if (!scroller || !canScrollY) {
+      return {
+        useful: false,
+        reason: "root-not-scrollable"
+      };
+    }
+
+    const rect = target.getBoundingClientRect();
+    const viewport = tourViewport();
+    const usefulTop = tourHeaderBottom() + 14;
+    const usefulBottom = viewport.bottom - 14;
+    const availableHeight = Math.max(1, usefulBottom - usefulTop);
+
+    const desiredViewportTop =
+      rect.height <= availableHeight
+        ? usefulTop + (availableHeight - rect.height) * .5
+        : usefulTop;
+
+    const currentTop = scroller.scrollTop;
+    const absoluteTargetTop = currentTop + rect.top;
+
+    const desiredScrollTop = Math.max(
+      0,
+      Math.min(
+        maxTop,
+        absoluteTargetTop - desiredViewportTop
+      )
+    );
+
+    const delta = desiredScrollTop - currentTop;
+
+    const useful =
+      Math.abs(delta) > 2;
+
+    return {
+      useful,
+      reason:
+        useful
+          ? "reachable-better-position"
+          : "already-at-best-reachable-position",
+      scroller,
+      currentTop,
+      desiredScrollTop,
+      delta,
+      maxTop,
+      desiredViewportTop,
+      targetTop: rect.top,
+      targetHeight: rect.height,
+      availableHeight
+    };
+  }
+
+  function tourPageRootCanHelpTarget(target) {
+    return tourPageRootCenteringPlan(target).useful === true;
+  }
+
+
+  function tourTargetComfortablyVisible(target) {
+    if (!target || !tourElementActuallyVisible(target)) return false;
+
+    const rect = target.getBoundingClientRect();
+    const viewport = tourViewport();
+    const top = tourHeaderBottom() + 14;
+    const bottom = viewport.bottom - 14;
+    const left = viewport.left + 14;
+    const right = viewport.right - 14;
+    const availableHeight = Math.max(1, bottom - top);
+    const availableWidth = Math.max(1, right - left);
+
+    const verticalOk =
+      rect.height <= availableHeight
+        ? rect.top >= top && rect.bottom <= bottom
+        : Math.abs(rect.top - top) <= 18;
+
+    const horizontalOk =
+      rect.width <= availableWidth
+        ? rect.left >= left && rect.right <= right
+        : rect.left <= left + 18 && rect.right >= right - 18;
+
+    return verticalOk && horizontalOk;
+  }
+
+  async function nativeTourScrollTargetIntoView(target, runId = demoRunId) {
+    if (!target || runId !== demoRunId) return false;
+
+    ensureTourGraphSidebarsVisible();
+    await new Promise(resolve =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve))
+    );
+    if (runId !== demoRunId) return false;
+
+    if (tourTargetComfortablyVisible(target)) return true;
+
+    if (!tourPageRootCanHelpTarget(target)) {
+      return true;
+    }
+
+    window.RMLTypedNodeGraphScrollLayers?.clear?.();
+    window.RMLUniversalScrollLayers?.clear?.();
+
+    const viewport = tourViewport();
+
+    const anchor = document.elementFromPoint(
+      viewport.left + Math.min(viewport.width - 24, Math.max(24, viewport.width * .5)),
+      tourHeaderBottom() + Math.min(
+        Math.max(36, (viewport.bottom - tourHeaderBottom()) * .42),
+        Math.max(36, viewport.bottom - tourHeaderBottom() - 24)
+      )
+    ) || document.body;
+    const anchorPoint = centerOf(anchor);
+
+    showKeys(["Ctrl"], anchorPoint);
+    showDemoLabel(
+      "Assistant uses the real Ctrl + Wheel layer selector to bring this step into view",
+      anchorPoint
+    );
+
+    const foundHtml = await cycleTourScrollLayerUntil(
+      anchor,
+      /<html>|Page ROOT/i,
+      runId,
+      20,
+      150
+    );
+
+    if (runId !== demoRunId) return false;
+
+    releaseTourScrollModifier();
+    hideKeys();
+
+    if (!foundHtml) {
+      console.error(
+        "[RML Tour] Page ROOT can scroll for this target, but the native <html> layer could not be selected.",
+        {
+          stepIndex,
+          target,
+          root: tourPageRootScrollState(),
+          state: scrollLayerState()
+        }
+      );
+      return false;
+    }
+
+    const mouse = elements().mouse;
+    mouse?.classList.add("scrolling");
+
+    for (let attempt = 0; attempt < 72 && runId === demoRunId; attempt += 1) {
+      ensureTourGraphSidebarsVisible();
+
+      if (tourTargetComfortablyVisible(target)) break;
+
+      const plan =
+        tourPageRootCenteringPlan(target);
+
+      if (!plan.useful) {
+        break;
+      }
+
+      const deltaY =
+        Math.sign(plan.delta) *
+        Math.min(
+          220,
+          Math.max(28, Math.abs(plan.delta))
+        );
+
+      dispatchTourWheel(anchor, { deltaY });
+      await wait(TOUR_SCROLL_TIMING.autoScrollInterval);
+    }
+
+    mouse?.classList.remove("scrolling");
+
+    const ok =
+      tourTargetComfortablyVisible(target);
+
+    const finalPlan =
+      tourPageRootCenteringPlan(target);
+
+    if (!ok && finalPlan.useful) {
+      console.error(
+        "[RML Tour] Native Ctrl+Wheel positioning stopped before reaching the best available page position.",
+        {
+          stepIndex,
+          targetRect: target.getBoundingClientRect(),
+          viewport: tourViewport(),
+          plan: finalPlan,
+          state: scrollLayerState()
+        }
+      );
+    }
+
+    window.RMLTypedNodeGraphScrollLayers?.clear?.();
+    window.RMLUniversalScrollLayers?.clear?.();
+
+    return ok || !finalPlan.useful;
+  }
+
+  function tourVisualSubjectForStep(step, target) {
+    if (!step) return target;
+
+    if (step.demo === "graph-route") {
+      return document.querySelector(".rml-graph-viewport") || target;
+    }
+
+    if (step.mode === "graph" && step.target === ".inspector") {
+      return document.querySelector(".inspector") || target;
+    }
+
+    return target;
+  }
+
+  async function runGraphPanDemo(runId) {
+    const viewport =
+      document.querySelector(".rml-graph-viewport");
+    if (!viewport) return;
+
+    const pageScroller =
+      document.scrollingElement ||
+      document.documentElement;
+    const pageStart = {
+      left: pageScroller.scrollLeft,
+      top: pageScroller.scrollTop
+    };
+    const codePanel =
+      document.querySelector(".code-panel");
+    const codeScroller =
+      codePanel?.querySelector("pre") ||
+      codePanel;
+    const codeStart = codeScroller
+      ? {
+          left: codeScroller.scrollLeft,
+          top: codeScroller.scrollTop
+        }
+      : null;
+
+    window.RMLTypedNodeGraphScrollLayers?.clear?.();
+    window.RMLUniversalScrollLayers?.clear?.();
+    pageScroller.scrollLeft = pageStart.left;
+    pageScroller.scrollTop = pageStart.top;
+    if (codeScroller && codeStart) {
+      codeScroller.scrollLeft = codeStart.left;
+      codeScroller.scrollTop = codeStart.top;
+    }
+
+    const scrollDemo =
+      prepareStartNodeScrollDemo();
+    if (!scrollDemo?.body) return;
+
+    const immediateNodePoint =
+      centerOf(scrollDemo.body, .58, .52);
+    const immediateMouse = elements().mouse;
+    immediateMouse?.classList.add("active");
+    immediateMouse?.style.setProperty(
+      "--mouse-x",
+      `${immediateNodePoint.x}px`
+    );
+    immediateMouse?.style.setProperty(
+      "--mouse-y",
+      `${immediateNodePoint.y}px`
+    );
+    immediateMouse?.style.setProperty(
+      "--mouse-duration",
+      "0ms"
+    );
+
+    let keepMouseVisible = false;
+
+    const selectedWheel = async (
+      target,
+      options,
+      repeat,
+      interval,
+      label,
+      point
+    ) => {
+      hideKeys();
+      elements().mouse?.classList.add("scrolling");
+      showDemoLabel(label, point);
+      await wait(TOUR_SCROLL_TIMING.gestureLeadIn);
+      await wheelBurst(
+        target,
+        options,
+        repeat,
+        Math.max(interval, TOUR_SCROLL_TIMING.wheelInterval),
         runId
       );
+      elements().mouse?.classList.remove("scrolling");
+      await wait(TOUR_SCROLL_TIMING.gestureSettle);
+    };
+
+    const selectLayer = async (
+      target,
+      matcher,
+      point,
+      label,
+      maxAttempts = 8,
+      deltaY = 150
+    ) => {
+      elements().mouse?.classList.remove(
+        "scrolling",
+        "horizontal-wheel"
+      );
+      showKeys(["Ctrl"], point);
+      showDemoLabel(label, point);
+      await wait(TOUR_SCROLL_TIMING.modifierLeadIn);
+
+      const found =
+        await cycleTourScrollLayerUntil(
+          target,
+          matcher,
+          runId,
+          maxAttempts,
+          deltaY
+        );
+
+      if (runId !== demoRunId) {
+        return false;
+      }
+
+      releaseTourScrollModifier();
+      hideKeys();
+      await wait(TOUR_SCROLL_TIMING.modifierReleasePause);
+      return found;
+    };
+
+    const ensureCodePanelFullyVisible = async () => {
+      if (!codePanel || runId !== demoRunId) return;
+
+      for (
+        let burst = 0;
+        burst < 22 &&
+        runId === demoRunId;
+        burst += 1
+      ) {
+        const rect =
+          codePanel.getBoundingClientRect();
+        const topMargin = 18;
+        const bottomMargin = 18;
+        const canFit =
+          rect.height <=
+          window.innerHeight -
+            topMargin -
+            bottomMargin;
+        const fullyVisible = canFit
+          ? (
+              rect.top >= topMargin &&
+              rect.bottom <=
+                window.innerHeight - bottomMargin
+            )
+          : (
+              rect.top <= topMargin + 10 &&
+              rect.bottom >=
+                window.innerHeight - bottomMargin
+            );
+
+        if (fullyVisible) break;
+
+        dispatchTourWheel(
+          scrollDemo.body,
+          { deltaY: 150 }
+        );
+        await wait(TOUR_SCROLL_TIMING.autoScrollInterval);
+      }
 
       if (runId !== demoRunId) return;
 
-      hideMouse();
-      await wait(320);
+      const rect =
+        codePanel.getBoundingClientRect();
+      const availableHeight =
+        Math.max(1, window.innerHeight - 36);
+      const desiredViewportTop =
+        rect.height <= availableHeight
+          ? Math.max(
+              18,
+              (window.innerHeight - rect.height) / 2
+            )
+          : 18;
+      const absoluteTop =
+        pageScroller.scrollTop + rect.top;
+      const desiredPageTop =
+        absoluteTop - desiredViewportTop;
 
-      const centerButton = [...document.querySelectorAll(".rml-graph-toolbar .button")].find(button =>
-        /Center Graph/i.test(button.textContent || "")
+      if (
+        Math.abs(
+          pageScroller.scrollTop - desiredPageTop
+        ) > 2
+      ) {
+        await animateTourPageScroll(
+          desiredPageTop,
+          TOUR_SCROLL_TIMING.pageScrollDuration,
+          runId
+        );
+      }
+    };
+
+    try {
+      await wait(140);
+      if (runId !== demoRunId) return;
+
+      let nodePoint =
+        centerOf(scrollDemo.body, .58, .52);
+      await moveMouse(nodePoint, 520, runId);
+      if (runId !== demoRunId) return;
+
+      hideKeys();
+      await selectedWheel(
+        scrollDemo.body,
+        { deltaY: 40 },
+        6,
+        TOUR_SCROLL_TIMING.wheelInterval,
+        "Wheel ↓ → normal vertical scroll INSIDE the real Node",
+        nodePoint
       );
-      if (centerButton && runId === demoRunId) {
-        positionShades(centerButton);
-        setTourControlHighlight(centerButton, true);
-        pulseAt(centerButton);
+      if (runId !== demoRunId) return;
+
+      showKeys(["Shift"], nodePoint);
+      elements().mouse?.classList.add(
+        "scrolling",
+        "horizontal-wheel"
+      );
+      showDemoLabel(
+        "Shift + Wheel ↓ → horizontal scroll INSIDE the same Node",
+        nodePoint
+      );
+      await wait(TOUR_SCROLL_TIMING.modifierLeadIn);
+      await wheelBurst(
+        scrollDemo.body,
+        {
+          deltaY: 48,
+          shiftKey: true
+        },
+        6,
+        TOUR_SCROLL_TIMING.wheelInterval,
+        runId
+      );
+      elements().mouse?.classList.remove(
+        "scrolling",
+        "horizontal-wheel"
+      );
+      hideKeys();
+      await wait(TOUR_SCROLL_TIMING.gestureSettle);
+      if (runId !== demoRunId) return;
+
+      scrollDemo.body.scrollTop = 0;
+      scrollDemo.body.scrollLeft = 0;
+      await wait(TOUR_SCROLL_TIMING.gestureSettle);
+
+      const foundGraphRoot =
+        await selectLayer(
+          scrollDemo.body,
+          /Graph ROOT/i,
+          nodePoint,
+          "Ctrl + Wheel ↓ → select Graph ROOT (mouse stays exactly here)",
+          7,
+          150
+        );
+      if (!foundGraphRoot) {
+        console.warn(
+          "[RML Tour · Step 11] Graph ROOT was not found in the live scroll-layer chain.",
+          scrollLayerState()
+        );
+      }
+      if (runId !== demoRunId) return;
+
+      await selectedWheel(
+        scrollDemo.body,
+        { deltaY: 32 },
+        5,
+        TOUR_SCROLL_TIMING.wheelInterval,
+        "Ctrl is released → normal Wheel now scrolls the SELECTED Graph ROOT",
+        nodePoint
+      );
+      if (runId !== demoRunId) return;
+
+      const foundHtml =
+        await selectLayer(
+          scrollDemo.body,
+          /<html>|Page ROOT/i,
+          nodePoint,
+          "Ctrl + Wheel ↓ → select <html> (mouse still does not move)",
+          7,
+          150
+        );
+      if (!foundHtml) {
+        console.warn(
+          "[RML Tour · Step 11] <html> was not found in the live scroll-layer chain.",
+          scrollLayerState()
+        );
+      }
+      if (runId !== demoRunId) return;
+
+      hideKeys();
+      elements().mouse?.classList.add("scrolling");
+      showDemoLabel(
+        "Ctrl is released → normal Wheel scrolls the locked <html> page",
+        nodePoint
+      );
+      await wait(120);
+      await ensureCodePanelFullyVisible();
+      elements().mouse?.classList.remove("scrolling");
+      if (runId !== demoRunId) return;
+
+      if (
+        codeScroller &&
+        graphDemoVisible(codeScroller)
+      ) {
+        positionShades(codePanel || codeScroller);
+        const codePoint =
+          centerOf(codeScroller, .55, .42);
+        await moveMouse(
+          codePoint,
+          560,
+          runId
+        );
+        if (runId !== demoRunId) return;
 
         showDemoLabel(
-          "Center Graph → fit everything again",
-          centerOf(centerButton)
+          "NO CLICK → press Ctrl again and recapture the NEW hierarchy here",
+          codePoint
         );
+        await wait(TOUR_SCROLL_TIMING.modifierLeadIn);
 
-        await wait(220);
-        if (runId !== demoRunId) return;
-
-        await moveMouse(centerOf(centerButton), 620, runId);
-        if (runId !== demoRunId) return;
-
-        await clickMouse(runId);
-        centerButton.click();
-
-        await wait(420);
-
-        setTourControlHighlight(centerButton, false);
-        if (runId === demoRunId) {
-          positionShades(
-            currentTarget ||
-            document.querySelector(".rml-graph-viewport")
+        const foundCode =
+          await selectLayer(
+            codeScroller,
+            /Generated code|Generated project files|Generated Project Files|code/i,
+            codePoint,
+            "Ctrl + Wheel → LIVE RECAPTURE selects Generated Project Files (no click)",
+            5,
+            150
+          );
+        if (!foundCode) {
+          console.warn(
+            "[RML Tour · Step 11] Generated Project Files code viewport was not found in the live scroll-layer chain.",
+            scrollLayerState()
           );
         }
+        if (runId !== demoRunId) return;
+
+        await selectedWheel(
+          codeScroller,
+          { deltaY: 48 },
+          6,
+          TOUR_SCROLL_TIMING.wheelInterval,
+          "Ctrl is released → normal Wheel scrolls the SELECTED code viewport",
+          codePoint
+        );
+        if (runId !== demoRunId) return;
+
+        showDemoLabel(
+          "Step 11 complete → Ctrl can be pressed again anywhere to recapture the visible hierarchy",
+          codePoint
+        );
+        await wait(620);
       }
-      hideMouse();
+
+      if (runId !== demoRunId) return;
+      const returnPoint = codeScroller && graphDemoVisible(codeScroller)
+        ? centerOf(codeScroller, .55, .42)
+        : centerOf(codePanel || viewport, .55, .42);
+      const returnTarget =
+        document.elementFromPoint(returnPoint.x, returnPoint.y) ||
+        codeScroller ||
+        codePanel ||
+        document.body;
+
+      showKeys(["Ctrl"], returnPoint);
+      showDemoLabel(
+        "Finally: Ctrl + Wheel selects <html> again → Wheel returns to the graph",
+        returnPoint
+      );
+      const foundReturnHtml = await cycleTourScrollLayerUntil(
+        returnTarget,
+        /<html>|Page ROOT/i,
+        runId,
+        12,
+        150
+      );
+      if (runId !== demoRunId) return;
+      releaseTourScrollModifier();
+      hideKeys();
+
+      if (foundReturnHtml) {
+        elements().mouse?.classList.add("scrolling");
+        for (let burst = 0; burst < 36 && runId === demoRunId; burst += 1) {
+          if (tourTargetComfortablyVisible(viewport)) break;
+          dispatchTourWheel(returnTarget, { deltaY: -150 });
+          await wait(TOUR_SCROLL_TIMING.returnScrollInterval);
+        }
+        elements().mouse?.classList.remove("scrolling");
+      } else {
+        console.warn(
+          "[RML Tour · Step 11] Could not reselect <html> for the visible return; no fallback scrolling is used.",
+          scrollLayerState()
+        );
+      }
+
+      window.RMLTypedNodeGraphScrollLayers?.clear?.();
+      window.RMLUniversalScrollLayers?.clear?.();
+      scrollDemo.body.scrollTop = 0;
+      scrollDemo.body.scrollLeft = 0;
+      ensureTourGraphSidebarsVisible();
+      positionShades(currentTarget || viewport);
+      nodePoint = centerOf(scrollDemo.body, .58, .52);
+      await moveMouse(nodePoint, 420, runId);
+      hideKeys();
+      elements().mouse?.classList.remove(
+        "pressed",
+        "scrolling",
+        "horizontal-wheel"
+      );
+      showDemoLabel(
+        "Back at the graph → Step 11 can repeat from the same visible place",
+        nodePoint
+      );
+      keepMouseVisible = true;
+      await wait(520);
     } finally {
-      cleanupStartNodeScrollDemo(scrollDemo);
+      window.RMLTypedNodeGraphScrollLayers?.clear?.();
+      window.RMLUniversalScrollLayers?.clear?.();
+
+      if (runId !== demoRunId) {
+        pageScroller.scrollLeft = pageStart.left;
+        pageScroller.scrollTop = pageStart.top;
+      }
+
+      if (codeScroller && codeStart) {
+        codeScroller.scrollLeft =
+          codeStart.left;
+        codeScroller.scrollTop =
+          codeStart.top;
+      }
+
+      positionShades(
+        currentTarget || viewport
+      );
+      cleanupStartNodeScrollDemo(
+        scrollDemo
+      );
+
+      if (!keepMouseVisible) {
+        hideKeys();
+      }
     }
   }
 
@@ -3971,11 +4472,70 @@
 
     const mutatingGraphDemo =
       step?.demo === "graph-route" ||
-      step?.demo === "graph-wire";
+      step?.demo === "graph-wire" ||
+      step?.demo === "graph-pan";
 
     while (runId === demoRunId) {
       const ok = await runSafely();
       if (runId !== demoRunId || !ok) return;
+
+      if (step?.demo === "graph-pan") {
+        restoreTourState(
+          stepSnapshots.get(stepIndex)
+        );
+        ensureTourMode(step);
+
+        await new Promise(resolve =>
+          requestAnimationFrame(() =>
+            requestAnimationFrame(resolve)
+          )
+        );
+
+        if (runId !== demoRunId) return;
+
+        const refreshedTarget =
+          findTarget(step);
+
+        if (refreshedTarget) {
+          clearTarget();
+          refreshedTarget.classList.add(
+            "rml-setup-target"
+          );
+          currentTarget =
+            refreshedTarget;
+          positionShades(
+            refreshedTarget
+          );
+          positionCard(
+            refreshedTarget
+          );
+          target =
+            refreshedTarget;
+        }
+
+        const freshBody =
+          document.querySelector(
+            ".rml-graph-node.configuration .rml-graph-node-body, .rml-graph-node .rml-graph-node-body"
+          );
+        if (freshBody) {
+          const freshPoint =
+            centerOf(freshBody, .58, .52);
+          const mouse = elements().mouse;
+          mouse?.classList.add("active");
+          mouse?.style.setProperty(
+            "--mouse-x",
+            `${freshPoint.x}px`
+          );
+          mouse?.style.setProperty(
+            "--mouse-y",
+            `${freshPoint.y}px`
+          );
+          mouse?.style.setProperty(
+            "--mouse-duration",
+            "0ms"
+          );
+        }
+      }
 
       const pause =
         isComplexDemo(step)
@@ -3985,7 +4545,7 @@
       await wait(pause);
       if (runId !== demoRunId) return;
 
-      if (mutatingGraphDemo) {
+      if (mutatingGraphDemo && step?.demo !== "graph-pan") {
         restoreTourState(
           stepSnapshots.get(stepIndex)
         );
@@ -4050,17 +4610,54 @@
       if (stepIndex !== index) return;
       let target = findTarget(step);
       if (target) {
-        target.scrollIntoView({ block: "center", inline: "nearest", behavior: "auto" });
         target.classList.add("rml-setup-target");
         currentTarget = target;
       }
+      ensureTourGraphSidebarsVisible();
       ui.title.textContent = step.title;
       ui.text.innerHTML = step.text;
       ui.hint.textContent = step.hint || "";
       ui.progress.style.width = `${((index + 1) / steps.length) * 100}%`;
       ui.back.disabled = index === 0;
       ui.next.textContent = index === steps.length - 1 ? "Finish" : "Next";
-      requestAnimationFrame(() => {
+      requestAnimationFrame(async () => {
+        ensureTourGraphSidebarsVisible();
+
+        await new Promise(resolve =>
+          requestAnimationFrame(() => requestAnimationFrame(resolve))
+        );
+        if (stepIndex !== index) return;
+
+        const visualSubject =
+          tourVisualSubjectForStep(step, target);
+
+        const mayAutoScroll =
+          index > 11 &&
+          visualSubject &&
+          !tourTargetComfortablyVisible(visualSubject) &&
+          tourPageRootCanHelpTarget(visualSubject);
+
+        if (mayAutoScroll) {
+          await nativeTourScrollTargetIntoView(
+            visualSubject,
+            demoRunId
+          );
+          if (stepIndex !== index) return;
+        }
+
+        ensureTourGraphSidebarsVisible();
+        await new Promise(resolve =>
+          requestAnimationFrame(() => requestAnimationFrame(resolve))
+        );
+        if (stepIndex !== index) return;
+
+        target = findTarget(step) || target;
+        if (target) {
+          clearTarget();
+          target.classList.add("rml-setup-target");
+          currentTarget = target;
+        }
+
         positionShades(target);
         positionCard(target);
         void runDemo(step, target);
@@ -4152,7 +4749,35 @@
 
     await ensureOutlineBeforeTour();
 
+    ensureTourGraphSidebarsVisible();
     window.RMLBuilderSetupBridge.prepareTourDemo?.();
+    await new Promise(resolve =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve))
+    );
+    ensureTourGraphSidebarsVisible();
+
+    window.RMLTypedNodeGraphScrollLayers?.clear?.();
+    window.RMLUniversalScrollLayers?.clear?.();
+
+    const tourStartScroller =
+      document.scrollingElement ||
+      document.documentElement;
+
+    if (tourStartScroller) {
+      tourStartScroller.scrollLeft = 0;
+      tourStartScroller.scrollTop = 0;
+    }
+
+    window.scrollTo({
+      left: 0,
+      top: 0,
+      behavior: "auto"
+    });
+
+    await new Promise(resolve =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve))
+    );
+
     ui.root.hidden = false;
     document.documentElement.classList.add("rml-setup-tour-active");
     showStep(0, { captureEntry: true });

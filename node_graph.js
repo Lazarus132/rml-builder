@@ -945,6 +945,7 @@
   let graphScrollLayerCycleDirection = 0;
   let graphScrollLayerLastCycleAt = 0;
   let graphScrollLayerVisualFrame = 0;
+  let graphScrollLayerVisualFollowFrame = 0;
   let graphScrollLayerIndicatorTimer = 0;
   let graphScrollLayerOutline = null;
   let graphScrollLayerIndicator = null;
@@ -12272,6 +12273,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     element
   ) {
     return [
+      "auto",
       "always",
       "true",
       "programmatic"
@@ -12303,7 +12305,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     return {
       x:
         element.scrollWidth >
-          element.clientWidth + 1 &&
+          element.clientWidth &&
         (
           scrollableOverflow(
             style.overflowX
@@ -12312,7 +12314,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         ),
       y:
         element.scrollHeight >
-          element.clientHeight + 1 &&
+          element.clientHeight &&
         (
           scrollableOverflow(
             style.overflowY
@@ -12534,6 +12536,90 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     );
   }
 
+  function graphScrollLayerHitTestVisibleAt(
+    element,
+    clientX,
+    clientY
+  ) {
+    if (!(element instanceof HTMLElement)) {
+      return false;
+    }
+
+    const viewport = graphVisibleViewportRectangle();
+
+    if (
+      clientX < viewport.left ||
+      clientX >= viewport.right ||
+      clientY < viewport.top ||
+      clientY >= viewport.bottom
+    ) {
+      return false;
+    }
+
+    const stack =
+      typeof document.elementsFromPoint === "function"
+        ? document.elementsFromPoint(clientX, clientY)
+        : [document.elementFromPoint(clientX, clientY)].filter(Boolean);
+
+    return stack.some(hit =>
+      hit === element ||
+      element.contains(hit)
+    );
+  }
+
+  function graphScrollLayerHasExposedPixels(
+    element,
+    rectangle = null
+  ) {
+    if (!(element instanceof HTMLElement)) {
+      return false;
+    }
+
+    const rect = rectangle ||
+      element.getBoundingClientRect();
+    const viewport = graphVisibleViewportRectangle();
+    const left = Math.max(viewport.left, rect.left);
+    const top = Math.max(viewport.top, rect.top);
+    const right = Math.min(viewport.right, rect.right);
+    const bottom = Math.min(viewport.bottom, rect.bottom);
+
+    if (right - left < 1 || bottom - top < 1) {
+      return false;
+    }
+
+    const epsilon = 1;
+    const xs = [
+      left + epsilon,
+      left + (right - left) * 0.25,
+      left + (right - left) * 0.5,
+      left + (right - left) * 0.75,
+      right - epsilon
+    ];
+    const ys = [
+      top + epsilon,
+      top + (bottom - top) * 0.25,
+      top + (bottom - top) * 0.5,
+      top + (bottom - top) * 0.75,
+      bottom - epsilon
+    ];
+
+    for (const y of ys) {
+      for (const x of xs) {
+        if (
+          graphScrollLayerHitTestVisibleAt(
+            element,
+            x,
+            y
+          )
+        ) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
   function graphScrollLayerNodeTitle(
     element
   ) {
@@ -12637,7 +12723,9 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       .trim();
 
     if (!area) {
-      if (
+      if (element.matches?.(".code-panel pre")) {
+        area = "Generated code";
+      } else if (
         element instanceof
           HTMLTextAreaElement
       ) {
@@ -12742,10 +12830,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           identity.value
         );
 
-      return element &&
-        graphElementBelongsToViewport(
-          element
-        )
+      return element?.isConnected
         ? element
         : null;
     }
@@ -12758,7 +12843,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           : "";
 
     return attribute
-      ? dom.viewport.querySelector(
+      ? document.querySelector(
           `[${attribute}="${CSS.escape(identity.value)}"]`
         )
       : null;
@@ -12915,10 +13000,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
     if (
       descriptor.element
-        ?.isConnected &&
-      graphElementBelongsToViewport(
-        descriptor.element
-      )
+        ?.isConnected
     ) {
       return descriptor.element;
     }
@@ -12936,7 +13018,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     if (
       descriptor.elementId
     ) {
-      return dom.viewport.querySelector(
+      return document.querySelector(
         `[data-rml-graph-scroll-layer-id="${CSS.escape(descriptor.elementId)}"]`
       );
     }
@@ -12979,9 +13061,9 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     const rectangle =
       element.getBoundingClientRect();
     const viewportRectangle =
-      dom.viewport.getBoundingClientRect();
+      graphVisibleViewportRectangle();
 
-    return (
+    if (!(
       rectangle.right >
         viewportRectangle.left &&
       rectangle.left <
@@ -12990,12 +13072,23 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         viewportRectangle.top &&
       rectangle.top <
         viewportRectangle.bottom
+    )) {
+      return false;
+    }
+
+    return graphScrollLayerHasExposedPixels(
+      element,
+      graphScrollLayerClipRectangle(
+        element,
+        descriptor
+      )
     );
   }
 
   function graphDynamicAncestorElements(
     target,
-    composedPath = null
+    composedPath = null,
+    hitPoint = null
   ) {
     const result = [];
     const seen = new Set();
@@ -13003,10 +13096,29 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     const add = element => {
       if (
         element instanceof HTMLElement &&
+        element !== dom.viewport &&
+        graphElementBelongsToViewport(element) &&
         !seen.has(element)
       ) {
         seen.add(element);
         result.push(element);
+      }
+    };
+
+    const addOwningNodeBody = element => {
+      if (!(element instanceof Element)) {
+        return;
+      }
+
+      const node = element.closest(
+        ".rml-graph-node"
+      );
+      const body = node?.querySelector(
+        ":scope > .rml-graph-node-body"
+      );
+
+      if (body instanceof HTMLElement) {
+        add(body);
       }
     };
 
@@ -13016,6 +13128,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           break;
         }
         add(item);
+        addOwningNodeBody(item);
       }
     }
 
@@ -13025,11 +13138,13 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         : null;
 
     if (
-      !current ||
-      !graphElementBelongsToViewport(
+      current &&
+      graphElementBelongsToViewport(
         current
       )
     ) {
+      addOwningNodeBody(current);
+    } else {
       current = dom.viewport;
     }
 
@@ -13038,6 +13153,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       current !== dom.viewport
     ) {
       add(current);
+      addOwningNodeBody(current);
 
       const root =
         current.getRootNode?.();
@@ -13051,12 +13167,109 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         );
     }
 
+    // Wheel targets can be an SVG wire, resize overlay, socket marker or other
+    // graph chrome even though a scrollable node is visibly underneath it.
+    // Hit-testing the live viewport makes node-body discovery independent from
+    // whichever overlay happened to become event.target.
+    if (
+      Number.isFinite(hitPoint?.x) &&
+      Number.isFinite(hitPoint?.y) &&
+      typeof document.elementsFromPoint ===
+        "function"
+    ) {
+      for (const element of
+        document.elementsFromPoint(
+          hitPoint.x,
+          hitPoint.y
+        )) {
+        if (
+          !graphElementBelongsToViewport(
+            element
+          )
+        ) {
+          continue;
+        }
+
+        add(element);
+        addOwningNodeBody(element);
+      }
+    }
+
     return result;
+  }
+
+  function graphViewportVisibleScrollElements() {
+    const viewport =
+      graphVisibleViewportRectangle();
+    const values = [];
+
+    for (const element of
+      document.querySelectorAll("*")) {
+      if (
+        !(element instanceof HTMLElement) ||
+        element === document.documentElement ||
+        element === document.body ||
+        element === dom.viewport ||
+        !graphScrollLayerCanScroll(element)
+      ) {
+        continue;
+      }
+
+      const descriptor =
+        graphScrollLayerDescriptor(element);
+      if (!descriptor) continue;
+
+      const clipped =
+        graphScrollLayerClipRectangle(
+          element,
+          descriptor
+        );
+      const width = Math.max(0, clipped.right - clipped.left);
+      const height = Math.max(0, clipped.bottom - clipped.top);
+
+      // Even a thin visible strip counts. This is intentional: if a real
+      // scroll surface is visible anywhere in the visual viewport, it must
+      // participate regardless of aspect ratio, page split or panel layout.
+      if (
+        width < 1 ||
+        height < 1 ||
+        !graphScrollLayerHasExposedPixels(
+          element,
+          clipped
+        )
+      ) {
+        continue;
+      }
+
+      const isGeneratedCode =
+        element.matches(".code-panel pre") ||
+        element.querySelector?.("#generated-code") != null;
+
+      values.push({
+        element,
+        visibleArea: Math.max(1, width * height),
+        priority: isGeneratedCode ? -1000 : 0,
+        top: clipped.top,
+        left: clipped.left
+      });
+    }
+
+    values.sort((left, right) =>
+      left.priority - right.priority ||
+      left.visibleArea - right.visibleArea ||
+      left.top - right.top ||
+      left.left - right.left
+    );
+
+    return values.map(value =>
+      value.element
+    );
   }
 
   function graphScrollLayerCandidates(
     target,
-    composedPath = null
+    composedPath = null,
+    hitPoint = null
   ) {
     const candidates = [];
     const keys = new Set();
@@ -13065,7 +13278,8 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       const current of
       graphDynamicAncestorElements(
         target,
-        composedPath
+        composedPath,
+        hitPoint
       )
     ) {
       if (
@@ -13085,6 +13299,24 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           keys.add(descriptor.key);
           candidates.push(descriptor);
         }
+      }
+    }
+
+    // Ctrl/Command selection is viewport-wide, not pointer-column-only.
+    // Any currently visible real scroll surface participates, including a
+    // node body that sits slightly above the pointer and a Generated C#
+    // viewport visible beside/below the graph at the same time.
+    for (const current of
+      graphViewportVisibleScrollElements()) {
+      const descriptor =
+        graphScrollLayerDescriptor(current);
+
+      if (
+        descriptor &&
+        !keys.has(descriptor.key)
+      ) {
+        keys.add(descriptor.key);
+        candidates.push(descriptor);
       }
     }
 
@@ -13234,36 +13466,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       );
     }
 
-    if (
-      !graphScrollLayerIndicator
-        ?.isConnected ||
-      graphScrollLayerIndicator
-        .parentElement !== dom.viewport
-    ) {
-      graphScrollLayerIndicator
-        ?.remove();
-      graphScrollLayerIndicator =
-        document.createElement("div");
-      graphScrollLayerIndicator.className =
-        "rml-graph-scroll-layer-indicator";
-      graphScrollLayerIndicator.hidden =
-        true;
-      graphScrollLayerIndicator.setAttribute(
-        "role",
-        "status"
-      );
-      graphScrollLayerIndicator.setAttribute(
-        "aria-live",
-        "polite"
-      );
-      graphScrollLayerIndicator.append(
-        document.createElement("strong"),
-        document.createElement("span")
-      );
-      dom.viewport.appendChild(
-        graphScrollLayerIndicator
-      );
-    }
+
   }
 
   function hideGraphScrollLayerIndicator(
@@ -13301,61 +13504,9 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     descriptor,
     options = {}
   ) {
-    if (!descriptor || !dom.viewport) {
-      return;
-    }
-
-    ensureGraphScrollLayerVisuals();
-
-    const indicator =
-      graphScrollLayerIndicator;
-
-    if (!indicator) {
-      return;
-    }
-
-    window.clearTimeout(
-      graphScrollLayerIndicatorTimer
-    );
-    graphScrollLayerIndicatorTimer = 0;
-
-    const heading =
-      indicator.querySelector(
-        ":scope > strong"
-      );
-    const copy =
-      indicator.querySelector(
-        ":scope > span"
-      );
-
-    if (!heading || !copy) {
-      return;
-    }
-
-    heading.textContent = mode;
-    copy.textContent = [
-      options.position || "",
-      descriptor.label
-    ]
-      .filter(Boolean)
-      .join(" · ");
-
-    indicator.dataset.mode =
-      options.variant || "selected";
-    indicator.hidden = false;
-
-    requestAnimationFrame(() => {
-      indicator.classList.add(
-        "visible"
-      );
-    });
-
-    if (options.sticky !== true) {
-      graphScrollLayerIndicatorTimer =
-        window.setTimeout(() => {
-          hideGraphScrollLayerIndicator();
-        }, options.duration || 1350);
-    }
+    // The selected/previewed layer is already communicated by the glowing
+    // boundary.  Keep the top-right status box permanently disabled.
+    hideGraphScrollLayerIndicator(true);
   }
 
   function graphScrollLayerClipRectangle(
@@ -13384,8 +13535,12 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       };
     }
 
+    const belongsToGraph =
+      graphElementBelongsToViewport(element);
     const viewportRectangle =
-      dom.viewport.getBoundingClientRect();
+      belongsToGraph
+        ? dom.viewport.getBoundingClientRect()
+        : graphVisibleViewportRectangle();
     const rectangle =
       element.getBoundingClientRect();
 
@@ -13411,7 +13566,12 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
     while (
       ancestor &&
-      ancestor !== dom.viewport
+      ancestor !== (
+        belongsToGraph
+          ? dom.viewport
+          : document.body
+      ) &&
+      ancestor !== document.documentElement
     ) {
       const style =
         getComputedStyle(ancestor);
@@ -13478,11 +13638,15 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         descriptor.kind ===
           "document-root" ||
         (
-          graphElementBelongsToViewport(
-            element
-          ) &&
           graphScrollLayerVisible(
             element
+          ) &&
+          graphScrollLayerHasExposedPixels(
+            element,
+            graphScrollLayerClipRectangle(
+              element,
+              descriptor
+            )
           )
         )
       );
@@ -13598,6 +13762,69 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       );
   }
 
+  function followGraphScrollLayerVisualDuringViewportMotion(
+    descriptor
+  ) {
+    if (graphScrollLayerVisualFollowFrame) {
+      cancelAnimationFrame(
+        graphScrollLayerVisualFollowFrame
+      );
+      graphScrollLayerVisualFollowFrame = 0;
+    }
+
+    const startedAt = performance.now();
+    let lastLeft = Number.NaN;
+    let lastTop = Number.NaN;
+    let stableFrames = 0;
+
+    const tick = () => {
+      graphScrollLayerVisualFollowFrame = 0;
+
+      if (
+        !graphScrollLayerSelection ||
+        !descriptor ||
+        graphScrollLayerSelection.key !== descriptor.key
+      ) {
+        return;
+      }
+
+      positionGraphScrollLayerVisual();
+
+      const element =
+        resolveGraphScrollLayerElement(descriptor);
+
+      if (!element?.isConnected) {
+        return;
+      }
+
+      const rectangle =
+        element.getBoundingClientRect();
+      const unchanged =
+        Number.isFinite(lastLeft) &&
+        Math.abs(rectangle.left - lastLeft) < 0.1 &&
+        Math.abs(rectangle.top - lastTop) < 0.1;
+
+      stableFrames = unchanged
+        ? stableFrames + 1
+        : 0;
+      lastLeft = rectangle.left;
+      lastTop = rectangle.top;
+
+      if (
+        stableFrames < 4 &&
+        performance.now() - startedAt < 1600
+      ) {
+        graphScrollLayerVisualFollowFrame =
+          requestAnimationFrame(tick);
+      } else {
+        positionGraphScrollLayerVisual();
+      }
+    };
+
+    graphScrollLayerVisualFollowFrame =
+      requestAnimationFrame(tick);
+  }
+
   function clearGraphScrollLayerSelection(
     options = {}
   ) {
@@ -13615,6 +13842,13 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       graphScrollLayerVisualFrame = 0;
     }
 
+    if (graphScrollLayerVisualFollowFrame) {
+      cancelAnimationFrame(
+        graphScrollLayerVisualFollowFrame
+      );
+      graphScrollLayerVisualFollowFrame = 0;
+    }
+
     if (graphScrollLayerOutline) {
       graphScrollLayerOutline.hidden =
         true;
@@ -13622,6 +13856,60 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
     if (options.keepIndicator !== true) {
       hideGraphScrollLayerIndicator(true);
+    }
+  }
+
+  function focusGraphScrollLayerInViewport(
+    descriptor
+  ) {
+    if (
+      !descriptor ||
+      descriptor.kind === "html-root" ||
+      descriptor.kind === "document-root"
+    ) {
+      return;
+    }
+
+    const element =
+      resolveGraphScrollLayerElement(descriptor);
+
+    if (!element?.isConnected) {
+      return;
+    }
+
+    const viewport =
+      graphVisibleViewportRectangle();
+    const headerBottom =
+      Math.max(
+        viewport.top,
+        document.querySelector(".topbar")
+          ?.getBoundingClientRect().bottom ||
+          viewport.top
+      );
+    const availableHeight =
+      Math.max(1, viewport.bottom - headerBottom);
+    const rectangle =
+      element.getBoundingClientRect();
+
+    const desiredTop =
+      rectangle.height > availableHeight
+        ? headerBottom
+        : headerBottom +
+          (availableHeight - rectangle.height) / 2;
+    const deltaY =
+      rectangle.top - desiredTop;
+
+    if (Math.abs(deltaY) > 1) {
+      followGraphScrollLayerVisualDuringViewportMotion(
+        descriptor
+      );
+      window.scrollBy({
+        top: deltaY,
+        left: 0,
+        behavior: "smooth"
+      });
+    } else {
+      positionGraphScrollLayerVisual();
     }
   }
 
@@ -13662,6 +13950,9 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         ? frozenChain
         : [candidate];
 
+    focusGraphScrollLayerInViewport(
+      graphScrollLayerSelection
+    );
     scheduleGraphScrollLayerVisualRefresh();
 
     showGraphScrollLayerIndicator(
@@ -13697,24 +13988,25 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       graphScrollLayerSession
         ?.candidates?.length
     ) {
+      // Keep the hierarchy frozen only for the CURRENT Ctrl/Command hold.
       candidates =
         refreshGraphScrollLayerCandidateChain(
           graphScrollLayerSession
             .candidates
         );
-    } else if (
-      graphScrollLayerSelectionCandidates
-        ?.length
-    ) {
-      candidates =
-        refreshGraphScrollLayerCandidateChain(
-          graphScrollLayerSelectionCandidates
-        );
     } else {
+      // Every new modifier gesture starts from the live hierarchy currently
+      // under the pointer.  Do not reuse the chain from the previous lock:
+      // scrolling Graph ROOT / <html> can move different nested node content
+      // under the same screen position before Ctrl/Command is pressed again.
       candidates =
         graphScrollLayerCandidates(
           event.target,
-          event.composedPath?.()
+          event.composedPath?.(),
+          {
+            x: event.clientX,
+            y: event.clientY
+          }
         );
     }
 
@@ -13909,7 +14201,8 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
   function selectedGraphScrollLayerFor(
     target,
-    composedPath = null
+    composedPath = null,
+    hitPoint = null
   ) {
     if (graphScrollLayerSelection) {
       return {
@@ -13926,7 +14219,8 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     const descriptor =
       graphScrollLayerCandidates(
         target,
-        composedPath
+        composedPath,
+        hitPoint
       )[0] ||
       graphScrollLayerDescriptor(
         dom.viewport
@@ -13981,9 +14275,23 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       return;
     }
 
+    const graphRectangle =
+      dom.viewport.getBoundingClientRect();
+    const visibleViewport =
+      graphVisibleViewportRectangle();
+    const graphVisible =
+      graphRectangle.right > visibleViewport.left &&
+      graphRectangle.left < visibleViewport.right &&
+      graphRectangle.bottom > visibleViewport.top &&
+      graphRectangle.top < visibleViewport.bottom;
+
     if (
       !graphOwnsWheel &&
-      !insideGraph
+      !insideGraph &&
+      !(
+        (event.ctrlKey || event.metaKey) &&
+        graphVisible
+      )
     ) {
       return;
     }
@@ -14007,7 +14315,11 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     const selected =
       selectedGraphScrollLayerFor(
         target,
-        event.composedPath?.()
+        event.composedPath?.(),
+        {
+          x: event.clientX,
+          y: event.clientY
+        }
       );
     const descriptor =
       selected.descriptor;

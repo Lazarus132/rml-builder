@@ -254,14 +254,19 @@
                   moving the mouse into Properties, Generated Project Files, another node
                   or a dialog does not replace that hierarchy. Wheel down moves outward
                   and Wheel up moves inward.
-                  The currently previewed boundary glows; releasing the modifier enables a
-                  <strong>global scroll override</strong>. Every subsequent Wheel event is
+                  The currently previewed boundary itself glows; no separate corner status
+                  box is shown. Releasing the modifier enables a <strong>global scroll
+                  override</strong>. Every subsequent Wheel event is
                   captured before nested panels and native browser scrolling, and is routed
                   only to the locked level regardless of cursor position. Shift + Wheel
                   scrolls that same locked level horizontally. A normal primary click/tap
                   is the only action that releases the override; the clicked control still
                   performs its normal action. Reaching an edge, becoming empty, or being
                   temporarily rerendered never silently transfers scrolling to another level.
+                  Only layers with a genuinely visible, unobscured area participate: elements
+                  outside the viewport or fully covered by a higher stacking layer (for example
+                  underneath the sticky header, a dialog or an overlay) are excluded. Partially
+                  covered layers remain selectable through their still-visible area.
                 </p>
                 <p>
                   The final outermost level is always the actual
@@ -279,8 +284,8 @@
                   session is built from the current composed DOM path and real overflow
                   dimensions, then locked by stable identities so dynamically rerendered
                   elements can rebind without changing the chosen level. Dynamically rendered
-                  nested Section enums, graph-node internals, dialog lists and future scroll
-                  containers therefore participate automatically. A future custom surface can
+                  nested Section enums, real scrollable graph-node bodies, dialog lists and
+                  future scroll containers therefore participate automatically. A future custom surface can
                   also declare
                   <code>data-rml-scroll-layer="auto"</code> (or
                   <code>"always"</code> for an intentionally selectable empty level) and a
@@ -340,21 +345,16 @@
               <a href="#shortcut-graph">Node graph</a>
               <a href="#shortcut-search">Search & menus</a>
               <a href="#shortcut-color">Color picker</a>
-              <a href="#shortcut-pointer">Pointer gestures</a>
             </nav>
             <article class="information-content">
               <section id="shortcut-global" class="information-section">
                 <span class="information-kicker">Global</span>
-                <h3>Cancel and select scroll layers</h3>
+                <h3>Keyboard & wheel shortcuts</h3>
                 <div class="shortcut-grid">
                   <div><kbd>Esc</kbd><span>Cancel an active Outline drag and restore the scroll position from before the drag.</span></div>
-                  <div><span>Wheel / trackpad</span><span>Without a lock, scroll the innermost currently rendered level under the pointer. With a lock, scroll only that selected level globally, even when the pointer is over Generated Project Files, another panel, node or dialog.</span></div>
-                  <div><kbd>Ctrl</kbd><span class="shortcut-plus">+</span><span>Wheel</span><span>Start the global override and cycle the captured hierarchy. Wheel down moves outward; Wheel up moves inward. The hierarchy remains frozen if the mouse moves elsewhere. Release Ctrl to lock the glowing level. Command works on macOS.</span></div>
-                  <div><span>Primary click / tap</span><span>Release the global scroll override and remove its glow. This is the only normal action that changes the locked target; the clicked button, field, section or node still performs its own action.</span></div>
-                  <div><kbd>Shift</kbd><span class="shortcut-plus">+</span><span>Wheel / trackpad</span><span>Scroll the globally locked level horizontally, independent of mouse position.</span></div>
-                  <div><strong>Global capture</strong><span>The override captures Wheel before local code windows, dialogs, lists and native scrolling, so another surface cannot steal the gesture.</span></div>
-                  <div><strong>Dynamic levels</strong><span>Nested Sub Enums, node internals, lists, dialogs and future scroll containers are detected from the live DOM rather than from a fixed selector list. Stable identities keep a selected layer bound across rerenders.</span></div>
-                  <div><code>&lt;html&gt;</code><span>Always remains the final outermost selectable level. It can be selected even when it is empty and has no current scroll range.</span></div>
+                  <div><kbd>Wheel</kbd><span>Scroll the innermost visible scrollable level under the pointer. If a global level is locked, Wheel scrolls only that locked level.</span></div>
+                  <div><kbd>Ctrl</kbd><span class="shortcut-plus">+</span><kbd>Wheel</kbd><span>Select a visible scroll level. Wheel down moves outward and Wheel up moves inward. Release Ctrl to lock the glowing level. Press Ctrl again later to capture the currently visible hierarchy again without clicking first. Use Command on macOS.</span></div>
+                  <div><kbd>Shift</kbd><span class="shortcut-plus">+</span><kbd>Wheel</kbd><span>Scroll horizontally. With a global level locked, the horizontal wheel input is routed only to that selected level.</span></div>
                 </div>
               </section>
               <section id="shortcut-graph" class="information-section">
@@ -365,7 +365,6 @@
                   <div><kbd>Delete</kbd><span>Delete the selected graph node, wire or bend point.</span></div>
                   <div><kbd>Backspace</kbd><span>Same as Delete when focus is not inside an editable field.</span></div>
                   <div><kbd>Ctrl</kbd><span class="shortcut-plus">+</span><kbd>0</kbd><span>Center the graph. On macOS use Command + 0.</span></div>
-                  <div><strong>Graph ROOT</strong><span>The graph pan surface is an intermediate scroll level between nested node content and the final <code>&lt;html&gt;</code> page level. Once locked, it keeps panning even while the cursor is outside the graph.</span></div>
                 </div>
               </section>
               <section id="shortcut-search" class="information-section">
@@ -385,17 +384,7 @@
                 <div class="shortcut-grid">
                   <div><kbd>←</kbd><kbd>→</kbd><span>Decrease / increase saturation by 0.01.</span></div>
                   <div><kbd>↓</kbd><kbd>↑</kbd><span>Decrease / increase value by 0.01.</span></div>
-                  <div><kbd>Shift</kbd><span class="shortcut-plus">+</span><span>Arrow key</span><span>Use a larger 0.05 step.</span></div>
-                </div>
-              </section>
-              <section id="shortcut-pointer" class="information-section">
-                <span class="information-kicker">Pointer / mouse</span>
-                <h3>Useful graph gestures</h3>
-                <div class="shortcut-grid">
-                  <div><span>Double-click resize grip</span><span>Reset that node size axis.</span></div>
-                  <div><span>Double-click bend point</span><span>Remove that manual wire point.</span></div>
-                  <div><span>Drag wire segment</span><span>Create a movable bend point.</span></div>
-                  <div><span>Drop output on empty graph</span><span>Create a live monitor for that value.</span></div>
+                  <div><kbd>Shift</kbd><span class="shortcut-plus">+</span><kbd>Arrow</kbd><span>Use a larger 0.05 step.</span></div>
                 </div>
               </section>
             </article>
