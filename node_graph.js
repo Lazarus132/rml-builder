@@ -949,6 +949,7 @@
   let graphScrollLayerIndicatorTimer = 0;
   let graphScrollLayerOutline = null;
   let graphScrollLayerIndicator = null;
+  let graphRevealAnimationFrame = 0;
 
   const graphSharedWheelClaims = (() => {
     const existing =
@@ -12068,6 +12069,145 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     scheduleGraphScrollLayerVisualRefresh();
   }
 
+
+  function installGraphRevealProvider() {
+    if (
+      !window.RMLScrollManager?.registerRevealProvider ||
+      window.__RMLGraphRevealProviderInstalled
+    ) {
+      return;
+    }
+
+    window.__RMLGraphRevealProviderInstalled = true;
+
+    window.RMLScrollManager.registerRevealProvider(
+      "typed-runtime-graph-virtual-surface",
+      (element, context = {}) => {
+        if (
+          !graph?.active ||
+          !dom.viewport?.isConnected ||
+          !(element instanceof HTMLElement) ||
+          !dom.viewport.contains(element) ||
+          element === dom.viewport
+        ) {
+          return false;
+        }
+
+        const node =
+          element.closest(".rml-graph-node");
+
+        if (!node || !dom.nodesHost?.contains(node)) {
+          return false;
+        }
+
+        const viewportRect =
+          dom.viewport.getBoundingClientRect();
+        const targetRect =
+          element.getBoundingClientRect();
+        const margin =
+          Math.max(0, Number(context.margin) || 18);
+
+        const left = viewportRect.left + margin;
+        const right = viewportRect.right - margin;
+        const top = viewportRect.top + margin;
+        const bottom = viewportRect.bottom - margin;
+
+        let dx = 0;
+        let dy = 0;
+
+        if (targetRect.width > Math.max(1, right - left)) {
+          dx = left - targetRect.left;
+        } else if (targetRect.left < left) {
+          dx = left - targetRect.left;
+        } else if (targetRect.right > right) {
+          dx = right - targetRect.right;
+        }
+
+        if (targetRect.height > Math.max(1, bottom - top)) {
+          dy = top - targetRect.top;
+        } else if (targetRect.top < top) {
+          dy = top - targetRect.top;
+        } else if (targetRect.bottom > bottom) {
+          dy = bottom - targetRect.bottom;
+        }
+
+        if (Math.abs(dx) <= 0.5 && Math.abs(dy) <= 0.5) {
+          return false;
+        }
+
+        if (graphRevealAnimationFrame) {
+          cancelAnimationFrame(
+            graphRevealAnimationFrame
+          );
+          graphRevealAnimationFrame = 0;
+        }
+
+        if (context.behavior !== "smooth") {
+          graph.viewport.x += dx;
+          graph.viewport.y += dy;
+          applyViewportTransform();
+          persistGraphSoon();
+          return true;
+        }
+
+        const startX = graph.viewport.x;
+        const startY = graph.viewport.y;
+        const targetX = startX + dx;
+        const targetY = startY + dy;
+        const startedAt = performance.now();
+        const duration = 430;
+
+        const animateReveal = now => {
+          const raw =
+            Math.min(
+              1,
+              (now - startedAt) /
+                duration
+            );
+          const eased =
+            raw < 0.5
+              ? 2 * raw * raw
+              : 1 -
+                Math.pow(
+                  -2 * raw + 2,
+                  2
+                ) / 2;
+
+          graph.viewport.x =
+            startX +
+            (targetX - startX) *
+              eased;
+          graph.viewport.y =
+            startY +
+            (targetY - startY) *
+              eased;
+
+          applyViewportTransform();
+
+          if (raw < 1) {
+            graphRevealAnimationFrame =
+              requestAnimationFrame(
+                animateReveal
+              );
+          } else {
+            graphRevealAnimationFrame = 0;
+            persistGraphSoon();
+          }
+        };
+
+        graphRevealAnimationFrame =
+          requestAnimationFrame(
+            animateReveal
+          );
+
+        return true;
+      },
+      100
+    );
+  }
+
+  installGraphRevealProvider();
+
   function graphToClient(
     x,
     y
@@ -13167,10 +13307,6 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         );
     }
 
-    // Wheel targets can be an SVG wire, resize overlay, socket marker or other
-    // graph chrome even though a scrollable node is visibly underneath it.
-    // Hit-testing the live viewport makes node-body discovery independent from
-    // whichever overlay happened to become event.target.
     if (
       Number.isFinite(hitPoint?.x) &&
       Number.isFinite(hitPoint?.y) &&
@@ -13227,9 +13363,6 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       const width = Math.max(0, clipped.right - clipped.left);
       const height = Math.max(0, clipped.bottom - clipped.top);
 
-      // Even a thin visible strip counts. This is intentional: if a real
-      // scroll surface is visible anywhere in the visual viewport, it must
-      // participate regardless of aspect ratio, page split or panel layout.
       if (
         width < 1 ||
         height < 1 ||
@@ -13269,7 +13402,8 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
   function graphScrollLayerCandidates(
     target,
     composedPath = null,
-    hitPoint = null
+    hitPoint = null,
+    options = {}
   ) {
     const candidates = [];
     const keys = new Set();
@@ -13302,21 +13436,19 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       }
     }
 
-    // Ctrl/Command selection is viewport-wide, not pointer-column-only.
-    // Any currently visible real scroll surface participates, including a
-    // node body that sits slightly above the pointer and a Generated C#
-    // viewport visible beside/below the graph at the same time.
-    for (const current of
-      graphViewportVisibleScrollElements()) {
-      const descriptor =
-        graphScrollLayerDescriptor(current);
+    if (options.includeViewportWide === true) {
+      for (const current of
+        graphViewportVisibleScrollElements()) {
+        const descriptor =
+          graphScrollLayerDescriptor(current);
 
-      if (
-        descriptor &&
-        !keys.has(descriptor.key)
-      ) {
-        keys.add(descriptor.key);
-        candidates.push(descriptor);
+        if (
+          descriptor &&
+          !keys.has(descriptor.key)
+        ) {
+          keys.add(descriptor.key);
+          candidates.push(descriptor);
+        }
       }
     }
 
@@ -13504,8 +13636,6 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     descriptor,
     options = {}
   ) {
-    // The selected/previewed layer is already communicated by the glowing
-    // boundary.  Keep the top-right status box permanently disabled.
     hideGraphScrollLayerIndicator(true);
   }
 
@@ -13877,40 +14007,27 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       return;
     }
 
-    const viewport =
-      graphVisibleViewportRectangle();
-    const headerBottom =
-      Math.max(
-        viewport.top,
-        document.querySelector(".topbar")
-          ?.getBoundingClientRect().bottom ||
-          viewport.top
-      );
-    const availableHeight =
-      Math.max(1, viewport.bottom - headerBottom);
-    const rectangle =
-      element.getBoundingClientRect();
+    followGraphScrollLayerVisualDuringViewportMotion(
+      descriptor
+    );
 
-    const desiredTop =
-      rectangle.height > availableHeight
-        ? headerBottom
-        : headerBottom +
-          (availableHeight - rectangle.height) / 2;
-    const deltaY =
-      rectangle.top - desiredTop;
-
-    if (Math.abs(deltaY) > 1) {
-      followGraphScrollLayerVisualDuringViewportMotion(
-        descriptor
+    if (window.RMLScrollManager?.revealElement) {
+      window.RMLScrollManager.revealElement(
+        element,
+        {
+          reason: "ctrl-scroll-commit",
+          margin: 18,
+          behavior: "smooth"
+        }
       );
-      window.scrollBy({
-        top: deltaY,
-        left: 0,
-        behavior: "smooth"
-      });
-    } else {
-      positionGraphScrollLayerVisual();
+      return;
     }
+
+    element.scrollIntoView({
+      block: "nearest",
+      inline: "nearest",
+      behavior: "smooth"
+    });
   }
 
   function commitGraphScrollLayerSelection() {
@@ -13988,17 +14105,12 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       graphScrollLayerSession
         ?.candidates?.length
     ) {
-      // Keep the hierarchy frozen only for the CURRENT Ctrl/Command hold.
       candidates =
         refreshGraphScrollLayerCandidateChain(
           graphScrollLayerSession
             .candidates
         );
     } else {
-      // Every new modifier gesture starts from the live hierarchy currently
-      // under the pointer.  Do not reuse the chain from the previous lock:
-      // scrolling Graph ROOT / <html> can move different nested node content
-      // under the same screen position before Ctrl/Command is pressed again.
       candidates =
         graphScrollLayerCandidates(
           event.target,
@@ -14006,7 +14118,8 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           {
             x: event.clientX,
             y: event.clientY
-          }
+          },
+          { includeViewportWide: true }
         );
     }
 
@@ -14220,7 +14333,8 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       graphScrollLayerCandidates(
         target,
         composedPath,
-        hitPoint
+        hitPoint,
+        { includeViewportWide: false }
       )[0] ||
       graphScrollLayerDescriptor(
         dom.viewport
@@ -21838,14 +21952,26 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       }
     );
 
-    window.addEventListener(
-      "wheel",
-      handleGraphWheel,
-      {
-        capture: true,
-        passive: false
-      }
-    );
+    if (window.RMLScrollManager?.registerWheelHandler) {
+      window.RMLScrollManager.registerWheelHandler(
+        "typed-node-graph-scroll",
+        event => {
+          const before = event.defaultPrevented;
+          handleGraphWheel(event);
+          return !before && event.defaultPrevented;
+        },
+        200
+      );
+    } else {
+      window.addEventListener(
+        "wheel",
+        handleGraphWheel,
+        {
+          capture: true,
+          passive: false
+        }
+      );
+    }
 
     document.addEventListener(
       "keydown",
