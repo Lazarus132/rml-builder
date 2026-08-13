@@ -350,7 +350,10 @@
       csType: "byte[]",
       defaultCs: "Array.Empty<byte>()",
       referenceType: true,
-      constraints: ["reference", "serializable"]
+      collectionType: true,
+      enumerableElementType: "int",
+      enumerableElementCsType: "System.Byte",
+      constraints: ["reference", "serializable", "enumerable"]
     },
     stringArray: {
       label: "String array",
@@ -359,7 +362,10 @@
       csType: "string[]",
       defaultCs: "Array.Empty<string>()",
       referenceType: true,
-      constraints: ["reference", "serializable"]
+      collectionType: true,
+      enumerableElementType: "string",
+      enumerableElementCsType: "System.String",
+      constraints: ["reference", "serializable", "enumerable"]
     },
     objectArray: {
       label: "Object array",
@@ -368,7 +374,10 @@
       csType: "object?[]",
       defaultCs: "Array.Empty<object?>()",
       referenceType: true,
-      constraints: ["reference", "serializable"]
+      collectionType: true,
+      enumerableElementType: "object",
+      enumerableElementCsType: "System.Object",
+      constraints: ["reference", "serializable", "enumerable"]
     },
     type: {
       label: "System.Type",
@@ -914,6 +923,7 @@
 
   const groups = [
     ["Transforms", { after: "Math" }],
+    ["Collections", { after: "Flow" }],
     ["Harmony", { after: "Lifecycle" }],
     ["Reflection", { after: "Harmony" }],
     ["Slots & Components", { after: "Debug & Output" }],
@@ -4123,6 +4133,200 @@ private static T ReadNumericComponent<T>(
       const body = api.emit("body");
       const done = api.emit("completed");
       return `for (${field} = 0; ${field} < Math.Max(0, ${api.input("count").code}); ${field}++)\n        {\n            ${body ? `${body}();` : "// No Body path."}\n        }${done ? `\n        ${done}();` : ""}`;
+    }
+  });
+
+  registerNode("flow.forEach", {
+    title: "For Each",
+    group: "Collections",
+    symbol: "∀",
+    description:
+      "Iterates any typed array or System.Collections.IEnumerable collection. The Item output is inferred from the connected collection, Body runs once per element, Index is zero-based and Completed runs after the collection is exhausted (including empty or null collections).",
+    inputs: [
+      port("call", "Call", "impulse"),
+      genericPort(
+        "collection",
+        "Collection",
+        "TCollection",
+        "enumerable"
+      )
+    ],
+    outputs: [
+      port("body", "Body", "impulse"),
+      port("completed", "Completed", "impulse"),
+      genericPort(
+        "item",
+        "Item",
+        "TItem",
+        "value"
+      ),
+      port("index", "Index", "int")
+    ],
+    genericRelations: [
+      {
+        kind: "enumerableElement",
+        collectionTypeVar: "TCollection",
+        elementTypeVar: "TItem"
+      }
+    ],
+    codegenCollect(api) {
+      const itemSpec =
+        api.definition.outputs.find(
+          specification =>
+            specification.id === "item"
+        );
+      const itemType =
+        api.resolvedType(
+          api.node,
+          itemSpec
+        ) || "object";
+      const token = nodeToken(api);
+
+      addStatefulField(
+        api,
+        "forEachItem",
+        api.csType(itemType),
+        api.csDefault(itemType)
+      );
+      addStatefulField(
+        api,
+        "forEachIndex",
+        "int",
+        "0"
+      );
+
+      api.addUsing("System.Collections");
+      api.addMember(
+        "collection.foreach.runtime",
+        String.raw`
+private static System.Collections.IEnumerable GraphEnumerateCollection(object? collection)
+{
+    if (collection is null)
+    {
+        return System.Array.Empty<object>();
+    }
+
+    if (collection is System.Collections.IEnumerable enumerable)
+    {
+        return enumerable;
+    }
+
+    throw new System.InvalidOperationException(
+        $"The runtime value {collection.GetType().FullName} is not enumerable.");
+}
+
+private static T GraphCollectionItem<T>(object? value)
+{
+    if (value is null)
+    {
+        return default!;
+    }
+
+    if (value is T typed)
+    {
+        return typed;
+    }
+
+    System.Type targetType =
+        System.Nullable.GetUnderlyingType(typeof(T)) ??
+        typeof(T);
+
+    try
+    {
+        if (targetType.IsEnum)
+        {
+            object convertedEnum =
+                value is string text
+                    ? System.Enum.Parse(
+                        targetType,
+                        text,
+                        ignoreCase: true)
+                    : System.Enum.ToObject(
+                        targetType,
+                        value);
+
+            return (T)convertedEnum;
+        }
+
+        if (
+            value is System.IConvertible &&
+            typeof(System.IConvertible)
+                .IsAssignableFrom(targetType))
+        {
+            object? converted =
+                System.Convert.ChangeType(
+                    value,
+                    targetType,
+                    System.Globalization.CultureInfo.InvariantCulture);
+
+            if (converted is T convertedTyped)
+            {
+                return convertedTyped;
+            }
+        }
+    }
+    catch (System.Exception exception)
+    {
+        throw new System.InvalidCastException(
+            $"Collection item {value.GetType().FullName} cannot be converted to {typeof(T).FullName}.",
+            exception);
+    }
+
+    throw new System.InvalidCastException(
+        $"Collection item {value.GetType().FullName} cannot be used as {typeof(T).FullName}.");
+}
+`
+      );
+    },
+    codegenExpression(api) {
+      const token = nodeToken(api);
+      const output = String(
+        api.portId ||
+        api.outputPortId ||
+        ""
+      );
+
+      return output === "index"
+        ? `_forEachIndex${token}`
+        : `_forEachItem${token}`;
+    },
+    codegenAction(api) {
+      const itemSpec =
+        api.definition.outputs.find(
+          specification =>
+            specification.id === "item"
+        );
+      const itemType =
+        api.resolvedType(
+          api.node,
+          itemSpec
+        ) || "object";
+      const itemCsType =
+        api.csType(itemType);
+      const token = nodeToken(api);
+      const itemField =
+        `_forEachItem${token}`;
+      const indexField =
+        `_forEachIndex${token}`;
+      const rawItem =
+        `_forEachRaw${token}`;
+      const body = api.emit("body");
+      const completed =
+        api.emit("completed");
+
+      return `${indexField} = 0;\nforeach (object? ${rawItem} in GraphEnumerateCollection(${api.input("collection").code}))\n        {\n            ${itemField} = GraphCollectionItem<${itemCsType}>(${rawItem});\n            ${body ? `${body}();` : "// No Body path."}\n            ${indexField}++;\n        }${completed ? `\n        ${completed}();` : ""}`;
+    },
+    previewEvaluate({
+      portId,
+      type,
+      unknown
+    }) {
+      return unknown(
+        type,
+        portId === "index"
+          ? "Runtime-only collection index"
+          : "Runtime-only collection item"
+      );
     }
   });
 

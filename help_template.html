@@ -197,6 +197,7 @@
               <a href="#info-library">Node library</a>
               <a href="#info-wires">Sockets & wires</a>
               <a href="#info-runtime">Live runtime monitors</a>
+              <a href="#info-collections">Collections & iteration</a>
               <a href="#info-editing">Graph editing</a>
               <a href="#info-harmony">Harmony projects</a>
               <a href="#info-advanced">Advanced / Raw C#</a>
@@ -252,6 +253,30 @@
                   generated mod. When the scanner or matching mod is unavailable, the node clearly
                   falls back to <strong>Runtime Only</strong> and keeps the existing local graph
                   preview where that value can be evaluated safely.
+                </p>
+              </section>
+
+
+              <section id="info-collections" class="information-section">
+                <span class="information-kicker">Typed collections</span>
+                <h3>For Each over arrays and IEnumerable values</h3>
+                <p>
+                  <strong>For Each</strong> accepts any scanner-derived or built-in type
+                  that implements <code>System.Collections.IEnumerable</code>. Its
+                  collection and item generics are linked: connecting a typed collection
+                  automatically infers the exact element type, while the zero-based
+                  <strong>Index</strong> and current <strong>Item</strong> remain valid for
+                  the duration of each <strong>Body</strong> impulse. <strong>Completed</strong>
+                  fires after the final item and also for empty or null collections.
+                </p>
+                <p>
+                  Example: <code>Focused World → Get · World.AllUsers → For Each</code>,
+                  then connect <code>Item</code> to a User property such as
+                  <code>Get · User.UserName</code> and run logging or other logic from
+                  <code>Body</code>. Arrays, generic lists, dictionary key/value collections
+                  and custom catalog types implementing <code>IEnumerable&lt;T&gt;</code>
+                  use the same node. Asynchronous enumerables are intentionally separate
+                  and are not executed by this synchronous node.
                 </p>
               </section>
 

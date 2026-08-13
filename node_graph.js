@@ -2,7 +2,7 @@
   "use strict";
 
   const EXTENSION_NAME = "typedNodeGraph";
-  const GRAPH_SCHEMA_VERSION = 15;
+  const GRAPH_SCHEMA_VERSION = 16;
   const GRAPH_STAGE_WIDTH = 5200;
   const GRAPH_STAGE_HEIGHT = 3400;
   const GRAPH_MIN_ZOOM = 0.005;
@@ -1099,7 +1099,8 @@
       ordered: "Ordered number",
       interpolatable: "Interpolatable value",
       reflectionMember: "Reflection member",
-      serializable: "Serializable value"
+      serializable: "Serializable value",
+      enumerable: "Enumerable collection"
     };
 
     return labels[constraint] || "Generic";
@@ -1842,6 +1843,12 @@
       return type !== "impulse";
     }
 
+    if (constraint === "enumerable") {
+      return Boolean(
+        information.enumerableElementType
+      );
+    }
+
     if (constraint === "reference") {
       return Boolean(
         information.referenceType ||
@@ -1961,6 +1968,37 @@
     }
 
     return false;
+  }
+
+  function enumerableElementType(type) {
+    const information =
+      TYPE_INFO[typeBase(type)] || {};
+    const elementType =
+      information.enumerableElementType;
+
+    return typeof elementType === "string" &&
+      elementType
+        ? elementType
+        : null;
+  }
+
+  function collectionElementTypesCompatible(
+    collectionType,
+    itemType
+  ) {
+    const elementType =
+      enumerableElementType(
+        collectionType
+      );
+
+    return Boolean(
+      elementType &&
+      itemType &&
+      connectionTypesCompatible(
+        elementType,
+        itemType
+      )
+    );
   }
 
   function defaultGraphState() {
@@ -3175,29 +3213,51 @@
   }
 
   function graphConcreteTypes() {
-      const result = new Set(
-          VALUE_TYPES
-      );
+    const result = new Set();
 
-      for (const node of graph.nodes) {
-          const definition =
-              nodeDefinition(node);
-
-          for (const spec of [
-              ...(definition?.inputs || []),
-              ...(definition?.outputs || [])
-          ]) {
-              if (
-                  spec.type &&
-                  spec.type !== "generic" &&
-                  spec.type !== "auto"
-              ) {
-                  result.add(spec.type);
-              }
-          }
+    const addType = type => {
+      if (
+        !type ||
+        type === "generic" ||
+        type === "auto" ||
+        type === "impulse" ||
+        result.has(type)
+      ) {
+        return;
       }
 
-      return [...result];
+      result.add(type);
+
+      const elementType =
+        TYPE_INFO[typeBase(type)]
+          ?.enumerableElementType;
+
+      if (
+        typeof elementType === "string" &&
+        elementType &&
+        elementType !== type
+      ) {
+        addType(elementType);
+      }
+    };
+
+    for (const type of VALUE_TYPES) {
+      addType(type);
+    }
+
+    for (const node of graph.nodes) {
+      const definition =
+        nodeDefinition(node);
+
+      for (const spec of [
+        ...(definition?.inputs || []),
+        ...(definition?.outputs || [])
+      ]) {
+        addType(spec.type);
+      }
+    }
+
+    return [...result];
   }
 
   function genericVariableDefault(variable) {
@@ -3456,6 +3516,77 @@
       }
     }
 
+    const genericRelations = [];
+
+    for (const node of graph.nodes) {
+      const definition =
+        nodeDefinition(node);
+
+      for (const descriptor of
+        Array.isArray(
+          definition?.genericRelations
+        )
+          ? definition.genericRelations
+          : []) {
+        if (
+          descriptor?.kind !==
+            "enumerableElement"
+        ) {
+          continue;
+        }
+
+        const collectionTypeVar =
+          String(
+            descriptor.collectionTypeVar ||
+            ""
+          );
+        const elementTypeVar =
+          String(
+            descriptor.elementTypeVar ||
+            ""
+          );
+        const collectionKey =
+          genericVariableKey(
+            node.id,
+            collectionTypeVar
+          );
+        const elementKey =
+          genericVariableKey(
+            node.id,
+            elementTypeVar
+          );
+        const collectionVariable =
+          variables.get(collectionKey);
+        const elementVariable =
+          variables.get(elementKey);
+
+        if (
+          !collectionVariable ||
+          !elementVariable
+        ) {
+          return {
+            valid: false,
+            reason:
+              `${definition?.title || "Node"} contains an invalid enumerable generic relation.`,
+            bindings: new Map()
+          };
+        }
+
+        genericRelations.push({
+          node,
+          definition,
+          collection: {
+            key: collectionKey,
+            variable: collectionVariable
+          },
+          element: {
+            key: elementKey,
+            variable: elementVariable
+          }
+        });
+      }
+    }
+
     const termFor = portRef => {
       if (portRef.spec.type) {
         return {
@@ -3633,6 +3764,61 @@
           };
         }
       }
+
+      for (const relation of genericRelations) {
+        const collectionValues =
+          [...relation.collection.variable.domain];
+        const itemValues =
+          [...relation.element.variable.domain];
+
+        for (const collectionType of collectionValues) {
+          if (
+            !itemValues.some(itemType =>
+              collectionElementTypesCompatible(
+                collectionType,
+                itemType
+              )
+            )
+          ) {
+            relation.collection.variable
+              .domain.delete(collectionType);
+            changed = true;
+          }
+        }
+
+        const remainingCollections =
+          [...relation.collection.variable.domain];
+
+        for (const itemType of itemValues) {
+          if (
+            !remainingCollections.some(
+              collectionType =>
+                collectionElementTypesCompatible(
+                  collectionType,
+                  itemType
+                )
+            )
+          ) {
+            relation.element.variable
+              .domain.delete(itemType);
+            changed = true;
+          }
+        }
+
+        if (
+          relation.collection.variable
+            .domain.size === 0 ||
+          relation.element.variable
+            .domain.size === 0
+        ) {
+          return {
+            valid: false,
+            reason:
+              `${relation.definition?.title || "For Each"} cannot infer a compatible collection item type.`,
+            bindings: new Map()
+          };
+        }
+      }
     }
 
     const edgesByVariable = new Map();
@@ -3646,6 +3832,22 @@
       if (!edge.to.fixed) {
         edgesByVariable.get(edge.to.key)?.push(edge);
       }
+    }
+
+    const relationsByVariable =
+      new Map(
+        [...variables.keys()].map(
+          key => [key, []]
+        )
+      );
+
+    for (const relation of genericRelations) {
+      relationsByVariable
+        .get(relation.collection.key)
+        ?.push(relation);
+      relationsByVariable
+        .get(relation.element.key)
+        ?.push(relation);
     }
 
     const assignments = new Map();
@@ -3695,6 +3897,49 @@
       return true;
     };
 
+    const candidateFitsAssignedRelations =
+      (key, candidate) => {
+        for (const relation of
+          relationsByVariable.get(key) || []) {
+          const collectionType =
+            relation.collection.key === key
+              ? candidate
+              : assignments.get(
+                  relation.collection.key
+                );
+          const itemType =
+            relation.element.key === key
+              ? candidate
+              : assignments.get(
+                  relation.element.key
+                );
+
+          if (
+            collectionType &&
+            itemType &&
+            !collectionElementTypesCompatible(
+              collectionType,
+              itemType
+            )
+          ) {
+            return false;
+          }
+        }
+
+        return true;
+      };
+
+    const candidateFitsAssignedConstraints =
+      (key, candidate) =>
+        candidateFitsAssignedEdges(
+          key,
+          candidate
+        ) &&
+        candidateFitsAssignedRelations(
+          key,
+          candidate
+        );
+
     const everyUnassignedNeighborHasCandidate = key => {
       for (const edge of edgesByVariable.get(key) || []) {
         const other =
@@ -3710,18 +3955,46 @@
 
         const possible = candidateOrders.get(other.key)?.some(
           candidate =>
-            candidateFitsAssignedEdges(other.key, candidate)
+            candidateFitsAssignedConstraints(other.key, candidate)
         );
 
         if (!possible) {
           return false;
         }
       }
+
+      for (const relation of
+        relationsByVariable.get(key) || []) {
+        const other =
+          relation.collection.key === key
+            ? relation.element
+            : relation.collection;
+
+        if (assignments.has(other.key)) {
+          continue;
+        }
+
+        const possible =
+          candidateOrders.get(other.key)?.some(
+            candidate =>
+              candidateFitsAssignedConstraints(
+                other.key,
+                candidate
+              )
+          );
+
+        if (!possible) {
+          return false;
+        }
+      }
+
       return true;
     };
 
     const connectedVariableKeys = [...variables.keys()].filter(
-      key => (edgesByVariable.get(key) || []).length > 0
+      key =>
+        (edgesByVariable.get(key) || []).length > 0 ||
+        (relationsByVariable.get(key) || []).length > 0
     );
 
     const solve = () => {
@@ -3749,6 +4022,40 @@
         };
         const assignedIncoming = [];
         const assignedOutgoing = [];
+
+        for (const relation of
+          relationsByVariable.get(key) || []) {
+          if (relation.element.key !== key) {
+            continue;
+          }
+
+          const assignedCollection =
+            assignments.get(
+              relation.collection.key
+            );
+
+          if (assignedCollection) {
+            addPreferred(
+              enumerableElementType(
+                assignedCollection
+              )
+            );
+            continue;
+          }
+
+          const possibleElementTypes =
+            new Set(
+              [...relation.collection.variable.domain]
+                .map(enumerableElementType)
+                .filter(Boolean)
+            );
+
+          if (possibleElementTypes.size === 1) {
+            addPreferred(
+              [...possibleElementTypes][0]
+            );
+          }
+        }
 
         for (const edge of edgesByVariable.get(key) || []) {
           if (!edge.to.fixed && edge.to.key === key) {
@@ -3791,7 +4098,7 @@
               array.indexOf(candidate) === index
           )
           .filter(candidate =>
-            candidateFitsAssignedEdges(key, candidate)
+            candidateFitsAssignedConstraints(key, candidate)
           );
 
         if (candidates.length === 0) {
@@ -3858,6 +4165,31 @@
           valid: false,
           reason:
             `${typeLabel(fromType)} cannot safely connect to ${typeLabel(toType)}.`,
+          bindings
+        };
+      }
+    }
+
+    for (const relation of genericRelations) {
+      const collectionType =
+        assignments.get(
+          relation.collection.key
+        );
+      const itemType =
+        assignments.get(
+          relation.element.key
+        );
+
+      if (
+        !collectionElementTypesCompatible(
+          collectionType,
+          itemType
+        )
+      ) {
+        return {
+          valid: false,
+          reason:
+            `${relation.definition?.title || "For Each"} could not bind its collection to a compatible item type.`,
           bindings
         };
       }

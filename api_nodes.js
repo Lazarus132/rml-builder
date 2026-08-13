@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const FACTORY_VERSION = 3;
+  const FACTORY_VERSION = 4;
   const ADVANCED_GROUP = "Advanced / Raw C#";
   const API_GROUPS = Object.freeze({
     types: "API · Types & Enums",
@@ -98,6 +98,7 @@
       : [];
     const definitions = getNodeDefinitions();
     const typeByName = new Map();
+    const genericTypeRowsByShape = new Map();
     const graphTypeByCs = new Map();
     const graphTypeByNormalizedCs = new Map();
     const generatedNodeIds = new Set();
@@ -106,6 +107,11 @@
       const name = normalizeCsType(row.fullName);
       if (name) {
         typeByName.set(name, row);
+
+        const shape = genericTypeShape(name);
+        if (shape && !genericTypeRowsByShape.has(shape)) {
+          genericTypeRowsByShape.set(shape, row);
+        }
       }
     }
 
@@ -203,6 +209,82 @@
       );
     }
 
+    function enumerableElementCsTypeFor(
+      fullName,
+      row = null,
+      visited = new Set()
+    ) {
+      const csType = normalizeCsType(fullName);
+
+      if (
+        !csType ||
+        csType === "System.String" ||
+        csType === "string"
+      ) {
+        return null;
+      }
+
+      const direct =
+        directEnumerableElementCsType(csType);
+
+      if (direct) {
+        return normalizeCsType(direct);
+      }
+
+      const shape = genericTypeShape(csType);
+      const information =
+        row?.fullName
+          ? row
+          : typeByName.get(csType) ||
+            genericTypeRowsByShape.get(shape) ||
+            null;
+
+      if (!information) {
+        return null;
+      }
+
+      const visitKey =
+        `${csType}|${normalizeCsType(information.fullName)}`;
+
+      if (visited.has(visitKey)) {
+        return null;
+      }
+
+      visited.add(visitKey);
+
+      const substitutions =
+        genericTypeSubstitutions(
+          information.fullName,
+          csType
+        );
+
+      for (const interfaceName of
+        Array.isArray(information.interfaces)
+          ? information.interfaces
+          : []) {
+        const closedInterface =
+          substituteGenericTypeParameters(
+            interfaceName,
+            substitutions
+          );
+        const element =
+          directEnumerableElementCsType(
+            closedInterface
+          ) ||
+          enumerableElementCsTypeFor(
+            closedInterface,
+            null,
+            visited
+          );
+
+        if (element) {
+          return normalizeCsType(element);
+        }
+      }
+
+      return null;
+    }
+
     function registerApiType(fullName, row = null) {
       const csType = normalizeCsType(fullName);
       if (!csType || csType === "System.Void" || csType === "void") {
@@ -239,6 +321,11 @@
         information.name ||
         shortTypeName(csType);
       const color = colorForString(csType);
+      const enumerableElementCsType =
+        enumerableElementCsTypeFor(
+          csType,
+          information
+        );
 
       registerType(graphType, {
           label,
@@ -274,6 +361,50 @@
         normalizeTypeForLookup(csType),
         graphType
       );
+
+      if (
+        enumerableElementCsType &&
+        !isGenericParameterName(
+          enumerableElementCsType
+        ) &&
+        !isOpenTypeExpression(
+          enumerableElementCsType
+        )
+      ) {
+        const elementGraphType =
+          normalizeTypeForLookup(
+            enumerableElementCsType
+          ) ===
+          normalizeTypeForLookup(csType)
+            ? graphType
+            : registerApiType(
+                enumerableElementCsType,
+                typeByName.get(
+                  normalizeCsType(
+                    enumerableElementCsType
+                  )
+                ) || null
+              ) || "object";
+        const registeredInformation =
+          getTypeInformation(graphType);
+
+        if (registeredInformation) {
+          registeredInformation
+            .enumerableElementType =
+              elementGraphType;
+          registeredInformation
+            .enumerableElementCsType =
+              enumerableElementCsType;
+          registeredInformation
+            .collectionType = true;
+          registeredInformation.constraints =
+            [...new Set([
+              ...(registeredInformation.constraints || []),
+              "enumerable"
+            ])];
+        }
+      }
+
       return graphType;
     }
 
@@ -1356,6 +1487,242 @@ private static System.Reflection.MethodInfo? ResolveApiCatalogMethod(
     function displayTypeName(row) {
       return row?.name || shortTypeName(row?.fullName || "Type");
     }
+  }
+
+  function splitTopLevelTypeArguments(value) {
+    const text = String(value || "");
+    const result = [];
+    let start = 0;
+    let depth = 0;
+
+    for (let index = 0; index < text.length; index += 1) {
+      const character = text[index];
+
+      if (character === "<" || character === "[" || character === "(") {
+        depth += 1;
+      } else if (character === ">" || character === "]" || character === ")") {
+        depth = Math.max(0, depth - 1);
+      } else if (character === "," && depth === 0) {
+        result.push(text.slice(start, index).trim());
+        start = index + 1;
+      }
+    }
+
+    const tail = text.slice(start).trim();
+    if (tail) result.push(tail);
+    return result;
+  }
+
+  function firstGenericTypeParts(value) {
+    const text = normalizeCsType(value);
+    const open = text.indexOf("<");
+
+    if (open < 0) {
+      return null;
+    }
+
+    let depth = 0;
+    let close = -1;
+
+    for (let index = open; index < text.length; index += 1) {
+      if (text[index] === "<") {
+        depth += 1;
+      } else if (text[index] === ">") {
+        depth -= 1;
+        if (depth === 0) {
+          close = index;
+          break;
+        }
+      }
+    }
+
+    if (close < 0) {
+      return null;
+    }
+
+    return {
+      head: text.slice(0, open).trim(),
+      arguments: splitTopLevelTypeArguments(
+        text.slice(open + 1, close)
+      ),
+      suffix: text.slice(close + 1).trim()
+    };
+  }
+
+  function genericTypeShape(value) {
+    const parsed = firstGenericTypeParts(value);
+    if (!parsed) return "";
+
+    return (
+      `${parsed.head.replace(/\s+/g, "")}` +
+      `${parsed.suffix.replace(/\s+/g, "")}` +
+      `|${parsed.arguments.length}`
+    );
+  }
+
+  function genericTypeSubstitutions(
+    templateType,
+    actualType
+  ) {
+    const template =
+      firstGenericTypeParts(templateType);
+    const actual =
+      firstGenericTypeParts(actualType);
+    const result = new Map();
+
+    if (
+      !template ||
+      !actual ||
+      genericTypeShape(templateType) !==
+        genericTypeShape(actualType) ||
+      template.arguments.length !==
+        actual.arguments.length
+    ) {
+      return result;
+    }
+
+    for (
+      let index = 0;
+      index < template.arguments.length;
+      index += 1
+    ) {
+      const parameter =
+        normalizeCsType(
+          template.arguments[index]
+        );
+
+      if (isGenericParameterName(parameter)) {
+        result.set(
+          parameter,
+          normalizeCsType(
+            actual.arguments[index]
+          )
+        );
+      }
+    }
+
+    return result;
+  }
+
+  function substituteGenericTypeParameters(
+    value,
+    substitutions
+  ) {
+    let result = normalizeCsType(value);
+
+    for (const [parameter, replacement] of
+      substitutions instanceof Map
+        ? substitutions
+        : []) {
+      result = result.replace(
+        new RegExp(
+          `(^|[^A-Za-z0-9_])${parameter.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?=$|[^A-Za-z0-9_])`,
+          "g"
+        ),
+        (_match, prefix) =>
+          `${prefix}${replacement}`
+      );
+    }
+
+    return result;
+  }
+
+  function directEnumerableElementCsType(value) {
+    const text = normalizeCsType(value);
+
+    if (
+      !text ||
+      text === "System.String" ||
+      text === "string"
+    ) {
+      return null;
+    }
+
+    const array = text.match(
+      /^(.*)\[(?:,*)\]$/
+    );
+
+    if (array) {
+      return normalizeCsType(array[1]);
+    }
+
+    if (text === "System.Collections.IEnumerable") {
+      return "System.Object";
+    }
+
+    const parsed = firstGenericTypeParts(text);
+    if (!parsed) return null;
+
+    const head = parsed.head.replace(/\s+/g, "");
+    const suffix = parsed.suffix.replace(/\s+/g, "");
+    const argumentsList = parsed.arguments;
+    const oneElementCollections = new Set([
+      "System.Collections.Generic.IEnumerable",
+      "System.Collections.Generic.ICollection",
+      "System.Collections.Generic.IList",
+      "System.Collections.Generic.IReadOnlyCollection",
+      "System.Collections.Generic.IReadOnlyList",
+      "System.Collections.Generic.ISet",
+      "System.Collections.Generic.List",
+      "System.Collections.Generic.HashSet",
+      "System.Collections.Generic.Queue",
+      "System.Collections.Generic.Stack",
+      "System.Collections.Generic.LinkedList",
+      "System.Collections.ObjectModel.Collection",
+      "System.Collections.ObjectModel.ReadOnlyCollection",
+      "System.Collections.ObjectModel.ObservableCollection",
+      "System.Collections.Concurrent.ConcurrentBag",
+      "System.Collections.Concurrent.ConcurrentQueue",
+      "System.Collections.Concurrent.ConcurrentStack",
+      "System.Collections.Immutable.ImmutableArray",
+      "System.Collections.Immutable.ImmutableList",
+      "System.Collections.Immutable.ImmutableHashSet"
+    ]);
+
+    if (
+      !suffix &&
+      argumentsList.length === 1 &&
+      oneElementCollections.has(head)
+    ) {
+      return argumentsList[0];
+    }
+
+    if (
+      head === "System.Linq.IGrouping" &&
+      argumentsList.length === 2
+    ) {
+      return argumentsList[1];
+    }
+
+    const dictionaryHeads = new Set([
+      "System.Collections.Generic.Dictionary",
+      "System.Collections.Generic.IDictionary",
+      "System.Collections.Generic.IReadOnlyDictionary",
+      "System.Collections.Concurrent.ConcurrentDictionary",
+      "System.Collections.Immutable.ImmutableDictionary"
+    ]);
+
+    if (
+      dictionaryHeads.has(head) &&
+      argumentsList.length === 2
+    ) {
+      if (suffix.endsWith(".ValueCollection")) {
+        return argumentsList[1];
+      }
+
+      if (suffix.endsWith(".KeyCollection")) {
+        return argumentsList[0];
+      }
+
+      if (!suffix) {
+        return (
+          "System.Collections.Generic.KeyValuePair<" +
+          `${argumentsList[0]}, ${argumentsList[1]}>`
+        );
+      }
+    }
+
+    return null;
   }
 
   function normalizeCsType(value) {
