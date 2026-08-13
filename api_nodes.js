@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const FACTORY_VERSION = 4;
+  const FACTORY_VERSION = 5;
   const ADVANCED_GROUP = "Advanced / Raw C#";
   const API_GROUPS = Object.freeze({
     types: "API · Types & Enums",
@@ -102,6 +102,17 @@
     const graphTypeByCs = new Map();
     const graphTypeByNormalizedCs = new Map();
     const generatedNodeIds = new Set();
+    const assemblyByName = new Map(
+      (Array.isArray(catalog.assemblies)
+        ? catalog.assemblies
+        : [])
+        .filter(Boolean)
+        .map(assembly => [
+          String(assembly.name || "").trim(),
+          assembly
+        ])
+        .filter(([name]) => Boolean(name))
+    );
 
     for (const row of typeRows) {
       const name = normalizeCsType(row.fullName);
@@ -113,6 +124,128 @@
           genericTypeRowsByShape.set(shape, row);
         }
       }
+    }
+
+    function catalogTypeNamesInExpression(csType) {
+      const normalized =
+        normalizeCsType(csType)
+          .replace(/global::/g, "");
+      const names = new Set();
+      const matches = normalized.match(
+        /[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+/g
+      ) || [];
+
+      if (typeByName.has(normalized)) {
+        names.add(normalized);
+      }
+
+      for (const candidate of matches) {
+        if (typeByName.has(candidate)) {
+          names.add(candidate);
+        }
+      }
+
+      return [...names];
+    }
+
+    function assemblyReferencesForCsType(
+      csType,
+      row = null
+    ) {
+      const references = new Map();
+      const rows = [];
+
+      if (row && typeof row === "object") {
+        rows.push(row);
+      }
+
+      for (const typeName of
+        catalogTypeNamesInExpression(csType)) {
+        const information =
+          typeByName.get(typeName);
+        if (information) rows.push(information);
+      }
+
+      for (const information of rows) {
+        const include = String(
+          information.assembly || ""
+        ).trim();
+
+        if (!include) continue;
+
+        const assembly =
+          assemblyByName.get(include);
+        const location = String(
+          assembly?.location || ""
+        )
+          .trim()
+          .replace(/\\/g, "/")
+          .replace(/^\.\//, "");
+
+        references.set(
+          include.toLowerCase(),
+          {
+            include,
+            hintPath: location
+              ? `$(ResonitePath)${location}`
+              : `$(ResonitePath)${include}.dll`,
+            private: false
+          }
+        );
+      }
+
+      return [...references.values()];
+    }
+
+    function enrichGraphTypeAssemblies(
+      graphType,
+      csType,
+      row = null
+    ) {
+      const information =
+        getTypeInformation(graphType);
+
+      if (!information) return;
+
+      const references =
+        assemblyReferencesForCsType(
+          csType,
+          row
+        );
+      const assemblies = [...new Set([
+        ...(Array.isArray(information.assemblies)
+          ? information.assemblies
+          : []),
+        ...references.map(reference =>
+          reference.include
+        )
+      ])];
+      const mergedReferences = new Map();
+
+      for (const reference of [
+        ...(Array.isArray(information.assemblyReferences)
+          ? information.assemblyReferences
+          : []),
+        ...references
+      ]) {
+        const include = String(
+          reference?.include || ""
+        ).trim();
+        if (!include) continue;
+        mergedReferences.set(
+          include.toLowerCase(),
+          reference
+        );
+      }
+
+      information.assemblies = assemblies;
+      information.assemblyReferences =
+        [...mergedReferences.values()];
+      information.assembly =
+        String(row?.assembly || "").trim() ||
+        information.assembly ||
+        assemblies[0] ||
+        "";
     }
 
     const knownGraphTypes = new Map(Object.entries({
@@ -293,6 +426,11 @@
 
       const known = graphTypeByCs.get(csType);
       if (known) {
+        enrichGraphTypeAssemblies(
+          known,
+          csType,
+          row || typeByName.get(csType) || null
+        );
         return known;
       }
 
@@ -303,6 +441,11 @@
           normalizedLookup
         );
       if (existing) {
+        enrichGraphTypeAssemblies(
+          existing,
+          csType,
+          row || typeByName.get(csType) || null
+        );
         return existing;
       }
 
@@ -353,7 +496,21 @@
                       ? ["reference", "serializable"]
                       : ["serializable"],
 
-          apiCatalogType: csType
+          apiCatalogType: csType,
+          assembly:
+              String(information.assembly || "").trim(),
+          assemblies:
+              assemblyReferencesForCsType(
+                csType,
+                information
+              ).map(reference =>
+                reference.include
+              ),
+          assemblyReferences:
+              assemblyReferencesForCsType(
+                csType,
+                information
+              )
       });
 
       graphTypeByCs.set(csType, graphType);
@@ -740,6 +897,39 @@
             definition.description ||
             "Low-level Harmony API node."
           )} This scanner-generated node executes as a low-level runtime call in the main mod project. It does not create or deploy an early rml_libs patch assembly automatically.`;
+      }
+
+      const dependencyReferences =
+        assemblyReferencesForCsType(
+          definition?.catalogType || "",
+          typeByName.get(
+            normalizeCsType(
+              definition?.catalogType || ""
+            )
+          ) || null
+        );
+
+      if (dependencyReferences.length > 0) {
+        const references = new Map();
+        for (const reference of [
+          ...(Array.isArray(
+            definition.requiredAssemblyReferences
+          )
+            ? definition.requiredAssemblyReferences
+            : []),
+          ...dependencyReferences
+        ]) {
+          const include = String(
+            reference?.include || ""
+          ).trim();
+          if (!include) continue;
+          references.set(
+            include.toLowerCase(),
+            reference
+          );
+        }
+        definition.requiredAssemblyReferences =
+          [...references.values()];
       }
 
       generatedNodeIds.add(id);

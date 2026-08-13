@@ -745,6 +745,30 @@
       );
     }
 
+    const assemblyReferences =
+      Array.isArray(information.assemblyReferences)
+        ? information.assemblyReferences
+            .filter(reference =>
+              reference &&
+              typeof reference === "object" &&
+              String(reference.include || "").trim()
+            )
+            .map(reference => ({
+              include: String(reference.include || "").trim(),
+              hintPath: String(reference.hintPath || "").trim(),
+              private: reference.private === true
+            }))
+        : [];
+
+    const assemblies = [...new Set([
+      ...(Array.isArray(information.assemblies)
+        ? information.assemblies
+        : []),
+      information.assembly
+    ]
+      .map(value => String(value || "").trim())
+      .filter(Boolean))];
+
     TYPE_INFO[id] = {
       label:
         information.label || id,
@@ -752,7 +776,9 @@
         information.short || id.slice(0, 4).toUpperCase(),
       color:
         information.color || "#9da8b4",
-      ...information
+      ...information,
+      assemblies,
+      assemblyReferences
     };
 
     if (
@@ -6310,6 +6336,74 @@
       "YourModNamespace";
   }
 
+  function graphTypeAssemblyReferences(type) {
+    const information =
+      TYPE_INFO[typeBase(type)] || {};
+    const references = new Map();
+
+    const add = reference => {
+      if (!reference || typeof reference !== "object") {
+        return;
+      }
+
+      const include = String(
+        reference.include || ""
+      ).trim();
+
+      if (!include) {
+        return;
+      }
+
+      references.set(
+        include.toLowerCase(),
+        {
+          include,
+          hintPath: String(
+            reference.hintPath || ""
+          ).trim(),
+          private: reference.private === true
+        }
+      );
+    };
+
+    for (const reference of
+      Array.isArray(information.assemblyReferences)
+        ? information.assemblyReferences
+        : []) {
+      add(reference);
+    }
+
+    for (const assembly of [
+      ...(Array.isArray(information.assemblies)
+        ? information.assemblies
+        : []),
+      information.assembly
+    ]) {
+      const include = String(assembly || "").trim();
+
+      if (
+        !include ||
+        include === "FrooxEngine" ||
+        include === "ResoniteModLoader" ||
+        include === "mscorlib" ||
+        include === "netstandard" ||
+        include === "System" ||
+        include.startsWith("System.") ||
+        include.startsWith("Microsoft.")
+      ) {
+        continue;
+      }
+
+      add({
+        include,
+        hintPath: `$(ResonitePath)${include}.dll`,
+        private: false
+      });
+    }
+
+    return [...references.values()];
+  }
+
   function graphCsType(type) {
     if (
       typeof type === "string" &&
@@ -7809,31 +7903,102 @@ ${actions.length > 0
       }
     }
 
-    const usesElements =
-      graph.nodes.some(node => {
-        const definition =
-          nodeDefinition(node);
+    const requiredAssemblyReferences =
+      new Map();
 
-        return [
-          ...(definition?.inputs || []),
-          ...(definition?.outputs || [])
-        ].some(spec => {
-          const type =
-            resolvedType(node, spec);
-          return (
-            type === "colorX" ||
-            /^(?:int|float|double)[234]$/.test(
-              type || ""
-            )
-          );
-        });
-      }) ||
-      configurationFields.some(item =>
-        item.type === "colorX" ||
-        /^(?:int|float|double)[234]$/.test(
-          item.type || ""
-        )
-      ) ||
+    const collectAssemblyReference = reference => {
+      if (!reference || typeof reference !== "object") {
+        return;
+      }
+
+      const include = String(
+        reference.include || ""
+      ).trim();
+
+      if (!include) {
+        return;
+      }
+
+      if (
+        include === "FrooxEngine" ||
+        include === "ResoniteModLoader" ||
+        include === "mscorlib" ||
+        include === "netstandard" ||
+        include === "System" ||
+        include.startsWith("System.") ||
+        include.startsWith("Microsoft.")
+      ) {
+        return;
+      }
+
+      const key = include.toLowerCase();
+      const existing =
+        requiredAssemblyReferences.get(key);
+      const candidate = {
+        include,
+        hintPath: String(
+          reference.hintPath || ""
+        ).trim(),
+        private: reference.private === true
+      };
+
+      if (
+        !existing ||
+        (!existing.hintPath && candidate.hintPath)
+      ) {
+        requiredAssemblyReferences.set(
+          key,
+          candidate
+        );
+      }
+    };
+
+    const collectGraphTypeAssemblies = type => {
+      for (const reference of
+        graphTypeAssemblyReferences(type)) {
+        collectAssemblyReference(reference);
+      }
+    };
+
+    for (const node of graph.nodes) {
+      const definition =
+        nodeDefinition(node);
+
+      for (const spec of [
+        ...(definition?.inputs || []),
+        ...(definition?.outputs || [])
+      ]) {
+        collectGraphTypeAssemblies(
+          resolvedType(node, spec)
+        );
+      }
+
+      for (const reference of
+        Array.isArray(definition?.requiredAssemblyReferences)
+          ? definition.requiredAssemblyReferences
+          : []) {
+        collectAssemblyReference(reference);
+      }
+    }
+
+    for (const item of configurationFields) {
+      collectGraphTypeAssemblies(item.type);
+    }
+
+    for (const reference of
+      requiredAssemblyReferences.values()) {
+      registerReference(reference);
+    }
+
+    const hasAssemblyReference = name =>
+      requiredAssemblyReferences.has(
+        String(name || "")
+          .trim()
+          .toLowerCase()
+      );
+
+    const usesElements =
+      hasAssemblyReference("Elements.Core") ||
       extensionRequirements.usesElements ===
         true;
     const usesColorX =
@@ -7853,6 +8018,7 @@ ${actions.length > 0
         item =>
           item.type === "colorX"
       ) ||
+      hasAssemblyReference("Renderite.Shared") ||
       extensionRequirements.usesRenderiteShared ===
         true;
 

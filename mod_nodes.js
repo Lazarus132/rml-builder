@@ -875,10 +875,107 @@
     }
   };
 
+  const CATALOG_TYPE_BY_CS = new Map(
+    CATALOG_TYPES
+      .filter(type =>
+        typeof type.fullName === "string" &&
+        type.fullName.trim()
+      )
+      .map(type => [
+        String(type.fullName).trim(),
+        type
+      ])
+  );
+  const CATALOG_ASSEMBLY_BY_NAME = new Map(
+    (Array.isArray(componentCatalog.assemblies)
+      ? componentCatalog.assemblies
+      : [])
+      .filter(Boolean)
+      .map(assembly => [
+        String(assembly.name || "").trim(),
+        assembly
+      ])
+      .filter(([name]) => Boolean(name))
+  );
+
+  function catalogAssemblyReferencesForCsType(csType) {
+    const normalized =
+      String(csType || "")
+        .replace(/global::/g, "")
+        .trim();
+    const names = new Set();
+    const direct =
+      CATALOG_TYPE_BY_CS.get(normalized);
+
+    if (direct) names.add(normalized);
+
+    for (const candidate of
+      normalized.match(
+        /[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+/g
+      ) || []) {
+      if (CATALOG_TYPE_BY_CS.has(candidate)) {
+        names.add(candidate);
+      }
+    }
+
+    const references = new Map();
+
+    for (const name of names) {
+      const row = CATALOG_TYPE_BY_CS.get(name);
+      const include = String(
+        row?.assembly || ""
+      ).trim();
+      if (!include) continue;
+
+      const location = String(
+        CATALOG_ASSEMBLY_BY_NAME.get(include)
+          ?.location || ""
+      )
+        .trim()
+        .replace(/\\/g, "/")
+        .replace(/^\.\//, "");
+
+      references.set(
+        include.toLowerCase(),
+        {
+          include,
+          hintPath: location
+            ? `$(ResonitePath)${location}`
+            : `$(ResonitePath)${include}.dll`,
+          private: false
+        }
+      );
+    }
+
+    return [...references.values()];
+  }
+
   for (const [type, information] of Object.entries(typeDefinitions)) {
+    const assemblyReferences =
+      catalogAssemblyReferencesForCsType(
+        information.csType
+      );
     const storeableInformation = {
       valueType: information.valueType !== false,
-      ...information
+      ...information,
+      assembly:
+        information.assembly ||
+        assemblyReferences[0]?.include ||
+        "",
+      assemblies: [...new Set([
+        ...(Array.isArray(information.assemblies)
+          ? information.assemblies
+          : []),
+        ...assemblyReferences.map(reference =>
+          reference.include
+        )
+      ])],
+      assemblyReferences: [
+        ...(Array.isArray(information.assemblyReferences)
+          ? information.assemblyReferences
+          : []),
+        ...assemblyReferences
+      ]
     };
 
     registerType(type, storeableInformation);
@@ -913,6 +1010,20 @@
         defaultCs:
           `global::${enumInfo.fullName}.${csharpIdentifier(firstValue)}`,
         valueType: false,
+        assembly:
+          CATALOG_TYPE_BY_CS.get(
+            enumInfo.fullName
+          )?.assembly || "",
+        assemblies:
+          catalogAssemblyReferencesForCsType(
+            enumInfo.fullName
+          ).map(reference =>
+            reference.include
+          ),
+        assemblyReferences:
+          catalogAssemblyReferencesForCsType(
+            enumInfo.fullName
+          ),
         constraints: [
           "value",
           "serializable"
