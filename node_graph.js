@@ -15539,11 +15539,6 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           changed = true;
         }
       } else {
-        // Automatic creation width:
-        // use the normal node width when all content fits,
-        // otherwise grow only as far as the complete intrinsic body/header
-        // requires so a freshly created node does not start with a
-        // horizontal scrollbar.
         article._rmlAutomaticWidth =
           clamp(
             Math.max(
