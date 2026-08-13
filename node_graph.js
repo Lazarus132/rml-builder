@@ -11,7 +11,7 @@
   const GRAPH_AUTOPAN_EDGE = 54;
   const GRAPH_AUTOPAN_MAX_SPEED = 24;
   const GRAPH_COORDINATE_LIMIT = 100000;
-  const GRAPH_NODE_MIN_WIDTH = 250;
+  const GRAPH_NODE_MIN_WIDTH = 120;
   const GRAPH_NODE_MIN_HEIGHT = 96;
   const GRAPH_NODE_MIN_BODY_HEIGHT = 48;
   const GRAPH_NODE_MAX_WIDTH =
@@ -2858,7 +2858,7 @@
         "Each configuration key is exposed exactly once as a typed reactive output. Connect it to value inputs to read the current value; Startup/Saved sockets can also connect directly to impulse inputs.",
       inputs: [],
       outputs,
-      width: 390
+      width: 280
     };
   }
 
@@ -7805,8 +7805,8 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
       @media (min-width: 1181px) {
         body.rml-node-graph-mode .workspace {
-          height: min(820px, calc(100dvh - 110px));
-          min-height: 720px;
+          height: 100dvh;
+          min-height: 0;
           align-items: stretch;
         }
 
@@ -7833,7 +7833,8 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       }
 
       body.rml-node-graph-mode #builder-canvas {
-        min-height: 720px;
+        height: 100dvh;
+        min-height: 0;
         padding: 0 !important;
         overflow: hidden !important;
         background: #090b12 !important;
@@ -7841,7 +7842,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       }
 
       body.rml-node-graph-mode #inspector-content {
-        min-height: 640px;
+        min-height: 0;
       }
 
       .rml-graph-palette {
@@ -8060,7 +8061,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         display: grid;
         width: 100%;
         height: 100%;
-        min-height: 720px;
+        min-height: 0;
         grid-template-rows: 46px minmax(0, 1fr);
         overflow: hidden;
         background: #090b12;
@@ -9317,9 +9318,14 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           max-height: 480px;
         }
 
-        body.rml-node-graph-mode #builder-canvas,
+        body.rml-node-graph-mode #builder-canvas {
+          height: 100dvh;
+          min-height: 0;
+        }
+
         .rml-graph-root {
-          min-height: 68dvh;
+          height: 100%;
+          min-height: 0;
         }
 
         .rml-graph-toolbar {
@@ -15112,10 +15118,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
   }
 
   function nodeDefaultWidth(node, definition = nodeDefinition(node)) {
-    return definition?.width ||
-      (node.kind === "configuration"
-        ? 390
-        : 280);
+    return definition?.width || 280;
   }
 
   function applyNodeSizeStyles(
@@ -15137,10 +15140,20 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       manualHeight
     );
 
+    const automaticWidth =
+      Number.isFinite(
+        article._rmlAutomaticWidth
+      )
+        ? article._rmlAutomaticWidth
+        : nodeDefaultWidth(
+            node,
+            definition
+          );
+
     article.style.width =
       `${manualWidth
         ? node.width
-        : nodeDefaultWidth(node, definition)}px`;
+        : automaticWidth}px`;
 
     if (manualHeight) {
       article.style.height =
@@ -15301,14 +15314,10 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           headerStyle.gap
         )
       : 0;
-    const titleWidth = Math.max(
+    const titleWidth =
       intrinsicTextWidth(
         title?.querySelector("strong")
-      ),
-      intrinsicTextWidth(
-        title?.querySelector("small")
-      )
-    );
+      );
     const headerItemCount = [
       symbol,
       title,
@@ -15376,15 +15385,21 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
     const defaultWidth =
       nodeDefaultWidth(node);
-    const minimumWidth =
-      GRAPH_NODE_MIN_WIDTH;
+    const minimumWidth = Math.ceil(
+      Math.min(
+        GRAPH_NODE_MAX_WIDTH,
+        Math.max(
+          GRAPH_NODE_MIN_WIDTH,
+          headerWidth + 2
+        )
+      )
+    );
     const maximumWidth = Math.ceil(
       Math.min(
         GRAPH_NODE_MAX_WIDTH,
         Math.max(
           minimumWidth,
           defaultWidth,
-          headerWidth + 2,
           bodyWidth + 2
         )
       )
@@ -15511,6 +15526,9 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       );
 
       if (Number.isFinite(node.width)) {
+        article._rmlAutomaticWidth =
+          null;
+
         const width = clamp(
           node.width,
           limits.minimumWidth,
@@ -15520,6 +15538,22 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           node.width = width;
           changed = true;
         }
+      } else {
+        // Automatic creation width:
+        // use the normal node width when all content fits,
+        // otherwise grow only as far as the complete intrinsic body/header
+        // requires so a freshly created node does not start with a
+        // horizontal scrollbar.
+        article._rmlAutomaticWidth =
+          clamp(
+            Math.max(
+              nodeDefaultWidth(node),
+              limits.minimumWidth,
+              limits.bodyIntrinsicWidth + 2
+            ),
+            limits.minimumWidth,
+            limits.maximumWidth
+          );
       }
 
       if (Number.isFinite(node.height)) {
