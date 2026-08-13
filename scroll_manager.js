@@ -47,9 +47,12 @@
 
   function routeWheel(event) {
     for (const entry of [...handlers]) {
-      if (event.cancelBubble || event.defaultPrevented) break;
+      if (event.cancelBubble || event.defaultPrevented) {
+        break;
+      }
 
       let handled = false;
+
       try {
         handled = entry.handler(event) === true;
       } catch (error) {
@@ -60,6 +63,106 @@
         break;
       }
     }
+  }
+
+
+
+  function createCyclicWheelStepper(options = {}) {
+    const threshold =
+      Math.max(
+        1,
+        Number(options.threshold) || 40
+      );
+
+    let accumulator = 0;
+    let direction = 0;
+
+    function reset() {
+      accumulator = 0;
+      direction = 0;
+    }
+
+    function step(index, count, dominantDelta) {
+      const candidateCount =
+        Math.max(
+          0,
+          Math.trunc(Number(count) || 0)
+        );
+
+      if (candidateCount <= 0) {
+        reset();
+        return {
+          index: 0,
+          moved: false,
+          direction: 0
+        };
+      }
+
+      const currentIndex =
+        (
+          Math.trunc(Number(index) || 0) %
+            candidateCount +
+          candidateCount
+        ) % candidateCount;
+
+      const nextDirection =
+        Math.sign(
+          Number(dominantDelta) || 0
+        );
+
+      if (nextDirection === 0) {
+        return {
+          index: currentIndex,
+          moved: false,
+          direction
+        };
+      }
+
+      if (direction !== nextDirection) {
+        accumulator = 0;
+        direction = nextDirection;
+      }
+
+      accumulator +=
+        Number(dominantDelta) || 0;
+
+      if (
+        Math.abs(accumulator) <
+        threshold
+      ) {
+        return {
+          index: currentIndex,
+          moved: false,
+          direction
+        };
+      }
+
+      accumulator -=
+        direction * threshold;
+
+      return {
+        index:
+          (
+            currentIndex +
+            direction +
+            candidateCount
+          ) % candidateCount,
+        moved: true,
+        direction
+      };
+    }
+
+    return Object.freeze({
+      step,
+      reset,
+      getState() {
+        return Object.freeze({
+          accumulator,
+          direction,
+          threshold
+        });
+      }
+    });
   }
 
 
@@ -306,9 +409,10 @@
 
   Object.defineProperty(window, "RMLScrollManager", {
     value: Object.freeze({
-      version: 3,
+      version: 6,
       registerWheelHandler,
       unregisterWheelHandler,
+      createCyclicWheelStepper,
       registerRevealProvider,
       unregisterRevealProvider,
       revealElement,

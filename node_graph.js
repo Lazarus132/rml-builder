@@ -936,14 +936,14 @@
   const WIRE_DOUBLE_CLICK_MS = 450;
   const WIRE_DOUBLE_CLICK_DISTANCE = 8;
 
-  const GRAPH_SCROLL_LAYER_CYCLE_THRESHOLD = 40;
-  const GRAPH_SCROLL_LAYER_CYCLE_COOLDOWN_MS = 140;
   let graphScrollLayerSelection = null;
   let graphScrollLayerSelectionCandidates = null;
   let graphScrollLayerSession = null;
-  let graphScrollLayerCycleAccumulator = 0;
-  let graphScrollLayerCycleDirection = 0;
-  let graphScrollLayerLastCycleAt = 0;
+  const graphCyclicWheelStepper =
+    window.RMLScrollManager
+      ?.createCyclicWheelStepper?.({
+        threshold: 40
+      }) || null;
   let graphScrollLayerVisualFrame = 0;
   let graphScrollLayerVisualFollowFrame = 0;
   let graphScrollLayerIndicatorTimer = 0;
@@ -12743,15 +12743,34 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       bottom - epsilon
     ];
 
+    let probeCount = 0;
     for (const y of ys) {
       for (const x of xs) {
-        if (
-          graphScrollLayerHitTestVisibleAt(
-            element,
-            x,
-            y
-          )
-        ) {
+        probeCount += 1;
+        const hit = graphScrollLayerHitTestVisibleAt(
+          element,
+          x,
+          y
+        );
+        if (hit) {
+          return true;
+        }
+      }
+    }
+
+    const startX = Math.ceil(left);
+    const endX = Math.floor(right - 0.001);
+    const startY = Math.ceil(top);
+    const endY = Math.floor(bottom - 0.001);
+    let exactProbeCount = 0;
+
+
+    for (let y = startY; y <= endY; y += 1) {
+      let rowProbes = 0;
+      for (let x = startX; x <= endX; x += 1) {
+        exactProbeCount += 1;
+        rowProbes += 1;
+        if (graphScrollLayerHitTestVisibleAt(element, x + 0.5, y + 0.5)) {
           return true;
         }
       }
@@ -13381,7 +13400,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       values.push({
         element,
         visibleArea: Math.max(1, width * height),
-        priority: isGeneratedCode ? -1000 : 0,
+        priority: isGeneratedCode ? 1000 : 0,
         top: clipped.top,
         left: clipped.left
       });
@@ -13503,7 +13522,69 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       candidates.push(html);
     }
 
+
     return candidates;
+  }
+
+  function normalizeGraphScrollHierarchy(
+    descriptors
+  ) {
+    return Array.isArray(descriptors)
+      ? descriptors
+      : [];
+  }
+
+  function orderGraphScrollLayerCandidatesByReadingHierarchy(
+    descriptors
+  ) {
+    const hierarchy =
+      window.RMLScrollHierarchy;
+
+    if (
+      !hierarchy ||
+      typeof hierarchy.orderByReadingHierarchy !==
+        "function"
+    ) {
+      return normalizeGraphScrollHierarchy(
+        descriptors
+      );
+    }
+
+    const ordered =
+      hierarchy.orderByReadingHierarchy(
+        descriptors,
+        {
+          resolveElement:
+            resolveGraphScrollLayerElement,
+          isVirtualParent(parent, child) {
+            if (
+              parent?.kind !== "root" ||
+              !child ||
+              child.kind === "root" ||
+              child.kind === "html-root" ||
+              child.kind === "document-root"
+            ) {
+              return false;
+            }
+
+            const element =
+              resolveGraphScrollLayerElement(
+                child
+              );
+
+            return (
+              element instanceof Element &&
+              graphElementBelongsToViewport(
+                element
+              )
+            );
+          }
+        }
+      );
+
+    return normalizeGraphScrollHierarchy(
+      ordered
+    );
   }
 
   function refreshGraphScrollLayerCandidateChain(
@@ -13544,30 +13625,9 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       add(rebound || descriptor);
     }
 
-    const html =
-      graphScrollLayerDescriptor(
-        document.documentElement
-      );
-
-    if (html) {
-      const withoutHtml =
-        refreshed.filter(
-          descriptor =>
-            descriptor.kind !==
-            "html-root"
-        );
-
-      refreshed.length = 0;
-      keys.clear();
-
-      for (const descriptor of withoutHtml) {
-        add(descriptor);
-      }
-
-      add(html);
-    }
-
-    return refreshed;
+    return normalizeGraphScrollHierarchy(
+      refreshed
+    );
   }
 
   function ensureGraphScrollLayerVisuals() {
@@ -13961,9 +14021,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     graphScrollLayerSelection = null;
     graphScrollLayerSelectionCandidates = null;
     graphScrollLayerSession = null;
-    graphScrollLayerCycleAccumulator = 0;
-    graphScrollLayerCycleDirection = 0;
-    graphScrollLayerLastCycleAt = 0;
+    graphCyclicWheelStepper?.reset?.();
 
     if (graphScrollLayerVisualFrame) {
       cancelAnimationFrame(
@@ -14052,8 +14110,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       null;
 
     graphScrollLayerSession = null;
-    graphScrollLayerCycleAccumulator = 0;
-    graphScrollLayerCycleDirection = 0;
+    graphCyclicWheelStepper?.reset?.();
 
     if (!candidate) {
       scheduleGraphScrollLayerVisualRefresh();
@@ -14066,6 +14123,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       frozenChain.length > 0
         ? frozenChain
         : [candidate];
+
 
     focusGraphScrollLayerInViewport(
       graphScrollLayerSelection
@@ -14131,6 +14189,16 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       ].filter(Boolean);
     }
 
+    const startingSession =
+      !graphScrollLayerSession;
+
+    if (startingSession) {
+      candidates =
+        orderGraphScrollLayerCandidatesByReadingHierarchy(
+          candidates
+        );
+    }
+
     const selectedIndex =
       candidates.findIndex(
         candidate =>
@@ -14138,22 +14206,17 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           previousActiveKey
       );
 
-    if (!graphScrollLayerSession) {
+    if (startingSession) {
       graphScrollLayerSession = {
         candidates,
-        index:
-          selectedIndex >= 0
-            ? selectedIndex
-            : 0,
+        index: 0,
         modifierLabel:
           event.metaKey &&
           !event.ctrlKey
             ? "COMMAND + WHEEL"
             : "CTRL + WHEEL"
       };
-      graphScrollLayerCycleAccumulator = 0;
-      graphScrollLayerCycleDirection = 0;
-      graphScrollLayerLastCycleAt = 0;
+      graphCyclicWheelStepper?.reset?.();
     } else {
       graphScrollLayerSession.candidates =
         candidates;
@@ -14184,41 +14247,27 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     const direction =
       Math.sign(dominant);
 
-    if (direction !== 0) {
-      if (
-        graphScrollLayerCycleDirection !==
-        direction
-      ) {
-        graphScrollLayerCycleAccumulator =
-          0;
-        graphScrollLayerCycleDirection =
-          direction;
-      }
+    if (
+      direction !== 0 &&
+      !startingSession
+    ) {
+      const stepped =
+        graphCyclicWheelStepper?.step?.(
+          graphScrollLayerSession.index,
+          candidates.length,
+          dominant
+        );
 
-      graphScrollLayerCycleAccumulator +=
-        dominant;
-
-      const now = performance.now();
-
-      if (
-        Math.abs(
-          graphScrollLayerCycleAccumulator
-        ) >=
-          GRAPH_SCROLL_LAYER_CYCLE_THRESHOLD &&
-        now - graphScrollLayerLastCycleAt >=
-          GRAPH_SCROLL_LAYER_CYCLE_COOLDOWN_MS
-      ) {
+      if (stepped) {
         graphScrollLayerSession.index =
-          clamp(
+          stepped.index;
+      } else {
+        graphScrollLayerSession.index =
+          (
             graphScrollLayerSession.index +
-              (direction > 0 ? 1 : -1),
-            0,
-            candidates.length - 1
-          );
-        graphScrollLayerCycleAccumulator =
-          0;
-        graphScrollLayerLastCycleAt =
-          now;
+            (direction > 0 ? 1 : -1) +
+            candidates.length
+          ) % candidates.length;
       }
     }
 
@@ -14227,9 +14276,10 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         graphScrollLayerSession.index
       ];
 
+
     scheduleGraphScrollLayerVisualRefresh();
     showGraphScrollLayerIndicator(
-      `${graphScrollLayerSession.modifierLabel} · GLOBAL OVERRIDE · ↓ OUTER / ↑ INNER`,
+      `${graphScrollLayerSession.modifierLabel} · GLOBAL OVERRIDE · ↓ INNER / ↑ OUTER`,
       active,
       {
         position:
@@ -14295,6 +14345,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         element.scrollTop -
         beforeTop
       ) > .25;
+
 
     if (
       descriptor.kind ===
@@ -14519,12 +14570,113 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     }
   }
 
-  function handleGraphScrollLayerCancelClick(
+  function activeGraphScrollLayerDescriptor() {
+    return (
+      graphScrollLayerSession
+        ?.candidates?.[
+          graphScrollLayerSession.index
+        ] ||
+      graphScrollLayerSelection ||
+      null
+    );
+  }
+
+  function graphDescriptorHasHorizontalScroll(
+    descriptor
+  ) {
+    if (!descriptor) {
+      return false;
+    }
+
+    if (descriptor.kind === "root") {
+      return false;
+    }
+
+    let element =
+      resolveGraphScrollLayerElement(
+        descriptor
+      );
+
+    if (
+      descriptor.kind ===
+        "html-root"
+    ) {
+      element =
+        graphDocumentScrollElement() ===
+          document.documentElement
+          ? document.documentElement
+          : null;
+    } else if (
+      descriptor.kind ===
+        "document-root"
+    ) {
+      const scrolling =
+        graphDocumentScrollElement();
+
+      element =
+        scrolling !==
+          document.documentElement
+          ? scrolling
+          : null;
+    }
+
+    if (!(element instanceof HTMLElement)) {
+      return false;
+    }
+
+    if (
+      descriptor.kind ===
+        "html-root" ||
+      descriptor.kind ===
+        "document-root"
+    ) {
+      return (
+        element.scrollWidth >
+        element.clientWidth + 1
+      );
+    }
+
+    return graphScrollLayerAxes(
+      element
+    ).x;
+  }
+
+  function releaseGraphScrollLayerFromInput() {
+    const previous =
+      activeGraphScrollLayerDescriptor();
+
+    if (
+      !graph?.active ||
+      !previous
+    ) {
+      return false;
+    }
+
+    clearGraphScrollLayerSelection({
+      keepIndicator: true
+    });
+
+    showGraphScrollLayerIndicator(
+      "SCROLL LEVEL RELEASED",
+      previous,
+      {
+        variant: "cancelled",
+        duration: 900
+      }
+    );
+
+    return true;
+  }
+
+  function handleGraphScrollLayerCancelClick() {
+    releaseGraphScrollLayerFromInput();
+  }
+
+  function handleGraphScrollLayerCancelKeyDown(
     event
   ) {
     if (
       !graph?.active ||
-      event.button !== 0 ||
       (
         !graphScrollLayerSelection &&
         !graphScrollLayerSession
@@ -14533,27 +14685,23 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       return;
     }
 
-    const previous =
-      graphScrollLayerSession
-        ?.candidates?.[
-          graphScrollLayerSession.index
-        ] ||
-      graphScrollLayerSelection;
-
-    clearGraphScrollLayerSelection({
-      keepIndicator: true
-    });
-
-    if (previous) {
-      showGraphScrollLayerIndicator(
-        "SCROLL LEVEL RELEASED",
-        previous,
-        {
-          variant: "cancelled",
-          duration: 900
-        }
-      );
+    if (
+      event.key === "Control" ||
+      event.key === "Meta"
+    ) {
+      return;
     }
+
+    if (
+      event.key === "Shift" &&
+      graphDescriptorHasHorizontalScroll(
+        activeGraphScrollLayerDescriptor()
+      )
+    ) {
+      return;
+    }
+
+    releaseGraphScrollLayerFromInput();
   }
 
   function handleGraphModifierKeyUp(
@@ -21809,7 +21957,20 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
                 graphScrollLayerSelection
               ),
             outermost:
-              "<html> · Page ROOT"
+              "<html> · Page ROOT",
+            candidateOrder:
+              Object.freeze(
+                (
+                  graphScrollLayerSession
+                    ?.candidates ||
+                  graphScrollLayerSelectionCandidates ||
+                  []
+                ).map(descriptor => ({
+                  key: descriptor.key,
+                  label: descriptor.label,
+                  kind: descriptor.kind
+                }))
+              )
           });
         }
       }),
@@ -21972,6 +22133,14 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         }
       );
     }
+
+    document.addEventListener(
+      "keydown",
+      handleGraphScrollLayerCancelKeyDown,
+      {
+        capture: true
+      }
+    );
 
     document.addEventListener(
       "keydown",

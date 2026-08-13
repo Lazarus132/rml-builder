@@ -17729,8 +17729,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "help_template.html?v=11",
-    "help_template.js?v=11",
+    "help_template.html?v=14",
+    "help_template.js?v=14",
     "help-template",
     "RMLHelpTemplateMarkup"
   )
@@ -17823,7 +17823,7 @@ function ensureSetupAssistantLoaded(firstRun = false) {
 
   setupAssistantLoadPromise = new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = new URL("setup_assistant.js?v=20", APP_SCRIPT_BASE_URL).href;
+    script.src = new URL("setup_assistant.js?v=23", APP_SCRIPT_BASE_URL).href;
     script.async = true;
     script.dataset.rmlSetupAssistant = "true";
     script.addEventListener("load", () => resolve(true), { once: true });
@@ -18646,17 +18646,22 @@ function installUniversalScrollLayerSelector() {
     return;
   }
 
-  const CYCLE_THRESHOLD = 40;
-  const CYCLE_COOLDOWN_MS = 140;
   const HTML_KEY = "html-root";
   const DOCUMENT_KEY = "document-scroll-root";
+  const scrollDebug = window.RMLScrollHierarchy?.debug || null;
+  const dbg = (type, payload = {}) =>
+    scrollDebug?.log?.(`universal:${type}`, payload);
+  const dbgTable = (type, rows = []) =>
+    scrollDebug?.table?.(`universal:${type}`, rows);
 
   let selection = null;
   let selectionCandidates = null;
   let session = null;
-  let cycleAccumulator = 0;
-  let cycleDirection = 0;
-  let lastCycleAt = 0;
+  const cyclicWheelStepper =
+    window.RMLScrollManager
+      ?.createCyclicWheelStepper?.({
+        threshold: 40
+      }) || null;
   let visualFrame = 0;
   let visualFollowFrame = 0;
   let indicatorTimer = 0;
@@ -18908,14 +18913,62 @@ function installUniversalScrollLayerSelector() {
       bottom - epsilon
     ];
 
+    let probeCount = 0;
     for (const y of ys) {
       for (const x of xs) {
-        if (elementHitTestVisibleAt(element, x, y)) {
+        probeCount += 1;
+        const hit = elementHitTestVisibleAt(element, x, y);
+        dbg("exposure-probe", {
+          element: scrollDebug?.describeElement?.(element),
+          x: Number(x.toFixed(3)),
+          y: Number(y.toFixed(3)),
+          hit,
+          probe: probeCount
+        });
+        if (hit) {
+          dbg("exposure-result", { result: true, method: "25-point", probes: probeCount });
           return true;
         }
       }
     }
 
+    const startX = Math.ceil(left);
+    const endX = Math.floor(right - 0.001);
+    const startY = Math.ceil(top);
+    const endY = Math.floor(bottom - 0.001);
+    let exactProbeCount = 0;
+
+    dbg("exposure-pixel-audit-start", {
+      element: scrollDebug?.describeElement?.(element),
+      startX, endX, startY, endY,
+      width: Math.max(0, endX - startX + 1),
+      height: Math.max(0, endY - startY + 1)
+    });
+
+    for (let y = startY; y <= endY; y += 1) {
+      let rowProbes = 0;
+      for (let x = startX; x <= endX; x += 1) {
+        exactProbeCount += 1;
+        rowProbes += 1;
+        if (elementHitTestVisibleAt(element, x + 0.5, y + 0.5)) {
+          dbg("exposure-pixel-hit", {
+            x, y,
+            exactProbeCount,
+            element: scrollDebug?.describeElement?.(element)
+          });
+          return true;
+        }
+      }
+      dbg("exposure-pixel-row", { y, rowProbes, exactProbeCount });
+    }
+
+    dbg("exposure-result", {
+      result: false,
+      method: "exact-pixel-raster",
+      probes: probeCount,
+      exactProbeCount,
+      element: scrollDebug?.describeElement?.(element)
+    });
     return false;
   };
 
@@ -19410,7 +19463,7 @@ function installUniversalScrollLayerSelector() {
 
       values.push({
         element,
-        priority: generatedCode ? -1000 : 0,
+        priority: generatedCode ? 1000 : 0,
         visibleArea: Math.max(1, width * height),
         top: clipped.top,
         left: clipped.left
@@ -19493,7 +19546,77 @@ function installUniversalScrollLayerSelector() {
 
       add(htmlElement());
 
+      dbgTable(
+        options.includeViewportWide === true
+          ? "candidates-viewport-wide"
+          : "candidates-local",
+        candidates.map((descriptor, index) => {
+          const element = resolveDescriptor(descriptor);
+          const rect = element instanceof HTMLElement
+            ? element.getBoundingClientRect()
+            : null;
+          const clipped = element instanceof HTMLElement
+            ? clippedRectangle(element, descriptor)
+            : null;
+          const axes = element instanceof HTMLElement
+            ? scrollAxesForElement(element)
+            : { x: false, y: false };
+          return {
+            index,
+            key: descriptor.key,
+            label: descriptor.label,
+            kind: descriptor.kind,
+            rawLeft: rect?.left ?? null,
+            rawTop: rect?.top ?? null,
+            rawRight: rect?.right ?? null,
+            rawBottom: rect?.bottom ?? null,
+            clippedLeft: clipped?.left ?? null,
+            clippedTop: clipped?.top ?? null,
+            clippedRight: clipped?.right ?? null,
+            clippedBottom: clipped?.bottom ?? null,
+            scrollLeft: element?.scrollLeft ?? null,
+            scrollTop: element?.scrollTop ?? null,
+            scrollWidth: element?.scrollWidth ?? null,
+            scrollHeight: element?.scrollHeight ?? null,
+            clientWidth: element?.clientWidth ?? null,
+            clientHeight: element?.clientHeight ?? null,
+            axisX: axes.x,
+            axisY: axes.y
+          };
+        })
+      );
+
       return candidates;
+    };
+
+  const orderCandidatesByReadingHierarchy =
+    descriptors => {
+      const hierarchy =
+        window.RMLScrollHierarchy;
+
+      if (
+        !hierarchy ||
+        typeof hierarchy.orderByReadingHierarchy !==
+          "function"
+      ) {
+        return Array.isArray(descriptors)
+          ? descriptors
+          : [];
+      }
+
+      return hierarchy.orderByReadingHierarchy(
+        descriptors,
+        {
+          resolveElement: resolveDescriptor,
+          kindRank(descriptor) {
+            return descriptor?.kind === "html-root"
+              ? -5000
+              : descriptor?.kind === "document-root"
+                ? -4000
+                : 0;
+          }
+        }
+      );
     };
 
   const refreshCandidateChain =
@@ -19529,47 +19652,11 @@ function installUniversalScrollLayerSelector() {
         add(rebound || descriptor);
       }
 
-      const scrolling =
-        documentScrollElement();
-
-      if (
-        scrolling instanceof HTMLElement &&
-        scrolling !== htmlElement()
-      ) {
-        const documentDescriptor =
-          descriptorFor(scrolling);
-
-        if (
-          descriptors?.some?.(
-            descriptor =>
-              descriptor?.kind ===
-              "document-root"
-          )
-        ) {
-          add(documentDescriptor);
-        }
-      }
-
-      const htmlDescriptor =
-        descriptorFor(htmlElement());
-
-      if (htmlDescriptor) {
-        const withoutHtml =
-          refreshed.filter(
-            descriptor =>
-              descriptor.kind !==
-              "html-root"
-          );
-
-        refreshed.length = 0;
-        keys.clear();
-
-        for (const descriptor of withoutHtml) {
-          add(descriptor);
-        }
-
-        add(htmlDescriptor);
-      }
+      dbgTable("candidate-chain-refreshed-preserving-order",
+        refreshed.map((descriptor, index) => ({
+          index, key: descriptor.key, label: descriptor.label, kind: descriptor.kind
+        }))
+      );
 
       return refreshed;
     };
@@ -19962,9 +20049,7 @@ function installUniversalScrollLayerSelector() {
     selection = null;
     selectionCandidates = null;
     session = null;
-    cycleAccumulator = 0;
-    cycleDirection = 0;
-    lastCycleAt = 0;
+    cyclicWheelStepper?.reset?.();
 
     if (visualFrame) {
       cancelAnimationFrame(
@@ -20046,8 +20131,7 @@ function installUniversalScrollLayerSelector() {
       null;
 
     session = null;
-    cycleAccumulator = 0;
-    cycleDirection = 0;
+    cyclicWheelStepper?.reset?.();
 
     if (!candidate) {
       scheduleVisualRefresh();
@@ -20059,6 +20143,18 @@ function installUniversalScrollLayerSelector() {
       frozenChain.length > 0
         ? frozenChain
         : [candidate];
+
+    dbg("commit-selection", {
+      key: selection.key,
+      label: selection.label,
+      kind: selection.kind,
+      frozenChain: selectionCandidates.map((value, index) => ({
+        index,
+        key: value.key,
+        label: value.label,
+        kind: value.kind
+      }))
+    });
 
     focusSelectionInViewport(selection);
     scheduleVisualRefresh();
@@ -20119,6 +20215,39 @@ function installUniversalScrollLayerSelector() {
         ].filter(Boolean);
       }
 
+      const startingSession =
+        !session;
+
+      dbg("cycle-wheel-event", {
+        startingSession,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        shiftKey: event.shiftKey,
+        deltaX: event.deltaX,
+        deltaY: event.deltaY,
+        deltaMode: event.deltaMode,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        target: event.target instanceof HTMLElement
+          ? scrollDebug?.describeElement?.(event.target)
+          : null,
+        previousActiveKey,
+        candidateCountBeforeOrder: candidates.length
+      });
+
+      if (startingSession) {
+        candidates =
+          orderCandidatesByReadingHierarchy(
+            candidates
+          );
+        dbgTable("cycle-ordered-candidates", candidates.map((candidate, index) => ({
+          index,
+          key: candidate.key,
+          label: candidate.label,
+          kind: candidate.kind
+        })));
+      }
+
       const selectedIndex =
         candidates.findIndex(
           candidate =>
@@ -20126,22 +20255,17 @@ function installUniversalScrollLayerSelector() {
             previousActiveKey
         );
 
-      if (!session) {
+      if (startingSession) {
         session = {
           candidates,
-          index:
-            selectedIndex >= 0
-              ? selectedIndex
-              : 0,
+          index: 0,
           modifierLabel:
             event.metaKey &&
             !event.ctrlKey
               ? "COMMAND + WHEEL"
               : "CTRL + WHEEL"
         };
-        cycleAccumulator = 0;
-        cycleDirection = 0;
-        lastCycleAt = 0;
+        cyclicWheelStepper?.reset?.();
       } else {
         session.candidates =
           candidates;
@@ -20175,44 +20299,27 @@ function installUniversalScrollLayerSelector() {
           dominant
         );
 
-      if (direction !== 0) {
-        if (
-          cycleDirection !==
-          direction
-        ) {
-          cycleAccumulator =
-            0;
-          cycleDirection =
-            direction;
-        }
+      if (
+        direction !== 0 &&
+        !startingSession
+      ) {
+        const stepped =
+          cyclicWheelStepper?.step?.(
+            session.index,
+            candidates.length,
+            dominant
+          );
 
-        cycleAccumulator +=
-          dominant;
-
-        const now =
-          performance.now();
-
-        if (
-          Math.abs(
-            cycleAccumulator
-          ) >=
-            CYCLE_THRESHOLD &&
-          now - lastCycleAt >=
-            CYCLE_COOLDOWN_MS
-        ) {
+        if (stepped) {
           session.index =
-            clamp(
+            stepped.index;
+        } else {
+          session.index =
+            (
               session.index +
-                (
-                  direction > 0
-                    ? 1
-                    : -1
-                ),
-              0,
-              candidates.length - 1
-            );
-          cycleAccumulator = 0;
-          lastCycleAt = now;
+              (direction > 0 ? 1 : -1) +
+              candidates.length
+            ) % candidates.length;
         }
       }
 
@@ -20221,9 +20328,19 @@ function installUniversalScrollLayerSelector() {
           session.index
         ];
 
+      dbg("cycle-state-after-wheel", {
+        index: session.index,
+        count: candidates.length,
+        activeKey: active?.key || "",
+        activeLabel: active?.label || "",
+        dominant,
+        direction,
+        normalizedDelta: delta
+      });
+
       scheduleVisualRefresh();
       showIndicator(
-        `${session.modifierLabel} · GLOBAL OVERRIDE · ↓ OUTER / ↑ INNER`,
+        `${session.modifierLabel} · GLOBAL OVERRIDE · ↓ INNER / ↑ OUTER`,
         active,
         {
           position:
@@ -20312,6 +20429,17 @@ function installUniversalScrollLayerSelector() {
     }
 
     if (!target || blocked) {
+      dbg("scroll-blocked", {
+        key: descriptor?.key || "",
+        label: descriptor?.label || "",
+        kind: descriptor?.kind || "",
+        targetExists: Boolean(target),
+        blocked,
+        delta,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        shiftKey: event.shiftKey
+      });
       return {
         moved: false,
         empty:
@@ -20382,6 +20510,27 @@ function installUniversalScrollLayerSelector() {
         target.scrollTop -
         beforeTop
       ) > .25;
+
+    dbg("scroll-applied", {
+      key: descriptor?.key || "",
+      label: descriptor?.label || "",
+      kind: descriptor?.kind || "",
+      rawDeltaX: event.deltaX,
+      rawDeltaY: event.deltaY,
+      deltaMode: event.deltaMode,
+      normalizedDelta: delta,
+      requestedHorizontal: horizontal,
+      requestedVertical: vertical,
+      allowsX,
+      allowsY,
+      beforeLeft,
+      beforeTop,
+      afterLeft: target.scrollLeft,
+      afterTop: target.scrollTop,
+      moved,
+      empty,
+      element: scrollDebug?.describeElement?.(target)
+    });
 
     scheduleVisualRefresh();
 
@@ -20611,35 +20760,117 @@ function installUniversalScrollLayerSelector() {
       }
     };
 
-  const handleSelectionCancelClick =
-    event => {
-      if (
-        event.button !== 0 ||
-        (!selection && !session)
-      ) {
-        return;
+  const descriptorHasHorizontalScroll =
+    descriptor => {
+      if (!descriptor) {
+        return false;
       }
 
-      const previous =
-        session?.candidates?.[
+      let element =
+        resolveDescriptor(
+          descriptor
+        );
+
+      if (
+        descriptor.kind ===
+          "html-root"
+      ) {
+        element =
+          documentScrollElement() ===
+            htmlElement()
+            ? htmlElement()
+            : null;
+      } else if (
+        descriptor.kind ===
+          "document-root"
+      ) {
+        element =
+          documentScrollElement();
+      }
+
+      if (!(element instanceof HTMLElement)) {
+        return false;
+      }
+
+      if (
+        descriptor.kind ===
+          "html-root" ||
+        descriptor.kind ===
+          "document-root"
+      ) {
+        return (
+          element.scrollWidth >
+          element.clientWidth + 1
+        );
+      }
+
+      return scrollAxesForElement(
+        element
+      ).x;
+    };
+
+  const activeSelectionDescriptor =
+    () =>
+      session
+        ?.candidates?.[
           session.index
         ] ||
-        selection;
+      selection ||
+      null;
+
+  const releaseSelectionFromInput =
+    () => {
+      const previous =
+        activeSelectionDescriptor();
+
+      if (!previous) {
+        return false;
+      }
 
       clearSelection({
         keepIndicator: true
       });
 
-      if (previous) {
-        showIndicator(
-          "SCROLL LEVEL RELEASED",
-          previous,
-          {
-            variant: "cancelled",
-            duration: 900
-          }
-        );
+      showIndicator(
+        "SCROLL LEVEL RELEASED",
+        previous,
+        {
+          variant: "cancelled",
+          duration: 900
+        }
+      );
+
+      return true;
+    };
+
+  const handleSelectionCancelClick =
+    () => {
+      releaseSelectionFromInput();
+    };
+
+  const handleSelectionCancelKeyDown =
+    event => {
+      if (!selection && !session) {
+        return;
       }
+
+      if (
+        event.key === "Control" ||
+        event.key === "Meta"
+      ) {
+        return;
+      }
+
+      if (
+        event.key === "Shift" &&
+        descriptorHasHorizontalScroll(
+          activeSelectionDescriptor()
+        )
+      ) {
+        return;
+      }
+
+      releaseSelectionFromInput();
     };
 
   const handleModifierKeyUp =
@@ -20678,6 +20909,14 @@ function installUniversalScrollLayerSelector() {
       }
     );
   }
+
+  document.addEventListener(
+    "keydown",
+    handleSelectionCancelKeyDown,
+    {
+      capture: true
+    }
+  );
 
   document.addEventListener(
     "keyup",

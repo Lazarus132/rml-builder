@@ -252,16 +252,24 @@
                   on macOS) and use the wheel to choose a level. The hierarchy is captured
                   from the first gesture and remains frozen while the modifier is held:
                   moving the mouse into Properties, Generated Project Files, another node
-                  or a dialog does not replace that hierarchy. Wheel down moves outward
-                  and Wheel up moves inward.
+                  or a dialog does not replace that hierarchy. A new session starts at the
+                  outermost available level. From there, the selectable hierarchy follows visual
+                  reading order: the real visual hierarchy: each parent is visited before its descendants. Sibling or independent regions are read
+                  top to bottom and, when they share a row, left to right. A region is completed depth-first before the selector moves to a later sibling region below. Wheel down advances through that order and
+                  Wheel up walks it backward. The selector has no hard beginning or end:
+                  continuing in the same direction wraps around to the opposite end and repeats the hierarchy.
                   The currently previewed boundary itself glows; no separate corner status
                   box is shown. Releasing the modifier enables a <strong>global scroll
                   override</strong>. Every subsequent Wheel event is
                   captured before nested panels and native browser scrolling, and is routed
-                  only to the locked level regardless of cursor position. Shift + Wheel
-                  scrolls that same locked level horizontally. A normal primary click/tap
-                  is the only action that releases the override; the clicked control still
-                  performs its normal action. Reaching an edge, becoming empty, or being
+                  only to the locked level regardless of cursor position. Shift does not
+                  release the selection/override only when that exact selected level has a
+                  real horizontal scroll axis; Shift + Wheel then scrolls that same level
+                  horizontally. On a level without horizontal scrolling, Shift releases the
+                  selection/override like any other non-Ctrl/Command key. Any other key
+                  (including Tab, Escape, Enter, arrows or text input) and any pointer press
+                  (mouse, touch or pen; any mouse button) releases it without consuming the
+                  original input. Reaching an edge, becoming empty, or being
                   temporarily rerendered never silently transfers scrolling to another level.
                   Only layers with a genuinely visible, unobscured area participate: elements
                   outside the viewport or fully covered by a higher stacking layer (for example
@@ -353,8 +361,8 @@
                 <div class="shortcut-grid">
                   <div><kbd>Esc</kbd><span>Cancel an active Outline drag and restore the scroll position from before the drag.</span></div>
                   <div><kbd>Wheel</kbd><span>Scroll the innermost visible scrollable level under the pointer. If a global level is locked, Wheel scrolls only that locked level.</span></div>
-                  <div><kbd>Ctrl</kbd><span class="shortcut-plus">+</span><kbd>Wheel</kbd><span>Select a visible scroll level. Wheel down moves outward and Wheel up moves inward. Release Ctrl to lock the glowing level. Press Ctrl again later to capture the currently visible hierarchy again without clicking first. Use Command on macOS.</span></div>
-                  <div><kbd>Shift</kbd><span class="shortcut-plus">+</span><kbd>Wheel</kbd><span>Scroll horizontally. With a global level locked, the horizontal wheel input is routed only to that selected level.</span></div>
+                  <div><kbd>Ctrl</kbd><span class="shortcut-plus">+</span><kbd>Wheel</kbd><span>Select visible scroll levels in reading hierarchy: start at the outermost level, then follow the real layout like reading a page: parent before descendants, then sibling regions top to bottom and same-row siblings left to right; each region is completed depth-first before moving on. Wheel down advances; Wheel up goes backward. There is no hard beginning or end: keep scrolling in the same direction and the hierarchy wraps around and repeats. Release Ctrl to lock the glowing level. Press Ctrl again later to capture the currently visible hierarchy again without clicking first. Use Command on macOS.</span></div>
+                  <div><kbd>Shift</kbd><span class="shortcut-plus">+</span><kbd>Wheel</kbd><span>Scroll the locked level horizontally only when that selected level actually has a horizontal scroll axis. In that case Shift does not release the lock; otherwise Shift releases it like any other non-Ctrl/Command key.</span></div>
                 </div>
               </section>
               <section id="shortcut-graph" class="information-section">
