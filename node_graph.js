@@ -643,7 +643,7 @@
       group: "Debug & Output",
       symbol: "▣",
       description:
-        "Displays the current typed value live. It is a terminal monitor with one input; branch it directly from an existing typed wire when the same value is needed elsewhere.",
+        "Displays the actual value published by the matching running Resonite mod through the local scanner bridge. When no live bridge value exists, the local Runtime Only graph preview remains the fallback.",
       inputs: [genericPort("value", "Value", "T", "value")],
       outputs: [],
       displaysValue: true
@@ -670,7 +670,7 @@
           api.node.label ||
           "Display Impulse";
 
-        return `_impulseCount${token}++;\nPublishDisplay("${api.escapeString(label)}", _impulseCount${token});`;
+        return `_impulseCount${token}++;\nPublishDisplay("${api.escapeString(api.node.id)}", "${api.escapeString(label)}", "impulse", _impulseCount${token});`;
       }
     },
     "resonite.store": {
@@ -909,6 +909,9 @@
   let bridge = null;
   let graph = null;
   let currentAnalysis = null;
+  let runtimeBridgeSubscription = null;
+  let runtimeBridgeChannel = "";
+  let runtimeBridgeRefreshFrame = 0;
   let lastPersistedGraphJson = "";
   let persistTimer = 0;
   let graphMessageTimer = 0;
@@ -5548,6 +5551,242 @@
     );
   }
 
+  function runtimeBridgeChannelForGraph() {
+    const stateSnapshot =
+      bridge?.getStateSnapshot?.() ||
+      {};
+    const metadata =
+      stateSnapshot.metadata ||
+      graph?.configSnapshot?.metadata ||
+      {};
+    const namespaceName =
+      graphCsNamespace(
+        metadata.namespaceName
+      );
+    const className =
+      graphCsIdentifier(
+        metadata.className,
+        "YourMod"
+      );
+
+    return `${namespaceName}.${className}`;
+  }
+
+  function graphContainsRuntimeMonitors() {
+    return Boolean(
+      graph?.nodes?.some(node => {
+        const definition =
+          nodeDefinition(node);
+
+        return (
+          definition?.displaysValue ===
+            true ||
+          definition?.displaysImpulse ===
+            true
+        );
+      })
+    );
+  }
+
+  function scheduleRuntimeMonitorRefresh() {
+    if (runtimeBridgeRefreshFrame) {
+      return;
+    }
+
+    runtimeBridgeRefreshFrame =
+      requestAnimationFrame(() => {
+        runtimeBridgeRefreshFrame = 0;
+        refreshDisplayValueNodes();
+      });
+  }
+
+  function clearRuntimeBridgeSubscription() {
+    runtimeBridgeSubscription?.();
+    runtimeBridgeSubscription = null;
+    runtimeBridgeChannel = "";
+  }
+
+  function synchronizeRuntimeBridgeSubscription(
+    force = false
+  ) {
+    const runtimeBridge =
+      window.RMLRuntimeBridge;
+
+    if (
+      !graph?.active ||
+      !runtimeBridge ||
+      typeof runtimeBridge.subscribe !==
+        "function" ||
+      !graphContainsRuntimeMonitors()
+    ) {
+      clearRuntimeBridgeSubscription();
+      scheduleRuntimeMonitorRefresh();
+      return;
+    }
+
+    const channel =
+      runtimeBridgeChannelForGraph();
+
+    if (
+      !force &&
+      runtimeBridgeSubscription &&
+      runtimeBridgeChannel === channel
+    ) {
+      return;
+    }
+
+    clearRuntimeBridgeSubscription();
+    runtimeBridgeChannel =
+      channel;
+
+    try {
+      runtimeBridgeSubscription =
+        runtimeBridge.subscribe(
+          channel,
+          () => {
+            scheduleRuntimeMonitorRefresh();
+          }
+        );
+    } catch (error) {
+      console.warn(
+        "The live Resonite runtime bridge could not be subscribed.",
+        error
+      );
+      clearRuntimeBridgeSubscription();
+    }
+
+    scheduleRuntimeMonitorRefresh();
+  }
+
+  function runtimeBridgeState() {
+    const runtimeBridge =
+      window.RMLRuntimeBridge;
+    const channel =
+      runtimeBridgeChannel ||
+      runtimeBridgeChannelForGraph();
+
+    return runtimeBridge
+      ?.getState?.(channel) || {
+        connected: false,
+        active: false,
+        sessionId: "",
+        lastSeenUtc: ""
+      };
+  }
+
+  function liveRuntimeRecordForNode(
+    node
+  ) {
+    const runtimeBridge =
+      window.RMLRuntimeBridge;
+    const channel =
+      runtimeBridgeChannel ||
+      runtimeBridgeChannelForGraph();
+    const state =
+      runtimeBridge
+        ?.getState?.(channel);
+
+    if (
+      !runtimeBridge ||
+      state?.connected !== true ||
+      state?.active !== true
+    ) {
+      return null;
+    }
+
+    return runtimeBridge
+      .getValue?.(
+        channel,
+        node.id
+      ) || null;
+  }
+
+  function runtimeMonitorPresentation(
+    node
+  ) {
+    const definition =
+      nodeDefinition(node);
+    const state =
+      runtimeBridgeState();
+    const record =
+      liveRuntimeRecordForNode(
+        node
+      );
+
+    if (record) {
+      const runtimeType =
+        record.runtimeType ||
+        record.graphType ||
+        "runtime value";
+      const updated =
+        record.updatedAtUtc
+          ? new Date(
+              record.updatedAtUtc
+            ).toLocaleTimeString()
+          : "";
+
+      return {
+        live: true,
+        known: true,
+        label:
+          definition?.displaysImpulse
+            ? "Live Resonite calls"
+            : "Live Resonite value",
+        text:
+          record.display ||
+          (
+            record.isNull
+              ? "<null>"
+              : ""
+          ),
+        title:
+          `${runtimeType}${
+            updated
+              ? ` · ${updated}`
+              : ""
+          }`
+      };
+    }
+
+    if (definition?.displaysImpulse) {
+      return {
+        live: false,
+        known: false,
+        label: "Runtime Only",
+        text:
+          state.connected
+            ? state.active
+              ? "Waiting for this monitor in the running mod"
+              : "Waiting for the generated mod to run"
+            : "Scanner connection unavailable",
+        title:
+          "The live Resonite value is used when the scanner and matching generated mod are running."
+      };
+    }
+
+    const preview =
+      displayPreviewForNode(
+        node
+      );
+
+    return {
+      live: false,
+      known:
+        preview.known === true,
+      label: "Runtime Only",
+      text:
+        previewFormatValue(
+          preview
+        ),
+      title:
+        state.connected
+          ? state.active
+            ? "No matching live monitor has been published yet. Rebuild and reload the generated mod if this node was added later."
+            : "The scanner is connected, but the matching generated mod is not currently publishing."
+          : "No scanner connection is available; the local graph preview is shown as the fallback."
+    };
+  }
+
   function displayPreviewForNode(node) {
     const definition =
       nodeDefinition(node);
@@ -5585,51 +5824,83 @@
   }
 
   function refreshDisplayValueNodes() {
-    if (!dom.nodesHost) {
+    if (!graph) {
       return;
     }
 
+    const roots = [
+      dom.nodesHost,
+      dom.inspectorContent
+    ].filter(Boolean);
     let sizeMayHaveChanged = false;
 
-    for (const node of graph.nodes) {
-      if (
-        node.kind !== "operator" ||
-        node.operatorId !==
-          "resonite.displayValue"
-      ) {
-        continue;
-      }
-
-      const host =
-        dom.nodesHost.querySelector(
-          `[data-graph-node-id="${CSS.escape(node.id)}"] .rml-graph-display-value`
+    for (const root of roots) {
+      const monitors =
+        root.querySelectorAll(
+          ".rml-graph-display-value[data-runtime-monitor-id]"
         );
 
-      if (!host) {
-        continue;
-      }
+      for (const host of monitors) {
+        const monitorId =
+          host.dataset
+            .runtimeMonitorId;
+        const node =
+          graph.nodes.find(
+            candidate =>
+              candidate.id ===
+              monitorId
+          );
 
-      const preview =
-        displayPreviewForNode(node);
-      const output =
-        host.querySelector("output");
+        if (!node) {
+          continue;
+        }
 
-      host.classList.toggle(
-        "unknown",
-        !preview.known
-      );
+        const presentation =
+          runtimeMonitorPresentation(
+            node
+          );
+        const label =
+          host.querySelector("span");
+        const output =
+          host.querySelector("output");
 
-      if (output) {
-        const nextText =
-          previewFormatValue(preview);
+        host.classList.toggle(
+          "live-runtime",
+          presentation.live
+        );
+        host.classList.toggle(
+          "unknown",
+          !presentation.known
+        );
 
-        if (output.textContent !== nextText) {
-          output.textContent = nextText;
+        if (
+          label &&
+          label.textContent !==
+            presentation.label
+        ) {
+          label.textContent =
+            presentation.label;
           sizeMayHaveChanged = true;
         }
 
-        output.title =
-          output.textContent;
+        if (
+          output &&
+          output.textContent !==
+            presentation.text
+        ) {
+          output.textContent =
+            presentation.text;
+          sizeMayHaveChanged = true;
+        }
+
+        if (output) {
+          output.title =
+            presentation.title ||
+            presentation.text;
+        }
+
+        host.title =
+          presentation.title || "";
       }
     }
 
@@ -7116,8 +7387,13 @@ ${actions.length > 0
           node.label ||
           `Display Value ${index + 1}`;
 
+        const monitorId =
+          graphCsEscapeString(
+            node.id
+          );
+
         if (!connection) {
-          return `        PublishDisplay("${graphCsEscapeString(label)}", "<not connected>");`;
+          return `        PublishDisplay("${monitorId}", "${graphCsEscapeString(label)}", "unknown", "<not connected>");`;
         }
 
         const expression =
@@ -7125,9 +7401,50 @@ ${actions.length > 0
             connection.fromNode,
             connection.fromPort
           );
+        const graphType =
+          graphCsEscapeString(
+            expression.type ||
+            "object"
+          );
 
-        return `        PublishDisplay("${graphCsEscapeString(label)}", ${expression.code});`;
+        return `        PublishDisplay("${monitorId}", "${graphCsEscapeString(label)}", "${graphType}", ${expression.code});`;
       });
+
+    const impulseDisplayNodes =
+      graph.nodes.filter(
+        node =>
+          node.kind === "operator" &&
+          nodeDefinition(node)
+            ?.displaysImpulse === true
+      );
+
+    for (
+      let index = 0;
+      index <
+        impulseDisplayNodes.length;
+      index += 1
+    ) {
+      const node =
+        impulseDisplayNodes[index];
+      const token =
+        graphCsMethodToken(
+          node.id
+        );
+      const label =
+        node.label ||
+        `Display Impulse ${index + 1}`;
+
+      displayStatements.push(
+        `        PublishDisplay("${graphCsEscapeString(node.id)}", "${graphCsEscapeString(label)}", "impulse", _impulseCount${token});`
+      );
+    }
+
+    const runtimeMonitorNodes = [
+      ...displayNodes,
+      ...impulseDisplayNodes
+    ];
+    const runtimeBridgeChannel =
+      `${namespaceName}.${className}`;
 
     const applyStatements = {};
     const syncStatements = {};
@@ -7348,7 +7665,7 @@ ${actions.length > 0
 
     const guideComment =
       metadata.includeGuide === true
-        ? `// RML typed runtime graph\n\n/*\n * Generated by the RML Configuration Builder.\n *\n * STEP 1 - Configuration values\n * The main mod source forwards the current RML configuration values into\n * this generated runtime class through the Set... methods below.\n *\n * STEP 2 - Runtime reactions\n * React... methods are entry points for Configuration sockets configured to\n * react when settings are saved. Startup-capable sockets are emitted from\n * OnEngineInit(). Stored-only sockets remain typed value sources.\n *\n * STEP 3 - Typed graph execution\n * Emit... methods are the generated impulse paths. Value inputs are resolved\n * from their connected typed sources when an impulse path executes.\n *\n * STEP 4 - Runtime state and outputs\n * Generated fields retain node state and action outputs. Display Value and\n * Display Impulse nodes publish through DisplayValues/DisplayValueChanged.\n *\n * This file is generated from the visual graph. Edit the graph rather than\n * editing this generated file manually.\n */\n\n`
+        ? `// RML typed runtime graph\n\n/*\n * Generated by the RML Configuration Builder.\n *\n * STEP 1 - Configuration values\n * The main mod source forwards the current RML configuration values into\n * this generated runtime class through the Set... methods below.\n *\n * STEP 2 - Runtime reactions\n * React... methods are entry points for Configuration sockets configured to\n * react when settings are saved. Startup-capable sockets are emitted from\n * OnEngineInit(). Stored-only sockets remain typed value sources.\n *\n * STEP 3 - Typed graph execution\n * Emit... methods are the generated impulse paths. Value inputs are resolved\n * from their connected typed sources when an impulse path executes.\n *\n * STEP 4 - Runtime state and outputs\n * Generated fields retain node state and action outputs. Display Value and\n * Display Impulse nodes publish through DisplayValues/DisplayValueChanged and\n * stream to the local scanner runtime bridge when that scanner is installed.\n *\n * This file is generated from the visual graph. Edit the graph rather than\n * editing this generated file manually.\n */\n\n`
         : "";
 
     const source = `${guideComment}${usingLines}
@@ -7362,9 +7679,24 @@ ${warningsComment}
 internal static partial class ${graphClassName}
 {
     private static readonly object _configurationStateLock = new();
+    private static readonly object _displayStateLock = new();
+    private static readonly object _runtimeBridgeResolverLock = new();
     private static Action<string> _display = static _ => { };
     private static readonly Dictionary<string, object?> _displayValues =
         new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, string> _displayFingerprints =
+        new(StringComparer.Ordinal);
+    private const string RuntimeBridgeChannel =
+        "${graphCsEscapeString(runtimeBridgeChannel)}";
+    private static readonly string _runtimeBridgeSessionId =
+        DateTimeOffset.UtcNow
+            .ToUnixTimeMilliseconds()
+            .ToString(CultureInfo.InvariantCulture) +
+        "-" +
+        Guid.NewGuid().ToString("N");
+    private static MethodInfo? _runtimeBridgePublisher;
+    private static long _runtimeBridgeResolveAfter;
+    private static int _runtimeDisplayPumpStarted;
 
     /// <summary>
     /// Latest values published by Display Value and Display Impulse nodes, keyed by node label.
@@ -7403,7 +7735,11 @@ ${startupEmitters.length > 0
     )}`
   : ""}
 
-        RefreshDisplays();
+        _ = TryDispatchGraphToWorld(
+            RefreshDisplays);${runtimeMonitorNodes.length > 0
+  ? `
+        StartRuntimeDisplayPump();`
+  : ""}
     }
 
     // Graph entry points use the global CoroutineManager only to wait until a
@@ -7496,7 +7832,8 @@ ${startupEmitters
 
     public static void OnConfigurationSynchronized()
     {
-        RefreshDisplays();
+        _ = TryDispatchGraphToWorld(
+            RefreshDisplays);
     }
 
     private static void RefreshDisplays()
@@ -7621,20 +7958,204 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         return 0f;
     }
 
-    private static void PublishDisplay(
+    private static void StartRuntimeDisplayPump()
+    {
+        if (Interlocked.Exchange(
+                ref _runtimeDisplayPumpStarted,
+                1) != 0)
+        {
+            return;
+        }
+
+        _ = System.Threading.Tasks.Task.Run(
+            async () =>
+            {
+                while (FrooxEngine.Engine.Current is not null)
+                {
+                    try
+                    {
+                        TryDispatchGraphToWorld(
+                            RefreshDisplays);
+                    }
+                    catch
+                    {
+                        // A temporary world transition must not stop the monitor pump.
+                    }
+
+                    await System.Threading.Tasks.Task
+                        .Delay(200)
+                        .ConfigureAwait(false);
+                }
+            });
+    }
+
+    private static MethodInfo? ResolveRuntimeBridgePublisher()
+    {
+        lock (_runtimeBridgeResolverLock)
+        {
+            if (_runtimeBridgePublisher is not null)
+            {
+                return _runtimeBridgePublisher;
+            }
+
+            long now =
+                Environment.TickCount64;
+
+            if (now < _runtimeBridgeResolveAfter)
+            {
+                return null;
+            }
+
+            _runtimeBridgeResolveAfter =
+                now + 2000;
+
+            foreach (Assembly assembly in
+                     AppDomain.CurrentDomain.GetAssemblies())
+            {
+                Type? scannerType =
+                    assembly.GetType(
+                        "LazarusRmlBuilderCatalog.ResoniteApiCatalogScannerMod",
+                        throwOnError: false,
+                        ignoreCase: false);
+
+                MethodInfo? publisher =
+                    scannerType?.GetMethod(
+                        "PublishRuntimeDisplay",
+                        BindingFlags.Public |
+                        BindingFlags.Static,
+                        binder: null,
+                        types:
+                        [
+                            typeof(string),
+                            typeof(string),
+                            typeof(string),
+                            typeof(string),
+                            typeof(string),
+                            typeof(object)
+                        ],
+                        modifiers: null);
+
+                if (publisher is not null)
+                {
+                    _runtimeBridgePublisher =
+                        publisher;
+                    return publisher;
+                }
+            }
+
+            return null;
+        }
+    }
+
+    private static void PublishRuntimeBridge(
+        string monitorId,
         string name,
+        string graphType,
         object? value)
     {
-        _displayValues[name] = value;
-        DisplayValueChanged?.Invoke(name, value);
-        _display($"{name}: {FormatValue(value)}");
+        MethodInfo? publisher =
+            ResolveRuntimeBridgePublisher();
+
+        if (publisher is null)
+        {
+            return;
+        }
+
+        try
+        {
+            publisher.Invoke(
+                null,
+                [
+                    RuntimeBridgeChannel,
+                    _runtimeBridgeSessionId,
+                    monitorId,
+                    name,
+                    graphType,
+                    value
+                ]);
+        }
+        catch
+        {
+            lock (_runtimeBridgeResolverLock)
+            {
+                if (ReferenceEquals(
+                        _runtimeBridgePublisher,
+                        publisher))
+                {
+                    _runtimeBridgePublisher =
+                        null;
+                    _runtimeBridgeResolveAfter =
+                        Environment.TickCount64 +
+                        500;
+                }
+            }
+        }
+    }
+
+    private static void PublishDisplay(
+        string monitorId,
+        string name,
+        string graphType,
+        object? value)
+    {
+        string formatted =
+            FormatValue(value);
+        string runtimeType =
+            value?.GetType().FullName ??
+            "null";
+        string fingerprint =
+            graphType + "\u001f" +
+            runtimeType + "\u001f" +
+            formatted;
+        bool changed;
+
+        lock (_displayStateLock)
+        {
+            _displayValues[name] =
+                value;
+            changed =
+                !_displayFingerprints.TryGetValue(
+                    monitorId,
+                    out string? previous) ||
+                !string.Equals(
+                    previous,
+                    fingerprint,
+                    StringComparison.Ordinal);
+
+            if (changed)
+            {
+                _displayFingerprints[
+                    monitorId
+                ] = fingerprint;
+            }
+        }
+
+        if (changed)
+        {
+            DisplayValueChanged?.Invoke(
+                name,
+                value);
+            _display(
+                $"{name}: {formatted}");
+        }
+
+        PublishRuntimeBridge(
+            monitorId,
+            name,
+            graphType,
+            value);
     }
 
     public static bool TryGetDisplayValue(
         string name,
         out object? value)
     {
-        return _displayValues.TryGetValue(name, out value);
+        lock (_displayStateLock)
+        {
+            return _displayValues.TryGetValue(
+                name,
+                out value);
+        }
     }
 
     private static string FormatValue(object? value)
@@ -8777,6 +9298,22 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
       .rml-graph-display-value.unknown output {
         color: #ffd181;
+      }
+
+      .rml-graph-display-value.live-runtime {
+        border-color: rgba(108, 232, 155, 0.48);
+        background: rgba(7, 24, 18, 0.92);
+        box-shadow:
+          inset 0 0 18px rgba(108, 232, 155, 0.065),
+          0 0 14px rgba(108, 232, 155, 0.055);
+      }
+
+      .rml-graph-display-value.live-runtime span {
+        color: #82cfa0;
+      }
+
+      .rml-graph-display-value.live-runtime output {
+        color: #dffff0;
       }
 
       .rml-graph-node-footer-note {
@@ -9927,10 +10464,14 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     renderGraphPalette();
     renderGraphCanvas();
     renderGraphInspector();
+    synchronizeRuntimeBridgeSubscription(
+      true
+    );
     updatePackButton();
   }
 
   function deactivateGraphMode() {
+    clearRuntimeBridgeSubscription();
     clearGraphScrollLayerSelection();
     graphScrollLayerOutline?.remove();
     graphScrollLayerIndicator?.remove();
@@ -14975,6 +15516,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     }
 
     updateSourceBadge();
+    synchronizeRuntimeBridgeSubscription();
 
     requestAnimationFrame(
       refreshDisplayValueNodes
@@ -16169,49 +16711,42 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       );
     }
 
-    if (definition?.displaysValue) {
-      const preview =
-        displayPreviewForNode(node);
+    if (
+      definition?.displaysValue ||
+      definition?.displaysImpulse
+    ) {
+      const presentation =
+        runtimeMonitorPresentation(
+          node
+        );
       const display =
         document.createElement("div");
       display.className =
         `rml-graph-display-value${
-          preview.known
+          presentation.live
+            ? " live-runtime"
+            : ""
+        }${
+          presentation.known
             ? ""
             : " unknown"
         }`;
+      display.dataset
+        .runtimeMonitorId =
+        node.id;
       const displayLabel =
         document.createElement("span");
       displayLabel.textContent =
-        "Current value";
+        presentation.label;
       const displayOutput =
         document.createElement("output");
       displayOutput.textContent =
-        previewFormatValue(preview);
+        presentation.text;
       displayOutput.title =
-        displayOutput.textContent;
-      display.append(
-        displayLabel,
-        displayOutput
-      );
-      bodyContent.appendChild(display);
-    }
-
-    if (definition?.displaysImpulse) {
-      const display =
-        document.createElement("div");
-      display.className =
-        "rml-graph-display-value unknown";
-      const displayLabel =
-        document.createElement("span");
-      displayLabel.textContent =
-        "Runtime calls";
-      const displayOutput =
-        document.createElement("output");
-      displayOutput.textContent =
-        "Updates while the mod runs";
-      displayOutput.title =
-        displayOutput.textContent;
+        presentation.title ||
+        presentation.text;
+      display.title =
+        presentation.title || "";
       display.append(
         displayLabel,
         displayOutput
@@ -18387,49 +18922,42 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       description
     );
 
-    if (definition?.displaysValue) {
-      const preview =
-        displayPreviewForNode(node);
+    if (
+      definition?.displaysValue ||
+      definition?.displaysImpulse
+    ) {
+      const presentation =
+        runtimeMonitorPresentation(
+          node
+        );
       const live =
         document.createElement("div");
       live.className =
         `rml-graph-display-value${
-          preview.known
+          presentation.live
+            ? " live-runtime"
+            : ""
+        }${
+          presentation.known
             ? ""
             : " unknown"
         }`;
+      live.dataset
+        .runtimeMonitorId =
+        node.id;
       const liveLabel =
         document.createElement("span");
       liveLabel.textContent =
-        "Current graph result";
+        presentation.label;
       const liveOutput =
         document.createElement("output");
       liveOutput.textContent =
-        previewFormatValue(preview);
+        presentation.text;
       liveOutput.title =
-        liveOutput.textContent;
-      live.append(
-        liveLabel,
-        liveOutput
-      );
-      card.appendChild(live);
-    }
-
-    if (definition?.displaysImpulse) {
-      const live =
-        document.createElement("div");
-      live.className =
-        "rml-graph-display-value unknown";
-      const liveLabel =
-        document.createElement("span");
-      liveLabel.textContent =
-        "Runtime impulse count";
-      const liveOutput =
-        document.createElement("output");
-      liveOutput.textContent =
-        "Published whenever this input is called";
-      liveOutput.title =
-        liveOutput.textContent;
+        presentation.title ||
+        presentation.text;
+      live.title =
+        presentation.title || "";
       live.append(
         liveLabel,
         liveOutput
@@ -22094,6 +22622,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
     graph.active = false;
 
+    synchronizeRuntimeBridgeSubscription();
     pruneConnections();
     persistGraph(true);
 
@@ -22257,6 +22786,12 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         ) {
           if (graph?.active) {
             schedulePackedSnapshotSync();
+            requestAnimationFrame(
+              () =>
+                synchronizeRuntimeBridgeSubscription(
+                  true
+                )
+            );
           } else {
             requestAnimationFrame(
               updateSourceBadge

@@ -17729,8 +17729,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "help_template.html?v=14",
-    "help_template.js?v=14",
+    "help_template.html?v=15",
+    "help_template.js?v=15",
     "help-template",
     "RMLHelpTemplateMarkup"
   )
@@ -17823,7 +17823,7 @@ function ensureSetupAssistantLoaded(firstRun = false) {
 
   setupAssistantLoadPromise = new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = new URL("setup_assistant.js?v=23", APP_SCRIPT_BASE_URL).href;
+    script.src = new URL("setup_assistant.js?v=24", APP_SCRIPT_BASE_URL).href;
     script.async = true;
     script.dataset.rmlSetupAssistant = "true";
     script.addEventListener("load", () => resolve(true), { once: true });

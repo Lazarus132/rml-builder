@@ -259,7 +259,7 @@
       target: ".rml-graph-viewport",
       mode: "graph",
       title: "9. Connect typed sockets",
-      text: "Create a wire by dragging from one socket to another. Compatible sockets light up, incompatible sockets are rejected, and wire color communicates the concrete value type. You can also drop a wire on empty graph space: an output creates a typed Display monitor automatically, while a compatible value input creates a safe typed source such as a constant/context helper. Impulse inputs and inputs that cannot be safely synthesized still require an explicit connection.",
+      text: "Create a wire by dragging from one socket to another. Compatible sockets light up, incompatible sockets are rejected, and wire color communicates the concrete value type. You can also drop a wire on empty graph space: an output creates a typed Display monitor automatically, while a compatible value input creates a safe typed source such as a constant/context helper. When the matching generated mod and scanner are running, Display Value shows the actual Resonite runtime value; otherwise it remains in the explicit Runtime Only fallback. Impulse inputs and inputs that cannot be safely synthesized still require an explicit connection.",
       hint: "The animation shows socket-to-socket wiring first, then REAL output → empty-space and input → empty-space drops. The automatically created helper nodes appear live in safe visible graph positions.",
       demo: "graph-wire"
     },

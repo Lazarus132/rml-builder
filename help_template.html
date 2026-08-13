@@ -196,6 +196,7 @@
             <nav class="information-nav" aria-label="Technical help sections">
               <a href="#info-library">Node library</a>
               <a href="#info-wires">Sockets & wires</a>
+              <a href="#info-runtime">Live runtime monitors</a>
               <a href="#info-editing">Graph editing</a>
               <a href="#info-harmony">Harmony projects</a>
               <a href="#info-advanced">Advanced / Raw C#</a>
@@ -233,6 +234,24 @@
                   Dropping a value-input wire can create a self-contained constant or
                   context source. Impulse inputs and multi-input runtime operations must
                   be connected explicitly.
+                </p>
+              </section>
+
+              <section id="info-runtime" class="information-section">
+                <span class="information-kicker">Scanner runtime bridge</span>
+                <h3>Live Display Value and Display Impulse</h3>
+                <p>
+                  Display Value and Display Impulse prefer values published by the matching
+                  generated mod running inside Resonite. The generated runtime discovers the
+                  scanner mod without a compile-time dependency, and the scanner streams each
+                  monitor update to this builder over its local loopback SSE bridge.
+                </p>
+                <p>
+                  Matching uses the generated namespace/class channel plus the stable graph node
+                  id. After adding, deleting or replacing a monitor, rebuild and reload the
+                  generated mod. When the scanner or matching mod is unavailable, the node clearly
+                  falls back to <strong>Runtime Only</strong> and keeps the existing local graph
+                  preview where that value can be evaluated safely.
                 </p>
               </section>
 

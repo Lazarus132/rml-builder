@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const LOADER_VERSION = 9;
+  const LOADER_VERSION = 11;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
   const CATALOG_PATH = "/resonite_api_catalog.json";
@@ -250,46 +250,94 @@
     return catalog;
   }
 
-  function updateStatus(catalog) {
+  let scannerOnline = false;
+  let scannerChecking = false;
+  let scannerPollTimer = 0;
+  let scannerCheckPromise = null;
+
+  function statusCatalog() {
+    return (
+      window.RMLResoniteApiCatalog ||
+      window.RMLFrooxComponentCatalog ||
+      null
+    );
+  }
+
+  function updateStatus(
+    catalog = statusCatalog(),
+    options = {}
+  ) {
     const element =
       document.getElementById(
         "api-catalog-state"
       );
 
-    if (!element || !catalog) {
+    if (!element) {
       return;
     }
 
-    const source = String(
-      catalog.catalogSource || ""
-    );
-    const live = source === "scanner";
-    const cached = source === "scanner-cache";
+    const checking =
+      options.checking === true ||
+      scannerChecking === true;
+    const online =
+      options.online === true ||
+      (
+        options.online !== false &&
+        scannerOnline === true
+      );
+
     const count =
-      catalog.components?.length || 0;
+      catalog?.components?.length || 0;
+    const version =
+      String(
+        catalog?.engineVersion ||
+        "unknown"
+      );
 
-    element.dataset.source = live
-      ? "scanner"
-      : cached
-        ? "cache"
-        : "unavailable";
+    if (checking) {
+      element.dataset.source = "updating";
+      element.textContent =
+        catalog
+          ? `Resonite API ${version} · checking… · ${count} components`
+          : "Resonite API · checking…";
+      element.title =
+        "Checking the local Resonite scanner. The cached catalog remains in use unless a newer catalog is found.";
+      return;
+    }
 
-    element.textContent = live
-      ? `Resonite API ${catalog.engineVersion} · live · ${count} components`
-      : cached
-        ? `Resonite API ${catalog.engineVersion} · cached live catalog · ${count} components`
-        : "Resonite API · unavailable";
+    if (online) {
+      element.dataset.source = "scanner";
+      element.textContent =
+        catalog
+          ? `Resonite API ${version} · live · ${count} components`
+          : "Resonite API · live";
+      element.title =
+        "The local Resonite scanner is online. The builder continues using the cached catalog when it already matches the live catalog. Click to check and synchronize now.";
+      return;
+    }
 
-    element.title = live
-      ? `Live catalog from ${catalog.catalogSourceUrl}. Click to scan again.`
-      : cached
-        ? "The last live scanner catalog is loaded from this browser's IndexedDB cache. Click to look for a newer running scanner."
-        : "No live or cached Resonite API catalog is available.";
+    if (catalog) {
+      element.dataset.source = "cache";
+      element.textContent =
+        `Resonite API ${version} · cached · ${count} components`;
+      element.title =
+        "The local Resonite scanner is offline. The last synchronized catalog is being used from this browser's IndexedDB cache. Click to reconnect and synchronize.";
+      return;
+    }
+
+    element.dataset.source = "unavailable";
+    element.textContent =
+      "Resonite API · unavailable";
+    element.title =
+      "No live scanner connection or cached Resonite API catalog is available. Click to reconnect.";
   }
 
   function updateUnavailableStatus(
-    message = "No live or cached Resonite API catalog is available. Click to look for a running scanner."
+    message = "No live scanner connection or cached Resonite API catalog is available. Click to reconnect."
   ) {
+    scannerOnline = false;
+    scannerChecking = false;
+
     const element =
       document.getElementById(
         "api-catalog-state"
@@ -301,7 +349,7 @@
 
     element.dataset.source = "unavailable";
     element.textContent =
-      "Resonite API · no live/cache catalog";
+      "Resonite API · unavailable";
     element.title = message;
   }
 
@@ -670,34 +718,8 @@
   }
 
   async function loadCatalog() {
-    const cachedPromise =
-      readCachedLiveCatalog();
-
-    const configured =
-      configuredCatalogUrl();
-
-    if (configured) {
-      const live =
-        await tryScannerCatalog([0]);
-
-      if (live) {
-        void writeCachedLiveCatalog(
-          live.raw,
-          live.url
-        );
-
-        return installCatalog(
-          normalizeCatalog(
-            live.raw,
-            "scanner",
-            live.url
-          )
-        );
-      }
-    }
-
     const cached =
-      await cachedPromise;
+      await readCachedLiveCatalog();
 
     if (cached) {
       return installCatalog(
@@ -709,6 +731,35 @@
       );
     }
 
+    scannerChecking = true;
+    updateStatus(null, {
+      checking: true,
+      online: false
+    });
+
+    const live =
+      await tryScannerCatalog([0]);
+
+    scannerChecking = false;
+
+    if (live) {
+      scannerOnline = true;
+
+      await writeCachedLiveCatalog(
+        live.raw,
+        live.url
+      );
+
+      return installCatalog(
+        normalizeCatalog(
+          live.raw,
+          "scanner",
+          live.url
+        )
+      );
+    }
+
+    scannerOnline = false;
     updateUnavailableStatus();
     return null;
   }
@@ -797,67 +848,156 @@
     );
   }
 
-  async function refreshLiveCatalogManually() {
-    const status =
-      document.getElementById(
-        "api-catalog-state"
-      );
-
-    if (status) {
-      status.dataset.source = "updating";
-      status.textContent =
-        "Resonite API · checking local scanner…";
-    }
-
-    const live =
-      await tryScannerCatalog([0]);
-
-    if (!live) {
-      if (status) {
-        const current =
-          window.RMLResoniteApiCatalog;
-        if (current) {
-          updateStatus(current);
-          status.title =
-            "No newer running scanner was found. The current live/cache catalog remains active.";
-        } else {
-          updateUnavailableStatus(
-            "No running scanner was found and no cached live catalog exists yet."
-          );
-        }
-      }
-      return false;
-    }
-
-    void writeCachedLiveCatalog(
-      live.raw,
-      live.url
+  function scheduleScannerStatusCheck(
+    delayMs = POLL_INTERVAL_MS
+  ) {
+    window.clearTimeout(
+      scannerPollTimer
     );
 
-    const normalized =
-      normalizeCatalog(
-        live.raw,
-        "scanner",
-        live.url
-      );
-
-    const currentIdentity =
-      catalogIdentity(
-        window.RMLResoniteApiCatalog
-      );
-    const nextIdentity =
-      catalogIdentity(normalized);
-
-    installCatalog(normalized);
-
-    if (nextIdentity !== currentIdentity) {
+    scannerPollTimer =
       window.setTimeout(
-        () => window.location.reload(),
-        250
+        () => {
+          void synchronizeScannerStatus({
+            showChecking:
+              !scannerOnline,
+            reloadOnChange: true
+          });
+        },
+        Math.max(
+          1000,
+          Number(delayMs) ||
+            POLL_INTERVAL_MS
+        )
       );
+  }
+
+  async function synchronizeScannerStatus(
+    options = {}
+  ) {
+    if (scannerCheckPromise) {
+      return scannerCheckPromise;
     }
 
-    return true;
+    const showChecking =
+      options.showChecking === true;
+    const reloadOnChange =
+      options.reloadOnChange !== false;
+
+    scannerCheckPromise =
+      (async () => {
+        if (showChecking) {
+          scannerChecking = true;
+          updateStatus(
+            statusCatalog(),
+            {
+              checking: true,
+              online: scannerOnline
+            }
+          );
+        }
+
+        const live =
+          await tryScannerCatalog([0]);
+
+        scannerChecking = false;
+
+        if (!live) {
+          scannerOnline = false;
+          updateStatus(
+            statusCatalog(),
+            {
+              checking: false,
+              online: false
+            }
+          );
+          return false;
+        }
+
+        scannerOnline = true;
+
+        const normalized =
+          normalizeCatalog(
+            live.raw,
+            "scanner",
+            live.url
+          );
+
+        const current =
+          statusCatalog();
+        const currentIdentity =
+          catalogIdentity(current);
+        const nextIdentity =
+          catalogIdentity(normalized);
+
+        if (
+          !current ||
+          nextIdentity !==
+            currentIdentity
+        ) {
+          await writeCachedLiveCatalog(
+            live.raw,
+            live.url
+          );
+
+          installCatalog(normalized);
+
+          if (
+            current &&
+            reloadOnChange
+          ) {
+            window.setTimeout(
+              () =>
+                window.location.reload(),
+              250
+            );
+          }
+
+          return true;
+        }
+
+        updateStatus(
+          current,
+          {
+            checking: false,
+            online: true
+          }
+        );
+
+        return true;
+      })()
+        .catch(error => {
+          scannerChecking = false;
+          scannerOnline = false;
+
+          updateStatus(
+            statusCatalog(),
+            {
+              checking: false,
+              online: false
+            }
+          );
+
+          console.debug(
+            "Resonite scanner status check failed.",
+            error
+          );
+
+          return false;
+        })
+        .finally(() => {
+          scannerCheckPromise = null;
+          scheduleScannerStatusCheck();
+        });
+
+    return scannerCheckPromise;
+  }
+
+  async function refreshLiveCatalogManually() {
+    return synchronizeScannerStatus({
+      showChecking: true,
+      reloadOnChange: true
+    });
   }
 
   function installManualScannerRefresh() {
@@ -949,6 +1089,11 @@
   catalogReady
     .then(() => {
       installManualScannerRefresh();
+
+      void synchronizeScannerStatus({
+        showChecking: true,
+        reloadOnChange: true
+      });
     })
     .catch(() => {});
 
