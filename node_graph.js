@@ -1102,6 +1102,104 @@
     );
   }
 
+  const COLLECT_LIST_TYPE_PREFIX =
+    "collectList:";
+
+  function isCollectListType(type) {
+    return (
+      typeof type === "string" &&
+      type.startsWith(
+        COLLECT_LIST_TYPE_PREFIX
+      )
+    );
+  }
+
+  function collectListTypeId(
+    elementType
+  ) {
+    const normalized = String(
+      elementType || ""
+    ).trim();
+
+    return normalized
+      ? `${COLLECT_LIST_TYPE_PREFIX}${normalized}`
+      : null;
+  }
+
+  function ensureCollectListType(
+    elementType
+  ) {
+    const normalized = String(
+      elementType || ""
+    ).trim();
+
+    if (
+      !normalized ||
+      normalized === "impulse" ||
+      normalized === "generic" ||
+      normalized === "auto"
+    ) {
+      return null;
+    }
+
+    const id =
+      collectListTypeId(
+        normalized
+      );
+    const elementInformation =
+      TYPE_INFO[typeBase(normalized)] ||
+      TYPE_INFO.generic;
+    const elementCsType =
+      graphCsType(normalized);
+    const assemblyReferences =
+      graphTypeAssemblyReferences(
+        normalized
+      );
+
+    registerGraphType(id, {
+      label:
+        `List<${typeLabel(normalized)}>`,
+      short:
+        `${elementInformation.short || "T"}[]`,
+      color:
+        elementInformation.color ||
+        "#9da8b4",
+      csType:
+        `System.Collections.Generic.List<${elementCsType}>`,
+      defaultCs:
+        `new System.Collections.Generic.List<${elementCsType}>()`,
+      referenceType: true,
+      valueType: true,
+      globalGenericCandidate: false,
+      collectionType: true,
+      collectorCollection: true,
+      syntheticCollectionType: true,
+      enumerableElementType:
+        normalized,
+      enumerableElementCsType:
+        elementCsType,
+      assignableTo: ["object"],
+      constraints: [
+        "reference",
+        "serializable",
+        "enumerable",
+        "collectableCollection"
+      ],
+      assembly:
+        elementInformation.assembly ||
+        assemblyReferences[0]?.include ||
+        "",
+      assemblies:
+        assemblyReferences.map(
+          reference =>
+            reference.include
+        ),
+      assemblyReferences
+    });
+
+    return id;
+  }
+
   function typeLabel(type) {
     if (!type) {
       return "Unbound generic";
@@ -1126,7 +1224,9 @@
       interpolatable: "Interpolatable value",
       reflectionMember: "Reflection member",
       serializable: "Serializable value",
-      enumerable: "Enumerable collection"
+      enumerable: "Enumerable collection",
+      collectableCollection:
+        "Strongly typed collector list"
     };
 
     return labels[constraint] || "Generic";
@@ -1993,6 +2093,79 @@
       return true;
     }
 
+    const fromCsType = String(
+      fromInformation.csType || ""
+    )
+      .replace(/global::/g, "")
+      .trim();
+    const toCsType = String(
+      toInformation.csType || ""
+    )
+      .replace(/global::/g, "")
+      .trim();
+
+    if (
+      fromCsType &&
+      toCsType &&
+      fromCsType === toCsType
+    ) {
+      return true;
+    }
+
+    if (
+      fromInformation.collectorCollection ===
+        true
+    ) {
+      if (
+        [
+          "System.Collections.IEnumerable",
+          "System.Collections.ICollection",
+          "System.Collections.IList"
+        ].includes(toCsType)
+      ) {
+        return true;
+      }
+
+      const genericCollectionInterface =
+        toCsType.match(
+          /^(?:System\.Collections\.Generic\.)?(IEnumerable|ICollection|IList|IReadOnlyCollection|IReadOnlyList)</
+        );
+
+      if (genericCollectionInterface) {
+        const interfaceName =
+          genericCollectionInterface[1];
+        const fromElementType =
+          enumerableElementType(
+            fromType
+          );
+        const toElementType =
+          enumerableElementType(
+            toType
+          );
+        const covariant = [
+          "IEnumerable",
+          "IReadOnlyCollection",
+          "IReadOnlyList"
+        ].includes(interfaceName);
+
+        if (
+          fromElementType &&
+          toElementType &&
+          (
+            covariant
+              ? connectionTypesCompatible(
+                  fromElementType,
+                  toElementType
+                )
+              : fromElementType ===
+                  toElementType
+          )
+        ) {
+          return true;
+        }
+      }
+    }
+
     return false;
   }
 
@@ -2025,6 +2198,28 @@
         itemType
       )
     );
+  }
+
+  function genericCollectionRelationCompatible(
+    relation,
+    collectionType,
+    itemType
+  ) {
+    const elementType =
+      enumerableElementType(
+        collectionType
+      );
+
+    if (!elementType || !itemType) {
+      return false;
+    }
+
+    return relation?.exact === true
+      ? elementType === itemType
+      : connectionTypesCompatible(
+          elementType,
+          itemType
+        );
   }
 
   function defaultGraphState() {
@@ -3240,6 +3435,8 @@
 
   function graphConcreteTypes() {
     const result = new Set();
+    const collectorElementTypes =
+      new Set();
 
     const addType = type => {
       if (
@@ -3253,6 +3450,10 @@
       }
 
       result.add(type);
+
+      if (!isCollectListType(type)) {
+        collectorElementTypes.add(type);
+      }
 
       const elementType =
         TYPE_INFO[typeBase(type)]
@@ -3280,6 +3481,18 @@
         ...(definition?.outputs || [])
       ]) {
         addType(spec.type);
+      }
+    }
+
+    for (const elementType of
+      collectorElementTypes) {
+      const collectionType =
+        ensureCollectListType(
+          elementType
+        );
+
+      if (collectionType) {
+        result.add(collectionType);
       }
     }
 
@@ -3601,6 +3814,8 @@
         genericRelations.push({
           node,
           definition,
+          exact:
+            descriptor.exact === true,
           collection: {
             key: collectionKey,
             variable: collectionVariable
@@ -3800,7 +4015,8 @@
         for (const collectionType of collectionValues) {
           if (
             !itemValues.some(itemType =>
-              collectionElementTypesCompatible(
+              genericCollectionRelationCompatible(
+                relation,
                 collectionType,
                 itemType
               )
@@ -3819,7 +4035,8 @@
           if (
             !remainingCollections.some(
               collectionType =>
-                collectionElementTypesCompatible(
+                genericCollectionRelationCompatible(
+                  relation,
                   collectionType,
                   itemType
                 )
@@ -3943,7 +4160,8 @@
           if (
             collectionType &&
             itemType &&
-            !collectionElementTypesCompatible(
+            !genericCollectionRelationCompatible(
+              relation,
               collectionType,
               itemType
             )
@@ -4051,35 +4269,65 @@
 
         for (const relation of
           relationsByVariable.get(key) || []) {
-          if (relation.element.key !== key) {
+          if (relation.element.key === key) {
+            const assignedCollection =
+              assignments.get(
+                relation.collection.key
+              );
+
+            if (assignedCollection) {
+              addPreferred(
+                enumerableElementType(
+                  assignedCollection
+                )
+              );
+              continue;
+            }
+
+            const possibleElementTypes =
+              new Set(
+                [...relation.collection.variable.domain]
+                  .map(enumerableElementType)
+                  .filter(Boolean)
+              );
+
+            if (possibleElementTypes.size === 1) {
+              addPreferred(
+                [...possibleElementTypes][0]
+              );
+            }
+
             continue;
           }
 
-          const assignedCollection =
-            assignments.get(
-              relation.collection.key
-            );
+          if (
+            relation.collection.key === key &&
+            relation.exact === true
+          ) {
+            const assignedElement =
+              assignments.get(
+                relation.element.key
+              );
 
-          if (assignedCollection) {
-            addPreferred(
-              enumerableElementType(
-                assignedCollection
-              )
-            );
-            continue;
-          }
+            if (assignedElement) {
+              addPreferred(
+                ensureCollectListType(
+                  assignedElement
+                )
+              );
+              continue;
+            }
 
-          const possibleElementTypes =
-            new Set(
-              [...relation.collection.variable.domain]
-                .map(enumerableElementType)
-                .filter(Boolean)
-            );
+            const possibleItems =
+              [...relation.element.variable.domain];
 
-          if (possibleElementTypes.size === 1) {
-            addPreferred(
-              [...possibleElementTypes][0]
-            );
+            if (possibleItems.length === 1) {
+              addPreferred(
+                ensureCollectListType(
+                  possibleItems[0]
+                )
+              );
+            }
           }
         }
 
@@ -4207,7 +4455,8 @@
         );
 
       if (
-        !collectionElementTypesCompatible(
+        !genericCollectionRelationCompatible(
+          relation,
           collectionType,
           itemType
         )
@@ -4652,23 +4901,195 @@
     return false;
   }
 
-  function wouldCreateCycle(
+  function impulseEndpointKey(
+    direction,
+    nodeId,
+    portId
+  ) {
+    return `${direction}:${nodeId}:${portId}`;
+  }
+
+  function isImpulseControlConnection(
+    connection
+  ) {
+    const source = findPortSpec(
+      connection.fromNode,
+      connection.fromPort,
+      "output"
+    );
+    const target = findPortSpec(
+      connection.toNode,
+      connection.toPort,
+      "input"
+    );
+
+    if (!source || !target) {
+      return false;
+    }
+
+    if (target.spec?.type !== "impulse") {
+      return false;
+    }
+
+    return (
+      source.spec?.type === "impulse" ||
+      isConfigurationReactionConnection(
+        source,
+        target
+      )
+    );
+  }
+
+  function impulseOutputsForInput(
+    node,
+    inputPortId
+  ) {
+    const definition =
+      nodeDefinition(node);
+    const outputs =
+      Array.isArray(definition?.outputs)
+        ? definition.outputs.filter(
+            spec => spec?.type === "impulse"
+          )
+        : [];
+    const routes =
+      definition?.impulseRoutes;
+
+    if (
+      routes &&
+      typeof routes === "object" &&
+      !Array.isArray(routes) &&
+      Object.hasOwn(
+        routes,
+        inputPortId
+      )
+    ) {
+      const routed = new Set(
+        Array.isArray(routes[inputPortId])
+          ? routes[inputPortId]
+              .map(value =>
+                String(value || "").trim()
+              )
+              .filter(Boolean)
+          : []
+      );
+
+      return outputs
+        .filter(spec =>
+          routed.has(spec.id)
+        )
+        .map(spec => spec.id);
+    }
+
+    return outputs.map(spec => spec.id);
+  }
+
+  function wouldCreateImpulseCycle(
     connections,
     candidate
   ) {
-    if (
-      candidate.fromNode ===
-      candidate.toNode
-    ) {
-      return true;
+    const adjacency = new Map();
+    const addEdge = (from, to) => {
+      const list = adjacency.get(from) || [];
+      list.push(to);
+      adjacency.set(from, list);
+    };
+
+    for (const node of graph?.nodes || []) {
+      if (node.kind !== "operator") {
+        continue;
+      }
+
+      const definition =
+        nodeDefinition(node);
+      const inputs =
+        Array.isArray(definition?.inputs)
+          ? definition.inputs.filter(
+              spec => spec?.type === "impulse"
+            )
+          : [];
+
+      for (const input of inputs) {
+        for (const outputPortId of
+          impulseOutputsForInput(
+            node,
+            input.id
+          )) {
+          addEdge(
+            impulseEndpointKey(
+              "in",
+              node.id,
+              input.id
+            ),
+            impulseEndpointKey(
+              "out",
+              node.id,
+              outputPortId
+            )
+          );
+        }
+      }
     }
 
+    for (const connection of [
+      ...connections,
+      candidate
+    ]) {
+      if (
+        !isImpulseControlConnection(
+          connection
+        )
+      ) {
+        continue;
+      }
+
+      addEdge(
+        impulseEndpointKey(
+          "out",
+          connection.fromNode,
+          connection.fromPort
+        ),
+        impulseEndpointKey(
+          "in",
+          connection.toNode,
+          connection.toPort
+        )
+      );
+    }
+
+    return pathExists(
+      adjacency,
+      impulseEndpointKey(
+        "in",
+        candidate.toNode,
+        candidate.toPort
+      ),
+      impulseEndpointKey(
+        "out",
+        candidate.fromNode,
+        candidate.fromPort
+      )
+    );
+  }
+
+  function wouldCreateValueCycle(
+    connections,
+    candidate
+  ) {
     const adjacency = new Map();
 
     for (const connection of [
       ...connections,
       candidate
     ]) {
+      if (
+        isImpulseControlConnection(
+          connection
+        )
+      ) {
+        continue;
+      }
+
       const sourceNode =
         graph?.nodes?.find(
           node =>
@@ -4703,6 +5124,30 @@
       candidate.toNode,
       candidate.fromNode
     );
+  }
+
+  function wouldCreateCycle(
+    connections,
+    candidate
+  ) {
+    if (
+      candidate.fromNode ===
+      candidate.toNode
+    ) {
+      return true;
+    }
+
+    return isImpulseControlConnection(
+      candidate
+    )
+      ? wouldCreateImpulseCycle(
+          connections,
+          candidate
+        )
+      : wouldCreateValueCycle(
+          connections,
+          candidate
+        );
   }
 
   function normalizedEndpoints(
@@ -6059,6 +6504,102 @@
       ) || null;
   }
 
+  function runtimeStructuredValueText(
+    value,
+    depth = 0
+  ) {
+    if (value === null || value === undefined) {
+      return "<null>";
+    }
+
+    if (
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean" ||
+      typeof value === "bigint"
+    ) {
+      return String(value);
+    }
+
+    if (depth >= 2) {
+      return String(value);
+    }
+
+    if (Array.isArray(value)) {
+      return `[${value
+        .map(item =>
+          runtimeStructuredValueText(
+            item,
+            depth + 1
+          )
+        )
+        .join(", ")}]`;
+    }
+
+    if (
+      typeof value === "object" &&
+      typeof value.display === "string"
+    ) {
+      return value.display;
+    }
+
+    if (typeof value === "object") {
+      try {
+        return JSON.stringify(value);
+      } catch {
+        return String(value);
+      }
+    }
+
+    return String(value);
+  }
+
+  function runtimeRecordPresentationText(
+    record
+  ) {
+    if (
+      record?.valueKind === "sequence" &&
+      Array.isArray(record.value)
+    ) {
+      return record.value.length > 0
+        ? record.value
+            .map(value =>
+              runtimeStructuredValueText(
+                value
+              )
+            )
+            .join("\n")
+        : "[]";
+    }
+
+    if (
+      record?.valueKind === "map" &&
+      record.value &&
+      typeof record.value === "object" &&
+      !Array.isArray(record.value)
+    ) {
+      const entries =
+        Object.entries(record.value);
+
+      return entries.length > 0
+        ? entries
+            .map(([key, value]) =>
+              `${key}: ${runtimeStructuredValueText(value)}`
+            )
+            .join("\n")
+        : "{}";
+    }
+
+    return (
+      record?.display ||
+      (
+        record?.isNull
+          ? "<null>"
+          : ""
+      )
+    );
+  }
+
   function runtimeMonitorPresentation(
     node
   ) {
@@ -6083,22 +6624,29 @@
             ).toLocaleTimeString()
           : "";
 
+      const text =
+        runtimeRecordPresentationText(
+          record
+        );
+
       return {
         live: true,
         known: true,
+        multiline:
+          record.valueKind === "sequence" ||
+          record.valueKind === "map" ||
+          text.includes("\n"),
         label:
           definition?.displaysImpulse
             ? "Live Resonite calls"
             : "Live Resonite value",
-        text:
-          record.display ||
-          (
-            record.isNull
-              ? "<null>"
-              : ""
-          ),
+        text,
         title:
           `${runtimeType}${
+            record.display
+              ? ` · ${record.display}`
+              : ""
+          }${
             updated
               ? ` · ${updated}`
               : ""
@@ -6110,6 +6658,7 @@
       return {
         live: false,
         known: false,
+        multiline: false,
         label: "Runtime Only",
         text:
           state.connected
@@ -6131,6 +6680,7 @@
       live: false,
       known:
         preview.known === true,
+      multiline: false,
       label: "Runtime Only",
       text:
         previewFormatValue(
@@ -6229,6 +6779,10 @@
         host.classList.toggle(
           "unknown",
           !presentation.known
+        );
+        host.classList.toggle(
+          "multiline",
+          presentation.multiline === true
         );
 
         if (
@@ -6816,14 +7370,20 @@
           type,
           code:
             explicitDefault ||
-            graphCsDefault(type)
+            graphCsDefault(type),
+          connected: false,
+          connection: null
         };
       }
 
-      return outputExpression(
-        connection.fromNode,
-        connection.fromPort
-      );
+      return {
+        ...outputExpression(
+          connection.fromNode,
+          connection.fromPort
+        ),
+        connected: true,
+        connection
+      };
     };
 
     const storeFieldName = node =>
@@ -6923,6 +7483,16 @@
           node,
           inputId
         ),
+      isInputConnected(inputId) {
+        return incoming.has(
+          `${node.id}:${inputId}`
+        );
+      },
+      inputConnection(inputId) {
+        return incoming.get(
+          `${node.id}:${inputId}`
+        ) || null;
+      },
       output: (
         nodeId,
         portId
@@ -8545,6 +9115,100 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         }
     }
 
+    private static object? PrepareRuntimeBridgeValue(
+        object? value,
+        int depth = 0)
+    {
+        if (value is null)
+        {
+            return null;
+        }
+
+        if (
+            value is string ||
+            value is bool ||
+            value is byte ||
+            value is sbyte ||
+            value is short ||
+            value is ushort ||
+            value is int ||
+            value is uint ||
+            value is long ||
+            value is ulong ||
+            value is float ||
+            value is double ||
+            value is decimal)
+        {
+            return value;
+        }
+
+        if (depth >= 3)
+        {
+            return FormatValue(value);
+        }
+
+        if (
+            value is System.Collections.IDictionary dictionary)
+        {
+            Dictionary<string, object?> result =
+                new(StringComparer.Ordinal);
+
+            int count = 0;
+
+            foreach (
+                System.Collections.DictionaryEntry entry
+                in dictionary)
+            {
+                if (count >= 64)
+                {
+                    result["…"] = "…";
+                    break;
+                }
+
+                string key =
+                    FormatValue(entry.Key);
+
+                result[key] =
+                    PrepareRuntimeBridgeValue(
+                        entry.Value,
+                        depth + 1);
+
+                count++;
+            }
+
+            return result;
+        }
+
+        if (
+            value is System.Collections.IEnumerable sequence &&
+            value is not string)
+        {
+            List<object?> result = new();
+
+            int count = 0;
+
+            foreach (object? item in sequence)
+            {
+                if (count >= 64)
+                {
+                    result.Add("…");
+                    break;
+                }
+
+                result.Add(
+                    PrepareRuntimeBridgeValue(
+                        item,
+                        depth + 1));
+
+                count++;
+            }
+
+            return result.ToArray();
+        }
+
+        return value;
+    }
+
     private static void PublishRuntimeBridge(
         string monitorId,
         string name,
@@ -8562,15 +9226,15 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         try
         {
             publisher.Invoke(
-                null,
-                [
-                    RuntimeBridgeChannel,
-                    _runtimeBridgeSessionId,
-                    monitorId,
-                    name,
-                    graphType,
-                    value
-                ]);
+              null,
+              [
+                  RuntimeBridgeChannel,
+                  _runtimeBridgeSessionId,
+                  monitorId,
+                  name,
+                  graphType,
+                  PrepareRuntimeBridgeValue(value)
+              ]);
         }
         catch
         {
@@ -8658,15 +9322,98 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
     private static string FormatValue(object? value)
     {
-        return value switch
+        return FormatValue(value, 0);
+    }
+
+    private static string FormatValue(
+        object? value,
+        int depth)
+    {
+        if (value is null)
         {
-            null => "<null>",
-            bool current => current ? "true" : "false",
-            IFormattable current =>
-                current.ToString(null, CultureInfo.InvariantCulture) ??
-                string.Empty,
-            _ => value.ToString() ?? string.Empty
-        };
+            return "<null>";
+        }
+
+        if (value is string text)
+        {
+            return text;
+        }
+
+        if (value is bool boolean)
+        {
+            return boolean ? "true" : "false";
+        }
+
+        if (value is byte[] bytes)
+        {
+            return $"byte[{bytes.Length}]";
+        }
+
+        if (
+            depth < 2 &&
+            value is System.Collections.IDictionary dictionary)
+        {
+            List<string> entries = new();
+            int count = 0;
+
+            foreach (
+                System.Collections.DictionaryEntry entry in
+                dictionary)
+            {
+                if (count >= 64)
+                {
+                    entries.Add("…");
+                    break;
+                }
+
+                entries.Add(
+                    $"{FormatValue(entry.Key, depth + 1)}: " +
+                    FormatValue(entry.Value, depth + 1));
+                count++;
+            }
+
+            return entries.Count > 0
+                ? string.Join(Environment.NewLine, entries)
+                : "{}";
+        }
+
+        if (
+            depth < 2 &&
+            value is System.Collections.IEnumerable sequence)
+        {
+            List<string> entries = new();
+            int count = 0;
+
+            foreach (object? item in sequence)
+            {
+                if (count >= 64)
+                {
+                    entries.Add("…");
+                    break;
+                }
+
+                entries.Add(
+                    FormatValue(
+                        item,
+                        depth + 1));
+                count++;
+            }
+
+            return entries.Count > 0
+                ? string.Join(Environment.NewLine, entries)
+                : "[]";
+        }
+
+        if (value is IFormattable formattable)
+        {
+            return formattable.ToString(
+                       null,
+                       CultureInfo.InvariantCulture) ??
+                   string.Empty;
+        }
+
+        return value.ToString() ??
+               string.Empty;
     }
 }
 `;
@@ -9796,6 +10543,14 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
       .rml-graph-display-value.unknown output {
         color: #ffd181;
+      }
+
+      .rml-graph-display-value.multiline output {
+        max-height: 190px;
+        overflow: auto;
+        overflow-wrap: anywhere;
+        text-overflow: clip;
+        white-space: pre-wrap;
       }
 
       .rml-graph-display-value.live-runtime {
@@ -16263,12 +17018,20 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         style.letterSpacing
       );
 
+    const lines =
+      text.split(/\r?\n/);
+
     return Math.ceil(
-      context.measureText(text).width +
       Math.max(
         0,
-        text.length - 1
-      ) * letterSpacing
+        ...lines.map(line =>
+          context.measureText(line).width +
+          Math.max(
+            0,
+            line.length - 1
+          ) * letterSpacing
+        )
+      )
     );
   }
 
@@ -17228,6 +17991,10 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           presentation.known
             ? ""
             : " unknown"
+        }${
+          presentation.multiline
+            ? " multiline"
+            : ""
         }`;
       display.dataset
         .runtimeMonitorId =
@@ -19439,6 +20206,10 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           presentation.known
             ? ""
             : " unknown"
+        }${
+          presentation.multiline
+            ? " multiline"
+            : ""
         }`;
       live.dataset
         .runtimeMonitorId =

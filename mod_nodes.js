@@ -4441,6 +4441,155 @@ private static T GraphCollectionItem<T>(object? value)
     }
   });
 
+  registerNode("collection.collectToList", {
+    title: "Collect To List",
+    group: "Collections",
+    symbol: "＋[]",
+    description:
+      "Maintains a strongly typed List<T>. Reset clears the previous contents, Add appends the connected current Value, List exposes the complete live collection and Count exposes its current size. Value is mandatory whenever Add is triggered; missing Value is reported as a graph diagnostic instead of silently collecting null/default values. Use Reset Done to start a fresh For Each pass and connect For Each.Body to Add.",
+    inputs: [
+      port("reset", "Reset", "impulse"),
+      port("add", "Add", "impulse"),
+      genericPort(
+        "value",
+        "Value",
+        "TItem",
+        "value"
+      )
+    ],
+    outputs: [
+      port(
+        "resetDone",
+        "Reset Done",
+        "impulse"
+      ),
+      port(
+        "added",
+        "Added",
+        "impulse"
+      ),
+      genericPort(
+        "list",
+        "List",
+        "TCollection",
+        "collectableCollection"
+      ),
+      port("count", "Count", "int")
+    ],
+    genericRelations: [
+      {
+        kind: "enumerableElement",
+        collectionTypeVar:
+          "TCollection",
+        elementTypeVar: "TItem",
+        exact: true
+      }
+    ],
+    impulseRoutes: {
+      reset: ["resetDone"],
+      add: ["added"]
+    },
+    codegenCollect(api) {
+      const valueSpec =
+        api.definition.inputs.find(
+          specification =>
+            specification.id === "value"
+        );
+      const listSpec =
+        api.definition.outputs.find(
+          specification =>
+            specification.id === "list"
+        );
+      const itemType =
+        api.resolvedType(
+          api.node,
+          valueSpec
+        ) || "object";
+      const collectionType =
+        api.resolvedType(
+          api.node,
+          listSpec
+        );
+      const itemCsType =
+        api.csType(itemType);
+      const collectionCsType =
+        collectionType
+          ? api.csType(collectionType)
+          : `System.Collections.Generic.List<${itemCsType}>`;
+
+      addStatefulField(
+        api,
+        "collectedItems",
+        collectionCsType,
+        `new ${collectionCsType}()`
+      );
+    },
+    codegenExpression(api) {
+      const field =
+        `_collectedItems${nodeToken(api)}`;
+
+      return api.portId === "count"
+        ? `${field}.Count`
+        : field;
+    },
+    codegenAction(api) {
+      const field =
+        `_collectedItems${nodeToken(api)}`;
+      const inputPort = String(
+        api.connection?.toPort || ""
+      );
+
+      if (inputPort === "reset") {
+        const resetDone =
+          api.emit("resetDone");
+
+        return `${field}.Clear();${
+          resetDone
+            ? `\n        ${resetDone}();`
+            : ""
+        }`;
+      }
+
+      if (inputPort === "add") {
+        const added =
+          api.emit("added");
+        const valueInput =
+          api.input("value");
+
+        if (
+          valueInput?.connected !== true &&
+          api.isInputConnected?.("value") !== true
+        ) {
+          api.diagnostic(
+            "Collect To List.Value must be connected before Add can execute. The previous graph silently added the type default (null for reference types)."
+          );
+
+          return `throw new System.InvalidOperationException("Collect To List.Value is not connected. Connect the per-item value before triggering Add.");`;
+        }
+
+        return `${field}.Add(${valueInput.code});${
+          added
+            ? `\n        ${added}();`
+            : ""
+        }`;
+      }
+
+      return "";
+    },
+    previewEvaluate({
+      portId,
+      type,
+      unknown
+    }) {
+      return unknown(
+        type,
+        portId === "count"
+          ? "Runtime-only collected item count"
+          : "Runtime-only collected list"
+      );
+    }
+  });
+
   registerNode("debug.log", {
     title: "Log Message",
     group: "Debug & Output",

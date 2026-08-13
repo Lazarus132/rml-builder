@@ -17729,8 +17729,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "help_template.html?v=16",
-    "help_template.js?v=16",
+    "help_template.html?v=17",
+    "help_template.js?v=17",
     "help-template",
     "RMLHelpTemplateMarkup"
   )

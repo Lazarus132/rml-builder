@@ -278,6 +278,18 @@
                   use the same node. Asynchronous enumerables are intentionally separate
                   and are not executed by this synchronous node.
                 </p>
+                <p>
+                  <strong>Collect To List</strong> is a separate stateful collection node.
+                  <strong>Reset</strong> clears its strongly typed <code>List&lt;T&gt;</code>,
+                  <strong>Add</strong> appends the current <strong>Value</strong>, and the
+                  <strong>List</strong> and <strong>Count</strong> outputs expose the complete
+                  current result. For a fresh scan, connect the trigger to
+                  <code>Reset</code>, <code>Reset Done</code> to <code>For Each.Call</code>,
+                  <code>For Each.Body</code> to <code>Add</code>, and the per-item mapped
+                  value to <code>Value</code>. The List output can feed Display Value,
+                  another For Each node, object inputs and compatible standard .NET
+                  collection-interface inputs.
+                </p>
               </section>
 
               <section id="info-editing" class="information-section">
