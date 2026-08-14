@@ -38,6 +38,7 @@ const COLORX_NAMED_PREVIEWS = {
 const TYPE_DEFINITIONS = [
   { type: "bool", label: "Boolean", group: "Core", badge: "BOOL" },
   { type: "string", label: "Text", group: "Core", badge: "TXT" },
+  { type: "runtimeDisplay", label: "Display Value (RML Menu)", group: "Core", badge: "LIVE" },
   { type: "Uri", label: "URL / URI", group: "Core", badge: "URI" },
   { type: "enum", label: "Normal enum", group: "Core", badge: "ENUM" },
   { type: "int", label: "Integer", group: "Numbers", badge: "INT" },
@@ -593,8 +594,26 @@ function updateAdaptiveUtilityDialog(
     return;
   }
 
-  dialog.classList.remove(
-    "mobile-full-modal"
+  const viewport =
+    visibleViewportSize();
+  const content =
+    utilityDialogContentSize(
+      dialog
+    );
+  const fullHeightNeeded =
+    Boolean(
+      dialog.open &&
+      isMobileDialogViewport() &&
+      content.height >=
+        Math.max(
+          1,
+          viewport.height - 16
+        )
+    );
+
+  dialog.classList.toggle(
+    "mobile-full-modal",
+    fullHeightNeeded
   );
 }
 
@@ -16695,14 +16714,9 @@ function renderExportGeneratedFiles(
         exportCopyArtifactKey =
           artifact.key;
 
-        if (
-          elements.exportCopyFileSelect
-        ) {
-          elements.exportCopyFileSelect.value =
-            artifact.key;
-        }
-
-        updateExportCopyButtonState();
+        updateExportCopyButtonState(
+          catalog
+        );
       }
     );
     fragment.appendChild(row);
@@ -16769,21 +16783,23 @@ function updateExportCopyButtonState(
       ? getDiagnostics().length > 0
       : existingHasDiagnostics;
 
-  populateGeneratedArtifactSelect(
-    elements.exportCopyFileSelect,
-    catalog.artifacts,
-    artifact?.key || ""
-  );
-
   elements.exportGeneratedFiles
     ?.querySelectorAll(
       ".export-generated-file"
     )
     .forEach(row => {
+      const selected =
+        row.dataset.artifactKey ===
+          artifact?.key;
+
       row.classList.toggle(
         "selected",
-        row.dataset.artifactKey ===
-          artifact?.key
+        selected
+      );
+
+      row.setAttribute(
+        "aria-pressed",
+        String(selected)
       );
     });
 
@@ -16904,7 +16920,7 @@ function updateExportDialog() {
   renderExportProjectSummary(catalog);
   renderExportGeneratedFiles(catalog);
   updateExportCopyButtonState(
-    completeCatalog,
+    catalog,
     pathAvailable,
     hasDiagnostics
   );
@@ -17729,8 +17745,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "help_template.html?v=17",
-    "help_template.js?v=17",
+    "help_template.html?v=16",
+    "help_template.js?v=16",
     "help-template",
     "RMLHelpTemplateMarkup"
   )
@@ -17823,7 +17839,7 @@ function ensureSetupAssistantLoaded(firstRun = false) {
 
   setupAssistantLoadPromise = new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = new URL("setup_assistant.js?v=24", APP_SCRIPT_BASE_URL).href;
+    script.src = new URL("setup_assistant.js?v=26", APP_SCRIPT_BASE_URL).href;
     script.async = true;
     script.dataset.rmlSetupAssistant = "true";
     script.addEventListener("load", () => resolve(true), { once: true });
@@ -18034,9 +18050,6 @@ function cacheElements() {
     ),
     exportDownloadHint: document.getElementById(
       "export-download-hint"
-    ),
-    exportCopyFileSelect: document.getElementById(
-      "export-copy-file-select"
     ),
     exportCopySelectedFile: document.getElementById(
       "export-copy-selected-file"
@@ -21719,14 +21732,6 @@ function initialize() {
     "change",
     syncExportOptions
   );
-  elements.exportCopyFileSelect.addEventListener(
-    "change",
-    () => {
-      exportCopyArtifactKey =
-        elements.exportCopyFileSelect.value;
-      updateExportCopyButtonState();
-    }
-  );
   elements.exportCopySelectedFile.addEventListener(
     "click",
     () => {
@@ -21783,3 +21788,2305 @@ function initialize() {
 }
 
 document.addEventListener("DOMContentLoaded", initialize);
+
+const RML_RUNTIME_DISPLAY_VALUE_TYPE =
+  "runtimeDisplay";
+
+function rmlRuntimeDisplayIsNode(node) {
+  return Boolean(
+    node &&
+    node.kind === "setting" &&
+    node.valueType ===
+      RML_RUNTIME_DISPLAY_VALUE_TYPE
+  );
+}
+
+function rmlRuntimeDisplayWalk(
+  nodes = state.nodes,
+  result = []
+) {
+  for (const node of
+    Array.isArray(nodes) ? nodes : []) {
+    if (rmlRuntimeDisplayIsNode(node)) {
+      result.push(node);
+    }
+
+    if (node?.kind === "controller") {
+      for (const option of
+        Array.isArray(node.options)
+          ? node.options
+          : []) {
+        rmlRuntimeDisplayWalk(
+          option.children,
+          result
+        );
+      }
+    }
+  }
+
+  return result;
+}
+
+function rmlRuntimeDisplayFindNode(
+  id,
+  nodes = state.nodes
+) {
+  for (const node of
+    Array.isArray(nodes) ? nodes : []) {
+    if (node?.id === id) {
+      return node;
+    }
+
+    if (node?.kind === "controller") {
+      for (const option of
+        Array.isArray(node.options)
+          ? node.options
+          : []) {
+        const found =
+          rmlRuntimeDisplayFindNode(
+            id,
+            option.children
+          );
+
+        if (found) {
+          return found;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+function rmlRuntimeDisplayRemoveNode(
+  id,
+  nodes = state.nodes
+) {
+  const list =
+    Array.isArray(nodes)
+      ? nodes
+      : [];
+
+  const index =
+    list.findIndex(
+      node =>
+        node?.id === id
+    );
+
+  if (index >= 0) {
+    list.splice(index, 1);
+    return true;
+  }
+
+  for (const node of list) {
+    if (node?.kind !== "controller") {
+      continue;
+    }
+
+    for (const option of
+      Array.isArray(node.options)
+        ? node.options
+        : []) {
+      if (
+        rmlRuntimeDisplayRemoveNode(
+          id,
+          option.children
+        )
+      ) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function rmlRuntimeDisplayGraphBindings() {
+  const graph =
+    state.extensions?.typedNodeGraph;
+  const nodes =
+    Array.isArray(graph?.nodes)
+      ? graph.nodes
+      : [];
+  const connections =
+    Array.isArray(graph?.connections)
+      ? graph.connections
+      : [];
+  const configurationIds =
+    new Set(
+      nodes
+        .filter(node =>
+          node?.kind === "configuration"
+        )
+        .map(node => String(node.id || ""))
+        .filter(Boolean)
+    );
+  const monitors =
+    new Map(
+      nodes
+        .filter(node =>
+          node?.kind === "operator" &&
+          node.operatorId ===
+            "resonite.displayValue"
+        )
+        .map(node => [
+          String(node.id || ""),
+          node
+        ])
+        .filter(([id]) => Boolean(id))
+    );
+  const bindings = new Map();
+
+  for (const connection of connections) {
+    if (
+      !configurationIds.has(
+        String(connection?.fromNode || "")
+      ) ||
+      connection?.toPort !== "rmlMenu" ||
+      !String(connection?.fromPort || "")
+        .startsWith("config-")
+    ) {
+      continue;
+    }
+
+    const monitor =
+      monitors.get(
+        String(connection.toNode || "")
+      );
+    const outlineId =
+      String(connection.fromPort)
+        .slice("config-".length);
+    const outlineNode =
+      rmlRuntimeDisplayFindNode(
+        outlineId
+      );
+
+    if (
+      !monitor ||
+      !rmlRuntimeDisplayIsNode(
+        outlineNode
+      )
+    ) {
+      continue;
+    }
+
+    const list =
+      bindings.get(outlineId) || [];
+
+    list.push({
+      outlineId,
+      monitorId:
+        String(monitor.id || ""),
+      label:
+        String(
+          monitor.label ||
+          "Display Value"
+        ),
+      connectionId:
+        String(connection.id || ""),
+      sequence:
+        Number(monitor.sequence) || 0
+    });
+
+    bindings.set(
+      outlineId,
+      list
+    );
+  }
+
+  for (const [outlineId, list] of bindings) {
+    const unique = [];
+    const seen = new Set();
+
+    for (const binding of list) {
+      if (
+        !binding.monitorId ||
+        seen.has(binding.monitorId)
+      ) {
+        continue;
+      }
+
+      seen.add(binding.monitorId);
+      unique.push(binding);
+    }
+
+    unique.sort(
+      (left, right) =>
+        left.sequence - right.sequence ||
+        left.monitorId.localeCompare(
+          right.monitorId
+        )
+    );
+
+    bindings.set(
+      outlineId,
+      unique
+    );
+  }
+
+  return bindings;
+}
+
+function rmlRuntimeDisplayBindingsFor(
+  node
+) {
+  const bindings =
+    rmlRuntimeDisplayGraphBindings()
+      .get(String(node?.id || "")) ||
+    [];
+
+  const order =
+    Array.isArray(
+      node?.runtimeDisplayOrder
+    )
+      ? node.runtimeDisplayOrder
+          .map(value =>
+            String(value || "")
+          )
+          .filter(Boolean)
+      : [];
+  const rank =
+    new Map(
+      order.map(
+        (monitorId, index) => [
+          monitorId,
+          index
+        ]
+      )
+    );
+
+  return [...bindings].sort(
+    (left, right) => {
+      const leftRank =
+        rank.has(left.monitorId)
+          ? rank.get(left.monitorId)
+          : Number.MAX_SAFE_INTEGER;
+      const rightRank =
+        rank.has(right.monitorId)
+          ? rank.get(right.monitorId)
+          : Number.MAX_SAFE_INTEGER;
+
+      return (
+        leftRank - rightRank ||
+        left.sequence - right.sequence ||
+        left.monitorId.localeCompare(
+          right.monitorId
+        )
+      );
+    }
+  );
+}
+
+function rmlRuntimeDisplayBindingFor(
+  node
+) {
+  return (
+    rmlRuntimeDisplayBindingsFor(node)[0] ||
+    null
+  );
+}
+
+function rmlRuntimeDisplaySyncOrder(
+  node,
+  bindings =
+    rmlRuntimeDisplayBindingsFor(node)
+) {
+  if (!rmlRuntimeDisplayIsNode(node)) {
+    return [];
+  }
+
+  const available =
+    bindings.map(binding =>
+      String(binding.monitorId || "")
+    ).filter(Boolean);
+  const availableSet =
+    new Set(available);
+  const existing =
+    Array.isArray(node.runtimeDisplayOrder)
+      ? node.runtimeDisplayOrder
+          .map(value =>
+            String(value || "")
+          )
+          .filter(value =>
+            availableSet.has(value)
+          )
+      : [];
+  const seen =
+    new Set(existing);
+
+  for (const monitorId of available) {
+    if (!seen.has(monitorId)) {
+      existing.push(monitorId);
+      seen.add(monitorId);
+    }
+  }
+
+  node.runtimeDisplayOrder =
+    existing;
+  return existing;
+}
+
+function rmlRuntimeDisplayNormalizeNode(
+  node
+) {
+  if (!rmlRuntimeDisplayIsNode(node)) {
+    return node;
+  }
+
+  node.fieldName =
+    String(
+      node.fieldName ||
+      "RuntimeDisplay"
+    ).trim() ||
+    "RuntimeDisplay";
+
+  node.keyName =
+    String(
+      node.keyName ||
+      "runtime_display"
+    ).trim() ||
+    "runtime_display";
+
+  node.description =
+    String(
+      node.description ||
+      "Read-only value published by the generated Typed Runtime Graph."
+    );
+
+  node.customValidator =
+    String(
+      node.customValidator ||
+      "Runtime value unavailable"
+    );
+
+  node.runtimeDisplayOrder =
+    [...new Set(
+      (Array.isArray(node.runtimeDisplayOrder)
+        ? node.runtimeDisplayOrder
+        : [])
+        .map(value =>
+          String(value || "")
+        )
+        .filter(Boolean)
+    )];
+
+  node.runtimeDisplayStacked =
+    node.runtimeDisplayStacked === true;
+
+  node.defaultValue = "";
+
+  node.reaction = "stored";
+  node.validatorMode = "none";
+  node.useSlider = false;
+  node.hidden = false;
+
+  return node;
+}
+
+function rmlRuntimeDisplayEscapeCSharp(
+  value
+) {
+  return String(value ?? "")
+    .replace(/\\/g, "\\\\")
+    .replace(/\r\n|\r|\n/g, "\\n")
+    .replace(/\t/g, "\\t")
+    .replace(/\0/g, "\\0")
+    .replace(/"/g, '\\"');
+}
+
+function rmlRuntimeDisplayIdentifier(
+  value,
+  fallback = "RuntimeDisplay"
+) {
+  let identifier =
+    String(value || "")
+      .replace(/[^A-Za-z0-9_]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+
+  if (!identifier) {
+    identifier = fallback;
+  }
+
+  if (/^[0-9]/.test(identifier)) {
+    identifier =
+      `Value_${identifier}`;
+  }
+
+  return identifier;
+}
+
+function rmlRuntimeDisplayToken(
+  value
+) {
+  let hash = 2166136261;
+
+  for (const character of
+    String(value || "")) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(
+      hash,
+      16777619
+    ) >>> 0;
+  }
+
+  return hash
+    .toString(16)
+    .padStart(8, "0");
+}
+
+function rmlRuntimeDisplayFlattenOrder(
+  nodes = state.nodes,
+  result = []
+) {
+  for (const node of
+    Array.isArray(nodes) ? nodes : []) {
+    result.push(node);
+
+    if (node?.kind === "controller") {
+      for (const option of
+        Array.isArray(node.options)
+          ? node.options
+          : []) {
+        rmlRuntimeDisplayFlattenOrder(
+          option.children,
+          result
+        );
+      }
+    }
+  }
+
+  return result;
+}
+
+function rmlRuntimeDisplaySetCoreDirty() {
+  try { persist(); } catch {}
+  try { renderAll(); } catch {}
+  try { updateGeneratedOutput(); } catch {}
+  try {
+    scheduleTypedNodeGraphOutputRefresh();
+  } catch {
+  }
+}
+
+let rmlRuntimeDisplayInspectorRendering =
+  false;
+
+function rmlRuntimeDisplayInspector() {
+  if (
+    document.body.classList.contains(
+      "rml-node-graph-mode"
+    )
+  ) {
+    return false;
+  }
+
+  const selected =
+    rmlRuntimeDisplayFindNode(
+      state.selectedId
+    );
+
+  if (!rmlRuntimeDisplayIsNode(
+        selected)) {
+    return false;
+  }
+
+  rmlRuntimeDisplayNormalizeNode(
+    selected
+  );
+
+  const host =
+    document.getElementById(
+      "inspector-content"
+    );
+
+  if (!host) {
+    return false;
+  }
+
+  const bindings =
+    rmlRuntimeDisplayBindingsFor(
+      selected
+    );
+
+  rmlRuntimeDisplaySyncOrder(
+    selected,
+    bindings
+  );
+
+  const orderedBindings =
+    rmlRuntimeDisplayBindingsFor(
+      selected
+    );
+
+  const signature =
+    JSON.stringify({
+      id: selected.id,
+      fieldName: selected.fieldName,
+      keyName: selected.keyName,
+      description:
+        selected.description,
+      fallback:
+        selected.customValidator,
+      order:
+        selected.runtimeDisplayOrder,
+      stacked:
+        selected.runtimeDisplayStacked,
+      bindings:
+        orderedBindings.map(
+          binding => [
+            binding.monitorId,
+            binding.label,
+            binding.connectionId
+          ]
+        )
+    });
+
+  if (
+    !rmlRuntimeDisplayInspectorRendering &&
+    host.dataset
+      .rmlRuntimeDisplaySignature ===
+        signature &&
+    host.querySelector(
+      ".rml-runtime-display-inspector"
+    )
+  ) {
+    return true;
+  }
+
+  if (rmlRuntimeDisplayInspectorRendering) {
+    return true;
+  }
+
+  rmlRuntimeDisplayInspectorRendering =
+    true;
+  host.dataset
+    .rmlRuntimeDisplaySignature =
+      signature;
+  host.replaceChildren();
+
+  const form =
+    document.createElement(
+      "div"
+    );
+  form.className =
+    "inspector-form rml-runtime-display-inspector";
+
+  const heading =
+    document.createElement(
+      "div"
+    );
+  heading.className =
+    "selection-type";
+
+  const type =
+    document.createElement(
+      "span"
+    );
+  type.textContent =
+    "RML MENU DISPLAY";
+
+  const remove =
+    document.createElement(
+      "button"
+    );
+  remove.type = "button";
+  remove.textContent =
+    "Delete";
+  remove.addEventListener(
+    "click",
+    () => {
+      if (
+        !window.confirm(
+          "Delete this Runtime Display?"
+        )
+      ) {
+        return;
+      }
+
+      rmlRuntimeDisplayRemoveNode(
+        selected.id
+      );
+      state.selectedId = null;
+      rmlRuntimeDisplaySetCoreDirty();
+    }
+  );
+
+  heading.append(
+    type,
+    remove
+  );
+  form.appendChild(heading);
+
+  const createTextField = (
+    labelText,
+    value,
+    onInput,
+    options = {}
+  ) => {
+    const label =
+      document.createElement(
+        "label"
+      );
+    label.textContent =
+      labelText;
+
+    const input =
+      options.multiline
+        ? document.createElement(
+            "textarea"
+          )
+        : document.createElement(
+            "input"
+          );
+
+    input.value =
+      String(value || "");
+
+    if (options.placeholder) {
+      input.placeholder =
+        options.placeholder;
+    }
+
+    input.addEventListener(
+      "input",
+      () => {
+        onInput(input.value);
+        rmlRuntimeDisplaySetCoreDirty();
+      }
+    );
+
+    label.appendChild(input);
+    return label;
+  };
+
+  form.appendChild(
+    createTextField(
+      "Display label",
+      selected.fieldName,
+      value => {
+        selected.fieldName =
+          value.slice(0, 120);
+      },
+      {
+        placeholder:
+          "Runtime value"
+      }
+    )
+  );
+
+  form.appendChild(
+    createTextField(
+      "Description",
+      selected.description,
+      value => {
+        selected.description =
+          value.slice(0, 500);
+      },
+      {
+        multiline: true,
+        placeholder:
+          "Read-only runtime value shown in the RML mod menu."
+      }
+    )
+  );
+
+  const bindingStatus =
+    document.createElement("div");
+  bindingStatus.className =
+    "rml-runtime-display-source-status";
+  bindingStatus.dataset.state =
+    orderedBindings.length > 0
+      ? "ready"
+      : "missing";
+
+  if (orderedBindings.length === 0) {
+    bindingStatus.textContent =
+      "Not connected yet. In Typed Runtime Graph, connect this Start-node output to the RML Menu input of one or more Display Value nodes.";
+  } else {
+    const bindingTitle =
+      document.createElement("strong");
+    bindingTitle.className =
+      "rml-runtime-display-source-title";
+    bindingTitle.textContent =
+      orderedBindings.length === 1
+        ? "Displayed value"
+        : `Displayed values · ${orderedBindings.length}`;
+
+    const bindingHint =
+      document.createElement("small");
+    bindingHint.textContent =
+      orderedBindings.length === 1
+        ? "Connect more Display Value nodes to the same Start output. They stay side by side by default."
+        : selected.runtimeDisplayStacked
+          ? "Order here controls the top-to-bottom order in the RML menu."
+          : "Order here controls the left-to-right order in one RML menu row.";
+
+    const bindingList =
+      document.createElement("div");
+    bindingList.className =
+      "rml-runtime-display-source-list";
+
+    orderedBindings.forEach(
+      (binding, index) => {
+        const row =
+          document.createElement("div");
+        row.className =
+          "rml-runtime-display-source-row";
+
+        const position =
+          document.createElement("span");
+        position.className =
+          "rml-runtime-display-source-index";
+        position.textContent =
+          String(index + 1);
+
+        const label =
+          document.createElement("span");
+        label.className =
+          "rml-runtime-display-source-label";
+        label.textContent =
+          binding.label ||
+          "Display Value";
+
+        const controls =
+          document.createElement("div");
+        controls.className =
+          "rml-runtime-display-order-controls";
+
+        const move = delta => {
+          const order =
+            rmlRuntimeDisplaySyncOrder(
+              selected,
+              orderedBindings
+            );
+          const currentIndex =
+            order.indexOf(
+              binding.monitorId
+            );
+          const nextIndex =
+            currentIndex + delta;
+
+          if (
+            currentIndex < 0 ||
+            nextIndex < 0 ||
+            nextIndex >= order.length
+          ) {
+            return;
+          }
+
+          [
+            order[currentIndex],
+            order[nextIndex]
+          ] = [
+            order[nextIndex],
+            order[currentIndex]
+          ];
+
+          selected.runtimeDisplayOrder =
+            [...order];
+          rmlRuntimeDisplaySetCoreDirty();
+        };
+
+        const up =
+          document.createElement("button");
+        up.type = "button";
+        up.textContent =
+          selected.runtimeDisplayStacked
+            ? "↑"
+            : "←";
+        up.title =
+          selected.runtimeDisplayStacked
+            ? "Move this value up"
+            : "Move this value left";
+        up.disabled =
+          index === 0;
+        up.addEventListener(
+          "click",
+          () => move(-1)
+        );
+
+        const down =
+          document.createElement("button");
+        down.type = "button";
+        down.textContent =
+          selected.runtimeDisplayStacked
+            ? "↓"
+            : "→";
+        down.title =
+          selected.runtimeDisplayStacked
+            ? "Move this value down"
+            : "Move this value right";
+        down.disabled =
+          index ===
+          orderedBindings.length - 1;
+        down.addEventListener(
+          "click",
+          () => move(1)
+        );
+
+        controls.append(
+          up,
+          down
+        );
+        row.append(
+          position,
+          label,
+          controls
+        );
+        bindingList.appendChild(
+          row
+        );
+      }
+    );
+
+    bindingStatus.append(
+      bindingTitle,
+      bindingHint,
+      bindingList
+    );
+  }
+
+  form.appendChild(bindingStatus);
+
+  const stackToggle =
+    document.createElement("label");
+  stackToggle.className =
+    "toggle-row rml-runtime-display-layout-toggle";
+
+  const stackToggleText =
+    document.createElement("span");
+  const stackToggleTitle =
+    document.createElement("strong");
+  stackToggleTitle.textContent =
+    "Stack values vertically";
+  const stackToggleHelp =
+    document.createElement("small");
+  stackToggleHelp.textContent =
+    "Off (default): every connected Display Value stays beside the others in one row. On: values are intentionally shown underneath each other.";
+  stackToggleText.append(
+    stackToggleTitle,
+    stackToggleHelp
+  );
+
+  const stackToggleInput =
+    document.createElement("input");
+  stackToggleInput.type =
+    "checkbox";
+  stackToggleInput.checked =
+    selected.runtimeDisplayStacked === true;
+  stackToggleInput.addEventListener(
+    "change",
+    () => {
+      selected.runtimeDisplayStacked =
+        stackToggleInput.checked;
+      rmlRuntimeDisplaySetCoreDirty();
+    }
+  );
+
+  stackToggle.append(
+    stackToggleText,
+    stackToggleInput
+  );
+  form.appendChild(stackToggle);
+
+  form.appendChild(
+    createTextField(
+      "Offline / waiting text",
+      selected.customValidator,
+      value => {
+        selected.customValidator =
+          value.slice(0, 240);
+      },
+      {
+        placeholder:
+          "Runtime value unavailable"
+      }
+    )
+  );
+
+  const keyLabel =
+    createTextField(
+      "Internal configuration key",
+      selected.keyName,
+      value => {
+        selected.keyName =
+          value
+            .replace(
+              /[^A-Za-z0-9_.-]+/g,
+              "_"
+            )
+            .slice(0, 160);
+      },
+      {
+        placeholder:
+          "runtime_display"
+      }
+    );
+  const keyHelp =
+    document.createElement(
+      "small"
+    );
+  keyHelp.textContent =
+    "Used only as the stable RML configuration key. The displayed row is continuously synchronized from the graph and manual edits are overwritten.";
+  keyLabel.appendChild(keyHelp);
+  form.appendChild(keyLabel);
+
+
+  host.appendChild(form);
+  rmlRuntimeDisplayInspectorRendering =
+    false;
+  return true;
+}
+
+const rmlRuntimeDisplayBaseRenderInspector =
+  renderInspector;
+
+renderInspector =
+  function (...args) {
+    const result =
+      rmlRuntimeDisplayBaseRenderInspector
+        .apply(
+          this,
+          args
+        );
+
+    if (
+      !document.body.classList.contains(
+        "rml-node-graph-mode"
+      )
+    ) {
+      queueMicrotask(
+        rmlRuntimeDisplayInspector
+      );
+    }
+
+    return result;
+  };
+
+function rmlRuntimeDisplayUpdatePaletteAvailability() {
+  const button =
+    document.querySelector(
+      '[data-palette="runtimeDisplay"]'
+    );
+
+  if (!button) {
+    return;
+  }
+
+  button.disabled = false;
+  button.title =
+    "Add a read-only RML menu display. After packing, connect its Start-node output to the RML Menu input of one or more Display Value nodes. Multiple values stay side by side in one row by default; Properties can reorder them or intentionally stack them vertically.";
+  button.dataset.help =
+    button.title;
+}
+
+function rmlRuntimeDisplayInjectCSharp(
+  source
+) {
+  const bindings =
+    rmlRuntimeDisplayGraphBindings();
+  const displays =
+    rmlRuntimeDisplayWalk()
+      .map(rmlRuntimeDisplayNormalizeNode)
+      .filter(node =>
+        bindings.has(
+          String(node.id || "")
+        )
+      );
+
+  if (
+    displays.length === 0 ||
+    typeof source !== "string" ||
+    !source.includes(
+      "public override void OnEngineInit"
+    )
+  ) {
+    return source;
+  }
+
+  if (
+    source.includes(
+      "RML_RUNTIME_MENU_DISPLAY_BRIDGE_V4"
+    )
+  ) {
+    return source;
+  }
+
+  if (
+    !source.includes(
+      "using System.Linq;"
+    )
+  ) {
+    const usingAnchor =
+      source.match(
+        /^using\s+[^;]+;\s*$/m
+      );
+
+    if (usingAnchor) {
+      source =
+        source.replace(
+          usingAnchor[0],
+          `${usingAnchor[0]}\nusing System.Linq;`
+        );
+    }
+  }
+
+  const graphClassName =
+    `${rmlRuntimeDisplayIdentifier(
+      state.metadata.className,
+      "YourMod"
+    )}NodeGraph`;
+
+  const ordered =
+    rmlRuntimeDisplayFlattenOrder();
+  const descriptors =
+    displays.map((node, index) => {
+      const token =
+        rmlRuntimeDisplayToken(
+          node.id
+        );
+      const field =
+        `RuntimeDisplay_${token}_${index}`;
+      const sourceBindings =
+        rmlRuntimeDisplayBindingsFor(
+          node
+        );
+      rmlRuntimeDisplaySyncOrder(
+        node,
+        sourceBindings
+      );
+      const orderedSourceBindings =
+        rmlRuntimeDisplayBindingsFor(
+          node
+        );
+      const sources =
+        orderedSourceBindings
+          .map((binding, sourceIndex) => {
+            const monitorId =
+              String(
+                binding.monitorId || ""
+              );
+
+            if (!monitorId) {
+              return null;
+            }
+
+            return {
+              monitorId,
+              label:
+                String(
+                  binding.label ||
+                  `Display Value ${sourceIndex + 1}`
+                ),
+              field:
+                `${field}_Value${sourceIndex}`,
+              key:
+                `${String(
+                  node.keyName ||
+                  `runtime_display_${token}`
+                )}.${sourceIndex + 1}.${rmlRuntimeDisplayToken(monitorId)}`
+            };
+          })
+          .filter(Boolean);
+      const sourceIds =
+        sources.map(source =>
+          source.monitorId
+        );
+      const label =
+        String(
+          node.fieldName ||
+          `Runtime Display ${index + 1}`
+        );
+      const key =
+        String(
+          node.keyName ||
+          `runtime_display_${token}`
+        );
+      const description =
+        String(
+          node.description ||
+          "Read-only value published by the Typed Runtime Graph."
+        );
+      const fallback =
+        String(
+          node.customValidator ||
+          "Runtime value unavailable"
+        );
+      const orderIndex =
+        ordered.indexOf(node);
+
+      return {
+        node,
+        token,
+        field,
+        sources,
+        sourceIds,
+        label,
+        key,
+        description,
+        fallback,
+        orderIndex,
+        stackVertically:
+          node.runtimeDisplayStacked === true
+      };
+    });
+
+  const runtimeValueFields =
+    descriptors.flatMap(item =>
+      item.sources.map(source => ({
+        item,
+        source
+      }))
+    );
+
+  const fields =
+    runtimeValueFields.map(({ item, source }) =>
+`    [AutoRegisterConfigKey]
+    private static readonly ModConfigurationKey<string> ${source.field} =
+        new(
+            "${rmlRuntimeDisplayEscapeCSharp(source.key)}",
+            "${rmlRuntimeDisplayEscapeCSharp(item.label)} / ${rmlRuntimeDisplayEscapeCSharp(source.label)} — ${rmlRuntimeDisplayEscapeCSharp(item.description)} Read-only live value; manual edits are overwritten by the generated runtime.",
+            () => "${rmlRuntimeDisplayEscapeCSharp(item.fallback)}",
+            internalAccessOnly: true);
+`
+    ).join("\n");
+
+  const sourceText =
+    (item, source) =>
+      `${graphClassName}.GetDisplayTextByMonitorId("${rmlRuntimeDisplayEscapeCSharp(source.monitorId)}", "${rmlRuntimeDisplayEscapeCSharp(item.fallback)}")`;
+
+  const switchGroups =
+    new Map();
+
+  for (const item of descriptors) {
+    for (const source of item.sources) {
+      const list =
+        switchGroups.get(
+          source.monitorId
+        ) || [];
+
+      list.push({
+        item,
+        source
+      });
+
+      switchGroups.set(
+        source.monitorId,
+        list
+      );
+    }
+  }
+
+  const switchCases =
+    [...switchGroups.entries()]
+      .map(([sourceId, entries]) =>
+`            case "${rmlRuntimeDisplayEscapeCSharp(sourceId)}":
+${entries.map(({ item, source }) =>
+`                RuntimeDisplayWrite(
+                    ${source.field},
+                    ${sourceText(item, source)});`
+).join("\n")}
+                break;`
+      ).join("\n");
+
+  const refreshCalls =
+    runtimeValueFields
+      .map(({ item, source }) =>
+`        RuntimeDisplayWrite(
+            ${source.field},
+            ${sourceText(item, source)});`
+      ).join("\n");
+
+  const providerDisplays =
+    descriptors.map(item => {
+      const keys =
+        item.sources
+          .map(source =>
+            `                        ${source.field}`
+          )
+          .join(",\n");
+
+      const order =
+        Number.isInteger(item.orderIndex) &&
+        item.orderIndex >= 0
+          ? item.orderIndex
+          : 2147483647;
+
+      return `            new ModConfigurationRuntimeDisplay
+            {
+                Name = "${rmlRuntimeDisplayEscapeCSharp(item.label)}",
+                Description = "${rmlRuntimeDisplayEscapeCSharp(item.description)}",
+                Keys =
+                    new ModConfigurationKey[]
+                    {
+${keys}
+                    },
+                StackValuesVertically = ${item.stackVertically ? "true" : "false"},
+                Order = ${order}
+            }`;
+    }).join(",\n");
+
+  const providerMembers =
+`    public System.Collections.Generic.IReadOnlyList<
+        ModConfigurationRuntimeDisplay>
+        GetRuntimeDisplays()
+    {
+        return new ModConfigurationRuntimeDisplay[]
+        {
+${providerDisplays}
+        };
+    }
+`;
+
+
+  const runtimeMembers =
+`
+    // RML_RUNTIME_MENU_DISPLAY_BRIDGE_V4
+    private static object? _runtimeDisplayConfiguration;
+    private static int _runtimeDisplayBridgeStarted;
+
+${providerMembers}
+
+    private void InitializeRuntimeMenuDisplays()
+    {
+        _runtimeDisplayConfiguration =
+            GetConfiguration();
+
+        ${graphClassName}.DisplayValueChangedByMonitorId +=
+            OnRuntimeMenuDisplayChanged;
+
+        RefreshRuntimeMenuDisplays();
+
+        if (System.Threading.Interlocked.Exchange(
+                ref _runtimeDisplayBridgeStarted,
+                1) == 0)
+        {
+            _ = System.Threading.Tasks.Task.Run(
+                async () =>
+                {
+                    while (FrooxEngine.Engine.Current is not null)
+                    {
+                        try
+                        {
+                            FrooxEngine.World? world =
+                                FrooxEngine.Engine.Current
+                                    ?.WorldManager
+                                    ?.FocusedWorld ??
+                                FrooxEngine.Userspace
+                                    .UserspaceWorld;
+
+                            if (
+                                world is not null &&
+                                !world.IsDisposed &&
+                                world.RootSlot is not null)
+                            {
+                                world.RunSynchronously(
+                                    RefreshRuntimeMenuDisplays,
+                                    immediatellyIfPossible: true);
+                            }
+                        }
+                        catch
+                        {
+                        }
+
+                        await System.Threading.Tasks.Task
+                            .Delay(750)
+                            .ConfigureAwait(false);
+                    }
+                });
+        }
+    }
+
+    private static void OnRuntimeMenuDisplayChanged(
+        string monitorId,
+        string label,
+        object? value)
+    {
+        switch (monitorId)
+        {
+${switchCases}
+        }
+    }
+
+    private static void RefreshRuntimeMenuDisplays()
+    {
+${refreshCalls}
+    }
+
+    private static System.Reflection.MethodInfo?
+        RuntimeDisplayConfigurationMethod(
+            object configuration,
+            string name,
+            ModConfigurationKey<string> key,
+            bool requiresValueParameter)
+    {
+        foreach (
+            System.Reflection.MethodInfo candidate in
+            configuration
+                .GetType()
+                .GetMethods(
+                    System.Reflection.BindingFlags.Public |
+                    System.Reflection.BindingFlags.Instance))
+        {
+            if (!string.Equals(
+                    candidate.Name,
+                    name,
+                    System.StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            System.Reflection.MethodInfo method =
+                candidate;
+
+            if (method.IsGenericMethodDefinition)
+            {
+                if (method
+                        .GetGenericArguments()
+                        .Length != 1)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    method =
+                        method.MakeGenericMethod(
+                            typeof(string));
+                }
+                catch
+                {
+                    continue;
+                }
+            }
+
+            System.Reflection.ParameterInfo[] parameters =
+                method.GetParameters();
+
+            if (
+                parameters.Length <
+                    (requiresValueParameter
+                        ? 2
+                        : 1) ||
+                !parameters[0]
+                    .ParameterType
+                    .IsInstanceOfType(key))
+            {
+                continue;
+            }
+
+            if (
+                requiresValueParameter &&
+                !parameters[1]
+                    .ParameterType
+                    .IsAssignableFrom(
+                        typeof(string)))
+            {
+                continue;
+            }
+
+            bool supported = true;
+
+            for (
+                int index =
+                    requiresValueParameter
+                        ? 2
+                        : 1;
+                index < parameters.Length;
+                index++)
+            {
+                if (
+                    !parameters[index]
+                        .HasDefaultValue &&
+                    parameters[index]
+                        .ParameterType !=
+                        typeof(bool))
+                {
+                    supported = false;
+                    break;
+                }
+            }
+
+            if (supported)
+            {
+                return method;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? RuntimeDisplayRead(
+        ModConfigurationKey<string> key)
+    {
+        object? configuration =
+            _runtimeDisplayConfiguration;
+
+        if (configuration is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            System.Reflection.MethodInfo? method =
+                RuntimeDisplayConfigurationMethod(
+                    configuration,
+                    "GetValue",
+                    key,
+                    requiresValueParameter: false);
+
+            if (method is null)
+            {
+                return null;
+            }
+
+            System.Reflection.ParameterInfo[] parameters =
+                method.GetParameters();
+            object?[] arguments =
+                new object?[parameters.Length];
+
+            arguments[0] = key;
+
+            for (int index = 1;
+                 index < arguments.Length;
+                 index++)
+            {
+                arguments[index] =
+                    parameters[index].HasDefaultValue
+                        ? parameters[index].DefaultValue
+                        : parameters[index].ParameterType ==
+                              typeof(bool)
+                            ? false
+                            : parameters[index].ParameterType
+                                .IsValueType
+                                ? System.Activator.CreateInstance(
+                                    parameters[index].ParameterType)
+                                : null;
+            }
+
+            return method.Invoke(
+                       configuration,
+                       arguments) as string;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static void RuntimeDisplayWrite(
+        ModConfigurationKey<string> key,
+        string value)
+    {
+        object? configuration =
+            _runtimeDisplayConfiguration;
+
+        if (configuration is null)
+        {
+            return;
+        }
+
+        if (string.Equals(
+                RuntimeDisplayRead(key),
+                value,
+                System.StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        try
+        {
+            System.Reflection.MethodInfo? method =
+                RuntimeDisplayConfigurationMethod(
+                    configuration,
+                    "Set",
+                    key,
+                    requiresValueParameter: true);
+
+            if (method is null)
+            {
+                return;
+            }
+
+            System.Reflection.ParameterInfo[] parameters =
+                method.GetParameters();
+            object?[] arguments =
+                new object?[parameters.Length];
+
+            arguments[0] = key;
+            arguments[1] = value;
+
+            for (int index = 2;
+                 index < arguments.Length;
+                 index++)
+            {
+                arguments[index] =
+                    parameters[index].ParameterType ==
+                        typeof(bool)
+                        ? false
+                        : parameters[index].HasDefaultValue
+                            ? parameters[index].DefaultValue
+                            : parameters[index].ParameterType
+                                .IsValueType
+                                ? System.Activator.CreateInstance(
+                                    parameters[index].ParameterType)
+                                : null;
+            }
+
+            method.Invoke(
+                configuration,
+                arguments);
+        }
+        catch
+        {
+        }
+    }
+`;
+
+  if (
+    !source.includes(
+      "IModConfigurationRuntimeDisplayProvider"
+    )
+  ) {
+    const classHeaderPattern =
+      /(public\s+(?:sealed\s+)?(?:partial\s+)?class\s+[A-Za-z_][A-Za-z0-9_]*\s*\n\s*:\s*ResoniteMod,[\s\S]*?)(\n\s*\{)/;
+
+    if (classHeaderPattern.test(source)) {
+      source =
+        source.replace(
+          classHeaderPattern,
+          (_match, header, brace) =>
+            `${header.trimEnd()},\n      IModConfigurationRuntimeDisplayProvider${brace}`
+        );
+    }
+  }
+
+  const initPattern =
+    /public\s+override\s+void\s+OnEngineInit\s*\(\s*\)\s*\{/;
+
+  if (!initPattern.test(source)) {
+    return source;
+  }
+
+  source =
+    source.replace(
+      initPattern,
+      match =>
+        `${fields}\n${match}\n        InitializeRuntimeMenuDisplays();`
+    );
+
+  const finalBrace =
+    source.lastIndexOf("\n}");
+
+  if (finalBrace < 0) {
+    return source;
+  }
+
+  source =
+    source.slice(0, finalBrace) +
+    runtimeMembers +
+    source.slice(finalBrace);
+
+  /*
+   * Runtime display ordering is supplied by GetRuntimeDisplays().Order.
+   * The private per-monitor keys are intentionally omitted from the ordinary
+   * configuration-order provider because ModConfigurationView filters them
+   * through the runtime-display provider before normal editors are created.
+   */
+
+  return source;
+}
+
+function rmlRuntimeDisplayTransformGeneratedResult(
+  result
+) {
+  if (typeof result === "string") {
+    return rmlRuntimeDisplayInjectCSharp(
+      result
+    );
+  }
+
+  if (
+    result &&
+    typeof result === "object"
+  ) {
+    if (
+      typeof result.source === "string"
+    ) {
+      result.source =
+        rmlRuntimeDisplayInjectCSharp(
+          result.source
+        );
+    }
+
+    if (
+      Array.isArray(result.files)
+    ) {
+      for (const file of result.files) {
+        if (
+          file &&
+          typeof file.content === "string" &&
+          /\.cs$/i.test(
+            String(
+              file.name ||
+              file.path ||
+              ""
+            )
+          ) &&
+          file.content.includes(
+            "public override void OnEngineInit"
+          )
+        ) {
+          file.content =
+            rmlRuntimeDisplayInjectCSharp(
+              file.content
+            );
+        }
+      }
+    }
+
+    if (result.files instanceof Map) {
+      for (const [key, value] of
+        result.files) {
+        if (
+          typeof value === "string" &&
+          /\.cs$/i.test(
+            String(key)
+          ) &&
+          value.includes(
+            "public override void OnEngineInit"
+          )
+        ) {
+          result.files.set(
+            key,
+            rmlRuntimeDisplayInjectCSharp(
+              value
+            )
+          );
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
+const rmlRuntimeDisplayBaseMainGenerator =
+  generateCode;
+
+generateCode =
+  function (...args) {
+    const originalNodes =
+      state.nodes;
+
+    state.nodes =
+      (function filter(nodes) {
+        return (
+          Array.isArray(nodes)
+            ? nodes
+            : []
+        )
+          .filter(node =>
+            !rmlRuntimeDisplayIsNode(
+              node
+            )
+          )
+          .map(node => {
+            if (node?.kind !== "controller") {
+              return node;
+            }
+
+            return {
+              ...node,
+              options:
+                (
+                  Array.isArray(node.options)
+                    ? node.options
+                    : []
+                ).map(option => ({
+                  ...option,
+                  children:
+                    filter(
+                      option.children
+                    )
+                }))
+            };
+          });
+      })(originalNodes);
+
+    let result;
+
+    try {
+      result =
+        rmlRuntimeDisplayBaseMainGenerator
+          .apply(
+            this,
+            args
+          );
+    } finally {
+      state.nodes =
+        originalNodes;
+    }
+
+    if (
+      result &&
+      typeof result.then ===
+        "function"
+    ) {
+      return result.then(
+        rmlRuntimeDisplayTransformGeneratedResult
+      );
+    }
+
+    return rmlRuntimeDisplayTransformGeneratedResult(
+      result
+    );
+  };
+
+const rmlRuntimeDisplayObserver =
+  new MutationObserver(() => {
+    rmlRuntimeDisplayUpdatePaletteAvailability();
+
+    if (
+      !document.body.classList.contains(
+        "rml-node-graph-mode"
+      ) &&
+      rmlRuntimeDisplayIsNode(
+        rmlRuntimeDisplayFindNode(
+          state.selectedId
+        )
+      )
+    ) {
+      rmlRuntimeDisplayInspector();
+    }
+  });
+
+rmlRuntimeDisplayObserver.observe(
+  document.documentElement,
+  {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: [
+      "class",
+      "hidden"
+    ]
+  }
+);
+
+window.addEventListener(
+  "rml-api-node-factory-ready",
+  () => {
+    rmlRuntimeDisplayUpdatePaletteAvailability();
+
+    /*
+     * The API factory emits on window. Refresh generated diagnostics/output
+     * after reflected nodes and ports are actually registered.
+     */
+    try {
+      updateGeneratedOutput();
+    } catch (error) {
+      console.error(
+        "Generated output refresh after API-node registration failed.",
+        error
+      );
+    }
+  }
+);
+
+document.addEventListener(
+  "rml-catalog:loaded",
+  rmlRuntimeDisplayUpdatePaletteAvailability
+);
+
+queueMicrotask(() => {
+  for (const node of
+    rmlRuntimeDisplayWalk()) {
+    rmlRuntimeDisplayNormalizeNode(
+      node
+    );
+  }
+
+  rmlRuntimeDisplayUpdatePaletteAvailability();
+  rmlRuntimeDisplayInspector();
+  try { updateGeneratedOutput(); } catch {}
+});
+
+let rmlRuntimeDisplayPreviewUnsubscribe =
+  null;
+let rmlRuntimeDisplayPreviewChannel =
+  "";
+
+function rmlRuntimeDisplayPreviewText(
+  record,
+  fallback
+) {
+  if (!record) {
+    return fallback;
+  }
+
+  if (
+    record.valueKind === "sequence" &&
+    Array.isArray(record.value)
+  ) {
+    return record.value.length > 0
+      ? record.value
+          .map(value =>
+            typeof value === "object"
+              ? value?.display ||
+                JSON.stringify(value)
+              : String(value)
+          )
+          .join("\n")
+      : "[]";
+  }
+
+  if (
+    record.valueKind === "map" &&
+    record.value &&
+    typeof record.value === "object" &&
+    !Array.isArray(record.value)
+  ) {
+    const entries =
+      Object.entries(record.value);
+
+    return entries.length > 0
+      ? entries
+          .map(([key, value]) =>
+            `${key}: ${
+              typeof value === "object"
+                ? value?.display ||
+                  JSON.stringify(value)
+                : String(value)
+            }`
+          )
+          .join("\n")
+      : "{}";
+  }
+
+  return String(
+    record.display ??
+    record.value ??
+    (
+      record.isNull
+        ? "<null>"
+        : fallback
+    )
+  );
+}
+
+function rmlRuntimeDisplayPreviewItems(
+  value
+) {
+  const normalized =
+    String(value ?? "")
+      .replace(/\r\n?/g, "\n");
+
+  const items =
+    normalized.split("\n");
+
+  return items.length > 0
+    ? items
+    : [""];
+}
+
+function rmlRuntimeDisplayPreviewCopyIcon() {
+  return `
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="8" y="8" width="11" height="11" rx="2"></rect>
+      <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path>
+    </svg>
+  `;
+}
+
+function rmlRuntimeDisplayEnsurePreviewBridge() {
+  const channel =
+    `${state.metadata.namespaceName}.${state.metadata.className}`;
+
+  if (
+    rmlRuntimeDisplayPreviewUnsubscribe &&
+    rmlRuntimeDisplayPreviewChannel ===
+      channel
+  ) {
+    return;
+  }
+
+  try {
+    rmlRuntimeDisplayPreviewUnsubscribe
+      ?.();
+  } catch {
+  }
+
+  rmlRuntimeDisplayPreviewUnsubscribe =
+    null;
+  rmlRuntimeDisplayPreviewChannel =
+    channel;
+
+  if (
+    window.RMLRuntimeBridge &&
+    typeof window.RMLRuntimeBridge
+      .subscribe === "function"
+  ) {
+    try {
+      rmlRuntimeDisplayPreviewUnsubscribe =
+        window.RMLRuntimeBridge
+          .subscribe(
+            channel,
+            () =>
+              rmlRuntimeDisplayRenderPreviewRows()
+          );
+    } catch {
+    }
+  }
+}
+
+function rmlRuntimeDisplayRenderPreviewRows() {
+  const dialog =
+    document.getElementById(
+      "settings-preview-dialog"
+    );
+  const host =
+    document.getElementById(
+      "settings-preview-content"
+    );
+
+  if (
+    !dialog?.open ||
+    !host
+  ) {
+    return;
+  }
+
+  host
+    .querySelectorAll(
+      "[data-rml-runtime-display-preview]"
+    )
+    .forEach(element =>
+      element.remove()
+    );
+
+  const displays =
+    rmlRuntimeDisplayWalk()
+      .map(rmlRuntimeDisplayNormalizeNode);
+
+  if (displays.length === 0) {
+    return;
+  }
+
+  rmlRuntimeDisplayEnsurePreviewBridge();
+
+  const channel =
+    `${state.metadata.namespaceName}.${state.metadata.className}`;
+
+  for (const node of displays) {
+    const section =
+      document.createElement(
+        "section"
+      );
+
+    section.className =
+      "rml-preview-runtime-display";
+
+    section.dataset
+      .rmlRuntimeDisplayPreview =
+        node.id;
+
+    const heading =
+      document.createElement(
+        "div"
+      );
+
+    heading.className =
+      "rml-preview-runtime-display-heading";
+
+    const label =
+      document.createElement(
+        "strong"
+      );
+
+    label.textContent =
+      node.fieldName ||
+      "Runtime Display";
+
+    heading.appendChild(
+      label
+    );
+
+    const output =
+      document.createElement(
+        "div"
+      );
+
+    output.className =
+      "rml-preview-runtime-display-values";
+
+    output.classList.toggle(
+      "stacked",
+      node.runtimeDisplayStacked === true
+    );
+
+    const bindings =
+      rmlRuntimeDisplayBindingsFor(
+        node
+      );
+
+    rmlRuntimeDisplaySyncOrder(
+      node,
+      bindings
+    );
+
+    const orderedBindings =
+      rmlRuntimeDisplayBindingsFor(
+        node
+      );
+
+    const fallback =
+      node.customValidator ||
+      "Runtime value unavailable";
+
+    const columns =
+      orderedBindings.length > 0
+        ? orderedBindings.map(binding => {
+            const record =
+              window.RMLRuntimeBridge
+                ?.getValue?.(
+                  channel,
+                  binding.monitorId
+                ) ||
+              null;
+
+            return {
+              label:
+                binding.label ||
+                "Display Value",
+
+              monitorId:
+                binding.monitorId,
+
+              items:
+                rmlRuntimeDisplayPreviewItems(
+                  rmlRuntimeDisplayPreviewText(
+                    record,
+                    fallback
+                  )
+                )
+            };
+          })
+        : [
+            {
+              label:
+                "Runtime Display",
+
+              monitorId:
+                "",
+
+              items:
+                rmlRuntimeDisplayPreviewItems(
+                  fallback
+                )
+            }
+          ];
+
+    const rowCount =
+      Math.max(
+        1,
+        ...columns.map(column =>
+          column.items.length
+        )
+      );
+
+    output.style.setProperty(
+      "--rml-runtime-display-column-count",
+      String(
+        Math.max(
+          1,
+          columns.length
+        )
+      )
+    );
+
+    for (
+      let row = 0;
+      row < rowCount;
+      row += 1
+    ) {
+      const rowElement =
+        document.createElement(
+          "div"
+        );
+
+      rowElement.className =
+        "rml-preview-runtime-display-row";
+
+      for (
+        let columnIndex = 0;
+        columnIndex < columns.length;
+        columnIndex += 1
+      ) {
+        const column =
+          columns[columnIndex];
+
+        const cellValue =
+          row < column.items.length
+            ? column.items[row]
+            : "";
+
+        const cell =
+          document.createElement(
+            "div"
+          );
+
+        cell.className =
+          "rml-preview-runtime-display-cell";
+
+        cell.dataset.monitorId =
+          column.monitorId;
+
+        const value =
+          document.createElement(
+            "span"
+          );
+
+        value.className =
+          "rml-preview-runtime-display-value";
+
+        value.textContent =
+          cellValue;
+
+        value.title =
+          column.label;
+
+        const copyButton =
+          document.createElement(
+            "button"
+          );
+
+        copyButton.type =
+          "button";
+
+        copyButton.className =
+          "code-copy-button " +
+          "rml-preview-runtime-display-value-copy";
+
+        copyButton.innerHTML =
+          rmlRuntimeDisplayPreviewCopyIcon();
+
+        copyButton.setAttribute(
+          "aria-label",
+          `Copy ${column.label}, item ${row + 1}`
+        );
+
+        copyButton.title =
+          "Copy this value";
+
+        copyButton.addEventListener(
+          "click",
+          () => {
+            void copyText(
+              cellValue,
+              copyButton
+            );
+          }
+        );
+
+        cell.append(
+          value,
+          copyButton
+        );
+
+        rowElement.appendChild(
+          cell
+        );
+      }
+
+      output.appendChild(
+        rowElement
+      );
+    }
+
+    section.append(
+      heading,
+      output
+    );
+
+    host.appendChild(
+      section
+    );
+  }
+}
+
+const rmlRuntimeDisplayBasePreviewRenderer =
+  renderSettingsPreview;
+
+renderSettingsPreview =
+  function (...args) {
+    const originalNodes =
+      state.nodes;
+
+    state.nodes =
+      (function filter(nodes) {
+        return (
+          Array.isArray(nodes)
+            ? nodes
+            : []
+        )
+          .filter(node =>
+            !rmlRuntimeDisplayIsNode(
+              node
+            )
+          )
+          .map(node => {
+            if (node?.kind !== "controller") {
+              return node;
+            }
+
+            return {
+              ...node,
+              options:
+                (
+                  Array.isArray(node.options)
+                    ? node.options
+                    : []
+                ).map(option => ({
+                  ...option,
+                  children:
+                    filter(
+                      option.children
+                    )
+                }))
+            };
+          });
+      })(originalNodes);
+
+    let result;
+
+    try {
+      result =
+        rmlRuntimeDisplayBasePreviewRenderer
+          .apply(
+            this,
+            args
+          );
+    } finally {
+      state.nodes =
+        originalNodes;
+    }
+
+    const finish = value => {
+      queueMicrotask(
+        rmlRuntimeDisplayRenderPreviewRows
+      );
+      return value;
+    };
+
+    return result &&
+      typeof result.then === "function"
+      ? result.then(finish)
+      : finish(result);
+  };
+
+window.setInterval(
+  rmlRuntimeDisplayRenderPreviewRows,
+  750
+);

@@ -254,12 +254,25 @@
                   falls back to <strong>Runtime Only</strong> and keeps the existing local graph
                   preview where that value can be evaluated safely.
                 </p>
+                <p>
+                  Add <strong>Display Value (RML Menu)</strong> in Configuration Outline,
+                  then pack the outline. That item appears as its own dedicated output on the
+                  <strong>Start</strong> node. Every graph <strong>Display Value</strong> has a second
+                  <strong>RML Menu</strong> input. One Start-node display output may fan out to
+                  <strong>multiple</strong> Display Value nodes. By default, every connected runtime value
+                  stays side by side in <strong>one single RML menu row</strong>; the row does not wrap values
+                  into a vertical list. Select the Display Value (RML Menu) item in Properties to set
+                  their left-to-right order. If a vertical list is actually wanted, enable
+                  <strong>Stack values vertically</strong> there; the same order controls top-to-bottom
+                  placement in that mode. The graph wires define membership and the inspector defines
+                  presentation—there is no source dropdown.
+                </p>
               </section>
 
 
               <section id="info-collections" class="information-section">
                 <span class="information-kicker">Typed collections</span>
-                <h3>For Each over arrays and IEnumerable values</h3>
+                <h3>For Each, Collect To List and indexed access</h3>
                 <p>
                   <strong>For Each</strong> accepts any scanner-derived or built-in type
                   that implements <code>System.Collections.IEnumerable</code>. Its
@@ -277,6 +290,14 @@
                   and custom catalog types implementing <code>IEnumerable&lt;T&gt;</code>
                   use the same node. Asynchronous enumerables are intentionally separate
                   and are not executed by this synchronous node.
+                </p>
+                <p>
+                  <strong>Get Item At Index</strong> reads one zero-based item from any
+                  synchronous typed collection. Its Collection and Item generics are linked
+                  exactly, so <code>List&lt;User&gt;</code> produces <code>User</code> and
+                  <code>List&lt;string&gt;</code> produces <code>string</code>. Item returns
+                  the type default for an invalid index, while Success reports validity and
+                  Count exposes the current collection size.
                 </p>
                 <p>
                   <strong>Collect To List</strong> is a separate stateful collection node.

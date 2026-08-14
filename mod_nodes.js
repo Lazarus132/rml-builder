@@ -4441,6 +4441,230 @@ private static T GraphCollectionItem<T>(object? value)
     }
   });
 
+
+  registerNode("collection.getItemAtIndex", {
+    title: "Get Item At Index",
+    group: "Collections",
+    symbol: "[i]",
+    description:
+      "Reads one strongly typed item from any synchronous IEnumerable collection. Index is zero-based. Item returns default(T) when the index is invalid; Success reports whether an item exists and Count exposes the collection size.",
+    inputs: [
+      genericPort(
+        "collection",
+        "Collection",
+        "TCollection",
+        "enumerable"
+      ),
+      port("index", "Index", "int")
+    ],
+    outputs: [
+      genericPort(
+        "item",
+        "Item",
+        "TItem",
+        "value"
+      ),
+      port("success", "Success", "bool"),
+      port("count", "Count", "int")
+    ],
+    genericRelations: [
+      {
+        kind: "enumerableElement",
+        collectionTypeVar:
+          "TCollection",
+        elementTypeVar: "TItem",
+        exact: true
+      }
+    ],
+    codegenCollect(api) {
+      api.addUsing("System.Collections");
+      api.addUsing("System.Collections.Generic");
+      api.addMember(
+        "collection.item-at-index.runtime",
+        String.raw`
+private static int GraphCollectionCount(object? collection)
+{
+    if (collection is null)
+    {
+        return 0;
+    }
+
+    if (collection is System.Collections.ICollection direct)
+    {
+        return direct.Count;
+    }
+
+    if (collection is not System.Collections.IEnumerable enumerable ||
+        collection is string)
+    {
+        return 0;
+    }
+
+    int count = 0;
+
+    foreach (object? _ in enumerable)
+    {
+        count++;
+    }
+
+    return count;
+}
+
+private static bool GraphCollectionHasIndex(
+    object? collection,
+    int index)
+{
+    if (collection is null ||
+        collection is string ||
+        index < 0)
+    {
+        return false;
+    }
+
+    if (collection is System.Collections.IList list)
+    {
+        return index < list.Count;
+    }
+
+    if (collection is not System.Collections.IEnumerable enumerable)
+    {
+        return false;
+    }
+
+    int current = 0;
+
+    foreach (object? _ in enumerable)
+    {
+        if (current == index)
+        {
+            return true;
+        }
+
+        current++;
+    }
+
+    return false;
+}
+
+private static T GraphCollectionItemAt<T>(
+    object? collection,
+    int index)
+{
+    if (collection is null ||
+        collection is string ||
+        index < 0)
+    {
+        return default!;
+    }
+
+    object? value = null;
+    bool found = false;
+
+    if (collection is System.Collections.IList list)
+    {
+        if (index < list.Count)
+        {
+            value = list[index];
+            found = true;
+        }
+    }
+    else if (collection is System.Collections.IEnumerable enumerable)
+    {
+        int current = 0;
+
+        foreach (object? item in enumerable)
+        {
+            if (current == index)
+            {
+                value = item;
+                found = true;
+                break;
+            }
+
+            current++;
+        }
+    }
+
+    if (!found)
+    {
+        return default!;
+    }
+
+    if (value is null)
+    {
+        return default!;
+    }
+
+    if (value is T typed)
+    {
+        return typed;
+    }
+
+    System.Type target =
+        System.Nullable.GetUnderlyingType(
+            typeof(T)) ??
+        typeof(T);
+
+    if (
+        value is System.IConvertible &&
+        typeof(System.IConvertible)
+            .IsAssignableFrom(target))
+    {
+        return (T)System.Convert.ChangeType(
+            value,
+            target,
+            System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    return (T)value;
+}
+`
+      );
+    },
+    codegenExpression(api) {
+      const itemSpec =
+        api.definition.outputs.find(
+          specification =>
+            specification.id === "item"
+        );
+      const itemType =
+        api.resolvedType(
+          api.node,
+          itemSpec
+        ) || "object";
+      const itemCsType =
+        api.csType(itemType);
+      const collection =
+        api.input("collection").code;
+      const index =
+        api.input("index").code;
+
+      if (api.portId === "success") {
+        return `GraphCollectionHasIndex(${collection}, ${index})`;
+      }
+
+      if (api.portId === "count") {
+        return `GraphCollectionCount(${collection})`;
+      }
+
+      return `GraphCollectionItemAt<${itemCsType}>(${collection}, ${index})`;
+    },
+    previewEvaluate({
+      portId,
+      type,
+      unknown
+    }) {
+      return unknown(
+        type,
+        portId === "success"
+          ? "Runtime-only collection index validity"
+          : portId === "count"
+            ? "Runtime-only collection count"
+            : "Runtime-only collection item at index"
+      );
+    }
+  });
+
   registerNode("collection.collectToList", {
     title: "Collect To List",
     group: "Collections",

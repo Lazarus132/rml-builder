@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const FACTORY_VERSION = 5;
+  const FACTORY_VERSION = 6;
   const ADVANCED_GROUP = "Advanced / Raw C#";
   const API_GROUPS = Object.freeze({
     types: "API · Types & Enums",
@@ -13,6 +13,34 @@
   });
 
   let bootAttempts = 0;
+  let factoryBuildPromise = null;
+  let factoryReadySettled = false;
+  let resolveFactoryReady;
+
+  const factoryReady =
+    new Promise(resolve => {
+      resolveFactoryReady = resolve;
+    });
+
+  Object.defineProperty(
+    window,
+    "RMLApiNodeFactoryReady",
+    {
+      value: factoryReady,
+      writable: false,
+      enumerable: true,
+      configurable: true
+    }
+  );
+
+  function completeFactoryReady(report) {
+    if (!factoryReadySettled) {
+      factoryReadySettled = true;
+      resolveFactoryReady?.(report || null);
+    }
+
+    return report || null;
+  }
 
   function yieldToBrowser() {
     return new Promise(resolve => {
@@ -30,8 +58,19 @@
   }
 
   function boot() {
-    if ((window.__RMLApiNodeFactoryVersion || 0) >= FACTORY_VERSION) {
-      return;
+    if (factoryBuildPromise) {
+      return factoryBuildPromise;
+    }
+
+    if (
+      (window.__RMLApiNodeFactoryVersion || 0) >=
+        FACTORY_VERSION &&
+      window.RMLApiNodeFactoryReport
+    ) {
+      completeFactoryReady(
+        window.RMLApiNodeFactoryReport
+      );
+      return factoryReady;
     }
 
     const registry = window.RMLModNodeRegistry;
@@ -52,21 +91,30 @@
         console.error(
           "RML API Node Factory could not find the catalog/registry."
         );
+        completeFactoryReady(null);
       }
-      return;
+      return factoryReady;
     }
 
-    window.__RMLApiNodeFactoryVersion = FACTORY_VERSION;
+    window.__RMLApiNodeFactoryVersion =
+      FACTORY_VERSION;
 
-    void buildFactory(
-      registry,
-      catalog
-    ).catch(error => {
-      console.error(
-        "RML API Node Factory failed.",
-        error
-      );
-    });
+    factoryBuildPromise =
+      buildFactory(
+        registry,
+        catalog
+      )
+        .then(completeFactoryReady)
+        .catch(error => {
+          console.error(
+            "RML API Node Factory failed.",
+            error
+          );
+          completeFactoryReady(null);
+          return null;
+        });
+
+    return factoryBuildPromise;
   }
 
   async function buildFactory(registry, catalog) {
@@ -873,12 +921,19 @@
     });
 
     window.RMLApiNodeFactoryReport = report;
+    window.__RMLNodeDefinitionRevision =
+      (Number(
+        window.__RMLNodeDefinitionRevision
+      ) || 0) + 1;
+
     window.dispatchEvent(
       new CustomEvent("rml-api-node-factory-ready", {
         detail: report
       })
     );
     console.info("RML API Node Factory ready.", report);
+
+    return report;
 
     function registerGeneratedNode(id, definition) {
       if (generatedNodeIds.has(id) || definitions[id]) {

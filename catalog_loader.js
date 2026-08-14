@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const LOADER_VERSION = 14;
+  const LOADER_VERSION = 17;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
   const CATALOG_PATH = "/resonite_api_catalog.json";
@@ -23,7 +23,7 @@
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=6",
+    "api_nodes.js?v=8",
     scriptUrl
   ).href;
 
@@ -1048,6 +1048,30 @@
             "api-nodes",
             "api_nodes.js"
           );
+
+          /*
+           * Script load completion is NOT factory completion. api_nodes.js
+           * builds thousands of reflected definitions asynchronously and
+           * yields to the browser between batches. Do not expose
+           * RMLModNodesReady until every API node and port is registered.
+           */
+          const factoryReady =
+            window.RMLApiNodeFactoryReady;
+
+          if (
+            factoryReady &&
+            typeof factoryReady.then ===
+              "function"
+          ) {
+            const report =
+              await factoryReady;
+
+            if (!report) {
+              console.warn(
+                "RML API node factory completed without a report."
+              );
+            }
+          }
         } else {
           console.info(
             "RML API catalog nodes are disabled until a live or cached catalog is available."

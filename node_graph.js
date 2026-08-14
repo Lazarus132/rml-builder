@@ -2,7 +2,7 @@
   "use strict";
 
   const EXTENSION_NAME = "typedNodeGraph";
-  const GRAPH_SCHEMA_VERSION = 16;
+  const GRAPH_SCHEMA_VERSION = 18;
   const GRAPH_STAGE_WIDTH = 5200;
   const GRAPH_STAGE_HEIGHT = 3400;
   const GRAPH_MIN_ZOOM = 0.005;
@@ -137,6 +137,13 @@
       label: "Generic",
       short: "T",
       color: "#9da8b4"
+    },
+    rmlDisplaySlot: {
+      label: "RML Menu Display",
+      short: "RML",
+      color: "#a476ff",
+      csType: "string",
+      defaultCs: "string.Empty"
     }
   };
 
@@ -643,8 +650,19 @@
       group: "Debug & Output",
       symbol: "▣",
       description:
-        "Displays the actual value published by the matching running Resonite mod through the local scanner bridge. When no live bridge value exists, the local Runtime Only graph preview remains the fallback.",
-      inputs: [genericPort("value", "Value", "T", "value")],
+        "Displays the actual runtime value through the local scanner bridge. Connect an RML Menu Display output from the Start node to the second input when this monitor should also contribute to that read-only row in the RML mod menu. One Start display output can fan out to multiple Display Value monitors.",
+      inputs: [
+        genericPort("value", "Value", "T", "value"),
+        port(
+          "rmlMenu",
+          "RML Menu",
+          "rmlDisplaySlot",
+          {
+            detail:
+              "Optional binding to one Display Value (RML Menu) item from Configuration Outline. Multiple Display Value monitors may share the same RML Menu Display output."
+          }
+        )
+      ],
       outputs: [],
       displaysValue: true
     },
@@ -3043,6 +3061,13 @@
   }
 
   function configurationValueType(node) {
+    if (
+      node?.kind === "setting" &&
+      node.valueType === "runtimeDisplay"
+    ) {
+      return "rmlDisplaySlot";
+    }
+
     if (node.kind === "controller") {
       return `enum:${
         node.enumName ||
@@ -3091,16 +3116,23 @@
           configurationValueType(node),
           {
             reaction:
-              RUNTIME_BEHAVIORS[
-                node.reaction
-              ]
-                ? node.reaction
-                : "stored",
+              node.valueType === "runtimeDisplay"
+                ? "stored"
+                : RUNTIME_BEHAVIORS[
+                    node.reaction
+                  ]
+                    ? node.reaction
+                    : "stored",
             detail:
-              `${path} · ${
-                node.keyName ||
-                "configuration key"
-              }`,
+              node.valueType === "runtimeDisplay"
+                ? `${path} · RML menu display binding · ${
+                    node.keyName ||
+                    "runtime display"
+                  }`
+                : `${path} · ${
+                    node.keyName ||
+                    "configuration key"
+                  }`,
             sourceNodeId:
               node.id
           }
@@ -7154,7 +7186,20 @@
       JSON.stringify({
         metadata,
         graph:
-          graphSerializableState()
+          graphSerializableState(),
+        /*
+         * Reflected API definitions are registered asynchronously. A graph
+         * can be byte-for-byte identical before and after registration, so
+         * the registry revision must participate in the codegen cache key.
+         */
+        nodeDefinitionRevision:
+          Number(
+            window.__RMLNodeDefinitionRevision
+          ) || 0,
+        apiFactoryVersion:
+          Number(
+            window.__RMLApiNodeFactoryVersion
+          ) || 0
       });
 
     if (
@@ -7264,7 +7309,12 @@
         )
       );
     const configurationFields =
-      configurationEntries.map(entry => {
+      configurationEntries
+        .filter(entry =>
+          entry?.node?.valueType !==
+            "runtimeDisplay"
+        )
+        .map(entry => {
         const node = entry.node;
         const type =
           configurationValueType(node);
@@ -8752,6 +8802,10 @@ internal static partial class ${graphClassName}
     private static Action<string> _display = static _ => { };
     private static readonly Dictionary<string, object?> _displayValues =
         new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, object?> _displayValuesByMonitorId =
+        new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, string> _displayTextByMonitorId =
+        new(StringComparer.Ordinal);
     private static readonly Dictionary<string, string> _displayFingerprints =
         new(StringComparer.Ordinal);
     private const string RuntimeBridgeChannel =
@@ -8776,6 +8830,13 @@ internal static partial class ${graphClassName}
     /// Raised whenever a display or impulse monitor publishes a value.
     /// </summary>
     public static event Action<string, object?>? DisplayValueChanged;
+
+    /// <summary>
+    /// Raised with the stable graph monitor id whenever a Display Value changes.
+    /// This is used by generated read-only Runtime Display rows in the RML mod menu.
+    /// </summary>
+    public static event Action<string, string, object?>?
+        DisplayValueChangedByMonitorId;
 
 ${configFieldsCode || "    // No configuration values."}
 ${storeFieldsCode ? `\n${storeFieldsCode}` : ""}${extensionFieldsCode ? `\n\n${extensionFieldsCode}` : ""}
@@ -9275,6 +9336,15 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         {
             _displayValues[name] =
                 value;
+            _displayValuesByMonitorId[
+                monitorId
+            ] = value;
+            // Keep an immutable display snapshot. Mutable collections such as
+            // List<T> can be cleared or changed after publication; RML menu
+            // text must represent the value at the moment it was published.
+            _displayTextByMonitorId[
+                monitorId
+            ] = formatted;
             changed =
                 !_displayFingerprints.TryGetValue(
                     monitorId,
@@ -9297,6 +9367,11 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
             DisplayValueChanged?.Invoke(
                 name,
                 value);
+            DisplayValueChangedByMonitorId
+                ?.Invoke(
+                    monitorId,
+                    name,
+                    value);
             _display(
                 $"{name}: {formatted}");
         }
@@ -9317,6 +9392,34 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
             return _displayValues.TryGetValue(
                 name,
                 out value);
+        }
+    }
+
+    public static bool TryGetDisplayValueByMonitorId(
+        string monitorId,
+        out object? value)
+    {
+        lock (_displayStateLock)
+        {
+            return _displayValuesByMonitorId
+                .TryGetValue(
+                    monitorId,
+                    out value);
+        }
+    }
+
+    public static string GetDisplayTextByMonitorId(
+        string monitorId,
+        string fallback = "")
+    {
+        lock (_displayStateLock)
+        {
+            return _displayTextByMonitorId
+                .TryGetValue(
+                    monitorId,
+                    out string? value)
+                ? value
+                : fallback;
         }
     }
 
@@ -24116,6 +24219,30 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       return;
     }
 
+    /*
+     * A previous code-generation pass may have happened while reflected API
+     * nodes were still being registered. Its missing-port diagnostics must
+     * never survive once the real definitions exist.
+     */
+    typedGraphCodegenCacheKey = "";
+    typedGraphCodegenCache = null;
+
+    const wasActive =
+      graph.active === true;
+
+    /*
+     * Re-run parameter and port-layout normalization now that every API node
+     * definition is available. This preserves node/connection ids and all
+     * routing points.
+     */
+    graph = sanitizeGraphState(
+      graphSerializableState()
+    );
+    graph.active = wasActive;
+
+    pruneConnections();
+    persistGraph(true);
+
     if (graph.active) {
       renderGraphPalette();
       renderGraphNodesAndWires();
@@ -24132,6 +24259,18 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       await Promise.resolve(
         window.RMLModNodesReady
       );
+
+      /*
+       * Compatibility guard for loaders that resolve RMLModNodesReady after
+       * script load but before the asynchronous API factory has finished.
+       */
+      if (
+        window.RMLApiNodeFactoryReady &&
+        typeof window.RMLApiNodeFactoryReady.then ===
+          "function"
+      ) {
+        await window.RMLApiNodeFactoryReady;
+      }
     } catch (error) {
       console.error(
         "Typed mod-node initialization failed.",
@@ -24145,6 +24284,16 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       "rml-api-node-factory-ready",
       refreshAfterNodeModulesReady
     );
+
+    /*
+     * The ready event can legitimately have fired while this module awaited
+     * RMLModNodesReady. Apply the completed registry once in that case too.
+     */
+    if (window.RMLApiNodeFactoryReport) {
+      queueMicrotask(
+        refreshAfterNodeModulesReady
+      );
+    }
   }
 
   if (
