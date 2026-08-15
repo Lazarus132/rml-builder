@@ -8982,6 +8982,20 @@ html.rml-setup-tour-active .rml-graph-scroll-layer-outline {
   background: var(--panel-deep);
 }
 
+.rml-preview-dynamic-control.rml-preview-dynamic-choice {
+  display: grid;
+  min-height: 32px;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.rml-preview-dynamic-choice-switch {
+  width: 100%;
+}
+
 .rml-preview-dynamic-control > select,
 .rml-preview-dynamic-control > button {
   width: 100%;

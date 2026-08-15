@@ -13752,7 +13752,8 @@ function settingsPreviewNodesMarkup(nodes) {
           option => option.name
         );
 
-      rows.push(`<div class="rml-preview-setting rml-preview-setting-enum">
+      rows.push(`<div class="rml-preview-setting rml-preview-setting-enum"
+        data-preview-node-id="${escapeHtml(node.id)}">
         <div class="rml-preview-label">${escapeHtml(node.keyName)}</div>
         <div class="rml-preview-editor">
           ${previewEnumEditorMarkup(node, options, value)}
@@ -13767,7 +13768,8 @@ function settingsPreviewNodesMarkup(nodes) {
         : node.valueType === "colorX"
           ? "color"
           : "value"
-    )}">
+    )}"
+      data-preview-node-id="${escapeHtml(node.id)}">
       <div class="rml-preview-label">${escapeHtml(node.keyName)}</div>
       <div class="rml-preview-editor">
         ${previewSettingEditorMarkup(node)}
@@ -24071,6 +24073,108 @@ function rmlRuntimeDisplayEnsurePreviewBridge() {
   }
 }
 
+function rmlPreviewVisibleOrderedNodeIds() {
+  const flattened =
+    typeof flattenNodes === "function"
+      ? flattenNodes(state?.nodes || [])
+      : [];
+
+  return flattened
+    .filter(entry =>
+      entry &&
+      entry.node &&
+      (
+        !Array.isArray(entry.conditions) ||
+        entry.conditions.every(condition =>
+          settingsPreviewDraft
+            ?.controllers?.[
+              condition.controller.id
+            ] ===
+              condition.option.name
+        )
+      )
+    )
+    .map(entry => entry.node)
+    .filter(node =>
+      !(
+        node?.kind === "setting" &&
+        node.hidden === true &&
+        !node.dynamicSettingKind &&
+        !rmlRuntimeDisplayIsNode(node)
+      )
+    )
+    .map(node => String(node?.id || ""))
+    .filter(Boolean);
+}
+
+function rmlPreviewElementNodeId(element) {
+  if (!(element instanceof HTMLElement)) {
+    return "";
+  }
+
+  return String(
+    element.dataset?.previewNodeId ||
+    element.dataset?.rmlDynamicPreview ||
+    element.dataset?.rmlRuntimeDisplayPreview ||
+    ""
+  );
+}
+
+function rmlPreviewInsertByOutlineOrder(
+  host,
+  element,
+  nodeId
+) {
+  if (
+    !(host instanceof HTMLElement) ||
+    !(element instanceof HTMLElement)
+  ) {
+    return;
+  }
+
+  const orderedIds =
+    rmlPreviewVisibleOrderedNodeIds();
+
+  const currentId =
+    String(nodeId || "");
+
+  const currentIndex =
+    orderedIds.indexOf(currentId);
+
+  if (currentIndex < 0) {
+    host.appendChild(element);
+    return;
+  }
+
+  const children =
+    [...host.children];
+
+  for (
+    let index = currentIndex + 1;
+    index < orderedIds.length;
+    index += 1
+  ) {
+    const nextId = orderedIds[index];
+
+    const nextElement =
+      children.find(candidate =>
+        candidate !== element &&
+        rmlPreviewElementNodeId(candidate) ===
+          nextId
+      );
+
+    if (nextElement) {
+      host.insertBefore(
+        element,
+        nextElement
+      );
+      return;
+    }
+  }
+
+  host.appendChild(element);
+}
+
 function rmlRuntimeDisplayRenderPreviewRows() {
   const dialog =
     document.getElementById(
@@ -24121,6 +24225,9 @@ function rmlRuntimeDisplayRenderPreviewRows() {
     section.dataset
       .rmlRuntimeDisplayPreview =
         node.id;
+
+    section.dataset.previewNodeId =
+      String(node.id || "");
 
     const heading =
       document.createElement(
@@ -24340,8 +24447,10 @@ function rmlRuntimeDisplayRenderPreviewRows() {
       output
     );
 
-    host.appendChild(
-      section
+    rmlPreviewInsertByOutlineOrder(
+      host,
+      section,
+      node.id
     );
   }
 }

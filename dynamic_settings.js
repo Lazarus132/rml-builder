@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = 4;
+  const VERSION = 6;
   const KINDS = Object.freeze({
     choice: "choice",
     action: "action",
@@ -773,12 +773,12 @@
     }
 
     const existing =
-      dialog.querySelector(
+      [...dialog.querySelectorAll(
         "[data-rml-dynamic-preview]"
-      );
+      )];
 
-    if (existing) {
-      existing
+    for (const element of existing) {
+      element
         .querySelectorAll("select")
         .forEach(select => {
           try {
@@ -788,7 +788,7 @@
           } catch {}
         });
 
-      existing.remove();
+      element.remove();
     }
 
     appendDynamicPreview();
@@ -998,6 +998,199 @@
     return result;
   }
 
+  function visiblePreviewEntries() {
+    const flattened =
+      typeof flattenNodes === "function"
+        ? flattenNodes(state?.nodes || [])
+        : [];
+
+    return flattened
+      .filter(entry =>
+        entry &&
+        entry.node &&
+        (
+          !Array.isArray(entry.conditions) ||
+          entry.conditions.every(condition =>
+            settingsPreviewDraft
+              ?.controllers?.[
+                condition.controller.id
+              ] ===
+                condition.option.name
+          )
+        )
+      )
+      .map(entry => entry.node)
+      .filter(node =>
+        !(
+          node?.kind === "setting" &&
+          node.hidden === true &&
+          !node.dynamicSettingKind
+        )
+      );
+  }
+
+  function insertDynamicPreviewBlock(
+    host,
+    block,
+    node,
+    visibleNodes
+  ) {
+    const currentIndex =
+      visibleNodes.findIndex(candidate =>
+        String(candidate?.id || "") ===
+        String(node?.id || "")
+      );
+
+    if (currentIndex < 0) {
+      host.appendChild(block);
+      return;
+    }
+
+    for (
+      let index = currentIndex + 1;
+      index < visibleNodes.length;
+      index += 1
+    ) {
+      const nextId =
+        String(
+          visibleNodes[index]?.id || ""
+        );
+
+      if (!nextId) {
+        continue;
+      }
+
+      const nextElement =
+        [...host.children].find(element =>
+          element instanceof HTMLElement &&
+          (
+            element.dataset
+              ?.previewNodeId ===
+                nextId ||
+            element.dataset
+              ?.rmlDynamicPreview ===
+                nextId ||
+            element.dataset
+              ?.rmlRuntimeDisplayPreview ===
+                nextId
+          )
+        );
+
+      if (nextElement) {
+        host.insertBefore(
+          block,
+          nextElement
+        );
+        return;
+      }
+    }
+
+    host.appendChild(block);
+  }
+
+  function dynamicPreviewChoiceItems(
+    node,
+    options
+  ) {
+    const items = [];
+
+    if (node.dynamicAllowEmpty === true) {
+      items.push({
+        label: "(None)",
+        value: ""
+      });
+    }
+
+    for (const option of options) {
+      items.push({
+        label: String(
+          option?.label ??
+          option?.value ??
+          ""
+        ),
+        value: String(
+          option?.value ??
+          option?.label ??
+          ""
+        )
+      });
+    }
+
+    return items;
+  }
+
+  function setDynamicPreviewChoiceValue(
+    node,
+    value
+  ) {
+    const normalized = String(value ?? "");
+
+    previewSelection.set(
+      node.id,
+      normalized
+    );
+
+    /*
+     * Dynamic Preview selections use the same local draft as all ordinary
+     * Preview editors. Saving the Preview therefore persists the visible
+     * selection locally, but this path never calls the runtime bridge or the
+     * generated Resonite configuration setter.
+     */
+    if (
+      settingsPreviewDraft?.values &&
+      typeof settingsPreviewDraft.values ===
+        "object"
+    ) {
+      settingsPreviewDraft.values[
+        node.id
+      ] = normalized;
+    }
+  }
+
+  function currentDynamicPreviewChoice(
+    node,
+    items
+  ) {
+    if (items.length === 0) {
+      return {
+        index: -1,
+        item: null
+      };
+    }
+
+    const requestedSelection =
+      String(
+        settingsPreviewDraft?.values?.[
+          node.id
+        ] ??
+        previewSelection.get(node.id) ??
+        node.defaultValue ??
+        ""
+      );
+
+    let index = items.findIndex(
+      item =>
+        item.value ===
+        requestedSelection
+    );
+
+    if (index < 0) {
+      index = 0;
+    }
+
+    const item = items[index];
+
+    setDynamicPreviewChoiceValue(
+      node,
+      item.value
+    );
+
+    return {
+      index,
+      item
+    };
+  }
+
   function appendDynamicPreview() {
     const previewDialog =
       document.getElementById(
@@ -1012,119 +1205,284 @@
       return;
     }
 
-    const controls = allNodes()
-      .map(x => x.node)
-      .filter(node => node.dynamicSettingKind);
-    if (!controls.length) return;
-
     const host = document.querySelector(
       ".rml-preview-form, #settings-preview-content, .settings-preview-content, .rml-preview-body"
     );
-    if (!host || host.querySelector("[data-rml-dynamic-preview]")) return;
 
-    const section = document.createElement("section");
-    section.dataset.rmlDynamicPreview = "true";
-    section.className = "rml-preview-dynamic-settings";
+    if (!host) {
+      return;
+    }
+
+    /*
+     * Dynamic controls are hidden from app.js' ordinary setting renderer, but
+     * they still belong to the exact same Configuration Outline ordering.
+     * Use the same flattened/condition-filtered sequence as Preview and place
+     * every dynamic row relative to the normal rows' stable node ids.
+     */
+    const visibleNodes =
+      visiblePreviewEntries();
+
+    const controls =
+      visibleNodes.filter(node =>
+        node?.dynamicSettingKind
+      );
+
+    if (!controls.length) {
+      return;
+    }
 
     for (const node of controls) {
-      const block = document.createElement("div");
-      block.className = "rml-preview-dynamic-control";
-      const title = document.createElement("strong");
-      title.textContent = node.keyName || "Dynamic control";
+      if (
+        host.querySelector(
+          `[data-rml-dynamic-preview="${CSS.escape(
+            String(node.id)
+          )}"]`
+        )
+      ) {
+        continue;
+      }
+
+      const block =
+        document.createElement("div");
+
+      block.dataset.rmlDynamicPreview =
+        String(node.id);
+
+      block.dataset.previewNodeId =
+        String(node.id);
+
+      block.className =
+        "rml-preview-setting rml-preview-dynamic-control";
+
+      if (
+        node.dynamicSettingKind ===
+        KINDS.choice
+      ) {
+        block.classList.add(
+          "rml-preview-dynamic-choice"
+        );
+      }
+
+      const title =
+        document.createElement("div");
+
+      title.className =
+        "rml-preview-label";
+
+      title.textContent =
+        node.keyName ||
+        "Dynamic control";
+
       block.appendChild(title);
-      const options = controlOptions(node);
 
-      if (node.dynamicSettingKind === KINDS.choice) {
-        const select = document.createElement("select");
-        if (node.dynamicAllowEmpty) {
-          const empty = document.createElement("option");
-          empty.value = "";
-          empty.textContent = "(None)";
-          select.appendChild(empty);
-        }
-        for (const option of options) {
-          const item = document.createElement("option");
-          item.value = option.value;
-          item.textContent = option.label;
-          select.appendChild(item);
-        }
+      const editor =
+        document.createElement("div");
 
-        if (options.length === 0) {
-          const unavailable =
-            document.createElement(
-              "option"
-            );
+      editor.className =
+        "rml-preview-editor";
 
-          unavailable.value = "";
-          unavailable.textContent =
-            "Runtime options unavailable";
-          unavailable.disabled = true;
-          unavailable.selected = true;
-          select.appendChild(unavailable);
-        }
-        const requestedSelection =
-          String(
-            previewSelection.get(node.id) ??
-            node.defaultValue ??
-            ""
+      const options =
+        controlOptions(node);
+
+      if (
+        node.dynamicSettingKind ===
+        KINDS.choice
+      ) {
+        const items =
+          dynamicPreviewChoiceItems(
+            node,
+            options
           );
 
-        const availableValues =
-          new Set(
-            options.map(option =>
-              String(option.value)
+        const switchControl =
+          document.createElement("div");
+
+        switchControl.className =
+          "rml-preview-enum rml-preview-dynamic-choice-switch";
+
+        const valueButton =
+          document.createElement("button");
+
+        valueButton.type = "button";
+        valueButton.tabIndex = -1;
+        valueButton.className =
+          "rml-preview-control rml-preview-enum-value";
+        valueButton.setAttribute(
+          "aria-label",
+          "Current value"
+        );
+
+        const previousButton =
+          document.createElement("button");
+
+        previousButton.type = "button";
+        previousButton.className =
+          "rml-preview-control rml-preview-enum-step";
+        previousButton.textContent = "◀";
+        previousButton.setAttribute(
+          "aria-label",
+          "Previous value"
+        );
+
+        const nextButton =
+          document.createElement("button");
+
+        nextButton.type = "button";
+        nextButton.className =
+          "rml-preview-control rml-preview-enum-step";
+        nextButton.textContent = "▶";
+        nextButton.setAttribute(
+          "aria-label",
+          "Next value"
+        );
+
+        let selection =
+          currentDynamicPreviewChoice(
+            node,
+            items
+          );
+
+        const refreshSwitch = () => {
+          valueButton.textContent =
+            selection.item?.label ||
+            "Runtime options unavailable";
+
+          const canStep =
+            items.length > 1;
+
+          previousButton.disabled =
+            !canStep;
+          nextButton.disabled =
+            !canStep;
+        };
+
+        const step = direction => {
+          if (items.length <= 1) {
+            return;
+          }
+
+          const nextIndex =
+            (
+              selection.index +
+              direction +
+              items.length
+            ) % items.length;
+
+          selection = {
+            index: nextIndex,
+            item: items[nextIndex]
+          };
+
+          setDynamicPreviewChoiceValue(
+            node,
+            selection.item.value
+          );
+
+          refreshSwitch();
+        };
+
+        previousButton.addEventListener(
+          "click",
+          () => step(-1)
+        );
+
+        nextButton.addEventListener(
+          "click",
+          () => step(1)
+        );
+
+        refreshSwitch();
+
+        switchControl.append(
+          valueButton,
+          previousButton,
+          nextButton
+        );
+
+        editor.appendChild(
+          switchControl
+        );
+      } else if (
+        node.dynamicSettingKind ===
+        KINDS.action
+      ) {
+        for (const option of options) {
+          const button =
+            document.createElement(
+              "button"
+            );
+
+          button.type = "button";
+          button.className =
+            "button secondary";
+          button.textContent =
+            `${option.label}  ${
+              node.dynamicButtonLabel ||
+              "Run"
+            }`;
+
+          editor.appendChild(button);
+        }
+      } else {
+        const states =
+          splitLines(
+            monitorText(
+              node.dynamicStateMonitorId
+            )
+          ).map(value =>
+            /^(true|1|yes|on)$/i.test(
+              value
             )
           );
 
-        if (
-          requestedSelection &&
-          availableValues.has(
-            requestedSelection
-          )
-        ) {
-          select.value =
-            requestedSelection;
-        } else if (
-          node.dynamicAllowEmpty === true
-        ) {
-          select.value = "";
-        } else if (options.length > 0) {
-          select.value =
-            String(options[0].value);
-        }
+        options.forEach(
+          (option, index) => {
+            const button =
+              document.createElement(
+                "button"
+              );
 
-        select.addEventListener("change", () =>
-          previewSelection.set(node.id, select.value)
+            button.type = "button";
+            button.className =
+              "button secondary";
+
+            let checked =
+              states[index] === true;
+
+            button.textContent =
+              `${
+                checked ? "☑" : "☐"
+              }  ${option.label}`;
+
+            button.addEventListener(
+              "click",
+              () => {
+                checked = !checked;
+                button.textContent =
+                  `${
+                    checked
+                      ? "☑"
+                      : "☐"
+                  }  ${option.label}`;
+              }
+            );
+
+            editor.appendChild(
+              button
+            );
+          }
         );
-        block.appendChild(select);
-      } else if (node.dynamicSettingKind === KINDS.action) {
-        for (const option of options) {
-          const button = document.createElement("button");
-          button.type = "button";
-          button.className = "button secondary";
-          button.textContent = `${option.label}  ${node.dynamicButtonLabel || "Run"}`;
-          block.appendChild(button);
-        }
-      } else {
-        const states = splitLines(
-          monitorText(node.dynamicStateMonitorId)
-        ).map(value => /^(true|1|yes|on)$/i.test(value));
-        options.forEach((option, index) => {
-          const button = document.createElement("button");
-          button.type = "button";
-          button.className = "button secondary";
-          let checked = states[index] === true;
-          button.textContent = `${checked ? "☑" : "☐"}  ${option.label}`;
-          button.addEventListener("click", () => {
-            checked = !checked;
-            button.textContent = `${checked ? "☑" : "☐"}  ${option.label}`;
-          });
-          block.appendChild(button);
-        });
       }
-      section.appendChild(block);
+
+      block.appendChild(editor);
+
+      insertDynamicPreviewBlock(
+        host,
+        block,
+        node,
+        visibleNodes
+      );
     }
-    host.appendChild(section);
   }
 
   function csString(value) {
