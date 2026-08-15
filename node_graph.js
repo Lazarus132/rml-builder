@@ -20087,6 +20087,15 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       return select;
     }
 
+    /*
+     * This select is already owned by the graph's searchable-select UI.
+     * app.js also upgrades ordinary <select> elements globally; mark this
+     * one explicitly so the universal upgrader never wraps the same native
+     * select a second time. Without this marker a Boolean parameter such as
+     * Collect To List -> Mark as Editable gets two visible True/False fields.
+     */
+    select._rmlGeneratedCustomSelect = true;
+
     const wrapper =
       document.createElement("div");
     wrapper.className =

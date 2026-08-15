@@ -12009,6 +12009,28 @@ function ensureUniversalCustomSelect(select) {
   }
 
   /*
+   * node_graph.js has its own searchable-select controller. Do not apply
+   * the universal app-level controller to that same native <select>. This
+   * guard is deliberately structural as well as marker-based so it also
+   * protects graph controls created by a matching older graph renderer.
+   */
+  const graphOwnedWrapper = select.parentElement;
+  if (
+    graphOwnedWrapper?.classList.contains(
+      "rml-graph-searchable-select"
+    ) &&
+    !graphOwnedWrapper.classList.contains(
+      "rml-universal-custom-select"
+    ) &&
+    graphOwnedWrapper.querySelector(
+      ":scope > .rml-graph-searchable-trigger"
+    )
+  ) {
+    select._rmlGeneratedCustomSelect = true;
+    return null;
+  }
+
+  /*
    * Recover from an interrupted/old transformation. A select that only
    * carries the native-hidden class but has no live JS controller must not
    * be skipped, otherwise it can permanently fall back to the browser UI.
