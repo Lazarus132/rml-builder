@@ -671,8 +671,19 @@
       group: "Debug & Output",
       symbol: "↯#",
       description:
-        "A terminal impulse monitor. Every runtime call increments and publishes its counter.",
-      inputs: [port("call", "Impulse", "impulse")],
+        "A terminal impulse monitor. Every runtime call increments and publishes its counter. Connect an RML Menu Display output from the Start node to the optional RML Menu input to expose the live pulse count in that read-only RML menu row.",
+      inputs: [
+        port("call", "Impulse", "impulse"),
+        port(
+          "rmlMenu",
+          "RML Menu",
+          "rmlDisplaySlot",
+          {
+            detail:
+              "Optional binding to one Display Value (RML Menu) item from Configuration Outline. The displayed value is this monitor's live pulse count."
+          }
+        )
+      ],
       outputs: [],
       displaysImpulse: true,
       codegenCollect(api) {
@@ -688,7 +699,7 @@
           api.node.label ||
           "Display Impulse";
 
-        return `_impulseCount${token}++;\nPublishDisplay("${api.escapeString(api.node.id)}", "${api.escapeString(label)}", "impulse", _impulseCount${token});`;
+        return `System.Threading.Interlocked.Increment(ref _impulseCount${token});\nPublishDisplay("${api.escapeString(api.node.id)}", "${api.escapeString(label)}", "impulse", System.Threading.Interlocked.Read(ref _impulseCount${token}));`;
       }
     },
     "resonite.store": {
@@ -3129,10 +3140,15 @@
                     node.keyName ||
                     "runtime display"
                   }`
-                : `${path} · ${
-                    node.keyName ||
-                    "configuration key"
-                  }`,
+                : node.dynamicSettingKind === "choice"
+                  ? `${path} · Dynamic Choice selected value · ${
+                      node.keyName ||
+                      "dynamic choice"
+                    } · connect this string output to any compatible runtime logic`
+                  : `${path} · ${
+                      node.keyName ||
+                      "configuration key"
+                    }`,
             sourceNodeId:
               node.id
           }
@@ -6417,7 +6433,16 @@
           definition?.displaysValue ===
             true ||
           definition?.displaysImpulse ===
-            true
+            true ||
+          (
+            node?.operatorId ===
+              "collection.collectToList" &&
+            (
+              node?.parameters?.markAsEditable === true ||
+              node?.parameters?.markAsEditable === "true" ||
+              node?.parameters?.markAsEditable === 1
+            )
+          )
         );
       })
     );
@@ -6695,11 +6720,13 @@
         text:
           state.connected
             ? state.active
-              ? "Waiting for this monitor in the running mod"
+              ? "0 · no pulse received yet"
               : "Waiting for the generated mod to run"
             : "Scanner connection unavailable",
         title:
-          "The live Resonite value is used when the scanner and matching generated mod are running."
+          state.connected && state.active
+            ? "The matching generated mod is running. This Display Impulse monitor will update immediately when its impulse path fires; its generated runtime also publishes the current counter during monitor refresh."
+            : "The live Resonite pulse counter is used when the scanner and matching generated mod are running."
       };
     }
 
@@ -7324,6 +7351,13 @@
               node.keyName,
             "Setting"
           );
+        const dynamicChoiceSourceId =
+          node.dynamicSettingKind === "choice"
+            ? String(
+                node._rmlEditableCollectionSourceNodeId ||
+                ""
+              )
+            : "";
 
         return {
           node,
@@ -7333,6 +7367,15 @@
           field,
           backing:
             `_config${field}`,
+          configuredBacking:
+            dynamicChoiceSourceId
+              ? `_configured${field}`
+              : "",
+          dynamicChoiceSourceId,
+          dynamicChoicePreferredDefault:
+            String(node.defaultValue || ""),
+          dynamicChoiceAllowEmpty:
+            node.dynamicAllowEmpty === true,
           setter:
             `Set${field}`,
           getter:
@@ -8208,7 +8251,267 @@
       }
     }
 
-    const targetAction = connection => {
+    /*
+     * A single impulse output may fan out to several direct targets. The old
+     * generator emitted each complete target path recursively before moving to
+     * the next sibling. That made a graph such as
+     *
+     *   Trigger -> Collect A.Reset
+     *           -> Collect B.Reset
+     *   Collect A.ResetDone -> For Each
+     *
+     * execute Collect A.ResetDone (and the complete loop) before Collect B was
+     * reset. The second reset consequently erased values produced by the loop.
+     *
+     * For a real fan-out, direct sibling actions now form one barrier:
+     *   1. execute every direct target's immediate mutation/action;
+     *   2. only then invoke their top-level continuation impulses.
+     *
+     * Control-flow actions whose emitted impulses are nested inside a loop,
+     * branch or other block are kept atomic and are moved as one continuation.
+     * This avoids queueing a For Each.Body call after its transient Item/Index
+     * state has already changed.
+     */
+    const csharpBraceDelta = (
+      line,
+      lexicalState
+    ) => {
+      let delta = 0;
+      let index = 0;
+
+      while (index < line.length) {
+        const current = line[index];
+        const next = line[index + 1] || "";
+
+        if (lexicalState.blockComment) {
+          if (current === "*" && next === "/") {
+            lexicalState.blockComment = false;
+            index += 2;
+          } else {
+            index += 1;
+          }
+          continue;
+        }
+
+        if (lexicalState.stringMode === "normal") {
+          if (current === "\\") {
+            index += 2;
+            continue;
+          }
+          if (current === '"') {
+            lexicalState.stringMode = "";
+          }
+          index += 1;
+          continue;
+        }
+
+        if (lexicalState.stringMode === "verbatim") {
+          if (current === '"' && next === '"') {
+            index += 2;
+            continue;
+          }
+          if (current === '"') {
+            lexicalState.stringMode = "";
+          }
+          index += 1;
+          continue;
+        }
+
+        if (lexicalState.stringMode === "char") {
+          if (current === "\\") {
+            index += 2;
+            continue;
+          }
+          if (current === "'") {
+            lexicalState.stringMode = "";
+          }
+          index += 1;
+          continue;
+        }
+
+        if (current === "/" && next === "/") {
+          break;
+        }
+
+        if (current === "/" && next === "*") {
+          lexicalState.blockComment = true;
+          index += 2;
+          continue;
+        }
+
+        if (
+          current === "@" &&
+          next === '"'
+        ) {
+          lexicalState.stringMode = "verbatim";
+          index += 2;
+          continue;
+        }
+
+        if (
+          current === "$" &&
+          next === "@" &&
+          line[index + 2] === '"'
+        ) {
+          lexicalState.stringMode = "verbatim";
+          index += 3;
+          continue;
+        }
+
+        if (
+          current === "@" &&
+          next === "$" &&
+          line[index + 2] === '"'
+        ) {
+          lexicalState.stringMode = "verbatim";
+          index += 3;
+          continue;
+        }
+
+        if (
+          current === "$" &&
+          next === '"'
+        ) {
+          lexicalState.stringMode = "normal";
+          index += 2;
+          continue;
+        }
+
+        if (current === '"') {
+          lexicalState.stringMode = "normal";
+          index += 1;
+          continue;
+        }
+
+        if (current === "'") {
+          lexicalState.stringMode = "char";
+          index += 1;
+          continue;
+        }
+
+        if (current === "{") {
+          delta += 1;
+        } else if (current === "}") {
+          delta -= 1;
+        }
+
+        index += 1;
+      }
+
+      return delta;
+    };
+
+    const replaceEmitPlaceholders = (
+      code,
+      placeholderMethods
+    ) => {
+      let result = String(code || "");
+
+      for (const [placeholder, method] of
+        placeholderMethods) {
+        result = result
+          .split(placeholder)
+          .join(method);
+      }
+
+      return result;
+    };
+
+    const splitFanOutTargetAction = (
+      generatedCode,
+      placeholderMethods
+    ) => {
+      const source = String(
+        generatedCode || ""
+      );
+
+      if (
+        !source ||
+        placeholderMethods.size === 0
+      ) {
+        return {
+          immediate: source,
+          deferred: []
+        };
+      }
+
+      const lines = source.split("\n");
+      const immediateLines = [];
+      const deferred = [];
+      const lexicalState = {
+        blockComment: false,
+        stringMode: ""
+      };
+      let braceDepth = 0;
+      let unsafeNestedEmit = false;
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        let topLevelEmit = null;
+
+        if (braceDepth === 0) {
+          for (const [placeholder, method] of
+            placeholderMethods) {
+            if (trimmed === `${placeholder}();`) {
+              topLevelEmit = method;
+              break;
+            }
+          }
+        }
+
+        if (topLevelEmit) {
+          deferred.push(`${topLevelEmit}();`);
+        } else {
+          const resolvedLine =
+            replaceEmitPlaceholders(
+              line,
+              placeholderMethods
+            );
+
+          immediateLines.push(
+            resolvedLine
+          );
+
+          for (const placeholder of
+            placeholderMethods.keys()) {
+            if (line.includes(placeholder)) {
+              unsafeNestedEmit = true;
+              break;
+            }
+          }
+        }
+
+        braceDepth += csharpBraceDelta(
+          line,
+          lexicalState
+        );
+      }
+
+      if (unsafeNestedEmit) {
+        return {
+          immediate: "",
+          deferred: [
+            replaceEmitPlaceholders(
+              source,
+              placeholderMethods
+            )
+          ]
+        };
+      }
+
+      return {
+        immediate:
+          immediateLines
+            .join("\n")
+            .replace(/^\s+|\s+$/g, ""),
+        deferred
+      };
+    };
+
+    const targetAction = (
+      connection,
+      deferFanOutContinuations = false
+    ) => {
       const targetNode =
         nodeById.get(
           connection.toNode
@@ -8218,8 +8521,15 @@
         !targetNode ||
         targetNode.kind !== "operator"
       ) {
-        return "";
+        return {
+          immediate: "",
+          deferred: []
+        };
       }
+
+      const placeholderMethods =
+        new Map();
+      let placeholderSequence = 0;
 
       const emit = portId => {
         const method =
@@ -8227,15 +8537,38 @@
             `${targetNode.id}:${portId}`
           );
 
-        return method || "";
+        if (
+          !method ||
+          !deferFanOutContinuations
+        ) {
+          return method || "";
+        }
+
+        const placeholder =
+          `__RmlFanOutEmit${
+            graphCsMethodToken(
+              targetNode.id,
+              portId
+            )
+          }${placeholderSequence++}`;
+
+        placeholderMethods.set(
+          placeholder,
+          method
+        );
+
+        return placeholder;
       };
+
+      let generatedAction = "";
 
       switch (targetNode.operatorId) {
         case "resonite.impulseRelay": {
           const next = emit("out");
-          return next
+          generatedAction = next
             ? `${next}();`
             : "";
+          break;
         }
 
         case "resonite.store": {
@@ -8249,9 +8582,10 @@
           const written =
             emit("written");
 
-          return `${field} = ${value};${written
+          generatedAction = `${field} = ${value};${written
             ? `\n        ${written}();`
             : ""}`;
+          break;
         }
 
         default: {
@@ -8264,7 +8598,7 @@
             typeof generator !==
             "function"
           ) {
-            return "";
+            break;
           }
 
           try {
@@ -8285,7 +8619,8 @@
                 )
               );
 
-            return typeof generated ===
+            generatedAction =
+              typeof generated ===
               "string"
               ? generated
               : generated?.code || "";
@@ -8297,10 +8632,24 @@
                   : String(error)
               }`
             );
-            return "";
+            generatedAction = "";
           }
+          break;
         }
       }
+
+      if (!deferFanOutContinuations) {
+        return {
+          immediate:
+            generatedAction,
+          deferred: []
+        };
+      }
+
+      return splitFanOutTargetAction(
+        generatedAction,
+        placeholderMethods
+      );
     };
 
     const impulseMethods =
@@ -8342,10 +8691,33 @@
                 targetRef
               );
             });
-        const actions =
-          connections
-            .map(targetAction)
-            .filter(Boolean);
+        const fanOut =
+          connections.length > 1;
+        const actionPlans =
+          connections.map(connection =>
+            targetAction(
+              connection,
+              fanOut
+            )
+          );
+        const actions = fanOut
+          ? [
+              ...actionPlans
+                .map(plan =>
+                  plan.immediate
+                )
+                .filter(Boolean),
+              ...actionPlans
+                .flatMap(plan =>
+                  plan.deferred
+                )
+                .filter(Boolean)
+            ]
+          : actionPlans
+              .map(plan =>
+                plan.immediate
+              )
+              .filter(Boolean);
 
         return `    private static void ${item.method}()
     {
@@ -8481,9 +8853,193 @@ ${actions.length > 0
         `Display Impulse ${index + 1}`;
 
       displayStatements.push(
-        `        PublishDisplay("${graphCsEscapeString(node.id)}", "${graphCsEscapeString(label)}", "impulse", _impulseCount${token});`
+        `        PublishDisplay("${graphCsEscapeString(node.id)}", "${graphCsEscapeString(label)}", "impulse", System.Threading.Interlocked.Read(ref _impulseCount${token}));`
       );
     }
+
+    const editableCollectionNodes =
+      graph.nodes.filter(
+        node =>
+          node?.kind === "operator" &&
+          node?.operatorId ===
+            "collection.collectToList" &&
+          (
+            node?.parameters?.markAsEditable === true ||
+            node?.parameters?.markAsEditable === "true" ||
+            node?.parameters?.markAsEditable === 1
+          )
+      );
+
+    const editableCollectionNodeIds =
+      new Set(
+        editableCollectionNodes.map(node =>
+          String(node.id || "")
+        )
+      );
+
+    const directDynamicChoiceFields =
+      configurationFields.filter(item =>
+        item.dynamicChoiceSourceId &&
+        editableCollectionNodeIds.has(
+          item.dynamicChoiceSourceId
+        )
+      );
+
+    const directDynamicChoiceFieldIds =
+      new Set(
+        directDynamicChoiceFields.map(item =>
+          String(item.node.id || "")
+        )
+      );
+
+    const dynamicCollectionCases =
+      editableCollectionNodes.map(node => {
+        const token =
+          graphCsMethodToken(node.id);
+        const field =
+          `_collectedItems${token}`;
+
+        return `            case "${graphCsEscapeString(node.id)}":
+                lock (${field})
+                {
+                    return ${field}
+                        .Select(item => FormatValue(item))
+                        .Where(value =>
+                            !string.IsNullOrWhiteSpace(value) &&
+                            !string.Equals(
+                                value,
+                                "Runtime value unavailable",
+                                StringComparison.Ordinal))
+                        .ToArray();
+                }`;
+      });
+
+    const dynamicCollectionPublishStatements =
+      editableCollectionNodes.map(
+        node => {
+          const token =
+            graphCsMethodToken(node.id);
+          const field =
+            `_collectedItems${token}`;
+          const label =
+            String(
+              node?.parameters?.editableLabel ||
+              node?.label ||
+              "Dynamic Choice"
+            );
+
+          return `        PublishDynamicCollectionSource("${graphCsEscapeString(node.id)}", "${graphCsEscapeString(label)}", ${field});`;
+        }
+      );
+
+    const dynamicChoiceFieldsBySource =
+      new Map();
+
+    for (const item of
+      directDynamicChoiceFields) {
+      const sourceId =
+        item.dynamicChoiceSourceId;
+
+      if (!dynamicChoiceFieldsBySource.has(
+        sourceId
+      )) {
+        dynamicChoiceFieldsBySource.set(
+          sourceId,
+          []
+        );
+      }
+
+      dynamicChoiceFieldsBySource
+        .get(sourceId)
+        .push(item);
+    }
+
+    const dynamicChoiceRefreshCases =
+      [...dynamicChoiceFieldsBySource]
+        .map(([sourceId, items]) => {
+          const updates = items
+            .map(item => {
+              const token =
+                graphCsMethodToken(
+                  item.node.id
+                );
+              const configuredLocal =
+                `_configuredValue${token}`;
+              const resolvedLocal =
+                `_resolvedValue${token}`;
+
+              return `                {
+                    string ${configuredLocal};
+
+                    lock (_configurationStateLock)
+                    {
+                        ${configuredLocal} = ${item.configuredBacking};
+                    }
+
+                    string ${resolvedLocal} =
+                        ResolveDynamicChoiceValue(
+                            ${configuredLocal},
+                            "${graphCsEscapeString(item.dynamicChoicePreferredDefault)}",
+                            GetDynamicCollectionItemsBySourceId(
+                                "${graphCsEscapeString(sourceId)}"),
+                            ${item.dynamicChoiceAllowEmpty ? "true" : "false"});
+
+                    lock (_configurationStateLock)
+                    {
+                        ${item.backing} = ${resolvedLocal};
+                    }
+                }`;
+            })
+            .join("\n");
+
+          return `            case "${graphCsEscapeString(sourceId)}":
+${updates}
+                break;`;
+        });
+
+    const dynamicChoiceRuntimeSupportCode =
+      directDynamicChoiceFields.length > 0
+        ? `    private static string ResolveDynamicChoiceValue(
+        string current,
+        string preferredDefault,
+        IReadOnlyList<string> values,
+        bool allowEmpty)
+    {
+        values ??= Array.Empty<string>();
+
+        if (!string.IsNullOrEmpty(current) &&
+            values.Contains(current))
+        {
+            return current;
+        }
+
+        if (!string.IsNullOrEmpty(preferredDefault) &&
+            values.Contains(preferredDefault))
+        {
+            return preferredDefault;
+        }
+
+        if (!allowEmpty && values.Count > 0)
+        {
+            return values[0];
+        }
+
+        return string.Empty;
+    }
+
+    private static void RefreshDynamicChoiceSelectionsForSource(
+        string sourceNodeId)
+    {
+        switch (sourceNodeId ?? string.Empty)
+        {
+${dynamicChoiceRefreshCases.join("\n")}
+            default:
+                break;
+        }
+    }
+
+`
+        : "";
 
     const runtimeMonitorNodes = [
       ...displayNodes,
@@ -8679,19 +9235,48 @@ ${actions.length > 0
       [...usingSet].join("\n");
     const configFieldsCode =
       configurationFields
-        .map(item =>
-          `    private static ${item.csType} ${item.backing} = default!;`
-        )
+        .map(item => {
+          const fields = [
+            `    private static ${item.csType} ${item.backing} = default!;`
+          ];
+
+          if (
+            directDynamicChoiceFieldIds.has(
+              String(item.node.id || "")
+            )
+          ) {
+            fields.push(
+              `    private static ${item.csType} ${item.configuredBacking} = default!;`
+            );
+          }
+
+          return fields.join("\n");
+        })
         .join("\n");
     const setterCode =
       configurationFields
-        .map(item =>
-          `    public static void ${item.setter}(${item.csType} value)
+        .map(item => {
+          const directDynamicChoice =
+            directDynamicChoiceFieldIds.has(
+              String(item.node.id || "")
+            );
+
+          const assignment =
+            directDynamicChoice
+              ? `${item.configuredBacking} = value;`
+              : `${item.backing} = value;`;
+
+          const refresh =
+            directDynamicChoice
+              ? `\n\n        RefreshDynamicChoiceSelectionsForSource(\n            "${graphCsEscapeString(item.dynamicChoiceSourceId)}");`
+              : "";
+
+          return `    public static void ${item.setter}(${item.csType} value)
     {
         lock (_configurationStateLock)
         {
-            ${item.backing} = value;
-        }
+            ${assignment}
+        }${refresh}
     }
 
     private static ${item.csType} ${item.getter}()
@@ -8700,8 +9285,8 @@ ${actions.length > 0
         {
             return ${item.backing};
         }
-    }`
-        )
+    }`;
+        })
         .join("\n\n");
     const reactionCode =
       configurationFields
@@ -8967,9 +9552,46 @@ ${startupEmitters
 
     private static void RefreshDisplays()
     {
-${displayStatements.length > 0
-  ? displayStatements.join("\n")
-  : "        // No Display Value nodes are connected."}
+${[
+  ...displayStatements,
+  ...dynamicCollectionPublishStatements
+].length > 0
+  ? [
+      ...displayStatements,
+      ...dynamicCollectionPublishStatements
+    ].join("\n")
+  : "        // No runtime display or editable collection sources are present."}
+    }
+
+    public static IReadOnlyList<string> GetDynamicCollectionItemsBySourceId(
+        string sourceNodeId)
+    {
+        switch (sourceNodeId ?? string.Empty)
+        {
+${dynamicCollectionCases.length > 0
+  ? dynamicCollectionCases.join("\n")
+  : '            default:\n                return Array.Empty<string>();'}
+${dynamicCollectionCases.length > 0
+  ? `\n            default:\n                return Array.Empty<string>();`
+  : ""}
+        }
+    }
+
+${dynamicChoiceRuntimeSupportCode}    private static void PublishDynamicCollectionSource(
+        string sourceNodeId,
+        string label,
+        object? value)
+    {
+${directDynamicChoiceFields.length > 0
+  ? `        RefreshDynamicChoiceSelectionsForSource(
+            sourceNodeId);
+
+`
+  : ""}        PublishRuntimeBridge(
+            $"dynamic-source:{sourceNodeId}",
+            label,
+            "dynamicCollection",
+            value);
     }
 
 ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersCode ? `\n\n${extensionMembersCode}` : ""}
@@ -17834,7 +18456,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     renderGraphInspector();
   }
 
-  function createGraphNodeElement(
+  function createGraphNodeElementRmlOriginal(
     node,
     bindings,
     connectedKeys
@@ -18189,6 +18811,36 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
     return article;
   }
+
+
+  function createGraphNodeElement(...args) {
+
+    const result = createGraphNodeElementRmlOriginal(...args);
+
+    try {
+      const node = args[0];
+      if (node?.parameters?._rmlInternalDynamicMonitor === true && result instanceof HTMLElement) {
+        result.hidden = true;
+        result.dataset.rmlInternalDynamicMonitor = "true";
+      }
+
+
+      return window.RMLDynamicSettingsModes
+
+        ?.augmentConfigurationDefinition
+
+        ?.(result, args) ?? result;
+
+    } catch (error) {
+
+      console.error("Dynamic configuration-port augmentation failed.", error);
+
+      return result;
+
+    }
+
+  }
+
 
   function renderGraphNodes() {
     if (!dom.nodesHost) {
@@ -24310,4 +24962,39 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
   } else {
     initializeImmediately();
   }
+
+
+  /* Dynamic configuration-control graph host.
+   * Dynamic collection-backed settings bind directly to Collect To List.
+   * No Display Value/helper node is created in the runtime graph.
+   */
+  Object.defineProperty(window, "RMLDynamicGraphHost", {
+    value: Object.freeze({
+      version: 3,
+      getState() { return graph; },
+      isReady() {
+        return Boolean(
+          graph &&
+          Array.isArray(graph.nodes) &&
+          Array.isArray(graph.connections)
+        );
+      },
+      commit() {
+        try { if (typeof normalizeGraph === "function") normalizeGraph(); } catch {}
+        try { if (typeof normalizeState === "function") normalizeState(); } catch {}
+        try { if (typeof render === "function") render(); } catch {}
+        try { if (typeof renderGraph === "function") renderGraph(); } catch {}
+        try { if (typeof scheduleRender === "function") scheduleRender(); } catch {}
+        try { if (typeof save === "function") save(); } catch {}
+        try { if (typeof saveState === "function") saveState(); } catch {}
+        try { if (typeof persistGraph === "function") persistGraph(); } catch {}
+        try { if (typeof emitChange === "function") emitChange(); } catch {}
+        window.dispatchEvent(new CustomEvent("rml-dynamic-graph-commit"));
+      }
+    }),
+    writable: false,
+    enumerable: false,
+    configurable: true
+  });
+
 })();

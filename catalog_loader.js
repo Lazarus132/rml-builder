@@ -19,7 +19,7 @@
     document.currentScript?.src ||
     window.location.href;
   const modNodesUrl = new URL(
-    "mod_nodes.js?v=24",
+    "mod_nodes.js?v=26",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(

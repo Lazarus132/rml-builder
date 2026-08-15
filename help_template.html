@@ -198,6 +198,7 @@
               <a href="#info-wires">Sockets & wires</a>
               <a href="#info-runtime">Live runtime monitors</a>
               <a href="#info-collections">Collections & iteration</a>
+              <a href="#info-dynamic-controls">Dynamic controls</a>
               <a href="#info-editing">Graph editing</a>
               <a href="#info-harmony">Harmony projects</a>
               <a href="#info-advanced">Advanced / Raw C#</a>
@@ -259,7 +260,7 @@
                   then pack the outline. That item appears as its own dedicated output on the
                   <strong>Start</strong> node. Every graph <strong>Display Value</strong> has a second
                   <strong>RML Menu</strong> input. One Start-node display output may fan out to
-                  <strong>multiple</strong> Display Value nodes. By default, every connected runtime value
+                  <strong>multiple</strong> Display Value or Display Impulse nodes. Display Impulse has the same optional <strong>RML Menu</strong> input and contributes its live pulse counter. By default, every connected runtime value
                   stays side by side in <strong>one single RML menu row</strong>; the row does not wrap values
                   into a vertical list. Select the Display Value (RML Menu) item in Properties to set
                   their left-to-right order. If a vertical list is actually wanted, enable
@@ -309,8 +310,20 @@
                   <code>For Each.Body</code> to <code>Add</code>, and the per-item mapped
                   value to <code>Value</code>. The List output can feed Display Value,
                   another For Each node, object inputs and compatible standard .NET
-                  collection-interface inputs.
+                   collection-interface inputs. If one impulse output fans out to several
+                   direct Reset or Add targets, the generated runtime performs every direct
+                   sibling mutation first and only then follows their Reset Done / Added
+                   continuation paths. A later sibling reset therefore cannot erase values
+                   produced by an earlier continuation loop.
                 </p>
+              </section>
+
+
+              <section id="info-dynamic-controls" class="information-section">
+                <span class="information-kicker">Dynamic configuration controls</span>
+                <h3>Collection-backed controls from the runtime graph</h3>
+                <p><strong>Mark as Editable</strong> on <strong>Collect To List</strong> exposes a generated Dynamic Choice entry in the Configuration Outline node palette. It does not insert a setting merely when enabled. If it is later switched back to <strong>false</strong>, any Dynamic Choice previously materialized from that exact collection is removed from Configuration Outline automatically, because the collection is no longer an editable RML source.</p>
+                <p>Click or drag that generated palette node into the exact Outline position you want. Only then is the dynamic setting created and, after packing, exposed on the Start / Configuration node. The Dynamic Choice binds directly to the marked Collect To List source: no Display Value/helper node and no separate Labels/Stable Values source selection is required. Because that collection exists only at runtime, Properties only offers a Default selection while the matching generated mod is actually running and its runtime list is available. The Builder subscribes to that runtime channel directly, so Properties and Preview update as soon as the list arrives or changes; no unrelated click or rerender is required. Without an explicit valid default, the first runtime item is selected automatically (unless Allow empty selection is enabled). The generated Start-node string output resolves to that same effective selection as soon as the collection changes, so graph logic never remains on an empty raw configuration value while the menu already shows a valid first item. It can be wired freely into Equal, Select, Branch/flow logic, method calls, stores, or any other compatible typed runtime logic. Dynamic controls retain their exact global Configuration Outline position among ordinary settings and Runtime Display rows.</p>
               </section>
 
               <section id="info-editing" class="information-section">
@@ -499,7 +512,31 @@
             </aside>
             <article class="information-node-page-content">
               <div id="information-node-reference" class="information-node-reference" aria-live="polite"></div>
-            </article>
+            
+
+              <section id="info-dynamic-settings" class="information-section">
+                <span class="information-kicker">Dynamic settings</span>
+                <h3>Collection-backed Dynamic Choice</h3>
+                <p>
+                  A Collect To List node marked <strong>Editable</strong> contributes one
+                  generated Dynamic Choice entry to the Configuration Outline palette.
+                  The entry is only a creation option until you explicitly click or drag it.
+                </p>
+                <p>
+                  Once placed in the Outline, the control uses the marked runtime collection
+                  as its only option source and is emitted as a normal typed Start / Configuration
+                  output after packing. No Labels/Stable Values monitor selection is needed.
+                  A Default selection can only be picked while the matching generated mod is
+                  running and the runtime list is available. The direct runtime subscription
+                  refreshes Properties and Preview immediately when that list changes; otherwise
+                  the first runtime item is used automatically unless empty selection is explicitly
+                  allowed. The Start-node value follows that effective runtime selection immediately
+                  when the collection changes. The control keeps its exact global Outline position among normal settings
+                  and Runtime Display rows. No setting is auto-inserted merely by enabling Mark as
+                  Editable.
+                </p>
+              </section>
+</article>
           </div>
         </section>
       </div>

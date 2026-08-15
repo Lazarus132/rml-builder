@@ -4758,12 +4758,63 @@ function renderMetadata() {
   };
 }
 
+function editableRuntimeCollectionPaletteSources() {
+  const graph =
+    state?.extensions?.typedNodeGraph;
+
+  if (
+    !graph ||
+    !Array.isArray(graph.nodes)
+  ) {
+    return [];
+  }
+
+  const materialized =
+    new Set(
+      currentFlattenedNodes()
+        .filter(node =>
+          node?._rmlEditableCollectionSourceNodeId
+        )
+        .map(node =>
+          String(
+            node._rmlEditableCollectionSourceNodeId
+          )
+        )
+    );
+
+  return graph.nodes
+    .filter(node =>
+      node?.kind === "operator" &&
+      node?.operatorId ===
+        "collection.collectToList" &&
+      (
+        node?.parameters?.markAsEditable === true ||
+        node?.parameters?.markAsEditable === "true" ||
+        node?.parameters?.markAsEditable === 1
+      ) &&
+      !materialized.has(String(node.id))
+    )
+    .map(node => ({
+      id: String(node.id),
+      label:
+        String(
+          node?.parameters?.editableLabel ||
+          node?.label ||
+          "Dynamic Choice"
+        ).trim() ||
+        "Dynamic Choice"
+    }));
+}
+
 function renderPalette() {
   const groups =
     PALETTE_GROUP_NAMES.filter(
       group =>
         group !== "Structure"
     );
+  const dynamicSources =
+    editableRuntimeCollectionPaletteSources();
+
   elements.paletteContent.innerHTML = groups
     .map(group => {
       const definitions =
@@ -4771,7 +4822,8 @@ function renderPalette() {
           item =>
             item.group === group
         );
-      const items = definitions
+
+      const staticItems = definitions
         .map(
           item => `<button
             class="palette-item"
@@ -4784,6 +4836,32 @@ function renderPalette() {
           </button>`
         )
         .join("");
+
+      const dynamicItems =
+        group === "Core"
+          ? dynamicSources
+              .map(
+                source => `<button
+                  class="palette-item"
+                  type="button"
+                  draggable="true"
+                  data-rml-editable-collection-palette="true"
+                  data-rml-editable-collection-source="${escapeHtml(source.id)}"
+                  title="Runtime collection-backed Dynamic Choice">
+                  <span>DYN</span>
+                  <strong>${escapeHtml(`DYN · ${source.label}`)}</strong>
+                  <b>＋</b>
+                </button>`
+              )
+              .join("")
+          : "";
+
+      const count =
+        definitions.length +
+        (group === "Core"
+          ? dynamicSources.length
+          : 0);
+
       const open =
         state.collapsedPaletteGroups.includes(
           group
@@ -4798,9 +4876,9 @@ function renderPalette() {
         )}"${open}>
         <summary>
           <span>${escapeHtml(group)}</span>
-          <b>${definitions.length}</b>
+          <b>${count}</b>
         </summary>
-        <div class="palette-list">${items}</div>
+        <div class="palette-list">${staticItems}${dynamicItems}</div>
       </details>`;
     })
     .join("");
@@ -4847,20 +4925,77 @@ function renderPalette() {
       };
     });
 
-  elements.paletteContent.querySelectorAll("[data-palette]").forEach(button => {
-    button.addEventListener("click", () => {
-      addPaletteItem(button.dataset.palette, state.activeContainerId);
-    });
-    button.addEventListener("dragstart", event => {
-      beginDragScrolling(event);
-      event.dataTransfer.setData(
-        "application/x-rml-palette",
-        button.dataset.palette
+  elements.paletteContent
+    .querySelectorAll("[data-palette]")
+    .forEach(button => {
+      button.addEventListener("click", () => {
+        addPaletteItem(
+          button.dataset.palette,
+          state.activeContainerId
+        );
+      });
+      button.addEventListener(
+        "dragstart",
+        event => {
+          beginDragScrolling(event);
+          event.dataTransfer.setData(
+            "application/x-rml-palette",
+            button.dataset.palette
+          );
+          event.dataTransfer.effectAllowed =
+            "copy";
+        }
       );
-      event.dataTransfer.effectAllowed = "copy";
+      button.addEventListener(
+        "dragend",
+        finishDragInteraction
+      );
     });
-    button.addEventListener("dragend", finishDragInteraction);
-  });
+
+  /*
+   * This is intentionally part of renderPalette itself instead of a
+   * MutationObserver/late DOM injection. The Outline palette is rebuilt by
+   * app.js, so generated DYN entries must be rebuilt by the same owner.
+   */
+  elements.paletteContent
+    .querySelectorAll(
+      "[data-rml-editable-collection-source]"
+    )
+    .forEach(button => {
+      const sourceId =
+        button.dataset
+          .rmlEditableCollectionSource;
+
+      button.addEventListener(
+        "click",
+        () => {
+          window.RMLDynamicSettingsBridge
+            ?.createFromSource?.(
+              sourceId,
+              state.activeContainerId,
+              null
+            );
+        }
+      );
+
+      button.addEventListener(
+        "dragstart",
+        event => {
+          beginDragScrolling(event);
+          event.dataTransfer.setData(
+            "application/x-rml-dynamic-editable",
+            sourceId
+          );
+          event.dataTransfer.effectAllowed =
+            "copy";
+        }
+      );
+
+      button.addEventListener(
+        "dragend",
+        finishDragInteraction
+      );
+    });
 }
 
 function addPaletteItem(type, containerId) {
@@ -6879,6 +7014,10 @@ function handleDropAt(
     event.dataTransfer.getData(
       "application/x-rml-palette"
     );
+  const dynamicEditableSourceId =
+    event.dataTransfer.getData(
+      "application/x-rml-dynamic-editable"
+    );
   const nodeId =
     event.dataTransfer.getData(
       "application/x-rml-node"
@@ -6929,6 +7068,21 @@ function handleDropAt(
     state.activeContainerId =
       detached.option.id;
     renderAll();
+    return;
+  }
+
+  if (
+    dynamicEditableSourceId &&
+    window.RMLDynamicSettingsBridge &&
+    typeof window.RMLDynamicSettingsBridge
+      .createFromSource === "function"
+  ) {
+    window.RMLDynamicSettingsBridge
+      .createFromSource(
+        dynamicEditableSourceId,
+        containerId,
+        insertionIndex
+      );
     return;
   }
 
@@ -11845,12 +11999,37 @@ function ensureUniversalCustomSelect(select) {
   if (
     !(select instanceof HTMLSelectElement) ||
     select.dataset.rmlNativeSelect === "true" ||
-    select.classList.contains("rml-graph-searchable-native-select") ||
-    select._rmlUniversalCustomSelect ||
     select._rmlGeneratedCustomSelect
   ) {
     return select?._rmlUniversalCustomSelect || null;
   }
+
+  if (select._rmlUniversalCustomSelect) {
+    return select._rmlUniversalCustomSelect;
+  }
+
+  /*
+   * Recover from an interrupted/old transformation. A select that only
+   * carries the native-hidden class but has no live JS controller must not
+   * be skipped, otherwise it can permanently fall back to the browser UI.
+   */
+  if (
+    select.classList.contains(
+      "rml-graph-searchable-native-select"
+    )
+  ) {
+    select.classList.remove(
+      "rml-graph-searchable-native-select"
+    );
+    select.removeAttribute("aria-hidden");
+    select.removeAttribute("tabindex");
+  }
+
+  /*
+   * Modal selects intentionally use the same JavaScript custom selector
+   * as the rest of the builder. openPopup() mounts the popup into the
+   * currently open <dialog>, keeping it in the dialog's top layer.
+   */
 
   if (
     select.id === "generated-file-select" ||
@@ -11949,33 +12128,84 @@ function ensureUniversalCustomSelect(select) {
       Math.max(160, viewportWidth - margin * 2)
     );
 
+    const popupHost =
+      popup.parentElement;
+    const dialogHost =
+      popupHost instanceof
+        HTMLDialogElement
+        ? popupHost
+        : null;
+
+    /*
+     * A fixed-position descendant of the transformed desktop <dialog>
+     * uses that dialog as its containing block. The previous code still
+     * wrote viewport coordinates, so the dialog offset was added a second
+     * time and Path preset opened far to the right (often fully off-screen).
+     * Inside a dialog we now use explicit dialog-local absolute coordinates;
+     * outside a dialog the popup remains viewport-fixed.
+     */
+    popup.style.position =
+      dialogHost
+        ? "absolute"
+        : "fixed";
+
     popup.style.width = `${Math.round(width)}px`;
     popup.style.maxWidth =
       `${Math.max(160, viewportWidth - margin * 2)}px`;
 
-    const left = Math.min(
+    const viewportLeftPosition = Math.min(
       viewportLeft + viewportWidth - width - margin,
       Math.max(viewportLeft + margin, rect.left)
     );
-
-    popup.style.left = `${Math.round(left)}px`;
-    popup.style.top = `${Math.round(rect.bottom + gap)}px`;
 
     const measuredHeight = popup.getBoundingClientRect().height || 180;
     const below =
       viewportTop + viewportHeight - rect.bottom - margin - gap;
     const above = rect.top - viewportTop - margin - gap;
 
-    const top = measuredHeight > below && above > below
+    const viewportTopPosition = measuredHeight > below && above > below
       ? rect.top - measuredHeight - gap
       : Math.min(
           viewportTop + viewportHeight - measuredHeight - margin,
           rect.bottom + gap
         );
 
-    popup.style.top = `${Math.round(
-      Math.max(viewportTop + margin, top)
-    )}px`;
+    const clampedViewportTop =
+      Math.max(
+        viewportTop + margin,
+        viewportTopPosition
+      );
+
+    if (dialogHost) {
+      const hostRect =
+        dialogHost.getBoundingClientRect();
+      const hostPaddingLeft =
+        hostRect.left +
+        dialogHost.clientLeft;
+      const hostPaddingTop =
+        hostRect.top +
+        dialogHost.clientTop;
+
+      popup.style.left = `${Math.round(
+        viewportLeftPosition -
+        hostPaddingLeft +
+        dialogHost.scrollLeft
+      )}px`;
+
+      popup.style.top = `${Math.round(
+        clampedViewportTop -
+        hostPaddingTop +
+        dialogHost.scrollTop
+      )}px`;
+    } else {
+      popup.style.left = `${Math.round(
+        viewportLeftPosition
+      )}px`;
+
+      popup.style.top = `${Math.round(
+        clampedViewportTop
+      )}px`;
+    }
   };
 
   const closePopup = (restoreFocus = false) => {
@@ -12089,7 +12319,10 @@ function ensureUniversalCustomSelect(select) {
     wrapper.classList.add("open");
     trigger.setAttribute("aria-expanded", "true");
     popup.hidden = false;
-    document.body.appendChild(popup);
+    const popupHost =
+      trigger.closest("dialog[open]") ||
+      document.body;
+    popupHost.appendChild(popup);
     search.value = "";
     renderOptions();
     positionPopup();
@@ -17076,6 +17309,12 @@ function openExportDialog() {
     Boolean(state.exportOptions.includeCsproj);
   updateExportDialog();
 
+  const exportSelectUi =
+    ensureUniversalCustomSelect(
+      elements.exportPlatform
+    );
+  exportSelectUi?.refresh?.();
+
   if (typeof elements.exportDialog.showModal === "function") {
     elements.exportDialog.showModal();
   } else {
@@ -17745,8 +17984,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "help_template.html?v=16",
-    "help_template.js?v=16",
+    "help_template.html?v=17",
+    "help_template.js?v=17",
     "help-template",
     "RMLHelpTemplateMarkup"
   )
@@ -21775,10 +22014,18 @@ function initialize() {
     }
   );
 
+  /*
+   * Install JS selectors before the final heavy render. Export is enhanced
+   * explicitly, so it cannot depend on a later MutationObserver pass.
+   */
+  ensureUniversalCustomSelect(
+    elements.exportPlatform
+  );
+  startUniversalCustomSelectObserver();
+
   exposeBuilderBridge();
   beginTypedNodeGraphModulesTracking();
   renderAll();
-  startUniversalCustomSelectObserver();
 
   document.dispatchEvent(
     new CustomEvent(
@@ -21926,8 +22173,12 @@ function rmlRuntimeDisplayGraphBindings() {
       nodes
         .filter(node =>
           node?.kind === "operator" &&
-          node.operatorId ===
-            "resonite.displayValue"
+          (
+            node.operatorId ===
+              "resonite.displayValue" ||
+            node.operatorId ===
+              "debug.displayImpulse"
+          )
         )
         .map(node => [
           String(node.id || ""),
@@ -21980,7 +22231,12 @@ function rmlRuntimeDisplayGraphBindings() {
       label:
         String(
           monitor.label ||
-          "Display Value"
+          (
+            monitor.operatorId ===
+              "debug.displayImpulse"
+              ? "Display Impulse"
+              : "Display Value"
+          )
         ),
       connectionId:
         String(connection.id || ""),
@@ -22253,6 +22509,51 @@ function rmlRuntimeDisplayFlattenOrder(
         );
       }
     }
+  }
+
+  return result;
+}
+
+function rmlRuntimeDisplayApplyAbsoluteConfigurationOrder(
+  source
+) {
+  let result = String(source || "");
+  const ordered =
+    rmlRuntimeDisplayFlattenOrder();
+
+  for (
+    let order = 0;
+    order < ordered.length;
+    order += 1
+  ) {
+    const node = ordered[order];
+
+    if (
+      !node ||
+      rmlRuntimeDisplayIsNode(node)
+    ) {
+      continue;
+    }
+
+    const field = toPascalCase(
+      node.fieldName,
+      "Setting"
+    );
+    const escapedField =
+      field.replace(
+        /[.*+?^${}()|[\]\\]/g,
+        "\\$&"
+      );
+    const branch =
+      new RegExp(
+        `(if\\s*\\(ReferenceEquals\\(\\s*key,\\s*${escapedField}\\s*\\)\\)\\s*\\{\\s*return\\s+)\\d+(\\s*;)`,
+        "m"
+      );
+
+    result = result.replace(
+      branch,
+      `$1${order}$2`
+    );
   }
 
   return result;
@@ -23393,7 +23694,14 @@ ${refreshCalls}
    * The private per-monitor keys are intentionally omitted from the ordinary
    * configuration-order provider because ModConfigurationView filters them
    * through the runtime-display provider before normal editors are created.
+   * All ordinary keys still receive their absolute flattened Outline index,
+   * so normal settings, runtime displays and dynamic controls share one
+   * collision-free global order.
    */
+  source =
+    rmlRuntimeDisplayApplyAbsoluteConfigurationOrder(
+      source
+    );
 
   return source;
 }
@@ -24089,4 +24397,86 @@ renderSettingsPreview =
 window.setInterval(
   rmlRuntimeDisplayRenderPreviewRows,
   750
+);
+
+
+/* ================================================================
+ * Dynamic configuration-control integration host
+ * ================================================================ */
+Object.defineProperty(
+  window,
+  "RMLDynamicOutlineHost",
+  {
+    value: Object.freeze({
+      version: 2,
+      getState() {
+        return state;
+      },
+      getElements() {
+        return elements;
+      },
+      getFlatNodes() {
+        const result = [];
+        const visit = nodes => {
+          for (const node of Array.isArray(nodes) ? nodes : []) {
+            if (!node || typeof node !== "object") continue;
+            result.push(node);
+            if (node.kind === "controller") {
+              for (const option of Array.isArray(node.options) ? node.options : []) {
+                visit(option?.children);
+              }
+            }
+          }
+        };
+        visit(state.nodes);
+        return result;
+      },
+      getSelectedNode() {
+        const selected = String(state.selectedId || "");
+        return this.getFlatNodes().find(node => String(node.id || "") === selected) || null;
+      },
+      appendRootNode(node) {
+        if (!node || typeof node !== "object") return false;
+        if (!Array.isArray(state.nodes)) state.nodes = [];
+        if (this.getFlatNodes().some(value => value.id === node.id)) return false;
+        state.nodes.push(node);
+        return true;
+      },
+      removeNodeById(id) {
+        const wanted = String(id || "");
+        let removed = false;
+        const filter = nodes => (Array.isArray(nodes) ? nodes : []).filter(node => {
+          if (!node || typeof node !== "object") return false;
+          if (String(node.id || "") === wanted) {
+            removed = true;
+            return false;
+          }
+          if (node.kind === "controller") {
+            for (const option of Array.isArray(node.options) ? node.options : []) {
+              option.children = filter(option?.children);
+            }
+          }
+          return true;
+        });
+        state.nodes = filter(state.nodes);
+        if (state.selectedId === wanted) state.selectedId = null;
+        return removed;
+      },
+      commit() {
+        try { if (typeof saveState === "function") saveState(); } catch {}
+        try { if (typeof persistState === "function") persistState(); } catch {}
+        try { if (typeof render === "function") render(); } catch {}
+        try { if (typeof renderAll === "function") renderAll(); } catch {}
+        try { if (typeof renderCanvas === "function") renderCanvas(); } catch {}
+        try { if (typeof renderBuilderCanvas === "function") renderBuilderCanvas(); } catch {}
+        try { if (typeof renderInspector === "function") renderInspector(); } catch {}
+        try { if (typeof updateGeneratedOutput === "function") updateGeneratedOutput(); } catch {}
+        try { if (typeof updateCounts === "function") updateCounts(); } catch {}
+        window.dispatchEvent(new CustomEvent("rml-dynamic-outline-commit"));
+      }
+    }),
+    writable: false,
+    enumerable: false,
+    configurable: true
+  }
 );

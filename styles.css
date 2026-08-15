@@ -8948,3 +8948,71 @@ html.rml-setup-tour-active .rml-graph-scroll-layer-outline {
   text-transform: none;
   letter-spacing: 0;
 }
+
+
+/* ================================================================
+   Dynamic collection-driven settings
+   ================================================================ */
+.rml-dynamic-settings-palette {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.rml-dynamic-settings-palette > strong {
+  color: var(--accent);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.rml-preview-dynamic-settings,
+.rml-preview-dynamic-control {
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+}
+
+.rml-preview-dynamic-control {
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-deep);
+}
+
+.rml-preview-dynamic-control > select,
+.rml-preview-dynamic-control > button {
+  width: 100%;
+  min-width: 0;
+}
+
+
+/* Dynamic modes on normal Configuration Outline controls. */
+.rml-dynamic-mode-control {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+.rml-dynamic-mode-control small,
+.rml-dynamic-mode-note {
+  margin: 0;
+  color: var(--faint);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.45;
+  text-transform: none;
+}
+.rml-dynamic-mode-note {
+  padding: 9px 10px;
+  border: 1px solid rgba(164, 118, 255, 0.25);
+  border-radius: 7px;
+  background: rgba(164, 118, 255, 0.08);
+  color: #cdbcf0;
+}
+[data-rml-control-facade="button"] strong {
+  color: var(--text);
+}

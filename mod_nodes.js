@@ -4700,6 +4700,20 @@ private static T GraphCollectionItemAt<T>(
       ),
       port("count", "Count", "int")
     ],
+    parameters: [
+      pBool(
+        "markAsEditable",
+        "Mark as Editable",
+        false,
+        "Exposes one collection-backed Dynamic Choice entry in the Configuration Outline node palette. Nothing is inserted into the outline until you explicitly click or drag that generated node into place."
+      ),
+      pText(
+        "editableLabel",
+        "Configuration label",
+        "Dynamic Choice",
+        "Visible label of the generated collection-backed node in the Configuration Outline palette."
+      )
+    ],
     genericRelations: [
       {
         kind: "enumerableElement",
@@ -4766,8 +4780,16 @@ private static T GraphCollectionItemAt<T>(
       if (inputPort === "reset") {
         const resetDone =
           api.emit("resetDone");
+        const editable =
+          api.node?.parameters?.markAsEditable === true ||
+          api.node?.parameters?.markAsEditable === "true" ||
+          api.node?.parameters?.markAsEditable === 1;
+        const publish =
+          editable
+            ? `\n        PublishDynamicCollectionSource("${api.escapeString(api.node.id)}", "${api.escapeString(api.node?.parameters?.editableLabel || api.node?.label || "Dynamic Choice")}", ${field});`
+            : "";
 
-        return `${field}.Clear();${
+        return `lock (${field}) { ${field}.Clear(); }${publish}${
           resetDone
             ? `\n        ${resetDone}();`
             : ""
@@ -4791,7 +4813,16 @@ private static T GraphCollectionItemAt<T>(
           return `throw new System.InvalidOperationException("Collect To List.Value is not connected. Connect the per-item value before triggering Add.");`;
         }
 
-        return `${field}.Add(${valueInput.code});${
+        const editable =
+          api.node?.parameters?.markAsEditable === true ||
+          api.node?.parameters?.markAsEditable === "true" ||
+          api.node?.parameters?.markAsEditable === 1;
+        const publish =
+          editable
+            ? `\n        PublishDynamicCollectionSource("${api.escapeString(api.node.id)}", "${api.escapeString(api.node?.parameters?.editableLabel || api.node?.label || "Dynamic Choice")}", ${field});`
+            : "";
+
+        return `lock (${field}) { ${field}.Add(${valueInput.code}); }${publish}${
           added
             ? `\n        ${added}();`
             : ""
