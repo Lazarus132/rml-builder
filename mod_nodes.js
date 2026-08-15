@@ -1033,6 +1033,7 @@
   }
 
   const groups = [
+    ["Configuration Menu", { after: "Flow" }],
     ["Transforms", { after: "Math" }],
     ["Collections", { after: "Flow" }],
     ["Harmony", { after: "Lifecycle" }],
@@ -1051,6 +1052,512 @@
   for (const [name, options] of groups) {
     registerGroup(name, options);
   }
+
+  registerType(
+    "rmlConfigurationMenu",
+    {
+      label: "Configuration Menu",
+      short: "MENU",
+      color: "#b47cff",
+      csType:
+        "RuntimeConfigurationMenuHandle",
+      defaultCs:
+        "RuntimeConfigurationMenuHandle.Instance",
+      referenceType: true,
+      valueType: false,
+      globalGenericCandidate: false,
+      constraints: [
+        "value",
+        "reference"
+      ]
+    }
+  );
+
+  registerType(
+    "rmlConfigurationMenuItem",
+    {
+      label: "Configuration Menu Item",
+      short: "ITEM",
+      color: "#d09cff",
+      csType:
+        "RuntimeConfigurationMenuItem",
+      defaultCs:
+        "RuntimeConfigurationMenuItem.Empty",
+      referenceType: true,
+      valueType: false,
+      globalGenericCandidate: false,
+      constraints: [
+        "value",
+        "reference"
+      ]
+    }
+  );
+
+  function ensureRuntimeConfigurationMenu(
+    api
+  ) {
+    api.require(
+      "usesRuntimeConfigurationMenu"
+    );
+    api.addUsing("System.Threading");
+    api.addMember(
+      "configuration.runtimeMenu",
+      String.raw`
+internal sealed class RuntimeConfigurationMenuHandle
+{
+    private RuntimeConfigurationMenuHandle()
+    {
+    }
+
+    public static RuntimeConfigurationMenuHandle Instance { get; } =
+        new RuntimeConfigurationMenuHandle();
+}
+
+internal sealed class RuntimeConfigurationMenuItem
+{
+    private RuntimeConfigurationMenuItem(string itemId)
+    {
+        ItemId = itemId ?? string.Empty;
+    }
+
+    public string ItemId { get; }
+
+    public static RuntimeConfigurationMenuItem Empty { get; } =
+        new RuntimeConfigurationMenuItem(string.Empty);
+
+    public static RuntimeConfigurationMenuItem Create(string itemId) =>
+        new RuntimeConfigurationMenuItem(itemId);
+}
+
+private static readonly object _runtimeConfigurationMenuLock = new();
+private static readonly Dictionary<string, bool>
+    _runtimeConfigurationMenuVisibility =
+        new(StringComparer.Ordinal);
+private static readonly Dictionary<string, int>
+    _runtimeConfigurationMenuOrder =
+        new(StringComparer.Ordinal);
+private static Func<string, object?, bool, bool>?
+    _runtimeConfigurationMenuValueSetter;
+private static long _runtimeConfigurationMenuRevision;
+private static long _runtimeConfigurationValueRevision;
+
+public static long RuntimeConfigurationMenuRevision =>
+    Interlocked.Read(
+        ref _runtimeConfigurationMenuRevision);
+
+public static long RuntimeConfigurationValueRevision =>
+    Interlocked.Read(
+        ref _runtimeConfigurationValueRevision);
+
+public static void BindRuntimeConfigurationMenu(
+    Func<string, object?, bool, bool>? valueSetter)
+{
+    lock (_runtimeConfigurationMenuLock)
+    {
+        _runtimeConfigurationMenuValueSetter =
+            valueSetter;
+    }
+}
+
+public static bool TryGetRuntimeConfigurationMenuVisibility(
+    string itemId,
+    out bool visible)
+{
+    lock (_runtimeConfigurationMenuLock)
+    {
+        return _runtimeConfigurationMenuVisibility.TryGetValue(
+            itemId ?? string.Empty,
+            out visible);
+    }
+}
+
+public static bool TryGetRuntimeConfigurationMenuOrder(
+    string itemId,
+    out int order)
+{
+    lock (_runtimeConfigurationMenuLock)
+    {
+        return _runtimeConfigurationMenuOrder.TryGetValue(
+            itemId ?? string.Empty,
+            out order);
+    }
+}
+
+private static void SetRuntimeConfigurationMenuVisibility(
+    RuntimeConfigurationMenuItem item,
+    bool visible)
+{
+    if (item is null ||
+        string.IsNullOrEmpty(item.ItemId))
+    {
+        return;
+    }
+
+    bool changed;
+    lock (_runtimeConfigurationMenuLock)
+    {
+        changed =
+            !_runtimeConfigurationMenuVisibility.TryGetValue(
+                item.ItemId,
+                out bool current) ||
+            current != visible;
+
+        _runtimeConfigurationMenuVisibility[item.ItemId] =
+            visible;
+    }
+
+    if (changed)
+    {
+        Interlocked.Increment(
+            ref _runtimeConfigurationMenuRevision);
+    }
+}
+
+private static void SetRuntimeConfigurationMenuOrder(
+    RuntimeConfigurationMenuItem item,
+    int order)
+{
+    if (item is null ||
+        string.IsNullOrEmpty(item.ItemId))
+    {
+        return;
+    }
+
+    bool changed;
+    lock (_runtimeConfigurationMenuLock)
+    {
+        changed =
+            !_runtimeConfigurationMenuOrder.TryGetValue(
+                item.ItemId,
+                out int current) ||
+            current != order;
+
+        _runtimeConfigurationMenuOrder[item.ItemId] =
+            order;
+    }
+
+    if (changed)
+    {
+        Interlocked.Increment(
+            ref _runtimeConfigurationMenuRevision);
+    }
+}
+
+private static void SetRuntimeConfigurationMenuValue(
+    RuntimeConfigurationMenuItem item,
+    object? value,
+    bool save)
+{
+    if (item is null ||
+        string.IsNullOrEmpty(item.ItemId))
+    {
+        return;
+    }
+
+    Func<string, object?, bool, bool>? setter;
+    lock (_runtimeConfigurationMenuLock)
+    {
+        setter =
+            _runtimeConfigurationMenuValueSetter;
+    }
+
+    if (setter?.Invoke(
+            item.ItemId,
+            value,
+            save) == true)
+    {
+        Interlocked.Increment(
+            ref _runtimeConfigurationValueRevision);
+        Interlocked.Increment(
+            ref _runtimeConfigurationMenuRevision);
+    }
+}
+
+private static void ResetRuntimeConfigurationMenuItem(
+    RuntimeConfigurationMenuItem item)
+{
+    if (item is null ||
+        string.IsNullOrEmpty(item.ItemId))
+    {
+        return;
+    }
+
+    bool changed;
+    lock (_runtimeConfigurationMenuLock)
+    {
+        changed =
+            _runtimeConfigurationMenuVisibility.Remove(
+                item.ItemId) |
+            _runtimeConfigurationMenuOrder.Remove(
+                item.ItemId);
+    }
+
+    if (changed)
+    {
+        Interlocked.Increment(
+            ref _runtimeConfigurationMenuRevision);
+    }
+}
+
+private static void ResetRuntimeConfigurationMenu(
+    RuntimeConfigurationMenuHandle menu)
+{
+    if (menu is null)
+    {
+        return;
+    }
+
+    bool changed;
+    lock (_runtimeConfigurationMenuLock)
+    {
+        changed =
+            _runtimeConfigurationMenuVisibility.Count > 0 ||
+            _runtimeConfigurationMenuOrder.Count > 0;
+
+        _runtimeConfigurationMenuVisibility.Clear();
+        _runtimeConfigurationMenuOrder.Clear();
+    }
+
+    if (changed)
+    {
+        Interlocked.Increment(
+            ref _runtimeConfigurationMenuRevision);
+    }
+}
+`
+    );
+  }
+
+  registerNode(
+    "configuration.menuInstance",
+    {
+      title:
+        "Configuration Menu Instance",
+      group: "Configuration Menu",
+      symbol: "MENU",
+      description:
+        "Instantiates the generated RML configuration menu as a typed graph handle and exposes one stable Menu Item output for every entry in Configuration Outline. Outputs are synchronized by Outline id, so visibility, order and values can be changed by runtime logic without string-key wiring.",
+      inputs: [],
+      outputs: [
+        port(
+          "menu",
+          "Menu",
+          "rmlConfigurationMenu"
+        )
+      ],
+      width: 320,
+      codegenCollect(api) {
+        ensureRuntimeConfigurationMenu(
+          api
+        );
+      },
+      codegenExpression(api) {
+        if (api.portId === "menu") {
+          return "RuntimeConfigurationMenuHandle.Instance";
+        }
+
+        const itemId =
+          String(api.portId || "")
+            .startsWith("item-")
+            ? String(api.portId)
+                .slice("item-".length)
+            : "";
+
+        return `RuntimeConfigurationMenuItem.Create("${api.escapeString(itemId)}")`;
+      },
+      previewEvaluate({
+        portId,
+        type,
+        known
+      }) {
+        return known(
+          type,
+          portId === "menu"
+            ? {
+                kind:
+                  "configuration-menu"
+              }
+            : {
+                kind:
+                  "configuration-menu-item",
+                itemId:
+                  String(portId || "")
+                    .replace(
+                      /^item-/,
+                      ""
+                    )
+              }
+        );
+      }
+    }
+  );
+
+  registerNode(
+    "configuration.setVisibility",
+    {
+      title:
+        "Set Configuration Visibility",
+      group: "Configuration Menu",
+      symbol: "EYE",
+      description:
+        "Overrides one Configuration Outline item's runtime visibility. Visible can explicitly expose an item originally generated as internal/hidden; false hides it. Reset Configuration Item returns to the static Outline/controller rule.",
+      inputs: [
+        port("call", "Call", "impulse"),
+        port(
+          "item",
+          "Menu Item",
+          "rmlConfigurationMenuItem"
+        ),
+        port(
+          "visible",
+          "Visible",
+          "bool"
+        )
+      ],
+      outputs: [
+        port("done", "Done", "impulse")
+      ],
+      codegenCollect(api) {
+        ensureRuntimeConfigurationMenu(
+          api
+        );
+      },
+      codegenAction(api) {
+        const next = api.emit("done");
+        return `SetRuntimeConfigurationMenuVisibility(${api.input("item").code}, ${api.input("visible").code});${next ? `\n        ${next}();` : ""}`;
+      }
+    }
+  );
+
+  registerNode(
+    "configuration.setOrder",
+    {
+      title:
+        "Set Configuration Order",
+      group: "Configuration Menu",
+      symbol: "#↕",
+      description:
+        "Overrides the absolute runtime order of one Configuration Outline item. Ordinary settings, dynamic controls and runtime display rows share the same order space.",
+      inputs: [
+        port("call", "Call", "impulse"),
+        port(
+          "item",
+          "Menu Item",
+          "rmlConfigurationMenuItem"
+        ),
+        port("order", "Order", "int")
+      ],
+      outputs: [
+        port("done", "Done", "impulse")
+      ],
+      codegenCollect(api) {
+        ensureRuntimeConfigurationMenu(
+          api
+        );
+      },
+      codegenAction(api) {
+        const next = api.emit("done");
+        return `SetRuntimeConfigurationMenuOrder(${api.input("item").code}, ${api.input("order").code});${next ? `\n        ${next}();` : ""}`;
+      }
+    }
+  );
+
+  registerNode(
+    "configuration.setValue",
+    {
+      title:
+        "Set Configuration Value",
+      group: "Configuration Menu",
+      symbol: "SET",
+      description:
+        "Writes a value to the selected Configuration Outline item at runtime and refreshes the open RML menu. Save is optional: false changes the active configuration only, true also persists it. Read-only Runtime Display items reject value writes safely.",
+      inputs: [
+        port("call", "Call", "impulse"),
+        port(
+          "item",
+          "Menu Item",
+          "rmlConfigurationMenuItem"
+        ),
+        port("value", "Value", "object"),
+        port("save", "Save", "bool")
+      ],
+      outputs: [
+        port("done", "Done", "impulse")
+      ],
+      codegenCollect(api) {
+        ensureRuntimeConfigurationMenu(
+          api
+        );
+      },
+      codegenAction(api) {
+        const next = api.emit("done");
+        return `SetRuntimeConfigurationMenuValue(${api.input("item").code}, ${api.input("value").code}, ${api.input("save").code});${next ? `\n        ${next}();` : ""}`;
+      }
+    }
+  );
+
+  registerNode(
+    "configuration.resetItem",
+    {
+      title:
+        "Reset Configuration Item",
+      group: "Configuration Menu",
+      symbol: "↶1",
+      description:
+        "Removes the runtime visibility and order overrides for one menu item. Its original Configuration Outline position, hidden/internal state and Section controller rule become active again; the stored value is not changed.",
+      inputs: [
+        port("call", "Call", "impulse"),
+        port(
+          "item",
+          "Menu Item",
+          "rmlConfigurationMenuItem"
+        )
+      ],
+      outputs: [
+        port("done", "Done", "impulse")
+      ],
+      codegenCollect(api) {
+        ensureRuntimeConfigurationMenu(
+          api
+        );
+      },
+      codegenAction(api) {
+        const next = api.emit("done");
+        return `ResetRuntimeConfigurationMenuItem(${api.input("item").code});${next ? `\n        ${next}();` : ""}`;
+      }
+    }
+  );
+
+  registerNode(
+    "configuration.resetMenu",
+    {
+      title: "Reset Configuration Menu",
+      group: "Configuration Menu",
+      symbol: "↶ALL",
+      description:
+        "Clears every runtime visibility and order override in one action and restores the complete menu structure defined by Configuration Outline. Configuration values are kept.",
+      inputs: [
+        port("call", "Call", "impulse"),
+        port(
+          "menu",
+          "Menu",
+          "rmlConfigurationMenu"
+        )
+      ],
+      outputs: [
+        port("done", "Done", "impulse")
+      ],
+      codegenCollect(api) {
+        ensureRuntimeConfigurationMenu(
+          api
+        );
+      },
+      codegenAction(api) {
+        const next = api.emit("done");
+        return `ResetRuntimeConfigurationMenu(${api.input("menu").code});${next ? `\n        ${next}();` : ""}`;
+      }
+    }
+  );
 
   function ensureReflectionRuntime(api) {
     api.addUsing("System.Collections");

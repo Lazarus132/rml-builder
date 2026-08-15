@@ -2807,6 +2807,10 @@ function generateCode() {
     Boolean(
       graphContribution?.active
     );
+  const usesRuntimeConfigurationMenu =
+    graphContribution?.requirements
+      ?.usesRuntimeConfigurationMenu ===
+    true;
   const controllers = entries.filter(
     entry =>
       entry.node.kind ===
@@ -2943,6 +2947,9 @@ ${usesColorX
 
   const usingLines = [
     "using System;",
+    usesRuntimeConfigurationMenu
+      ? "using System.Globalization;"
+      : "",
     usesElements
       ? "using Elements.Core;"
       : "",
@@ -2971,9 +2978,15 @@ ${usesColorX
     .join("\n");
   const implementedInterfaces = [
     "IModConfigurationOrderProvider",
-    ...(hasControllers
+    ...(hasControllers ||
+      usesRuntimeConfigurationMenu
       ? [
           "IModConfigurationVisibilityProvider"
+        ]
+      : []),
+    ...(usesRuntimeConfigurationMenu
+      ? [
+          "IModConfigurationRuntimeMenuProvider"
         ]
       : [])
   ];
@@ -3011,6 +3024,147 @@ ${usesColorX
         _runtime${field};`;
       })
       .join("\n\n");
+
+  const runtimeMenuValueBranches =
+    usesRuntimeConfigurationMenu
+      ? entries
+          .filter(entry =>
+            entry?.node?.valueType !==
+              "runtimeDisplay"
+          )
+          .map(entry => {
+            const field = toPascalCase(
+              entry.node.fieldName,
+              "Setting"
+            );
+
+            return `        if (string.Equals(
+                itemId,
+                "${escapeCSharp(
+                  entry.node.id
+                )}",
+                StringComparison.Ordinal))
+        {
+            return SetRuntimeConfigurationValue(
+                ${field},
+                value,
+                save);
+        }`;
+          })
+          .join("\n\n")
+      : "";
+
+  const runtimeMenuValueSupport =
+    usesRuntimeConfigurationMenu
+      ? `
+    private static bool SetRuntimeConfigurationMenuValue(
+        string itemId,
+        object? value,
+        bool save)
+    {
+${runtimeMenuValueBranches}
+
+        return false;
+    }
+
+    private static bool SetRuntimeConfigurationValue(
+        ModConfigurationKey key,
+        object? value,
+        bool save)
+    {
+        try
+        {
+            Type targetType =
+                key.ValueType();
+
+            object? convertedValue =
+                ConvertRuntimeConfigurationValue(
+                    value,
+                    targetType);
+
+            _configuration.Set(
+                key,
+                convertedValue!);
+
+            if (save)
+            {
+                _configuration.Save();
+            }
+
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Msg(
+                "Runtime Configuration Menu could not set '" +
+                key.Name +
+                "': " +
+                exception.Message);
+
+            return false;
+        }
+    }
+
+    private static object? ConvertRuntimeConfigurationValue(
+        object? value,
+        Type targetType)
+    {
+        Type effectiveType =
+            Nullable.GetUnderlyingType(
+                targetType) ??
+            targetType;
+
+        if (value is null)
+        {
+            return effectiveType.IsValueType
+                ? Activator.CreateInstance(
+                    effectiveType)
+                : null;
+        }
+
+        if (effectiveType.IsInstanceOfType(
+                value))
+        {
+            return value;
+        }
+
+        if (effectiveType.IsEnum)
+        {
+            return value is string enumText
+                ? Enum.Parse(
+                    effectiveType,
+                    enumText,
+                    ignoreCase: true)
+                : Enum.ToObject(
+                    effectiveType,
+                    value);
+        }
+
+        if (effectiveType == typeof(Uri))
+        {
+            return new Uri(
+                Convert.ToString(
+                    value,
+                    CultureInfo.InvariantCulture) ??
+                string.Empty,
+                UriKind.RelativeOrAbsolute);
+        }
+
+        if (effectiveType == typeof(string))
+        {
+            return Convert.ToString(
+                       value,
+                       CultureInfo.InvariantCulture) ??
+                   string.Empty;
+        }
+
+        return Convert.ChangeType(
+            value,
+            effectiveType,
+            CultureInfo.InvariantCulture);
+    }
+`
+      : "";
 
   let runtimeBlock;
 
@@ -3216,7 +3370,7 @@ ${changedBranches}
     }
 
 `
-    : ""}${applyMethods}
+    : ""}${applyMethods}${runtimeMenuValueSupport}
 `;
   } else {
     runtimeBlock = `    public override void OnEngineInit()
@@ -3237,10 +3391,25 @@ ${changedBranches}
           "Setting"
         );
 
+        const runtimeOrder =
+          usesRuntimeConfigurationMenu
+            ? `
+            if (${graphContribution.className}.TryGetRuntimeConfigurationMenuOrder(
+                    "${escapeCSharp(
+                      entry.node.id
+                    )}",
+                    out int runtimeOrder))
+            {
+                return runtimeOrder;
+            }
+`
+            : "";
+
         return `        if (ReferenceEquals(
                 key,
                 ${field}))
         {
+${runtimeOrder}
             return ${index};
         }`;
       }
@@ -3258,7 +3427,10 @@ ${orderBranches}
 `;
 
   let visibilityBlock = "";
-  if (hasControllers) {
+  if (
+    hasControllers ||
+    usesRuntimeConfigurationMenu
+  ) {
     const controllerValues = controllers
       .map(entry => {
         const controller = entry.node;
@@ -3297,10 +3469,25 @@ ${orderBranches}
           conditionExpression(
             entry.conditions
           );
+        const runtimeVisibility =
+          usesRuntimeConfigurationMenu
+            ? `
+            if (${graphContribution.className}.TryGetRuntimeConfigurationMenuVisibility(
+                    "${escapeCSharp(
+                      entry.node.id
+                    )}",
+                    out bool runtimeVisible))
+            {
+                return runtimeVisible;
+            }
+`
+            : "";
+
         return `        if (ReferenceEquals(
                 key,
                 ${field}))
         {
+${runtimeVisibility}
             return
                 ${expression};
         }`;
@@ -3315,7 +3502,8 @@ ${orderBranches}
               "ActivePage"
             )})`
         )
-        .join(" ||\n            ");
+        .join(" ||\n            ") ||
+      "false";
     visibilityBlock = `
     public bool IsConfigurationKeyVisible(
         ModConfiguration configuration,
@@ -3338,6 +3526,64 @@ ${keyBranches}
     }
 `;
   }
+
+  const runtimeMenuProviderBlock =
+    usesRuntimeConfigurationMenu
+      ? (() => {
+          const keyVisibilityBranches =
+            entries
+              .map(entry => {
+                const field = toPascalCase(
+                  entry.node.fieldName,
+                  "Setting"
+                );
+
+                return `        if (ReferenceEquals(
+                key,
+                ${field}))
+        {
+            return ${graphContribution.className}.TryGetRuntimeConfigurationMenuVisibility(
+                "${escapeCSharp(
+                  entry.node.id
+                )}",
+                out visible);
+        }`;
+              })
+              .join("\n\n");
+
+          return `
+    public long RuntimeConfigurationMenuRevision =>
+        ${graphContribution.className}.RuntimeConfigurationMenuRevision;
+
+    public long RuntimeConfigurationValueRevision =>
+        ${graphContribution.className}.RuntimeConfigurationValueRevision;
+
+    public bool TryGetRuntimeConfigurationKeyVisibility(
+        ModConfigurationKey key,
+        out bool visible)
+    {
+${keyVisibilityBranches}
+
+        visible = false;
+        return false;
+    }
+
+    public bool TryGetRuntimeConfigurationItemVisibility(
+        string itemId,
+        out bool visible) =>
+            ${graphContribution.className}.TryGetRuntimeConfigurationMenuVisibility(
+                itemId,
+                out visible);
+
+    public bool TryGetRuntimeConfigurationItemOrder(
+        string itemId,
+        out int order) =>
+            ${graphContribution.className}.TryGetRuntimeConfigurationMenuOrder(
+                itemId,
+                out order);
+`;
+        })()
+      : "";
 
   return `${guide}${usingLines}
 
@@ -3368,7 +3614,7 @@ public sealed partial class ${className}
         )}";
 
 ${declarations}
-${runtimeBlock}${orderBlock}${visibilityBlock}}
+${runtimeBlock}${orderBlock}${visibilityBlock}${runtimeMenuProviderBlock}}
 `;
 }
 
@@ -23339,6 +23585,7 @@ ${entries.map(({ item, source }) =>
 
       return `            new ModConfigurationRuntimeDisplay
             {
+                Id = "${rmlRuntimeDisplayEscapeCSharp(item.node.id)}",
                 Name = "${rmlRuntimeDisplayEscapeCSharp(item.label)}",
                 Description = "${rmlRuntimeDisplayEscapeCSharp(item.description)}",
                 Keys =

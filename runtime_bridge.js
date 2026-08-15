@@ -1,15 +1,13 @@
 (() => {
   "use strict";
 
-  const BRIDGE_VERSION = 1;
-  const DEFAULT_PORT_FIRST = 42719;
-  const DEFAULT_PORT_LAST = 42729;
+  const BRIDGE_VERSION = 2;
+  const BRIDGE_PROTOCOL_VERSION = 1;
   const HEALTH_PATH = "/health";
   const SNAPSHOT_PATH = "/runtime/snapshot";
   const EVENTS_PATH = "/runtime/events";
   const PROBE_TIMEOUT_MS = 850;
   const SNAPSHOT_TIMEOUT_MS = 1600;
-  const RECONNECT_DELAY_MS = 1800;
   const STALE_CHECK_INTERVAL_MS = 1000;
   const ACTIVE_TIMEOUT_MS = 6500;
   const SNAPSHOT_RECONCILE_MS = 10000;
@@ -24,6 +22,11 @@
   const channels = new Map();
   let discoveredBaseUrl = "";
   let discoveryPromise = null;
+  let discoveryEnabled =
+    window.RMLResoniteApiCatalog
+      ?.catalogSource === "scanner" ||
+    window.RMLFrooxComponentCatalog
+      ?.catalogSource === "scanner";
 
   function safeLocalStorageValue(key) {
     try {
@@ -71,6 +74,10 @@
   }
 
   function scannerBaseCandidates() {
+    if (!discoveryEnabled) {
+      return [];
+    }
+
     const result = [];
     const seen = new Set();
 
@@ -100,16 +107,6 @@
     add(
       configuredCatalogUrl()
     );
-
-    for (
-      let port = DEFAULT_PORT_FIRST;
-      port <= DEFAULT_PORT_LAST;
-      port += 1
-    ) {
-      add(
-        `http://127.0.0.1:${port}`
-      );
-    }
 
     return result;
   }
@@ -180,7 +177,7 @@
       health.ok !== true ||
       Number(
         health.runtimeBridgeVersion
-      ) < BRIDGE_VERSION ||
+      ) < BRIDGE_PROTOCOL_VERSION ||
       health.runtimeBridgeReady !==
         true
     ) {
@@ -193,6 +190,10 @@
   }
 
   async function discoverScanner() {
+    if (!discoveryEnabled) {
+      return "";
+    }
+
     if (discoveredBaseUrl) {
       try {
         return await probeBaseUrl(
@@ -227,6 +228,10 @@
 
           discoveredBaseUrl =
             found;
+
+          if (!found) {
+            discoveryEnabled = false;
+          }
 
           return found;
         })
@@ -672,27 +677,32 @@
     state.reconcileTimer = 0;
   }
 
-  function scheduleReconnect(
-    state
+  function markRuntimeUnavailable(
+    state,
+    generation
   ) {
     if (
       state.disposed ||
-      state.listeners.size === 0 ||
-      state.retryTimer
+      generation !== state.generation
     ) {
       return;
     }
 
-    state.retryTimer =
-      window.setTimeout(
-        () => {
-          state.retryTimer = 0;
-          void startState(
-            state
-          );
-        },
-        RECONNECT_DELAY_MS
-      );
+    const failedBase =
+      state.scannerBaseUrl;
+
+    closeEventSource(state);
+    clearTimers(state);
+    setConnectionState(state, false);
+
+    if (
+      failedBase &&
+      failedBase === discoveredBaseUrl
+    ) {
+      discoveredBaseUrl = "";
+    }
+
+    discoveryEnabled = false;
   }
 
   function installStaleCheck(
@@ -755,6 +765,10 @@
             baseUrl,
             generation
           ).catch(() => {
+            markRuntimeUnavailable(
+              state,
+              generation
+            );
           });
         },
         Math.max(
@@ -853,21 +867,9 @@
           return;
         }
 
-        closeEventSource(
-          state
-        );
-        setConnectionState(
+        markRuntimeUnavailable(
           state,
-          false
-        );
-        installReconcile(
-          state,
-          baseUrl,
-          generation,
-          1000
-        );
-        scheduleReconnect(
-          state
+          generation
         );
       };
 
@@ -910,9 +912,6 @@
           state,
           false
         );
-        scheduleReconnect(
-          state
-        );
         return;
       }
 
@@ -932,6 +931,12 @@
         ) {
           return;
         }
+
+        markRuntimeUnavailable(
+          state,
+          generation
+        );
+        return;
       }
 
       setConnectionState(
@@ -957,9 +962,6 @@
           false
         );
         discoveredBaseUrl = "";
-        scheduleReconnect(
-          state
-        );
       }
     } finally {
       if (
@@ -1134,9 +1136,16 @@
           sourceUrl
         );
 
-      if (base) {
+      const liveScanner =
+        event.detail?.catalogSource ===
+          "scanner";
+
+      if (base && liveScanner) {
+        discoveryEnabled = true;
         discoveredBaseUrl =
           base;
+      } else {
+        return;
       }
 
       for (

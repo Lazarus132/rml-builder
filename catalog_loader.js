@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const LOADER_VERSION = 17;
+  const LOADER_VERSION = 18;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
   const CATALOG_PATH = "/resonite_api_catalog.json";
@@ -19,7 +19,7 @@
     document.currentScript?.src ||
     window.location.href;
   const modNodesUrl = new URL(
-    "mod_nodes.js?v=26",
+    "mod_nodes.js?v=27",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
@@ -254,6 +254,7 @@
   let scannerChecking = false;
   let scannerPollTimer = 0;
   let scannerCheckPromise = null;
+  let activeScannerCatalogUrl = "";
 
   function statusCatalog() {
     return (
@@ -383,6 +384,10 @@
 
     if (configured) {
       return [configured];
+    }
+
+    if (activeScannerCatalogUrl) {
+      return [activeScannerCatalogUrl];
     }
 
     const urls = [];
@@ -731,35 +736,14 @@
       );
     }
 
-    scannerChecking = true;
-    updateStatus(null, {
-      checking: true,
-      online: false
-    });
-
-    const live =
-      await tryScannerCatalog([0]);
-
-    scannerChecking = false;
-
-    if (live) {
-      scannerOnline = true;
-
-      await writeCachedLiveCatalog(
-        live.raw,
-        live.url
-      );
-
-      return installCatalog(
-        normalizeCatalog(
-          live.raw,
-          "scanner",
-          live.url
-        )
-      );
-    }
-
+    /*
+     * Offline Resonite is a normal idle state. Chromium reports every failed
+     * localhost fetch as ERR_CONNECTION_REFUSED even when the Promise is
+     * caught, so never scan the complete port range automatically. The
+     * existing catalog-status button performs discovery explicitly.
+     */
     scannerOnline = false;
+    scannerChecking = false;
     updateUnavailableStatus();
     return null;
   }
@@ -848,12 +832,38 @@
     );
   }
 
+  async function ensureApiNodesLoaded() {
+    await loadScript(
+      apiNodesUrl,
+      "api-nodes",
+      "api_nodes.js"
+    );
+
+    const factoryReady =
+      window.RMLApiNodeFactoryReady;
+
+    if (
+      factoryReady &&
+      typeof factoryReady.then ===
+        "function"
+    ) {
+      await factoryReady;
+    }
+  }
+
   function scheduleScannerStatusCheck(
     delayMs = POLL_INTERVAL_MS
   ) {
     window.clearTimeout(
       scannerPollTimer
     );
+
+    scannerPollTimer = 0;
+
+    /* Once offline, remain quietly offline until the user reconnects. */
+    if (!scannerOnline) {
+      return;
+    }
 
     scannerPollTimer =
       window.setTimeout(
@@ -904,6 +914,7 @@
 
         if (!live) {
           scannerOnline = false;
+          activeScannerCatalogUrl = "";
           updateStatus(
             statusCatalog(),
             {
@@ -915,6 +926,8 @@
         }
 
         scannerOnline = true;
+        activeScannerCatalogUrl =
+          live.url;
 
         const normalized =
           normalizeCatalog(
@@ -929,46 +942,48 @@
           catalogIdentity(current);
         const nextIdentity =
           catalogIdentity(normalized);
-
-        if (
+        const catalogChanged =
           !current ||
           nextIdentity !==
-            currentIdentity
-        ) {
-          await writeCachedLiveCatalog(
-            live.raw,
-            live.url
-          );
+            currentIdentity;
 
-          installCatalog(normalized);
+        await writeCachedLiveCatalog(
+          live.raw,
+          live.url
+        );
 
-          if (
-            current &&
-            reloadOnChange
-          ) {
-            window.setTimeout(
-              () =>
-                window.location.reload(),
-              250
-            );
-          }
+        /*
+         * Always install the live form, even when its fingerprint matches the
+         * cache. This dispatches rml-catalog:loaded with catalogSource=scanner
+         * and is the explicit signal that permits the runtime bridge to start.
+         */
+        installCatalog(normalized);
 
-          return true;
+        if (!current) {
+          await modNodesReady;
+          await ensureApiNodesLoaded();
         }
 
-        updateStatus(
-          current,
-          {
-            checking: false,
-            online: true
-          }
-        );
+        if (
+          current &&
+          catalogChanged &&
+          reloadOnChange &&
+          window.location.protocol !==
+            "file:"
+        ) {
+          window.setTimeout(
+            () =>
+              window.location.reload(),
+            250
+          );
+        }
 
         return true;
       })()
         .catch(error => {
           scannerChecking = false;
           scannerOnline = false;
+          activeScannerCatalogUrl = "";
 
           updateStatus(
             statusCatalog(),
@@ -987,7 +1002,10 @@
         })
         .finally(() => {
           scannerCheckPromise = null;
-          scheduleScannerStatusCheck();
+
+          if (scannerOnline) {
+            scheduleScannerStatusCheck();
+          }
         });
 
     return scannerCheckPromise;
@@ -1043,35 +1061,7 @@
         );
 
         if (catalog) {
-          await loadScript(
-            apiNodesUrl,
-            "api-nodes",
-            "api_nodes.js"
-          );
-
-          /*
-           * Script load completion is NOT factory completion. api_nodes.js
-           * builds thousands of reflected definitions asynchronously and
-           * yields to the browser between batches. Do not expose
-           * RMLModNodesReady until every API node and port is registered.
-           */
-          const factoryReady =
-            window.RMLApiNodeFactoryReady;
-
-          if (
-            factoryReady &&
-            typeof factoryReady.then ===
-              "function"
-          ) {
-            const report =
-              await factoryReady;
-
-            if (!report) {
-              console.warn(
-                "RML API node factory completed without a report."
-              );
-            }
-          }
+          await ensureApiNodesLoaded();
         } else {
           console.info(
             "RML API catalog nodes are disabled until a live or cached catalog is available."
@@ -1113,11 +1103,6 @@
   catalogReady
     .then(() => {
       installManualScannerRefresh();
-
-      void synchronizeScannerStatus({
-        showChecking: true,
-        reloadOnChange: true
-      });
     })
     .catch(() => {});
 

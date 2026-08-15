@@ -2,7 +2,7 @@
   "use strict";
 
   const EXTENSION_NAME = "typedNodeGraph";
-  const GRAPH_SCHEMA_VERSION = 18;
+  const GRAPH_SCHEMA_VERSION = 19;
   const GRAPH_STAGE_WIDTH = 5200;
   const GRAPH_STAGE_HEIGHT = 3400;
   const GRAPH_MIN_ZOOM = 0.005;
@@ -3172,6 +3172,77 @@
     };
   }
 
+  function configurationMenuDefinition() {
+    const registered =
+      OPERATOR_DEFINITIONS[
+        "configuration.menuInstance"
+      ] || {};
+    const snapshot =
+      graph.configSnapshot ||
+      snapshotFromBuilder();
+    const outputs = [
+      ...(Array.isArray(
+        registered.outputs
+      )
+        ? registered.outputs.filter(
+            output =>
+              output?.id === "menu"
+          )
+        : [])
+    ];
+
+    flattenConfiguration(
+      snapshot.nodes || []
+    ).forEach((entry, index) => {
+      const node = entry.node;
+      const path =
+        entry.path.length > 0
+          ? entry.path.join(" / ")
+          : "Always visible";
+
+      outputs.push(
+        port(
+          `item-${node.id}`,
+          node.fieldName ||
+            node.keyName ||
+            `Item ${index + 1}`,
+          "rmlConfigurationMenuItem",
+          {
+            detail:
+              `${path} · Runtime menu item · ${
+                node.keyName ||
+                node.fieldName ||
+                node.id
+              }`,
+            sourceNodeId: node.id,
+            sourceKeyName:
+              node.keyName || "",
+            defaultOrder: index,
+            readOnly:
+              node.valueType ===
+              "runtimeDisplay"
+          }
+        )
+      );
+    });
+
+    return {
+      ...registered,
+      title:
+        registered.title ||
+        "Configuration Menu Instance",
+      group:
+        registered.group ||
+        "Configuration Menu",
+      inputs: [],
+      outputs,
+      width: Math.max(
+        300,
+        Number(registered.width) || 0
+      )
+    };
+  }
+
   function isConfigurationReactionConnection(
     fromRef,
     toRef
@@ -3191,6 +3262,13 @@
   function nodeDefinition(node) {
     if (node.kind === "configuration") {
       return configurationDefinition();
+    }
+
+    if (
+      node.operatorId ===
+        "configuration.menuInstance"
+    ) {
+      return configurationMenuDefinition();
     }
 
     const definition =
@@ -7261,7 +7339,8 @@
       usesElements: false,
       usesRenderiteShared: false,
       allowUnsafeBlocks: false,
-      useWindowsForms: false
+      useWindowsForms: false,
+      usesRuntimeConfigurationMenu: false
     };
 
     const addNamedBlock = (
@@ -10222,7 +10301,12 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       syncStatements,
       reactionStatements,
       initializeStatement:
-        `${graphClassName}.Initialize(message => Msg(message));`,
+        `${graphClassName}.Initialize(message => Msg(message));${
+          extensionRequirements
+            .usesRuntimeConfigurationMenu
+            ? `\n${graphClassName}.BindRuntimeConfigurationMenu(SetRuntimeConfigurationMenuValue);`
+            : ""
+        }`,
       onEngineInitializedStatement:
         `${graphClassName}.OnEngineInit();`,
       onConfigurationSynchronizedStatement:
@@ -10235,6 +10319,9 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           extensionRequirements.allowUnsafeBlocks,
         useWindowsForms:
           extensionRequirements.useWindowsForms,
+        usesRuntimeConfigurationMenu:
+          extensionRequirements
+            .usesRuntimeConfigurationMenu,
         references:
           [...extensionReferences.values()],
         packageReferences:
