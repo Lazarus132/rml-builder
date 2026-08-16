@@ -1,7 +1,9 @@
 (() => {
   "use strict";
 
-  const VERSION = 6;
+  const VERSION = 8;
+  const IMPULSE_BUTTON_VALUE_TYPE =
+    "button";
   const KINDS = Object.freeze({
     choice: "choice",
     action: "action",
@@ -146,6 +148,26 @@
     return node;
   }
 
+  function normalizeImpulseButton(node) {
+    if (
+      node?.kind !== "setting" ||
+      node.valueType !==
+        IMPULSE_BUTTON_VALUE_TYPE
+    ) {
+      return node;
+    }
+
+    node.defaultValue = "";
+    node.buttonLabel =
+      String(
+        node.buttonLabel || "Run"
+      ).trim() || "Run";
+    node.validatorMode = "none";
+    node.useSlider = false;
+    node.reaction = "stored";
+    return node;
+  }
+
   function ensureCompanions(node, parent) {
     normalizeControl(node);
     const array = Array.isArray(parent) ? parent : activeNodeArray();
@@ -203,6 +225,10 @@
       if (entry.node.dynamicSettingKind) {
         ensureCompanions(entry.node, entry.parent);
       }
+
+      normalizeImpulseButton(
+        entry.node
+      );
     }
   }
 
@@ -1496,7 +1522,14 @@
   function generatedControlNodes() {
     return allNodes()
       .map(x => x.node)
-      .filter(node => node.dynamicSettingKind);
+      .filter(node =>
+        node.dynamicSettingKind ||
+        (
+          node?.kind === "setting" &&
+          node.valueType ===
+            IMPULSE_BUTTON_VALUE_TYPE
+        )
+      );
   }
 
   function configurationOutlineOrder(
@@ -1547,7 +1580,14 @@
   function dynamicProviderSource() {
     const controls = generatedControlNodes();
     if (!controls.length) return "";
-    const graphClass = `${String(state?.metadata?.className || "YourMod")}NodeGraph`;
+    const ownerClass = sanitizeIdentifier(
+      state?.metadata?.className,
+      "YourMod"
+    );
+    const graphClass = `${toPascalCase(
+      state?.metadata?.className,
+      "YourMod"
+    )}NodeGraph`;
     const entries = [];
 
     controls.forEach(node => {
@@ -1559,6 +1599,29 @@
         configurationOutlineOrder(
           node
         );
+      const baseCommon = [
+        `Id = ${csString(node.id)}`,
+        `Name = ${csString(node.keyName || node.fieldName || "Dynamic setting")}`,
+        `Description = ${csString(node.description || "")}`,
+        `ConfigurationKey = ${field}`,
+        `Order = ${order}`,
+        `DefaultVisible = ${
+          node.valueType ===
+            IMPULSE_BUTTON_VALUE_TYPE &&
+          node.hidden === true
+            ? "false"
+            : "true"
+        }`
+      ];
+
+      if (
+        node.valueType ===
+        IMPULSE_BUTTON_VALUE_TYPE
+      ) {
+        entries.push(`new ModConfigurationImpulseButton\n            {\n                ${baseCommon.join(",\n                ")},\n                ButtonLabel = ${csString(node.buttonLabel || "Run")},\n                Invoke = () => RmlInvokeConfigurationButton(${csString(node.id)})\n            }`);
+        return;
+      }
+
       const labels = csString(node.dynamicLabelMonitorId || "");
       const values = csString(node.dynamicValueMonitorId || "");
       const sourceId =
@@ -1571,11 +1634,7 @@
           node._rmlEditableCollectionSourceNodeId
         );
       const common = [
-        `Id = ${csString(node.id)}`,
-        `Name = ${csString(node.keyName || node.fieldName || "Dynamic setting")}`,
-        `Description = ${csString(node.description || "")}`,
-        `ConfigurationKey = ${field}`,
-        `Order = ${order}`,
+        ...baseCommon,
         directSource
           ? `GetLabels = () => ${graphClass}.GetDynamicCollectionItemsBySourceId(${sourceId})`
           : `GetLabels = () => RmlDynamicItems(${graphClass}.GetDisplayTextByMonitorId(${labels}, string.Empty))`,
@@ -1625,7 +1684,7 @@
       }
     });
 
-    return `\n    // RML_DYNAMIC_SETTINGS_COLLECTIONS_V1\n    public System.Collections.Generic.IReadOnlyList<ModConfigurationDynamicControl>\n        GetDynamicSettings()\n    {\n        return new ModConfigurationDynamicControl[]\n        {\n            ${entries.join(",\n            ")}\n        };\n    }\n\n    private static System.Collections.Generic.IReadOnlyList<string>\n        RmlDynamicItems(string text)\n    {\n        return (text ?? string.Empty)\n            .Replace("\\r\\n", "\\n", System.StringComparison.Ordinal)\n            .Replace('\\r', '\\n')\n            .Split('\\n', System.StringSplitOptions.None)\n            .Where(value =>\n                !string.IsNullOrWhiteSpace(value) &&\n                !string.Equals(value, "Runtime value unavailable", System.StringComparison.Ordinal))\n            .ToArray();\n    }\n\n    private static string\n        RmlDynamicSelectedValue(\n            string current,\n            string preferredDefault,\n            System.Collections.Generic.IReadOnlyList<string> values,\n            bool allowEmpty)\n    {\n        values ??= System.Array.Empty<string>();\n\n        if (!string.IsNullOrEmpty(current) && values.Contains(current))\n            return current;\n\n        if (!string.IsNullOrEmpty(preferredDefault) && values.Contains(preferredDefault))\n            return preferredDefault;\n\n        if (!allowEmpty && values.Count > 0)\n            return values[0];\n\n        return string.Empty;\n    }\n\n    private static System.Collections.Generic.IReadOnlyList<bool>\n        RmlDynamicBools(string text)\n    {\n        return RmlDynamicItems(text)\n            .Select(value =>\n                string.Equals(value, "true", System.StringComparison.OrdinalIgnoreCase) ||\n                string.Equals(value, "1", System.StringComparison.OrdinalIgnoreCase) ||\n                string.Equals(value, "yes", System.StringComparison.OrdinalIgnoreCase) ||\n                string.Equals(value, "on", System.StringComparison.OrdinalIgnoreCase))\n            .ToArray();\n    }\n`;
+    return `\n    // RML_DYNAMIC_SETTINGS_COLLECTIONS_V1\n    public System.Collections.Generic.IReadOnlyList<ModConfigurationDynamicControl>\n        GetDynamicSettings()\n    {\n        return new ModConfigurationDynamicControl[]\n        {\n            ${entries.join(",\n            ")}\n        };\n    }\n\n    private static void\n        RmlInvokeConfigurationButton(string itemId)\n    {\n        System.Type ownerType = typeof(${ownerClass});\n        string graphTypeName = string.IsNullOrEmpty(ownerType.Namespace)\n            ? ${csString(graphClass)}\n            : ownerType.Namespace + ${csString(`.${graphClass}`)};\n        System.Type? graphType = ownerType.Assembly.GetType(\n            graphTypeName,\n            throwOnError: false,\n            ignoreCase: false);\n        System.Reflection.MethodInfo? trigger = graphType?.GetMethod(\n            "TriggerConfigurationButton",\n            System.Reflection.BindingFlags.Public |\n                System.Reflection.BindingFlags.Static,\n            binder: null,\n            types: new[] { typeof(string) },\n            modifiers: null);\n\n        if (trigger == null)\n        {\n            Msg(\n                "Configuration button '" + itemId +\n                "' cannot reach the runtime graph. Pack the Configuration " +\n                "Outline into Node again and rebuild the mod.");\n            return;\n        }\n\n        object? accepted = trigger.Invoke(\n            null,\n            new object?[] { itemId });\n\n        if (accepted is bool wasAccepted && !wasAccepted)\n        {\n            Msg(\n                "Configuration button '" + itemId +\n                "' is not present in the packed runtime graph. Pack into " +\n                "Node again and rebuild the mod.");\n        }\n    }\n\n    private static System.Collections.Generic.IReadOnlyList<string>\n        RmlDynamicItems(string text)\n    {\n        return (text ?? string.Empty)\n            .Replace("\\r\\n", "\\n", System.StringComparison.Ordinal)\n            .Replace('\\r', '\\n')\n            .Split('\\n', System.StringSplitOptions.None)\n            .Where(value =>\n                !string.IsNullOrWhiteSpace(value) &&\n                !string.Equals(value, "Runtime value unavailable", System.StringComparison.Ordinal))\n            .ToArray();\n    }\n\n    private static string\n        RmlDynamicSelectedValue(\n            string current,\n            string preferredDefault,\n            System.Collections.Generic.IReadOnlyList<string> values,\n            bool allowEmpty)\n    {\n        values ??= System.Array.Empty<string>();\n\n        if (!string.IsNullOrEmpty(current) && values.Contains(current))\n            return current;\n\n        if (!string.IsNullOrEmpty(preferredDefault) && values.Contains(preferredDefault))\n            return preferredDefault;\n\n        if (!allowEmpty && values.Count > 0)\n            return values[0];\n\n        return string.Empty;\n    }\n\n    private static System.Collections.Generic.IReadOnlyList<bool>\n        RmlDynamicBools(string text)\n    {\n        return RmlDynamicItems(text)\n            .Select(value =>\n                string.Equals(value, "true", System.StringComparison.OrdinalIgnoreCase) ||\n                string.Equals(value, "1", System.StringComparison.OrdinalIgnoreCase) ||\n                string.Equals(value, "yes", System.StringComparison.OrdinalIgnoreCase) ||\n                string.Equals(value, "on", System.StringComparison.OrdinalIgnoreCase))\n            .ToArray();\n    }\n`;
   }
 
   function injectDynamicProvider(code) {

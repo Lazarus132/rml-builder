@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const FACTORY_VERSION = 6;
+  const FACTORY_VERSION = 7;
   const ADVANCED_GROUP = "Advanced / Raw C#";
   const API_GROUPS = Object.freeze({
     types: "API · Types & Enums",
@@ -1033,9 +1033,10 @@
           if (!direct) ensureApiReflectionRuntime(api);
         },
         codegenAction(api) {
-          return direct
+          const action = direct
             ? directConstructorAction(api, ownerCs, parameters)
             : reflectiveConstructorAction(api, ownerCs, parameters);
+          return actionWithDoneImpulse(api, action);
         },
         codegenExpression(api) {
           return actionOutputExpression(api, {
@@ -1132,9 +1133,10 @@
           if (!direct) ensureApiReflectionRuntime(api);
         },
         codegenAction(api) {
-          return direct
+          const action = direct
             ? directMethodAction(api, ownerCs, method, parameters, isVoid)
             : reflectiveMethodAction(api, ownerCs, method, parameters, isVoid);
+          return actionWithDoneImpulse(api, action);
         },
         codegenExpression(api) {
           return actionOutputExpression(api, {
@@ -1214,7 +1216,8 @@
         codegenAction(api) {
           const fields = actionFieldNames(api);
           const access = propertyAccessExpression(api, ownerCs, property, indexes);
-          return `try\n{\n    ${access} = ${api.input("value").code};\n    ${fields.success} = true;\n    ${fields.exception} = null;\n}\ncatch (System.Exception exception)\n{\n    ${fields.success} = false;\n    ${fields.exception} = exception;\n}`;
+          const action = `try\n{\n    ${access} = ${api.input("value").code};\n    ${fields.success} = true;\n    ${fields.exception} = null;\n}\ncatch (System.Exception exception)\n{\n    ${fields.success} = false;\n    ${fields.exception} = exception;\n}`;
+          return actionWithDoneImpulse(api, action);
         },
         codegenExpression(api) {
           return actionOutputExpression(api, { isVoid: true, outParameters: [] });
@@ -1283,7 +1286,8 @@
           const host = field.isStatic
             ? ownerCs
             : `(${api.input("target").code})`;
-          return `try\n{\n    ${host}.${escapeCSharpIdentifier(field.name)} = ${api.input("value").code};\n    ${fields.success} = true;\n    ${fields.exception} = null;\n}\ncatch (System.Exception exception)\n{\n    ${fields.success} = false;\n    ${fields.exception} = exception;\n}`;
+          const action = `try\n{\n    ${host}.${escapeCSharpIdentifier(field.name)} = ${api.input("value").code};\n    ${fields.success} = true;\n    ${fields.exception} = null;\n}\ncatch (System.Exception exception)\n{\n    ${fields.success} = false;\n    ${fields.exception} = exception;\n}`;
+          return actionWithDoneImpulse(api, action);
         },
         codegenExpression(api) {
           return actionOutputExpression(api, { isVoid: true, outParameters: [] });
@@ -1364,6 +1368,15 @@
             : ""
         }
       );
+    }
+
+    function actionWithDoneImpulse(api, action) {
+      const done = api.emit("done");
+      return `${String(action || "").trimEnd()}${
+        done
+          ? `\n${done}();`
+          : ""
+      }`;
     }
 
     function graphTypeFor(typeName) {

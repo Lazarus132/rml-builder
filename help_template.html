@@ -93,6 +93,12 @@
                   the root. Empty builder and inspector areas intentionally contain
                   no instructional text so the workspace stays as large as possible.
                 </p>
+                <p>
+                  <strong>Button (Impulse)</strong> creates a real RML mod-menu
+                  button. Its menu label and button text are editable independently.
+                  After packing, the matching Start / Configuration output is a direct
+                  Impulse and can connect to every compatible impulse input.
+                </p>
               </section>
 
               <section id="info-sections" class="information-section">
@@ -147,6 +153,11 @@
                   Preview changes remain session-local until applied or saved. The Full
                   Color Picker keeps its profile and strength behavior. The adaptive
                   color-picker fit script is loaded only on viewports that need it.
+                </p>
+                <p>
+                  Pressing an Outline Button in Preview only shows a local pulse count.
+                  It never invokes the generated graph, changes the running mod or sends
+                  anything to Resonite.
                 </p>
               </section>
 
@@ -224,12 +235,18 @@
                   <span><b>▶</b> Startup</span>
                   <span><b>■</b> Saved</span>
                   <span><b>◆</b> Startup + saved</span>
+                  <span><b>⚡</b> Button press impulse</span>
                 </div>
                 <p>
                   Wire colors represent value types. Startup and Saved configuration
                   sockets can connect to matching value inputs and impulse inputs;
                   Stored sockets remain value-only. Incompatible sockets are disabled
                   while a connection is being created.
+                </p>
+                <p>
+                  A Button socket is already an Impulse source: each press in the RML
+                  configuration page emits exactly one pulse. It does not depend on Save
+                  Settings and does not use Startup/Saved reaction modes.
                 </p>
                 <p>
                   Dropping an output wire on empty graph space creates a monitor.
@@ -513,6 +530,19 @@
             <article class="information-node-page-content">
               <div id="information-node-reference" class="information-node-reference" aria-live="polite"></div>
             
+
+              <section id="info-outline-buttons" class="information-section">
+                <span class="information-kicker">Start / Configuration</span>
+                <h3>Outline Button impulse outputs</h3>
+                <p>
+                  Every <strong>Button (Impulse)</strong> placed in Configuration
+                  Outline becomes one stable direct Impulse output on the packed Start
+                  node. Connect it to Branch, Sequence, method calls, stores, runtime
+                  menu actions or any other impulse input. The generated RML button
+                  invokes that exact output once per press. Visibility and absolute
+                  order remain controllable through the Configuration Menu nodes.
+                </p>
+              </section>
 
               <section id="info-dynamic-settings" class="information-section">
                 <span class="information-kicker">Dynamic settings</span>

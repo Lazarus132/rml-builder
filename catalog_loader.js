@@ -23,7 +23,7 @@
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=8",
+    "api_nodes.js?v=9",
     scriptUrl
   ).href;
 

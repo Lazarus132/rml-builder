@@ -3074,6 +3074,13 @@
   function configurationValueType(node) {
     if (
       node?.kind === "setting" &&
+      node.valueType === "button"
+    ) {
+      return "impulse";
+    }
+
+    if (
+      node?.kind === "setting" &&
       node.valueType === "runtimeDisplay"
     ) {
       return "rmlDisplaySlot";
@@ -3127,7 +3134,9 @@
           configurationValueType(node),
           {
             reaction:
-              node.valueType === "runtimeDisplay"
+              node.valueType === "button"
+                ? undefined
+                : node.valueType === "runtimeDisplay"
                 ? "stored"
                 : RUNTIME_BEHAVIORS[
                     node.reaction
@@ -3135,7 +3144,13 @@
                     ? node.reaction
                     : "stored",
             detail:
-              node.valueType === "runtimeDisplay"
+              node.valueType === "button"
+                ? `${path} · RML menu button · direct Impulse on every press · ${
+                    node.buttonLabel ||
+                    node.keyName ||
+                    "Run"
+                  }`
+                : node.valueType === "runtimeDisplay"
                 ? `${path} · RML menu display binding · ${
                     node.keyName ||
                     "runtime display"
@@ -3165,7 +3180,7 @@
       group: "Packed Configuration",
       symbol: "§",
       description:
-        "Each configuration key is exposed exactly once as a typed reactive output. Connect it to value inputs to read the current value; Startup/Saved sockets can also connect directly to impulse inputs.",
+        "Each configuration item is exposed exactly once. Values stay typed and reactive; Startup/Saved sockets can trigger impulses, while Button items are direct Impulse outputs that fire once per RML menu press.",
       inputs: [],
       outputs,
       width: 280
@@ -3220,7 +3235,9 @@
             defaultOrder: index,
             readOnly:
               node.valueType ===
-              "runtimeDisplay"
+                "runtimeDisplay" ||
+              node.valueType ===
+                "button"
           }
         )
       );
@@ -3251,8 +3268,12 @@
       fromRef?.direction === "output" &&
       fromRef.node?.kind ===
         "configuration" &&
-      runtimeBehaviorEmitsImpulse(
-        fromRef.spec?.reaction
+      (
+        fromRef.spec?.type ===
+          "impulse" ||
+        runtimeBehaviorEmitsImpulse(
+          fromRef.spec?.reaction
+        )
       ) &&
       toRef?.direction === "input" &&
       toRef.spec?.type === "impulse"
@@ -7417,8 +7438,12 @@
     const configurationFields =
       configurationEntries
         .filter(entry =>
-          entry?.node?.valueType !==
-            "runtimeDisplay"
+          ![
+            "runtimeDisplay",
+            "button"
+          ].includes(
+            entry?.node?.valueType
+          )
         )
         .map(entry => {
         const node = entry.node;
@@ -8115,7 +8140,13 @@
                       {
                         portId,
                         type,
-                        csType,
+                        /*
+                         * Keep api.csType as the conversion helper. Passing
+                         * the resolved type under the same name overwrote
+                         * that function for extension nodes such as Get Item
+                         * At Index.
+                         */
+                        resolvedCsType: csType,
                         input
                       }
                     )
@@ -8819,6 +8850,53 @@ ${actions.length > 0
           node.kind ===
           "configuration"
       ) || null;
+    const configurationButtons =
+      configurationEntries.filter(
+        entry =>
+          entry?.node?.kind ===
+            "setting" &&
+          entry.node.valueType ===
+            "button"
+      );
+    const configurationButtonCases =
+      configurationNode
+        ? configurationButtons
+            .map(entry => {
+              const method =
+                impulseMethodByPort.get(
+                  `${configurationNode.id}:config-${entry.node.id}`
+                );
+
+              return method
+                ? `            case "${graphCsEscapeString(entry.node.id)}":
+                DispatchGraphToWorld(() =>
+                {
+                    ${method}();
+                    RefreshDisplays();
+                });
+                return true;`
+                : "";
+            })
+            .filter(Boolean)
+        : [];
+    const configurationButtonTriggerCode =
+`    /// <summary>
+    /// Emits the direct Impulse output belonging to a Configuration Outline
+    /// Button. Unknown ids return false so the caller can report a stale
+    /// packed Outline instead of silently discarding the press.
+    /// </summary>
+    public static bool TriggerConfigurationButton(
+        string itemId)
+    {
+        switch (itemId ?? string.Empty)
+        {
+${configurationButtonCases.length > 0
+  ? configurationButtonCases.join("\n")
+  : "                // No packed Configuration Outline buttons."}
+            default:
+                return false;
+        }
+    }`;
     const startupEmitters = [];
 
     if (configurationNode) {
@@ -9316,7 +9394,7 @@ ${dynamicChoiceRefreshCases.join("\n")}
       configurationFields
         .map(item => {
           const fields = [
-            `    private static ${item.csType} ${item.backing} = default!;`
+            `    private static ${item.csType} ${item.backing} = ${graphCsDefault(item.type)};`
           ];
 
           if (
@@ -9325,7 +9403,7 @@ ${dynamicChoiceRefreshCases.join("\n")}
             )
           ) {
             fields.push(
-              `    private static ${item.csType} ${item.configuredBacking} = default!;`
+              `    private static ${item.csType} ${item.configuredBacking} = ${graphCsDefault(item.type)};`
             );
           }
 
@@ -9340,10 +9418,14 @@ ${dynamicChoiceRefreshCases.join("\n")}
               String(item.node.id || "")
             );
 
+          const assignedValue =
+            item.type === "string"
+              ? "value ?? string.Empty"
+              : "value";
           const assignment =
             directDynamicChoice
-              ? `${item.configuredBacking} = value;`
-              : `${item.backing} = value;`;
+              ? `${item.configuredBacking} = ${assignedValue};`
+              : `${item.backing} = ${assignedValue};`;
 
           const refresh =
             directDynamicChoice
@@ -9517,6 +9599,8 @@ ${storeFieldsCode ? `\n${storeFieldsCode}` : ""}${extensionFieldsCode ? `\n\n${e
 ${setterCode || "    // No configuration setters."}${reactionCode ? `
 
 ${reactionCode}` : ""}
+
+${configurationButtonTriggerCode}
 
     public static void OnEngineInit()
     {

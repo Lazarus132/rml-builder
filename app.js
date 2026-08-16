@@ -38,6 +38,7 @@ const COLORX_NAMED_PREVIEWS = {
 const TYPE_DEFINITIONS = [
   { type: "bool", label: "Boolean", group: "Core", badge: "BOOL" },
   { type: "string", label: "Text", group: "Core", badge: "TXT" },
+  { type: "button", label: "Button (Impulse)", group: "Core", badge: "BTN" },
   { type: "runtimeDisplay", label: "Display Value (RML Menu)", group: "Core", badge: "LIVE" },
   { type: "Uri", label: "URL / URI", group: "Core", badge: "URI" },
   { type: "enum", label: "Normal enum", group: "Core", badge: "ENUM" },
@@ -1493,6 +1494,8 @@ function defaultForType(type) {
       return "true";
     case "string":
       return "Example";
+    case "button":
+      return "";
     case "Uri":
       return "https://example.com";
     case "int":
@@ -2187,6 +2190,8 @@ function makeSetting(type) {
   const base =
     type === "enum"
       ? "Quality"
+      : type === "button"
+        ? "ActionButton"
       : type === "Uri"
         ? "ResourceUri"
         : toPascalCase(type, "Setting");
@@ -2199,6 +2204,7 @@ function makeSetting(type) {
     keyName: toSnakeCase(fieldName),
     description: `${friendlyTypeName(type)} configuration setting.`,
     defaultValue: defaultForType(type),
+    buttonLabel: type === "button" ? "Run" : undefined,
     hidden: false,
     validatorMode: "none",
     customValidator: "",
@@ -2304,7 +2310,7 @@ function normalizeNodes(nodes) {
         ? node.validatorMode
         : "none";
 
-    return {
+    const normalized = {
       ...node,
       defaultValue:
         node.valueType === "colorX"
@@ -2318,6 +2324,20 @@ function normalizeNodes(nodes) {
           Boolean(node.useSlider)),
       validatorMode
     };
+
+    if (normalized.valueType === "button") {
+      normalized.defaultValue = "";
+      normalized.buttonLabel =
+        String(
+          normalized.buttonLabel ||
+          "Run"
+        ).trim() || "Run";
+      normalized.validatorMode = "none";
+      normalized.useSlider = false;
+      normalized.reaction = "stored";
+    }
+
+    return normalized;
   });
 }
 
@@ -2375,6 +2395,8 @@ function defaultExpression(setting) {
       return value.toLowerCase() === "false" ? "false" : "true";
     case "string":
       return `"${escapeCSharp(value)}"`;
+    case "button":
+      return "string.Empty";
     case "Uri":
       return `new Uri(\n${" ".repeat(20)}"${escapeCSharp(
         value
@@ -2467,6 +2489,7 @@ function hasOptionalArguments(setting) {
     usesSlider(setting);
 
   return (
+    setting.valueType === "button" ||
     setting.hidden ||
     setting.validatorMode !== "none" ||
     useSlider
@@ -2477,6 +2500,8 @@ function settingDeclaration(setting, path) {
   const type =
     setting.valueType === "enum"
       ? toPascalCase(setting.enumName, "SettingOption")
+      : setting.valueType === "button"
+        ? "string"
       : setting.valueType;
   const field = toPascalCase(setting.fieldName, "Setting");
   const args = [
@@ -2488,7 +2513,12 @@ function settingDeclaration(setting, path) {
     const useSlider =
       usesSlider(setting);
 
-    args.push(setting.hidden ? "true" : "false");
+    args.push(
+      setting.valueType === "button" ||
+      setting.hidden
+        ? "true"
+        : "false"
+    );
     args.push(validatorExpression(setting));
     args.push(
       useSlider
@@ -2871,10 +2901,21 @@ function generateCode() {
   const hasControllers =
     controllers.length > 0;
 
+  const runtimeCapableEntries =
+    entries.filter(
+      entry =>
+        ![
+          "runtimeDisplay",
+          "button"
+        ].includes(
+          entry?.node?.valueType
+        )
+    );
+
   const runtimeEntries =
     graphRuntimeActive
-      ? entries
-      : entries.filter(
+      ? runtimeCapableEntries
+      : runtimeCapableEntries.filter(
           entry =>
             entry.node.reaction !==
             "stored"
@@ -3029,8 +3070,12 @@ ${usesColorX
     usesRuntimeConfigurationMenu
       ? entries
           .filter(entry =>
-            entry?.node?.valueType !==
-              "runtimeDisplay"
+            ![
+              "runtimeDisplay",
+              "button"
+            ].includes(
+              entry?.node?.valueType
+            )
           )
           .map(entry => {
             const field = toPascalCase(
@@ -3188,6 +3233,20 @@ ${runtimeMenuValueBranches}
         })
         .join("\n");
 
+    const configurationSynchronizationCalls =
+      graphRuntimeActive
+        ? runtimeEntries
+            .map(entry => {
+              const field = toPascalCase(
+                entry.node.fieldName,
+                "Setting"
+              );
+
+              return `        Apply${field}();`;
+            })
+            .join("\n")
+        : "";
+
     const graphSynchronizedStatement =
       graphRuntimeActive
         ? String(
@@ -3239,7 +3298,11 @@ ${runtimeMenuValueBranches}
 
           return `        if (ReferenceEquals(
                 configurationEvent.Key,
-                ${field}))
+                ${field}) ||
+            string.Equals(
+                configurationEvent.Key?.Name,
+                ${field}.Name,
+                StringComparison.Ordinal))
         {
             ${applyCall}${reactionCall}${synchronizedCall}
             return;
@@ -3366,6 +3429,9 @@ ${observedEntries.length > 0
     ? `    private static void OnConfigurationChanged(
         ConfigurationChangedEvent configurationEvent)
     {
+${configurationSynchronizationCalls ||
+  "        // No graph configuration values require synchronization."}
+
 ${changedBranches}
     }
 
@@ -4692,6 +4758,13 @@ function sanitizeProjectNodes(
               sourceNode.enumName
             ),
           enumOptions,
+          buttonLabel:
+            valueType === "button"
+              ? projectString(
+                  sourceNode.buttonLabel,
+                  "Run"
+                )
+              : undefined,
           colorProfile:
             valueType === "colorX"
               ? normalizeColorProfile(
@@ -10820,6 +10893,40 @@ function defaultValueMarkup(node) {
 }
 
 function settingInspectorMarkup(node) {
+  if (node.valueType === "button") {
+    return `<div class="inspector-form" data-inspector-id="${escapeHtml(
+      node.id
+    )}">
+      <div class="selection-type">
+        <span>BUTTON · IMPULSE</span>
+        <button type="button" data-inspector-delete>Delete button</button>
+      </div>
+      ${fieldMarkup("C# field / impulse name", node.fieldName, "fieldName")}
+      ${fieldMarkup("Menu label", node.keyName, "keyName")}
+      ${fieldMarkup("Button text", node.buttonLabel || "Run", "buttonLabel")}
+      <label>
+        Description
+        <textarea data-field="description">${escapeHtml(
+          node.description
+        )}</textarea>
+      </label>
+      <div class="toggle-row">
+        <span>
+          <strong>Internal / hidden</strong>
+          <small>A runtime menu visibility impulse can expose it later.</small>
+        </span>
+        <input type="checkbox" data-field="hidden"${
+          node.hidden ? " checked" : ""
+        }>
+      </div>
+      <div class="inspector-note">
+        After Pack into Node, this item appears on Start / Configuration as a
+        direct Impulse output. Every click in the RML mod menu emits exactly
+        one pulse. Preview clicks remain local and never call Resonite.
+      </div>
+    </div>`;
+  }
+
   const scalarNumeric =
     isScalarNumericType(
       node.valueType
@@ -13793,6 +13900,16 @@ function previewSettingEditorMarkup(node) {
   const value =
     settingsPreviewValue(node);
 
+  if (node.valueType === "button") {
+    return `<button
+      class="rml-preview-control rml-preview-impulse-button"
+      type="button"
+      data-preview-action-button="${escapeHtml(node.id)}">
+      <span>${escapeHtml(node.buttonLabel || "Run")}</span>
+      <output data-preview-action-count="${escapeHtml(node.id)}" aria-label="Local preview presses"></output>
+    </button>`;
+  }
+
   if (node.valueType === "bool") {
     return `<label class="rml-preview-checkbox">
       <input
@@ -14011,6 +14128,8 @@ function settingsPreviewNodesMarkup(nodes) {
     rows.push(`<div class="rml-preview-setting rml-preview-setting-${escapeHtml(
       node.valueType === "bool"
         ? "bool"
+        : node.valueType === "button"
+          ? "button"
         : node.valueType === "colorX"
           ? "color"
           : "value"
@@ -15725,6 +15844,52 @@ function bindSettingsPreviewColorInteractions() {
 }
 
 function handleSettingsPreviewClick(event) {
+  const actionButton =
+    event.target.closest(
+      "[data-preview-action-button]"
+    );
+
+  if (actionButton) {
+    const nodeId =
+      actionButton.dataset
+        .previewActionButton;
+    const nextCount =
+      Number(
+        actionButton.dataset
+          .previewActionCount || 0
+      ) + 1;
+
+    actionButton.dataset
+      .previewActionCount =
+        String(nextCount);
+
+    const output =
+      actionButton.querySelector(
+        "[data-preview-action-count]"
+      );
+
+    if (output) {
+      output.value =
+        `Preview ${nextCount}`;
+      output.textContent =
+        `Preview ${nextCount}`;
+    }
+
+    actionButton.classList.remove(
+      "is-preview-pulse"
+    );
+    void actionButton.offsetWidth;
+    actionButton.classList.add(
+      "is-preview-pulse"
+    );
+
+    setSettingsPreviewStatus(
+      `Preview button pulse ${nextCount} (local only — nothing was sent to Resonite).`,
+      "success"
+    );
+    return;
+  }
+
   const enumButton =
     event.target.closest(
       "[data-preview-enum-direction]"
@@ -18254,8 +18419,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "help_template.html?v=17",
-    "help_template.js?v=17",
+    "help_template.html?v=18",
+    "help_template.js?v=18",
     "help-template",
     "RMLHelpTemplateMarkup"
   )
