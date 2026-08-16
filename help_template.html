@@ -99,6 +99,14 @@
                   After packing, the matching Start / Configuration output is a direct
                   Impulse and can connect to every compatible impulse input.
                 </p>
+                <p>
+                  <strong>Inline row</strong> is a real Outline container. Drag two or
+                  more ordinary settings, buttons, Runtime Displays or dynamic controls
+                  into it to place them side by side. Its own horizontal overflow is an
+                  automatic scroll layer, so the existing Ctrl/Command + Wheel hierarchy
+                  and Shift + Wheel horizontal scrolling work without a special mode.
+                  Select the row to choose its default horizontal or vertical orientation.
+                </p>
               </section>
 
               <section id="info-sections" class="information-section">
@@ -541,6 +549,21 @@
                   menu actions or any other impulse input. The generated RML button
                   invokes that exact output once per press. Visibility and absolute
                   order remain controllable through the Configuration Menu nodes.
+                </p>
+              </section>
+
+              <section id="info-inline-layout" class="information-section">
+                <span class="information-kicker">Configuration Menu</span>
+                <h3>Inline row and Set Configuration Layout</h3>
+                <p>
+                  Every <strong>Inline row</strong> is exposed as a stable Menu Item on
+                  <strong>Configuration Menu Instance</strong>. Connect that output to
+                  <strong>Set Configuration Layout</strong> and drive Horizontal with a
+                  Boolean to switch the open RML menu between side-by-side and stacked
+                  layout at runtime. The same row output also works with Set Visibility,
+                  Set Order and Reset Configuration Item. Rebuilding preserves unsaved
+                  editor drafts; Preview interaction remains local and never sends this
+                  layout action to Resonite.
                 </p>
               </section>
 

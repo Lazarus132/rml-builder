@@ -975,8 +975,18 @@
   const GRAPH_SEARCHABLE_LIST_THRESHOLD = 8;
   const GRAPH_PANEL_LAYOUT_STORAGE_KEY =
     "rml-node-graph-panel-layout-v1";
+  const GRAPH_PALETTE_UI_STORAGE_KEY =
+    "rml-node-graph-palette-ui-v1";
+  const GRAPH_PALETTE_CONFIG_GROUP_KEY =
+    "__packed_configuration__";
   let graphLeftPanelCollapsed = false;
   let graphRightPanelCollapsed = false;
+  let graphPaletteUiLoaded = false;
+  let graphPaletteUiPersistTimer = 0;
+  let graphPaletteUiState = {
+    scrollTop: 0,
+    groups: Object.create(null)
+  };
   let autoPanFrame = 0;
   let autoPanState = null;
   let activeInteraction = null;
@@ -3065,6 +3075,13 @@
             )
           );
         }
+      } else if (node.kind === "layoutRow") {
+        entries.push(
+          ...flattenConfiguration(
+            node.children || [],
+            path
+          )
+        );
       }
     }
 
@@ -3120,6 +3137,9 @@
       )
     ) {
       const node = entry.node;
+      if (node.kind === "layoutRow") {
+        continue;
+      }
       const path =
         entry.path.length > 0
           ? entry.path.join(" / ")
@@ -3218,14 +3238,18 @@
       outputs.push(
         port(
           `item-${node.id}`,
-          node.fieldName ||
+          node.kind === "layoutRow"
+            ? node.label || "Inline Row"
+            : node.fieldName ||
             node.keyName ||
             `Item ${index + 1}`,
           "rmlConfigurationMenuItem",
           {
             detail:
               `${path} · Runtime menu item · ${
-                node.keyName ||
+              node.kind === "layoutRow"
+                ? `${node.label || "Inline Row"} · layout group`
+                : node.keyName ||
                 node.fieldName ||
                 node.id
               }`,
@@ -3234,6 +3258,7 @@
               node.keyName || "",
             defaultOrder: index,
             readOnly:
+              node.kind === "layoutRow" ||
               node.valueType ===
                 "runtimeDisplay" ||
               node.valueType ===
@@ -12457,6 +12482,179 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     }
   }
 
+  function loadGraphPaletteUiState() {
+    if (graphPaletteUiLoaded) {
+      return;
+    }
+
+    graphPaletteUiLoaded = true;
+
+    try {
+      const stored = JSON.parse(
+        localStorage.getItem(
+          GRAPH_PALETTE_UI_STORAGE_KEY
+        ) || "{}"
+      );
+      const groups =
+        Object.create(null);
+
+      if (
+        stored.groups &&
+        typeof stored.groups === "object" &&
+        !Array.isArray(stored.groups)
+      ) {
+        for (
+          const [key, open] of
+          Object.entries(stored.groups)
+            .slice(0, 500)
+        ) {
+          if (typeof open === "boolean") {
+            groups[key] = open;
+          }
+        }
+      }
+
+      graphPaletteUiState = {
+        scrollTop: Math.max(
+          0,
+          finiteNumber(
+            stored.scrollTop,
+            0
+          )
+        ),
+        groups
+      };
+    } catch {
+      graphPaletteUiState = {
+        scrollTop: 0,
+        groups: Object.create(null)
+      };
+    }
+  }
+
+  function persistGraphPaletteUiState(
+    immediate = false
+  ) {
+    clearTimeout(
+      graphPaletteUiPersistTimer
+    );
+
+    const commit = () => {
+      graphPaletteUiPersistTimer = 0;
+
+      try {
+        localStorage.setItem(
+          GRAPH_PALETTE_UI_STORAGE_KEY,
+          JSON.stringify({
+            scrollTop:
+              graphPaletteUiState
+                .scrollTop,
+            groups:
+              graphPaletteUiState.groups
+          })
+        );
+      } catch {
+        // Palette UI persistence is optional.
+      }
+    };
+
+    if (immediate) {
+      commit();
+    } else {
+      graphPaletteUiPersistTimer =
+        window.setTimeout(
+          commit,
+          80
+        );
+    }
+  }
+
+  function captureGraphPaletteUiState() {
+    const scroll =
+      dom.paletteContent?.querySelector(
+        ".rml-graph-palette-scroll"
+      );
+
+    if (scroll) {
+      graphPaletteUiState.scrollTop =
+        Math.max(
+          0,
+          finiteNumber(
+            scroll.scrollTop,
+            0
+          )
+        );
+    }
+
+    dom.paletteContent
+      ?.querySelectorAll(
+        ".rml-graph-palette-group[data-graph-palette-group]"
+      )
+      .forEach(details => {
+        const key =
+          details.dataset
+            .graphPaletteGroup;
+
+        if (key) {
+          graphPaletteUiState
+            .groups[key] =
+              details.open;
+        }
+      });
+  }
+
+  function graphPaletteGroupOpen(
+    key,
+    defaultOpen = false
+  ) {
+    return Object.prototype
+      .hasOwnProperty.call(
+        graphPaletteUiState.groups,
+        key
+      )
+        ? graphPaletteUiState.groups[key]
+        : defaultOpen;
+  }
+
+  function configureGraphPaletteGroup(
+    details,
+    key,
+    defaultOpen = false
+  ) {
+    details.dataset.graphPaletteGroup =
+      key;
+    details.open =
+      graphPaletteGroupOpen(
+        key,
+        defaultOpen
+      );
+
+    details.addEventListener(
+      "toggle",
+      () => {
+        graphPaletteUiState.groups[key] =
+          details.open;
+        persistGraphPaletteUiState();
+      }
+    );
+  }
+
+  function restoreGraphPaletteScroll(
+    scroll
+  ) {
+    const savedScrollTop =
+      graphPaletteUiState.scrollTop;
+
+    requestAnimationFrame(() => {
+      if (!scroll.isConnected) {
+        return;
+      }
+
+      scroll.scrollTop =
+        savedScrollTop;
+    });
+  }
+
   function applyGraphPanelLayout() {
     document.body.classList.toggle(
       "rml-graph-left-collapsed",
@@ -12620,6 +12818,8 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
   }
 
   function deactivateGraphMode() {
+    captureGraphPaletteUiState();
+    persistGraphPaletteUiState();
     clearRuntimeBridgeSubscription();
     clearGraphScrollLayerSelection();
     graphScrollLayerOutline?.remove();
@@ -12757,6 +12957,9 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       return;
     }
 
+    loadGraphPaletteUiState();
+    captureGraphPaletteUiState();
+
     const previousQuery =
       dom.paletteContent.querySelector(
         ".rml-graph-palette-search input"
@@ -12814,6 +13017,21 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       document.createElement("div");
     scroll.className =
       "rml-graph-palette-scroll";
+    scroll.addEventListener(
+      "scroll",
+      () => {
+        graphPaletteUiState.scrollTop =
+          Math.max(
+            0,
+            finiteNumber(
+              scroll.scrollTop,
+              0
+            )
+          );
+        persistGraphPaletteUiState();
+      },
+      { passive: true }
+    );
 
 
 
@@ -12845,6 +13063,15 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         } ${operatorId}`
           .toLowerCase();
 
+    let entriesRendered = false;
+
+    const finishEntriesRender = () => {
+      entriesRendered = true;
+      restoreGraphPaletteScroll(
+        scroll
+      );
+    };
+
     const appendGroup = (
       group,
       entries,
@@ -12858,8 +13085,11 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         document.createElement("details");
       details.className =
         "rml-graph-palette-group";
-      details.open =
-        options.open !== false;
+      configureGraphPaletteGroup(
+        details,
+        options.key || group,
+        options.open === true
+      );
 
       const summary =
         document.createElement("summary");
@@ -12903,13 +13133,21 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     };
 
     const renderEntries = () => {
+      if (entriesRendered) {
+        captureGraphPaletteUiState();
+      }
+
       scroll.replaceChildren();
 
       const configGroup =
         document.createElement("details");
       configGroup.className =
         "rml-graph-palette-group";
-      configGroup.open = true;
+      configureGraphPaletteGroup(
+        configGroup,
+        GRAPH_PALETTE_CONFIG_GROUP_KEY,
+        true
+      );
 
       const configSummary =
         document.createElement("summary");
@@ -12998,6 +13236,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           appendMessage(
             "No node matches this search."
           );
+          finishEntriesRender();
           return;
         }
 
@@ -13026,8 +13265,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           if (entries) {
             appendGroup(
               group,
-              entries,
-              { open: true }
+              entries
             );
             grouped.delete(group);
           }
@@ -13039,8 +13277,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         ) {
           appendGroup(
             group,
-            entries,
-            { open: true }
+            entries
           );
         }
 
@@ -13053,6 +13290,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           );
         }
 
+        finishEntriesRender();
         return;
       }
 
@@ -13100,12 +13338,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
         appendGroup(
           group,
-          entries,
-          {
-            open:
-              group !== "Conversions" &&
-              group !== "Advanced / Raw C#"
-          }
+          entries
         );
 
         normalGroups.delete(group);
@@ -13121,6 +13354,8 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           { open: false }
         );
       }
+
+      finishEntriesRender();
 
     };
 
@@ -24824,7 +25059,16 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       )
     );
 
-    graph.active = false;
+    loadGraphPaletteUiState();
+
+    window.addEventListener(
+      "pagehide",
+      () => {
+        captureGraphPaletteUiState();
+        persistGraphPaletteUiState(true);
+      },
+      { capture: true }
+    );
 
     synchronizeRuntimeBridgeSubscription();
     pruneConnections();

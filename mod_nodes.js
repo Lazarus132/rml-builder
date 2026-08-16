@@ -1136,6 +1136,9 @@ private static readonly Dictionary<string, bool>
 private static readonly Dictionary<string, int>
     _runtimeConfigurationMenuOrder =
         new(StringComparer.Ordinal);
+private static readonly Dictionary<string, bool>
+    _runtimeConfigurationMenuHorizontalLayout =
+        new(StringComparer.Ordinal);
 private static Func<string, object?, bool, bool>?
     _runtimeConfigurationMenuValueSetter;
 private static long _runtimeConfigurationMenuRevision;
@@ -1180,6 +1183,18 @@ public static bool TryGetRuntimeConfigurationMenuOrder(
         return _runtimeConfigurationMenuOrder.TryGetValue(
             itemId ?? string.Empty,
             out order);
+    }
+}
+
+public static bool TryGetRuntimeConfigurationMenuHorizontalLayout(
+    string itemId,
+    out bool horizontal)
+{
+    lock (_runtimeConfigurationMenuLock)
+    {
+        return _runtimeConfigurationMenuHorizontalLayout.TryGetValue(
+            itemId ?? string.Empty,
+            out horizontal);
     }
 }
 
@@ -1243,6 +1258,36 @@ private static void SetRuntimeConfigurationMenuOrder(
     }
 }
 
+private static void SetRuntimeConfigurationMenuHorizontalLayout(
+    RuntimeConfigurationMenuItem item,
+    bool horizontal)
+{
+    if (item is null ||
+        string.IsNullOrEmpty(item.ItemId))
+    {
+        return;
+    }
+
+    bool changed;
+    lock (_runtimeConfigurationMenuLock)
+    {
+        changed =
+            !_runtimeConfigurationMenuHorizontalLayout.TryGetValue(
+                item.ItemId,
+                out bool current) ||
+            current != horizontal;
+
+        _runtimeConfigurationMenuHorizontalLayout[item.ItemId] =
+            horizontal;
+    }
+
+    if (changed)
+    {
+        Interlocked.Increment(
+            ref _runtimeConfigurationMenuRevision);
+    }
+}
+
 private static void SetRuntimeConfigurationMenuValue(
     RuntimeConfigurationMenuItem item,
     object? value,
@@ -1289,6 +1334,8 @@ private static void ResetRuntimeConfigurationMenuItem(
             _runtimeConfigurationMenuVisibility.Remove(
                 item.ItemId) |
             _runtimeConfigurationMenuOrder.Remove(
+                item.ItemId) |
+            _runtimeConfigurationMenuHorizontalLayout.Remove(
                 item.ItemId);
     }
 
@@ -1312,10 +1359,12 @@ private static void ResetRuntimeConfigurationMenu(
     {
         changed =
             _runtimeConfigurationMenuVisibility.Count > 0 ||
-            _runtimeConfigurationMenuOrder.Count > 0;
+            _runtimeConfigurationMenuOrder.Count > 0 ||
+            _runtimeConfigurationMenuHorizontalLayout.Count > 0;
 
         _runtimeConfigurationMenuVisibility.Clear();
         _runtimeConfigurationMenuOrder.Clear();
+        _runtimeConfigurationMenuHorizontalLayout.Clear();
     }
 
     if (changed)
@@ -1497,6 +1546,43 @@ private static void ResetRuntimeConfigurationMenu(
   );
 
   registerNode(
+    "configuration.setLayout",
+    {
+      title:
+        "Set Configuration Layout",
+      group: "Configuration Menu",
+      symbol: "⇄",
+      description:
+        "Switches an Inline Row between horizontal side-by-side layout and vertical stacking at runtime. Connect the row's Menu Item output from Configuration Menu Instance. The menu rebuild preserves draft values and remains compatible with visibility and order overrides.",
+      inputs: [
+        port("call", "Call", "impulse"),
+        port(
+          "item",
+          "Inline Row",
+          "rmlConfigurationMenuItem"
+        ),
+        port(
+          "horizontal",
+          "Horizontal",
+          "bool"
+        )
+      ],
+      outputs: [
+        port("done", "Done", "impulse")
+      ],
+      codegenCollect(api) {
+        ensureRuntimeConfigurationMenu(
+          api
+        );
+      },
+      codegenAction(api) {
+        const next = api.emit("done");
+        return `SetRuntimeConfigurationMenuHorizontalLayout(${api.input("item").code}, ${api.input("horizontal").code});${next ? `\n        ${next}();` : ""}`;
+      }
+    }
+  );
+
+  registerNode(
     "configuration.resetItem",
     {
       title:
@@ -1504,7 +1590,7 @@ private static void ResetRuntimeConfigurationMenu(
       group: "Configuration Menu",
       symbol: "↶1",
       description:
-        "Removes the runtime visibility and order overrides for one menu item. Its original Configuration Outline position, hidden/internal state and Section controller rule become active again; the stored value is not changed.",
+        "Removes the runtime visibility, order and Inline Row layout overrides for one menu item. Its original Configuration Outline position, orientation, hidden/internal state and Section controller rule become active again; the stored value is not changed.",
       inputs: [
         port("call", "Call", "impulse"),
         port(
@@ -1535,7 +1621,7 @@ private static void ResetRuntimeConfigurationMenu(
       group: "Configuration Menu",
       symbol: "↶ALL",
       description:
-        "Clears every runtime visibility and order override in one action and restores the complete menu structure defined by Configuration Outline. Configuration values are kept.",
+        "Clears every runtime visibility, order and Inline Row layout override in one action and restores the complete menu structure defined by Configuration Outline. Configuration values are kept.",
       inputs: [
         port("call", "Call", "impulse"),
         port(

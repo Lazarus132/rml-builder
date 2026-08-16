@@ -8,6 +8,34 @@ const PROJECT_FILE_MAX_BYTES = 5 * 1024 * 1024;
 const PROJECT_TREE_MAX_DEPTH = 32;
 const PROJECT_TREE_MAX_ITEMS = 10000;
 const ROOT_CONTAINER = "root";
+const LAYOUT_ROW_KIND = "layoutRow";
+const RML_BUILDER_BUILD_ID =
+  "palette-pointer-drag-scroll-fix-20260816-051500-v172";
+
+function exposeRmlBuilderBuildId() {
+  document.documentElement.dataset
+    .rmlBuilderBuild = RML_BUILDER_BUILD_ID;
+  Object.defineProperty(
+    window,
+    "RMLBuilderBuildId",
+    {
+      value: RML_BUILDER_BUILD_ID,
+      writable: false,
+      enumerable: true,
+      configurable: true
+    }
+  );
+}
+
+exposeRmlBuilderBuildId();
+console.info(
+  `[RML Builder] ${RML_BUILDER_BUILD_ID}`
+);
+const DEFAULT_LAYOUT_ROW_DESCRIPTION =
+  "Places its direct Configuration Outline items next to each other.";
+const OUTLINE_CONTAINER_LANE_SELECTOR =
+  ".option-lane[data-container], " +
+  ".layout-row-lane[data-container]";
 const DRAG_SCROLL_VISIBILITY_PADDING = 8;
 const DRAG_SCROLL_MAX_SPEED = 22;
 const DRAG_SCROLL_VISIBILITY_MAX_SPEED = 48;
@@ -265,6 +293,18 @@ let nodePointerPendingCard = null;
 let nodePointerPendingId = null;
 let nodePointerPendingStartX = 0;
 let nodePointerPendingStartY = 0;
+let palettePointerDragActive = false;
+let palettePointerId = null;
+let palettePointerX = 0;
+let palettePointerY = 0;
+let palettePointerGhost = null;
+let palettePointerSourceButton = null;
+let palettePointerPayload = null;
+let palettePointerPendingButton = null;
+let palettePointerPendingPayload = null;
+let palettePointerPendingId = null;
+let palettePointerPendingStartX = 0;
+let palettePointerPendingStartY = 0;
 let nodeWheelTargetHost = null;
 let nodeWheelTargetContainerId = null;
 let nodeWheelDelta = 0;
@@ -276,8 +316,13 @@ let optionPointerQueuedY = 0;
 let nodePointerVisualFrame = 0;
 let nodePointerQueuedX = 0;
 let nodePointerQueuedY = 0;
+let palettePointerVisualFrame = 0;
+let palettePointerQueuedX = 0;
+let palettePointerQueuedY = 0;
 let suppressNodeClickId = null;
 let suppressNodeClickUntil = 0;
+let suppressPaletteClickButton = null;
+let suppressPaletteClickUntil = 0;
 let rootCanvasInteractionController = null;
 
 let typedNodeGraphModulesState = "pending";
@@ -379,6 +424,28 @@ function scheduleNodePointerTargetUpdate(
       updateNodePointerTarget(
         nodePointerQueuedX,
         nodePointerQueuedY
+      );
+    });
+}
+
+function schedulePalettePointerTargetUpdate(
+  clientX,
+  clientY
+) {
+  palettePointerQueuedX = clientX;
+  palettePointerQueuedY = clientY;
+
+  if (palettePointerVisualFrame) {
+    return;
+  }
+
+  palettePointerVisualFrame =
+    requestAnimationFrame(() => {
+      palettePointerVisualFrame = 0;
+
+      updatePalettePointerTarget(
+        palettePointerQueuedX,
+        palettePointerQueuedY
       );
     });
 }
@@ -1541,6 +1608,14 @@ function flattenNodes(nodes, conditions = [], path = []) {
           )
         );
       }
+    } else if (node.kind === LAYOUT_ROW_KIND) {
+      entries.push(
+        ...flattenNodes(
+          node.children || [],
+          conditions,
+          path
+        )
+      );
     }
   }
   return entries;
@@ -1567,6 +1642,9 @@ function findNode(nodes, id) {
         const found = findNode(option.children, id);
         if (found) return found;
       }
+    } else if (node.kind === LAYOUT_ROW_KIND) {
+      const found = findNode(node.children || [], id);
+      if (found) return found;
     }
   }
   return null;
@@ -1582,9 +1660,21 @@ function findNodeContainerId(
       return currentContainerId;
     }
 
-    if (node.kind !== "controller") {
+    if (node.kind === LAYOUT_ROW_KIND) {
+      const containerId = findNodeContainerId(
+        node.children || [],
+        nodeId,
+        node.id
+      );
+
+      if (containerId !== null) {
+        return containerId;
+      }
+
       continue;
     }
+
+    if (node.kind !== "controller") continue;
 
     for (const option of node.options) {
       const containerId = findNodeContainerId(
@@ -1605,6 +1695,16 @@ function findNodeContainerId(
 function updateNode(nodes, id, updater) {
   return nodes.map(node => {
     if (node.id === id) return updater(node);
+    if (node.kind === LAYOUT_ROW_KIND) {
+      return {
+        ...node,
+        children: updateNode(
+          node.children || [],
+          id,
+          updater
+        )
+      };
+    }
     if (node.kind !== "controller") return node;
     return {
       ...node,
@@ -1631,6 +1731,16 @@ function removeNode(nodes, id) {
         return { ...option, children: result.nodes };
       });
       next.push({ ...node, options });
+    } else if (node.kind === LAYOUT_ROW_KIND) {
+      const result = removeNode(
+        node.children || [],
+        id
+      );
+      if (result.removed && !removed) removed = result.removed;
+      next.push({
+        ...node,
+        children: result.nodes
+      });
     } else {
       next.push(node);
     }
@@ -1644,6 +1754,16 @@ function insertIntoContainerAt(
   nodeToInsert,
   requestedIndex = Number.POSITIVE_INFINITY
 ) {
+  if (
+    nodeToInsert?.kind === LAYOUT_ROW_KIND &&
+    findNode(nodes, containerId)?.kind === LAYOUT_ROW_KIND
+  ) {
+    return {
+      nodes,
+      inserted: false
+    };
+  }
+
   const insertAt = list => {
     const index = clamp(
       Number.isFinite(requestedIndex)
@@ -1669,6 +1789,32 @@ function insertIntoContainerAt(
 
   let inserted = false;
   const next = nodes.map(node => {
+    if (node.kind === LAYOUT_ROW_KIND) {
+      if (node.id === containerId) {
+        inserted = true;
+        return {
+          ...node,
+          children: insertAt(
+            node.children || []
+          )
+        };
+      }
+
+      const nested = insertIntoContainerAt(
+        node.children || [],
+        containerId,
+        nodeToInsert,
+        requestedIndex
+      );
+
+      if (nested.inserted) inserted = true;
+
+      return {
+        ...node,
+        children: nested.nodes
+      };
+    }
+
     if (node.kind !== "controller") return node;
 
     return {
@@ -1717,6 +1863,20 @@ function containerChildren(nodes, containerId) {
   }
 
   for (const node of nodes) {
+    if (node.kind === LAYOUT_ROW_KIND) {
+      if (node.id === containerId) {
+        return node.children || [];
+      }
+
+      const nested = containerChildren(
+        node.children || [],
+        containerId
+      );
+
+      if (nested) return nested;
+      continue;
+    }
+
     if (node.kind !== "controller") continue;
 
     for (const option of node.options) {
@@ -1800,6 +1960,17 @@ function findControllerOption(
   optionId
 ) {
   for (const node of nodes) {
+    if (node.kind === LAYOUT_ROW_KIND) {
+      const nested =
+        findControllerOption(
+          node.children || [],
+          optionId
+        );
+
+      if (nested) return nested;
+      continue;
+    }
+
     if (node.kind !== "controller") {
       continue;
     }
@@ -1995,6 +2166,16 @@ function detachControllerOption(
       const result = [];
 
       for (const node of nodes) {
+        if (node.kind === LAYOUT_ROW_KIND) {
+          result.push({
+            ...node,
+            children: processList(
+              node.children || []
+            )
+          });
+          continue;
+        }
+
         if (
           node.kind !==
           "controller"
@@ -2154,6 +2335,12 @@ function reorderControllerOption(
 }
 
 function nodeContainsContainer(node, containerId) {
+  if (node.kind === LAYOUT_ROW_KIND) {
+    if (node.id === containerId) return true;
+    return (node.children || []).some(child =>
+      nodeContainsContainer(child, containerId)
+    );
+  }
   if (node.kind !== "controller") return false;
   for (const option of node.options) {
     if (option.id === containerId) return true;
@@ -2171,6 +2358,17 @@ function nodeContainsContainer(node, containerId) {
 function findContainerName(nodes, containerId) {
   if (containerId === ROOT_CONTAINER) return "Root";
   for (const node of nodes) {
+    if (node.kind === LAYOUT_ROW_KIND) {
+      if (node.id === containerId) {
+        return `${node.label || "Inline row"} / items`;
+      }
+      const nested = findContainerName(
+        node.children || [],
+        containerId
+      );
+      if (nested !== "Unknown section") return nested;
+      continue;
+    }
     if (node.kind !== "controller") continue;
     for (const option of node.options) {
       if (option.id === containerId) {
@@ -2240,6 +2438,23 @@ function makeController() {
   };
 }
 
+function makeLayoutRow() {
+  const count = currentFlattenedNodes().filter(
+    entry => entry.node.kind === LAYOUT_ROW_KIND
+  ).length;
+  const suffix = count === 0 ? "" : ` ${count + 1}`;
+
+  return {
+    id: createId("layout-row"),
+    kind: LAYOUT_ROW_KIND,
+    label: `Inline Row${suffix}`,
+    description:
+      "Places its direct Configuration Outline items next to each other.",
+    horizontal: true,
+    children: []
+  };
+}
+
 function componentCount(type) {
   if (type.endsWith("2")) return 2;
   if (type.endsWith("3")) return 3;
@@ -2291,6 +2506,67 @@ function allowedValidatorModes(type) {
   return modes;
 }
 
+function isLegacyLayoutRowNode(node) {
+  return Boolean(
+    node &&
+    node.kind === "setting" &&
+    node.valueType === LAYOUT_ROW_KIND
+  );
+}
+
+function normalizeLayoutRowNode(
+  node,
+  children = null
+) {
+  const legacy =
+    isLegacyLayoutRowNode(node);
+
+  const rawLabel =
+    String(
+      node?.label ||
+      (legacy ? node?.fieldName : "") ||
+      "Inline Row"
+    ).trim();
+
+  const label =
+    !rawLabel ||
+    /^layout[\s_-]*row$/i.test(
+      rawLabel
+    )
+      ? "Inline Row"
+      : rawLabel;
+
+  const description =
+    legacy
+      ? DEFAULT_LAYOUT_ROW_DESCRIPTION
+      : String(
+          node?.description ||
+          DEFAULT_LAYOUT_ROW_DESCRIPTION
+        ).trim() ||
+        DEFAULT_LAYOUT_ROW_DESCRIPTION;
+
+  const source =
+    legacy
+      ? { id: node.id }
+      : { ...node };
+
+  return {
+    ...source,
+    id: node.id,
+    kind: LAYOUT_ROW_KIND,
+    label,
+    description,
+    horizontal:
+      node.horizontal !== false,
+    children:
+      Array.isArray(children)
+        ? children
+        : Array.isArray(node.children)
+          ? node.children
+          : []
+  };
+}
+
 function normalizeNodes(nodes) {
   return nodes.map(node => {
     if (node.kind === "controller") {
@@ -2301,6 +2577,20 @@ function normalizeNodes(nodes) {
           children: normalizeNodes(option.children)
         }))
       };
+    }
+
+    if (
+      node.kind === LAYOUT_ROW_KIND ||
+      isLegacyLayoutRowNode(node)
+    ) {
+      return normalizeLayoutRowNode(
+        node,
+        normalizeNodes(
+          Array.isArray(node.children)
+            ? node.children
+            : []
+        )
+      );
     }
 
     const validatorMode =
@@ -2830,7 +3120,22 @@ function indentGeneratedStatement(
 
 function generateCode() {
   const metadata = state.metadata;
-  const entries = currentFlattenedNodes();
+  const outlineEntries = currentFlattenedNodes();
+  const entries = outlineEntries.filter(
+    entry =>
+      entry.node.kind === "setting" ||
+      entry.node.kind === "controller"
+  );
+  const layoutRows = outlineEntries.filter(
+    entry =>
+      entry.node.kind === LAYOUT_ROW_KIND
+  );
+  const outlineOrderById = new Map(
+    outlineEntries.map((entry, index) => [
+      entry.node.id,
+      index
+    ])
+  );
   const graphContribution =
     getTypedNodeGraphContribution();
   const graphRuntimeActive =
@@ -3028,6 +3333,11 @@ ${usesColorX
     ...(usesRuntimeConfigurationMenu
       ? [
           "IModConfigurationRuntimeMenuProvider"
+        ]
+      : []),
+    ...(layoutRows.length > 0
+      ? [
+          "IModConfigurationLayoutProvider"
         ]
       : [])
   ];
@@ -3451,7 +3761,7 @@ ${changedBranches}
 
   const orderBranches = entries
     .map(
-      (entry, index) => {
+      entry => {
         const field = toPascalCase(
           entry.node.fieldName,
           "Setting"
@@ -3476,7 +3786,7 @@ ${changedBranches}
                 ${field}))
         {
 ${runtimeOrder}
-            return ${index};
+            return ${outlineOrderById.get(entry.node.id) ?? Number.MAX_SAFE_INTEGER};
         }`;
       }
     )
@@ -3651,6 +3961,98 @@ ${keyVisibilityBranches}
         })()
       : "";
 
+  const layoutProviderBlock =
+    layoutRows.length > 0
+      ? (() => {
+          const groups = layoutRows
+            .map(entry => {
+              const row = entry.node;
+              const itemIds = (
+                Array.isArray(row.layoutItemIds)
+                  ? row.layoutItemIds
+                  : (row.children || [])
+                      .filter(child =>
+                        child?.kind === "setting" ||
+                        child?.kind === "controller"
+                      )
+                      .map(child => child.id)
+              )
+                .map(itemId =>
+                  `"${escapeCSharp(itemId)}"`
+                )
+                .join(", ");
+              const horizontal =
+                row.horizontal === false
+                  ? "false"
+                  : "true";
+              const effectiveHorizontal =
+                usesRuntimeConfigurationMenu
+                  ? `GetRuntimeConfigurationLayoutOrDefault(
+                    "${escapeCSharp(row.id)}",
+                    ${horizontal})`
+                  : horizontal;
+
+              return `            new ModConfigurationLayoutGroup(
+                "${escapeCSharp(row.id)}",
+                "${escapeCSharp(row.label || "Inline Row")}",
+                ${outlineOrderById.get(row.id) ?? 0},
+                ${effectiveHorizontal},
+                new string[] { ${itemIds} })`;
+            })
+            .join(",\n");
+
+          const keyItemBranches = entries
+            .map(entry => {
+              const field = toPascalCase(
+                entry.node.fieldName,
+                "Setting"
+              );
+
+              return `        if (ReferenceEquals(
+                key,
+                ${field}))
+        {
+            itemId = "${escapeCSharp(entry.node.id)}";
+            return true;
+        }`;
+            })
+            .join("\n\n");
+
+          const runtimeLayoutHelper =
+            usesRuntimeConfigurationMenu
+              ? `
+    private static bool GetRuntimeConfigurationLayoutOrDefault(
+        string itemId,
+        bool fallback) =>
+            ${graphContribution.className}.TryGetRuntimeConfigurationMenuHorizontalLayout(
+                itemId,
+                out bool horizontal)
+                ? horizontal
+                : fallback;
+`
+              : "";
+
+          return `
+    public System.Collections.Generic.IReadOnlyList<ModConfigurationLayoutGroup>
+        GetConfigurationLayoutGroups() =>
+        new ModConfigurationLayoutGroup[]
+        {
+${groups}
+        };
+
+    public bool TryGetConfigurationLayoutItemId(
+        ModConfigurationKey key,
+        out string itemId)
+    {
+${keyItemBranches}
+
+        itemId = string.Empty;
+        return false;
+    }
+${runtimeLayoutHelper}`;
+        })()
+      : "";
+
   return `${guide}${usingLines}
 
 namespace ${namespaceName};
@@ -3680,7 +4082,7 @@ public sealed partial class ${className}
         )}";
 
 ${declarations}
-${runtimeBlock}${orderBlock}${visibilityBlock}${runtimeMenuProviderBlock}}
+${runtimeBlock}${orderBlock}${visibilityBlock}${runtimeMenuProviderBlock}${layoutProviderBlock}}
 `;
 }
 
@@ -4232,6 +4634,23 @@ function getDiagnostics() {
   if (!state.metadata.author.trim()) errors.push("Author is required.");
   for (const entry of entries) {
     const node = entry.node;
+    if (node.kind === LAYOUT_ROW_KIND) {
+      if ((node.children || []).length < 2) {
+        errors.push(
+          `${node.label || "Inline Row"}: add at least two items to display side by side.`
+        );
+      }
+      if (
+        (node.children || []).some(
+          child => child?.kind === LAYOUT_ROW_KIND
+        )
+      ) {
+        errors.push(
+          `${node.label || "Inline Row"}: nested inline rows are not supported.`
+        );
+      }
+      continue;
+    }
     const field = toPascalCase(node.fieldName, "Setting");
     fieldNames.set(field, (fieldNames.get(field) || 0) + 1);
     keyNames.set(node.keyName, (keyNames.get(node.keyName) || 0) + 1);
@@ -4546,6 +4965,50 @@ function sanitizeProjectNodes(
             sourceNode.id,
             `Item ${index + 1}`
           );
+
+        if (
+          sourceNode.kind ===
+            LAYOUT_ROW_KIND ||
+          isLegacyLayoutRowNode(
+            sourceNode
+          )
+        ) {
+          const children =
+            Array.isArray(
+              sourceNode.children
+            )
+              ? sourceNode.children
+              : [];
+
+          if (
+            children.some(
+              child =>
+                child?.kind ===
+                  LAYOUT_ROW_KIND ||
+                isLegacyLayoutRowNode(
+                  child
+                )
+            )
+          ) {
+            throw new Error(
+              `Inline row '${id}' cannot directly contain another inline row.`
+            );
+          }
+
+          return {
+            ...normalizeLayoutRowNode(
+              {
+                ...sourceNode,
+                id
+              },
+              sanitizeList(
+                children,
+                depth + 1
+              )
+            ),
+            layoutItemIds: undefined,
+          };
+        }
 
         if (
           sourceNode.kind ===
@@ -5247,28 +5710,49 @@ function renderPalette() {
   elements.paletteContent
     .querySelectorAll("[data-palette]")
     .forEach(button => {
-      button.addEventListener("click", () => {
+      button.addEventListener("click", event => {
+        if (
+          consumePalettePointerClick(
+            button,
+            event
+          )
+        ) {
+          return;
+        }
+
         addPaletteItem(
           button.dataset.palette,
           state.activeContainerId
         );
       });
-      button.addEventListener(
-        "dragstart",
-        event => {
-          beginDragScrolling(event);
-          event.dataTransfer.setData(
-            "application/x-rml-palette",
-            button.dataset.palette
-          );
-          event.dataTransfer.effectAllowed =
-            "copy";
-        }
-      );
-      button.addEventListener(
-        "dragend",
-        finishDragInteraction
-      );
+
+      const pointerBound =
+        bindPalettePointerDrag(
+          button,
+          {
+            paletteType:
+              button.dataset.palette
+          }
+        );
+
+      if (!pointerBound) {
+        button.addEventListener(
+          "dragstart",
+          event => {
+            beginDragScrolling(event);
+            event.dataTransfer.setData(
+              "application/x-rml-palette",
+              button.dataset.palette
+            );
+            event.dataTransfer.effectAllowed =
+              "copy";
+          }
+        );
+        button.addEventListener(
+          "dragend",
+          finishDragInteraction
+        );
+      }
     });
 
   /*
@@ -5287,7 +5771,16 @@ function renderPalette() {
 
       button.addEventListener(
         "click",
-        () => {
+        event => {
+          if (
+            consumePalettePointerClick(
+              button,
+              event
+            )
+          ) {
+            return;
+          }
+
           window.RMLDynamicSettingsBridge
             ?.createFromSource?.(
               sourceId,
@@ -5297,28 +5790,44 @@ function renderPalette() {
         }
       );
 
-      button.addEventListener(
-        "dragstart",
-        event => {
-          beginDragScrolling(event);
-          event.dataTransfer.setData(
-            "application/x-rml-dynamic-editable",
-            sourceId
-          );
-          event.dataTransfer.effectAllowed =
-            "copy";
-        }
-      );
+      const pointerBound =
+        bindPalettePointerDrag(
+          button,
+          {
+            dynamicSourceId:
+              sourceId
+          }
+        );
 
-      button.addEventListener(
-        "dragend",
-        finishDragInteraction
-      );
+      if (!pointerBound) {
+        button.addEventListener(
+          "dragstart",
+          event => {
+            beginDragScrolling(event);
+            event.dataTransfer.setData(
+              "application/x-rml-dynamic-editable",
+              sourceId
+            );
+            event.dataTransfer.effectAllowed =
+              "copy";
+          }
+        );
+
+        button.addEventListener(
+          "dragend",
+          finishDragInteraction
+        );
+      }
     });
 }
 
 function addPaletteItem(type, containerId) {
-  const node = type === "controller" ? makeController() : makeSetting(type);
+  const node =
+    type === "controller"
+      ? makeController()
+      : type === LAYOUT_ROW_KIND
+        ? makeLayoutRow()
+        : makeSetting(type);
   const result = insertIntoContainer(state.nodes, containerId, node);
   if (!result.inserted) {
     state.activeContainerId = ROOT_CONTAINER;
@@ -5332,6 +5841,7 @@ function addPaletteItem(type, containerId) {
 
 function selectedBadge(node) {
   if (node.kind === "controller") return "§";
+  if (node.kind === LAYOUT_ROW_KIND) return "⇄";
   return (
     TYPE_DEFINITIONS.find(item => item.type === node.valueType)?.badge ||
     node.valueType
@@ -5362,6 +5872,10 @@ function nodeCardMarkup(
   siblingCount
 ) {
   const selected = state.selectedId === node.id ? " selected" : "";
+  const displayName =
+    node.kind === LAYOUT_ROW_KIND
+      ? node.label || "Inline Row"
+      : node.fieldName;
 
   const nestedSectionEnum =
     node.kind === "controller" &&
@@ -5390,6 +5904,8 @@ const nextOptionDirection =
   const subtitle =
     node.kind === "controller"
       ? `${node.enumName} · section navigation`
+      : node.kind === LAYOUT_ROW_KIND
+        ? `${node.horizontal === false ? "vertical" : "horizontal"} layout · ${(node.children || []).length} item${(node.children || []).length === 1 ? "" : "s"}`
       : `${node.valueType} · ${node.keyName}`;
   let body = "";
 
@@ -5468,6 +5984,34 @@ const nextOptionDirection =
         )
         .join("")}
     </div>`;
+  } else if (node.kind === LAYOUT_ROW_KIND) {
+    const children = node.children || [];
+    body = `<section
+      class="layout-row-lane${
+        state.activeContainerId === node.id
+          ? " active-container"
+          : ""
+      }${
+        state.dragOverContainer === node.id
+          ? " drag-over"
+          : ""
+      }"
+      data-container="${escapeHtml(node.id)}"
+      data-rml-scroll-layer="auto"
+      data-rml-scroll-layer-key="outline-layout-row:${escapeHtml(node.id)}"
+      data-scroll-label="${escapeHtml(node.label || "Inline Row")} · Horizontal contents">
+      <div class="layout-row-heading">
+        <span>${escapeHtml(node.label || "Inline Row")}</span>
+        <small>${children.length} item${children.length === 1 ? "" : "s"}</small>
+      </div>
+      <div class="layout-row-drop-zone drop-zone">
+        ${
+          children.length
+            ? nodeCardsMarkup(children, node.id)
+            : `<div class="empty-drop"><span>＋</span>Drop settings here to place them side by side</div>`
+        }
+      </div>
+    </section>`;
   }
 
    return `<article
@@ -5483,7 +6027,7 @@ const nextOptionDirection =
     <div class="node-head">
       <div class="node-icon">${escapeHtml(selectedBadge(node))}</div>
       <div class="node-copy">
-        <strong>${escapeHtml(node.fieldName)}</strong>
+        <strong>${escapeHtml(displayName)}</strong>
         <small>${escapeHtml(subtitle)}</small>
       </div>
       <div class="node-order-actions" aria-label="Change item order">
@@ -5495,7 +6039,7 @@ const nextOptionDirection =
           data-move-direction="-1"
           ${index <= 0 ? "disabled" : ""}
           title="Move one position up"
-          aria-label="Move ${escapeHtml(node.fieldName)} up">▲</button>
+          aria-label="Move ${escapeHtml(displayName)} up">▲</button>
         <button
           class="move-node move-node-down"
           type="button"
@@ -5504,7 +6048,7 @@ const nextOptionDirection =
           data-move-direction="1"
           ${index >= siblingCount - 1 ? "disabled" : ""}
           title="Move one position down"
-          aria-label="Move ${escapeHtml(node.fieldName)} down">▼</button>
+          aria-label="Move ${escapeHtml(displayName)} down">▼</button>
       </div>
       <button
         class="delete-node"
@@ -5530,7 +6074,7 @@ function allowContainerDrop(container, event) {
   )
     ? "move"
     : "copy";
-  document.querySelectorAll(".option-lane, .builder-canvas").forEach(zone => {
+  document.querySelectorAll(".option-lane, .layout-row-lane, .builder-canvas").forEach(zone => {
     zone.classList.toggle(
       "drag-over",
       (zone.dataset.container || ROOT_CONTAINER) === container
@@ -5545,7 +6089,7 @@ function clearDragFeedback() {
 
   document
     .querySelectorAll(
-      ".option-lane.drag-over, .builder-canvas.drag-over"
+      ".option-lane.drag-over, .layout-row-lane.drag-over, .builder-canvas.drag-over"
     )
     .forEach(zone =>
       zone.classList.remove("drag-over")
@@ -5717,7 +6261,10 @@ function dragViewportTop() {
 
 function dragManualInsertSelectionActive() {
   if (
-    nodePointerDragActive &&
+    (
+      nodePointerDragActive ||
+      palettePointerDragActive
+    ) &&
     nodeWheelManualHost &&
     nodeWheelManualHost.isConnected &&
     Number.isFinite(
@@ -5814,6 +6361,15 @@ function refreshPointerTargetAfterDragScroll() {
     scheduleNodePointerTargetUpdate(
       nodePointerX,
       nodePointerY
+    );
+
+    return;
+  }
+
+  if (palettePointerDragActive) {
+    schedulePalettePointerTargetUpdate(
+      palettePointerX,
+      palettePointerY
     );
 
     return;
@@ -6045,6 +6601,90 @@ function directNodeCards(host) {
     );
 }
 
+function outlineDropTargetFromElement(
+  element,
+  canvas = elements.builderCanvas
+) {
+  if (
+    !(element instanceof Element) ||
+    !(canvas instanceof HTMLElement)
+  ) {
+    return null;
+  }
+
+  const lane =
+    element.closest(
+      OUTLINE_CONTAINER_LANE_SELECTOR
+    );
+
+  if (
+    !(lane instanceof HTMLElement) ||
+    !canvas.contains(lane)
+  ) {
+    return null;
+  }
+
+  const host =
+    lane.querySelector(
+      ":scope > .drop-zone"
+    );
+
+  const containerId =
+    lane.dataset.container;
+
+  if (
+    !(host instanceof HTMLElement) ||
+    !containerId
+  ) {
+    return null;
+  }
+
+  return {
+    lane,
+    host,
+    containerId
+  };
+}
+
+function horizontalLayoutHost(host) {
+  return Boolean(
+    host?.classList?.contains(
+      "layout-row-drop-zone"
+    )
+  );
+}
+
+function nodeInsertionIndexAtPoint(
+  host,
+  cards,
+  clientX,
+  clientY
+) {
+  const horizontal =
+    horizontalLayoutHost(host);
+
+  for (const card of cards) {
+    const rectangle =
+      card.getBoundingClientRect();
+    const pointer = horizontal
+      ? clientX
+      : clientY;
+    const midpoint = horizontal
+      ? rectangle.left +
+        rectangle.width / 2
+      : rectangle.top +
+        rectangle.height / 2;
+
+    if (pointer < midpoint) {
+      return Number(
+        card.dataset.siblingIndex
+      ) || 0;
+    }
+  }
+
+  return directNodeCards(host).length;
+}
+
 function dropHostForCard(card) {
   const parent = card.parentElement;
 
@@ -6104,6 +6744,39 @@ function nodeInsertionGeometry(
   const beforeRectangle = before?.getBoundingClientRect() || null;
   const afterRectangle = after?.getBoundingClientRect() || null;
 
+  if (horizontalLayoutHost(host)) {
+    let left;
+    if (beforeRectangle && afterRectangle) {
+      left =
+        (beforeRectangle.right +
+          afterRectangle.left) / 2;
+    } else if (afterRectangle) {
+      left = afterRectangle.left - 4;
+    } else if (beforeRectangle) {
+      left = beforeRectangle.right + 4;
+    } else {
+      left = hostRectangle.left + 7;
+    }
+
+    return {
+      horizontal: true,
+      left: Math.max(
+        0,
+        left -
+          hostRectangle.left +
+          host.scrollLeft -
+          host.clientLeft -
+          2
+      ),
+      top: 7,
+      width: 4,
+      height: Math.max(
+        24,
+        host.clientHeight - 14
+      )
+    };
+  }
+
   let top;
   if (beforeRectangle && afterRectangle) {
     top = (beforeRectangle.bottom + afterRectangle.top) / 2;
@@ -6151,6 +6824,7 @@ function nodeInsertionGeometry(
     hostRectangle.left + host.clientLeft;
 
   return {
+    horizontal: false,
     left: Math.max(
       0,
       left - hostContentLeft + host.scrollLeft
@@ -6169,7 +6843,8 @@ function nodeInsertionGeometry(
         host.clientWidth,
         right - left
       )
-    )
+    ),
+    height: 4
   };
 }
 
@@ -6192,6 +6867,11 @@ function positionNodeInsertPlaceholder(
     insertionIndex
   );
 
+  placeholder.classList.toggle(
+    "horizontal-layout-placeholder",
+    geometry.horizontal
+  );
+
   placeholder.style.setProperty(
     "--node-placeholder-left",
     `${geometry.left}px`
@@ -6203,6 +6883,10 @@ function positionNodeInsertPlaceholder(
   placeholder.style.setProperty(
     "--node-placeholder-width",
     `${geometry.width}px`
+  );
+  placeholder.style.setProperty(
+    "--node-placeholder-height",
+    `${geometry.height}px`
   );
 
   requestDragPlaceholderVisibility();
@@ -7227,25 +7911,13 @@ function setContainerInsertFeedback(
         activeDraggedNodeId
     );
 
-  let insertionIndex =
-    cards.length;
-
-  for (const card of comparisonCards) {
-    const rectangle =
-      card.getBoundingClientRect();
-
-    if (
-      event.clientY <
-      rectangle.top +
-        rectangle.height / 2
-    ) {
-      insertionIndex =
-        Number(
-          card.dataset.siblingIndex
-        ) || 0;
-      break;
-    }
-  }
+  const insertionIndex =
+    nodeInsertionIndexAtPoint(
+      host,
+      comparisonCards,
+      event.clientX,
+      event.clientY
+    );
 
   const targetUnchanged =
     state.dragInsertContainer ===
@@ -7262,7 +7934,7 @@ function setContainerInsertFeedback(
 
   document
     .querySelectorAll(
-      ".option-lane, .builder-canvas"
+      ".option-lane, .layout-row-lane, .builder-canvas"
     )
     .forEach(zone => {
       zone.classList.toggle(
@@ -7409,7 +8081,9 @@ function handleDropAt(
     const node =
       paletteType === "controller"
         ? makeController()
-        : makeSetting(paletteType);
+        : paletteType === LAYOUT_ROW_KIND
+          ? makeLayoutRow()
+          : makeSetting(paletteType);
     const insertion =
       insertIntoContainerAt(
         state.nodes,
@@ -7755,6 +8429,329 @@ function clearNodePointerGhost() {
   nodePointerSourceCard = null;
 }
 
+function palettePointerDragSupported() {
+  return (
+    typeof window.PointerEvent ===
+      "function" ||
+    "PointerEvent" in window
+  );
+}
+
+function normalizePalettePointerPayload(
+  payload
+) {
+  const paletteType =
+    String(
+      payload?.paletteType ||
+      ""
+    ).trim();
+
+  if (paletteType) {
+    return {
+      kind: "palette",
+      value: paletteType
+    };
+  }
+
+  const dynamicSourceId =
+    String(
+      payload?.dynamicSourceId ||
+      ""
+    ).trim();
+
+  return dynamicSourceId
+    ? {
+        kind: "dynamic",
+        value: dynamicSourceId
+      }
+    : null;
+}
+
+function consumePalettePointerClick(
+  button,
+  event = null
+) {
+  const suppressed =
+    button ===
+      suppressPaletteClickButton &&
+    performance.now() <=
+      suppressPaletteClickUntil;
+
+  if (!suppressed) {
+    return false;
+  }
+
+  suppressPaletteClickButton = null;
+  suppressPaletteClickUntil = 0;
+
+  event?.preventDefault?.();
+  event?.stopImmediatePropagation?.();
+
+  return true;
+}
+
+function clearPendingPalettePointerDrag() {
+  palettePointerPendingButton = null;
+  palettePointerPendingPayload = null;
+  palettePointerPendingId = null;
+}
+
+function preparePalettePointerDrag(
+  button,
+  payload,
+  event
+) {
+  if (
+    event.button !== 0 ||
+    event.isPrimary === false
+  ) {
+    return;
+  }
+
+  const normalized =
+    normalizePalettePointerPayload(
+      payload
+    );
+
+  if (!normalized) {
+    return;
+  }
+
+  clearPendingNodePointerDrag();
+  clearPendingOptionPointerDrag();
+  clearPendingPalettePointerDrag();
+
+  palettePointerPendingButton =
+    button;
+  palettePointerPendingPayload =
+    normalized;
+  palettePointerPendingId =
+    event.pointerId;
+  palettePointerPendingStartX =
+    event.clientX;
+  palettePointerPendingStartY =
+    event.clientY;
+}
+
+function createPalettePointerGhost(
+  button
+) {
+  palettePointerGhost?.remove();
+
+  const ghost =
+    button.cloneNode(true);
+
+  ghost.classList.add(
+    "node-pointer-ghost",
+    "palette-pointer-ghost"
+  );
+
+  ghost.classList.remove(
+    "palette-pointer-source"
+  );
+
+  ghost.style.pointerEvents =
+    "none";
+  ghost.style.userSelect =
+    "none";
+  ghost.removeAttribute(
+    "draggable"
+  );
+  ghost.disabled = true;
+
+  document.body.appendChild(
+    ghost
+  );
+
+  palettePointerGhost =
+    ghost;
+
+  movePalettePointerGhost(
+    palettePointerX,
+    palettePointerY
+  );
+}
+
+function movePalettePointerGhost(
+  clientX,
+  clientY
+) {
+  if (!palettePointerGhost) {
+    return;
+  }
+
+  palettePointerGhost.style.transform =
+    `translate3d(${clientX + 14}px, ` +
+    `${clientY + 14}px, 0)`;
+}
+
+function clearPalettePointerGhost() {
+  palettePointerGhost?.remove();
+  palettePointerGhost = null;
+
+  palettePointerSourceButton
+    ?.classList.remove(
+      "palette-pointer-source"
+    );
+
+  palettePointerSourceButton = null;
+}
+
+function startPalettePointerDrag(
+  button,
+  payload,
+  event
+) {
+  const primaryMouseButtonHeld =
+    event.pointerType !== "mouse" ||
+    (event.buttons & 1) === 1;
+
+  if (
+    !primaryMouseButtonHeld ||
+    event.isPrimary === false
+  ) {
+    clearPendingPalettePointerDrag();
+    return;
+  }
+
+  event.preventDefault();
+  event.stopImmediatePropagation();
+
+  clearPendingNodePointerDrag();
+  clearPendingOptionPointerDrag();
+  clearPendingPalettePointerDrag();
+
+  palettePointerDragActive = true;
+  palettePointerId =
+    event.pointerId;
+  palettePointerX =
+    event.clientX;
+  palettePointerY =
+    event.clientY;
+  palettePointerSourceButton =
+    button;
+  palettePointerPayload =
+    payload;
+
+  activeDraggedNodeId = null;
+  activeDraggedOptionId = null;
+  activeDraggedOptionControllerId = null;
+
+  button.classList.add(
+    "palette-pointer-source"
+  );
+
+  try {
+    button.setPointerCapture(
+      event.pointerId
+    );
+  } catch {
+    // Dokumentweite Pointer-Handler übernehmen den Drag trotzdem.
+  }
+
+  createPalettePointerGhost(
+    button
+  );
+
+  beginDragScrolling(
+    event
+  );
+
+  updatePalettePointerTarget(
+    event.clientX,
+    event.clientY
+  );
+}
+
+function bindPalettePointerDrag(
+  button,
+  payload
+) {
+  if (
+    !(button instanceof HTMLElement) ||
+    !palettePointerDragSupported() ||
+    !normalizePalettePointerPayload(
+      payload
+    )
+  ) {
+    return false;
+  }
+
+  button.draggable = false;
+  button.setAttribute(
+    "draggable",
+    "false"
+  );
+
+  if (
+    button.dataset
+      .rmlPalettePointerDragBound ===
+      "true"
+  ) {
+    return true;
+  }
+
+  button.dataset
+    .rmlPalettePointerDragBound =
+    "true";
+
+  button.addEventListener(
+    "pointerdown",
+    event => {
+      preparePalettePointerDrag(
+        button,
+        payload,
+        event
+      );
+    }
+  );
+
+  button.addEventListener(
+    "dragstart",
+    event => {
+      event.preventDefault();
+    }
+  );
+
+  return true;
+}
+
+function installPalettePointerDragBridge() {
+  Object.defineProperty(
+    window,
+    "RMLPalettePointerDragBridge",
+    {
+      value: Object.freeze({
+        bindDynamic(
+          button,
+          sourceId
+        ) {
+          return bindPalettePointerDrag(
+            button,
+            {
+              dynamicSourceId:
+                sourceId
+            }
+          );
+        },
+
+        consumeClick(
+          button,
+          event = null
+        ) {
+          return consumePalettePointerClick(
+            button,
+            event
+          );
+        }
+      }),
+      writable: false,
+      enumerable: false,
+      configurable: true
+    }
+  );
+}
+
 function nodeDropTargetAtPointer(
   clientX,
   clientY,
@@ -7807,32 +8804,22 @@ function nodeDropTargetAtPointer(
       continue;
     }
 
-    const sectionDropZone =
-      element.closest(
-        ".option-lane[data-container] > .drop-zone"
+    const outlineTarget =
+      outlineDropTargetFromElement(
+        element,
+        canvas
       );
 
     if (
-      sectionDropZone instanceof HTMLElement &&
-      canvas.contains(
-        sectionDropZone
-      )
+      outlineTarget
     ) {
-      const sectionLane =
-        sectionDropZone.parentElement;
+      host =
+        outlineTarget.host;
 
-      const sectionContainerId =
-        sectionLane?.dataset.container;
+      containerId =
+        outlineTarget.containerId;
 
-      if (sectionContainerId) {
-        host =
-          sectionDropZone;
-
-        containerId =
-          sectionContainerId;
-
-        break;
-      }
+      break;
     }
 
     if (
@@ -7913,26 +8900,13 @@ function nodeDropTargetAtPointer(
         cards.length
       );
   } else {
-    for (
-      const card of
-      comparisonCards
-    ) {
-      const cardRectangle =
-        card.getBoundingClientRect();
-
-      if (
-        clientY <
-        cardRectangle.top +
-          cardRectangle.height / 2
-      ) {
-        insertionIndex =
-          Number(
-            card.dataset.siblingIndex
-          ) || 0;
-
-        break;
-      }
-    }
+    insertionIndex =
+      nodeInsertionIndexAtPoint(
+        host,
+        comparisonCards,
+        clientX,
+        clientY
+      );
   }
 
   return {
@@ -8030,7 +9004,7 @@ function updateNodePointerTarget(
 
   document
     .querySelectorAll(
-      ".option-lane.drag-over, .builder-canvas.drag-over"
+      ".option-lane.drag-over, .layout-row-lane.drag-over, .builder-canvas.drag-over"
     )
     .forEach(zone => {
       zone.classList.remove(
@@ -8049,12 +9023,237 @@ function updateNodePointerTarget(
   nodeWheelDelta = 0;
 }
 
+function updatePalettePointerTarget(
+  clientX,
+  clientY
+) {
+  if (!palettePointerDragActive) {
+    return;
+  }
+
+  palettePointerX =
+    clientX;
+  palettePointerY =
+    clientY;
+
+  movePalettePointerGhost(
+    clientX,
+    clientY
+  );
+
+  const target =
+    nodeDropTargetAtPointer(
+      clientX,
+      clientY,
+      null
+    );
+
+  if (target) {
+    setNodePointerTarget(
+      target.containerId,
+      target.host,
+      target.insertionIndex,
+      clientX,
+      clientY
+    );
+
+    return;
+  }
+
+  clearPointerEdgeFeedback();
+
+  dragFeedbackPlaceholder?.remove();
+  dragFeedbackPlaceholder = null;
+
+  document
+    .querySelectorAll(
+      ".option-lane.drag-over, .layout-row-lane.drag-over, .builder-canvas.drag-over"
+    )
+    .forEach(zone => {
+      zone.classList.remove(
+        "drag-over"
+      );
+    });
+
+  state.dragOverContainer = null;
+  state.dragInsertContainer = null;
+  state.dragInsertIndex = null;
+
+  nodeWheelTargetHost = null;
+  nodeWheelTargetContainerId = null;
+  nodeWheelManualHost = null;
+  nodeWheelManualIndex = null;
+  nodeWheelDelta = 0;
+}
+
+function insertPalettePointerPayload(
+  payload,
+  containerId,
+  insertionIndex
+) {
+  if (
+    !payload ||
+    typeof containerId !==
+      "string"
+  ) {
+    return false;
+  }
+
+  if (payload.kind === "dynamic") {
+    const createFromSource =
+      window.RMLDynamicSettingsBridge
+        ?.createFromSource;
+
+    if (
+      typeof createFromSource !==
+        "function"
+    ) {
+      return false;
+    }
+
+    createFromSource(
+      payload.value,
+      containerId,
+      insertionIndex
+    );
+
+    return true;
+  }
+
+  if (payload.kind !== "palette") {
+    return false;
+  }
+
+  const node =
+    payload.value === "controller"
+      ? makeController()
+      : payload.value ===
+          LAYOUT_ROW_KIND
+        ? makeLayoutRow()
+        : makeSetting(
+            payload.value
+          );
+
+  const insertion =
+    insertIntoContainerAt(
+      state.nodes,
+      containerId,
+      node,
+      insertionIndex
+    );
+
+  state.nodes =
+    insertion.inserted
+      ? insertion.nodes
+      : [
+          ...state.nodes,
+          node
+        ];
+
+  state.selectedId =
+    node.id;
+  state.activeContainerId =
+    insertion.inserted
+      ? containerId
+      : ROOT_CONTAINER;
+
+  return true;
+}
+
+function finishPalettePointerDrag(
+  commit
+) {
+  if (!palettePointerDragActive) {
+    return;
+  }
+
+  const payload =
+    palettePointerPayload;
+  const sourceButton =
+    palettePointerSourceButton;
+  const insertContainer =
+    state.dragInsertContainer;
+  const insertIndex =
+    Number.isFinite(
+      state.dragInsertIndex
+    )
+      ? state.dragInsertIndex
+      : Number.POSITIVE_INFINITY;
+
+  palettePointerDragActive = false;
+
+  if (palettePointerVisualFrame) {
+    cancelAnimationFrame(
+      palettePointerVisualFrame
+    );
+    palettePointerVisualFrame = 0;
+  }
+
+  if (
+    sourceButton &&
+    palettePointerId !== null &&
+    sourceButton.hasPointerCapture?.(
+      palettePointerId
+    )
+  ) {
+    sourceButton.releasePointerCapture(
+      palettePointerId
+    );
+  }
+
+  palettePointerId = null;
+
+  clearPalettePointerGhost();
+  clearPendingPalettePointerDrag();
+  stopDragScrolling();
+  clearDragFeedback();
+
+  nodeWheelTargetHost = null;
+  nodeWheelTargetContainerId = null;
+  nodeWheelDelta = 0;
+  nodeWheelManualHost = null;
+  nodeWheelManualIndex = null;
+
+  suppressPaletteClickButton =
+    sourceButton;
+  suppressPaletteClickUntil =
+    performance.now() + 350;
+
+  palettePointerPayload = null;
+
+  const inserted =
+    commit &&
+    typeof insertContainer ===
+      "string"
+      ? insertPalettePointerPayload(
+          payload,
+          insertContainer,
+          insertIndex
+        )
+      : false;
+
+  if (
+    inserted &&
+    payload?.kind !== "dynamic"
+  ) {
+    renderAll();
+  }
+}
+
 function stepNodeInsertWithWheel(
   direction
 ) {
   if (
-    !nodePointerDragActive ||
-    !activeDraggedNodeId ||
+    !(
+      (
+        nodePointerDragActive &&
+        activeDraggedNodeId
+      ) ||
+      (
+        palettePointerDragActive &&
+        palettePointerPayload
+      )
+    ) ||
     !nodeWheelTargetHost ||
     !nodeWheelTargetHost.isConnected ||
     !nodeWheelTargetContainerId ||
@@ -8608,7 +9807,7 @@ function setPointerContainerTarget(
 
   document
     .querySelectorAll(
-      ".option-lane, .builder-canvas"
+      ".option-lane, .layout-row-lane, .builder-canvas"
     )
     .forEach(zone => {
       zone.classList.toggle(
@@ -8646,7 +9845,7 @@ function setPointerOptionEdgeTarget(
 
   document
     .querySelectorAll(
-      ".option-lane.drag-over, .builder-canvas.drag-over"
+      ".option-lane.drag-over, .layout-row-lane.drag-over, .builder-canvas.drag-over"
     )
     .forEach(zone => {
       zone.classList.remove(
@@ -8858,19 +10057,17 @@ function optionContainerTargetAtPointer(
   let containerId = ROOT_CONTAINER;
 
   for (const element of hitElements) {
-    const dropZone =
-      element.closest(
-        ".option-lane[data-container] > .drop-zone"
+    const outlineTarget =
+      outlineDropTargetFromElement(
+        element,
+        canvas
       );
 
     if (
-      dropZone instanceof HTMLElement &&
-      canvas.contains(dropZone)
+      outlineTarget
     ) {
-      const lane =
-        dropZone.parentElement;
       const candidateContainerId =
-        lane?.dataset.container;
+        outlineTarget.containerId;
 
       if (
         candidateContainerId &&
@@ -8879,7 +10076,8 @@ function optionContainerTargetAtPointer(
           candidateContainerId
         )
       ) {
-        host = dropZone;
+        host =
+          outlineTarget.host;
         containerId =
           candidateContainerId;
       }
@@ -8917,22 +10115,13 @@ function optionContainerTargetAtPointer(
         cards.length
       );
   } else {
-    for (const card of cards) {
-      const cardRectangle =
-        card.getBoundingClientRect();
-
-      if (
-        clientY <
-        cardRectangle.top +
-          cardRectangle.height / 2
-      ) {
-        insertionIndex =
-          Number(
-            card.dataset.siblingIndex
-          ) || 0;
-        break;
-      }
-    }
+    insertionIndex =
+      nodeInsertionIndexAtPoint(
+        host,
+        cards,
+        clientX,
+        clientY
+      );
   }
 
   return {
@@ -8965,16 +10154,17 @@ function optionPointerTargetModeAtPoint(
     if (
       controllerCard instanceof HTMLElement
     ) {
-      const dropZone =
-        element.closest(
-          ".option-lane[data-container] > .drop-zone"
+      const outlineTarget =
+        outlineDropTargetFromElement(
+          element,
+          elements.builderCanvas
         );
 
       if (
-        dropZone instanceof HTMLElement
+        outlineTarget
       ) {
         const dropZoneOwner =
-          dropZone.closest(
+          outlineTarget.host.closest(
             ".node-card.controller[data-node-id]"
           );
 
@@ -8990,8 +10180,9 @@ function optionPointerTargetModeAtPoint(
     }
 
     if (
-      element.closest(
-        ".option-lane[data-container] > .drop-zone"
+      outlineDropTargetFromElement(
+        element,
+        elements.builderCanvas
       )
     ) {
       return "container";
@@ -9073,7 +10264,7 @@ function updateOptionPointerTarget(
 
     document
       .querySelectorAll(
-        ".option-lane.drag-over, .builder-canvas.drag-over"
+        ".option-lane.drag-over, .layout-row-lane.drag-over, .builder-canvas.drag-over"
       )
       .forEach(zone => {
         zone.classList.remove(
@@ -9123,7 +10314,7 @@ function updateOptionPointerTarget(
 
   document
     .querySelectorAll(
-      ".option-lane.drag-over, .builder-canvas.drag-over"
+      ".option-lane.drag-over, .layout-row-lane.drag-over, .builder-canvas.drag-over"
     )
     .forEach(zone => {
       zone.classList.remove(
@@ -11088,9 +12279,49 @@ function controllerInspectorMarkup(node) {
   </div>`;
 }
 
+function layoutRowInspectorMarkup(node) {
+  return `<div class="inspector-form" data-inspector-id="${escapeHtml(
+    node.id
+  )}">
+    <div class="selection-type">
+      <span>INLINE LAYOUT</span>
+      <button type="button" data-inspector-delete>Delete row</button>
+    </div>
+    ${fieldMarkup("Outline label", node.label || "Inline Row", "label")}
+    <label>
+      Description
+      <textarea data-field="description">${escapeHtml(
+        node.description || ""
+      )}</textarea>
+    </label>
+    <label>
+      Default orientation
+      <select data-field="horizontal">
+        ${optionMarkup("true", "Horizontal — side by side", String(node.horizontal !== false))}
+        ${optionMarkup("false", "Vertical — stacked", String(node.horizontal !== false))}
+      </select>
+    </label>
+    <div class="inspector-note">
+      Drag settings into this row in Configuration Outline. The packed graph exposes the row on Configuration Menu Instance; Set Configuration Layout can switch it at runtime.
+    </div>
+  </div>`;
+}
+
 function changeSelectedNode(field, value) {
   const id = state.selectedId;
   state.nodes = updateNode(state.nodes, id, node => {
+    if (
+      node.kind === LAYOUT_ROW_KIND &&
+      field === "horizontal"
+    ) {
+      return {
+        ...node,
+        horizontal:
+          value === true ||
+          value === "true"
+      };
+    }
+
     if (
       node.kind === "setting" &&
       field === "validatorMode"
@@ -12282,6 +13513,8 @@ function renderInspector() {
   elements.inspectorContent.innerHTML =
     node.kind === "controller"
       ? controllerInspectorMarkup(node)
+      : node.kind === LAYOUT_ROW_KIND
+        ? layoutRowInspectorMarkup(node)
       : settingInspectorMarkup(node);
   bindInspectorInteractions();
 }
@@ -13630,6 +14863,11 @@ function createSettingsPreviewDraft() {
 
   const visit = nodes => {
     for (const node of nodes) {
+      if (node.kind === LAYOUT_ROW_KIND) {
+        visit(node.children || []);
+        continue;
+      }
+
       if (node.kind === "controller") {
         const selectedOption =
           node.options.find(
@@ -14086,27 +15324,31 @@ function previewSettingEditorMarkup(node) {
 
 function settingsPreviewNodesMarkup(nodes) {
   const rows = [];
-  const visibleNodes =
-    flattenNodes(nodes)
-      .filter(
-        entry =>
-          entry.conditions.every(
-            condition =>
-              settingsPreviewDraft?.controllers[
-                condition.controller.id
-              ] === condition.option.name
-          )
-      )
-      .map(entry => entry.node)
-      .filter(
-        node =>
-          !(
-            node.kind === "setting" &&
-            node.hidden
-          )
-      );
 
-  for (const node of visibleNodes) {
+  for (const node of nodes || []) {
+    if (node.kind === LAYOUT_ROW_KIND) {
+      const childrenMarkup =
+        settingsPreviewNodesMarkup(
+          node.children || []
+        );
+
+      rows.push(`<section
+          class="rml-preview-layout-row${
+            node.horizontal === false
+              ? " vertical"
+              : " horizontal"
+          }"
+          data-preview-layout-row="${escapeHtml(node.id)}"
+          data-preview-node-id="${escapeHtml(node.id)}"
+          data-rml-scroll-layer="auto"
+          data-rml-scroll-layer-key="settings-preview-layout-row:${escapeHtml(node.id)}"
+          data-scroll-label="${escapeHtml(node.label || "Inline Row")} · Layout group">
+          ${childrenMarkup}
+        </section>`);
+
+      continue;
+    }
+
     if (node.kind === "controller") {
       const value =
         settingsPreviewValue(node);
@@ -14122,6 +15364,28 @@ function settingsPreviewNodesMarkup(nodes) {
           ${previewEnumEditorMarkup(node, options, value)}
         </div>
       </div>`);
+
+      const selectedOption =
+        node.options.find(
+          option =>
+            option.name === value
+        ) || node.options[0];
+
+      if (selectedOption) {
+        rows.push(
+          settingsPreviewNodesMarkup(
+            selectedOption.children || []
+          )
+        );
+      }
+
+      continue;
+    }
+
+    if (
+      node.kind !== "setting" ||
+      node.hidden
+    ) {
       continue;
     }
 
@@ -18419,8 +19683,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "help_template.html?v=18",
-    "help_template.js?v=18",
+    "help_template.html?v=19",
+    "help_template.js?v=19",
     "help-template",
     "RMLHelpTemplateMarkup"
   )
@@ -21734,7 +22998,6 @@ function installUniversalScrollLayerSelector() {
 }
 
 function initialize() {
-
   if (
     document.documentElement.dataset
       .rmlBuilderInitialized === "true"
@@ -21744,9 +23007,11 @@ function initialize() {
 
   document.documentElement.dataset
     .rmlBuilderInitialized = "true";
+  exposeRmlBuilderBuildId();
 
   ensureColorPickerAdaptiveFitLoaded();
   installUniversalScrollLayerSelector();
+  installPalettePointerDragBridge();
 
   cacheElements();
 
@@ -21759,21 +23024,50 @@ function initialize() {
     void ensureSetupAssistantLoaded(true);
   }, 250);
 
-  const structureButton = document.querySelector(
-    '[data-palette="controller"]'
-  );
-  structureButton.addEventListener("click", () =>
-    addPaletteItem("controller", state.activeContainerId)
-  );
-  structureButton.addEventListener("dragstart", event => {
-    beginDragScrolling(event);
-    event.dataTransfer.setData(
-      "application/x-rml-palette",
-      "controller"
-    );
-    event.dataTransfer.effectAllowed = "copy";
-  });
-  structureButton.addEventListener("dragend", finishDragInteraction);
+  document
+    .querySelectorAll(
+      '.palette-group.structure [data-palette]'
+    )
+    .forEach(structureButton => {
+      const type =
+        structureButton.dataset.palette;
+
+      structureButton.addEventListener("click", event => {
+        if (
+          consumePalettePointerClick(
+            structureButton,
+            event
+          )
+        ) {
+          return;
+        }
+
+        addPaletteItem(
+          type,
+          state.activeContainerId
+        );
+      });
+
+      const pointerBound =
+        bindPalettePointerDrag(
+          structureButton,
+          {
+            paletteType: type
+          }
+        );
+
+      if (!pointerBound) {
+        structureButton.addEventListener("dragstart", event => {
+          beginDragScrolling(event);
+          event.dataTransfer.setData(
+            "application/x-rml-palette",
+            type
+          );
+          event.dataTransfer.effectAllowed = "copy";
+        });
+        structureButton.addEventListener("dragend", finishDragInteraction);
+      }
+    });
 
   document.addEventListener(
     "dragover",
@@ -21784,6 +23078,37 @@ function initialize() {
   document.addEventListener(
     "pointermove",
     event => {
+      if (
+        !palettePointerDragActive &&
+        palettePointerPendingButton &&
+        event.pointerId ===
+          palettePointerPendingId
+      ) {
+        if (
+          event.pointerType === "mouse" &&
+          (event.buttons & 1) !== 1
+        ) {
+          clearPendingPalettePointerDrag();
+          return;
+        }
+
+        const distance =
+          Math.hypot(
+            event.clientX -
+              palettePointerPendingStartX,
+            event.clientY -
+              palettePointerPendingStartY
+          );
+
+        if (distance >= 5) {
+          startPalettePointerDrag(
+            palettePointerPendingButton,
+            palettePointerPendingPayload,
+            event
+          );
+        }
+      }
+
       if (
         !nodePointerDragActive &&
         nodePointerPendingCard &&
@@ -21854,9 +23179,15 @@ function initialize() {
         event.pointerId ===
           nodePointerId;
 
+      const paletteDrag =
+        palettePointerDragActive &&
+        event.pointerId ===
+          palettePointerId;
+
       if (
         !optionDrag &&
-        !nodeDrag
+        !nodeDrag &&
+        !paletteDrag
       ) {
         return;
       }
@@ -21871,6 +23202,11 @@ function initialize() {
 
       if (optionDrag) {
         scheduleOptionPointerTargetUpdate(
+          event.clientX,
+          event.clientY
+        );
+      } else if (paletteDrag) {
+        schedulePalettePointerTargetUpdate(
           event.clientX,
           event.clientY
         );
@@ -21890,6 +23226,16 @@ function initialize() {
   document.addEventListener(
     "pointerup",
     event => {
+      if (
+        palettePointerPendingButton &&
+        event.pointerId ===
+          palettePointerPendingId &&
+        !palettePointerDragActive
+      ) {
+        clearPendingPalettePointerDrag();
+        return;
+      }
+
       if (
         optionPointerPendingLane &&
         event.pointerId ===
@@ -21920,9 +23266,15 @@ function initialize() {
         event.pointerId ===
           nodePointerId;
 
+      const paletteDrag =
+        palettePointerDragActive &&
+        event.pointerId ===
+          palettePointerId;
+
       if (
         !optionDrag &&
-        !nodeDrag
+        !nodeDrag &&
+        !paletteDrag
       ) {
         return;
       }
@@ -21937,6 +23289,15 @@ function initialize() {
         );
 
         finishOptionPointerDrag(
+          true
+        );
+      } else if (paletteDrag) {
+        updatePalettePointerTarget(
+          event.clientX,
+          event.clientY
+        );
+
+        finishPalettePointerDrag(
           true
         );
       } else {
@@ -21960,6 +23321,16 @@ function initialize() {
     "pointercancel",
     event => {
       if (
+        palettePointerPendingButton &&
+        event.pointerId ===
+          palettePointerPendingId &&
+        !palettePointerDragActive
+      ) {
+        clearPendingPalettePointerDrag();
+        return;
+      }
+
+      if (
         optionPointerPendingLane &&
         event.pointerId ===
           optionPointerPendingId &&
@@ -21989,9 +23360,15 @@ function initialize() {
         event.pointerId ===
           nodePointerId;
 
+      const paletteDrag =
+        palettePointerDragActive &&
+        event.pointerId ===
+          palettePointerId;
+
       if (
         !optionDrag &&
-        !nodeDrag
+        !nodeDrag &&
+        !paletteDrag
       ) {
         return;
       }
@@ -22001,6 +23378,10 @@ function initialize() {
 
       if (optionDrag) {
         finishOptionPointerDrag(
+          false
+        );
+      } else if (paletteDrag) {
+        finishPalettePointerDrag(
           false
         );
       } else {
@@ -22025,6 +23406,7 @@ function initialize() {
       const dragIsActive =
         dragScrollActive ||
         nodePointerDragActive ||
+        palettePointerDragActive ||
         optionPointerDragActive ||
         Boolean(activeDraggedNodeId) ||
         Boolean(activeDraggedOptionId);
@@ -22045,6 +23427,9 @@ function initialize() {
       if (nodePointerDragActive) {
         finishNodePointerDrag(false);
       }
+      else if (palettePointerDragActive) {
+        finishPalettePointerDrag(false);
+      }
       else if (optionPointerDragActive) {
         finishOptionPointerDrag(false);
       }
@@ -22054,6 +23439,7 @@ function initialize() {
 
       clearPendingNodePointerDrag();
       clearPendingOptionPointerDrag();
+      clearPendingPalettePointerDrag();
 
       window.scrollTo({
         left: restoreX,
@@ -22091,8 +23477,16 @@ function initialize() {
       }
 
       if (
-        nodePointerDragActive &&
-        activeDraggedNodeId &&
+        (
+          (
+            nodePointerDragActive &&
+            activeDraggedNodeId
+          ) ||
+          (
+            palettePointerDragActive &&
+            palettePointerPayload
+          )
+        ) &&
         nodeWheelTargetHost &&
         nodeWheelTargetHost.isConnected &&
         nodeWheelTargetContainerId
@@ -22469,7 +23863,15 @@ function initialize() {
   );
 }
 
-document.addEventListener("DOMContentLoaded", initialize);
+if (document.readyState === "loading") {
+  document.addEventListener(
+    "DOMContentLoaded",
+    initialize,
+    { once: true }
+  );
+} else {
+  initialize();
+}
 
 const RML_RUNTIME_DISPLAY_VALUE_TYPE =
   "runtimeDisplay";
@@ -22503,6 +23905,11 @@ function rmlRuntimeDisplayWalk(
           result
         );
       }
+    } else if (node?.kind === LAYOUT_ROW_KIND) {
+      rmlRuntimeDisplayWalk(
+        node.children,
+        result
+      );
     }
   }
 
@@ -22943,6 +24350,11 @@ function rmlRuntimeDisplayFlattenOrder(
           result
         );
       }
+    } else if (node?.kind === LAYOUT_ROW_KIND) {
+      rmlRuntimeDisplayFlattenOrder(
+        node.children,
+        result
+      );
     }
   }
 
@@ -22965,6 +24377,7 @@ function rmlRuntimeDisplayApplyAbsoluteConfigurationOrder(
 
     if (
       !node ||
+      node.kind === LAYOUT_ROW_KIND ||
       rmlRuntimeDisplayIsNode(node)
     ) {
       continue;
@@ -24237,6 +25650,22 @@ generateCode =
             )
           )
           .map(node => {
+            if (node?.kind === LAYOUT_ROW_KIND) {
+              return {
+                ...node,
+                layoutItemIds:
+                  (node.children || [])
+                    .map(child =>
+                      String(child?.id || "")
+                    )
+                    .filter(Boolean),
+                children:
+                  filter(
+                    node.children
+                  )
+              };
+            }
+
             if (node?.kind !== "controller") {
               return node;
             }
@@ -24859,8 +26288,28 @@ function rmlRuntimeDisplayRenderPreviewRows() {
       output
     );
 
+    const containerId =
+      findNodeContainerId(
+        state.nodes,
+        node.id
+      );
+    const containerNode =
+      containerId
+        ? findNode(
+            state.nodes,
+            containerId
+          )
+        : null;
+    const targetHost =
+      containerNode?.kind ===
+        LAYOUT_ROW_KIND
+        ? host.querySelector(
+            `[data-preview-layout-row="${CSS.escape(containerId)}"]`
+          ) || host
+        : host;
+
     rmlPreviewInsertByOutlineOrder(
-      host,
+      targetHost,
       section,
       node.id
     );
@@ -24888,6 +26337,16 @@ renderSettingsPreview =
             )
           )
           .map(node => {
+            if (node?.kind === LAYOUT_ROW_KIND) {
+              return {
+                ...node,
+                children:
+                  filter(
+                    node.children
+                  )
+              };
+            }
+
             if (node?.kind !== "controller") {
               return node;
             }
@@ -24969,6 +26428,9 @@ Object.defineProperty(
                 visit(option?.children);
               }
             }
+            if (node.kind === LAYOUT_ROW_KIND) {
+              visit(node.children);
+            }
           }
         };
         visit(state.nodes);
@@ -24998,6 +26460,9 @@ Object.defineProperty(
             for (const option of Array.isArray(node.options) ? node.options : []) {
               option.children = filter(option?.children);
             }
+          }
+          if (node.kind === LAYOUT_ROW_KIND) {
+            node.children = filter(node.children);
           }
           return true;
         });

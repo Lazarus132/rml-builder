@@ -1061,6 +1061,29 @@
     node,
     visibleNodes
   ) {
+    const containerId =
+      typeof findNodeContainerId ===
+        "function"
+        ? findNodeContainerId(
+            state.nodes,
+            node.id
+          )
+        : null;
+    const containerNode =
+      containerId &&
+      typeof findNode === "function"
+        ? findNode(
+            state.nodes,
+            containerId
+          )
+        : null;
+    const targetHost =
+      containerNode?.kind ===
+        "layoutRow"
+        ? host.querySelector(
+            `[data-preview-layout-row="${CSS.escape(String(containerId))}"]`
+          ) || host
+        : host;
     const currentIndex =
       visibleNodes.findIndex(candidate =>
         String(candidate?.id || "") ===
@@ -1068,7 +1091,7 @@
       );
 
     if (currentIndex < 0) {
-      host.appendChild(block);
+      targetHost.appendChild(block);
       return;
     }
 
@@ -1087,7 +1110,7 @@
       }
 
       const nextElement =
-        [...host.children].find(element =>
+        [...targetHost.children].find(element =>
           element instanceof HTMLElement &&
           (
             element.dataset
@@ -1103,7 +1126,7 @@
         );
 
       if (nextElement) {
-        host.insertBefore(
+        targetHost.insertBefore(
           block,
           nextElement
         );
@@ -1111,7 +1134,7 @@
       }
     }
 
-    host.appendChild(block);
+    targetHost.appendChild(block);
   }
 
   function dynamicPreviewChoiceItems(
@@ -2572,7 +2595,18 @@
 
       button.addEventListener(
         "click",
-        () => {
+        event => {
+          if (
+            window
+              .RMLPalettePointerDragBridge
+              ?.consumeClick?.(
+                button,
+                event
+              )
+          ) {
+            return;
+          }
+
           createFromSource(
             source.id,
             state.activeContainerId,
@@ -2581,32 +2615,42 @@
         }
       );
 
-      button.addEventListener(
-        "dragstart",
-        event => {
-          try {
-            beginDragScrolling?.(
-              event
+      const pointerBound =
+        window
+          .RMLPalettePointerDragBridge
+          ?.bindDynamic?.(
+            button,
+            source.id
+          ) === true;
+
+      if (!pointerBound) {
+        button.addEventListener(
+          "dragstart",
+          event => {
+            try {
+              beginDragScrolling?.(
+                event
+              );
+            } catch {}
+
+            event.dataTransfer.setData(
+              "application/x-rml-dynamic-editable",
+              String(source.id)
             );
-          } catch {}
+            event.dataTransfer.effectAllowed =
+              "copy";
+          }
+        );
 
-          event.dataTransfer.setData(
-            "application/x-rml-dynamic-editable",
-            String(source.id)
-          );
-          event.dataTransfer.effectAllowed =
-            "copy";
-        }
-      );
-
-      button.addEventListener(
-        "dragend",
-        () => {
-          try {
-            finishDragInteraction?.();
-          } catch {}
-        }
-      );
+        button.addEventListener(
+          "dragend",
+          () => {
+            try {
+              finishDragInteraction?.();
+            } catch {}
+          }
+        );
+      }
 
       if (enumButton) {
         host.insertBefore(

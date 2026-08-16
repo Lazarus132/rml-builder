@@ -4,10 +4,29 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta
+      name="rml-builder-build"
+      content="palette-pointer-drag-scroll-fix-20260816-051500-v172">
+    <meta
       name="description"
       content="Build complete typed ResoniteModLoader projects visually with automatic dependencies; optional Raw C# tools remain an expert fallback.">
     <title>RML Universal Mod Builder</title>
-    <link rel="stylesheet" href="styles.css?v=125">
+    <script>
+      Object.defineProperty(
+        window,
+        "RMLBuilderBuildId",
+        {
+          value:
+            "palette-pointer-drag-scroll-fix-20260816-051500-v172",
+          writable: false,
+          enumerable: true,
+          configurable: true
+        }
+      );
+      document.documentElement.dataset
+        .rmlBuilderBuild =
+          window.RMLBuilderBuildId;
+    </script>
+    <link rel="stylesheet" href="styles.css?v=127-palette-pointer-drag">
     <link rel="shortcut icon" href="./favicon.svg">
     <link rel="icon" href="./favicon.svg">
   </head>
@@ -128,7 +147,7 @@
             open>
             <summary>
               <span>Structure</span>
-              <b>1</b>
+              <b>2</b>
             </summary>
             <div class="palette-group-content">
               <button
@@ -138,6 +157,15 @@
                 data-palette="controller">
                 <span>§</span>
                 <strong>Section enum</strong>
+                <b>＋</b>
+              </button>
+              <button
+                class="palette-item layout-row-item"
+                type="button"
+                draggable="true"
+                data-palette="layoutRow">
+                <span>⇄</span>
+                <strong>Inline row</strong>
                 <b>＋</b>
               </button>
               
@@ -424,10 +452,10 @@
     </dialog>
     <script src="scroll_manager.js?v=6"></script>
     <script src="scroll_hierarchy.js?v=8"></script>
-    <script src="app.js?v=163"></script>
+    <script src="app.js?v=172-palette-pointer-drag-scroll-20260816-051500"></script>
     <script src="catalog_loader.js?v=26"></script>
     <script src="runtime_bridge.js?v=2"></script>
-    <script src="node_graph.js?v=100"></script>
-    <script src="dynamic_settings.js?v=17"></script>
+    <script src="node_graph.js?v=104-view-persistence-20260816-044000"></script>
+    <script src="dynamic_settings.js?v=19-palette-pointer-drag"></script>
 </body>
 </html>
