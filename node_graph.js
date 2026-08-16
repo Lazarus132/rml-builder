@@ -2282,6 +2282,27 @@
     };
   }
 
+  /*
+   * `graph.active` selects which editor view is currently visible. It must
+   * not also decide whether an already packed runtime program exists. Going
+   * back to Configuration Outline deliberately preserves the graph, so its
+   * Preview actions, generated C# and synchronized Outline snapshot must
+   * remain live while `active` is false.
+   */
+  function hasPackedRuntimeProgram() {
+    return Boolean(
+      graph?.configSnapshot &&
+      Array.isArray(
+        graph.configSnapshot.nodes
+      ) &&
+      Array.isArray(graph.nodes) &&
+      graph.nodes.some(node =>
+        node?.kind === "configuration"
+      ) &&
+      Array.isArray(graph.connections)
+    );
+  }
+
 
   function sanitizeWirePoints(
     rawPoints,
@@ -6471,6 +6492,544 @@
     return result;
   }
 
+  const previewFlowOnceState =
+    new Set();
+
+  function previewImpulseInputValue(
+    node,
+    inputId
+  ) {
+    const definition =
+      nodeDefinition(node);
+    const specification =
+      definition?.inputs?.find(
+        input => input.id === inputId
+      );
+
+    if (!specification) {
+      return previewUnknown(
+        null,
+        `Missing input ${inputId}`
+      );
+    }
+
+    return previewInputValue(
+      node,
+      specification,
+      previewContext()
+    );
+  }
+
+  function previewMenuItemId(result) {
+    if (!result?.known) return "";
+
+    return String(
+      result.value?.itemId || ""
+    );
+  }
+
+  function previewApplyConfigurationAction(
+    node,
+    statistics
+  ) {
+    const input = id =>
+      previewImpulseInputValue(
+        node,
+        id
+      );
+    const itemId = () =>
+      previewMenuItemId(
+        input("item")
+      );
+    let action = "";
+    let payload = {};
+
+    switch (node.operatorId) {
+      case "configuration.setVisibility":
+        action = "visibility";
+        payload = {
+          itemId: itemId(),
+          visible:
+            Boolean(input("visible").value)
+        };
+        break;
+
+      case "configuration.setOrder":
+        action = "order";
+        payload = {
+          itemId: itemId(),
+          order: input("order").value
+        };
+        break;
+
+      case "configuration.setValue":
+        action = "value";
+        payload = {
+          itemId: itemId(),
+          value: input("value").value,
+          save:
+            Boolean(input("save").value)
+        };
+        break;
+
+      case "configuration.saveSettings":
+        action = "saveSettings";
+        payload = {};
+        break;
+
+      case "configuration.setLayout":
+        action = "layout";
+        payload = {
+          itemId: itemId(),
+          horizontal:
+            Boolean(
+              input("horizontal").value
+            )
+        };
+        break;
+
+      case "configuration.setWidth":
+        action = "width";
+        payload = {
+          itemId: itemId(),
+          width: input("width").value
+        };
+        break;
+
+      case "configuration.setLabelVisibility":
+        action = "labelVisibility";
+        payload = {
+          itemId: itemId(),
+          visible:
+            Boolean(input("visible").value)
+        };
+        break;
+
+      case "configuration.resetItem":
+        action = "resetItem";
+        payload = {
+          itemId: itemId()
+        };
+        break;
+
+      case "configuration.resetMenu":
+        action = "resetMenu";
+        payload = {};
+        break;
+
+      default:
+        return false;
+    }
+
+    const result =
+      bridge
+        ?.applyPreviewConfigurationMenuAction
+        ?.(action, payload);
+
+    if (result?.applied) {
+      statistics.actionsApplied += 1;
+    } else {
+      statistics.runtimeOnlySkipped += 1;
+      statistics.messages.push(
+        result?.message ||
+          `${node.operatorId} had no valid Preview target.`
+      );
+    }
+
+    return (
+      node.operatorId ===
+        "configuration.saveSettings" &&
+      !result?.applied
+        ? "failed"
+        : "done"
+    );
+  }
+
+  function previewConfigurationImpulse(
+    outlineNodeId
+  ) {
+    const statistics = {
+      started: false,
+      actionsApplied: 0,
+      runtimeOnlySkipped: 0,
+      steps: 0,
+      error: false,
+      message: "",
+      messages: []
+    };
+
+    if (!hasPackedRuntimeProgram()) {
+      statistics.message =
+        "Typed Runtime Graph has not been packed yet";
+      return statistics;
+    }
+
+    /* Keep Menu Item ports aligned with the live Outline, including children
+     * added to an Inline Row after returning from the graph view. */
+    synchronizePackedSnapshot(false);
+
+    const outputPort =
+      `config-${String(
+        outlineNodeId || ""
+      )}`;
+    const configurationIds =
+      new Set(
+        graph.nodes
+          .filter(
+            node =>
+              node.kind ===
+              "configuration"
+          )
+          .map(node => node.id)
+      );
+    const queue = graph.connections
+      .filter(connection =>
+        configurationIds.has(
+          connection.fromNode
+        ) &&
+        connection.fromPort ===
+          outputPort
+      )
+      .map(connection => ({
+        nodeId: connection.toNode,
+        inputPortId:
+          connection.toPort
+      }));
+
+    if (queue.length === 0) {
+      statistics.message =
+        "Configuration impulse has no connected graph path";
+      return statistics;
+    }
+
+    statistics.started = true;
+    const visits = new Map();
+    const enqueueOutputs = (
+      nodeId,
+      outputPortIds
+    ) => {
+      for (const outputPortId of
+        outputPortIds) {
+        for (const connection of
+          graph.connections) {
+          if (
+            connection.fromNode ===
+              nodeId &&
+            connection.fromPort ===
+              outputPortId
+          ) {
+            queue.push({
+              nodeId:
+                connection.toNode,
+              inputPortId:
+                connection.toPort
+            });
+          }
+        }
+      }
+    };
+
+    while (
+      queue.length > 0 &&
+      statistics.steps < 2048
+    ) {
+      const current = queue.shift();
+      const endpoint =
+        `${current.nodeId}:${current.inputPortId}`;
+      const visitCount =
+        (visits.get(endpoint) || 0) + 1;
+      visits.set(endpoint, visitCount);
+
+      if (visitCount > 32) {
+        statistics.runtimeOnlySkipped += 1;
+        statistics.messages.push(
+          `Preview stopped a repeating impulse at ${endpoint}.`
+        );
+        continue;
+      }
+
+      statistics.steps += 1;
+      const node = findGraphNode(
+        current.nodeId
+      );
+
+      if (!node) continue;
+
+      const configurationOutput =
+        previewApplyConfigurationAction(
+          node,
+          statistics
+        );
+
+      if (configurationOutput) {
+        enqueueOutputs(
+          node.id,
+          [configurationOutput]
+        );
+        continue;
+      }
+
+      let outputPortIds = [];
+
+      switch (node.operatorId) {
+        case "flow.branch": {
+          const condition =
+            previewImpulseInputValue(
+              node,
+              "condition"
+            );
+
+          if (condition.known) {
+            outputPortIds = [
+              condition.value
+                ? "true"
+                : "false"
+            ];
+          } else {
+            statistics.runtimeOnlySkipped +=
+              1;
+            statistics.messages.push(
+              "Branch condition is runtime-only in Preview."
+            );
+          }
+          break;
+        }
+
+        case "flow.gate": {
+          const open =
+            previewImpulseInputValue(
+              node,
+              "open"
+            );
+
+          if (open.known && open.value) {
+            outputPortIds = [
+              "passed"
+            ];
+          } else if (!open.known) {
+            statistics.runtimeOnlySkipped +=
+              1;
+          }
+          break;
+        }
+
+        case "flow.once":
+          if (
+            current.inputPortId ===
+            "reset"
+          ) {
+            previewFlowOnceState.delete(
+              node.id
+            );
+          } else if (
+            !previewFlowOnceState.has(
+              node.id
+            )
+          ) {
+            previewFlowOnceState.add(
+              node.id
+            );
+            outputPortIds = [
+              "passed"
+            ];
+          }
+          break;
+
+        case "flow.sequence":
+        case "flow.impulseMerge":
+          outputPortIds =
+            impulseOutputsForInput(
+              node,
+              current.inputPortId
+            );
+          break;
+
+        default: {
+          const routed =
+            impulseOutputsForInput(
+              node,
+              current.inputPortId
+            );
+          const definition =
+            nodeDefinition(node);
+          const hasExplicitRoute =
+            Boolean(
+              definition?.impulseRoutes &&
+              Object.hasOwn(
+                definition.impulseRoutes,
+                current.inputPortId
+              )
+            );
+
+          if (
+            hasExplicitRoute ||
+            routed.length === 1
+          ) {
+            outputPortIds = routed;
+          } else if (routed.length > 1) {
+            statistics.runtimeOnlySkipped +=
+              1;
+            statistics.messages.push(
+              `${node.operatorId || "Runtime node"} has multiple runtime-dependent impulse outputs.`
+            );
+          }
+
+          if (
+            node.kind === "operator" &&
+            !node.operatorId?.startsWith(
+              "flow."
+            )
+          ) {
+            statistics.runtimeOnlySkipped +=
+              1;
+          }
+          break;
+        }
+      }
+
+      enqueueOutputs(
+        node.id,
+        outputPortIds
+      );
+    }
+
+    if (statistics.steps >= 2048) {
+      statistics.error = true;
+      statistics.message =
+        "Preview impulse stopped at its safety limit";
+    } else if (
+      statistics.actionsApplied === 0
+    ) {
+      statistics.message =
+        statistics.messages[0] ||
+        "No Preview-safe Configuration Menu action was reached";
+    } else {
+      statistics.message =
+        "Local Configuration Menu Preview updated";
+    }
+
+    delete statistics.messages;
+    return statistics;
+  }
+
+  function previewConfigurationPhase(
+    phase,
+    outlineNodeId = ""
+  ) {
+    const normalizedPhase =
+      String(phase || "")
+        .trim()
+        .toLowerCase();
+    const requestedId =
+      String(outlineNodeId || "");
+    const statistics = {
+      phase: normalizedPhase,
+      started: false,
+      reactions: 0,
+      actionsApplied: 0,
+      runtimeOnlySkipped: 0,
+      steps: 0,
+      error: false,
+      message: ""
+    };
+
+    if (
+      normalizedPhase !== "startup" &&
+      normalizedPhase !== "saved"
+    ) {
+      statistics.error = true;
+      statistics.message =
+        "Unknown Configuration Preview phase";
+      return statistics;
+    }
+
+    if (!hasPackedRuntimeProgram()) {
+      statistics.message =
+        "Typed Runtime Graph has not been packed yet";
+      return statistics;
+    }
+
+    synchronizePackedSnapshot(false);
+
+    /*
+     * Opening Preview represents a fresh local runtime session. Once nodes
+     * must therefore be reset before Startup is emitted, just as they are
+     * when the generated runtime graph is initialized in Resonite.
+     */
+    if (normalizedPhase === "startup") {
+      previewFlowOnceState.clear();
+    }
+
+    const snapshot =
+      graph.configSnapshot ||
+      snapshotFromBuilder();
+    const sources =
+      flattenConfiguration(
+        snapshot?.nodes || []
+      )
+        .map(entry => entry?.node)
+        .filter(node =>
+          node &&
+          node.kind !== "layoutRow" &&
+          (!requestedId ||
+            String(node.id || "") ===
+              requestedId) &&
+          (
+            normalizedPhase === "startup"
+              ? runtimeBehaviorIncludesStartup(
+                  node.reaction
+                )
+              : runtimeBehaviorIncludesSaved(
+                  node.reaction
+                )
+          )
+        );
+
+    for (const source of sources) {
+      const result =
+        previewConfigurationImpulse(
+          source.id
+        );
+
+      statistics.reactions += 1;
+      statistics.started =
+        statistics.started ||
+        result.started === true;
+      statistics.actionsApplied +=
+        Number(
+          result.actionsApplied || 0
+        );
+      statistics.runtimeOnlySkipped +=
+        Number(
+          result.runtimeOnlySkipped || 0
+        );
+      statistics.steps +=
+        Number(result.steps || 0);
+      statistics.error =
+        statistics.error ||
+        result.error === true;
+    }
+
+    if (sources.length === 0) {
+      statistics.message = requestedId
+        ? `Configuration item has no ${normalizedPhase} reaction`
+        : `No ${normalizedPhase} Configuration reactions`;
+    } else if (
+      statistics.actionsApplied > 0
+    ) {
+      statistics.message =
+        `Local ${normalizedPhase} Configuration Preview updated`;
+    } else if (statistics.started) {
+      statistics.message =
+        `${normalizedPhase} reactions executed locally`;
+    } else {
+      statistics.message =
+        `${normalizedPhase} reactions have no connected graph path`;
+    }
+
+    return statistics;
+  }
+
   function previewFormatNumber(value) {
     if (!Number.isFinite(value)) {
       return String(value);
@@ -9149,6 +9708,23 @@ ${configurationButtonCases.length > 0
                 `_configuredValue${token}`;
               const resolvedLocal =
                 `_resolvedValue${token}`;
+              const changedLocal =
+                `_selectionChanged${token}`;
+              const reactionEmitter =
+                configurationNode
+                  ? impulseMethodByPort.get(
+                      `${configurationNode.id}:${item.portId}`
+                    )
+                  : "";
+              const emitChangedReaction =
+                reactionEmitter
+                  ? `
+
+                    if (emitReactions && ${changedLocal})
+                    {
+                        ${item.reactor}();
+                    }`
+                  : "";
 
               return `                {
                     string ${configuredLocal};
@@ -9166,10 +9742,16 @@ ${configurationButtonCases.length > 0
                                 "${graphCsEscapeString(sourceId)}"),
                             ${item.dynamicChoiceAllowEmpty ? "true" : "false"});
 
+                    bool ${changedLocal};
+
                     lock (_configurationStateLock)
                     {
+                        ${changedLocal} =
+                            !EqualityComparer<string>.Default.Equals(
+                                ${item.backing},
+                                ${resolvedLocal});
                         ${item.backing} = ${resolvedLocal};
-                    }
+                    }${emitChangedReaction}
                 }`;
             })
             .join("\n");
@@ -9210,7 +9792,8 @@ ${updates}
     }
 
     private static void RefreshDynamicChoiceSelectionsForSource(
-        string sourceNodeId)
+        string sourceNodeId,
+        bool emitReactions)
     {
         switch (sourceNodeId ?? string.Empty)
         {
@@ -9454,7 +10037,7 @@ ${dynamicChoiceRefreshCases.join("\n")}
 
           const refresh =
             directDynamicChoice
-              ? `\n\n        RefreshDynamicChoiceSelectionsForSource(\n            "${graphCsEscapeString(item.dynamicChoiceSourceId)}");`
+              ? `\n\n        RefreshDynamicChoiceSelectionsForSource(\n            "${graphCsEscapeString(item.dynamicChoiceSourceId)}",\n            emitReactions: false);`
               : "";
 
           return `    public static void ${item.setter}(${item.csType} value)
@@ -9772,7 +10355,8 @@ ${dynamicChoiceRuntimeSupportCode}    private static void PublishDynamicCollecti
     {
 ${directDynamicChoiceFields.length > 0
   ? `        RefreshDynamicChoiceSelectionsForSource(
-            sourceNodeId);
+            sourceNodeId,
+            emitReactions: true);
 
 `
   : ""}        PublishRuntimeBridge(
@@ -10413,7 +10997,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         `${graphClassName}.Initialize(message => Msg(message));${
           extensionRequirements
             .usesRuntimeConfigurationMenu
-            ? `\n${graphClassName}.BindRuntimeConfigurationMenu(SetRuntimeConfigurationMenuValue);`
+            ? `\n${graphClassName}.BindRuntimeConfigurationMenu(SetRuntimeConfigurationMenuValue, SaveRuntimeConfigurationDrafts);`
             : ""
         }`,
       onEngineInitializedStatement:
@@ -11501,19 +12085,22 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       }
 
       .rml-graph-toast {
-        position: absolute;
-        z-index: 80;
-        right: 12px;
-        bottom: 12px;
-        max-width: min(430px, calc(100% - 24px));
-        padding: 9px 11px;
+        position: fixed;
+        z-index: 10020;
+        left: 50%;
+        bottom: max(14px, env(safe-area-inset-bottom));
+        width: max-content;
+        max-width: min(560px, calc(100vw - 24px));
+        padding: 10px 13px;
         border: 1px solid #465766;
         border-radius: 8px;
         background: rgba(14, 21, 29, 0.96);
         color: #dfeaf0;
-        font-size: 9px;
+        font-size: 10px;
+        font-weight: 650;
         line-height: 1.45;
-        box-shadow: 0 10px 34px rgba(0, 0, 0, 0.45);
+        box-shadow: 0 12px 38px rgba(0, 0, 0, 0.55);
+        transform: translateX(-50%);
         pointer-events: none;
       }
 
@@ -12182,10 +12769,10 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       active ? "Back to Configuration Outline" : "Pack into Node"
     );
 
-    dom.packButton.dataset.help =
-      active
-        ? "Return to the Configuration Outline. The packed graph is preserved."
-        : "Pack the Configuration Outline into the synchronized typed runtime graph.";
+    dom.packButton.dataset.helpTone =
+      "runtime";
+    dom.packButton.dataset.helpKicker =
+      "Runtime Graph";
 
     dom.packButton.classList.toggle(
       "graph-active",
@@ -12201,11 +12788,36 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
     dom.packButton.dataset.help =
       sourceNodes.length === 0
-        ? "Add at least one configuration item first."
+        ? "Add at least one Configuration Outline item before opening the Typed Runtime Graph."
         : graph?.active
           ? "Return to the Configuration Outline. The packed graph is preserved."
-          : "Replace the visual outline with an automatically synchronized typed node graph.";
+          : "Open the automatically synchronized Typed Runtime Graph. The Configuration Outline remains preserved.";
     dom.packButton.removeAttribute("title");
+  }
+
+  function ensureGraphViewportToast() {
+    let toast =
+      document.querySelector(
+        '[data-rml-graph-viewport-toast="true"]'
+      );
+
+    if (!toast) {
+      toast =
+        document.createElement("div");
+      toast.className =
+        "rml-graph-toast";
+      toast.dataset.rmlGraphViewportToast =
+        "true";
+      toast.hidden = true;
+      toast.setAttribute(
+        "aria-atomic",
+        "true"
+      );
+      document.body.appendChild(toast);
+    }
+
+    dom.toast = toast;
+    return toast;
   }
 
   function sourceIsOutdated() {
@@ -12250,22 +12862,56 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     );
 
     if (!graph?.active) {
-      window.alert(text);
+      if (
+        typeof window.RMLBuilderDialog
+          ?.notice === "function"
+      ) {
+        void window.RMLBuilderDialog.notice({
+          tone:
+            tone === "error"
+              ? "danger"
+              : tone === "success"
+                ? "success"
+                : "info",
+          kicker: "Runtime Graph",
+          title:
+            tone === "error"
+              ? "Graph action unavailable"
+              : "Runtime Graph notice",
+          message: text,
+          confirmLabel: "OK"
+        });
+      } else {
+        console.info(
+          `[Runtime Graph] ${text}`
+        );
+      }
       return;
     }
 
-    if (!dom.toast) {
-      return;
-    }
+    const toast =
+      ensureGraphViewportToast();
 
-    dom.toast.textContent = text;
-    dom.toast.className =
+    toast.textContent = text;
+    toast.className =
       `rml-graph-toast${
         tone
           ? ` ${tone}`
           : ""
       }`;
-    dom.toast.hidden = false;
+    toast.setAttribute(
+      "role",
+      tone === "error"
+        ? "alert"
+        : "status"
+    );
+    toast.setAttribute(
+      "aria-live",
+      tone === "error"
+        ? "assertive"
+        : "polite"
+    );
+    toast.hidden = false;
 
     graphMessageTimer =
       window.setTimeout(() => {
@@ -12315,7 +12961,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
   function synchronizePackedSnapshot(
     render = true
   ) {
-    if (!graph?.active) {
+    if (!hasPackedRuntimeProgram()) {
       return false;
     }
 
@@ -12355,7 +13001,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       packedSnapshotSyncTimer
     );
 
-    if (!graph?.active) {
+    if (!hasPackedRuntimeProgram()) {
       return;
     }
 
@@ -12423,12 +13069,35 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     updatePackButton();
   }
 
-  function clearGraphOperators() {
+  async function clearGraphOperators() {
+    const confirmation =
+      window.RMLBuilderDialog
+        ?.confirm;
+
     if (
-      !window.confirm(
-        "Remove all operator nodes and wires, while keeping the packed configuration node?"
-      )
+      typeof confirmation !==
+      "function"
     ) {
+      showGraphMessage(
+        "The confirmation dialog is not available yet.",
+        "error"
+      );
+      return;
+    }
+
+    const confirmed =
+      await confirmation({
+        tone: "danger",
+        kicker: "Runtime Graph reset",
+        title: "Clear all Runtime Graph operators?",
+        message:
+          "All operator nodes and wires are removed. The packed configuration start node is kept.",
+        details:
+          "This changes the generated runtime logic immediately.",
+        confirmLabel: "Clear Operators"
+      });
+
+    if (!confirmed) {
       return;
     }
 
@@ -12847,6 +13516,10 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     if (dom.inspectorTitle) {
       dom.inspectorTitle.innerHTML =
         dom.inspectorTitleOriginal;
+    }
+
+    if (dom.toast) {
+      dom.toast.hidden = true;
     }
 
     dom.root = null;
@@ -14699,10 +15372,6 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
     toolbar.append(
       createToolbarButton(
-        "Unpack to Outline",
-        unpackToOutline
-      ),
-      createToolbarButton(
         "Center Graph",
         centerGraph
       ),
@@ -14921,11 +15590,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     viewport.appendChild(stage);
 
     const toast =
-      document.createElement("div");
-    toast.className =
-      "rml-graph-toast";
-    toast.hidden = true;
-    viewport.appendChild(toast);
+      ensureGraphViewportToast();
 
     root.append(
       toolbar,
@@ -24870,8 +25535,11 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     cacheDom();
     ensurePackButton();
 
-    if (graph.active) {
+    if (hasPackedRuntimeProgram()) {
       synchronizePackedSnapshot(false);
+    }
+
+    if (graph.active) {
       activateGraphMode();
     } else {
       deactivateGraphMode();
@@ -25232,8 +25900,11 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
             ".identity"
           )
         ) {
-          if (graph?.active) {
+          if (hasPackedRuntimeProgram()) {
             schedulePackedSnapshotSync();
+          }
+
+          if (graph?.active) {
             requestAnimationFrame(
               () =>
                 synchronizeRuntimeBridgeSubscription(
@@ -25280,8 +25951,11 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       true
     );
 
-    if (graph.active) {
+    if (hasPackedRuntimeProgram()) {
       synchronizePackedSnapshot(false);
+    }
+
+    if (graph.active) {
       activateGraphMode();
     }
 
@@ -25394,13 +26068,29 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
    */
   Object.defineProperty(window, "RMLDynamicGraphHost", {
     value: Object.freeze({
-      version: 3,
+      version: 5,
       getState() { return graph; },
       isReady() {
         return Boolean(
           graph &&
           Array.isArray(graph.nodes) &&
           Array.isArray(graph.connections)
+        );
+      },
+      previewConfigurationImpulse(
+        outlineNodeId
+      ) {
+        return previewConfigurationImpulse(
+          outlineNodeId
+        );
+      },
+      previewConfigurationPhase(
+        phase,
+        outlineNodeId = ""
+      ) {
+        return previewConfigurationPhase(
+          phase,
+          outlineNodeId
         );
       },
       commit() {

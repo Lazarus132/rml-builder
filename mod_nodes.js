@@ -1139,8 +1139,16 @@ private static readonly Dictionary<string, int>
 private static readonly Dictionary<string, bool>
     _runtimeConfigurationMenuHorizontalLayout =
         new(StringComparer.Ordinal);
+private static readonly Dictionary<string, float>
+    _runtimeConfigurationMenuWidthPercent =
+        new(StringComparer.Ordinal);
+private static readonly Dictionary<string, bool>
+    _runtimeConfigurationMenuLabelVisibility =
+        new(StringComparer.Ordinal);
 private static Func<string, object?, bool, bool>?
     _runtimeConfigurationMenuValueSetter;
+private static Func<bool>?
+    _runtimeConfigurationMenuDraftSaver;
 private static long _runtimeConfigurationMenuRevision;
 private static long _runtimeConfigurationValueRevision;
 
@@ -1153,12 +1161,35 @@ public static long RuntimeConfigurationValueRevision =>
         ref _runtimeConfigurationValueRevision);
 
 public static void BindRuntimeConfigurationMenu(
-    Func<string, object?, bool, bool>? valueSetter)
+    Func<string, object?, bool, bool>? valueSetter,
+    Func<bool>? draftSaver)
 {
     lock (_runtimeConfigurationMenuLock)
     {
         _runtimeConfigurationMenuValueSetter =
             valueSetter;
+        _runtimeConfigurationMenuDraftSaver =
+            draftSaver;
+    }
+}
+
+private static bool SaveRuntimeConfigurationMenuSettings()
+{
+    Func<bool>? saver;
+
+    lock (_runtimeConfigurationMenuLock)
+    {
+        saver =
+            _runtimeConfigurationMenuDraftSaver;
+    }
+
+    try
+    {
+        return saver?.Invoke() == true;
+    }
+    catch
+    {
+        return false;
     }
 }
 
@@ -1195,6 +1226,30 @@ public static bool TryGetRuntimeConfigurationMenuHorizontalLayout(
         return _runtimeConfigurationMenuHorizontalLayout.TryGetValue(
             itemId ?? string.Empty,
             out horizontal);
+    }
+}
+
+public static bool TryGetRuntimeConfigurationMenuWidthPercent(
+    string itemId,
+    out float widthPercent)
+{
+    lock (_runtimeConfigurationMenuLock)
+    {
+        return _runtimeConfigurationMenuWidthPercent.TryGetValue(
+            itemId ?? string.Empty,
+            out widthPercent);
+    }
+}
+
+public static bool TryGetRuntimeConfigurationMenuLabelVisibility(
+    string itemId,
+    out bool visible)
+{
+    lock (_runtimeConfigurationMenuLock)
+    {
+        return _runtimeConfigurationMenuLabelVisibility.TryGetValue(
+            itemId ?? string.Empty,
+            out visible);
     }
 }
 
@@ -1288,6 +1343,75 @@ private static void SetRuntimeConfigurationMenuHorizontalLayout(
     }
 }
 
+private static void SetRuntimeConfigurationMenuWidthPercent(
+    RuntimeConfigurationMenuItem item,
+    float widthPercent)
+{
+    if (item is null ||
+        string.IsNullOrEmpty(item.ItemId))
+    {
+        return;
+    }
+
+    float normalized =
+        float.IsNaN(widthPercent) ||
+        float.IsInfinity(widthPercent)
+            ? 1f
+            : Math.Max(
+                1f,
+                Math.Min(
+                    100f,
+                    widthPercent));
+    bool changed;
+    lock (_runtimeConfigurationMenuLock)
+    {
+        changed =
+            !_runtimeConfigurationMenuWidthPercent.TryGetValue(
+                item.ItemId,
+                out float current) ||
+            Math.Abs(current - normalized) > 0.0001f;
+
+        _runtimeConfigurationMenuWidthPercent[item.ItemId] =
+            normalized;
+    }
+
+    if (changed)
+    {
+        Interlocked.Increment(
+            ref _runtimeConfigurationMenuRevision);
+    }
+}
+
+private static void SetRuntimeConfigurationMenuLabelVisibility(
+    RuntimeConfigurationMenuItem item,
+    bool visible)
+{
+    if (item is null ||
+        string.IsNullOrEmpty(item.ItemId))
+    {
+        return;
+    }
+
+    bool changed;
+    lock (_runtimeConfigurationMenuLock)
+    {
+        changed =
+            !_runtimeConfigurationMenuLabelVisibility.TryGetValue(
+                item.ItemId,
+                out bool current) ||
+            current != visible;
+
+        _runtimeConfigurationMenuLabelVisibility[item.ItemId] =
+            visible;
+    }
+
+    if (changed)
+    {
+        Interlocked.Increment(
+            ref _runtimeConfigurationMenuRevision);
+    }
+}
+
 private static void SetRuntimeConfigurationMenuValue(
     RuntimeConfigurationMenuItem item,
     object? value,
@@ -1336,6 +1460,10 @@ private static void ResetRuntimeConfigurationMenuItem(
             _runtimeConfigurationMenuOrder.Remove(
                 item.ItemId) |
             _runtimeConfigurationMenuHorizontalLayout.Remove(
+                item.ItemId) |
+            _runtimeConfigurationMenuWidthPercent.Remove(
+                item.ItemId) |
+            _runtimeConfigurationMenuLabelVisibility.Remove(
                 item.ItemId);
     }
 
@@ -1360,11 +1488,15 @@ private static void ResetRuntimeConfigurationMenu(
         changed =
             _runtimeConfigurationMenuVisibility.Count > 0 ||
             _runtimeConfigurationMenuOrder.Count > 0 ||
-            _runtimeConfigurationMenuHorizontalLayout.Count > 0;
+            _runtimeConfigurationMenuHorizontalLayout.Count > 0 ||
+            _runtimeConfigurationMenuWidthPercent.Count > 0 ||
+            _runtimeConfigurationMenuLabelVisibility.Count > 0;
 
         _runtimeConfigurationMenuVisibility.Clear();
         _runtimeConfigurationMenuOrder.Clear();
         _runtimeConfigurationMenuHorizontalLayout.Clear();
+        _runtimeConfigurationMenuWidthPercent.Clear();
+        _runtimeConfigurationMenuLabelVisibility.Clear();
     }
 
     if (changed)
@@ -1385,7 +1517,7 @@ private static void ResetRuntimeConfigurationMenu(
       group: "Configuration Menu",
       symbol: "MENU",
       description:
-        "Instantiates the generated RML configuration menu as a typed graph handle and exposes one stable Menu Item output for every entry in Configuration Outline. Outputs are synchronized by Outline id, so visibility, order and values can be changed by runtime logic without string-key wiring.",
+        "Instantiates the generated RML configuration menu as a typed graph handle and exposes one stable Menu Item output for every entry in Configuration Outline. Outputs are synchronized by Outline id, so visibility, order, values, Inline Row widths and label visibility can be changed by runtime logic without string-key wiring.",
       inputs: [],
       outputs: [
         port(
@@ -1449,7 +1581,7 @@ private static void ResetRuntimeConfigurationMenu(
       group: "Configuration Menu",
       symbol: "EYE",
       description:
-        "Overrides one Configuration Outline item's runtime visibility. Visible can explicitly expose an item originally generated as internal/hidden; false hides it. Reset Configuration Item returns to the static Outline/controller rule.",
+        "Overrides one Configuration Outline item's runtime visibility. Visible can explicitly expose an item originally generated as internal/hidden; false hides it. Reset Configuration Item returns to the static Outline/controller rule. A Preview button impulse applies the same change only inside local Preview and never contacts Resonite.",
       inputs: [
         port("call", "Call", "impulse"),
         port(
@@ -1546,6 +1678,47 @@ private static void ResetRuntimeConfigurationMenu(
   );
 
   registerNode(
+    "configuration.saveSettings",
+    {
+      title:
+        "Save Configuration Settings",
+      group: "Configuration Menu",
+      symbol: "SAVE",
+      description:
+        "Captures every current editor draft in the open RML configuration menu, validates it and persists the configuration exactly like the visible Save Settings button. Use Done for the action that must run after saving; Failed fires when no compatible menu is open, validation fails or persistence throws. In Preview this saves only the local Preview draft and never contacts Resonite.",
+      inputs: [
+        port("call", "Call", "impulse")
+      ],
+      outputs: [
+        port("done", "Done", "impulse"),
+        port(
+          "failed",
+          "Failed",
+          "impulse"
+        )
+      ],
+      codegenCollect(api) {
+        ensureRuntimeConfigurationMenu(
+          api
+        );
+      },
+      codegenAction(api) {
+        const done = api.emit("done");
+        const failed =
+          api.emit("failed");
+        return `if (SaveRuntimeConfigurationMenuSettings())
+        {
+            ${done ? `${done}();` : ""}
+        }
+        else
+        {
+            ${failed ? `${failed}();` : ""}
+        }`;
+      }
+    }
+  );
+
+  registerNode(
     "configuration.setLayout",
     {
       title:
@@ -1553,7 +1726,7 @@ private static void ResetRuntimeConfigurationMenu(
       group: "Configuration Menu",
       symbol: "⇄",
       description:
-        "Switches an Inline Row between horizontal side-by-side layout and vertical stacking at runtime. Connect the row's Menu Item output from Configuration Menu Instance. The menu rebuild preserves draft values and remains compatible with visibility and order overrides.",
+        "Switches an Inline Row between horizontal side-by-side layout and vertical stacking at runtime. Connect the row's Menu Item output from Configuration Menu Instance. The menu rebuild preserves draft values and remains compatible with visibility and order overrides. Connected Preview button impulses project this layout locally without synchronizing to Resonite.",
       inputs: [
         port("call", "Call", "impulse"),
         port(
@@ -1583,6 +1756,80 @@ private static void ResetRuntimeConfigurationMenu(
   );
 
   registerNode(
+    "configuration.setWidth",
+    {
+      title:
+        "Set Configuration Width",
+      group: "Configuration Menu",
+      symbol: "%↔",
+      description:
+        "Overrides one direct Inline Row child's width at runtime. Width Percent is clamped to 1-100. For exact proportions, the visible children in a row should total 100 percent. The open menu rebuild preserves draft values.",
+      inputs: [
+        port("call", "Call", "impulse"),
+        port(
+          "item",
+          "Row Item",
+          "rmlConfigurationMenuItem"
+        ),
+        port(
+          "width",
+          "Width Percent",
+          "float"
+        )
+      ],
+      outputs: [
+        port("done", "Done", "impulse")
+      ],
+      codegenCollect(api) {
+        ensureRuntimeConfigurationMenu(
+          api
+        );
+      },
+      codegenAction(api) {
+        const next = api.emit("done");
+        return `SetRuntimeConfigurationMenuWidthPercent(${api.input("item").code}, ${api.input("width").code});${next ? `\n        ${next}();` : ""}`;
+      }
+    }
+  );
+
+  registerNode(
+    "configuration.setLabelVisibility",
+    {
+      title:
+        "Set Configuration Label Visibility",
+      group: "Configuration Menu",
+      symbol: "TXT",
+      description:
+        "Shows or hides the left-side label of one Inline Row child at runtime without hiding the control itself. False gives the editor, picker, choice or button the complete cell width.",
+      inputs: [
+        port("call", "Call", "impulse"),
+        port(
+          "item",
+          "Row Item",
+          "rmlConfigurationMenuItem"
+        ),
+        port(
+          "visible",
+          "Label Visible",
+          "bool"
+        )
+      ],
+      outputs: [
+        port("done", "Done", "impulse")
+      ],
+      codegenCollect(api) {
+        ensureRuntimeConfigurationMenu(
+          api
+        );
+      },
+      codegenAction(api) {
+        const next = api.emit("done");
+        return `SetRuntimeConfigurationMenuLabelVisibility(${api.input("item").code}, ${api.input("visible").code});${next ? `\n        ${next}();` : ""}`;
+      }
+    }
+  );
+
+  registerNode(
     "configuration.resetItem",
     {
       title:
@@ -1590,7 +1837,7 @@ private static void ResetRuntimeConfigurationMenu(
       group: "Configuration Menu",
       symbol: "↶1",
       description:
-        "Removes the runtime visibility, order and Inline Row layout overrides for one menu item. Its original Configuration Outline position, orientation, hidden/internal state and Section controller rule become active again; the stored value is not changed.",
+        "Removes the runtime visibility, order, Inline Row layout, width and label overrides for one menu item. Its original Configuration Outline values become active again; the stored value is not changed.",
       inputs: [
         port("call", "Call", "impulse"),
         port(
@@ -1621,7 +1868,7 @@ private static void ResetRuntimeConfigurationMenu(
       group: "Configuration Menu",
       symbol: "↶ALL",
       description:
-        "Clears every runtime visibility, order and Inline Row layout override in one action and restores the complete menu structure defined by Configuration Outline. Configuration values are kept.",
+        "Clears every runtime visibility, order, Inline Row layout, width and label override in one action and restores the complete menu structure defined by Configuration Outline. Configuration values are kept.",
       inputs: [
         port("call", "Call", "impulse"),
         port(

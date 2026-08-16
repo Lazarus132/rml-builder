@@ -7,10 +7,11 @@ const PROJECT_FORMAT_VERSION = 1;
 const PROJECT_FILE_MAX_BYTES = 5 * 1024 * 1024;
 const PROJECT_TREE_MAX_DEPTH = 32;
 const PROJECT_TREE_MAX_ITEMS = 10000;
+const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "palette-pointer-drag-scroll-fix-20260816-051500-v172";
+  "runtime-generated-green-parity-20260816-180000-v188";
 
 function exposeRmlBuilderBuildId() {
   document.documentElement.dataset
@@ -85,6 +86,73 @@ const TYPE_DEFINITIONS = [
   { type: "colorX", label: "HDR color", group: "Visual", badge: "CLR" }
 ];
 
+const OUTLINE_TYPE_DESCRIPTIONS = Object.freeze({
+  bool:
+    "Boolean setting rendered as a checkbox in the RML menu.",
+  string:
+    "Editable text setting rendered as a text field.",
+  button:
+    "Menu button that emits one Impulse from the packed Start node.",
+  runtimeDisplay:
+    "RML menu row for live values connected from Runtime Graph display nodes.",
+  Uri:
+    "URI setting with an editable value and copy action.",
+  enum:
+    "Fixed-choice setting rendered with previous and next selection controls.",
+  int:
+    "32-bit whole-number setting with optional range validation and slider.",
+  float:
+    "32-bit decimal setting with optional range validation and slider.",
+  double:
+    "64-bit high-precision decimal setting with optional range validation and slider.",
+  int2:
+    "Two-component whole-number vector setting.",
+  int3:
+    "Three-component whole-number vector setting.",
+  int4:
+    "Four-component whole-number vector setting.",
+  float2:
+    "Two-component 32-bit decimal vector setting.",
+  float3:
+    "Three-component 32-bit decimal vector setting.",
+  float4:
+    "Four-component 32-bit decimal vector setting.",
+  double2:
+    "Two-component high-precision decimal vector setting.",
+  double3:
+    "Three-component high-precision decimal vector setting.",
+  double4:
+    "Four-component high-precision decimal vector setting.",
+  colorX:
+    "HDR-capable colorX setting with profile, strength and Full Color Picker support."
+});
+
+const OUTLINE_STRUCTURE_REFERENCE = Object.freeze([
+  {
+    type: "controller",
+    label: "Section enum",
+    badge: "§",
+    description:
+      "Creates selectable configuration pages whose child items are shown only for the active section."
+  },
+  {
+    type: "layoutRow",
+    label: "Inline row",
+    badge: "⇄",
+    description:
+      "Groups direct Outline children into one horizontal or vertical runtime menu layout."
+  }
+]);
+
+function outlineTypeDescription(type) {
+  return OUTLINE_TYPE_DESCRIPTIONS[type] ||
+    "Typed Configuration Outline setting.";
+}
+
+function outlinePaletteHelp(item) {
+  return `${outlineTypeDescription(item.type)} Click to add it to the active Outline container, or drag it to an exact position.`;
+}
+
 const DEFAULT_METADATA = {
   namespaceName: "YourModNamespace",
   className: "YourMod",
@@ -113,123 +181,6 @@ const DEFAULT_EXPORT_OPTIONS = {
   includeCsproj: true
 };
 
-const SAMPLE_NODES = [
-  {
-    id: "controller-main",
-    kind: "controller",
-    fieldName: "ActivePage",
-    keyName: "00_active_page",
-    description: "Selects the visible settings page.",
-    enumName: "SettingsPage",
-    defaultOption: "General",
-    reaction: "stored",
-    options: [
-      {
-        id: "option-general",
-        name: "General",
-        children: [
-          makeSampleSetting(
-            "setting-enabled",
-            "bool",
-            "Enabled",
-            "10_enabled",
-            "Enables this mod.",
-            "true",
-            "startup-saved"
-          ),
-          makeSampleSetting(
-            "setting-name",
-            "string",
-            "DisplayName",
-            "11_display_name",
-            "Example text setting.",
-            "Example"
-          ),
-          makeSampleSetting(
-            "setting-resource",
-            "Uri",
-            "ResourceUri",
-            "12_resource_uri",
-            "Any URL or URI with a copy button.",
-            "https://example.com/resource"
-          )
-        ]
-      },
-      {
-        id: "option-appearance",
-        name: "Appearance",
-        children: [
-          {
-            ...makeSampleSetting(
-              "setting-quality",
-              "enum",
-              "Quality",
-              "20_quality",
-              "Ordinary enum setting.",
-              "Medium",
-              "startup-saved"
-            ),
-            enumName: "QualityLevel",
-            enumOptions: ["Low", "Medium", "High"]
-          },
-          makeSampleSetting(
-            "setting-color",
-            "colorX",
-            "AccentColor",
-            "21_accent_color",
-            "HDR-capable accent color.",
-            "colorX.Red",
-            "startup-saved"
-          ),
-          {
-            ...makeSampleSetting(
-              "setting-scale",
-              "float",
-              "Scale",
-              "22_scale",
-              "Float slider from 0.1 to 10.",
-              "1",
-              "startup-saved"
-            ),
-            validatorMode: "range",
-            useSlider: true,
-            minimum: "0.1",
-            maximum: "10"
-          }
-        ]
-      },
-      {
-        id: "option-advanced",
-        name: "Advanced",
-        children: [
-          {
-            ...makeSampleSetting(
-              "setting-precise",
-              "double",
-              "PreciseValue",
-              "30_precise_value",
-              "Double slider from -100 to 100.",
-              "0.12345678901234567"
-            ),
-            validatorMode: "range",
-            useSlider: true,
-            minimum: "-100",
-            maximum: "100"
-          },
-          makeSampleSetting(
-            "setting-vector",
-            "double3",
-            "PrecisePosition",
-            "31_precise_position",
-            "Three-component double vector.",
-            "1.25, 2.5, 3.75"
-          )
-        ]
-      }
-    ]
-  }
-];
-
 const state = {
   metadata: { ...DEFAULT_METADATA },
   exportOptions: { ...DEFAULT_EXPORT_OPTIONS },
@@ -252,6 +203,8 @@ let dragScrollLastTimestamp = 0;
 let dragScrollOriginX = 0;
 let dragScrollOriginY = 0;
 let settingsPreviewDraft = null;
+let settingsPreviewRuntimeMenu = null;
+let settingsPreviewPulseCounts = {};
 let settingsPreviewColorSession = null;
 let settingsPreviewStatusTimer = null;
 let activeDraggedNodeId = null;
@@ -754,35 +707,6 @@ function movePreviewFocusAwayFromCloseButton() {
   stabilizeDialogFocus(
     elements.settingsPreviewDialog
   );
-}
-
-function makeSampleSetting(
-  id,
-  valueType,
-  fieldName,
-  keyName,
-  description,
-  defaultValue,
-  reaction = "stored"
-) {
-  return {
-    id,
-    kind: "setting",
-    valueType,
-    fieldName,
-    keyName,
-    description,
-    defaultValue,
-    hidden: false,
-    validatorMode: "none",
-    customValidator: "",
-    useSlider: false,
-    minimum: "0",
-    maximum: "100",
-    enumName: "",
-    enumOptions: [],
-    reaction
-  };
 }
 
 function clone(value) {
@@ -1633,6 +1557,430 @@ function currentFlattenedNodes() {
   return flattenedNodesCache;
 }
 
+function findDirectInlineRowContext(
+  nodeId,
+  nodes = state.nodes
+) {
+  for (const candidate of
+    Array.isArray(nodes) ? nodes : []) {
+    if (candidate?.kind === LAYOUT_ROW_KIND) {
+      const children =
+        Array.isArray(candidate.children)
+          ? candidate.children
+          : [];
+      const index = children.findIndex(
+        child =>
+          String(child?.id || "") ===
+          String(nodeId || "")
+      );
+
+      if (index >= 0) {
+        return {
+          row: candidate,
+          children,
+          index
+        };
+      }
+
+      const nested =
+        findDirectInlineRowContext(
+          nodeId,
+          children
+        );
+      if (nested) return nested;
+    }
+
+    if (candidate?.kind === "controller") {
+      for (const option of
+        Array.isArray(candidate.options)
+          ? candidate.options
+          : []) {
+        const nested =
+          findDirectInlineRowContext(
+            nodeId,
+            option.children
+          );
+        if (nested) return nested;
+      }
+    }
+  }
+
+  return null;
+}
+
+function effectiveInlineRowWidthPercent(
+  node,
+  context =
+    findDirectInlineRowContext(node?.id)
+) {
+  const explicit =
+    Number(node?.layoutWidthPercent);
+
+  if (
+    Number.isFinite(explicit) &&
+    explicit > 0
+  ) {
+    return clamp(explicit, 1, 100);
+  }
+
+  return context?.children?.length > 0
+    ? 100 / context.children.length
+    : 100;
+}
+
+function inlineRowWidthText(value) {
+  return Number(value)
+    .toFixed(2)
+    .replace(/\.00$/, "")
+    .replace(/(\.\d)0$/, "$1");
+}
+
+function createSettingsPreviewRuntimeMenu() {
+  return {
+    visibility: {},
+    order: {},
+    horizontal: {},
+    width: {},
+    labelVisibility: {}
+  };
+}
+
+function settingsPreviewRuntimeOverride(
+  property,
+  nodeId
+) {
+  const values =
+    settingsPreviewRuntimeMenu?.[
+      property
+    ];
+  const key = String(nodeId || "");
+
+  if (
+    !values ||
+    !Object.prototype.hasOwnProperty.call(
+      values,
+      key
+    )
+  ) {
+    return undefined;
+  }
+
+  return values[key];
+}
+
+function settingsPreviewNodeVisible(node) {
+  const override =
+    settingsPreviewRuntimeOverride(
+      "visibility",
+      node?.id
+    );
+
+  if (override !== undefined) {
+    return override === true;
+  }
+
+  /*
+   * A dynamic Choice/Action/Toggle deliberately uses an
+   * InternalAccessOnly backing key (`hidden === true`) so AddSetting does not
+   * render that backing key a second time in Resonite.  The actual dynamic
+   * control is nevertheless visible by default (`dynamicInternal === false`)
+   * and is rendered by IModConfigurationDynamicSettingsProvider.
+   *
+   * Treating `hidden` as the control's Preview visibility removed the Choice
+   * from Preview entirely.  Its saved/startup reaction could therefore never
+   * be changed locally and the hidden children in the Inline Row stayed
+   * hidden.  Mirror the generated provider's DefaultVisible semantics here;
+   * a runtime visibility override above still has the final say.
+   */
+  if (node?.dynamicSettingKind) {
+    return node.dynamicInternal !== true;
+  }
+
+  return node?.hidden !== true;
+}
+
+function settingsPreviewNodeHorizontal(node) {
+  const override =
+    settingsPreviewRuntimeOverride(
+      "horizontal",
+      node?.id
+    );
+
+  return override === undefined
+    ? node?.horizontal !== false
+    : override === true;
+}
+
+function settingsPreviewNodeLabelVisible(node) {
+  const override =
+    settingsPreviewRuntimeOverride(
+      "labelVisibility",
+      node?.id
+    );
+
+  return override === undefined
+    ? node?.hideLabel !== true
+    : override === true;
+}
+
+function settingsPreviewOrderedNodes(nodes) {
+  const source =
+    Array.isArray(nodes)
+      ? nodes
+      : [];
+  const defaultOrders =
+    new Map(
+      typeof flattenNodes ===
+        "function" &&
+      typeof state !== "undefined"
+        ? flattenNodes(
+            state?.nodes || []
+          ).map((entry, index) => [
+            String(
+              entry?.node?.id || ""
+            ),
+            index
+          ])
+        : []
+    );
+
+  return source
+    .map((node, index) => ({
+      node,
+      index,
+      defaultOrder:
+        defaultOrders.get(
+          String(node?.id || "")
+        ) ?? index,
+      order:
+        settingsPreviewRuntimeOverride(
+          "order",
+          node?.id
+        )
+    }))
+    .sort((left, right) => {
+      const leftOrder =
+        Number(left.order);
+      const rightOrder =
+        Number(right.order);
+      const leftHasOrder =
+        left.order !== undefined &&
+        Number.isFinite(leftOrder);
+      const rightHasOrder =
+        right.order !== undefined &&
+        Number.isFinite(rightOrder);
+
+      if (leftHasOrder || rightHasOrder) {
+        const leftValue = leftHasOrder
+          ? leftOrder
+          : left.defaultOrder;
+        const rightValue = rightHasOrder
+          ? rightOrder
+          : right.defaultOrder;
+
+        if (leftValue !== rightValue) {
+          return leftValue - rightValue;
+        }
+      }
+
+      return left.index - right.index;
+    })
+    .map(entry => entry.node);
+}
+
+function settingsPreviewInlineRowWidthPercent(
+  node,
+  context =
+    findDirectInlineRowContext(node?.id)
+) {
+  const override = Number(
+    settingsPreviewRuntimeOverride(
+      "width",
+      node?.id
+    )
+  );
+
+  if (Number.isFinite(override)) {
+    return clamp(override, 1, 100);
+  }
+
+  return effectiveInlineRowWidthPercent(
+    node,
+    context
+  );
+}
+
+function applyInlineRowPreviewLayout(
+  node,
+  element,
+  context =
+    findDirectInlineRowContext(node?.id)
+) {
+  if (
+    !(element instanceof HTMLElement) ||
+    !context
+  ) {
+    return element;
+  }
+
+  element.classList.add(
+    "rml-preview-layout-cell"
+  );
+  element.style.setProperty(
+    "--rml-inline-width-percent",
+    inlineRowWidthText(
+      settingsPreviewInlineRowWidthPercent(
+        node,
+        context
+      )
+    )
+  );
+  element.dataset.previewNodeId =
+    String(node?.id || "");
+  return element;
+}
+
+function appendInlineRowInspectorControls(
+  host,
+  node,
+  onChanged
+) {
+  const context =
+    findDirectInlineRowContext(node?.id);
+
+  if (
+    !(host instanceof HTMLElement) ||
+    !node ||
+    !context ||
+    host.querySelector(
+      "[data-inline-row-item-properties]"
+    )
+  ) {
+    return false;
+  }
+
+  const fieldset =
+    document.createElement("fieldset");
+  fieldset.dataset
+    .inlineRowItemProperties = "true";
+
+  const legend =
+    document.createElement("legend");
+  legend.textContent =
+    `Inline Row · ${context.row.label || "Layout"}`;
+  fieldset.appendChild(legend);
+
+  const widthLabel =
+    document.createElement("label");
+  widthLabel.append(
+    document.createTextNode(
+      "Width in this row (%)"
+    )
+  );
+
+  const width =
+    document.createElement("input");
+  width.type = "number";
+  width.min = "1";
+  width.max = "100";
+  width.step = "0.1";
+  width.value = inlineRowWidthText(
+    effectiveInlineRowWidthPercent(
+      node,
+      context
+    )
+  );
+  width.addEventListener(
+    "change",
+    () => {
+      const next = clamp(
+        Number(width.value) ||
+          effectiveInlineRowWidthPercent(
+            node,
+            context
+          ),
+        1,
+        100
+      );
+      node.layoutWidthPercent = next;
+      width.value =
+        inlineRowWidthText(next);
+      onChanged?.();
+    }
+  );
+  widthLabel.appendChild(width);
+  fieldset.appendChild(widthLabel);
+
+  const toggle =
+    document.createElement("label");
+  toggle.className = "toggle-row";
+  const toggleText =
+    document.createElement("span");
+  const strong =
+    document.createElement("strong");
+  strong.textContent = "Hide label";
+  const small =
+    document.createElement("small");
+  small.textContent =
+    "Uses the complete cell width for the editor or button.";
+  toggleText.append(strong, small);
+
+  const hide =
+    document.createElement("input");
+  hide.type = "checkbox";
+  hide.checked = node.hideLabel === true;
+  hide.addEventListener(
+    "change",
+    () => {
+      node.hideLabel = hide.checked;
+      onChanged?.();
+    }
+  );
+  toggle.append(toggleText, hide);
+  fieldset.appendChild(toggle);
+
+  const total = context.children.reduce(
+    (sum, child) =>
+      sum +
+      effectiveInlineRowWidthPercent(
+        child,
+        context
+      ),
+    0
+  );
+  const note =
+    document.createElement("small");
+  note.className =
+    "inline-row-width-note";
+  note.textContent =
+    `Current row total: ${inlineRowWidthText(total)}%. ` +
+    "Use a total of 100% for exact proportions.";
+  fieldset.appendChild(note);
+
+  host.appendChild(fieldset);
+  return true;
+}
+
+window.RMLInlineRowLayout =
+  Object.freeze({
+    findContext:
+      findDirectInlineRowContext,
+    effectiveWidthPercent:
+      settingsPreviewInlineRowWidthPercent,
+    isPreviewVisible:
+      settingsPreviewNodeVisible,
+    isPreviewLabelVisible:
+      settingsPreviewNodeLabelVisible,
+    isPreviewHorizontal:
+      settingsPreviewNodeHorizontal,
+    orderedPreviewNodes:
+      settingsPreviewOrderedNodes,
+    applyPreviewLayout:
+      applyInlineRowPreviewLayout,
+    appendInspectorControls:
+      appendInlineRowInspectorControls
+  });
+
 
 function findNode(nodes, id) {
   for (const node of nodes) {
@@ -2403,6 +2751,8 @@ function makeSetting(type) {
     description: `${friendlyTypeName(type)} configuration setting.`,
     defaultValue: defaultForType(type),
     buttonLabel: type === "button" ? "Run" : undefined,
+    layoutWidthPercent: undefined,
+    hideLabel: false,
     hidden: false,
     validatorMode: "none",
     customValidator: "",
@@ -2428,6 +2778,8 @@ function makeController() {
     fieldName: `ActivePage${suffix}`,
     keyName: count === 0 ? "00_active_page" : `active_page_${count + 1}`,
     description: "Selects the visible settings section.",
+    layoutWidthPercent: undefined,
+    hideLabel: false,
     enumName: `SettingsPage${suffix}`,
     defaultOption: "General",
     reaction: "stored",
@@ -2450,6 +2802,7 @@ function makeLayoutRow() {
     label: `Inline Row${suffix}`,
     description:
       "Places its direct Configuration Outline items next to each other.",
+    hidden: false,
     horizontal: true,
     children: []
   };
@@ -2556,6 +2909,8 @@ function normalizeLayoutRowNode(
     kind: LAYOUT_ROW_KIND,
     label,
     description,
+    hidden:
+      node?.hidden === true,
     horizontal:
       node.horizontal !== false,
     children:
@@ -2602,6 +2957,21 @@ function normalizeNodes(nodes) {
 
     const normalized = {
       ...node,
+      layoutWidthPercent:
+        Number.isFinite(
+          Number(node.layoutWidthPercent)
+        ) &&
+        Number(node.layoutWidthPercent) > 0
+          ? clamp(
+              Number(
+                node.layoutWidthPercent
+              ),
+              1,
+              100
+            )
+          : undefined,
+      hideLabel:
+        node.hideLabel === true,
       defaultValue:
         node.valueType === "colorX"
           ? portableColorXExpression(
@@ -3412,6 +3782,17 @@ ${usesColorX
   const runtimeMenuValueSupport =
     usesRuntimeConfigurationMenu
       ? `
+    private static Func<bool>?
+        _runtimeConfigurationDraftSaveHandler;
+
+    private static bool SaveRuntimeConfigurationDrafts()
+    {
+        Func<bool>? handler =
+            _runtimeConfigurationDraftSaveHandler;
+
+        return handler?.Invoke() == true;
+    }
+
     private static bool SetRuntimeConfigurationMenuValue(
         string itemId,
         object? value,
@@ -3916,7 +4297,11 @@ ${keyBranches}
 
                 return `        if (ReferenceEquals(
                 key,
-                ${field}))
+                ${field}) ||
+            string.Equals(
+                key?.Name,
+                ${field}.Name,
+                StringComparison.Ordinal))
         {
             return ${graphContribution.className}.TryGetRuntimeConfigurationMenuVisibility(
                 "${escapeCSharp(
@@ -3928,6 +4313,13 @@ ${keyBranches}
               .join("\n\n");
 
           return `
+    public void SetRuntimeConfigurationDraftSaveHandler(
+        Func<bool>? handler)
+    {
+        _runtimeConfigurationDraftSaveHandler =
+            handler;
+    }
+
     public long RuntimeConfigurationMenuRevision =>
         ${graphContribution.className}.RuntimeConfigurationMenuRevision;
 
@@ -3957,6 +4349,20 @@ ${keyVisibilityBranches}
             ${graphContribution.className}.TryGetRuntimeConfigurationMenuOrder(
                 itemId,
                 out order);
+
+    public bool TryGetRuntimeConfigurationItemWidthPercent(
+        string itemId,
+        out float widthPercent) =>
+            ${graphContribution.className}.TryGetRuntimeConfigurationMenuWidthPercent(
+                itemId,
+                out widthPercent);
+
+    public bool TryGetRuntimeConfigurationItemLabelVisibility(
+        string itemId,
+        out bool visible) =>
+            ${graphContribution.className}.TryGetRuntimeConfigurationMenuLabelVisibility(
+                itemId,
+                out visible);
 `;
         })()
       : "";
@@ -3964,6 +4370,49 @@ ${keyVisibilityBranches}
   const layoutProviderBlock =
     layoutRows.length > 0
       ? (() => {
+          const layoutItems =
+            layoutRows.flatMap(entry => {
+              const row = entry.node;
+              const stored =
+                Array.isArray(
+                  row.layoutItemMetadata
+                )
+                  ? row.layoutItemMetadata
+                  : (row.children || []).map(
+                      child => ({
+                        id: child?.id,
+                        widthPercent:
+                          effectiveInlineRowWidthPercent(
+                            child,
+                            {
+                              row,
+                              children:
+                                row.children || [],
+                              index: 0
+                            }
+                          ),
+                        hideLabel:
+                          child?.hideLabel === true
+                      })
+                    );
+
+              return stored
+                .filter(item =>
+                  String(item?.id || "")
+                )
+                .map(item => ({
+                  id: String(item.id),
+                  widthPercent: clamp(
+                    Number(item.widthPercent) ||
+                      100,
+                    1,
+                    100
+                  ),
+                  hideLabel:
+                    item.hideLabel === true
+                }));
+            });
+
           const groups = layoutRows
             .map(entry => {
               const row = entry.node;
@@ -4001,6 +4450,22 @@ ${keyVisibilityBranches}
             })
             .join(",\n");
 
+          const groupVisibilityBranches =
+            layoutRows
+              .map(entry => {
+                const row = entry.node;
+
+                return `        if (string.Equals(
+                groupId,
+                "${escapeCSharp(row.id)}",
+                StringComparison.Ordinal))
+        {
+            visible = ${row.hidden === true ? "false" : "true"};
+            return true;
+        }`;
+              })
+              .join("\n\n");
+
           const keyItemBranches = entries
             .map(entry => {
               const field = toPascalCase(
@@ -4010,13 +4475,50 @@ ${keyVisibilityBranches}
 
               return `        if (ReferenceEquals(
                 key,
-                ${field}))
+                ${field}) ||
+            string.Equals(
+                key?.Name,
+                ${field}.Name,
+                StringComparison.Ordinal))
         {
             itemId = "${escapeCSharp(entry.node.id)}";
             return true;
         }`;
             })
             .join("\n\n");
+
+          const widthBranches =
+            layoutItems
+              .map(item => {
+                const width =
+                  Number(item.widthPercent)
+                    .toFixed(3)
+                    .replace(/\.?0+$/, "");
+
+                return `        if (string.Equals(
+                itemId,
+                "${escapeCSharp(item.id)}",
+                StringComparison.Ordinal))
+        {
+            widthPercent = ${width}f;
+            return true;
+        }`;
+              })
+              .join("\n\n");
+
+          const labelBranches =
+            layoutItems
+              .map(item =>
+                `        if (string.Equals(
+                itemId,
+                "${escapeCSharp(item.id)}",
+                StringComparison.Ordinal))
+        {
+            visible = ${item.hideLabel ? "false" : "true"};
+            return true;
+        }`
+              )
+              .join("\n\n");
 
           const runtimeLayoutHelper =
             usesRuntimeConfigurationMenu
@@ -4047,6 +4549,36 @@ ${groups}
 ${keyItemBranches}
 
         itemId = string.Empty;
+        return false;
+    }
+
+    public bool TryGetConfigurationLayoutGroupVisibility(
+        string groupId,
+        out bool visible)
+    {
+${groupVisibilityBranches}
+
+        visible = true;
+        return false;
+    }
+
+    public bool TryGetConfigurationLayoutItemWidthPercent(
+        string itemId,
+        out float widthPercent)
+    {
+${widthBranches}
+
+        widthPercent = 0f;
+        return false;
+    }
+
+    public bool TryGetConfigurationLayoutItemLabelVisibility(
+        string itemId,
+        out bool visible)
+    {
+${labelBranches}
+
+        visible = true;
         return false;
     }
 ${runtimeLayoutHelper}`;
@@ -5097,6 +5629,25 @@ function sanitizeProjectNodes(
                 sourceNode.description,
                 "Selects the visible settings section."
               ),
+            layoutWidthPercent:
+              Number.isFinite(
+                Number(
+                  sourceNode.layoutWidthPercent
+                )
+              ) &&
+              Number(
+                sourceNode.layoutWidthPercent
+              ) > 0
+                ? clamp(
+                    Number(
+                      sourceNode.layoutWidthPercent
+                    ),
+                    1,
+                    100
+                  )
+                : undefined,
+            hideLabel:
+              sourceNode.hideLabel === true,
             enumName:
               projectString(
                 sourceNode.enumName,
@@ -5192,6 +5743,25 @@ function sanitizeProjectNodes(
             "boolean"
               ? sourceNode.hidden
               : false,
+          layoutWidthPercent:
+            Number.isFinite(
+              Number(
+                sourceNode.layoutWidthPercent
+              )
+            ) &&
+            Number(
+              sourceNode.layoutWidthPercent
+            ) > 0
+              ? clamp(
+                  Number(
+                    sourceNode.layoutWidthPercent
+                  ),
+                  1,
+                  100
+                )
+              : undefined,
+          hideLabel:
+            sourceNode.hideLabel === true,
           validatorMode:
             projectString(
               sourceNode.validatorMode,
@@ -5472,30 +6042,138 @@ function persist() {
   }
 }
 
-function restore() {
+function resetProjectState() {
+  state.metadata = { ...DEFAULT_METADATA };
+  state.exportOptions = {
+    ...DEFAULT_EXPORT_OPTIONS
+  };
+  state.extensions = {};
+  state.nodes = [];
+  state.selectedId = null;
+  state.activeContainerId = ROOT_CONTAINER;
+  state.collapsedPaletteGroups = [];
+}
+
+function exampleProjectUrl() {
+  return new URL(
+    EXAMPLE_PROJECT_FILE_NAME,
+    APP_SCRIPT_BASE_URL
+  );
+}
+
+function parseProjectJsonText(
+  sourceText,
+  displayName = "JSON project"
+) {
+  const text = String(sourceText ?? "");
+
+  if (
+    new TextEncoder().encode(text).byteLength >
+    PROJECT_FILE_MAX_BYTES
+  ) {
+    throw new Error(
+      `${displayName} is larger than the 5 MB project limit.`
+    );
+  }
+
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (!saved) {
-      state.nodes =
-        normalizeNodes(
-          clone(SAMPLE_NODES)
-        );
-      return;
-    }
-    applyProjectDocument(
-      parseProjectDocument(
-        JSON.parse(saved)
-      )
+    return parseProjectDocument(
+      JSON.parse(text)
     );
   } catch (error) {
-    console.warn("Could not restore the local builder draft.", error);
-    state.metadata = { ...DEFAULT_METADATA };
-    state.exportOptions = { ...DEFAULT_EXPORT_OPTIONS };
-    state.extensions = {};
-    state.nodes =
-      normalizeNodes(
-        clone(SAMPLE_NODES)
+    if (error instanceof SyntaxError) {
+      throw new Error(
+        `${displayName} does not contain valid JSON.`
       );
+    }
+
+    throw error;
+  }
+}
+
+async function readExampleProjectDocument() {
+  const url = exampleProjectUrl();
+
+  if (url.protocol === "file:") {
+    throw new Error(
+      "The browser blocks adjacent JSON files in file:// mode. Start the builder with 'Start Builder.cmd' so Load Example.json can be read locally from 127.0.0.1."
+    );
+  }
+
+  const response = await fetch(
+    url.href,
+    {
+      cache: "no-store",
+      credentials: "same-origin"
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `${EXAMPLE_PROJECT_FILE_NAME} could not be loaded (HTTP ${response.status}).`
+    );
+  }
+
+  return parseProjectJsonText(
+    await response.text(),
+    EXAMPLE_PROJECT_FILE_NAME
+  );
+}
+
+function applyLoadedProject(
+  project,
+  { render = true } = {}
+) {
+  applyProjectDocument(project);
+
+  if (!render) {
+    return;
+  }
+
+  renderMetadata();
+  renderPalette();
+  renderAll();
+}
+
+let initialExampleProjectLoadError = null;
+
+async function restore() {
+  const saved =
+    localStorage.getItem(STORAGE_KEY);
+
+  if (saved) {
+    try {
+      applyProjectDocument(
+        parseProjectDocument(
+          JSON.parse(saved)
+        )
+      );
+      return;
+    } catch (error) {
+      console.warn(
+        "Could not restore the local builder draft.",
+        error
+      );
+    }
+  }
+
+  try {
+    applyLoadedProject(
+      await readExampleProjectDocument(),
+      { render: false }
+    );
+  } catch (error) {
+    console.warn(
+      "Could not load the external example project.",
+      error
+    );
+    resetProjectState();
+    initialExampleProjectLoadError =
+      error instanceof Error
+        ? error
+        : new Error(
+            `${EXAMPLE_PROJECT_FILE_NAME} could not be loaded.`
+          );
   }
 }
 
@@ -5611,7 +6289,9 @@ function renderPalette() {
             class="palette-item"
             type="button"
             draggable="true"
-            data-palette="${escapeHtml(item.type)}">
+            data-palette="${escapeHtml(item.type)}"
+            data-help-kicker="Outline node"
+            data-help="${escapeHtml(outlinePaletteHelp(item))}">
             <span>${escapeHtml(item.badge)}</span>
             <strong>${escapeHtml(item.label)}</strong>
             <b>＋</b>
@@ -5629,7 +6309,8 @@ function renderPalette() {
                   draggable="true"
                   data-rml-editable-collection-palette="true"
                   data-rml-editable-collection-source="${escapeHtml(source.id)}"
-                  title="Runtime collection-backed Dynamic Choice">
+                  data-help-kicker="Dynamic outline node"
+                  data-help="Adds a Dynamic Choice whose options come from the marked runtime collection. Click to add it to the active Outline container, or drag it to an exact position.">
                   <span>DYN</span>
                   <strong>${escapeHtml(`DYN · ${source.label}`)}</strong>
                   <b>＋</b>
@@ -12301,6 +12982,17 @@ function layoutRowInspectorMarkup(node) {
         ${optionMarkup("false", "Vertical — stacked", String(node.horizontal !== false))}
       </select>
     </label>
+    <div class="toggle-row">
+      <span>
+        <strong>Internal / hidden</strong>
+        <small>Hides the complete row by default. Runtime Set Configuration Visibility can expose it later.</small>
+      </span>
+      <input type="checkbox" data-field="hidden"${
+        node.hidden === true
+          ? " checked"
+          : ""
+      }>
+    </div>
     <div class="inspector-note">
       Drag settings into this row in Configuration Outline. The packed graph exposes the row on Configuration Menu Instance; Set Configuration Layout can switch it at runtime.
     </div>
@@ -13517,6 +14209,17 @@ function renderInspector() {
         ? layoutRowInspectorMarkup(node)
       : settingInspectorMarkup(node);
   bindInspectorInteractions();
+  appendInlineRowInspectorControls(
+    elements.inspectorContent
+      .querySelector(
+        "[data-inspector-id]"
+      ),
+    node,
+    () => {
+      persist();
+      renderAll();
+    }
+  );
 }
 
 function preferredGraphArtifact(
@@ -15139,12 +15842,24 @@ function previewSettingEditorMarkup(node) {
     settingsPreviewValue(node);
 
   if (node.valueType === "button") {
+    const pulseCount =
+      Number(
+        settingsPreviewPulseCounts?.[
+          node.id
+        ]
+      ) || 0;
+
     return `<button
       class="rml-preview-control rml-preview-impulse-button"
       type="button"
-      data-preview-action-button="${escapeHtml(node.id)}">
+      data-preview-action-button="${escapeHtml(node.id)}"
+      data-preview-action-count="${pulseCount}">
       <span>${escapeHtml(node.buttonLabel || "Run")}</span>
-      <output data-preview-action-count="${escapeHtml(node.id)}" aria-label="Local preview presses"></output>
+      <output data-preview-action-count="${escapeHtml(node.id)}" aria-label="Local preview presses">${
+        pulseCount > 0
+          ? `Preview ${pulseCount}`
+          : ""
+      }</output>
     </button>`;
   }
 
@@ -15325,18 +16040,67 @@ function previewSettingEditorMarkup(node) {
 function settingsPreviewNodesMarkup(nodes) {
   const rows = [];
 
-  for (const node of nodes || []) {
+  for (const node of
+    settingsPreviewOrderedNodes(nodes)) {
+    if (!settingsPreviewNodeVisible(node)) {
+      continue;
+    }
+
     if (node.kind === LAYOUT_ROW_KIND) {
-      const childrenMarkup =
-        settingsPreviewNodesMarkup(
-          node.children || []
+      const children =
+        settingsPreviewOrderedNodes(
+          Array.isArray(node.children)
+            ? node.children
+            : []
+        ).filter(
+          settingsPreviewNodeVisible
         );
+      const widthChildren =
+        Array.isArray(
+          node.previewLayoutChildren
+        )
+          ? node.previewLayoutChildren
+          : children;
+      const context = {
+        row: node,
+        children: widthChildren,
+        index: 0
+      };
+      const childrenMarkup =
+        children
+          .map(child => {
+            const content =
+              settingsPreviewNodesMarkup(
+                [child]
+              );
+
+            if (!content.trim()) {
+              return "";
+            }
+
+            return `<div
+              class="rml-preview-layout-cell"
+              style="--rml-inline-width-percent: ${escapeHtml(
+                inlineRowWidthText(
+                  settingsPreviewInlineRowWidthPercent(
+                    child,
+                    context
+                  )
+                )
+              )}"
+              data-preview-node-id="${escapeHtml(child.id)}">
+              ${content}
+            </div>`;
+          })
+          .join("");
 
       rows.push(`<section
           class="rml-preview-layout-row${
-            node.horizontal === false
-              ? " vertical"
-              : " horizontal"
+            settingsPreviewNodeHorizontal(
+              node
+            )
+              ? " horizontal"
+              : " vertical"
           }"
           data-preview-layout-row="${escapeHtml(node.id)}"
           data-preview-node-id="${escapeHtml(node.id)}"
@@ -15357,9 +16121,22 @@ function settingsPreviewNodesMarkup(nodes) {
           option => option.name
         );
 
-      rows.push(`<div class="rml-preview-setting rml-preview-setting-enum"
+      const labelVisible =
+        settingsPreviewNodeLabelVisible(
+          node
+        );
+
+      rows.push(`<div class="rml-preview-setting rml-preview-setting-enum${
+        !labelVisible
+          ? " label-hidden"
+          : ""
+      }"
         data-preview-node-id="${escapeHtml(node.id)}">
-        <div class="rml-preview-label">${escapeHtml(node.keyName)}</div>
+        ${
+          !labelVisible
+            ? ""
+            : `<div class="rml-preview-label">${escapeHtml(node.keyName)}</div>`
+        }
         <div class="rml-preview-editor">
           ${previewEnumEditorMarkup(node, options, value)}
         </div>
@@ -15382,12 +16159,29 @@ function settingsPreviewNodesMarkup(nodes) {
       continue;
     }
 
+    /*
+     * Dynamic Choice/Action/Toggle entries intentionally use an internal
+     * backing ModConfigurationKey.  They are rendered by
+     * dynamic_settings.js so that their runtime collection/options and
+     * impulse behavior stay live.  Rendering the same Outline node again as
+     * an ordinary setting produced the duplicate raw key row seen in
+     * Preview (for example two "bgff" rows).
+     */
+    if (node?.dynamicSettingKind) {
+      continue;
+    }
+
     if (
-      node.kind !== "setting" ||
-      node.hidden
+      node.kind !== "setting"
     ) {
       continue;
     }
+
+
+    const labelVisible =
+      settingsPreviewNodeLabelVisible(
+        node
+      );
 
     rows.push(`<div class="rml-preview-setting rml-preview-setting-${escapeHtml(
       node.valueType === "bool"
@@ -15397,9 +16191,17 @@ function settingsPreviewNodesMarkup(nodes) {
         : node.valueType === "colorX"
           ? "color"
           : "value"
-    )}"
+    )}${
+      !labelVisible
+        ? " label-hidden"
+        : ""
+    }"
       data-preview-node-id="${escapeHtml(node.id)}">
-      <div class="rml-preview-label">${escapeHtml(node.keyName)}</div>
+      ${
+        !labelVisible
+          ? ""
+          : `<div class="rml-preview-label">${escapeHtml(node.keyName)}</div>`
+      }
       <div class="rml-preview-editor">
         ${previewSettingEditorMarkup(node)}
       </div>
@@ -16106,6 +16908,10 @@ function changeSettingsPreviewEnum(
   }
 
   renderSettingsPreview();
+  runSettingsPreviewRuntimePhase(
+    "saved",
+    node.id
+  );
 }
 
 async function copySettingsPreviewUri(nodeId) {
@@ -16279,6 +17085,12 @@ function openSettingsPreviewColor(nodeId) {
 function closeSettingsPreviewColor(
   apply
 ) {
+  const changedNodeId =
+    apply
+      ? settingsPreviewColorSession
+          ?.nodeId || ""
+      : "";
+
   if (
     apply &&
     settingsPreviewDraft &&
@@ -16315,6 +17127,13 @@ function closeSettingsPreviewColor(
 
   settingsPreviewColorSession = null;
   renderSettingsPreview();
+
+  if (changedNodeId) {
+    runSettingsPreviewRuntimePhase(
+      "saved",
+      changedNodeId
+    );
+  }
 }
 
 function settingsPreviewColorComponentValue(
@@ -17107,6 +17926,248 @@ function bindSettingsPreviewColorInteractions() {
   );
 }
 
+function settingsPreviewApplyRuntimeValue(
+  itemId,
+  value
+) {
+  const node = findNode(
+    state.nodes,
+    itemId
+  );
+
+  if (
+    !node ||
+    !settingsPreviewDraft ||
+    node.kind === LAYOUT_ROW_KIND ||
+    node.valueType === "runtimeDisplay" ||
+    node.valueType === "button"
+  ) {
+    return false;
+  }
+
+  if (node.kind === "controller") {
+    settingsPreviewDraft.controllers[
+      node.id
+    ] = String(value ?? "");
+    return true;
+  }
+
+  if (node.valueType === "bool") {
+    settingsPreviewDraft.values[node.id] =
+      typeof value === "string"
+        ? value.trim().toLowerCase() ===
+          "true"
+        : Boolean(value);
+    return true;
+  }
+
+  if (node.valueType === "colorX") {
+    const channels =
+      Array.isArray(value)
+        ? value
+        : String(value ?? "")
+            .split(",")
+            .map(Number);
+
+    settingsPreviewDraft.values[node.id] =
+      channels.join(", ");
+    settingsPreviewDraft.colorStates[
+      node.id
+    ] = {
+      red: Number(channels[0]) || 0,
+      green: Number(channels[1]) || 0,
+      blue: Number(channels[2]) || 0,
+      alpha:
+        Number.isFinite(
+          Number(channels[3])
+        )
+          ? Number(channels[3])
+          : 1,
+      profile: "linear",
+      strength: 1,
+      source: "runtime-preview"
+    };
+    return true;
+  }
+
+  settingsPreviewDraft.values[node.id] =
+    Array.isArray(value)
+      ? [...value]
+      : value ?? "";
+  return true;
+}
+
+function applySettingsPreviewRuntimeMenuAction(
+  action,
+  payload = {}
+) {
+  if (!settingsPreviewDraft) {
+    return {
+      applied: false,
+      message:
+        "Settings Preview is not open."
+    };
+  }
+
+  settingsPreviewRuntimeMenu ||=
+    createSettingsPreviewRuntimeMenu();
+
+  const itemId = String(
+    payload.itemId || ""
+  );
+  const setOverride = (
+    property,
+    value
+  ) => {
+    if (!itemId) return false;
+    settingsPreviewRuntimeMenu[
+      property
+    ][itemId] = value;
+    return true;
+  };
+  let applied = false;
+
+  switch (action) {
+    case "visibility":
+      applied = setOverride(
+        "visibility",
+        payload.visible === true
+      );
+      break;
+
+    case "order": {
+      const order = Number(
+        payload.order
+      );
+      applied =
+        Number.isFinite(order) &&
+        setOverride(
+          "order",
+          Math.trunc(order)
+        );
+      break;
+    }
+
+    case "value":
+      applied =
+        settingsPreviewApplyRuntimeValue(
+          itemId,
+          payload.value
+        );
+      break;
+
+    case "saveSettings":
+      try {
+        localStorage.setItem(
+          PREVIEW_STORAGE_KEY,
+          JSON.stringify(
+            settingsPreviewDraft
+          )
+        );
+        setSettingsPreviewStatus(
+          "Preview saved locally by runtime graph.",
+          "success"
+        );
+        applied = true;
+      } catch {
+        setSettingsPreviewStatus(
+          "Saving the local Preview draft failed.",
+          "error"
+        );
+        applied = false;
+      }
+      break;
+
+    case "layout":
+      applied = setOverride(
+        "horizontal",
+        payload.horizontal === true
+      );
+      break;
+
+    case "width": {
+      const width = Number(
+        payload.width
+      );
+      applied =
+        Number.isFinite(width) &&
+        setOverride(
+          "width",
+          clamp(width, 1, 100)
+        );
+      break;
+    }
+
+    case "labelVisibility":
+      applied = setOverride(
+        "labelVisibility",
+        payload.visible === true
+      );
+      break;
+
+    case "resetItem":
+      if (itemId) {
+        for (const values of
+          Object.values(
+            settingsPreviewRuntimeMenu
+          )) {
+          delete values[itemId];
+        }
+        applied = true;
+      }
+      break;
+
+    case "resetMenu":
+      settingsPreviewRuntimeMenu =
+        createSettingsPreviewRuntimeMenu();
+      applied = true;
+      break;
+  }
+
+  if (applied) {
+    renderSettingsPreview();
+  }
+
+  return {
+    applied,
+    message: applied
+      ? "Local Preview menu updated."
+      : "The local Preview action had no valid target."
+  };
+}
+
+function runSettingsPreviewRuntimePhase(
+  phase,
+  outlineNodeId = ""
+) {
+  if (!settingsPreviewDraft) {
+    return null;
+  }
+
+  try {
+    return (
+      window.RMLDynamicGraphHost
+        ?.previewConfigurationPhase?.(
+          phase,
+          outlineNodeId
+        ) || null
+    );
+  } catch (error) {
+    console.warn(
+      `Local Configuration Preview ${phase} phase failed.`,
+      error
+    );
+    return {
+      started: false,
+      error: true,
+      message:
+        error instanceof Error
+          ? error.message
+          : String(error)
+    };
+  }
+}
+
 function handleSettingsPreviewClick(event) {
   const actionButton =
     event.target.closest(
@@ -17119,9 +18180,14 @@ function handleSettingsPreviewClick(event) {
         .previewActionButton;
     const nextCount =
       Number(
-        actionButton.dataset
-          .previewActionCount || 0
+        settingsPreviewPulseCounts?.[
+          nodeId
+        ] || 0
       ) + 1;
+
+    settingsPreviewPulseCounts[
+      nodeId
+    ] = nextCount;
 
     actionButton.dataset
       .previewActionCount =
@@ -17147,9 +18213,40 @@ function handleSettingsPreviewClick(event) {
       "is-preview-pulse"
     );
 
+    const execution =
+      window.RMLDynamicGraphHost
+        ?.previewConfigurationImpulse?.(
+          nodeId
+        ) || null;
+
+    const actionCount = Number(
+      execution?.actionsApplied || 0
+    );
+    const skippedCount = Number(
+      execution?.runtimeOnlySkipped || 0
+    );
+    const executionSummary =
+      execution?.started
+        ? actionCount > 0
+          ? `${actionCount} local menu action${
+              actionCount === 1
+                ? ""
+                : "s"
+            } applied${
+              skippedCount > 0
+                ? `; ${skippedCount} runtime-only step${skippedCount === 1 ? "" : "s"} skipped`
+                : ""
+            }`
+          : execution.message ||
+            "no Preview-safe menu action reached"
+        : execution?.message ||
+          "no connected Preview graph path";
+
     setSettingsPreviewStatus(
-      `Preview button pulse ${nextCount} (local only — nothing was sent to Resonite).`,
-      "success"
+      `Preview pulse ${nextCount}: ${executionSummary}. Nothing was sent to Resonite.`,
+      execution?.error
+        ? "error"
+        : "success"
     );
     return;
   }
@@ -17206,23 +18303,34 @@ function handleSettingsPreviewInput(event) {
     event.target;
 
   if (target.matches("[data-preview-bool]")) {
-    settingsPreviewDraft.values[
-      target.dataset.previewBool
-    ] = target.checked;
+    const nodeId =
+      target.dataset.previewBool;
+    settingsPreviewDraft.values[nodeId] =
+      target.checked;
+    runSettingsPreviewRuntimePhase(
+      "saved",
+      nodeId
+    );
     return;
   }
 
   if (target.matches("[data-preview-input]")) {
-    settingsPreviewDraft.values[
-      target.dataset.previewInput
-    ] = target.value;
+    const nodeId =
+      target.dataset.previewInput;
+    settingsPreviewDraft.values[nodeId] =
+      target.value;
+    runSettingsPreviewRuntimePhase(
+      "saved",
+      nodeId
+    );
     return;
   }
 
   if (target.matches("[data-preview-range]")) {
-    settingsPreviewDraft.values[
-      target.dataset.previewRange
-    ] = target.value;
+    const nodeId =
+      target.dataset.previewRange;
+    settingsPreviewDraft.values[nodeId] =
+      target.value;
     const output =
       Array.from(
         elements.settingsPreviewContent.querySelectorAll(
@@ -17248,6 +18356,11 @@ function handleSettingsPreviewInput(event) {
       )}%`
     );
 
+    runSettingsPreviewRuntimePhase(
+      "saved",
+      nodeId
+    );
+
     return;
   }
 
@@ -17262,10 +18375,19 @@ function handleSettingsPreviewInput(event) {
         Number(target.dataset.previewVectorIndex)
       ] = target.value;
     }
+
+    runSettingsPreviewRuntimePhase(
+      "saved",
+      nodeId
+    );
   }
 }
 
 function saveSettingsPreview() {
+  runSettingsPreviewRuntimePhase(
+    "saved"
+  );
+
   try {
     localStorage.setItem(
       PREVIEW_STORAGE_KEY,
@@ -17365,6 +18487,9 @@ function openSettingsPreview() {
       savedDraft
     );
 
+  settingsPreviewRuntimeMenu =
+    createSettingsPreviewRuntimeMenu();
+  settingsPreviewPulseCounts = {};
   settingsPreviewColorSession = null;
 
   elements.settingsPreviewStatus.textContent =
@@ -17382,6 +18507,15 @@ function openSettingsPreview() {
   );
 
   dialog.showModal();
+
+  /*
+   * Reproduce the generated runtime graph's initialization locally. This is
+   * what makes startup-controlled hidden items (including complete Inline
+   * Rows and their children) visible in Preview without contacting Resonite.
+   */
+  runSettingsPreviewRuntimePhase(
+    "startup"
+  );
 
   movePreviewFocusAwayFromCloseButton();
 
@@ -17433,6 +18567,8 @@ function closeSettingsPreview(
     () => {
       settingsPreviewColorSession = null;
       settingsPreviewDraft = null;
+      settingsPreviewRuntimeMenu = null;
+      settingsPreviewPulseCounts = {};
 
       if (
         typeof dialog.close ===
@@ -17672,6 +18808,176 @@ function closeProjectDialog() {
   }
 }
 
+let activeBuilderMessageResolver = null;
+
+function normalizedBuilderMessageTone(tone) {
+  return ["warning", "danger", "info", "success"].includes(tone)
+    ? tone
+    : "info";
+}
+
+function resolveBuilderMessage(
+  accepted,
+  closeDialog = true
+) {
+  const resolve =
+    activeBuilderMessageResolver;
+  activeBuilderMessageResolver = null;
+
+  if (
+    closeDialog &&
+    elements.builderMessageDialog?.open
+  ) {
+    elements.builderMessageDialog.close();
+  }
+
+  resolve?.(Boolean(accepted));
+}
+
+function showBuilderMessage({
+  tone = "info",
+  kicker = "Builder message",
+  title = "Continue?",
+  message = "",
+  details = "",
+  confirmLabel = "Continue",
+  cancelLabel = "Cancel",
+  showCancel = true
+} = {}) {
+  const dialog =
+    elements.builderMessageDialog;
+
+  if (!dialog) {
+    console.warn(
+      "Builder message dialog is not available."
+    );
+    return Promise.resolve(false);
+  }
+
+  if (activeBuilderMessageResolver) {
+    resolveBuilderMessage(false);
+  }
+
+  const normalizedTone =
+    normalizedBuilderMessageTone(tone);
+  dialog.dataset.tone = normalizedTone;
+  elements.builderMessageKicker.textContent =
+    kicker;
+  elements.builderMessageTitle.textContent =
+    title;
+  elements.builderMessageCopy.textContent =
+    message;
+  elements.builderMessageDetails.textContent =
+    details;
+  elements.builderMessageDetails.hidden =
+    !details;
+  elements.builderMessageConfirm.textContent =
+    confirmLabel;
+  elements.builderMessageConfirm.dataset.tone =
+    normalizedTone;
+  elements.builderMessageCancel.textContent =
+    cancelLabel;
+  elements.builderMessageCancel.hidden =
+    !showCancel;
+
+  const result = new Promise(resolve => {
+    activeBuilderMessageResolver =
+      resolve;
+  });
+
+  if (
+    typeof dialog.showModal ===
+    "function"
+  ) {
+    dialog.showModal();
+  } else {
+    dialog.setAttribute("open", "");
+  }
+
+  requestAnimationFrame(() => {
+    const focusTarget = showCancel
+      ? elements.builderMessageCancel
+      : elements.builderMessageConfirm;
+
+    try {
+      focusTarget.focus({
+        preventScroll: true
+      });
+    } catch {
+      focusTarget.focus();
+    }
+  });
+
+  return result;
+}
+
+function confirmBuilderAction(options) {
+  return showBuilderMessage({
+    tone: "warning",
+    kicker: "Confirm action",
+    title: "Continue?",
+    message:
+      "Confirm this action before the builder changes the current project.",
+    ...options,
+    showCancel: true
+  });
+}
+
+function showBuilderNotice(options) {
+  return showBuilderMessage({
+    tone: "info",
+    kicker: "Builder notice",
+    title: "Notice",
+    confirmLabel: "OK",
+    ...options,
+    showCancel: false
+  });
+}
+
+function exposeBuilderDialogBridge() {
+  Object.defineProperty(
+    window,
+    "RMLBuilderDialog",
+    {
+      value: Object.freeze({
+        confirm: options =>
+          confirmBuilderAction(options),
+        notice: options =>
+          showBuilderNotice(options)
+      }),
+      writable: false,
+      enumerable: false,
+      configurable: true
+    }
+  );
+}
+
+function builderHasActiveProject() {
+  if (state.nodes.length > 0) {
+    return true;
+  }
+
+  if (
+    Object.keys(
+      state.extensions || {}
+    ).length > 0
+  ) {
+    return true;
+  }
+
+  return Object.keys(
+    DEFAULT_METADATA
+  ).some(
+    key =>
+      String(
+        state.metadata?.[key] ?? ""
+      ) !==
+      String(
+        DEFAULT_METADATA[key] ?? ""
+      )
+  );
+}
+
 function saveProjectJson() {
   const projectJson =
     `${JSON.stringify(
@@ -17722,17 +19028,23 @@ async function loadProjectJsonFile(
     }
 
     const project =
-      parseProjectDocument(
-        JSON.parse(
-          await file.text()
-        )
+      parseProjectJsonText(
+        await file.text(),
+        file.name
       );
 
     if (
-      state.nodes.length > 0 &&
-      !window.confirm(
-        "Replace the current builder draft with the selected JSON project?"
-      )
+      builderHasActiveProject() &&
+      !(await confirmBuilderAction({
+        tone: "warning",
+        kicker: "Project replacement",
+        title: "Replace the current project?",
+        message:
+          "Loading the selected JSON project replaces the open Configuration Outline, Typed Runtime Graph and project metadata.",
+        details:
+          "Save the current project as JSON first if you want to keep a portable backup.",
+        confirmLabel: "Load JSON"
+      }))
     ) {
       setProjectFileStatus(
         "Loading was cancelled."
@@ -17740,12 +19052,7 @@ async function loadProjectJsonFile(
       return;
     }
 
-    applyProjectDocument(
-      project
-    );
-    renderMetadata();
-    renderPalette();
-    renderAll();
+    applyLoadedProject(project);
 
     setProjectFileStatus(
       `Loaded ${file.name}.`,
@@ -19094,23 +20401,34 @@ function downloadSelectedExport() {
   );
 }
 
-function loadExample() {
-  state.metadata = { ...DEFAULT_METADATA };
-  state.extensions = {};
-  state.nodes =
-    normalizeNodes(
-      clone(SAMPLE_NODES)
-    );
-  state.selectedId = "controller-main";
-  state.activeContainerId = ROOT_CONTAINER;
-  renderMetadata();
-  renderAll();
+async function loadExampleProject() {
+  setProjectFileStatus(
+    `Reading ${EXAMPLE_PROJECT_FILE_NAME}…`
+  );
+
+  const project =
+    await readExampleProjectDocument();
+
+  applyLoadedProject(project);
+  setProjectFileStatus(
+    `Loaded ${EXAMPLE_PROJECT_FILE_NAME}.`,
+    "success"
+  );
 }
 
-function newBlank() {
+async function newBlank() {
   if (
-    state.nodes.length > 0 &&
-    !window.confirm("Clear the current builder draft and start blank?")
+    builderHasActiveProject() &&
+    !(await confirmBuilderAction({
+      tone: "danger",
+      kicker: "Project reset",
+      title: "Start with a blank project?",
+      message:
+        "This clears the open Configuration Outline, Typed Runtime Graph and project metadata.",
+      details:
+        "Save the current project as JSON first if you may need it again.",
+      confirmLabel: "Start Blank"
+    }))
   ) {
     return;
   }
@@ -19277,6 +20595,11 @@ function appendInformationNodeSection(fragment, title, entries, options = {}) {
   section.className = "information-node-group";
   if (options.advanced) {
     section.classList.add("information-node-group-advanced");
+  }
+  if (options.runtimeGenerated) {
+    section.classList.add(
+      "information-node-group-runtime-generated"
+    );
   }
 
   const heading = document.createElement("h4");
@@ -19482,18 +20805,223 @@ function renderInformationNodeReference() {
   host.replaceChildren(fragment);
 }
 
+function renderInformationOutlineNodeReference() {
+  const host =
+    elements.informationOutlineNodeReference;
+
+  if (!host) {
+    return;
+  }
+
+  const settingEntries =
+    TYPE_DEFINITIONS.map(item => ({
+      operatorId:
+        `outline.${item.type}`,
+      group: item.group,
+      definition: {
+        title: item.label,
+        symbol: item.badge,
+        description:
+          outlineTypeDescription(
+            item.type
+          )
+      }
+    }));
+
+  const structureEntries =
+    OUTLINE_STRUCTURE_REFERENCE.map(
+      item => ({
+        operatorId:
+          `outline.${item.type}`,
+        definition: {
+          title: item.label,
+          symbol: item.badge,
+          description:
+            item.description
+        }
+      })
+    );
+
+  const dynamicEntries = [
+    {
+      operatorId:
+        "outline.dynamicChoice",
+      definition: {
+        title:
+          "Dynamic Choice (Runtime collection)",
+        symbol: "DYN",
+        description:
+          "Runtime-generated choice control whose labels and stable values come from a Collect To List node marked Editable."
+      }
+    }
+  ];
+
+  const fragment =
+    document.createDocumentFragment();
+
+  const summary =
+    document.createElement("section");
+  summary.className =
+    "information-node-reference-summary";
+  summary.innerHTML = `
+    <div>
+      <strong>${settingEntries.length}</strong>
+      <span>setting &amp; control nodes</span>
+    </div>
+    <div>
+      <strong>${structureEntries.length}</strong>
+      <span>structure nodes</span>
+    </div>
+    <div>
+      <strong>${dynamicEntries.length}</strong>
+      <span>runtime-generated control</span>
+    </div>`;
+  fragment.appendChild(summary);
+
+  const intro =
+    document.createElement("div");
+  intro.className =
+    "information-node-tier-note standard";
+  intro.innerHTML = `
+    <strong>Configuration Outline nodes</strong>
+    <span>These nodes define the actual RML settings menu. Click to add to the active container or drag to choose an exact position. Properties configure keys, defaults, validation, visibility, reactions, Inline Row widths and labels.</span>`;
+  fragment.appendChild(intro);
+
+  for (const groupName of
+    PALETTE_GROUP_NAMES.filter(
+      name => name !== "Structure"
+    )) {
+    appendInformationNodeSection(
+      fragment,
+      groupName,
+      settingEntries.filter(
+        entry =>
+          entry.group === groupName
+      )
+    );
+  }
+
+  appendInformationNodeSection(
+    fragment,
+    "Structure",
+    structureEntries,
+    {
+      description:
+        "Structure nodes own child items and therefore change nesting, page selection or same-row layout rather than storing a normal scalar value."
+    }
+  );
+
+  const runtimeGeneratedIntro =
+    document.createElement("div");
+  runtimeGeneratedIntro.className =
+    "information-node-tier-note runtime-generated";
+  runtimeGeneratedIntro.innerHTML = `
+    <strong>Runtime Graph → Configuration Outline</strong>
+    <span>These green-marked controls are supplied by compatible Runtime Graph nodes. They bridge live graph collections into the Configuration Outline palette, but the builder never inserts them automatically. Add them deliberately where the runtime-created menu control should appear.</span>`;
+  fragment.appendChild(runtimeGeneratedIntro);
+
+  appendInformationNodeSection(
+    fragment,
+    "Runtime-generated Outline controls",
+    dynamicEntries,
+    {
+      runtimeGenerated: true,
+      description:
+        "Available only while the required editable Runtime Graph output exists. Their values are populated at runtime and their placement, Inline Row width, label and visibility remain controlled by the Configuration Outline."
+    }
+  );
+
+  host.replaceChildren(fragment);
+}
+
 let delayedButtonHelpTimer = 0;
 let delayedButtonHelpTarget = null;
 let delayedButtonHelpBubble = null;
 
-function buttonHelpText(button) {
+function normalizeBuilderHelpTarget(target) {
+  if (!(target instanceof HTMLElement)) {
+    return null;
+  }
+
+  const nativeTitle =
+    target.getAttribute("title");
+
+  if (nativeTitle) {
+    target.dataset.help = nativeTitle;
+    target.removeAttribute("title");
+  }
+
+  return target;
+}
+
+function buttonHelpText(target) {
   return String(
-    button?.dataset?.help ||
-    button?.getAttribute?.("aria-label") ||
-    button?.getAttribute?.("title") ||
-    button?.textContent ||
+    target?.dataset?.help ||
+    target?.getAttribute?.("aria-label") ||
+    target?.textContent ||
     ""
   ).replace(/\s+/g, " ").trim();
+}
+
+function builderHelpTone(target) {
+  const explicitTone =
+    target?.dataset?.helpTone;
+
+  if (
+    ["warning", "danger", "info", "runtime"].includes(
+      explicitTone
+    )
+  ) {
+    return explicitTone;
+  }
+
+  const text =
+    buttonHelpText(target);
+
+  if (
+    target?.classList?.contains("danger") ||
+    /\b(delete|remove|clear|discard)\b/i.test(text)
+  ) {
+    return "danger";
+  }
+
+  if (
+    /\b(replace|overwrite|example|reset)\b/i.test(text)
+  ) {
+    return "warning";
+  }
+
+  return "info";
+}
+
+function builderHelpKicker(target) {
+  const explicitKicker =
+    String(
+      target?.dataset?.helpKicker ||
+      ""
+    ).trim();
+
+  if (explicitKicker) {
+    return explicitKicker;
+  }
+
+  if (
+    target?.matches?.(
+      ".rml-graph-socket, [data-socket], [data-port]"
+    )
+  ) {
+    return "Node signal";
+  }
+
+  if (
+    target?.matches?.(
+      "input, select, textarea"
+    )
+  ) {
+    return "Field tip";
+  }
+
+  return "Control tip";
 }
 
 function hideDelayedButtonHelp() {
@@ -19504,9 +21032,9 @@ function hideDelayedButtonHelp() {
   delayedButtonHelpBubble = null;
 }
 
-function showDelayedButtonHelp(button) {
-  const text = buttonHelpText(button);
-  if (!text || !button?.isConnected) {
+function showDelayedButtonHelp(target) {
+  const text = buttonHelpText(target);
+  if (!text || !target?.isConnected) {
     return;
   }
 
@@ -19514,11 +21042,37 @@ function showDelayedButtonHelp(button) {
 
   const bubble = document.createElement("div");
   bubble.className = "rml-button-help-bubble";
+  bubble.dataset.tone =
+    builderHelpTone(target);
   bubble.setAttribute("role", "tooltip");
-  bubble.textContent = text;
+
+  const icon = document.createElement("span");
+  icon.className = "rml-help-bubble-icon";
+  icon.setAttribute("aria-hidden", "true");
+  icon.textContent =
+    bubble.dataset.tone === "danger"
+      ? "!"
+      : bubble.dataset.tone === "warning"
+        ? "△"
+        : "i";
+
+  const copy = document.createElement("span");
+  copy.className = "rml-help-bubble-copy";
+
+  const kicker = document.createElement("small");
+  kicker.className = "rml-help-bubble-kicker";
+  kicker.textContent =
+    builderHelpKicker(target);
+
+  const content = document.createElement("span");
+  content.className = "rml-help-bubble-text";
+  content.textContent = text;
+
+  copy.append(kicker, content);
+  bubble.append(icon, copy);
   document.body.appendChild(bubble);
 
-  const rect = button.getBoundingClientRect();
+  const rect = target.getBoundingClientRect();
   const bubbleRect = bubble.getBoundingClientRect();
   const gap = 9;
   const left = Math.min(
@@ -19535,45 +21089,164 @@ function showDelayedButtonHelp(button) {
   delayedButtonHelpBubble = bubble;
 }
 
-function scheduleDelayedButtonHelp(button) {
+function scheduleDelayedButtonHelp(target, delay = 620) {
   hideDelayedButtonHelp();
-  delayedButtonHelpTarget = button;
+  delayedButtonHelpTarget = target;
   delayedButtonHelpTimer = window.setTimeout(() => {
-    if (delayedButtonHelpTarget === button) {
-      showDelayedButtonHelp(button);
+    if (delayedButtonHelpTarget === target) {
+      showDelayedButtonHelp(target);
     }
-  }, 700);
+  }, delay);
 }
 
 function installDelayedButtonHelp() {
+  const targetSelector =
+    "button, [data-help], [title]";
+
+  document
+    .querySelectorAll("[title]")
+    .forEach(normalizeBuilderHelpTarget);
+
   document.addEventListener("pointerover", event => {
     if (event.pointerType && event.pointerType !== "mouse") {
       return;
     }
-    const button = event.target.closest?.("button");
-    if (!(button instanceof HTMLButtonElement) || button.disabled) {
+
+    const target =
+      normalizeBuilderHelpTarget(
+        event.target.closest?.(
+          targetSelector
+        )
+      );
+
+    if (
+      !target ||
+      (target instanceof HTMLButtonElement &&
+        target.disabled)
+    ) {
       return;
     }
-    if (button.contains(event.relatedTarget)) {
+
+    if (target.contains(event.relatedTarget)) {
       return;
     }
-    scheduleDelayedButtonHelp(button);
+
+    scheduleDelayedButtonHelp(target);
   });
 
   document.addEventListener("pointerout", event => {
-    const button = event.target.closest?.("button");
-    if (!(button instanceof HTMLButtonElement)) {
+    const target =
+      event.target.closest?.(
+        "button, [data-help]"
+      );
+
+    if (!(target instanceof HTMLElement)) {
       return;
     }
-    if (button.contains(event.relatedTarget)) {
+
+    if (target.contains(event.relatedTarget)) {
       return;
     }
+
     hideDelayedButtonHelp();
   });
+
+  document.addEventListener("focusin", event => {
+    const target =
+      normalizeBuilderHelpTarget(
+        event.target.closest?.(
+          targetSelector
+        )
+      );
+
+    if (target) {
+      scheduleDelayedButtonHelp(
+        target,
+        180
+      );
+    }
+  });
+
+  document.addEventListener(
+    "focusout",
+    hideDelayedButtonHelp
+  );
 
   document.addEventListener("pointerdown", hideDelayedButtonHelp, true);
   document.addEventListener("scroll", hideDelayedButtonHelp, true);
   window.addEventListener("blur", hideDelayedButtonHelp);
+}
+
+function setInformationNodeScope(
+  scopeName,
+  resetScroll = false
+) {
+  const dialog =
+    elements.informationDialog;
+
+  if (!dialog) {
+    return;
+  }
+
+  const targetScope =
+    scopeName === "runtime"
+      ? "runtime"
+      : "outline";
+
+  dialog.dataset.informationNodeScope =
+    targetScope;
+
+  dialog
+    .querySelectorAll(
+      "[data-information-node-scope-target]"
+    )
+    .forEach(button => {
+      const active =
+        button.dataset
+          .informationNodeScopeTarget ===
+        targetScope;
+      button.classList.toggle(
+        "active",
+        active
+      );
+      button.setAttribute(
+        "aria-selected",
+        String(active)
+      );
+    });
+
+  dialog
+    .querySelectorAll(
+      "[data-information-node-scope-copy]"
+    )
+    .forEach(copy => {
+      copy.hidden =
+        copy.dataset
+          .informationNodeScopeCopy !==
+        targetScope;
+    });
+
+  dialog
+    .querySelectorAll(
+      "[data-information-node-scope-panel]"
+    )
+    .forEach(panel => {
+      const active =
+        panel.dataset
+          .informationNodeScopePanel ===
+        targetScope;
+      panel.hidden = !active;
+
+      if (active && resetScroll) {
+        panel.scrollTop = 0;
+      }
+    });
+
+  if (targetScope === "runtime") {
+    renderInformationNodeReference();
+  } else {
+    renderInformationOutlineNodeReference();
+  }
 }
 
 function setInformationPage(pageName) {
@@ -19608,7 +21281,12 @@ function setInformationPage(pageName) {
   }
 
   if (targetName === "nodes") {
-    renderInformationNodeReference();
+    setInformationNodeScope(
+      dialog.dataset
+        .informationNodeScope ||
+        "outline",
+      true
+    );
   }
 }
 
@@ -19683,8 +21361,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "help_template.html?v=19",
-    "help_template.js?v=19",
+    "help_template.html?v=24-node-scopes-v185",
+    "help_template.js?v=25-node-scopes-v185",
     "help-template",
     "RMLHelpTemplateMarkup"
   )
@@ -19694,6 +21372,9 @@ async function ensureInformationDialogLoaded() {
       elements.informationDialog = document.getElementById("information-dialog");
       elements.informationClose = document.getElementById("information-close");
       elements.informationNodeReference = document.getElementById("information-node-reference");
+      elements.informationOutlineNodeReference = document.getElementById(
+        "information-outline-node-reference"
+      );
       bindInformationDialogEvents();
       return elements.informationDialog;
     })
@@ -19714,6 +21395,18 @@ function bindInformationDialogEvents() {
   dialog.dataset.bound = "true";
   elements.informationClose?.addEventListener("click", closeInformationDialog);
   dialog.addEventListener("click", event => {
+    const scopeButton = event.target.closest(
+      "[data-information-node-scope-target]"
+    );
+    if (scopeButton) {
+      setInformationNodeScope(
+        scopeButton.dataset
+          .informationNodeScopeTarget,
+        true
+      );
+      return;
+    }
+
     const pageButton = event.target.closest("[data-information-page-target]");
     if (pageButton) {
       setInformationPage(pageButton.dataset.informationPageTarget);
@@ -19929,6 +21622,9 @@ function cacheElements() {
     informationDialog: document.getElementById("information-dialog"),
     informationClose: document.getElementById("information-close"),
     informationNodeReference: document.getElementById("information-node-reference"),
+    informationOutlineNodeReference: document.getElementById(
+      "information-outline-node-reference"
+    ),
     settingsPreviewOpen: document.getElementById("preview-open"),
     settingsPreviewDialog: document.getElementById(
       "settings-preview-dialog"
@@ -19956,6 +21652,27 @@ function cacheElements() {
     projectLoadJson: document.getElementById("project-load-json"),
     projectFileInput: document.getElementById("project-file-input"),
     projectFileStatus: document.getElementById("project-file-status"),
+    builderMessageDialog: document.getElementById(
+      "builder-message-dialog"
+    ),
+    builderMessageKicker: document.getElementById(
+      "builder-message-kicker"
+    ),
+    builderMessageTitle: document.getElementById(
+      "builder-message-title"
+    ),
+    builderMessageCopy: document.getElementById(
+      "builder-message-copy"
+    ),
+    builderMessageDetails: document.getElementById(
+      "builder-message-details"
+    ),
+    builderMessageCancel: document.getElementById(
+      "builder-message-cancel"
+    ),
+    builderMessageConfirm: document.getElementById(
+      "builder-message-confirm"
+    ),
     exportDialog: document.getElementById("export-dialog"),
     exportClose: document.getElementById("export-close"),
     exportCancel: document.getElementById("export-cancel"),
@@ -20434,7 +22151,7 @@ function builderStateSnapshot() {
 
 function exposeBuilderBridge() {
   const bridge = {
-    version: 2,
+    version: 3,
 
     getStateSnapshot() {
       return builderStateSnapshot();
@@ -20495,6 +22212,18 @@ function exposeBuilderBridge() {
       }
 
       return clone(draft);
+    },
+
+    applyPreviewConfigurationMenuAction(
+      action,
+      payload
+    ) {
+      return clone(
+        applySettingsPreviewRuntimeMenuAction(
+          action,
+          payload
+        )
+      );
     },
 
     getExtensionState(name) {
@@ -22997,7 +24726,7 @@ function installUniversalScrollLayerSelector() {
   );
 }
 
-function initialize() {
+async function initialize() {
   if (
     document.documentElement.dataset
       .rmlBuilderInitialized === "true"
@@ -23014,9 +24743,10 @@ function initialize() {
   installPalettePointerDragBridge();
 
   cacheElements();
+  exposeBuilderDialogBridge();
 
   preventGlobalDoubleSelection();
-  restore();
+  await restore();
   renderMetadata();
   renderPalette();
   installSetupAssistantBridge();
@@ -23596,7 +25326,56 @@ function initialize() {
 
   document
     .getElementById("load-example")
-    .addEventListener("click", loadExample);
+    .addEventListener(
+      "click",
+      async () => {
+        if (
+          builderHasActiveProject() &&
+          !(await confirmBuilderAction({
+            tone: "warning",
+            kicker: "Project replacement",
+            title: "Replace the current project with the complete example?",
+            message:
+              "The complete example replaces the open Configuration Outline, Typed Runtime Graph and project metadata.",
+            details:
+              "This action is intentionally blocked until you confirm it. Save the current project as JSON first if you want to keep a portable backup.",
+            confirmLabel: "Load Complete Example"
+          }))
+        ) {
+          setProjectFileStatus(
+            "Example loading was cancelled."
+          );
+          return;
+        }
+
+        try {
+          await loadExampleProject();
+          closeProjectDialog();
+        } catch (error) {
+          console.warn(
+            "Could not load the external example project.",
+            error
+          );
+          const message =
+            error instanceof Error
+              ? error.message
+              : `${EXAMPLE_PROJECT_FILE_NAME} could not be loaded.`;
+          setProjectFileStatus(
+            `Could not load the example: ${message}`,
+            "error"
+          );
+          await showBuilderNotice({
+            tone: "warning",
+            kicker: "Example project unavailable",
+            title: `${EXAMPLE_PROJECT_FILE_NAME} could not be loaded`,
+            message,
+            details:
+              "Keep Load Example.json beside index.html. For a local Windows start, use Start Builder.cmd instead of opening index.html directly.",
+            confirmLabel: "OK"
+          });
+        }
+      }
+    );
   document
     .getElementById("new-blank")
     .addEventListener("click", newBlank);
@@ -23774,6 +25553,43 @@ function initialize() {
       }
     }
   );
+  elements.builderMessageCancel.addEventListener(
+    "click",
+    () => resolveBuilderMessage(false)
+  );
+  elements.builderMessageConfirm.addEventListener(
+    "click",
+    () => resolveBuilderMessage(true)
+  );
+  elements.builderMessageDialog.addEventListener(
+    "cancel",
+    event => {
+      event.preventDefault();
+      resolveBuilderMessage(false);
+    }
+  );
+  elements.builderMessageDialog.addEventListener(
+    "click",
+    event => {
+      if (
+        event.target ===
+        elements.builderMessageDialog
+      ) {
+        resolveBuilderMessage(false);
+      }
+    }
+  );
+  elements.builderMessageDialog.addEventListener(
+    "close",
+    () => {
+      if (activeBuilderMessageResolver) {
+        resolveBuilderMessage(
+          false,
+          false
+        );
+      }
+    }
+  );
   elements.downloadCode.addEventListener("click", openExportDialog);
   elements.exportClose.addEventListener("click", closeExportDialog);
   elements.exportCancel.addEventListener("click", closeExportDialog);
@@ -23861,6 +25677,22 @@ function initialize() {
       "rml-builder:ready"
     )
   );
+
+  if (initialExampleProjectLoadError) {
+    const error =
+      initialExampleProjectLoadError;
+    initialExampleProjectLoadError = null;
+
+    void showBuilderNotice({
+      tone: "warning",
+      kicker: "First-start example unavailable",
+      title: `${EXAMPLE_PROJECT_FILE_NAME} was not loaded`,
+      message: error.message,
+      details:
+        "The builder started with a blank project and did not use any embedded fallback. Keep Load Example.json beside index.html and launch Start Builder.cmd for automatic local loading.",
+      confirmLabel: "OK"
+    });
+  }
 }
 
 if (document.readyState === "loading") {
@@ -23941,6 +25773,18 @@ function rmlRuntimeDisplayFindNode(
           return found;
         }
       }
+    } else if (
+      node?.kind === LAYOUT_ROW_KIND
+    ) {
+      const found =
+        rmlRuntimeDisplayFindNode(
+          id,
+          node.children
+        );
+
+      if (found) {
+        return found;
+      }
     }
   }
 
@@ -23968,22 +25812,28 @@ function rmlRuntimeDisplayRemoveNode(
   }
 
   for (const node of list) {
-    if (node?.kind !== "controller") {
-      continue;
-    }
-
-    for (const option of
-      Array.isArray(node.options)
-        ? node.options
-        : []) {
-      if (
-        rmlRuntimeDisplayRemoveNode(
-          id,
-          option.children
-        )
-      ) {
-        return true;
+    if (node?.kind === "controller") {
+      for (const option of
+        Array.isArray(node.options)
+          ? node.options
+          : []) {
+        if (
+          rmlRuntimeDisplayRemoveNode(
+            id,
+            option.children
+          )
+        ) {
+          return true;
+        }
       }
+    } else if (
+      node?.kind === LAYOUT_ROW_KIND &&
+      rmlRuntimeDisplayRemoveNode(
+        id,
+        node.children
+      )
+    ) {
+      return true;
     }
   }
 
@@ -24271,6 +26121,21 @@ function rmlRuntimeDisplayNormalizeNode(
   node.runtimeDisplayStacked =
     node.runtimeDisplayStacked === true;
 
+  node.layoutWidthPercent =
+    Number.isFinite(
+      Number(node.layoutWidthPercent)
+    ) &&
+    Number(node.layoutWidthPercent) > 0
+      ? clamp(
+          Number(node.layoutWidthPercent),
+          1,
+          100
+        )
+      : undefined;
+
+  node.hideLabel =
+    node.hideLabel === true;
+
   node.defaultValue = "";
 
   node.reaction = "stored";
@@ -24480,6 +26345,10 @@ function rmlRuntimeDisplayInspector() {
         selected.runtimeDisplayOrder,
       stacked:
         selected.runtimeDisplayStacked,
+      layoutWidthPercent:
+        selected.layoutWidthPercent,
+      hideLabel:
+        selected.hideLabel,
       bindings:
         orderedBindings.map(
           binding => [
@@ -24543,11 +26412,18 @@ function rmlRuntimeDisplayInspector() {
     "Delete";
   remove.addEventListener(
     "click",
-    () => {
+    async () => {
       if (
-        !window.confirm(
-          "Delete this Runtime Display?"
-        )
+        !(await confirmBuilderAction({
+          tone: "danger",
+          kicker: "Runtime display",
+          title: "Delete this Runtime Display?",
+          message:
+            "The display item and its configured runtime values are removed from the Configuration Outline.",
+          details:
+            "Runtime Graph references to this item may become invalid.",
+          confirmLabel: "Delete Display"
+        }))
       ) {
         return;
       }
@@ -24882,6 +26758,12 @@ function rmlRuntimeDisplayInspector() {
 
 
   host.appendChild(form);
+  window.RMLInlineRowLayout
+    ?.appendInspectorControls?.(
+      form,
+      selected,
+      rmlRuntimeDisplaySetCoreDirty
+    );
   rmlRuntimeDisplayInspectorRendering =
     false;
   return true;
@@ -25651,14 +27533,40 @@ generateCode =
           )
           .map(node => {
             if (node?.kind === LAYOUT_ROW_KIND) {
+              const sourceChildren =
+                Array.isArray(node.children)
+                  ? node.children
+                  : [];
+              const layoutContext = {
+                row: node,
+                children: sourceChildren,
+                index: 0
+              };
+
               return {
                 ...node,
                 layoutItemIds:
-                  (node.children || [])
+                  sourceChildren
                     .map(child =>
                       String(child?.id || "")
                     )
                     .filter(Boolean),
+                layoutItemMetadata:
+                  sourceChildren
+                    .map(child => ({
+                      id:
+                        String(
+                          child?.id || ""
+                        ),
+                      widthPercent:
+                        effectiveInlineRowWidthPercent(
+                          child,
+                          layoutContext
+                        ),
+                      hideLabel:
+                        child?.hideLabel === true
+                    }))
+                    .filter(item => item.id),
                 children:
                   filter(
                     node.children
@@ -25920,7 +27828,7 @@ function rmlPreviewVisibleOrderedNodeIds() {
       ? flattenNodes(state?.nodes || [])
       : [];
 
-  return flattened
+  const visibleNodes = flattened
     .filter(entry =>
       entry &&
       entry.node &&
@@ -25937,13 +27845,22 @@ function rmlPreviewVisibleOrderedNodeIds() {
     )
     .map(entry => entry.node)
     .filter(node =>
-      !(
-        node?.kind === "setting" &&
-        node.hidden === true &&
-        !node.dynamicSettingKind &&
-        !rmlRuntimeDisplayIsNode(node)
+      settingsPreviewNodeVisible(node) &&
+      (
+        !window.RMLInlineRowLayout
+          ?.findContext?.(node?.id)
+          ?.row ||
+        settingsPreviewNodeVisible(
+          window.RMLInlineRowLayout
+            ?.findContext?.(node?.id)
+            ?.row
+        )
       )
-    )
+    );
+
+  return settingsPreviewOrderedNodes(
+    visibleNodes
+  )
     .map(node => String(node?.id || ""))
     .filter(Boolean);
 }
@@ -26055,6 +27972,21 @@ function rmlRuntimeDisplayRenderPreviewRows() {
     `${state.metadata.namespaceName}.${state.metadata.className}`;
 
   for (const node of displays) {
+    const row =
+      window.RMLInlineRowLayout
+        ?.findContext?.(node.id)
+        ?.row;
+
+    if (
+      !settingsPreviewNodeVisible(node) ||
+      (
+        row &&
+        !settingsPreviewNodeVisible(row)
+      )
+    ) {
+      continue;
+    }
+
     const section =
       document.createElement(
         "section"
@@ -26062,6 +27994,19 @@ function rmlRuntimeDisplayRenderPreviewRows() {
 
     section.className =
       "rml-preview-runtime-display";
+
+    window.RMLInlineRowLayout
+      ?.applyPreviewLayout?.(
+        node,
+        section
+      );
+
+    section.classList.toggle(
+      "label-hidden",
+      !settingsPreviewNodeLabelVisible(
+        node
+      )
+    );
 
     section.dataset
       .rmlRuntimeDisplayPreview =
@@ -26283,10 +28228,18 @@ function rmlRuntimeDisplayRenderPreviewRows() {
       );
     }
 
-    section.append(
-      heading,
-      output
-    );
+    if (
+      !settingsPreviewNodeLabelVisible(
+        node
+      )
+    ) {
+      section.append(output);
+    } else {
+      section.append(
+        heading,
+        output
+      );
+    }
 
     const containerId =
       findNodeContainerId(
@@ -26338,8 +28291,19 @@ renderSettingsPreview =
           )
           .map(node => {
             if (node?.kind === LAYOUT_ROW_KIND) {
+              const sourceChildren =
+                Array.isArray(node.children)
+                  ? node.children
+                  : [];
+
               return {
                 ...node,
+                previewLayoutChildren:
+                  sourceChildren.map(child => ({
+                    id: child?.id,
+                    layoutWidthPercent:
+                      child?.layoutWidthPercent
+                  })),
                 children:
                   filter(
                     node.children

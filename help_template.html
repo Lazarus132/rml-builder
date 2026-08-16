@@ -55,7 +55,7 @@
             type="button"
             data-information-page-target="nodes"
             aria-selected="false"
-            data-help="Open the separate built-in node reference.">
+            data-help="Open the Configuration Outline and Runtime Graph node references.">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <rect x="3" y="5" width="7" height="6" rx="1.5"></rect>
               <rect x="14" y="13" width="7" height="6" rx="1.5"></rect>
@@ -106,6 +106,12 @@
                   automatic scroll layer, so the existing Ctrl/Command + Wheel hierarchy
                   and Shift + Wheel horizontal scrolling work without a special mode.
                   Select the row to choose its default horizontal or vertical orientation.
+                  The row's own <strong>Internal / hidden</strong> property hides the
+                  complete group by default while keeping it available to runtime
+                  <strong>Set Configuration Visibility</strong> logic.
+                  Select any direct child to define its width percentage and optionally
+                  hide its left-side label. Preview, the generated RML menu and runtime
+                  graph overrides all use the same values.
                 </p>
               </section>
 
@@ -141,8 +147,9 @@
                 <p>
                   <strong>Pack into Node</strong> replaces the visual configuration
                   outline with an automatically synchronized typed runtime graph.
-                  Returning to the outline preserves the packed graph. Reloading starts
-                  in the outline while keeping graph nodes and wires saved.
+                  Returning to the outline preserves the packed graph. Reloading restores
+                  the last open Outline or Typed Runtime Graph view together with its
+                  saved nodes and wires.
                 </p>
                 <p>
                   The Generated file selector is available in both Configuration Outline
@@ -163,9 +170,12 @@
                   color-picker fit script is loaded only on viewports that need it.
                 </p>
                 <p>
-                  Pressing an Outline Button in Preview only shows a local pulse count.
-                  It never invokes the generated graph, changes the running mod or sends
-                  anything to Resonite.
+                  Pressing an Outline Button in Preview runs the connected typed impulse
+                  path locally. Preview-safe Configuration Menu nodes immediately update
+                  visibility, order, value, Inline Row direction, child width and label
+                  visibility in this Preview. Branch, Gate, Sequence and ordinary single-output
+                  impulse forwarding are simulated; runtime-only API side effects are skipped.
+                  This never invokes the generated mod and never sends anything to Resonite.
                 </p>
               </section>
 
@@ -517,25 +527,73 @@
         <section class="information-page information-node-page" data-information-page="nodes" hidden>
           <div class="information-node-page-layout">
             <aside class="information-node-page-intro">
-              <span class="information-kicker">Complete built-in runtime nodes</span>
+              <span class="information-kicker">Builder node libraries</span>
               <h3>Node reference</h3>
-              <p>
-                This is the complete reference for the builder's fixed built-in runtime nodes.
-                Every registered built-in node is documented here, including palette-hidden
-                helper nodes. Advanced / Raw C# nodes are deliberately separated from the
-                normal typed nodes so it is clear when the builder can no longer provide the
-                same level of type and dependency safety.
-              </p>
-              <p class="information-api-note">
-                Catalog-generated Resonite API nodes are version-derived rather than fixed builder
-                nodes. The reference reports the complete currently registered catalog count,
-                while Node Search remains the authoritative live index for each generated Type,
-                Enum, Constructor, Method, Property, Field and Event node. HarmonyLib catalog
-                calls are classified as Advanced / Raw C# because they expose low-level runtime
-                APIs without inferring patch signatures or an early rml_libs load phase.
-              </p>
+              <nav class="information-node-scope-tabs" aria-label="Node reference category">
+                <button
+                  class="information-node-scope-tab active"
+                  type="button"
+                  data-information-node-scope-target="outline"
+                  aria-controls="information-outline-node-panel"
+                  aria-selected="true"
+                  data-help="Show every control and structure node available in Configuration Outline.">
+                  <span aria-hidden="true">▤</span>
+                  <span>Configuration Outline</span>
+                </button>
+                <button
+                  class="information-node-scope-tab"
+                  type="button"
+                  data-information-node-scope-target="runtime"
+                  aria-controls="information-runtime-node-panel"
+                  aria-selected="false"
+                  data-help="Show the existing complete Typed Runtime Graph node reference.">
+                  <span aria-hidden="true">◇</span>
+                  <span>Runtime Graph</span>
+                </button>
+              </nav>
+
+              <div data-information-node-scope-copy="outline">
+                <p>
+                  Configuration Outline nodes define the generated RML settings menu:
+                  stored controls, impulse buttons, runtime display rows and structural
+                  containers. Their order and nesting are the menu layout.
+                </p>
+                <p class="information-api-note outline">
+                  Click a palette node to add it to the active container, or drag it to
+                  an exact position. Every palette tooltip now describes the resulting
+                  menu control instead of repeating the visible badge and plus symbol.
+                </p>
+              </div>
+
+              <div data-information-node-scope-copy="runtime" hidden>
+                <p>
+                  This is the complete reference for the builder's fixed built-in Runtime
+                  Graph nodes, including palette-hidden helper nodes. Advanced / Raw C#
+                  nodes remain deliberately separated from normal typed nodes.
+                </p>
+                <p class="information-api-note">
+                  Catalog-generated Resonite API nodes are version-derived rather than fixed
+                  builder nodes. Node Search remains the authoritative live index for each
+                  generated Type, Enum, Constructor, Method, Property, Field and Event node.
+                </p>
+              </div>
             </aside>
-            <article class="information-node-page-content">
+
+            <article
+              id="information-outline-node-panel"
+              class="information-node-page-content"
+              data-information-node-scope-panel="outline">
+              <div
+                id="information-outline-node-reference"
+                class="information-node-reference information-outline-node-reference"
+                aria-live="polite"></div>
+            </article>
+
+            <article
+              id="information-runtime-node-panel"
+              class="information-node-page-content"
+              data-information-node-scope-panel="runtime"
+              hidden>
               <div id="information-node-reference" class="information-node-reference" aria-live="polite"></div>
             
 
@@ -554,16 +612,32 @@
 
               <section id="info-inline-layout" class="information-section">
                 <span class="information-kicker">Configuration Menu</span>
-                <h3>Inline row and Set Configuration Layout</h3>
+                <h3>Inline row layout, width and labels</h3>
                 <p>
                   Every <strong>Inline row</strong> is exposed as a stable Menu Item on
                   <strong>Configuration Menu Instance</strong>. Connect that output to
+                  <strong>Set Configuration Visibility</strong> to override the row's
+                  static Internal / hidden state, or to
                   <strong>Set Configuration Layout</strong> and drive Horizontal with a
                   Boolean to switch the open RML menu between side-by-side and stacked
-                  layout at runtime. The same row output also works with Set Visibility,
-                  Set Order and Reset Configuration Item. Rebuilding preserves unsaved
-                  editor drafts; Preview interaction remains local and never sends this
-                  layout action to Resonite.
+                  layout at runtime. Connect a direct child item to
+                  <strong>Set Configuration Width</strong> to override its percentage,
+                  or to <strong>Set Configuration Label Visibility</strong> to show or
+                  hide only its left-side label. The same outputs also work with Set
+                  Visibility, Set Order and Reset Configuration Item. Rebuilding preserves unsaved
+                  editor drafts. The connected action path is also simulated in Preview,
+                  so these changes are visible immediately there while remaining completely
+                  local; no Preview layout action is sent to Resonite.
+                </p>
+                <p>
+                  <strong>Save Configuration Settings</strong> is an Impulse action for
+                  Outline buttons. It first captures the values currently typed into the
+                  open RML menu, validates and persists them, then emits
+                  <strong>Done</strong>. Connect subsequent actions to Done so a button
+                  can save its sibling text field before rebuilding or changing the menu.
+                  <strong>Failed</strong> handles a missing menu, invalid input or a save
+                  error. Preview performs the same sequence against its browser-local draft
+                  only and never synchronizes it to Resonite.
                 </p>
               </section>
 
@@ -589,7 +663,7 @@
                   Editable.
                 </p>
               </section>
-</article>
+            </article>
           </div>
         </section>
       </div>

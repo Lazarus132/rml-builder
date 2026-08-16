@@ -1,0 +1,205 @@
+{
+  "format": "rml-configuration-builder-project",
+  "formatVersion": 1,
+  "metadata": {
+    "namespaceName": "YourModNamespace",
+    "className": "YourMod",
+    "modName": "Your Mod",
+    "author": "Your Name",
+    "version": "1.0.0",
+    "description": "A Resonite mod generated with the RML Configuration Builder.",
+    "includeGuide": true
+  },
+  "exportOptions": {
+    "platform": "windows",
+    "resonitePath": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Resonite\\",
+    "includeCs": true,
+    "includeCsproj": true
+  },
+  "nodes": [
+    {
+      "id": "controller-main",
+      "kind": "controller",
+      "fieldName": "ActivePage",
+      "keyName": "00_active_page",
+      "description": "Selects the visible settings page.",
+      "enumName": "SettingsPage",
+      "defaultOption": "General",
+      "reaction": "stored",
+      "options": [
+        {
+          "id": "option-general",
+          "name": "General",
+          "children": [
+            {
+              "id": "setting-enabled",
+              "kind": "setting",
+              "valueType": "bool",
+              "fieldName": "Enabled",
+              "keyName": "10_enabled",
+              "description": "Enables this mod.",
+              "defaultValue": "true",
+              "hidden": false,
+              "validatorMode": "none",
+              "customValidator": "",
+              "useSlider": false,
+              "minimum": "0",
+              "maximum": "100",
+              "enumName": "",
+              "enumOptions": [],
+              "reaction": "startup-saved"
+            },
+            {
+              "id": "setting-name",
+              "kind": "setting",
+              "valueType": "string",
+              "fieldName": "DisplayName",
+              "keyName": "11_display_name",
+              "description": "Example text setting.",
+              "defaultValue": "Example",
+              "hidden": false,
+              "validatorMode": "none",
+              "customValidator": "",
+              "useSlider": false,
+              "minimum": "0",
+              "maximum": "100",
+              "enumName": "",
+              "enumOptions": [],
+              "reaction": "stored"
+            },
+            {
+              "id": "setting-resource",
+              "kind": "setting",
+              "valueType": "Uri",
+              "fieldName": "ResourceUri",
+              "keyName": "12_resource_uri",
+              "description": "Any URL or URI with a copy button.",
+              "defaultValue": "https://example.com/resource",
+              "hidden": false,
+              "validatorMode": "none",
+              "customValidator": "",
+              "useSlider": false,
+              "minimum": "0",
+              "maximum": "100",
+              "enumName": "",
+              "enumOptions": [],
+              "reaction": "stored"
+            }
+          ]
+        },
+        {
+          "id": "option-appearance",
+          "name": "Appearance",
+          "children": [
+            {
+              "id": "setting-quality",
+              "kind": "setting",
+              "valueType": "enum",
+              "fieldName": "Quality",
+              "keyName": "20_quality",
+              "description": "Ordinary enum setting.",
+              "defaultValue": "Medium",
+              "hidden": false,
+              "validatorMode": "none",
+              "customValidator": "",
+              "useSlider": false,
+              "minimum": "0",
+              "maximum": "100",
+              "enumName": "QualityLevel",
+              "enumOptions": [
+                "Low",
+                "Medium",
+                "High"
+              ],
+              "reaction": "startup-saved"
+            },
+            {
+              "id": "setting-color",
+              "kind": "setting",
+              "valueType": "colorX",
+              "fieldName": "AccentColor",
+              "keyName": "21_accent_color",
+              "description": "HDR-capable accent color.",
+              "defaultValue": "colorX.Red",
+              "hidden": false,
+              "validatorMode": "none",
+              "customValidator": "",
+              "useSlider": false,
+              "minimum": "0",
+              "maximum": "100",
+              "enumName": "",
+              "enumOptions": [],
+              "reaction": "startup-saved"
+            },
+            {
+              "id": "setting-scale",
+              "kind": "setting",
+              "valueType": "float",
+              "fieldName": "Scale",
+              "keyName": "22_scale",
+              "description": "Float slider from 0.1 to 10.",
+              "defaultValue": "1",
+              "hidden": false,
+              "validatorMode": "range",
+              "customValidator": "",
+              "useSlider": true,
+              "minimum": "0.1",
+              "maximum": "10",
+              "enumName": "",
+              "enumOptions": [],
+              "reaction": "startup-saved"
+            }
+          ]
+        },
+        {
+          "id": "option-advanced",
+          "name": "Advanced",
+          "children": [
+            {
+              "id": "setting-precise",
+              "kind": "setting",
+              "valueType": "double",
+              "fieldName": "PreciseValue",
+              "keyName": "30_precise_value",
+              "description": "Double slider from -100 to 100.",
+              "defaultValue": "0.12345678901234567",
+              "hidden": false,
+              "validatorMode": "range",
+              "customValidator": "",
+              "useSlider": true,
+              "minimum": "-100",
+              "maximum": "100",
+              "enumName": "",
+              "enumOptions": [],
+              "reaction": "stored"
+            },
+            {
+              "id": "setting-vector",
+              "kind": "setting",
+              "valueType": "double3",
+              "fieldName": "PrecisePosition",
+              "keyName": "31_precise_position",
+              "description": "Three-component double vector.",
+              "defaultValue": "1.25, 2.5, 3.75",
+              "hidden": false,
+              "validatorMode": "none",
+              "customValidator": "",
+              "useSlider": false,
+              "minimum": "0",
+              "maximum": "100",
+              "enumName": "",
+              "enumOptions": [],
+              "reaction": "stored"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "extensions": {},
+  "workspace": {
+    "selectedId": "controller-main",
+    "activeContainerId": "root",
+    "collapsedPaletteGroups": []
+  }
+}

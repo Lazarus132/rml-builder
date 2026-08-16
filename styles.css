@@ -817,7 +817,12 @@ fieldset legend {
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior-x: contain;
-  scrollbar-gutter: stable;
+}
+
+@supports (scrollbar-gutter: stable) {
+  .layout-row-drop-zone.drop-zone {
+    scrollbar-gutter: stable;
+  }
 }
 
 .layout-row-drop-zone > .node-card {
@@ -1507,26 +1512,66 @@ footer strong {
   overflow-y: hidden;
   padding: 1px 1px 7px;
   overscroll-behavior-x: contain;
-  scrollbar-gutter: stable;
+}
+
+@supports (scrollbar-gutter: stable) {
+  .rml-preview-layout-row.horizontal {
+    scrollbar-gutter: stable;
+  }
 }
 
 .rml-preview-layout-row.vertical {
   flex-direction: column;
 }
 
-.rml-preview-layout-row.horizontal > .rml-preview-setting,
-.rml-preview-layout-row.horizontal > .rml-preview-layout-row {
-  min-width: min(430px, 82vw);
-  flex: 1 0 min(430px, 82vw);
+.rml-preview-layout-cell {
+  min-width: 0;
+  max-width: 100%;
 }
 
-.rml-preview-layout-row.horizontal > .rml-preview-setting {
-  grid-template-columns: minmax(120px, 0.9fr) minmax(160px, 1.1fr);
+.rml-preview-layout-row.horizontal > .rml-preview-layout-cell {
+  flex-grow:
+    var(--rml-inline-width-percent, 100);
+  flex-shrink: 1;
+  flex-basis: 0;
+}
+
+.rml-preview-layout-row.vertical > .rml-preview-layout-cell {
+  flex: 1 1 auto;
+  width: 100%;
+}
+
+.rml-preview-layout-cell > .rml-preview-setting,
+.rml-preview-layout-cell > .rml-preview-runtime-display {
+  width: 100%;
+}
+
+.rml-preview-layout-row.horizontal .rml-preview-setting {
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
 }
 
 .rml-preview-setting-bool,
 .rml-preview-setting-color {
   grid-template-columns: minmax(220px, 70fr) minmax(104px, 30fr);
+}
+
+.rml-preview-layout-row.horizontal .rml-preview-setting-bool,
+.rml-preview-layout-row.horizontal .rml-preview-setting-color {
+  grid-template-columns: minmax(0, 70fr) minmax(0, 30fr);
+}
+
+.rml-preview-setting.label-hidden,
+.rml-preview-layout-row.horizontal .rml-preview-setting.label-hidden {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.rml-preview-setting.label-hidden > .rml-preview-editor,
+.rml-preview-setting.label-hidden .rml-preview-impulse-button,
+.rml-preview-dynamic-control.label-hidden > .rml-preview-editor,
+.rml-preview-dynamic-control.label-hidden > button {
+  width: 100%;
+  min-width: 0;
+  flex: 1 1 100%;
 }
 
 .rml-preview-label,
@@ -2012,6 +2057,10 @@ footer strong {
 
 .project-file-actions .button {
   width: 100%;
+}
+
+.project-file-actions .project-example-button {
+  grid-column: 1 / -1;
 }
 
 .project-file-status {
@@ -7326,6 +7375,16 @@ body:has(.node-pointer-ghost) .builder-canvas {
   color: #b9dcf5;
 }
 
+.information-node-tier-note.runtime-generated {
+  margin-top: 8px;
+  border-color: rgba(108, 232, 155, 0.25);
+  background: rgba(108, 232, 155, 0.05);
+}
+
+.information-node-tier-note.runtime-generated strong {
+  color: var(--green);
+}
+
 .information-node-group {
   display: grid;
   gap: 8px;
@@ -7357,6 +7416,35 @@ body:has(.node-pointer-ghost) .builder-canvas {
 
 .information-node-group-advanced h4 {
   color: var(--amber);
+}
+
+.information-node-group-runtime-generated {
+  padding: 10px;
+  border: 1px solid rgba(108, 232, 155, 0.22);
+  border-radius: 10px;
+  background:
+    linear-gradient(
+      135deg,
+      rgba(108, 232, 155, 0.045),
+      rgba(108, 232, 155, 0.018)
+    );
+}
+
+.information-node-group-runtime-generated h4 {
+  color: #bcefd0;
+}
+
+.information-node-group-runtime-generated
+.information-node-card {
+  border-color: rgba(108, 232, 155, 0.2);
+  background: rgba(12, 20, 17, 0.76);
+}
+
+.information-node-group-runtime-generated
+.information-node-symbol {
+  border-color: rgba(108, 232, 155, 0.3);
+  color: var(--green);
+  background: rgba(108, 232, 155, 0.075);
 }
 
 .information-node-grid {
@@ -9182,5 +9270,771 @@ html.rml-setup-tour-active .rml-graph-scroll-layer-outline {
 
   to {
     transform: scale(1);
+  }
+}
+
+/* ================================================================
+   Build 179 · Resonite menu parity
+
+   Keep these rules at the end of the stylesheet so the desktop Preview
+   mirrors ModConfigurationView's actual HorizontalElementWithLabel ratios.
+   No decorative pseudo-content is injected into runtime values.
+   ================================================================ */
+.rml-preview-impulse-button {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.rml-preview-impulse-button output {
+  display: none;
+}
+
+@media (min-width: 981px) and (min-height: 721px) {
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-setting {
+    grid-template-columns: minmax(0, 35fr) minmax(0, 65fr);
+    column-gap: 8px;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-layout-row.horizontal
+  .rml-preview-setting {
+    grid-template-columns: minmax(0, 35fr) minmax(0, 65fr);
+    column-gap: 6px;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-setting-bool,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-setting-color,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-layout-row.horizontal
+  .rml-preview-setting-bool,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-layout-row.horizontal
+  .rml-preview-setting-color {
+    grid-template-columns: minmax(0, 70fr) minmax(0, 30fr);
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-dynamic-control.rml-preview-dynamic-choice,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-layout-row.horizontal
+  .rml-preview-dynamic-control.rml-preview-dynamic-choice {
+    grid-template-columns: minmax(0, 70fr) minmax(0, 30fr);
+    column-gap: 8px;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-setting.label-hidden,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-layout-row.horizontal
+  .rml-preview-setting.label-hidden,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-dynamic-control.label-hidden {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-runtime-display {
+    gap: 4px;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-runtime-display-heading {
+    min-height: 28px;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-runtime-display-heading strong {
+    font-family: "Trebuchet MS", "Segoe UI", Arial, sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    line-height: 1;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-runtime-display-values {
+    gap: 6px;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-runtime-display-row {
+    min-height: 46px;
+    gap: 6px;
+    padding: 3px 2px;
+    border: 0;
+    border-radius: 6px;
+    background: #12161e;
+    box-shadow: none;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-runtime-display-cell {
+    min-height: 38px;
+    grid-template-columns: minmax(0, 1fr) 38px;
+    gap: 4px;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-runtime-display-value {
+    padding: 0 6px;
+    font-family: "Trebuchet MS", "Segoe UI", Arial, sans-serif;
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-runtime-display-value-copy {
+    width: 38px;
+    min-width: 38px;
+    height: 38px;
+    min-height: 38px;
+    border: 0;
+    border-radius: 5px;
+    background: #252b32;
+    color: #53f86d;
+    box-shadow: none;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-runtime-display-value-copy:hover {
+    border: 0;
+    background: #30373f;
+    color: #69ff80;
+  }
+}
+
+/* ================================================================
+   Build 182 · Native setting-control height parity
+
+   ModConfigurationView uses SettingHeight = 32f for both TextField and
+   impulse Button. Keep both Preview controls in the very same fixed box;
+   min-height alone is insufficient because browser font/padding metrics can
+   otherwise make one of them taller than the other.
+   ================================================================ */
+.settings-preview-dialog:not(.rml-preview-color-open)
+.rml-preview-text-field,
+.settings-preview-dialog:not(.rml-preview-color-open)
+.rml-preview-impulse-button {
+  box-sizing: border-box;
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
+  margin: 0;
+  align-self: stretch;
+}
+
+.settings-preview-dialog:not(.rml-preview-color-open)
+.rml-preview-text-field {
+  padding: 0 9px;
+  border: 1px solid #454b52;
+  border-radius: 5px;
+  outline: none;
+  background: #30343a;
+  box-shadow: none;
+  line-height: 30px;
+  transition:
+    background-color 90ms linear,
+    border-color 90ms linear;
+}
+
+.settings-preview-dialog:not(.rml-preview-color-open)
+.rml-preview-impulse-button {
+  padding-block: 0;
+  line-height: 30px;
+}
+
+.settings-preview-dialog:not(.rml-preview-color-open)
+.rml-preview-impulse-button > span {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  place-items: center;
+  line-height: 1;
+}
+
+.settings-preview-dialog:not(.rml-preview-color-open)
+.rml-preview-text-field:hover {
+  border-color: #525860;
+  background: #3a3e44;
+  box-shadow: none;
+}
+
+.settings-preview-dialog:not(.rml-preview-color-open)
+.rml-preview-text-field:focus,
+.settings-preview-dialog:not(.rml-preview-color-open)
+.rml-preview-text-field:focus-visible {
+  border-color: #5d636b;
+  outline: none;
+  background: #3a3e44;
+  box-shadow: none;
+}
+
+/* ================================================================
+   Build 184 · Unified builder messages and technical help bubbles
+   ================================================================ */
+dialog.builder-message-dialog {
+  width: min(570px, calc(100vw - 28px));
+  max-width: none;
+  padding: 0;
+  overflow: visible;
+  border: 1px solid rgba(164, 118, 255, 0.42);
+  border-radius: 15px;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  box-shadow:
+    0 30px 110px rgba(0, 0, 0, 0.78),
+    0 0 0 1px rgba(255, 255, 255, 0.025);
+}
+
+dialog.builder-message-dialog::backdrop {
+  background: rgba(4, 3, 8, 0.82);
+  -webkit-backdrop-filter: blur(8px) saturate(0.85);
+  backdrop-filter: blur(8px) saturate(0.85);
+}
+
+.builder-message-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  gap: 0 17px;
+  overflow: hidden;
+  padding: 21px;
+  border-radius: inherit;
+  background:
+    linear-gradient(135deg, rgba(164, 118, 255, 0.09), transparent 42%),
+    radial-gradient(circle at 7% 4%, rgba(255, 209, 129, 0.12), transparent 16rem),
+    #111019;
+  animation: rml-builder-message-enter 170ms cubic-bezier(0.2, 0.8, 0.25, 1) both;
+}
+
+.builder-message-card::before {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--amber), transparent);
+  content: "";
+  opacity: 0.85;
+}
+
+.builder-message-dialog[data-tone="danger"] .builder-message-card::before {
+  background: linear-gradient(90deg, transparent, var(--red), transparent);
+}
+
+.builder-message-dialog[data-tone="info"] .builder-message-card::before {
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+}
+
+.builder-message-dialog[data-tone="success"] .builder-message-card::before {
+  background: linear-gradient(90deg, transparent, var(--green), transparent);
+}
+
+.builder-message-signal {
+  position: relative;
+  display: grid;
+  width: 58px;
+  height: 58px;
+  place-items: center;
+  border: 1px solid rgba(255, 209, 129, 0.3);
+  border-radius: 14px;
+  background: rgba(255, 209, 129, 0.075);
+  color: var(--amber);
+  box-shadow: inset 0 0 22px rgba(255, 209, 129, 0.035);
+}
+
+.builder-message-signal::after {
+  position: absolute;
+  inset: -1px;
+  border: 1px solid currentColor;
+  border-radius: inherit;
+  content: "";
+  opacity: 0;
+  animation: rml-builder-warning-signal 2.25s ease-out infinite;
+}
+
+.builder-message-signal svg {
+  width: 35px;
+  height: 35px;
+  overflow: visible;
+}
+
+.builder-message-signal-shape {
+  fill: rgba(255, 209, 129, 0.12);
+  stroke: currentColor;
+  stroke-linejoin: round;
+  stroke-width: 2.25;
+}
+
+.builder-message-signal-mark {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-width: 3.25;
+}
+
+.builder-message-dialog[data-tone="danger"] .builder-message-signal {
+  border-color: rgba(255, 113, 136, 0.34);
+  background: rgba(255, 113, 136, 0.08);
+  color: var(--red);
+}
+
+.builder-message-dialog[data-tone="danger"] .builder-message-signal-shape {
+  fill: rgba(255, 113, 136, 0.12);
+}
+
+.builder-message-dialog[data-tone="info"] .builder-message-signal {
+  border-color: rgba(164, 118, 255, 0.34);
+  background: rgba(164, 118, 255, 0.08);
+  color: #c9b1ff;
+}
+
+.builder-message-dialog[data-tone="info"] .builder-message-signal-shape {
+  fill: rgba(164, 118, 255, 0.12);
+}
+
+.builder-message-dialog[data-tone="success"] .builder-message-signal {
+  border-color: rgba(108, 232, 155, 0.34);
+  background: rgba(108, 232, 155, 0.08);
+  color: var(--green);
+}
+
+.builder-message-dialog[data-tone="success"] .builder-message-signal-shape {
+  fill: rgba(108, 232, 155, 0.12);
+}
+
+.builder-message-content {
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.builder-message-content > small {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--amber);
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: 0.14em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.builder-message-dialog[data-tone="danger"] .builder-message-content > small {
+  color: #ff9bac;
+}
+
+.builder-message-dialog[data-tone="info"] .builder-message-content > small {
+  color: #c9b1ff;
+}
+
+.builder-message-dialog[data-tone="success"] .builder-message-content > small {
+  color: var(--green);
+}
+
+.builder-message-content h2 {
+  margin: 0;
+  color: #f7f4ff;
+  font-size: 19px;
+  line-height: 1.22;
+  letter-spacing: -0.02em;
+}
+
+.builder-message-content > p {
+  margin: 10px 0 0;
+  color: #b8b3c8;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.builder-message-details {
+  padding: 9px 10px;
+  border: 1px solid rgba(164, 118, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(8, 7, 12, 0.42);
+  color: #8f899f !important;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 10px !important;
+  line-height: 1.5 !important;
+}
+
+.builder-message-actions {
+  display: flex;
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+  gap: 9px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(64, 58, 85, 0.72);
+}
+
+.builder-message-actions .button {
+  min-width: 122px;
+}
+
+.builder-message-confirm {
+  border-color: rgba(255, 209, 129, 0.5);
+  background: linear-gradient(180deg, #5a4626, #3d2f1b);
+  color: #fff3d8;
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.05);
+}
+
+.builder-message-confirm:hover,
+.builder-message-confirm:focus-visible {
+  border-color: rgba(255, 224, 166, 0.76);
+  background: linear-gradient(180deg, #6a522c, #483820);
+}
+
+.builder-message-confirm[data-tone="danger"] {
+  border-color: rgba(255, 113, 136, 0.52);
+  background: linear-gradient(180deg, #682f3b, #48222b);
+  color: #ffe5e9;
+}
+
+.builder-message-confirm[data-tone="danger"]:hover,
+.builder-message-confirm[data-tone="danger"]:focus-visible {
+  border-color: rgba(255, 143, 161, 0.8);
+  background: linear-gradient(180deg, #7b3947, #542731);
+}
+
+.builder-message-confirm[data-tone="info"] {
+  border-color: rgba(164, 118, 255, 0.55);
+  background: linear-gradient(180deg, #553b82, #392859);
+  color: #f2eaff;
+}
+
+.builder-message-confirm[data-tone="success"] {
+  border-color: rgba(108, 232, 155, 0.52);
+  background: linear-gradient(180deg, #285e40, #1b422c);
+  color: #e4ffed;
+}
+
+.rml-button-help-bubble {
+  display: grid;
+  grid-template-columns: 25px minmax(0, 1fr);
+  align-items: start;
+  gap: 9px;
+  width: max-content;
+  max-width: min(360px, calc(100vw - 16px));
+  padding: 10px 11px;
+  overflow: hidden;
+  border: 1px solid rgba(164, 118, 255, 0.38);
+  border-radius: 9px;
+  background:
+    linear-gradient(135deg, rgba(164, 118, 255, 0.09), transparent 52%),
+    rgba(13, 12, 19, 0.985);
+  color: var(--text);
+  box-shadow:
+    0 14px 42px rgba(0, 0, 0, 0.58),
+    inset 0 1px rgba(255, 255, 255, 0.025);
+  animation: rml-help-bubble-enter 120ms ease-out both;
+}
+
+.rml-help-bubble-icon {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 1px solid rgba(164, 118, 255, 0.4);
+  border-radius: 6px;
+  background: rgba(164, 118, 255, 0.1);
+  color: #c9b1ff;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.rml-help-bubble-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.rml-help-bubble-kicker {
+  color: #b99bff;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 8px;
+  font-weight: 850;
+  letter-spacing: 0.13em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.rml-help-bubble-text {
+  color: #ddd8ea;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0;
+  line-height: 1.45;
+  text-transform: none;
+}
+
+.rml-button-help-bubble[data-tone="warning"] {
+  border-color: rgba(255, 209, 129, 0.4);
+  background:
+    linear-gradient(135deg, rgba(255, 209, 129, 0.075), transparent 52%),
+    rgba(16, 14, 16, 0.985);
+}
+
+.rml-button-help-bubble[data-tone="warning"] .rml-help-bubble-icon {
+  border-color: rgba(255, 209, 129, 0.42);
+  background: rgba(255, 209, 129, 0.08);
+  color: var(--amber);
+}
+
+.rml-button-help-bubble[data-tone="warning"] .rml-help-bubble-kicker {
+  color: var(--amber);
+}
+
+.rml-button-help-bubble[data-tone="runtime"] {
+  border-color: rgba(108, 232, 155, 0.4);
+  background:
+    linear-gradient(
+      135deg,
+      rgba(108, 232, 155, 0.1),
+      rgba(108, 232, 155, 0.035) 58%,
+      transparent
+    ),
+    rgba(11, 16, 14, 0.985);
+}
+
+.rml-button-help-bubble[data-tone="runtime"] .rml-help-bubble-icon {
+  border-color: rgba(108, 232, 155, 0.44);
+  background: rgba(108, 232, 155, 0.1);
+  color: var(--green);
+}
+
+.rml-button-help-bubble[data-tone="runtime"] .rml-help-bubble-kicker {
+  color: #bcefd0;
+}
+
+.rml-button-help-bubble[data-tone="danger"] {
+  border-color: rgba(255, 113, 136, 0.42);
+  background:
+    linear-gradient(135deg, rgba(255, 113, 136, 0.08), transparent 52%),
+    rgba(17, 13, 17, 0.985);
+}
+
+.rml-button-help-bubble[data-tone="danger"] .rml-help-bubble-icon {
+  border-color: rgba(255, 113, 136, 0.44);
+  background: rgba(255, 113, 136, 0.09);
+  color: var(--red);
+}
+
+.rml-button-help-bubble[data-tone="danger"] .rml-help-bubble-kicker {
+  color: #ff9bac;
+}
+
+@keyframes rml-builder-message-enter {
+  from {
+    opacity: 0;
+    transform: translateY(7px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes rml-builder-warning-signal {
+  0%, 48% {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  58% {
+    opacity: 0.34;
+  }
+  86%, 100% {
+    opacity: 0;
+    transform: scale(1.22);
+  }
+}
+
+@keyframes rml-help-bubble-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-3px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (max-width: 560px) {
+  .builder-message-card {
+    grid-template-columns: 48px minmax(0, 1fr);
+    gap: 0 12px;
+    padding: 17px;
+  }
+
+  .builder-message-signal {
+    width: 44px;
+    height: 44px;
+    border-radius: 11px;
+  }
+
+  .builder-message-signal svg {
+    width: 28px;
+    height: 28px;
+  }
+
+  .builder-message-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .builder-message-actions .button {
+    width: 100%;
+  }
+
+  .builder-message-confirm {
+    grid-row: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .builder-message-card,
+  .builder-message-signal::after,
+  .rml-button-help-bubble {
+    animation: none;
+  }
+}
+
+/* ================================================================
+   Build 185 · Outline / Runtime node reference scopes
+   ================================================================ */
+.information-node-scope-tabs {
+  display: grid;
+  gap: 7px;
+  margin: 15px 0 17px;
+}
+
+.information-node-scope-tab {
+  display: grid;
+  width: 100%;
+  min-height: 43px;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(24, 22, 34, 0.86);
+  color: var(--muted);
+  text-align: left;
+  cursor: pointer;
+}
+
+.information-node-scope-tab:hover {
+  border-color: var(--line-strong);
+  background: #201b2d;
+  color: var(--text);
+}
+
+.information-node-scope-tab > span:first-child {
+  display: grid;
+  width: 27px;
+  height: 27px;
+  place-items: center;
+  border: 1px solid rgba(164, 118, 255, 0.22);
+  border-radius: 7px;
+  background: #0c0b11;
+  color: #c1a5ff;
+  font-family: Consolas, monospace;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.information-node-scope-tab > span:last-child {
+  min-width: 0;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.information-node-scope-tab.active {
+  border-color: rgba(164, 118, 255, 0.6);
+  background:
+    linear-gradient(90deg, rgba(164, 118, 255, 0.14), transparent),
+    #1a1723;
+  color: #eadfff;
+  box-shadow: inset 0 0 0 1px rgba(164, 118, 255, 0.06);
+}
+
+.information-node-scope-tab.active > span:first-child {
+  border-color: rgba(164, 118, 255, 0.5);
+  background: rgba(164, 118, 255, 0.12);
+  color: #dbcaff;
+}
+
+.information-node-scope-tab[data-information-node-scope-target="runtime"].active {
+  border-color: rgba(89, 183, 255, 0.48);
+  background:
+    linear-gradient(
+      90deg,
+      rgba(89, 183, 255, 0.13),
+      rgba(164, 118, 255, 0.055),
+      transparent
+    ),
+    #151823;
+  color: #e1f1ff;
+  box-shadow: inset 0 0 0 1px rgba(89, 183, 255, 0.055);
+}
+
+.information-node-scope-tab[data-information-node-scope-target="runtime"].active > span:first-child {
+  border-color: rgba(89, 183, 255, 0.44);
+  background: rgba(89, 183, 255, 0.1);
+  color: #b9dcf5;
+}
+
+[data-information-node-scope-copy][hidden],
+[data-information-node-scope-panel][hidden] {
+  display: none !important;
+}
+
+.information-api-note.outline {
+  border-color: rgba(108, 232, 155, 0.24);
+  background: rgba(108, 232, 155, 0.055);
+}
+
+.information-outline-node-reference
+.information-node-reference-summary > div:last-child {
+  border-color: rgba(108, 232, 155, 0.25);
+  background: rgba(108, 232, 155, 0.05);
+}
+
+.information-outline-node-reference
+.information-node-reference-summary > div:last-child strong {
+  color: var(--green);
+}
+
+@media (max-width: 760px) {
+  .information-node-scope-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-block: 10px 12px;
+  }
+
+  .information-node-scope-tab {
+    min-height: 40px;
+  }
+}
+
+@media (max-width: 460px) {
+  .information-node-scope-tab {
+    grid-template-columns: 23px minmax(0, 1fr);
+    gap: 6px;
+    padding-inline: 7px;
+  }
+
+  .information-node-scope-tab > span:first-child {
+    width: 23px;
+    height: 23px;
+  }
+
+  .information-node-scope-tab > span:last-child {
+    font-size: 9px;
   }
 }

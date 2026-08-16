@@ -145,6 +145,23 @@
     node.dynamicAllowEmpty = node.dynamicAllowEmpty === true;
     node.dynamicButtonLabel ||= "Run";
     node.defaultValue ??= "";
+    node.layoutWidthPercent =
+      Number.isFinite(
+        Number(node.layoutWidthPercent)
+      ) &&
+      Number(node.layoutWidthPercent) > 0
+        ? Math.min(
+            100,
+            Math.max(
+              1,
+              Number(
+                node.layoutWidthPercent
+              )
+            )
+          )
+        : undefined;
+    node.hideLabel =
+      node.hideLabel === true;
     return node;
   }
 
@@ -638,6 +655,13 @@
         .join("<br>");
     inspectorBody.appendChild(outputs);
 
+    window.RMLInlineRowLayout
+      ?.appendInspectorControls?.(
+        inspectorBody,
+        node,
+        requestRefresh
+      );
+
     inspectorRendering = false;
     return true;
   }
@@ -1030,7 +1054,7 @@
         ? flattenNodes(state?.nodes || [])
         : [];
 
-    return flattened
+    const nodes = flattened
       .filter(entry =>
         entry &&
         entry.node &&
@@ -1047,12 +1071,14 @@
       )
       .map(entry => entry.node)
       .filter(node =>
-        !(
-          node?.kind === "setting" &&
-          node.hidden === true &&
-          !node.dynamicSettingKind
-        )
+        window.RMLInlineRowLayout
+          ?.isPreviewVisible?.(node) !==
+          false
       );
+
+    return window.RMLInlineRowLayout
+      ?.orderedPreviewNodes?.(nodes) ||
+      nodes;
   }
 
   function insertDynamicPreviewBlock(
@@ -1281,6 +1307,25 @@
     }
 
     for (const node of controls) {
+      const row =
+        window.RMLInlineRowLayout
+          ?.findContext?.(node.id)
+          ?.row;
+
+      if (
+        window.RMLInlineRowLayout
+          ?.isPreviewVisible?.(node) ===
+          false ||
+        (
+          row &&
+          window.RMLInlineRowLayout
+            ?.isPreviewVisible?.(row) ===
+            false
+        )
+      ) {
+        continue;
+      }
+
       if (
         host.querySelector(
           `[data-rml-dynamic-preview="${CSS.escape(
@@ -1303,6 +1348,20 @@
       block.className =
         "rml-preview-setting rml-preview-dynamic-control";
 
+      window.RMLInlineRowLayout
+        ?.applyPreviewLayout?.(
+          node,
+          block
+        );
+
+      block.classList.toggle(
+        "label-hidden",
+        window.RMLInlineRowLayout
+          ?.isPreviewLabelVisible?.(
+            node
+          ) === false
+      );
+
       if (
         node.dynamicSettingKind ===
         KINDS.choice
@@ -1322,7 +1381,14 @@
         node.keyName ||
         "Dynamic control";
 
-      block.appendChild(title);
+      if (
+        window.RMLInlineRowLayout
+          ?.isPreviewLabelVisible?.(
+            node
+          ) !== false
+      ) {
+        block.appendChild(title);
+      }
 
       const editor =
         document.createElement("div");
@@ -1428,6 +1494,11 @@
           );
 
           refreshSwitch();
+          window.RMLDynamicGraphHost
+            ?.previewConfigurationPhase?.(
+              "saved",
+              node.id
+            );
         };
 
         previousButton.addEventListener(

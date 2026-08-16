@@ -19,7 +19,7 @@
     document.currentScript?.src ||
     window.location.href;
   const modNodesUrl = new URL(
-    "mod_nodes.js?v=28",
+    "mod_nodes.js?v=32-draft-safe-save-v180",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(

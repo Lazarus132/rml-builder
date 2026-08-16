@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta
       name="rml-builder-build"
-      content="palette-pointer-drag-scroll-fix-20260816-051500-v172">
+      content="runtime-generated-green-parity-20260816-180000-v188">
     <meta
       name="description"
       content="Build complete typed ResoniteModLoader projects visually with automatic dependencies; optional Raw C# tools remain an expert fallback.">
@@ -16,7 +16,7 @@
         "RMLBuilderBuildId",
         {
           value:
-            "palette-pointer-drag-scroll-fix-20260816-051500-v172",
+            "runtime-generated-green-parity-20260816-180000-v188",
           writable: false,
           enumerable: true,
           configurable: true
@@ -26,7 +26,7 @@
         .rmlBuilderBuild =
           window.RMLBuilderBuildId;
     </script>
-    <link rel="stylesheet" href="styles.css?v=127-palette-pointer-drag">
+    <link rel="stylesheet" href="styles.css?v=141-runtime-generated-green-parity-v188">
     <link rel="shortcut icon" href="./favicon.svg">
     <link rel="icon" href="./favicon.svg">
   </head>
@@ -60,11 +60,6 @@
         <span></span><span></span><span></span>
       </button>
       <div id="top-actions" class="top-actions">
-        <button id="load-example" class="button secondary top-action-button" type="button"
-          aria-label="Load example" data-help="Load the complete example project into the builder.">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v6h6 M5 9a8 8 0 1 1-1 7 M12 8v8 M8.5 12.5 12 16l3.5-3.5"></path></svg>
-          <span class="top-action-label">Load example</span>
-        </button>
         <button id="new-blank" class="button secondary top-action-button" type="button"
           aria-label="New blank project" data-help="Clear the current draft and start a new blank project.">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14 M5 12h14"></path></svg>
@@ -154,7 +149,9 @@
                 class="palette-item controller-item"
                 type="button"
                 draggable="true"
-                data-palette="controller">
+                data-palette="controller"
+                data-help-kicker="Outline structure"
+                data-help="Creates selectable configuration pages. Click to add it to the active Outline container, or drag it to an exact position.">
                 <span>§</span>
                 <strong>Section enum</strong>
                 <b>＋</b>
@@ -163,7 +160,9 @@
                 class="palette-item layout-row-item"
                 type="button"
                 draggable="true"
-                data-palette="layoutRow">
+                data-palette="layoutRow"
+                data-help-kicker="Outline structure"
+                data-help="Groups direct Outline children into one horizontal or vertical runtime menu layout. Click to add it, or drag it to an exact position.">
                 <span>⇄</span>
                 <strong>Inline row</strong>
                 <b>＋</b>
@@ -314,6 +313,13 @@
             type="button">
             Load JSON…
           </button>
+          <button
+            id="load-example"
+            class="button secondary project-example-button"
+            type="button"
+            data-help="Replace the current builder project with the complete example.">
+            Load Complete Example
+          </button>
         </div>
 
         <input
@@ -332,6 +338,48 @@
         <button id="project-done" class="button secondary" type="button">
           Done
         </button>
+      </div>
+    </dialog>
+
+    <dialog
+      id="builder-message-dialog"
+      class="builder-message-dialog"
+      data-tone="warning"
+      aria-labelledby="builder-message-title"
+      aria-describedby="builder-message-copy">
+      <div class="builder-message-card">
+        <div class="builder-message-signal" aria-hidden="true">
+          <svg viewBox="0 0 48 48" focusable="false">
+            <path
+              class="builder-message-signal-shape"
+              d="M24 4.5 45 41H3L24 4.5Z"></path>
+            <path
+              class="builder-message-signal-mark"
+              d="M24 15v13.5M24 35.5v.5"></path>
+          </svg>
+        </div>
+
+        <div class="builder-message-content">
+          <small id="builder-message-kicker">Project safety</small>
+          <h2 id="builder-message-title">Replace current project?</h2>
+          <p id="builder-message-copy"></p>
+          <p id="builder-message-details" class="builder-message-details" hidden></p>
+        </div>
+
+        <div class="builder-message-actions">
+          <button
+            id="builder-message-cancel"
+            class="button secondary"
+            type="button">
+            Cancel
+          </button>
+          <button
+            id="builder-message-confirm"
+            class="button builder-message-confirm"
+            type="button">
+            Continue
+          </button>
+        </div>
       </div>
     </dialog>
 
@@ -452,10 +500,10 @@
     </dialog>
     <script src="scroll_manager.js?v=6"></script>
     <script src="scroll_hierarchy.js?v=8"></script>
-    <script src="app.js?v=172-palette-pointer-drag-scroll-20260816-051500"></script>
-    <script src="catalog_loader.js?v=26"></script>
+    <script src="app.js?v=188-runtime-generated-green-parity-20260816-180000"></script>
+    <script src="catalog_loader.js?v=29-draft-safe-save-v180"></script>
     <script src="runtime_bridge.js?v=2"></script>
-    <script src="node_graph.js?v=104-view-persistence-20260816-044000"></script>
-    <script src="dynamic_settings.js?v=19-palette-pointer-drag"></script>
+    <script src="node_graph.js?v=112-viewport-toast-runtime-tooltip-v187"></script>
+    <script src="dynamic_settings.js?v=24-inline-row-runtime-visibility-v178"></script>
 </body>
 </html>
