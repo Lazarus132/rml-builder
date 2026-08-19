@@ -2,8 +2,8 @@
   "use strict";
 
   const SCRIPT_BASE = document.currentScript?.src || window.location.href;
-  const TEMPLATE_URL = new URL("setup_template.html?v=73-step9-adaptive-card-monotonic-v271", SCRIPT_BASE).href;
-  const TEMPLATE_SCRIPT_URL = new URL("setup_template.js?v=73-step9-adaptive-card-monotonic-v271", SCRIPT_BASE).href;
+  const TEMPLATE_URL = new URL("setup_template.html?v=74-immediate-ready-repeat-previous-v272", SCRIPT_BASE).href;
+  const TEMPLATE_SCRIPT_URL = new URL("setup_template.js?v=74-immediate-ready-repeat-previous-v272", SCRIPT_BASE).href;
   let templatePromise = null;
   let snapshot = null;
   let snapshotFingerprint = "";
@@ -16,6 +16,8 @@
   let demoTimers = [];
   let stepPhase = "explain";
   let demoInFlight = false;
+  let repeatPreviousInFlight = false;
+  let controlledRepeatCount = 0;
   let restoreInFlight = false;
   let tourResizeObserver = null;
   let modalSurfaceState = null;
@@ -86,7 +88,7 @@
     rejectedCount: 0
   };
   const tourDebugState = {
-    build: "stable-tour-step4-build259-plus-vertical-live-wheel-20260819-v271",
+    build: "stable-tour-step4-build259-plus-vertical-live-wheel-20260819-v272",
     events: [],
     assertions: []
   };
@@ -872,7 +874,9 @@
             narratedStepIndexes: [...narratedStepIndexes],
             attemptedDemonstrationIndexes:
               [...attemptedDemonstrationIndexes],
-            blockedRepeatCount
+            blockedRepeatCount,
+            controlledRepeatCount,
+            controlledRepeatInFlight: repeatPreviousInFlight
           },
           constraintHandler: {
             version: 1,
@@ -1019,7 +1023,7 @@
     narrationParagraphPause: 620,
     narrationAutoScrollReadPause: 900,
     narrationSectionHold: 620,
-    narrationHintHold: 4200,
+    narrationHintHold: 0,
     preparationSettle: 320
   });
   const TOUR_PRESENTATION_SPEED = (() => {
@@ -1219,6 +1223,7 @@
       progress: root?.querySelector("[data-setup-progress]"),
       next: root?.querySelector("[data-setup-next]"),
       skip: root?.querySelector("[data-setup-skip]"),
+      repeatPrevious: root?.querySelector("[data-setup-repeat-previous]"),
       skipDemo: root?.querySelector("[data-setup-skip-demo]"),
       interactionShield: root?.querySelector("[data-setup-interaction-shield]"),
       liveControls: root?.querySelector("[data-setup-live-controls]"),
@@ -2103,39 +2108,37 @@
         "[RML Tour · Narration] The final hint font size differs from the explanation font size."
       );
     }
-    const hintHoldStarted = performance.now();
-    const hintAdvancedByInteraction = step.hint
-      ? await waitForNarrationScene(
-          TOUR_SCROLL_TIMING.narrationHintHold
-        )
-      : false;
-    if (runId !== demoRunId || stepIndex !== index) return;
-    const hintHoldDurationMs = Math.round(
-      performance.now() - hintHoldStarted
-    );
-    const effectiveHintHoldMs = tourPresentationDuration(
-      TOUR_SCROLL_TIMING.narrationHintHold
+    setStepPhase("ready");
+
+    fitNarrationCardToContent({ followText: false });
+    const readyControlsVisible = Boolean(
+      ui.next &&
+      !ui.next.hidden &&
+      !ui.next.disabled &&
+      ui.skipDemo &&
+      !ui.skipDemo.hidden &&
+      !ui.skipDemo.disabled
     );
     tourDebugAssert(
       `tour-step-${index}-hint-readable-hold`,
-      !step.hint ||
-        hintAdvancedByInteraction === true ||
-        hintHoldDurationMs >= effectiveHintHoldMs * .9,
+      (!step.hint || ui.hint.hidden === false) &&
+        readyControlsVisible,
       {
         hintVisible: Boolean(step.hint && ui.hint.hidden === false),
-        hintHoldDurationMs,
-        configuredHintHoldMs:
-          TOUR_SCROLL_TIMING.narrationHintHold,
-        effectiveHintHoldMs,
+        hintHoldDurationMs: 0,
+        configuredHintHoldMs: 0,
+        effectiveHintHoldMs: 0,
         presentationSpeed: TOUR_PRESENTATION_SPEED,
-        advancedByUserInteraction:
-          hintAdvancedByInteraction === true,
+        advancedByUserInteraction: false,
+        readyControlsVisible,
+        demonstrateVisible: Boolean(ui.next && !ui.next.hidden),
+        skipDemonstrationVisible: Boolean(
+          ui.skipDemo && !ui.skipDemo.hidden
+        ),
         behavior:
-          "the final hint remains readable, unless the user explicitly skips it with a primary click"
+          "the final blue hint remains visible while the manual Demonstrate controls appear immediately, with no autonomous hold delay"
       }
     );
-    setStepPhase("ready");
-    fitNarrationCardToContent({ followText: false });
     assertAdaptiveNarrationCard(index);
     const narrationDurationMs = Math.round(
       performance.now() - narrationStarted
@@ -4928,7 +4931,6 @@
       mouse?.style.setProperty("--mouse-x", point.x + "px");
       mouse?.style.setProperty("--mouse-y", point.y + "px");
       mouse?.style.setProperty("--mouse-duration", "0ms");
-
       document.dispatchEvent(
         new PointerEvent("pointermove", {
           bubbles: true,
@@ -5676,7 +5678,6 @@
       return score(a) - score(b);
     });
     const best = candidates[0];
-
     demoLabel.style.left = best.left + "px";
     demoLabel.style.top = best.top + "px";
   }
@@ -5851,7 +5852,6 @@
     await teacherClickElement(input, label, runId);
     if (runId !== demoRunId) return;
     setTourInputValue(input, "");
-
     const visibleInputSteps = Math.min(5, Math.max(1, value.length));
     for (
       let step = 1;
@@ -19912,6 +19912,17 @@
     return true;
   }
 
+  function previousDemonstrationIndex(fromIndex = stepIndex) {
+    for (
+      let index = Math.min(steps.length, fromIndex) - 1;
+      index >= 0;
+      index -= 1
+    ) {
+      if (steps[index]?.demo) return index;
+    }
+    return -1;
+  }
+
   function setStepPhase(phase) {
     stepPhase = phase;
     const ui = elements();
@@ -19933,10 +19944,36 @@
       phase === "narrating" ||
       phase === "preparing" ||
       phase === "demonstrating";
+    const tourComplete =
+      stepIndex === steps.length - 1 &&
+      !step.demo;
+    const previousDemoIndex =
+      previousDemonstrationIndex(stepIndex);
+    const repeatVisiblePhase =
+      (step.demo && phase === "ready") ||
+      (!step.demo && phase === "explain");
     ui.next.hidden =
       phase === "narrating" ||
       phase === "preparing";
     ui.next.disabled = locked;
+    if (ui.skip) {
+      ui.skip.hidden = tourComplete;
+      ui.skip.disabled = restoreInFlight;
+    }
+    if (ui.repeatPrevious) {
+      ui.repeatPrevious.hidden = !(
+        previousDemoIndex >= 0 &&
+        repeatVisiblePhase
+      );
+      ui.repeatPrevious.disabled =
+        locked ||
+        demoInFlight ||
+        repeatPreviousInFlight;
+      ui.repeatPrevious.dataset.repeatStepIndex =
+        previousDemoIndex >= 0
+          ? String(previousDemoIndex)
+          : "";
+    }
     if (ui.skipDemo) {
       ui.skipDemo.hidden = !(step.demo && phase === "ready");
       ui.skipDemo.disabled = phase !== "ready" || demoInFlight;
@@ -19977,9 +20014,32 @@
               ui.skipDemo?.parentElement === ui.next.parentElement
           }
         );
+        const repeatExpected = previousDemoIndex >= 0;
+        tourDebugAssert(
+          `tour-step-${stepIndex}-repeat-previous-button-state`,
+          Boolean(ui.repeatPrevious) &&
+            ui.repeatPrevious.hidden === !repeatExpected &&
+            (
+              !repeatExpected ||
+              ui.repeatPrevious.disabled ===
+                repeatPreviousInFlight
+            ),
+          {
+            previousDemoIndex,
+            repeatExpected,
+            repeatVisible:
+              Boolean(ui.repeatPrevious && !ui.repeatPrevious.hidden),
+            repeatEnabled:
+              Boolean(ui.repeatPrevious && !ui.repeatPrevious.disabled),
+            policy:
+              "the first Demonstrate overlay has nothing to repeat; every later lesson may repeat only the immediately preceding demonstration"
+          }
+        );
       }
     } else {
-      ui.kicker.textContent = "Explanation";
+      ui.kicker.textContent = tourComplete
+        ? "Tour complete"
+        : "Explanation";
       ui.next.textContent =
         step.demo
           ? "Demonstrate"
@@ -19988,6 +20048,31 @@
                 ? "Finish"
                 : "Next"
       );
+      if (tourComplete) {
+        tourDebugAssert(
+          "tour-complete-final-actions",
+          Boolean(
+            ui.skip?.hidden &&
+            ui.repeatPrevious &&
+            !ui.repeatPrevious.hidden &&
+            ui.repeatPrevious.disabled ===
+              repeatPreviousInFlight &&
+            ui.next &&
+            !ui.next.hidden &&
+            !ui.next.disabled &&
+            ui.next.textContent === "Finish"
+          ),
+          {
+            skipTourHidden: Boolean(ui.skip?.hidden),
+            repeatPreviousVisible: Boolean(
+              ui.repeatPrevious && !ui.repeatPrevious.hidden
+            ),
+            repeatPreviousIndex: previousDemoIndex,
+            finishVisible: Boolean(ui.next && !ui.next.hidden),
+            finishLabel: ui.next?.textContent || ""
+          }
+        );
+      }
     }
   }
 
@@ -19996,9 +20081,14 @@
     const root = ui.root;
     const step = steps[index];
     if (!root || !step) return false;
+    const controlledReentry =
+      options.controlledReentry === true;
     if (
-      enteredStepIndexes.has(index) ||
-      index < stepIndex
+      !controlledReentry &&
+      (
+        enteredStepIndexes.has(index) ||
+        index < stepIndex
+      )
     ) {
       blockedRepeatCount += 1;
       tourDebugRecord("tour-step-reentry-blocked", {
@@ -20006,7 +20096,8 @@
         currentStepIndex: stepIndex,
         alreadyEntered: enteredStepIndexes.has(index),
         backwardNavigation: index < stepIndex,
-        policy: "strict forward-only single pass"
+        policy:
+          "strict forward-only single pass, except the explicit Repeat previous step transaction"
       });
       return false;
     }
@@ -20367,10 +20458,74 @@
     return effectiveSuccess;
   }
 
-  async function runDemo(step, target) {
+  function revealReadyStepWithoutNarration(index) {
+    const ui = elements();
+    const step = steps[index];
+    if (
+      !ui.root ||
+      !step?.demo ||
+      stepIndex !== index
+    ) {
+      return false;
+    }
+
+    clearNarrationOutlines();
+    clearTarget();
+    ui.root.classList.add("rml-setup-narration-active");
+    ui.text.innerHTML = step.text || "";
+    ui.hint.textContent = step.hint || "";
+    ui.hint.hidden = !step.hint;
+    setStepPhase("ready");
+    positionShades(null, { force: true });
+    fitNarrationCardToContent({
+      reset: true,
+      followText: false
+    });
+    tourDebugRecord("controlled-repeat-returned-to-ready-dialog", {
+      returnedStepIndex: index,
+      returnedStepTitle: step.title || "",
+      narrationRepeated: false
+    });
+    return true;
+  }
+
+  async function returnFromControlledRepeat(index) {
+    const returned = await transitionToStep(index, {
+      captureEntry: false,
+      controlledReentry: true,
+      deferNarration: true,
+      repeatReturn: true
+    });
+    if (!returned) return false;
+    if (steps[index]?.demo) {
+      return revealReadyStepWithoutNarration(index);
+    }
+    return true;
+  }
+
+  async function runDemo(step, target, options = {}) {
     if (!step?.demo || demoInFlight) return false;
     const attemptedStepIndex = stepIndex;
-    if (attemptedDemonstrationIndexes.has(attemptedStepIndex)) {
+    const controlledRepeat =
+      options.controlledRepeat === true;
+    const repeatReturnStepIndex = Number.isInteger(
+      options.repeatReturnStepIndex
+    )
+      ? options.repeatReturnStepIndex
+      : -1;
+    if (
+      controlledRepeat &&
+      (
+        repeatReturnStepIndex <= attemptedStepIndex ||
+        repeatReturnStepIndex >= steps.length
+      )
+    ) {
+      return false;
+    }
+    if (
+      attemptedDemonstrationIndexes.has(attemptedStepIndex) &&
+      !controlledRepeat
+    ) {
       blockedRepeatCount += 1;
       tourDebugRecord("tour-demonstration-repeat-blocked", {
         attemptedStepIndex,
@@ -20380,10 +20535,19 @@
       return false;
     }
     attemptedDemonstrationIndexes.add(attemptedStepIndex);
+    const priorAttemptCount = tourDebugState.events.filter(event =>
+      event.type === "tour-demonstration-attempt-start" &&
+      event.attemptedStepIndex === attemptedStepIndex
+    ).length;
     tourDebugRecord("tour-demonstration-attempt-start", {
       attemptedStepIndex,
       attemptedDemo: step.demo,
-      attempts: 1
+      attempts: priorAttemptCount + 1,
+      controlledRepeat,
+      repeatReturnStepIndex:
+        controlledRepeat
+          ? repeatReturnStepIndex
+          : null
     });
 
     cancelDemo();
@@ -20530,7 +20694,11 @@
         graphTeachingSceneHandoff = null;
       }
 
-      if (stepIndex >= steps.length - 1) {
+      if (controlledRepeat) {
+        await returnFromControlledRepeat(
+          repeatReturnStepIndex
+        );
+      } else if (stepIndex >= steps.length - 1) {
         void restoreAndClose(true);
       } else {
         await transitionToStep(stepIndex + 1, { captureEntry: true });
@@ -20539,6 +20707,22 @@
     } catch (error) {
       if (runId === demoRunId) {
         const failedStepIndex = stepIndex;
+        if (controlledRepeat) {
+          tourDebugRecord("controlled-repeat-demonstration-error", {
+            failedStepIndex,
+            failedStepTitle: step?.title || "",
+            failedDemo: step?.demo || "",
+            repeatReturnStepIndex,
+            errorName: error?.name || "Error",
+            message:
+              error?.message ||
+              String(error || "Unknown demonstration error")
+          });
+          await returnFromControlledRepeat(
+            repeatReturnStepIndex
+          );
+          return false;
+        }
         const constraintCertificate = handleTourLayoutError(error, {
           stage: "demonstration",
           failedStepIndex,
@@ -20687,7 +20871,18 @@
   function showStep(index, options = {}) {
     const ui = elements();
     const step = steps[index];
-    if (!ui.root || !step || enteredStepIndexes.has(index)) return false;
+    const controlledReentry =
+      options.controlledReentry === true;
+    if (
+      !ui.root ||
+      !step ||
+      (
+        enteredStepIndexes.has(index) &&
+        !controlledReentry
+      )
+    ) {
+      return false;
+    }
 
     cancelDemo();
     demoInFlight = false;
@@ -20702,11 +20897,16 @@
     }
 
     stepIndex = index;
+    const previousEntryCount = tourDebugState.events.filter(event =>
+      event.type === "tour-step-entered" &&
+      event.enteredStepIndex === index
+    ).length;
     enteredStepIndexes.add(index);
     tourDebugRecord("tour-step-entered", {
       enteredStepIndex: index,
       enteredStepTitle: step.title || "",
-      entries: 1
+      entries: previousEntryCount + 1,
+      controlledReentry
     });
     ui.title.textContent = step.title;
     ui.hint.hidden = false;
@@ -20792,6 +20992,112 @@
     return true;
   }
 
+  async function repeatPreviousDemonstration() {
+    const returnStepIndex = stepIndex;
+    const returnStep = steps[returnStepIndex];
+    const repeatStepIndex = previousDemonstrationIndex(
+      returnStepIndex
+    );
+    const repeatAllowedFromCurrentPhase = Boolean(
+      returnStep &&
+      (
+        returnStep.demo
+          ? stepPhase === "ready"
+          : stepPhase === "explain"
+      )
+    );
+    const repeatSnapshot = stepSnapshots.get(repeatStepIndex);
+
+    if (
+      repeatPreviousInFlight ||
+      demoInFlight ||
+      restoreInFlight ||
+      repeatStepIndex < 0 ||
+      !repeatAllowedFromCurrentPhase ||
+      !repeatSnapshot
+    ) {
+      tourDebugRecord("controlled-repeat-previous-rejected", {
+        returnStepIndex,
+        repeatStepIndex,
+        phase: stepPhase,
+        repeatPreviousInFlight,
+        demoInFlight,
+        restoreInFlight,
+        snapshotAvailable: Boolean(repeatSnapshot),
+        policy:
+          "Repeat is available only from the next ready dialog and uses the previous lesson's immutable entry snapshot."
+      });
+      return false;
+    }
+
+    repeatPreviousInFlight = true;
+    controlledRepeatCount += 1;
+    setStepPhase(stepPhase);
+    tourDebugRecord("controlled-repeat-previous-start", {
+      transaction: controlledRepeatCount,
+      repeatStepIndex,
+      repeatStepTitle: steps[repeatStepIndex]?.title || "",
+      repeatDemo: steps[repeatStepIndex]?.demo || "",
+      returnStepIndex,
+      returnStepTitle: returnStep.title || "",
+      previousNarrationWillRun: false,
+      snapshotRestored: true
+    });
+
+    try {
+      const opened = await transitionToStep(repeatStepIndex, {
+        restoreEntry: true,
+        captureEntry: false,
+        controlledReentry: true,
+        deferNarration: true,
+        directDemonstration: true
+      });
+      if (!opened) {
+        if (stepIndex !== returnStepIndex) {
+          await returnFromControlledRepeat(returnStepIndex);
+        }
+        return false;
+      }
+
+      const repeated = await runDemo(
+        steps[repeatStepIndex],
+        findTarget(steps[repeatStepIndex]),
+        {
+          controlledRepeat: true,
+          repeatReturnStepIndex: returnStepIndex
+        }
+      );
+      tourDebugRecord("controlled-repeat-previous-complete", {
+        transaction: controlledRepeatCount,
+        repeatStepIndex,
+        returnStepIndex,
+        returnedToRequestedDialog: stepIndex === returnStepIndex,
+        previousNarrationRepeated: false,
+        demonstrationCompleted: repeated
+      });
+      return repeated;
+    } catch (error) {
+      tourDebugRecord("controlled-repeat-previous-transaction-error", {
+        transaction: controlledRepeatCount,
+        repeatStepIndex,
+        returnStepIndex,
+        errorName: error?.name || "Error",
+        message: error?.message || String(error || "Unknown repeat error")
+      });
+      if (stepIndex !== returnStepIndex) {
+        await returnFromControlledRepeat(returnStepIndex);
+      }
+      return false;
+    } finally {
+      repeatPreviousInFlight = false;
+      const currentUi = elements();
+      if (!currentUi.root?.hidden && !demoInFlight) {
+        setStepPhase(stepPhase);
+        fitNarrationCardToContent({ followText: false });
+      }
+    }
+  }
+
   async function restoreAndClose(markComplete = true) {
     if (restoreInFlight) return;
     restoreInFlight = true;
@@ -20822,6 +21128,7 @@
       firstRunSession = false;
       mobileTopbarPreparedForNarration = false;
       mobilePackPreparedForNarration = false;
+      repeatPreviousInFlight = false;
       tourResizeObserver?.disconnect?.();
       restoreInFlight = false;
     }
@@ -20943,6 +21250,9 @@
     ui.skipDemo?.addEventListener("click", () => {
       void skipCurrentDemonstration();
     });
+    ui.repeatPrevious?.addEventListener("click", () => {
+      void repeatPreviousDemonstration();
+    });
     ui.liveSkipDemo?.addEventListener("click", () => {
       void skipCurrentDemonstration();
     });
@@ -21046,6 +21356,8 @@
       narratedStepIndexes.clear();
       attemptedDemonstrationIndexes.clear();
       blockedRepeatCount = 0;
+      controlledRepeatCount = 0;
+      repeatPreviousInFlight = false;
       snapshot = captureTourState();
       snapshotFingerprint = tourStateFingerprint(snapshot);
       originalTourUiState = {

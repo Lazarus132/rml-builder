@@ -3105,13 +3105,13 @@ footer strong {
 
 @supports (scrollbar-width: none) {
   .settings-preview-dialog.rml-preview-color-open .rml-preview-content {
-    scrollbar-width: none !important;      /* Firefox */
+    scrollbar-width: none !important;
   }
 }
 
 .settings-preview-dialog.rml-preview-color-open
 .rml-preview-content::-webkit-scrollbar {
-  display: none !important;              /* Chrome, Edge, Safari */
+  display: none !important;
 }
 
 .settings-preview-dialog.rml-preview-color-open
@@ -8182,8 +8182,6 @@ dialog[open] > #rml-setup-assistant.rml-setup-modal-demonstration
 
 #rml-setup-assistant.rml-setup-narration-clickable [data-setup-text] {
   -webkit-user-select: none;
-  -moz-user-select: none;
-  -ms-user-select: none;
   user-select: none;
 }
 
