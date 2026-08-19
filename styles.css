@@ -1381,7 +1381,7 @@ footer strong {
   position: relative;
   display: grid;
   height: 100%;
-  min-height: 0;
+  min-height: var(--rml-setup-adaptive-card-min-height, 0px) !important;
   grid-template-rows: 76px minmax(0, 1fr) 64px;
   background:
     radial-gradient(
@@ -6326,10 +6326,7 @@ body:has(.node-pointer-ghost) {
   pointer-events: none;
   transform: translateZ(0);
   contain: strict;
-  transition:
-    left 90ms linear,
-    top 90ms linear,
-    width 90ms linear !important;
+  transition: none !important;
 }
 
 .drag-reorder-placeholder.horizontal-layout-placeholder {
@@ -8013,6 +8010,90 @@ html.rml-setup-tour-active body {
   overflow: hidden !important;
 }
 
+html.rml-setup-tour-active.rml-setup-preparation-scroll,
+html.rml-setup-tour-active.rml-setup-preparation-scroll body,
+html.rml-setup-tour-active.rml-setup-drag-scroll-live,
+html.rml-setup-tour-active.rml-setup-drag-scroll-live body {
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+}
+
+html.rml-setup-demonstration-active body >
+  :not(#rml-setup-assistant):not(script) {
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+
+dialog[open] > #rml-setup-assistant.rml-setup-modal-demonstration {
+  position: fixed !important;
+  z-index: 2147483640 !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100dvh !important;
+  overflow: visible !important;
+  pointer-events: none !important;
+}
+
+dialog[open] > #rml-setup-assistant.rml-setup-modal-demonstration
+  .rml-setup-demo-mouse {
+  z-index: 2147483644 !important;
+}
+
+dialog[open] > #rml-setup-assistant.rml-setup-modal-demonstration
+  .rml-setup-drag-ghost,
+dialog[open] > #rml-setup-assistant.rml-setup-modal-demonstration
+  .rml-setup-demo-label,
+dialog[open] > #rml-setup-assistant.rml-setup-modal-demonstration
+  .rml-setup-demo-keys {
+  z-index: 2147483643 !important;
+}
+
+dialog[open] > #rml-setup-assistant.rml-setup-modal-demonstration
+  .rml-setup-live-controls {
+  z-index: 2147483646 !important;
+  pointer-events: auto !important;
+}
+
+#rml-setup-assistant.rml-setup-layout-pending {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+#rml-setup-assistant.rml-setup-layout-pending * {
+  transition: none !important;
+  animation: none !important;
+}
+
+.rml-setup-interaction-shield {
+  position: fixed;
+  z-index: 9999;
+  inset: 0;
+  display: block;
+  background: transparent;
+  pointer-events: none;
+}
+
+.rml-setup-live-controls {
+  position: fixed;
+  z-index: 10006;
+  right: 14px;
+  bottom: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid rgba(164, 118, 255, .7);
+  border-radius: 10px;
+  background: rgba(17, 16, 25, .94);
+  box-shadow: 0 12px 38px rgba(0, 0, 0, .62);
+  pointer-events: auto;
+}
+
+.rml-setup-live-controls[hidden] {
+  display: none !important;
+}
+
 .rml-setup-shade {
   position: fixed;
   z-index: 10000;
@@ -8085,7 +8166,26 @@ html.rml-setup-tour-active body {
   gap: 8px;
 }
 
-.rml-setup-actions > div { display: flex; gap: 8px; }
+.rml-setup-actions > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.rml-setup-actions button { white-space: nowrap; }
+
+#rml-setup-assistant.rml-setup-narration-clickable .rml-setup-card,
+#rml-setup-assistant.rml-setup-narration-clickable .rml-setup-shade {
+  cursor: pointer;
+}
+
+#rml-setup-assistant.rml-setup-narration-clickable [data-setup-text] {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}
 
 .rml-setup-step-badge {
   display: inline-flex;
@@ -8102,6 +8202,12 @@ html.rml-setup-tour-active body {
     width: calc(100vw - 18px);
     max-height: min(46vh, 390px);
     padding: 14px;
+  }
+  .rml-setup-actions {
+    align-items: flex-end;
+  }
+  .rml-setup-actions > div {
+    max-width: 72%;
   }
   .shortcut-grid > div,
   .shortcut-grid > div:has(> kbd + kbd),
@@ -8294,6 +8400,11 @@ html.rml-setup-tour-active body {
     width: 29px;
     height: 40px;
   }
+  .rml-setup-live-controls {
+    right: 9px;
+    bottom: 9px;
+    max-width: calc(100vw - 18px);
+  }
   .rml-setup-demo-label {
     max-width: 160px;
     font-size: 8px;
@@ -8413,12 +8524,21 @@ html.rml-setup-tour-active body {
     0 0 8px rgba(88,191,255,.92),
     0 0 16px rgba(88,191,255,.58);
   pointer-events: none;
+  transition: none;
+  animation: rml-setup-landing-breathe .72s ease-in-out infinite alternate;
+}
+
+.rml-setup-demo-landing.native-tracking {
   transition:
     left 180ms cubic-bezier(.2,.75,.25,1),
     top 180ms cubic-bezier(.2,.75,.25,1),
     width 180ms cubic-bezier(.2,.75,.25,1),
     height 180ms cubic-bezier(.2,.75,.25,1);
-  animation: rml-setup-landing-breathe .72s ease-in-out infinite alternate;
+}
+
+html.rml-setup-tour-active.rml-setup-drag-scroll-live
+.drag-reorder-placeholder {
+  transition: none !important;
 }
 
 .rml-setup-demo-landing[data-orientation="horizontal"]::before,
@@ -8899,6 +9019,54 @@ html.rml-setup-tour-active .rml-scroll-layer-outline,
 html.rml-setup-tour-active .rml-graph-scroll-layer-outline {
   z-index: 10007;
 }
+
+.rml-setup-narration-outline {
+  position: fixed;
+  z-index: 10003;
+  pointer-events: none;
+  border: 2px solid rgba(181, 139, 255, .98);
+  border-radius: 12px;
+  opacity: 1;
+  box-shadow:
+    0 0 0 1px rgba(7, 5, 12, .96),
+    0 0 22px rgba(164, 118, 255, .72),
+    inset 0 0 18px rgba(164, 118, 255, .13);
+  transition:
+    left 180ms ease,
+    top 180ms ease,
+    width 180ms ease,
+    height 180ms ease,
+    opacity 360ms ease,
+    box-shadow 620ms ease,
+    border-color 620ms ease;
+}
+
+.rml-setup-narration-outline.is-entering {
+  border-color: rgba(234, 219, 255, 1);
+  opacity: .2;
+  box-shadow:
+    0 0 0 3px rgba(164, 118, 255, .42),
+    0 0 46px rgba(185, 132, 255, 1),
+    inset 0 0 34px rgba(164, 118, 255, .28);
+}
+
+.rml-setup-card-hidden-during-scene {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+#rml-setup-assistant.rml-setup-demonstration-only .rml-setup-card,
+#rml-setup-assistant.rml-setup-demonstration-only .rml-setup-shade,
+#rml-setup-assistant.rml-setup-demonstration-only .rml-setup-narration-outline {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+#rml-setup-assistant.rml-setup-demonstration-only .rml-setup-card {
+  display: none !important;
+}
 .rml-scroll-layer-outline[data-kind="html-root"] {
   border-width: 3px;
   border-color: rgba(216, 199, 255, 0.98);
@@ -8969,10 +9137,6 @@ html.rml-setup-tour-active .rml-graph-scroll-layer-outline {
   }
 }
 
-
-
-
-/* Runtime Display pseudo-setting in Configuration Outline */
 .rml-runtime-display-inspector {
   gap: 14px;
 }
@@ -9152,10 +9316,6 @@ html.rml-setup-tour-active .rml-graph-scroll-layer-outline {
   letter-spacing: 0;
 }
 
-
-/* ================================================================
-   Dynamic collection-driven settings
-   ================================================================ */
 .rml-dynamic-settings-palette {
   display: grid;
   gap: 6px;
@@ -9205,8 +9365,6 @@ html.rml-setup-tour-active .rml-graph-scroll-layer-outline {
   min-width: 0;
 }
 
-
-/* Dynamic modes on normal Configuration Outline controls. */
 .rml-dynamic-mode-control {
   display: flex;
   min-width: 0;
@@ -9234,7 +9392,6 @@ html.rml-setup-tour-active .rml-graph-scroll-layer-outline {
   color: var(--text);
 }
 
-/* Configuration Outline Button (direct graph Impulse). */
 .rml-preview-impulse-button {
   display: grid;
   width: 100%;
@@ -9273,13 +9430,6 @@ html.rml-setup-tour-active .rml-graph-scroll-layer-outline {
   }
 }
 
-/* ================================================================
-   Build 179 · Resonite menu parity
-
-   Keep these rules at the end of the stylesheet so the desktop Preview
-   mirrors ModConfigurationView's actual HorizontalElementWithLabel ratios.
-   No decorative pseudo-content is injected into runtime values.
-   ================================================================ */
 .rml-preview-impulse-button {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -9406,14 +9556,6 @@ html.rml-setup-tour-active .rml-graph-scroll-layer-outline {
   }
 }
 
-/* ================================================================
-   Build 182 · Native setting-control height parity
-
-   ModConfigurationView uses SettingHeight = 32f for both TextField and
-   impulse Button. Keep both Preview controls in the very same fixed box;
-   min-height alone is insufficient because browser font/padding metrics can
-   otherwise make one of them taller than the other.
-   ================================================================ */
 .settings-preview-dialog:not(.rml-preview-color-open)
 .rml-preview-text-field,
 .settings-preview-dialog:not(.rml-preview-color-open)
@@ -9472,9 +9614,6 @@ html.rml-setup-tour-active .rml-graph-scroll-layer-outline {
   box-shadow: none;
 }
 
-/* ================================================================
-   Build 184 · Unified builder messages and technical help bubbles
-   ================================================================ */
 dialog.builder-message-dialog {
   width: min(570px, calc(100vw - 28px));
   max-width: none;
@@ -9903,9 +10042,6 @@ dialog.builder-message-dialog::backdrop {
   }
 }
 
-/* ================================================================
-   Build 185 · Outline / Runtime node reference scopes
-   ================================================================ */
 .information-node-scope-tabs {
   display: grid;
   gap: 7px;
@@ -10036,5 +10172,84 @@ dialog.builder-message-dialog::backdrop {
 
   .information-node-scope-tab > span:last-child {
     font-size: 9px;
+  }
+}
+
+#rml-setup-assistant.rml-setup-adaptive-narration-card .rml-setup-card {
+  box-sizing: border-box;
+  display: grid;
+  width: var(--rml-setup-adaptive-card-width, min(480px, calc(100vw - 24px))) !important;
+  min-width: 0;
+  max-width: var(--rml-setup-adaptive-card-max-width, calc(100vw - 24px)) !important;
+  height: var(--rml-setup-adaptive-card-height, auto) !important;
+  min-height: 0;
+  max-height: var(--rml-setup-adaptive-card-max-height, calc(100dvh - 24px)) !important;
+  grid-template-rows:
+    auto
+    auto
+    minmax(var(--rml-setup-adaptive-text-min-height, 1.56em), 1fr)
+    auto
+    auto
+    auto !important;
+  align-content: stretch;
+  overflow: hidden !important;
+}
+
+#rml-setup-assistant.rml-setup-adaptive-narration-card
+.rml-setup-card > p[data-setup-text] {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  max-height: none !important;
+  align-self: stretch;
+  margin-top: clamp(10px, .65em, 13px) !important;
+  padding-top: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-block: .35em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: clamp(15px, calc(14px + .2vw), 18px) !important;
+  line-height: 1.56;
+}
+
+@supports (scrollbar-gutter: stable) {
+  #rml-setup-assistant.rml-setup-adaptive-narration-card
+  .rml-setup-card > p[data-setup-text] {
+    scrollbar-gutter: stable;
+  }
+}
+
+#rml-setup-assistant.rml-setup-adaptive-narration-card
+.rml-setup-card .rml-setup-actions {
+  min-width: 0;
+  flex: 0 0 auto;
+  align-self: end;
+}
+
+#rml-setup-assistant.rml-setup-adaptive-narration-card
+.rml-setup-card h2 {
+  position: relative;
+  z-index: 1;
+  margin-bottom: 0 !important;
+  font-size: clamp(20px, calc(17px + .3vw), 24px);
+  line-height: 1.2;
+}
+
+#rml-setup-assistant.rml-setup-adaptive-narration-card
+.rml-setup-card small {
+  font-size: clamp(10px, calc(9px + .12vw), 12px);
+}
+
+#rml-setup-assistant.rml-setup-adaptive-narration-card
+.rml-setup-step-badge {
+  font-size: clamp(15px, calc(14px + .2vw), 18px) !important;
+  line-height: 1.56;
+}
+
+@media (max-width: 520px) {
+  #rml-setup-assistant.rml-setup-adaptive-narration-card .rml-setup-card {
+    max-width: calc(100vw - 18px) !important;
   }
 }

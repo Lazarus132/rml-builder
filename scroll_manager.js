@@ -46,6 +46,17 @@
   }
 
   function routeWheel(event) {
+    if (
+      event.isTrusted === true &&
+      document.documentElement.classList.contains(
+        "rml-setup-tour-active"
+      )
+    ) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
+
     for (const entry of [...handlers]) {
       if (event.cancelBubble || event.defaultPrevented) {
         break;
@@ -409,7 +420,7 @@
 
   Object.defineProperty(window, "RMLScrollManager", {
     value: Object.freeze({
-      version: 6,
+      version: 7,
       registerWheelHandler,
       unregisterWheelHandler,
       createCyclicWheelStepper,

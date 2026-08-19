@@ -2,6 +2,23 @@
 
 const STORAGE_KEY = "rml-configuration-builder-standalone-v1";
 const PREVIEW_STORAGE_KEY = "rml-preview-values-v2";
+const RML_VISUAL_TOUR_TEST =
+  new URLSearchParams(window.location.search).has("rmlTourTest") ||
+  window.location.hash.includes("rmlTourTest");
+const RML_VISUAL_TOUR_STORAGE_KEY =
+  new URLSearchParams(window.location.search).get("rmlTourStorageKey") || "";
+const ACTIVE_STORAGE_KEY = RML_VISUAL_TOUR_TEST
+  ? (
+      /^rml-configuration-builder-visual-test-[a-z0-9._-]+$/i.test(
+        RML_VISUAL_TOUR_STORAGE_KEY
+      )
+        ? RML_VISUAL_TOUR_STORAGE_KEY
+        : "rml-configuration-builder-visual-test-default"
+    )
+  : STORAGE_KEY;
+const ACTIVE_PREVIEW_STORAGE_KEY = RML_VISUAL_TOUR_TEST
+  ? `${ACTIVE_STORAGE_KEY}-preview`
+  : PREVIEW_STORAGE_KEY;
 const PROJECT_FORMAT = "rml-configuration-builder-project";
 const PROJECT_FORMAT_VERSION = 1;
 const PROJECT_FILE_MAX_BYTES = 5 * 1024 * 1024;
@@ -11,7 +28,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "runtime-generated-green-parity-20260816-180000-v188";
+  "stable-tour-step4-build259-plus-vertical-live-wheel-20260819-v271";
 
 function exposeRmlBuilderBuildId() {
   document.documentElement.dataset
@@ -272,6 +289,18 @@ let nodePointerQueuedY = 0;
 let palettePointerVisualFrame = 0;
 let palettePointerQueuedX = 0;
 let palettePointerQueuedY = 0;
+let palettePointerTransactionSequence = 0;
+let palettePointerLastResult = Object.freeze({
+  sequence: 0,
+  pointerId: null,
+  committed: false,
+  inserted: false,
+  payloadKind: "",
+  payloadValue: "",
+  containerId: "",
+  insertionIndex: null,
+  createdNodeId: ""
+});
 let suppressNodeClickId = null;
 let suppressNodeClickUntil = 0;
 let suppressPaletteClickButton = null;
@@ -419,6 +448,9 @@ let colorPickerAdaptiveFitLoadPromise = null;
 let informationTemplateLoadPromise = null;
 let setupAssistantLoadPromise = null;
 const SETUP_ASSISTANT_STORAGE_KEY = "rml-builder-setup-tour-v1-complete";
+const ACTIVE_SETUP_ASSISTANT_STORAGE_KEY = RML_VISUAL_TOUR_TEST
+  ? `${ACTIVE_STORAGE_KEY}-tour-complete`
+  : SETUP_ASSISTANT_STORAGE_KEY;
 
 function ensureColorPickerAdaptiveFitLoaded() {
   if (
@@ -1679,19 +1711,6 @@ function settingsPreviewNodeVisible(node) {
     return override === true;
   }
 
-  /*
-   * A dynamic Choice/Action/Toggle deliberately uses an
-   * InternalAccessOnly backing key (`hidden === true`) so AddSetting does not
-   * render that backing key a second time in Resonite.  The actual dynamic
-   * control is nevertheless visible by default (`dynamicInternal === false`)
-   * and is rendered by IModConfigurationDynamicSettingsProvider.
-   *
-   * Treating `hidden` as the control's Preview visibility removed the Choice
-   * from Preview entirely.  Its saved/startup reaction could therefore never
-   * be changed locally and the hidden children in the Inline Row stayed
-   * hidden.  Mirror the generated provider's DefaultVisible semantics here;
-   * a runtime visibility override above still has the final say.
-   */
   if (node?.dynamicSettingKind) {
     return node.dynamicInternal !== true;
   }
@@ -6032,7 +6051,7 @@ function applyProjectDocument(
 function persist() {
   try {
     localStorage.setItem(
-      STORAGE_KEY,
+      ACTIVE_STORAGE_KEY,
       JSON.stringify(
         createProjectDocument()
       )
@@ -6139,7 +6158,7 @@ let initialExampleProjectLoadError = null;
 
 async function restore() {
   const saved =
-    localStorage.getItem(STORAGE_KEY);
+    localStorage.getItem(ACTIVE_STORAGE_KEY);
 
   if (saved) {
     try {
@@ -6148,6 +6167,9 @@ async function restore() {
           JSON.parse(saved)
         )
       );
+      if (RML_VISUAL_TOUR_TEST && state.extensions) {
+        delete state.extensions.typedNodeGraph;
+      }
       return;
     } catch (error) {
       console.warn(
@@ -6162,6 +6184,9 @@ async function restore() {
       await readExampleProjectDocument(),
       { render: false }
     );
+    if (RML_VISUAL_TOUR_TEST && state.extensions) {
+      delete state.extensions.typedNodeGraph;
+    }
   } catch (error) {
     console.warn(
       "Could not load the external example project.",
@@ -6436,11 +6461,6 @@ function renderPalette() {
       }
     });
 
-  /*
-   * This is intentionally part of renderPalette itself instead of a
-   * MutationObserver/late DOM injection. The Outline palette is rebuilt by
-   * app.js, so generated DYN entries must be rebuilt by the same owner.
-   */
   elements.paletteContent
     .querySelectorAll(
       "[data-rml-editable-collection-source]"
@@ -7090,11 +7110,23 @@ function runDragScrolling(timestamp) {
     return;
   }
 
+  if (
+    optionPointerDragActive &&
+    document.documentElement.classList.contains(
+      "rml-setup-horizontal-option-gesture"
+    )
+  ) {
+    dragScrollLastTimestamp = 0;
+    return;
+  }
+
   const manualSelection =
     dragManualInsertSelectionActive();
 
   const visibilityDelta =
-    dragPlaceholderVisibilityDelta();
+    manualSelection
+      ? dragPlaceholderVisibilityDelta()
+      : 0;
 
   let scrollAmount = 0;
   let refreshTarget = false;
@@ -7458,6 +7490,14 @@ function nodeInsertionGeometry(
     };
   }
 
+  if (
+    beforeRectangle &&
+    afterRectangle &&
+    afterRectangle.top < beforeRectangle.bottom - 2
+  ) {
+    return null;
+  }
+
   let top;
   if (beforeRectangle && afterRectangle) {
     top = (beforeRectangle.bottom + afterRectangle.top) / 2;
@@ -7529,6 +7569,117 @@ function nodeInsertionGeometry(
   };
 }
 
+function keepNodeInsertionLineClearOfControls(
+  host,
+  geometry
+) {
+  if (
+    !(host instanceof HTMLElement) ||
+    !geometry ||
+    geometry.horizontal
+  ) {
+    return geometry;
+  }
+
+  const hostRectangle =
+    host.getBoundingClientRect();
+  const clientLeft =
+    hostRectangle.left +
+    host.clientLeft -
+    host.scrollLeft +
+    geometry.left;
+  const clientTop =
+    hostRectangle.top +
+    host.clientTop -
+    host.scrollTop +
+    geometry.top;
+  const centerY =
+    clientTop + geometry.height / 2;
+  let safeLeft = clientLeft;
+  let safeRight =
+    clientLeft + geometry.width;
+
+  const crossesInterior = rectangle =>
+    centerY > rectangle.top + 4 &&
+    centerY < rectangle.bottom - 4 &&
+    safeRight > rectangle.left + 4 &&
+    safeLeft < rectangle.right - 4;
+
+  if (
+    directNodeCards(host)
+      .filter(card =>
+        !card.classList.contains("node-pointer-ghost")
+      )
+      .some(card =>
+        crossesInterior(
+          card.getBoundingClientRect()
+        )
+      )
+  ) {
+    return null;
+  }
+
+  const controls = [
+    ...document.querySelectorAll(
+      "button, input, select, textarea, [role='button']"
+    )
+  ].filter(control => {
+    if (
+      !(control instanceof HTMLElement) ||
+      control.closest("#rml-setup-assistant") ||
+      control.closest(".node-pointer-ghost") ||
+      control.contains(host)
+    ) {
+      return false;
+    }
+    const style = getComputedStyle(control);
+    const rectangle = control.getBoundingClientRect();
+    return (
+      style.display !== "none" &&
+      style.visibility !== "hidden" &&
+      rectangle.width > 0 &&
+      rectangle.height > 0 &&
+      crossesInterior(rectangle)
+    );
+  });
+
+  const originalCenterX =
+    clientLeft + geometry.width / 2;
+  for (const control of controls) {
+    const rectangle =
+      control.getBoundingClientRect();
+    if (
+      rectangle.left + rectangle.width / 2 >=
+      originalCenterX
+    ) {
+      safeRight = Math.min(
+        safeRight,
+        rectangle.left - 6
+      );
+    } else {
+      safeLeft = Math.max(
+        safeLeft,
+        rectangle.right + 6
+      );
+    }
+  }
+
+  if (safeRight - safeLeft < 24) {
+    return null;
+  }
+
+  return {
+    ...geometry,
+    left:
+      geometry.left +
+      safeLeft -
+      clientLeft,
+    width:
+      safeRight -
+      safeLeft
+  };
+}
+
 function positionNodeInsertPlaceholder(
   host,
   insertionIndex
@@ -7543,10 +7694,21 @@ function positionNodeInsertPlaceholder(
     host.appendChild(placeholder);
   }
 
-  const geometry = nodeInsertionGeometry(
-    host,
-    insertionIndex
-  );
+  const geometry =
+    keepNodeInsertionLineClearOfControls(
+      host,
+      nodeInsertionGeometry(
+        host,
+        insertionIndex
+      )
+    );
+
+  if (!geometry) {
+    placeholder.hidden = true;
+    return false;
+  }
+
+  placeholder.hidden = false;
 
   placeholder.classList.toggle(
     "horizontal-layout-placeholder",
@@ -7571,6 +7733,7 @@ function positionNodeInsertPlaceholder(
   );
 
   requestDragPlaceholderVisibility();
+  return true;
 }
 
 function directOptionLanes(host) {
@@ -8639,6 +8802,7 @@ function setContainerInsertFeedback(
   if (
     targetUnchanged &&
     dragFeedbackPlaceholder?.isConnected &&
+    dragFeedbackPlaceholder.hidden !== true &&
     dragFeedbackPlaceholder.parentElement ===
       host
   ) {
@@ -9424,6 +9588,252 @@ function installPalettePointerDragBridge() {
             button,
             event
           );
+        },
+
+        settleRelease(
+          pointerId,
+          clientX,
+          clientY,
+          afterSequence = 0,
+          fallbackPayload = null
+        ) {
+          const completed =
+            palettePointerLastResult;
+          const completedAfterSequence =
+            Number(completed?.sequence || 0) >
+              Number(afterSequence || 0) &&
+            completed?.pointerId === pointerId;
+
+          if (completedAfterSequence) {
+            return Object.freeze({
+              accepted: true,
+              path: "document-pointerup",
+              result: completed
+            });
+          }
+
+          if (
+            !Number.isFinite(clientX) ||
+            !Number.isFinite(clientY)
+          ) {
+            return Object.freeze({
+              accepted: false,
+              path: "unavailable",
+              reason: "invalid-release-point",
+              result: palettePointerLastResult
+            });
+          }
+
+          const matchingActivePointer =
+            palettePointerDragActive === true &&
+            palettePointerId === pointerId;
+
+          if (
+            palettePointerDragActive === true &&
+            !matchingActivePointer
+          ) {
+            return Object.freeze({
+              accepted: false,
+              path: "unavailable",
+              reason: "different-palette-pointer-is-active",
+              result: palettePointerLastResult
+            });
+          }
+
+          if (!matchingActivePointer) {
+            const normalizedFallback =
+              normalizePalettePointerPayload(
+                fallbackPayload
+              );
+            const target =
+              nodeDropTargetAtPointer(
+                clientX,
+                clientY,
+                null
+              );
+
+            if (!normalizedFallback || !target) {
+              return Object.freeze({
+                accepted: false,
+                path: "unavailable",
+                reason: "no-matching-active-pointer-or-valid-fallback",
+                result: palettePointerLastResult
+              });
+            }
+
+            const nodeIdsBefore = new Set(
+              currentFlattenedNodes()
+                .map(entry => String(entry?.node?.id || ""))
+                .filter(Boolean)
+            );
+            clearPendingPalettePointerDrag();
+            clearPalettePointerGhost();
+            stopDragScrolling();
+            clearDragFeedback();
+
+            const inserted =
+              insertPalettePointerPayload(
+                normalizedFallback,
+                target.containerId,
+                target.insertionIndex
+              );
+            if (
+              inserted &&
+              normalizedFallback.kind !== "dynamic"
+            ) {
+              renderAll();
+            }
+
+            const createdNodeId =
+              currentFlattenedNodes()
+                .map(entry => String(entry?.node?.id || ""))
+                .find(nodeId =>
+                  nodeId &&
+                  !nodeIdsBefore.has(nodeId)
+                ) || "";
+            palettePointerTransactionSequence += 1;
+            palettePointerLastResult = Object.freeze({
+              sequence: palettePointerTransactionSequence,
+              pointerId,
+              committed: inserted === true,
+              inserted: inserted === true,
+              payloadKind: normalizedFallback.kind,
+              payloadValue: normalizedFallback.value,
+              containerId: target.containerId,
+              insertionIndex:
+                Number.isFinite(target.insertionIndex)
+                  ? target.insertionIndex
+                  : null,
+              createdNodeId,
+              point: Object.freeze({
+                x: clientX,
+                y: clientY
+              })
+            });
+            document.dispatchEvent(
+              new CustomEvent(
+                "rml-builder:palette-pointer-drop",
+                { detail: palettePointerLastResult }
+              )
+            );
+
+            return Object.freeze({
+              accepted:
+                inserted === true &&
+                Boolean(createdNodeId),
+              path: "product-direct-single-settlement",
+              reason:
+                inserted === true && createdNodeId
+                  ? ""
+                  : "production-direct-commit-did-not-complete",
+              result: palettePointerLastResult
+            });
+          }
+
+          updatePalettePointerTarget(
+            clientX,
+            clientY
+          );
+
+          if (
+            typeof state.dragInsertContainer !==
+              "string"
+          ) {
+            return Object.freeze({
+              accepted: false,
+              path: "active-pointer-without-target",
+              reason: "no-live-outline-drop-target",
+              result: palettePointerLastResult
+            });
+          }
+
+          finishPalettePointerDrag(true);
+
+          const result =
+            palettePointerLastResult;
+          const committed = Boolean(
+            Number(result?.sequence || 0) >
+              Number(afterSequence || 0) &&
+            result?.pointerId === pointerId &&
+            result?.committed === true &&
+            result?.inserted === true
+          );
+
+          return Object.freeze({
+            accepted: committed,
+            path: "product-controller-settlement",
+            reason: committed
+              ? ""
+              : "production-commit-did-not-complete",
+            result
+          });
+        },
+
+        getState() {
+          const marker =
+            document.querySelector(
+              ".drag-reorder-placeholder"
+            );
+          const markerHost =
+            marker?.parentElement || null;
+          const markerRectangle =
+            marker instanceof HTMLElement
+              ? marker.getBoundingClientRect()
+              : null;
+          const markerStyle =
+            marker instanceof HTMLElement
+              ? getComputedStyle(marker)
+              : null;
+          const markerVisible = Boolean(
+            markerRectangle &&
+            marker.hidden !== true &&
+            markerStyle?.display !== "none" &&
+            markerStyle?.visibility !== "hidden" &&
+            markerRectangle.width >= 2 &&
+            markerRectangle.height >= 2
+          );
+
+          return Object.freeze({
+            active: palettePointerDragActive,
+            pointerId: palettePointerId,
+            point: Object.freeze({
+              x: palettePointerX,
+              y: palettePointerY
+            }),
+            payload: palettePointerPayload
+              ? Object.freeze({ ...palettePointerPayload })
+              : null,
+            sourceConnected:
+              palettePointerSourceButton?.isConnected === true,
+            targetContainerId:
+              typeof state.dragInsertContainer === "string"
+                ? state.dragInsertContainer
+                : "",
+            targetInsertionIndex:
+              Number.isFinite(state.dragInsertIndex)
+                ? state.dragInsertIndex
+                : null,
+            marker: Object.freeze({
+              visible: markerVisible,
+              hostId: markerHost?.id || "",
+              hostClasses: markerHost?.className || "",
+              insideBuilderCanvas: Boolean(
+                markerHost &&
+                elements.builderCanvas?.contains(markerHost)
+              ),
+              rectangle: markerRectangle
+                ? Object.freeze({
+                    left: markerRectangle.left,
+                    top: markerRectangle.top,
+                    right: markerRectangle.right,
+                    bottom: markerRectangle.bottom,
+                    width: markerRectangle.width,
+                    height: markerRectangle.height
+                  })
+                : null
+            }),
+            lastResult: palettePointerLastResult
+          });
         }
       }),
       writable: false,
@@ -9852,6 +10262,18 @@ function finishPalettePointerDrag(
     palettePointerPayload;
   const sourceButton =
     palettePointerSourceButton;
+  const completedPointerId =
+    palettePointerId;
+  const completedPoint = {
+    x: palettePointerX,
+    y: palettePointerY
+  };
+  const nodeIdsBefore =
+    new Set(
+      currentFlattenedNodes()
+        .map(entry => String(entry?.node?.id || ""))
+        .filter(Boolean)
+    );
   const insertContainer =
     state.dragInsertContainer;
   const insertIndex =
@@ -9919,6 +10341,42 @@ function finishPalettePointerDrag(
   ) {
     renderAll();
   }
+
+  const createdNodeId =
+    currentFlattenedNodes()
+      .map(entry => String(entry?.node?.id || ""))
+      .find(nodeId =>
+        nodeId &&
+        !nodeIdsBefore.has(nodeId)
+      ) || "";
+  palettePointerTransactionSequence += 1;
+  palettePointerLastResult = Object.freeze({
+    sequence: palettePointerTransactionSequence,
+    pointerId: completedPointerId,
+    committed: commit === true,
+    inserted: inserted === true,
+    payloadKind: payload?.kind || "",
+    payloadValue: payload?.value || "",
+    containerId:
+      typeof insertContainer === "string"
+        ? insertContainer
+        : "",
+    insertionIndex:
+      Number.isFinite(insertIndex)
+        ? insertIndex
+        : null,
+    createdNodeId,
+    point: Object.freeze(completedPoint)
+  });
+
+  document.dispatchEvent(
+    new CustomEvent(
+      "rml-builder:palette-pointer-drop",
+      {
+        detail: palettePointerLastResult
+      }
+    )
+  );
 }
 
 function stepNodeInsertWithWheel(
@@ -10183,7 +10641,7 @@ function prepareNodePointerDrag(
   if (
     event.button !== 0 ||
     event.isPrimary === false ||
-    event.target.closest(
+    event.target?.closest?.(
       "button, input, select, textarea"
     )
   ) {
@@ -11382,6 +11840,28 @@ function finishOptionPointerDrag(
   renderAll();
 }
 
+function heldOptionWheelTargetIsAuthoritative() {
+  if (
+    !optionPointerDragActive ||
+    !activeDraggedOptionId ||
+    !activeDraggedOptionControllerId ||
+    !(optionWheelManualHost instanceof HTMLElement) ||
+    !optionWheelManualHost.isConnected ||
+    optionWheelTargetHost !== optionWheelManualHost ||
+    !optionWheelTargetControllerId ||
+    !Number.isFinite(optionWheelManualIndex)
+  ) {
+    return false;
+  }
+
+  return (
+    state.dragInsertContainer ===
+      `controller:${optionWheelTargetControllerId}` &&
+    Number.isFinite(state.dragInsertIndex) &&
+    state.dragInsertIndex === optionWheelManualIndex
+  );
+}
+
 function prepareOptionPointerDrag(
   lane,
   event
@@ -11389,7 +11869,7 @@ function prepareOptionPointerDrag(
   if (
     event.button !== 0 ||
     event.isPrimary === false ||
-    event.target.closest(
+    event.target?.closest?.(
       "button, input, select, textarea"
     )
   ) {
@@ -11422,7 +11902,7 @@ function startOptionPointerDrag(
 ) {
   if (
     event.isPrimary === false ||
-    event.target.closest(
+    event.target?.closest?.(
       "button, input, select, textarea"
     )
   ) {
@@ -14297,12 +14777,6 @@ function ensureUniversalCustomSelect(select) {
     return select._rmlUniversalCustomSelect;
   }
 
-  /*
-   * node_graph.js has its own searchable-select controller. Do not apply
-   * the universal app-level controller to that same native <select>. This
-   * guard is deliberately structural as well as marker-based so it also
-   * protects graph controls created by a matching older graph renderer.
-   */
   const graphOwnedWrapper = select.parentElement;
   if (
     graphOwnedWrapper?.classList.contains(
@@ -14319,11 +14793,6 @@ function ensureUniversalCustomSelect(select) {
     return null;
   }
 
-  /*
-   * Recover from an interrupted/old transformation. A select that only
-   * carries the native-hidden class but has no live JS controller must not
-   * be skipped, otherwise it can permanently fall back to the browser UI.
-   */
   if (
     select.classList.contains(
       "rml-graph-searchable-native-select"
@@ -14335,12 +14804,6 @@ function ensureUniversalCustomSelect(select) {
     select.removeAttribute("aria-hidden");
     select.removeAttribute("tabindex");
   }
-
-  /*
-   * Modal selects intentionally use the same JavaScript custom selector
-   * as the rest of the builder. openPopup() mounts the popup into the
-   * currently open <dialog>, keeping it in the dialog's top layer.
-   */
 
   if (
     select.id === "generated-file-select" ||
@@ -14447,14 +14910,6 @@ function ensureUniversalCustomSelect(select) {
         ? popupHost
         : null;
 
-    /*
-     * A fixed-position descendant of the transformed desktop <dialog>
-     * uses that dialog as its containing block. The previous code still
-     * wrote viewport coordinates, so the dialog offset was added a second
-     * time and Path preset opened far to the right (often fully off-screen).
-     * Inside a dialog we now use explicit dialog-local absolute coordinates;
-     * outside a dialog the popup remains viewport-fixed.
-     */
     popup.style.position =
       dialogHost
         ? "absolute"
@@ -16159,14 +16614,6 @@ function settingsPreviewNodesMarkup(nodes) {
       continue;
     }
 
-    /*
-     * Dynamic Choice/Action/Toggle entries intentionally use an internal
-     * backing ModConfigurationKey.  They are rendered by
-     * dynamic_settings.js so that their runtime collection/options and
-     * impulse behavior stay live.  Rendering the same Outline node again as
-     * an ordinary setting produced the duplicate raw key row seen in
-     * Preview (for example two "bgff" rows).
-     */
     if (node?.dynamicSettingKind) {
       continue;
     }
@@ -18059,7 +18506,7 @@ function applySettingsPreviewRuntimeMenuAction(
     case "saveSettings":
       try {
         localStorage.setItem(
-          PREVIEW_STORAGE_KEY,
+          ACTIVE_PREVIEW_STORAGE_KEY,
           JSON.stringify(
             settingsPreviewDraft
           )
@@ -18390,7 +18837,7 @@ function saveSettingsPreview() {
 
   try {
     localStorage.setItem(
-      PREVIEW_STORAGE_KEY,
+      ACTIVE_PREVIEW_STORAGE_KEY,
       JSON.stringify(settingsPreviewDraft)
     );
 
@@ -18468,7 +18915,7 @@ function openSettingsPreview() {
   try {
     const saved =
       localStorage.getItem(
-        PREVIEW_STORAGE_KEY
+        ACTIVE_PREVIEW_STORAGE_KEY
       );
 
     if (saved) {
@@ -18508,11 +18955,6 @@ function openSettingsPreview() {
 
   dialog.showModal();
 
-  /*
-   * Reproduce the generated runtime graph's initialization locally. This is
-   * what makes startup-controlled hidden items (including complete Inline
-   * Rows and their children) visible in Preview without contacting Resonite.
-   */
   runSettingsPreviewRuntimePhase(
     "startup"
   );
@@ -21361,8 +21803,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "help_template.html?v=24-node-scopes-v185",
-    "help_template.js?v=25-node-scopes-v185",
+    "help_template.html?v=58-natural-narration-v225",
+    "help_template.js?v=58-natural-narration-v225",
     "help-template",
     "RMLHelpTemplateMarkup"
   )
@@ -21445,7 +21887,7 @@ function closeInformationDialog() {
 
 function setupAssistantCompleted() {
   try {
-    return window.localStorage?.getItem(SETUP_ASSISTANT_STORAGE_KEY) === "true";
+    return window.localStorage?.getItem(ACTIVE_SETUP_ASSISTANT_STORAGE_KEY) === "true";
   } catch {
     return false;
   }
@@ -21470,7 +21912,7 @@ function ensureSetupAssistantLoaded(firstRun = false) {
 
   setupAssistantLoadPromise = new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = new URL("setup_assistant.js?v=26", APP_SCRIPT_BASE_URL).href;
+    script.src = new URL("setup_assistant.js?v=89-step9-adaptive-card-monotonic-v271", APP_SCRIPT_BASE_URL).href;
     script.async = true;
     script.dataset.rmlSetupAssistant = "true";
     script.addEventListener("load", () => resolve(true), { once: true });
@@ -21520,6 +21962,7 @@ function installSetupAssistantBridge() {
         state.activeContainerId = snapshot.activeContainerId || ROOT_CONTAINER;
         state.collapsedPaletteGroups = clone(snapshot.collapsedPaletteGroups || []);
         renderMetadata();
+        renderPalette();
         renderAll();
         persist();
       },
@@ -21574,17 +22017,437 @@ function installSetupAssistantBridge() {
         resource.fieldName = "ResourceUri";
         resource.keyName = "resource_uri";
 
-        state.nodes = [controller, resource];
+        const actionButton = makeSetting("button");
+        actionButton.fieldName = "ApplyPreset";
+        actionButton.keyName = "apply_preset";
+        actionButton.description =
+          "Applies the currently selected runtime preset.";
+        actionButton.buttonLabel = "Apply preset";
+
+        state.nodes = [controller, resource, actionButton];
         state.selectedId = enabled.id;
         state.activeContainerId = controller.options[0].id;
         state.collapsedPaletteGroups = [];
         state.extensions = {};
         flattenedNodesCacheSource = null;
+        renderPalette();
         renderAll();
+      },
+      ensureTourOutlineVerticalRange(minimumRange = 180) {
+        const requested = Math.max(80, Number(minimumRange) || 180);
+        const scroller = document.scrollingElement || document.documentElement;
+        const helperIds = [];
+        const currentRange = () => Math.max(
+          0,
+          (scroller?.scrollHeight || 0) - (scroller?.clientHeight || 0)
+        );
+
+        for (
+          let index = 0;
+          currentRange() < requested && index < 14;
+          index += 1
+        ) {
+          const helper = makeSetting("string");
+          helper.fieldName = `TourScrollAnchor${index + 1}`;
+          helper.keyName = `tour_scroll_anchor_${index + 1}`;
+          helper.description = "Temporary guided-tour scroll anchor";
+          helper.__rmlTourScrollHelper = true;
+          state.nodes.push(helper);
+          helperIds.push(helper.id);
+          renderAll();
+        }
+
+        return {
+          ok: currentRange() >= Math.min(requested, 80),
+          helperIds,
+          range: currentRange()
+        };
+      },
+      removeTourOutlineVerticalRange(helperIds = []) {
+        const ids = new Set(
+          Array.isArray(helperIds) ? helperIds.filter(Boolean) : []
+        );
+        if (ids.size === 0) {
+          return { ok: true, removed: 0 };
+        }
+        const before = state.nodes.length;
+        state.nodes = state.nodes.filter(node => !ids.has(node.id));
+        if (state.selectedId && ids.has(state.selectedId)) {
+          state.selectedId = state.nodes[0]?.id || null;
+        }
+        flattenedNodesCacheSource = null;
+        renderAll();
+        return {
+          ok: true,
+          removed: before - state.nodes.length
+        };
+      },
+      armHeldOptionHorizontal(
+        host,
+        clientX,
+        clientY
+      ) {
+        if (
+          !optionPointerDragActive ||
+          !activeDraggedOptionId ||
+          !activeDraggedOptionControllerId ||
+          !(host instanceof HTMLElement) ||
+          !host.isConnected
+        ) {
+          return {
+            accepted: false,
+            index: null,
+            maximumIndex: 0,
+            reason: "No live held option drag is active."
+          };
+        }
+
+        const controllerCard = host.closest(
+          ".node-card.controller[data-node-id]"
+        );
+        const controllerId =
+          controllerCard?.dataset.nodeId || "";
+
+        if (!controllerId) {
+          return {
+            accepted: false,
+            index: null,
+            maximumIndex: 0,
+            reason: "The live controller could not be resolved."
+          };
+        }
+
+        const feedbackEvent = {
+          clientX: Number.isFinite(clientX)
+            ? clientX
+            : host.getBoundingClientRect().left,
+          clientY: Number.isFinite(clientY)
+            ? clientY
+            : host.getBoundingClientRect().top,
+          dataTransfer: { dropEffect: "move" },
+          preventDefault() {},
+          stopPropagation() {}
+        };
+
+        setOptionInsertFeedback(
+          controllerId,
+          host,
+          feedbackEvent
+        );
+
+        const accepted =
+          optionWheelTargetHost === host &&
+          optionWheelTargetControllerId === controllerId &&
+          state.dragInsertContainer ===
+            `controller:${controllerId}` &&
+          Number.isFinite(state.dragInsertIndex) &&
+          optionDragFeedbackPlaceholder?.isConnected === true;
+
+        return {
+          accepted,
+          index: accepted ? state.dragInsertIndex : null,
+          maximumIndex: directOptionLanes(host).length,
+          reason: accepted
+            ? ""
+            : "The native horizontal insertion target rejected the held option."
+        };
+      },
+      stepHeldOptionHorizontal(
+        host,
+        direction,
+        clientX,
+        clientY
+      ) {
+        const normalizedDirection =
+          Math.sign(Number(direction) || 0);
+
+        if (
+          !optionPointerDragActive ||
+          !activeDraggedOptionId ||
+          !activeDraggedOptionControllerId ||
+          !(host instanceof HTMLElement) ||
+          !host.isConnected ||
+          normalizedDirection === 0
+        ) {
+          return {
+            accepted: false,
+            moved: false,
+            reason: "No live held option drag is active."
+          };
+        }
+
+        const controllerCard = host.closest(
+          ".node-card.controller[data-node-id]"
+        );
+        const controllerId =
+          controllerCard?.dataset.nodeId || "";
+
+        if (!controllerId) {
+          return {
+            accepted: false,
+            moved: false,
+            reason: "The live controller could not be resolved."
+          };
+        }
+
+        const markerBeforeFeedback =
+          optionDragFeedbackPlaceholder;
+        const anchoredTop =
+          markerBeforeFeedback?.style.getPropertyValue(
+            "--rml-setup-option-anchor-top"
+          ) ||
+          markerBeforeFeedback?.style.getPropertyValue(
+            "--option-placeholder-top"
+          ) ||
+          "";
+        const anchoredHeight =
+          markerBeforeFeedback?.style.getPropertyValue(
+            "--rml-setup-option-anchor-height"
+          ) ||
+          markerBeforeFeedback?.style.getPropertyValue(
+            "--option-placeholder-height"
+          ) ||
+          "";
+        if (markerBeforeFeedback?.isConnected) {
+          if (anchoredTop) {
+            markerBeforeFeedback.style.setProperty(
+              "--rml-setup-option-anchor-top",
+              anchoredTop
+            );
+          }
+          if (anchoredHeight) {
+            markerBeforeFeedback.style.setProperty(
+              "--rml-setup-option-anchor-height",
+              anchoredHeight
+            );
+          }
+        }
+
+        let accepted =
+          optionWheelTargetHost === host &&
+          optionWheelTargetControllerId === controllerId &&
+          state.dragInsertContainer ===
+            `controller:${controllerId}` &&
+          Number.isFinite(state.dragInsertIndex);
+
+        if (!accepted) {
+          const feedbackEvent = {
+            clientX: Number.isFinite(clientX)
+              ? clientX
+              : host.getBoundingClientRect().left,
+            clientY: Number.isFinite(clientY)
+              ? clientY
+              : host.getBoundingClientRect().top,
+            dataTransfer: { dropEffect: "move" },
+            preventDefault() {},
+            stopPropagation() {}
+          };
+          setOptionInsertFeedback(
+            controllerId,
+            host,
+            feedbackEvent
+          );
+          accepted =
+            optionWheelTargetHost === host &&
+            optionWheelTargetControllerId === controllerId &&
+            state.dragInsertContainer ===
+              `controller:${controllerId}` &&
+            Number.isFinite(state.dragInsertIndex);
+        }
+
+        if (!accepted) {
+          return {
+            accepted: false,
+            moved: false,
+            reason: "The native horizontal insertion target rejected the held option."
+          };
+        }
+
+        const marker =
+          optionDragFeedbackPlaceholder;
+        const beforeIndex = state.dragInsertIndex;
+
+        stepOptionInsertWithWheel(
+          controllerId,
+          host,
+          normalizedDirection
+        );
+        if (marker?.isConnected) {
+          if (anchoredTop) {
+            marker.style.setProperty(
+              "--option-placeholder-top",
+              anchoredTop
+            );
+            marker.style.setProperty(
+              "--rml-setup-option-anchor-top",
+              anchoredTop
+            );
+          }
+          if (anchoredHeight) {
+            marker.style.setProperty(
+              "--option-placeholder-height",
+              anchoredHeight
+            );
+            marker.style.setProperty(
+              "--rml-setup-option-anchor-height",
+              anchoredHeight
+            );
+          }
+        }
+        requestDragPlaceholderVisibility();
+
+        const afterIndex = state.dragInsertIndex;
+
+        return {
+          accepted: true,
+          moved: afterIndex !== beforeIndex,
+          beforeIndex,
+          afterIndex,
+          maximumIndex: directOptionLanes(host).length
+        };
+      },
+      inspectHeldOptionHorizontal(host) {
+        if (
+          !optionPointerDragActive ||
+          !activeDraggedOptionId ||
+          !(host instanceof HTMLElement) ||
+          optionWheelTargetHost !== host ||
+          !optionWheelTargetControllerId ||
+          state.dragInsertContainer !==
+            `controller:${optionWheelTargetControllerId}` ||
+          !Number.isFinite(state.dragInsertIndex)
+        ) {
+          return {
+            accepted: false,
+            index: null,
+            maximumIndex: 0
+          };
+        }
+
+        return {
+          accepted: true,
+          index: state.dragInsertIndex,
+          maximumIndex: directOptionLanes(host).length
+        };
+      },
+      armHeldOptionContainer(
+        host,
+        clientX,
+        clientY
+      ) {
+        if (
+          !optionPointerDragActive ||
+          !activeDraggedOptionId ||
+          !activeDraggedOptionControllerId ||
+          !(host instanceof HTMLElement) ||
+          !host.isConnected
+        ) {
+          return {
+            accepted: false,
+            index: null,
+            maximumIndex: 0,
+            reason: "No live held option drag is active."
+          };
+        }
+
+        const lane = host.closest(
+          OUTLINE_CONTAINER_LANE_SELECTOR
+        );
+        const containerId = lane?.dataset.container || "";
+        const authoritativeHost = lane?.querySelector(
+          ":scope > .drop-zone"
+        );
+        const source = findControllerOption(
+          state.nodes,
+          activeDraggedOptionId
+        );
+
+        if (
+          !containerId ||
+          authoritativeHost !== host ||
+          !source ||
+          optionContainsContainer(
+            source.option,
+            containerId
+          )
+        ) {
+          return {
+            accepted: false,
+            index: null,
+            maximumIndex: directNodeCards(host).length,
+            reason: "The live nested container rejected the held option."
+          };
+        }
+
+        const cards = directNodeCards(host);
+        const pointX = Number.isFinite(clientX)
+          ? clientX
+          : host.getBoundingClientRect().left + 8;
+        const pointY = Number.isFinite(clientY)
+          ? clientY
+          : host.getBoundingClientRect().top + 8;
+        const insertionIndex = nodeInsertionIndexAtPoint(
+          host,
+          cards,
+          pointX,
+          pointY
+        );
+        const feedbackEvent = {
+          clientX: pointX,
+          clientY: pointY,
+          dataTransfer: { dropEffect: "move" },
+          preventDefault() {},
+          stopPropagation() {}
+        };
+
+        setPointerContainerTarget(
+          containerId,
+          host,
+          insertionIndex,
+          feedbackEvent
+        );
+        requestDragPlaceholderVisibility();
+
+        const accepted =
+          optionContainerWheelTargetHost === host &&
+          optionContainerWheelTargetContainerId === containerId &&
+          state.dragInsertContainer === containerId &&
+          Number.isFinite(state.dragInsertIndex) &&
+          dragFeedbackPlaceholder?.isConnected === true;
+
+        return {
+          accepted,
+          index: accepted ? state.dragInsertIndex : null,
+          maximumIndex: cards.length,
+          containerId,
+          reason: accepted
+            ? ""
+            : "The native nested insertion target rejected the held option."
+        };
+      },
+      inspectHeldOptionContainer(host) {
+        const accepted =
+          optionPointerDragActive &&
+          activeDraggedOptionId &&
+          host instanceof HTMLElement &&
+          optionContainerWheelTargetHost === host &&
+          optionContainerWheelTargetContainerId &&
+          state.dragInsertContainer ===
+            optionContainerWheelTargetContainerId &&
+          Number.isFinite(state.dragInsertIndex);
+
+        return {
+          accepted: Boolean(accepted),
+          index: accepted ? state.dragInsertIndex : null,
+          maximumIndex: directNodeCards(host).length,
+          containerId: accepted
+            ? optionContainerWheelTargetContainerId
+            : ""
+        };
       },
       markComplete() {
         try {
-          window.localStorage?.setItem(SETUP_ASSISTANT_STORAGE_KEY, "true");
+          window.localStorage?.setItem(ACTIVE_SETUP_ASSISTANT_STORAGE_KEY, "true");
         } catch {}
       }
     }),
@@ -22151,7 +23014,16 @@ function builderStateSnapshot() {
 
 function exposeBuilderBridge() {
   const bridge = {
-    version: 3,
+    version: 4,
+
+    getStorageContract() {
+      return {
+        visualTest: RML_VISUAL_TOUR_TEST,
+        activeStorageKey: ACTIVE_STORAGE_KEY,
+        activePreviewStorageKey: ACTIVE_PREVIEW_STORAGE_KEY,
+        requestedStorageKey: RML_VISUAL_TOUR_STORAGE_KEY
+      };
+    },
 
     getStateSnapshot() {
       return builderStateSnapshot();
@@ -22194,7 +23066,7 @@ function exposeBuilderBridge() {
         try {
           const saved =
             localStorage.getItem(
-              PREVIEW_STORAGE_KEY
+              ACTIVE_PREVIEW_STORAGE_KEY
             );
 
           if (saved) {
@@ -22612,41 +23484,48 @@ function installUniversalScrollLayerSelector() {
       }
     }
 
-    const startX = Math.ceil(left);
-    const endX = Math.floor(right - 0.001);
-    const startY = Math.ceil(top);
-    const endY = Math.floor(bottom - 0.001);
-    let exactProbeCount = 0;
+    const boundedAxis = (start, end) => {
+      const span = Math.max(0, end - start);
+      const count = Math.max(
+        3,
+        Math.min(15, Math.ceil(span / 48) + 1)
+      );
+      const inset = Math.min(0.5, span / 4);
+      const first = start + inset;
+      const last = end - inset;
+      if (count <= 1 || last <= first) {
+        return [(start + end) / 2];
+      }
+      return Array.from(
+        { length: count },
+        (_, index) =>
+          first + (last - first) * index / (count - 1)
+      );
+    };
+    const boundedXs = boundedAxis(left, right);
+    const boundedYs = boundedAxis(top, bottom);
+    let boundedProbeCount = 0;
 
-    dbg("exposure-pixel-audit-start", {
-      element: scrollDebug?.describeElement?.(element),
-      startX, endX, startY, endY,
-      width: Math.max(0, endX - startX + 1),
-      height: Math.max(0, endY - startY + 1)
-    });
-
-    for (let y = startY; y <= endY; y += 1) {
-      let rowProbes = 0;
-      for (let x = startX; x <= endX; x += 1) {
-        exactProbeCount += 1;
-        rowProbes += 1;
-        if (elementHitTestVisibleAt(element, x + 0.5, y + 0.5)) {
-          dbg("exposure-pixel-hit", {
-            x, y,
-            exactProbeCount,
+    for (const y of boundedYs) {
+      for (const x of boundedXs) {
+        boundedProbeCount += 1;
+        if (elementHitTestVisibleAt(element, x, y)) {
+          dbg("exposure-bounded-grid-hit", {
+            x: Number(x.toFixed(3)),
+            y: Number(y.toFixed(3)),
+            boundedProbeCount,
             element: scrollDebug?.describeElement?.(element)
           });
           return true;
         }
       }
-      dbg("exposure-pixel-row", { y, rowProbes, exactProbeCount });
     }
 
     dbg("exposure-result", {
       result: false,
-      method: "exact-pixel-raster",
+      method: "bounded-15x15-grid",
       probes: probeCount,
-      exactProbeCount,
+      boundedProbeCount,
       element: scrollDebug?.describeElement?.(element)
     });
     return false;
@@ -24751,7 +25630,11 @@ async function initialize() {
   renderPalette();
   installSetupAssistantBridge();
   window.setTimeout(() => {
-    void ensureSetupAssistantLoaded(true);
+    const visualTourTest =
+      new URLSearchParams(window.location.search).has("rmlTourTest") ||
+      window.location.hash.includes("rmlTourTest");
+
+    void ensureSetupAssistantLoaded(!visualTourTest);
   }, 250);
 
   document
@@ -25013,10 +25896,12 @@ async function initialize() {
       event.stopImmediatePropagation();
 
       if (optionDrag) {
-        updateOptionPointerTarget(
-          event.clientX,
-          event.clientY
-        );
+        if (!heldOptionWheelTargetIsAuthoritative()) {
+          updateOptionPointerTarget(
+            event.clientX,
+            event.clientY
+          );
+        }
 
         finishOptionPointerDrag(
           true
@@ -25659,10 +26544,6 @@ async function initialize() {
     }
   );
 
-  /*
-   * Install JS selectors before the final heavy render. Export is enhanced
-   * explicitly, so it cannot depend on a later MutationObserver pass.
-   */
   ensureUniversalCustomSelect(
     elements.exportPlatform
   );
@@ -27420,15 +28301,6 @@ ${refreshCalls}
     runtimeMembers +
     source.slice(finalBrace);
 
-  /*
-   * Runtime display ordering is supplied by GetRuntimeDisplays().Order.
-   * The private per-monitor keys are intentionally omitted from the ordinary
-   * configuration-order provider because ModConfigurationView filters them
-   * through the runtime-display provider before normal editors are created.
-   * All ordinary keys still receive their absolute flattened Outline index,
-   * so normal settings, runtime displays and dynamic controls share one
-   * collision-free global order.
-   */
   source =
     rmlRuntimeDisplayApplyAbsoluteConfigurationOrder(
       source
@@ -27661,10 +28533,6 @@ window.addEventListener(
   () => {
     rmlRuntimeDisplayUpdatePaletteAvailability();
 
-    /*
-     * The API factory emits on window. Refresh generated diagnostics/output
-     * after reflected nodes and ports are actually registered.
-     */
     try {
       updateGeneratedOutput();
     } catch (error) {
@@ -28365,10 +29233,6 @@ window.setInterval(
   750
 );
 
-
-/* ================================================================
- * Dynamic configuration-control integration host
- * ================================================================ */
 Object.defineProperty(
   window,
   "RMLDynamicOutlineHost",

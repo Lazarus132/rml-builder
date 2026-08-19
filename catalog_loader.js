@@ -736,12 +736,6 @@
       );
     }
 
-    /*
-     * Offline Resonite is a normal idle state. Chromium reports every failed
-     * localhost fetch as ERR_CONNECTION_REFUSED even when the Promise is
-     * caught, so never scan the complete port range automatically. The
-     * existing catalog-status button performs discovery explicitly.
-     */
     scannerOnline = false;
     scannerChecking = false;
     updateUnavailableStatus();
@@ -860,7 +854,6 @@
 
     scannerPollTimer = 0;
 
-    /* Once offline, remain quietly offline until the user reconnects. */
     if (!scannerOnline) {
       return;
     }
@@ -952,11 +945,6 @@
           live.url
         );
 
-        /*
-         * Always install the live form, even when its fingerprint matches the
-         * cache. This dispatches rml-catalog:loaded with catalogSource=scanner
-         * and is the explicit signal that permits the runtime bridge to start.
-         */
         installCatalog(normalized);
 
         if (!current) {

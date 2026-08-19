@@ -1,16 +1,11 @@
 <!-- Lazy-loaded by setup_assistant.js. -->
 <div id="rml-setup-assistant" hidden aria-live="polite">
+  <div class="rml-setup-interaction-shield" data-setup-interaction-shield aria-hidden="true"></div>
   <div class="rml-setup-shade" data-setup-shade="top"></div>
   <div class="rml-setup-shade" data-setup-shade="left"></div>
   <div class="rml-setup-shade" data-setup-shade="right"></div>
   <div class="rml-setup-shade" data-setup-shade="bottom"></div>
 
-  <svg class="rml-setup-demo-wire-layer" aria-hidden="true">
-    <path data-setup-demo-wire hidden></path>
-    <path data-setup-demo-wire-secondary hidden></path>
-    <path data-setup-demo-wire-tertiary hidden></path>
-  </svg>
-  <div class="rml-setup-demo-crossing" data-setup-demo-crossing hidden aria-hidden="true"></div>
   <div class="rml-setup-demo-keys" data-setup-demo-keys hidden aria-hidden="true"></div>
   <div class="rml-setup-drag-ghost" data-setup-drag-ghost hidden aria-hidden="true"></div>
   <div class="rml-setup-demo-label" data-setup-demo-label hidden aria-hidden="true"></div>
@@ -23,8 +18,13 @@
     <span class="rml-setup-mouse-ripple"></span>
   </div>
 
+  <div class="rml-setup-live-controls" data-setup-live-controls hidden>
+    <button class="button secondary" type="button" data-setup-live-skip-demo>Skip demonstration</button>
+    <button class="button secondary" type="button" data-setup-live-skip-tour>Skip tour</button>
+  </div>
+
   <section class="rml-setup-card" role="dialog" aria-modal="true" aria-labelledby="rml-setup-title">
-    <small data-setup-kicker>Interactive live tour</small>
+    <small data-setup-kicker>Interactive guided tour</small>
     <h2 id="rml-setup-title" data-setup-title>Welcome</h2>
     <p data-setup-text></p>
     <span class="rml-setup-step-badge" data-setup-hint></span>
@@ -32,7 +32,7 @@
     <div class="rml-setup-actions">
       <button class="button secondary" type="button" data-setup-skip>Skip tour</button>
       <div>
-        <button class="button secondary" type="button" data-setup-back>Back</button>
+        <button class="button secondary" type="button" data-setup-skip-demo hidden title="Skip only this demonstration">Skip</button>
         <button class="button primary" type="button" data-setup-next>Next</button>
       </div>
     </div>

@@ -427,11 +427,6 @@
       );
 
     if (!directCollectionBound) {
-      /*
-       * Manually supplied collection controls use explicit monitor bindings.
-       * Direct Collect To List controls use the marked collection itself as
-       * their single authoritative source.
-       */
       const labels =
         monitorSelect(
           node.dynamicLabelMonitorId
@@ -1205,12 +1200,6 @@
       normalized
     );
 
-    /*
-     * Dynamic Preview selections use the same local draft as all ordinary
-     * Preview editors. Saving the Preview therefore persists the visible
-     * selection locally, but this path never calls the runtime bridge or the
-     * generated Resonite configuration setter.
-     */
     if (
       settingsPreviewDraft?.values &&
       typeof settingsPreviewDraft.values ===
@@ -1288,12 +1277,6 @@
       return;
     }
 
-    /*
-     * Dynamic controls are hidden from app.js' ordinary setting renderer, but
-     * they still belong to the exact same Configuration Outline ordering.
-     * Use the same flattened/condition-filtered sequence as Preview and place
-     * every dynamic row relative to the normal rows' stable node ids.
-     */
     const visibleNodes =
       visiblePreviewEntries();
 
@@ -2306,11 +2289,6 @@
         continue;
       }
 
-      /*
-       * Mark as Editable is authoritative.
-       * If the Collect To List source is no longer editable (or was deleted),
-       * its materialized Dynamic Choice must not remain in Configuration Outline.
-       */
       if (!validSourceIds.has(sourceId)) {
         staleControlIds.add(
           String(node.id || "")

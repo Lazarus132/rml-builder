@@ -2,6 +2,17 @@
   "use strict";
 
   const EXTENSION_NAME = "typedNodeGraph";
+  const RML_GRAPH_VISUAL_TEST =
+    new URLSearchParams(window.location.search).has("rmlTourTest") ||
+    window.location.hash.includes("rmlTourTest");
+  const RML_GRAPH_REQUESTED_TEST_STORAGE_SCOPE =
+    new URLSearchParams(window.location.search).get("rmlTourStorageKey") || "";
+  const RML_GRAPH_TEST_STORAGE_SCOPE =
+    /^rml-configuration-builder-visual-test-[a-z0-9._-]+$/i.test(
+      RML_GRAPH_REQUESTED_TEST_STORAGE_SCOPE
+    )
+      ? RML_GRAPH_REQUESTED_TEST_STORAGE_SCOPE
+      : "rml-configuration-builder-visual-test-default";
   const GRAPH_SCHEMA_VERSION = 19;
   const GRAPH_STAGE_WIDTH = 5200;
   const GRAPH_STAGE_HEIGHT = 3400;
@@ -974,9 +985,13 @@
   let graphNodeSearchIndex = -1;
   const GRAPH_SEARCHABLE_LIST_THRESHOLD = 8;
   const GRAPH_PANEL_LAYOUT_STORAGE_KEY =
-    "rml-node-graph-panel-layout-v1";
+    RML_GRAPH_VISUAL_TEST && RML_GRAPH_TEST_STORAGE_SCOPE
+      ? `${RML_GRAPH_TEST_STORAGE_SCOPE}-panel-layout`
+      : "rml-node-graph-panel-layout-v1";
   const GRAPH_PALETTE_UI_STORAGE_KEY =
-    "rml-node-graph-palette-ui-v1";
+    RML_GRAPH_VISUAL_TEST && RML_GRAPH_TEST_STORAGE_SCOPE
+      ? `${RML_GRAPH_TEST_STORAGE_SCOPE}-palette-ui`
+      : "rml-node-graph-palette-ui-v1";
   const GRAPH_PALETTE_CONFIG_GROUP_KEY =
     "__packed_configuration__";
   let graphLeftPanelCollapsed = false;
@@ -989,8 +1004,15 @@
   };
   let autoPanFrame = 0;
   let autoPanState = null;
+  let guidedInteractionAutoPanSuppressed = false;
+  let guidedAutomaticNodeCreationSuppressed = false;
+  let lastGuidedConnectionDropState = null;
+  let lastGuidedPaletteDropState = null;
   let activeInteraction = null;
   let paletteDragSuppressClickUntil = 0;
+  let palettePointerTransactionSequence = 0;
+  let paletteClickSuppression = null;
+  const consumedPalettePointerSources = new WeakSet();
   let packedSnapshotSyncTimer = 0;
   const nodeBodyScrollPositions =
     new Map();
@@ -2282,13 +2304,6 @@
     };
   }
 
-  /*
-   * `graph.active` selects which editor view is currently visible. It must
-   * not also decide whether an already packed runtime program exists. Going
-   * back to Configuration Outline deliberately preserves the graph, so its
-   * Preview actions, generated C# and synchronized Outline snapshot must
-   * remain live while `active` is false.
-   */
   function hasPackedRuntimeProgram() {
     return Boolean(
       graph?.configSnapshot &&
@@ -6664,8 +6679,6 @@
       return statistics;
     }
 
-    /* Keep Menu Item ports aligned with the live Outline, including children
-     * added to an Inline Row after returning from the graph view. */
     synchronizePackedSnapshot(false);
 
     const outputPort =
@@ -6951,11 +6964,6 @@
 
     synchronizePackedSnapshot(false);
 
-    /*
-     * Opening Preview represents a fresh local runtime session. Once nodes
-     * must therefore be reset before Startup is emitted, just as they are
-     * when the generated runtime graph is initialized in Resonite.
-     */
     if (normalizedPhase === "startup") {
       previewFlowOnceState.clear();
     }
@@ -7897,11 +7905,6 @@
         metadata,
         graph:
           graphSerializableState(),
-        /*
-         * Reflected API definitions are registered asynchronously. A graph
-         * can be byte-for-byte identical before and after registration, so
-         * the registry revision must participate in the codegen cache key.
-         */
         nodeDefinitionRevision:
           Number(
             window.__RMLNodeDefinitionRevision
@@ -8724,12 +8727,6 @@
                       {
                         portId,
                         type,
-                        /*
-                         * Keep api.csType as the conversion helper. Passing
-                         * the resolved type under the same name overwrote
-                         * that function for extension nodes such as Get Item
-                         * At Index.
-                         */
                         resolvedCsType: csType,
                         input
                       }
@@ -8945,27 +8942,6 @@
       }
     }
 
-    /*
-     * A single impulse output may fan out to several direct targets. The old
-     * generator emitted each complete target path recursively before moving to
-     * the next sibling. That made a graph such as
-     *
-     *   Trigger -> Collect A.Reset
-     *           -> Collect B.Reset
-     *   Collect A.ResetDone -> For Each
-     *
-     * execute Collect A.ResetDone (and the complete loop) before Collect B was
-     * reset. The second reset consequently erased values produced by the loop.
-     *
-     * For a real fan-out, direct sibling actions now form one barrier:
-     *   1. execute every direct target's immediate mutation/action;
-     *   2. only then invoke their top-level continuation impulses.
-     *
-     * Control-flow actions whose emitted impulses are nested inside a loop,
-     * branch or other block are kept atomic and are moved as one continuation.
-     * This avoids queueing a For Each.Body call after its transient Item/Index
-     * state has already changed.
-     */
     const csharpBraceDelta = (
       line,
       lexicalState
@@ -12611,14 +12587,23 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           min-width: 0;
         }
 
+        body.rml-node-graph-mode .workspace > .canvas {
+          min-height: calc(100vh + 52px);
+          min-height: calc(100dvh + 52px);
+        }
+
         body.rml-node-graph-mode #palette-content {
           min-height: 340px;
           max-height: 480px;
         }
 
         body.rml-node-graph-mode #builder-canvas {
+          flex: 0 0 100vh;
+          flex-basis: 100dvh;
+          height: 100vh;
           height: 100dvh;
-          min-height: 0;
+          min-height: 100vh;
+          min-height: 100dvh;
         }
 
         .rml-graph-root {
@@ -13593,11 +13578,20 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
     button.addEventListener(
       "click",
-      () => {
+      event => {
+        const transactionSuppressed = Boolean(
+          paletteClickSuppression &&
+          paletteClickSuppression.operatorId === operatorId
+        );
         if (
+          !button.isConnected ||
+          consumedPalettePointerSources.has(button) ||
+          transactionSuppressed ||
           performance.now() <
           paletteDragSuppressClickUntil
         ) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
           return;
         }
 
@@ -13605,6 +13599,19 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           operatorId,
           isConfiguration
         );
+      }
+    );
+
+    button.addEventListener(
+      "keydown",
+      event => {
+        if (
+          (event.key === "Enter" || event.key === " ") &&
+          paletteClickSuppression?.operatorId === operatorId
+        ) {
+          paletteClickSuppression = null;
+          consumedPalettePointerSources.delete(button);
+        }
       }
     );
 
@@ -16354,19 +16361,30 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       }
     }
 
-    const startX = Math.ceil(left);
-    const endX = Math.floor(right - 0.001);
-    const startY = Math.ceil(top);
-    const endY = Math.floor(bottom - 0.001);
-    let exactProbeCount = 0;
+    const boundedAxis = (start, end) => {
+      const span = Math.max(0, end - start);
+      const count = Math.max(
+        3,
+        Math.min(15, Math.ceil(span / 48) + 1)
+      );
+      const inset = Math.min(0.5, span / 4);
+      const first = start + inset;
+      const last = end - inset;
+      if (count <= 1 || last <= first) {
+        return [(start + end) / 2];
+      }
+      return Array.from(
+        { length: count },
+        (_, index) =>
+          first + (last - first) * index / (count - 1)
+      );
+    };
+    const boundedXs = boundedAxis(left, right);
+    const boundedYs = boundedAxis(top, bottom);
 
-
-    for (let y = startY; y <= endY; y += 1) {
-      let rowProbes = 0;
-      for (let x = startX; x <= endX; x += 1) {
-        exactProbeCount += 1;
-        rowProbes += 1;
-        if (graphScrollLayerHitTestVisibleAt(element, x + 0.5, y + 0.5)) {
+    for (const y of boundedYs) {
+      for (const x of boundedXs) {
+        if (graphScrollLayerHitTestVisibleAt(element, x, y)) {
           return true;
         }
       }
@@ -21158,13 +21176,6 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       return select;
     }
 
-    /*
-     * This select is already owned by the graph's searchable-select UI.
-     * app.js also upgrades ordinary <select> elements globally; mark this
-     * one explicitly so the universal upgrader never wraps the same native
-     * select a second time. Without this marker a Boolean parameter such as
-     * Collect To List -> Mark as Editable gets two visible True/False fields.
-     */
     select._rmlGeneratedCustomSelect = true;
 
     const wrapper =
@@ -24365,6 +24376,8 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     activeInteraction = {
       kind: "connection",
       pointerId: event.pointerId,
+      automaticNodeCreationSuppressed:
+        guidedAutomaticNodeCreationSuppressed,
       start: effectiveStart,
       originalStart: startRef,
       startType,
@@ -24745,6 +24758,11 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     let connected = false;
     let failureReason = "";
     let successMessage = "";
+    let targetKind = "none";
+    let automaticNodeCreationAttempted = false;
+    let automaticNodeCreationSuppressed = false;
+    const nodeCountBefore =
+      graph.nodes.length;
 
     if (commit) {
       const target =
@@ -24755,6 +24773,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         );
 
       if (target) {
+        targetKind = "socket";
         const proposal =
           connectionProposal(
             interaction.start,
@@ -24791,6 +24810,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           interaction.start.direction ===
             "input"
         ) {
+          targetKind = "wire";
           const result =
             connectInputToWire(
               interaction,
@@ -24801,9 +24821,21 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           connected = result.connected;
           failureReason = result.reason;
         } else if (wireTarget) {
+          targetKind = "wire";
           failureReason =
             "A wire is a value source. Drag an input socket onto it; two outputs cannot be merged implicitly.";
+        } else if (
+          interaction
+            .automaticNodeCreationSuppressed ===
+          true
+        ) {
+          targetKind = "canvas";
+          automaticNodeCreationSuppressed = true;
+          failureReason =
+            "The guided connection did not resolve a native socket or wire target. Automatic canvas-helper creation was intentionally suppressed so the owning assistant can apply its deterministic connection fallback without adding a second node.";
         } else {
+          targetKind = "canvas";
+          automaticNodeCreationAttempted = true;
           const automatic =
             interaction.start.direction ===
               "input"
@@ -24831,6 +24863,32 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           }
         }
       }
+    }
+
+    if (
+      interaction
+        .automaticNodeCreationSuppressed ===
+      true
+    ) {
+      lastGuidedConnectionDropState = {
+        ok: connected,
+        pointerId: interaction.pointerId,
+        start: {
+          nodeId:
+            interaction.start.nodeId || "",
+          portId:
+            interaction.start.portId || "",
+          direction:
+            interaction.start.direction || ""
+        },
+        targetKind,
+        automaticNodeCreationAttempted,
+        automaticNodeCreationSuppressed,
+        nodeCountBefore,
+        nodeCountAfter:
+          graph.nodes.length,
+        failureReason
+      };
     }
 
     if (
@@ -24887,8 +24945,16 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     event.preventDefault();
     event.stopPropagation();
 
+    paletteClickSuppression = null;
+    consumedPalettePointerSources.delete(
+      event.currentTarget
+    );
+
     activeInteraction = {
       kind: "palette",
+      transactionId:
+        ++palettePointerTransactionSequence,
+      sourceButton: event.currentTarget,
       pointerId: event.pointerId,
       operatorId,
       isConfiguration,
@@ -25000,12 +25066,36 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
     const wasDragging =
       interaction.dragging;
+    const guided =
+      guidedInteractionAutoPanSuppressed;
+
+    if (interaction.sourceButton instanceof HTMLElement) {
+      consumedPalettePointerSources.add(
+        interaction.sourceButton
+      );
+    }
+    paletteClickSuppression = {
+      transactionId:
+        interaction.transactionId || 0,
+      pointerId: interaction.pointerId,
+      operatorId: interaction.operatorId,
+      wasDragging,
+      committed: commit === true
+    };
 
     interaction.ghost?.remove();
     activeInteraction = null;
     stopAutoPan();
 
     if (!commit) {
+      if (guided) {
+        lastGuidedPaletteDropState = {
+          ok: false,
+          reason: "pointer-cancelled",
+          operatorId: interaction.operatorId,
+          pointerId: interaction.pointerId
+        };
+      }
       return;
     }
 
@@ -25016,6 +25106,15 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       );
       paletteDragSuppressClickUntil =
         performance.now() + 300;
+      if (guided) {
+        lastGuidedPaletteDropState = {
+          ok: true,
+          reason: "palette-click-created-at-center",
+          operatorId: interaction.operatorId,
+          pointerId: interaction.pointerId,
+          wasDragging: false
+        };
+      }
       return;
     }
 
@@ -25025,11 +25124,35 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         clientY
       );
 
+    const viewportRectangle =
+      dom.viewport?.getBoundingClientRect?.();
+    const guidedGeometricDrop = Boolean(
+      guided &&
+      viewportRectangle &&
+      clientX >= viewportRectangle.left &&
+      clientX <= viewportRectangle.right &&
+      clientY >= viewportRectangle.top &&
+      clientY <= viewportRectangle.bottom
+    );
+
     if (
       !target?.closest?.(
         ".rml-graph-viewport"
-      )
+      ) &&
+      !guidedGeometricDrop
     ) {
+      if (guided) {
+        lastGuidedPaletteDropState = {
+          ok: false,
+          reason: "release-outside-runtime-viewport",
+          operatorId: interaction.operatorId,
+          pointerId: interaction.pointerId,
+          clientX,
+          clientY,
+          directViewportHit: false,
+          guidedGeometricDrop: false
+        };
+      }
       showGraphMessage(
         "Drop the node inside the graph canvas.",
         "error"
@@ -25043,13 +25166,14 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         clientY
       );
 
+    let createdNode = null;
     if (interaction.isConfiguration) {
-      addConfigurationNode(
+      createdNode = addConfigurationNode(
         point.x - 190,
         point.y - 35
       );
     } else {
-      addOperatorNode(
+      createdNode = addOperatorNode(
         interaction.operatorId,
         point.x - 130,
         point.y - 35
@@ -25058,6 +25182,23 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
     paletteDragSuppressClickUntil =
       performance.now() + 300;
+    if (guided) {
+      lastGuidedPaletteDropState = {
+        ok: true,
+        reason: "native-palette-drop-committed",
+        operatorId: interaction.operatorId,
+        pointerId: interaction.pointerId,
+        clientX,
+        clientY,
+        wasDragging: true,
+        nodeId: createdNode?.id || "",
+        nodeKind: createdNode?.kind || "",
+        directViewportHit: Boolean(
+          target?.closest?.(".rml-graph-viewport")
+        ),
+        guidedGeometricDrop
+      };
+    }
   }
 
   function startAutoPan(
@@ -25065,6 +25206,11 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     clientY,
     callback
   ) {
+    if (guidedInteractionAutoPanSuppressed) {
+      stopAutoPan();
+      return;
+    }
+
     autoPanState = {
       clientX,
       clientY,
@@ -25083,7 +25229,10 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     clientX,
     clientY
   ) {
-    if (!autoPanState) {
+    if (
+      guidedInteractionAutoPanSuppressed ||
+      !autoPanState
+    ) {
       return;
     }
 
@@ -25095,9 +25244,13 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     autoPanFrame = 0;
 
     if (
+      guidedInteractionAutoPanSuppressed ||
       !autoPanState ||
       !dom.viewport
     ) {
+      if (guidedInteractionAutoPanSuppressed) {
+        autoPanState = null;
+      }
       return;
     }
 
@@ -25646,58 +25799,6 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
   Object.defineProperty(
     window,
-    "RMLTypedNodeGraphTourBridge",
-    {
-      value: Object.freeze({
-        ensureConnection(fromNodeId, fromPortId, toNodeId, toPortId) {
-          const fromNode = findGraphNode(fromNodeId);
-          const toNode = findGraphNode(toNodeId);
-          if (!fromNode || !toNode) return false;
-
-          const existing = graph.connections.find(connection =>
-            connection.fromNode === fromNodeId &&
-            connection.fromPort === fromPortId &&
-            connection.toNode === toNodeId &&
-            connection.toPort === toPortId
-          );
-          if (existing) {
-            renderGraphNodesAndWires();
-            return existing.id;
-          }
-
-          const proposal = connectionProposal(
-            graphPortReference(fromNode, fromPortId, "output"),
-            graphPortReference(toNode, toPortId, "input"),
-            graph.connections
-          );
-          if (!proposal.valid) return false;
-
-          applyAutoVectorUpdates(proposal.autoVectorUpdates);
-          graph.connections = proposal.nextConnections;
-          normalizeConnectionRouting(graph.connections);
-          graph.selectedConnectionId = proposal.candidate.id;
-          graph.selectedNodeId = null;
-          clearSelectedWirePoint();
-          currentAnalysis = proposal.analysis;
-          persistGraph(true);
-          renderGraphNodesAndWires();
-          renderGraphInspector();
-          return proposal.candidate.id;
-        },
-        refresh() {
-          renderGraphNodesAndWires();
-          renderGraphInspector();
-          return true;
-        }
-      }),
-      writable: false,
-      enumerable: false,
-      configurable: true
-    }
-  );
-
-  Object.defineProperty(
-    window,
     "RMLTypedNodeGraphGenerator",
     {
       value: Object.freeze({
@@ -25969,22 +26070,12 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       return;
     }
 
-    /*
-     * A previous code-generation pass may have happened while reflected API
-     * nodes were still being registered. Its missing-port diagnostics must
-     * never survive once the real definitions exist.
-     */
     typedGraphCodegenCacheKey = "";
     typedGraphCodegenCache = null;
 
     const wasActive =
       graph.active === true;
 
-    /*
-     * Re-run parameter and port-layout normalization now that every API node
-     * definition is available. This preserves node/connection ids and all
-     * routing points.
-     */
     graph = sanitizeGraphState(
       graphSerializableState()
     );
@@ -26010,10 +26101,6 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         window.RMLModNodesReady
       );
 
-      /*
-       * Compatibility guard for loaders that resolve RMLModNodesReady after
-       * script load but before the asynchronous API factory has finished.
-       */
       if (
         window.RMLApiNodeFactoryReady &&
         typeof window.RMLApiNodeFactoryReady.then ===
@@ -26035,10 +26122,6 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       refreshAfterNodeModulesReady
     );
 
-    /*
-     * The ready event can legitimately have fired while this module awaited
-     * RMLModNodesReady. Apply the completed registry once in that case too.
-     */
     if (window.RMLApiNodeFactoryReport) {
       queueMicrotask(
         refreshAfterNodeModulesReady
@@ -26061,21 +26144,99 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     initializeImmediately();
   }
 
-
-  /* Dynamic configuration-control graph host.
-   * Dynamic collection-backed settings bind directly to Collect To List.
-   * No Display Value/helper node is created in the runtime graph.
-   */
   Object.defineProperty(window, "RMLDynamicGraphHost", {
     value: Object.freeze({
-      version: 5,
+      version: 14,
       getState() { return graph; },
+      getGuidedInteractionState() {
+        if (!activeInteraction) return null;
+        return {
+          kind: activeInteraction.kind || "",
+          pointerId: activeInteraction.pointerId ?? null,
+          operatorId: activeInteraction.operatorId || "",
+          dragging: activeInteraction.dragging === true,
+          ghostVisible: Boolean(
+            activeInteraction.ghost?.isConnected
+          ),
+          clientX: Number.isFinite(activeInteraction.clientX)
+            ? activeInteraction.clientX
+            : null,
+          clientY: Number.isFinite(activeInteraction.clientY)
+            ? activeInteraction.clientY
+            : null
+        };
+      },
+      getGuidedPaletteDropState() {
+        return lastGuidedPaletteDropState
+          ? { ...lastGuidedPaletteDropState }
+          : null;
+      },
+      getGuidedConnectionDropState() {
+        return lastGuidedConnectionDropState
+          ? {
+              ...lastGuidedConnectionDropState,
+              start: {
+                ...lastGuidedConnectionDropState.start
+              }
+            }
+          : null;
+      },
       isReady() {
         return Boolean(
           graph &&
           Array.isArray(graph.nodes) &&
           Array.isArray(graph.connections)
         );
+      },
+      ensureActiveMode() {
+        if (graph?.active !== true) {
+          return {
+            ok: false,
+            reason: "The Runtime Graph product state is not active."
+          };
+        }
+        activateGraphMode();
+        return {
+          ok: document.body.classList.contains(
+            "rml-node-graph-mode"
+          ),
+          graphActive: graph.active === true
+        };
+      },
+      getOperatorPlacementMetrics(operatorId) {
+        const definition =
+          OPERATOR_DEFINITIONS[operatorId];
+        if (!definition) {
+          return {
+            ok: false,
+            operatorId,
+            reason: `Unknown operator: ${operatorId}`
+          };
+        }
+        const scale = clamp(
+          finiteNumber(graph?.viewport?.scale, 1),
+          GRAPH_MIN_ZOOM,
+          GRAPH_MAX_ZOOM
+        );
+        const width = definition.width || 280;
+        const height = 190;
+        const pointerOffsetX = 130;
+        const pointerOffsetY = 35;
+        return {
+          ok: true,
+          operatorId,
+          width,
+          height,
+          pointerOffsetX,
+          pointerOffsetY,
+          scale,
+          clientWidth: width * scale,
+          clientHeight: height * scale,
+          clientPointerOffsetX:
+            pointerOffsetX * scale,
+          clientPointerOffsetY:
+            pointerOffsetY * scale
+        };
       },
       previewConfigurationImpulse(
         outlineNodeId
@@ -26092,6 +26253,750 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           phase,
           outlineNodeId
         );
+      },
+      setGuidedAutomaticNodeCreationSuppressed(
+        value
+      ) {
+        guidedAutomaticNodeCreationSuppressed =
+          value === true;
+        if (
+          guidedAutomaticNodeCreationSuppressed
+        ) {
+          lastGuidedConnectionDropState = null;
+        }
+        return guidedAutomaticNodeCreationSuppressed;
+      },
+      setGuidedAutoPanSuppressed(value) {
+        guidedInteractionAutoPanSuppressed =
+          value === true;
+        if (guidedInteractionAutoPanSuppressed) {
+          lastGuidedPaletteDropState = null;
+        }
+        if (guidedInteractionAutoPanSuppressed) {
+          stopAutoPan();
+        }
+        return guidedInteractionAutoPanSuppressed;
+      },
+      ensureOperatorNode(
+        operatorId,
+        options = {}
+      ) {
+        const existing =
+          graph?.nodes?.find(
+            node =>
+              node.kind === "operator" &&
+              node.operatorId === operatorId
+          ) || null;
+
+        if (
+          existing &&
+          options.allowDuplicate !== true
+        ) {
+          return {
+            ok: true,
+            created: false,
+            nodeId: existing.id
+          };
+        }
+
+        if (!OPERATOR_DEFINITIONS[operatorId]) {
+          return {
+            ok: false,
+            created: false,
+            nodeId: "",
+            reason: `Unknown operator: ${operatorId}`
+          };
+        }
+
+        const viewportRect =
+          dom.viewport?.getBoundingClientRect();
+        const center = viewportRect
+          ? clientToGraph(
+              viewportRect.left + viewportRect.width / 2,
+              viewportRect.top + viewportRect.height / 2
+            )
+          : { x: 0, y: 0 };
+        const node = addOperatorNode(
+          operatorId,
+          Number.isFinite(options.x)
+            ? options.x
+            : center.x - 140,
+          Number.isFinite(options.y)
+            ? options.y
+            : center.y - 90,
+          false
+        );
+
+        return node
+          ? {
+              ok: true,
+              created: true,
+              nodeId: node.id
+            }
+          : {
+              ok: false,
+              created: false,
+              nodeId: "",
+              reason: `Could not create operator: ${operatorId}`
+            };
+      },
+      ensureConnection(first, second) {
+        const normalizeEndpoint = endpoint => {
+          const node = findGraphNode(endpoint?.nodeId);
+          if (!node || !endpoint?.portId || !endpoint?.direction) {
+            return null;
+          }
+          const reference = graphPortReference(
+            node,
+            endpoint.portId,
+            endpoint.direction
+          );
+          return {
+            ...reference,
+            ...endpoint,
+            side:
+              endpoint.side ||
+              reference.side
+          };
+        };
+        const a = normalizeEndpoint(first);
+        const b = normalizeEndpoint(second);
+
+        if (!a || !b) {
+          return {
+            ok: false,
+            created: false,
+            connectionId: "",
+            reason: "A graph endpoint is missing."
+          };
+        }
+
+        const output =
+          a.direction === "output" ? a : b;
+        const input =
+          a.direction === "input" ? a : b;
+        const existing =
+          graph.connections.find(
+            connection =>
+              connection.fromNode === output.nodeId &&
+              connection.fromPort === output.portId &&
+              connection.toNode === input.nodeId &&
+              connection.toPort === input.portId
+          ) || null;
+
+        if (existing) {
+          renderGraphNodesAndWires();
+          return {
+            ok: true,
+            created: false,
+            connectionId: existing.id
+          };
+        }
+
+        const proposal = connectionProposal(
+          a,
+          b,
+          graph.connections
+        );
+
+        if (!proposal.valid) {
+          return {
+            ok: false,
+            created: false,
+            connectionId: "",
+            reason: proposal.reason
+          };
+        }
+
+        applyAutoVectorUpdates(
+          proposal.autoVectorUpdates
+        );
+        graph.connections =
+          proposal.nextConnections;
+        normalizeConnectionRouting(
+          graph.connections
+        );
+        graph.selectedConnectionId =
+          proposal.candidate.id;
+        graph.selectedNodeId = null;
+        clearSelectedWirePoint();
+        currentAnalysis = proposal.analysis;
+        pruneConnections();
+        persistGraph(true);
+        renderGraphNodesAndWires();
+        renderGraphInspector();
+
+        return {
+          ok: true,
+          created: true,
+          connectionId:
+            proposal.candidate.id
+        };
+      },
+      ensureBranch(
+        parentConnectionId,
+        inputEndpoint,
+        clientX,
+        clientY
+      ) {
+        const parent =
+          graphConnectionById(
+            parentConnectionId
+          );
+        const targetNode =
+          findGraphNode(
+            inputEndpoint?.nodeId
+          );
+        if (
+          !parent ||
+          !targetNode ||
+          inputEndpoint?.direction !== "input"
+        ) {
+          return {
+            ok: false,
+            reason: "The parent wire or branch input is missing."
+          };
+        }
+        const targetReference =
+          graphPortReference(
+            targetNode,
+            inputEndpoint.portId,
+            "input"
+          );
+        const target = {
+          ...targetReference,
+          ...inputEndpoint,
+          direction: "input",
+          side:
+            inputEndpoint.side ||
+            targetReference.side
+        };
+        const existing =
+          graph.connections.find(
+            connection =>
+              connection.toNode === target.nodeId &&
+              connection.toPort === target.portId &&
+              connection.branchFrom
+                ?.connectionId === parent.id
+          ) || null;
+        if (existing) {
+          renderGraphWires();
+          return {
+            ok: true,
+            created: false,
+            connectionId: existing.id,
+            pointId:
+              existing.branchFrom?.pointId || ""
+          };
+        }
+
+        const proposal = connectionProposal(
+          sourceSocketRefForConnection(parent),
+          target,
+          graph.connections
+        );
+        if (!proposal.valid) {
+          return {
+            ok: false,
+            reason: proposal.reason
+          };
+        }
+
+        const paths = [
+          ...dom.wires?.querySelectorAll(
+            `.rml-graph-wire-hit[data-connection-id="${CSS.escape(parent.id)}"]`
+          ) || []
+        ];
+        const path = paths[0] || null;
+        const segmentIndex = Math.max(
+          0,
+          Math.trunc(
+            finiteNumber(
+              path?.dataset.segmentIndex,
+              0
+            )
+          )
+        );
+        const position =
+          nearestGraphPointOnSvgPath(
+            path,
+            finiteNumber(clientX, 0),
+            finiteNumber(clientY, 0)
+          );
+        const junction =
+          ensureWireJunctionPoint(
+            parent,
+            segmentIndex,
+            position
+          );
+        const branch =
+          proposal.nextConnections.find(
+            connection =>
+              connection.id ===
+              proposal.candidate.id
+          );
+        if (!branch) {
+          return {
+            ok: false,
+            reason: "The typed branch record was not created."
+          };
+        }
+        branch.branchFrom = {
+          connectionId: parent.id,
+          pointId: junction.id
+        };
+        branch.points =
+          Array.isArray(branch.points)
+            ? branch.points
+            : [];
+        applyAutoVectorUpdates(
+          proposal.autoVectorUpdates
+        );
+        graph.connections =
+          proposal.nextConnections;
+        normalizeConnectionRouting(
+          graph.connections
+        );
+        graph.selectedConnectionId =
+          branch.id;
+        graph.selectedNodeId = null;
+        clearSelectedWirePoint();
+        currentAnalysis = proposal.analysis;
+        persistGraph(true);
+        renderGraphNodesAndWires();
+        renderGraphInspector();
+        return {
+          ok: true,
+          created: true,
+          connectionId: branch.id,
+          pointId: junction.id
+        };
+      },
+      ensureWirePoint(
+        connectionId,
+        clientX,
+        clientY
+      ) {
+        const connection =
+          graphConnectionById(connectionId);
+        if (!connection) {
+          return {
+            ok: false,
+            reason: "The wire no longer exists."
+          };
+        }
+        const path =
+          dom.wires?.querySelector(
+            `.rml-graph-wire-hit[data-connection-id="${CSS.escape(connectionId)}"]`
+          ) || null;
+        const position =
+          nearestGraphPointOnSvgPath(
+            path,
+            finiteNumber(clientX, 0),
+            finiteNumber(clientY, 0)
+          );
+        const point = insertWirePoint(
+          connection,
+          Math.max(
+            0,
+            Math.trunc(
+              finiteNumber(
+                path?.dataset.segmentIndex,
+                connection.points?.length || 0
+              )
+            )
+          ),
+          position
+        );
+        graph.selectedNodeId = null;
+        graph.selectedConnectionId =
+          connection.id;
+        graph.selectedWirePoint = {
+          connectionId: connection.id,
+          pointId: point.id
+        };
+        persistGraph(true);
+        renderGraphWires();
+        renderGraphInspector();
+        return {
+          ok: true,
+          pointId: point.id
+        };
+      },
+      ensureAutomaticHelper(
+        endpoint,
+        clientX,
+        clientY
+      ) {
+        const node =
+          findGraphNode(endpoint?.nodeId);
+        if (
+          !node ||
+          !endpoint?.portId ||
+          !endpoint?.direction
+        ) {
+          return {
+            ok: false,
+            reason: "The helper endpoint is missing."
+          };
+        }
+
+        const start = {
+          ...graphPortReference(
+            node,
+            endpoint.portId,
+            endpoint.direction
+          ),
+          ...endpoint
+        };
+        const portRef = findPortSpec(
+          start.nodeId,
+          start.portId,
+          start.direction
+        );
+        const beforeIds = new Set(
+          graph.nodes.map(candidate => candidate.id)
+        );
+        const interaction = {
+          kind: "connection",
+          start,
+          originalStart: start,
+          startType:
+            resolvePortType(
+              portRef,
+              currentAnalysis?.bindings || new Map()
+            ) ||
+            fallbackConcreteTypeForPort(portRef)
+        };
+        const result =
+          start.direction === "input"
+            ? createAutomaticSourceForInput(
+                interaction,
+                clientX,
+                clientY
+              )
+            : createAutomaticMonitorForOutput(
+                interaction,
+                clientX,
+                clientY
+              );
+
+        if (!result.connected) {
+          return {
+            ok: false,
+            reason: result.reason ||
+              "The typed helper could not be created."
+          };
+        }
+
+        pruneConnections();
+        persistGraph(true);
+        renderGraphNodesAndWires();
+        renderGraphInspector();
+        const created =
+          graph.nodes.find(
+            candidate => !beforeIds.has(candidate.id)
+          ) || null;
+
+        return {
+          ok: true,
+          nodeId: created?.id || "",
+          message: result.message || ""
+        };
+      },
+      setNodeClientCenter(nodeId, clientX, clientY) {
+        const node = findGraphNode(nodeId);
+        if (!node || !dom.viewport) {
+          return {
+            ok: false,
+            reason: "The graph node or viewport is unavailable."
+          };
+        }
+        const point = clientToGraph(
+          finiteNumber(clientX, 0),
+          finiteNumber(clientY, 0)
+        );
+        const element =
+          dom.nodesHost?.querySelector(
+            `[data-graph-node-id="${CSS.escape(node.id)}"]`
+          );
+        const width =
+          element?.offsetWidth ||
+          (node.kind === "configuration" ? 390 : 280);
+        const height =
+          element?.offsetHeight || 180;
+        node.x = point.x - width / 2;
+        node.y = point.y - height / 2;
+        persistGraph(true);
+        renderGraphNodesAndWires();
+        renderGraphInspector();
+        return {
+          ok: true,
+          nodeId: node.id,
+          x: node.x,
+          y: node.y
+        };
+      },
+      setNodePosition(nodeId, x, y) {
+        const node = findGraphNode(nodeId);
+        if (!node) {
+          return {
+            ok: false,
+            reason: "The graph node is unavailable."
+          };
+        }
+        node.x = finiteNumber(x, node.x);
+        node.y = finiteNumber(y, node.y);
+        persistGraph(true);
+        renderGraphNodesAndWires();
+        renderGraphInspector();
+        return {
+          ok: true,
+          nodeId: node.id,
+          x: node.x,
+          y: node.y
+        };
+      },
+      setNodePortLayout(nodeId, layout) {
+        const node = findGraphNode(nodeId);
+        const definition = node
+          ? nodeDefinition(node)
+          : null;
+        if (
+          !node ||
+          !definitionHasSockets(definition)
+        ) {
+          return {
+            ok: false,
+            reason: "This node has no switchable sockets."
+          };
+        }
+        node.parameters =
+          node.parameters || {};
+        node.parameters.portLayout =
+          layout === "mirrored"
+            ? "mirrored"
+            : "standard";
+        persistGraph(true);
+        renderGraphNodesAndWires();
+        renderGraphInspector();
+        return {
+          ok: true,
+          layout: node.parameters.portLayout
+        };
+      },
+      fitNodesToClientRect(
+        nodeIds,
+        requestedRect,
+        options = {}
+      ) {
+        if (!dom.viewport) {
+          return {
+            ok: false,
+            reason: "The graph viewport is unavailable."
+          };
+        }
+        const ids = new Set(
+          Array.isArray(nodeIds)
+            ? nodeIds.filter(Boolean)
+            : []
+        );
+        const nodes = graph.nodes.filter(
+          node => ids.size === 0 || ids.has(node.id)
+        );
+        if (nodes.length === 0) {
+          return {
+            ok: false,
+            reason: "No teaching nodes are available."
+          };
+        }
+
+        let minimumX = Infinity;
+        let minimumY = Infinity;
+        let maximumX = -Infinity;
+        let maximumY = -Infinity;
+        for (const node of nodes) {
+          const element =
+            dom.nodesHost?.querySelector(
+              `[data-graph-node-id="${CSS.escape(node.id)}"]`
+            );
+          const width =
+            element?.offsetWidth ||
+            (node.kind === "configuration" ? 390 : 280);
+          const height =
+            element?.offsetHeight || 180;
+          minimumX = Math.min(minimumX, node.x);
+          minimumY = Math.min(minimumY, node.y);
+          maximumX = Math.max(maximumX, node.x + width);
+          maximumY = Math.max(maximumY, node.y + height);
+        }
+
+        const viewportRect =
+          dom.viewport.getBoundingClientRect();
+        const left = clamp(
+          finiteNumber(
+            requestedRect?.left,
+            viewportRect.left
+          ),
+          viewportRect.left,
+          viewportRect.right
+        );
+        const top = clamp(
+          finiteNumber(
+            requestedRect?.top,
+            viewportRect.top
+          ),
+          viewportRect.top,
+          viewportRect.bottom
+        );
+        const right = clamp(
+          finiteNumber(
+            requestedRect?.right,
+            viewportRect.right
+          ),
+          left,
+          viewportRect.right
+        );
+        const bottom = clamp(
+          finiteNumber(
+            requestedRect?.bottom,
+            viewportRect.bottom
+          ),
+          top,
+          viewportRect.bottom
+        );
+        const padding = Math.max(
+          8,
+          finiteNumber(options.padding, 34)
+        );
+        const areaWidth = Math.max(1, right - left);
+        const areaHeight = Math.max(1, bottom - top);
+        const contentWidth = Math.max(1, maximumX - minimumX);
+        const contentHeight = Math.max(1, maximumY - minimumY);
+        const scale = clamp(
+          Math.min(
+            Math.max(1, areaWidth - padding * 2) / contentWidth,
+            Math.max(1, areaHeight - padding * 2) / contentHeight,
+            finiteNumber(options.maxScale, 1.08)
+          ),
+          GRAPH_MIN_ZOOM,
+          GRAPH_MAX_ZOOM
+        );
+
+        const fittedViewport = {
+          scale,
+          x:
+          left - viewportRect.left +
+          (areaWidth - contentWidth * scale) / 2 -
+          minimumX * scale,
+          y:
+          top - viewportRect.top +
+          (areaHeight - contentHeight * scale) / 2 -
+          minimumY * scale
+        };
+
+        if (options.apply === false) {
+          return {
+            ok: true,
+            applied: false,
+            scale,
+            viewport: fittedViewport
+          };
+        }
+
+        graph.viewport.scale = fittedViewport.scale;
+        graph.viewport.x = fittedViewport.x;
+        graph.viewport.y = fittedViewport.y;
+        applyViewportTransform();
+        persistGraph(true);
+        renderGraphWires();
+
+        return {
+          ok: true,
+          applied: true,
+          scale,
+          viewport: { ...graph.viewport }
+        };
+      },
+      setViewportState(
+        requestedViewport,
+        options = {}
+      ) {
+        if (!dom.viewport || !requestedViewport) {
+          return {
+            ok: false,
+            reason: "The graph viewport is unavailable."
+          };
+        }
+        graph.viewport.x = finiteNumber(
+          requestedViewport.x,
+          graph.viewport.x
+        );
+        graph.viewport.y = finiteNumber(
+          requestedViewport.y,
+          graph.viewport.y
+        );
+        graph.viewport.scale = clamp(
+          finiteNumber(
+            requestedViewport.scale,
+            graph.viewport.scale
+          ),
+          GRAPH_MIN_ZOOM,
+          GRAPH_MAX_ZOOM
+        );
+        applyViewportTransform();
+        renderGraphWires();
+        if (options.persist !== false) {
+          persistGraph(true);
+        }
+        return {
+          ok: true,
+          viewport: { ...graph.viewport }
+        };
+      },
+      getViewportState() {
+        const rectangle =
+          dom.viewport?.getBoundingClientRect();
+        return {
+          viewport: graph?.viewport
+            ? { ...graph.viewport }
+            : null,
+          rectangle: rectangle
+            ? {
+                left: rectangle.left,
+                top: rectangle.top,
+                right: rectangle.right,
+                bottom: rectangle.bottom,
+                width: rectangle.width,
+                height: rectangle.height
+              }
+            : null
+        };
+      },
+      getLayoutConstraints() {
+        return Object.freeze({
+          zoom: Object.freeze({
+            available: true,
+            minimum: GRAPH_MIN_ZOOM,
+            maximum: GRAPH_MAX_ZOOM,
+            current: clamp(
+              finiteNumber(graph?.viewport?.scale, 1),
+              GRAPH_MIN_ZOOM,
+              GRAPH_MAX_ZOOM
+            )
+          }),
+          node: Object.freeze({
+            minimumWidth: GRAPH_NODE_MIN_WIDTH,
+            minimumHeight: GRAPH_NODE_MIN_HEIGHT,
+            minimumBodyHeight: GRAPH_NODE_MIN_BODY_HEIGHT,
+            maximumWidth: GRAPH_NODE_MAX_WIDTH,
+            maximumHeight: GRAPH_NODE_MAX_HEIGHT
+          }),
+          stage: Object.freeze({
+            width: GRAPH_STAGE_WIDTH,
+            height: GRAPH_STAGE_HEIGHT
+          })
+        });
       },
       commit() {
         try { if (typeof normalizeGraph === "function") normalizeGraph(); } catch {}
@@ -26110,5 +27015,4 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     enumerable: false,
     configurable: true
   });
-
 })();
