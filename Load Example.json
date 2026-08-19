@@ -2,12 +2,12 @@
   "format": "rml-configuration-builder-project",
   "formatVersion": 1,
   "metadata": {
-    "namespaceName": "YourModNamespace",
-    "className": "YourMod",
-    "modName": "Your Mod",
-    "author": "Your Name",
+    "namespaceName": "RuntimeGraphDemo",
+    "className": "RuntimeGraphDemoMod",
+    "modName": "Runtime Graph Demo",
+    "author": "Lazarus132",
     "version": "1.0.0",
-    "description": "A Resonite mod generated with the RML Configuration Builder.",
+    "description": "A compiled, interactive Typed Runtime Graph demonstration for the RML Configuration Builder.",
     "includeGuide": true
   },
   "exportOptions": {
@@ -18,26 +18,78 @@
   },
   "nodes": [
     {
-      "id": "controller-main",
+      "id": "controller-demo-pages",
       "kind": "controller",
       "fieldName": "ActivePage",
       "keyName": "00_active_page",
-      "description": "Selects the visible settings page.",
-      "enumName": "SettingsPage",
-      "defaultOption": "General",
+      "description": "Switches between the interactive demo, ordinary settings and a short learning page.",
+      "enumName": "DemoPage",
+      "defaultOption": "Live Demo",
       "reaction": "stored",
+      "hideLabel": false,
       "options": [
         {
-          "id": "option-general",
-          "name": "General",
+          "id": "option-live-demo",
+          "name": "Live Demo",
           "children": [
             {
-              "id": "setting-enabled",
+              "id": "setting-live-values",
+              "kind": "setting",
+              "valueType": "runtimeDisplay",
+              "fieldName": "LiveValues",
+              "keyName": "01_live_values",
+              "description": "Live values calculated by the compiled Runtime Graph.",
+              "defaultValue": "",
+              "hidden": false,
+              "validatorMode": "none",
+              "customValidator": "Compile and run the generated mod to receive live values.",
+              "useSlider": false,
+              "minimum": "0",
+              "maximum": "100",
+              "enumName": "",
+              "enumOptions": [],
+              "reaction": "stored",
+              "hideLabel": false,
+              "runtimeDisplayOrder": [
+                "graph-live-status",
+                "graph-live-intensity",
+                "graph-live-message"
+              ],
+              "runtimeDisplayStacked": false
+            },
+            {
+              "id": "setting-action-events",
+              "kind": "setting",
+              "valueType": "runtimeDisplay",
+              "fieldName": "ActionEvents",
+              "keyName": "02_action_events",
+              "description": "Impulse counters from Apply, blocked and reset paths.",
+              "defaultValue": "",
+              "hidden": false,
+              "validatorMode": "none",
+              "customValidator": "Press one of the demo buttons after compiling the mod.",
+              "useSlider": false,
+              "minimum": "0",
+              "maximum": "100",
+              "enumName": "",
+              "enumOptions": [],
+              "reaction": "stored",
+              "hideLabel": false,
+              "runtimeDisplayOrder": [
+                "graph-pulse-applied",
+                "graph-pulse-blocked",
+                "graph-pulse-reset",
+                "graph-pulse-save-failed"
+              ],
+              "runtimeDisplayStacked": false
+            },
+            {
+              "id": "setting-demo-enabled",
               "kind": "setting",
               "valueType": "bool",
-              "fieldName": "Enabled",
-              "keyName": "10_enabled",
-              "description": "Enables this mod.",
+              "fieldName": "DemoEnabled",
+              "keyName": "10_demo_enabled",
+              "description": "Controls the Apply branch. Disable it to watch the False path count pulses.",
               "defaultValue": "true",
               "hidden": false,
               "validatorMode": "none",
@@ -47,16 +99,36 @@
               "maximum": "100",
               "enumName": "",
               "enumOptions": [],
-              "reaction": "startup-saved"
+              "reaction": "startup-saved",
+              "hideLabel": false
             },
             {
-              "id": "setting-name",
+              "id": "setting-intensity",
               "kind": "setting",
-              "valueType": "string",
-              "fieldName": "DisplayName",
-              "keyName": "11_display_name",
-              "description": "Example text setting.",
-              "defaultValue": "Example",
+              "valueType": "float",
+              "fieldName": "Intensity",
+              "keyName": "11_intensity",
+              "description": "The graph multiplies this value by two and publishes the result live.",
+              "defaultValue": "2.5",
+              "hidden": false,
+              "validatorMode": "range",
+              "customValidator": "",
+              "useSlider": true,
+              "minimum": "0",
+              "maximum": "10",
+              "enumName": "",
+              "enumOptions": [],
+              "reaction": "startup-saved",
+              "hideLabel": false
+            },
+            {
+              "id": "setting-show-details",
+              "kind": "setting",
+              "valueType": "bool",
+              "fieldName": "ShowRuntimeDetails",
+              "keyName": "12_show_runtime_details",
+              "description": "Uses Set Configuration Visibility to reveal the initially hidden Details Inline Row.",
+              "defaultValue": "false",
               "hidden": false,
               "validatorMode": "none",
               "customValidator": "",
@@ -65,16 +137,17 @@
               "maximum": "100",
               "enumName": "",
               "enumOptions": [],
-              "reaction": "stored"
+              "reaction": "startup-saved",
+              "hideLabel": false
             },
             {
-              "id": "setting-resource",
+              "id": "setting-horizontal-controls",
               "kind": "setting",
-              "valueType": "Uri",
-              "fieldName": "ResourceUri",
-              "keyName": "12_resource_uri",
-              "description": "Any URL or URI with a copy button.",
-              "defaultValue": "https://example.com/resource",
+              "valueType": "bool",
+              "fieldName": "HorizontalControls",
+              "keyName": "13_horizontal_controls",
+              "description": "Switches the Demo Controls Inline Row between horizontal and vertical layout at runtime.",
+              "defaultValue": "true",
               "hidden": false,
               "validatorMode": "none",
               "customValidator": "",
@@ -83,7 +156,149 @@
               "maximum": "100",
               "enumName": "",
               "enumOptions": [],
-              "reaction": "stored"
+              "reaction": "startup-saved",
+              "hideLabel": false
+            },
+            {
+              "id": "setting-show-apply-label",
+              "kind": "setting",
+              "valueType": "bool",
+              "fieldName": "ShowApplyLabel",
+              "keyName": "14_show_apply_label",
+              "description": "Shows or hides the left-side label of the Apply button cell at runtime.",
+              "defaultValue": "false",
+              "hidden": false,
+              "validatorMode": "none",
+              "customValidator": "",
+              "useSlider": false,
+              "minimum": "0",
+              "maximum": "100",
+              "enumName": "",
+              "enumOptions": [],
+              "reaction": "startup-saved",
+              "hideLabel": false
+            },
+            {
+              "id": "row-demo-controls",
+              "kind": "layoutRow",
+              "label": "Demo Controls",
+              "description": "A 65/20/15 Inline Row controlled by the Runtime Graph.",
+              "horizontal": true,
+              "hidden": false,
+              "children": [
+                {
+                  "id": "setting-demo-message",
+                  "kind": "setting",
+                  "valueType": "string",
+                  "fieldName": "DemoMessage",
+                  "keyName": "15_demo_message",
+                  "description": "This draft is saved before Apply runs, so the button action does not reset the text.",
+                  "defaultValue": "Hello from the compiled Runtime Graph!",
+                  "hidden": false,
+                  "validatorMode": "none",
+                  "customValidator": "",
+                  "useSlider": false,
+                  "minimum": "0",
+                  "maximum": "100",
+                  "enumName": "",
+                  "enumOptions": [],
+                  "reaction": "startup-saved",
+                  "hideLabel": false,
+                  "layoutWidthPercent": 65
+                },
+                {
+                  "id": "button-apply-demo",
+                  "kind": "setting",
+                  "valueType": "button",
+                  "fieldName": "ApplyDemo",
+                  "keyName": "16_apply_demo",
+                  "description": "Saves all current menu drafts, branches on Demo Enabled and applies the runtime widths.",
+                  "defaultValue": "",
+                  "hidden": false,
+                  "validatorMode": "none",
+                  "customValidator": "",
+                  "useSlider": false,
+                  "minimum": "0",
+                  "maximum": "100",
+                  "enumName": "",
+                  "enumOptions": [],
+                  "reaction": "stored",
+                  "hideLabel": true,
+                  "layoutWidthPercent": 20,
+                  "buttonLabel": "Apply + Save"
+                },
+                {
+                  "id": "button-reset-menu",
+                  "kind": "setting",
+                  "valueType": "button",
+                  "fieldName": "ResetDemoMenu",
+                  "keyName": "17_reset_demo_menu",
+                  "description": "Saves drafts, removes runtime menu overrides and restores the Configuration Outline layout.",
+                  "defaultValue": "",
+                  "hidden": false,
+                  "validatorMode": "none",
+                  "customValidator": "",
+                  "useSlider": false,
+                  "minimum": "0",
+                  "maximum": "100",
+                  "enumName": "",
+                  "enumOptions": [],
+                  "reaction": "stored",
+                  "hideLabel": true,
+                  "layoutWidthPercent": 15,
+                  "buttonLabel": "Reset Layout"
+                }
+              ]
+            },
+            {
+              "id": "row-runtime-details",
+              "kind": "layoutRow",
+              "label": "Runtime Details",
+              "description": "Initially hidden as a complete row; Show Runtime Details reveals it through graph logic.",
+              "horizontal": true,
+              "hidden": true,
+              "children": [
+                {
+                  "id": "setting-detail-note",
+                  "kind": "setting",
+                  "valueType": "string",
+                  "fieldName": "DetailNote",
+                  "keyName": "18_detail_note",
+                  "description": "A child of a runtime-controlled hidden Inline Row.",
+                  "defaultValue": "This complete row was revealed by Set Configuration Visibility.",
+                  "hidden": false,
+                  "validatorMode": "none",
+                  "customValidator": "",
+                  "useSlider": false,
+                  "minimum": "0",
+                  "maximum": "100",
+                  "enumName": "",
+                  "enumOptions": [],
+                  "reaction": "stored",
+                  "hideLabel": false,
+                  "layoutWidthPercent": 70
+                },
+                {
+                  "id": "setting-detail-strength",
+                  "kind": "setting",
+                  "valueType": "float",
+                  "fieldName": "DetailStrength",
+                  "keyName": "19_detail_strength",
+                  "description": "A second control proving that the entire Inline Row becomes visible.",
+                  "defaultValue": "0.75",
+                  "hidden": false,
+                  "validatorMode": "range",
+                  "customValidator": "",
+                  "useSlider": true,
+                  "minimum": "0",
+                  "maximum": "1",
+                  "enumName": "",
+                  "enumOptions": [],
+                  "reaction": "stored",
+                  "hideLabel": false,
+                  "layoutWidthPercent": 30
+                }
+              ]
             }
           ]
         },
@@ -97,7 +312,7 @@
               "valueType": "enum",
               "fieldName": "Quality",
               "keyName": "20_quality",
-              "description": "Ordinary enum setting.",
+              "description": "A normal enum setting included to demonstrate the generated picker control.",
               "defaultValue": "Medium",
               "hidden": false,
               "validatorMode": "none",
@@ -109,18 +324,20 @@
               "enumOptions": [
                 "Low",
                 "Medium",
-                "High"
+                "High",
+                "Ultra"
               ],
-              "reaction": "startup-saved"
+              "reaction": "startup-saved",
+              "hideLabel": false
             },
             {
-              "id": "setting-color",
+              "id": "setting-accent-color",
               "kind": "setting",
               "valueType": "colorX",
               "fieldName": "AccentColor",
               "keyName": "21_accent_color",
-              "description": "HDR-capable accent color.",
-              "defaultValue": "colorX.Red",
+              "description": "An HDR-capable colorX setting rendered by the shared color picker.",
+              "defaultValue": "colorX.Cyan",
               "hidden": false,
               "validatorMode": "none",
               "customValidator": "",
@@ -129,58 +346,44 @@
               "maximum": "100",
               "enumName": "",
               "enumOptions": [],
-              "reaction": "startup-saved"
+              "reaction": "startup-saved",
+              "hideLabel": false,
+              "colorProfile": "linear",
+              "colorStrength": 1
             },
             {
-              "id": "setting-scale",
+              "id": "setting-ui-scale",
               "kind": "setting",
               "valueType": "float",
-              "fieldName": "Scale",
-              "keyName": "22_scale",
-              "description": "Float slider from 0.1 to 10.",
+              "fieldName": "UiScale",
+              "keyName": "22_ui_scale",
+              "description": "A regular validated slider from 0.5 to 2.0.",
               "defaultValue": "1",
               "hidden": false,
               "validatorMode": "range",
               "customValidator": "",
               "useSlider": true,
-              "minimum": "0.1",
-              "maximum": "10",
+              "minimum": "0.5",
+              "maximum": "2",
               "enumName": "",
               "enumOptions": [],
-              "reaction": "startup-saved"
+              "reaction": "stored",
+              "hideLabel": false
             }
           ]
         },
         {
-          "id": "option-advanced",
-          "name": "Advanced",
+          "id": "option-learn",
+          "name": "Learn",
           "children": [
             {
-              "id": "setting-precise",
+              "id": "setting-try-this",
               "kind": "setting",
-              "valueType": "double",
-              "fieldName": "PreciseValue",
-              "keyName": "30_precise_value",
-              "description": "Double slider from -100 to 100.",
-              "defaultValue": "0.12345678901234567",
-              "hidden": false,
-              "validatorMode": "range",
-              "customValidator": "",
-              "useSlider": true,
-              "minimum": "-100",
-              "maximum": "100",
-              "enumName": "",
-              "enumOptions": [],
-              "reaction": "stored"
-            },
-            {
-              "id": "setting-vector",
-              "kind": "setting",
-              "valueType": "double3",
-              "fieldName": "PrecisePosition",
-              "keyName": "31_precise_position",
-              "description": "Three-component double vector.",
-              "defaultValue": "1.25, 2.5, 3.75",
+              "valueType": "string",
+              "fieldName": "TryThisNext",
+              "keyName": "30_try_this_next",
+              "description": "A compact walkthrough stored directly inside the generated example menu.",
+              "defaultValue": "Compile → open the menu → edit the message → press Apply + Save → toggle the runtime controls.",
               "hidden": false,
               "validatorMode": "none",
               "customValidator": "",
@@ -189,16 +392,1871 @@
               "maximum": "100",
               "enumName": "",
               "enumOptions": [],
-              "reaction": "stored"
+              "reaction": "stored",
+              "hideLabel": false
+            },
+            {
+              "id": "setting-demo-uri",
+              "kind": "setting",
+              "valueType": "Uri",
+              "fieldName": "DemoResource",
+              "keyName": "31_demo_resource",
+              "description": "An ordinary URI field with the shared copy action.",
+              "defaultValue": "https://github.com/resonite-modding-group/ResoniteModLoader",
+              "hidden": false,
+              "validatorMode": "none",
+              "customValidator": "",
+              "useSlider": false,
+              "minimum": "0",
+              "maximum": "100",
+              "enumName": "",
+              "enumOptions": [],
+              "reaction": "stored",
+              "hideLabel": false
             }
           ]
         }
       ]
     }
   ],
-  "extensions": {},
+  "extensions": {
+    "typedNodeGraph": {
+      "version": 19,
+      "active": true,
+      "sourceSignature": "28596f69",
+      "showAdvancedNodes": true,
+      "configSnapshot": {
+        "metadata": {
+          "namespaceName": "RuntimeGraphDemo",
+          "className": "RuntimeGraphDemoMod",
+          "modName": "Runtime Graph Demo",
+          "author": "Your Name",
+          "version": "1.0.0",
+          "description": "A compiled, interactive Typed Runtime Graph demonstration for the RML Configuration Builder.",
+          "includeGuide": true
+        },
+        "nodes": [
+          {
+            "id": "controller-demo-pages",
+            "kind": "controller",
+            "fieldName": "ActivePage",
+            "keyName": "00_active_page",
+            "description": "Switches between the interactive demo, ordinary settings and a short learning page.",
+            "enumName": "DemoPage",
+            "defaultOption": "Live Demo",
+            "reaction": "stored",
+            "hideLabel": false,
+            "options": [
+              {
+                "id": "option-live-demo",
+                "name": "Live Demo",
+                "children": [
+                  {
+                    "id": "setting-live-values",
+                    "kind": "setting",
+                    "valueType": "runtimeDisplay",
+                    "fieldName": "LiveValues",
+                    "keyName": "01_live_values",
+                    "description": "Live values calculated by the compiled Runtime Graph.",
+                    "defaultValue": "",
+                    "hidden": false,
+                    "validatorMode": "none",
+                    "customValidator": "Compile and run the generated mod to receive live values.",
+                    "useSlider": false,
+                    "minimum": "0",
+                    "maximum": "100",
+                    "enumName": "",
+                    "enumOptions": [],
+                    "reaction": "stored",
+                    "hideLabel": false,
+                    "runtimeDisplayOrder": [
+                      "graph-live-status",
+                      "graph-live-intensity",
+                      "graph-live-message"
+                    ],
+                    "runtimeDisplayStacked": false
+                  },
+                  {
+                    "id": "setting-action-events",
+                    "kind": "setting",
+                    "valueType": "runtimeDisplay",
+                    "fieldName": "ActionEvents",
+                    "keyName": "02_action_events",
+                    "description": "Impulse counters from Apply, blocked and reset paths.",
+                    "defaultValue": "",
+                    "hidden": false,
+                    "validatorMode": "none",
+                    "customValidator": "Press one of the demo buttons after compiling the mod.",
+                    "useSlider": false,
+                    "minimum": "0",
+                    "maximum": "100",
+                    "enumName": "",
+                    "enumOptions": [],
+                    "reaction": "stored",
+                    "hideLabel": false,
+                    "runtimeDisplayOrder": [
+                      "graph-pulse-applied",
+                      "graph-pulse-blocked",
+                      "graph-pulse-reset",
+                      "graph-pulse-save-failed"
+                    ],
+                    "runtimeDisplayStacked": false
+                  },
+                  {
+                    "id": "setting-demo-enabled",
+                    "kind": "setting",
+                    "valueType": "bool",
+                    "fieldName": "DemoEnabled",
+                    "keyName": "10_demo_enabled",
+                    "description": "Controls the Apply branch. Disable it to watch the False path count pulses.",
+                    "defaultValue": "true",
+                    "hidden": false,
+                    "validatorMode": "none",
+                    "customValidator": "",
+                    "useSlider": false,
+                    "minimum": "0",
+                    "maximum": "100",
+                    "enumName": "",
+                    "enumOptions": [],
+                    "reaction": "startup-saved",
+                    "hideLabel": false
+                  },
+                  {
+                    "id": "setting-intensity",
+                    "kind": "setting",
+                    "valueType": "float",
+                    "fieldName": "Intensity",
+                    "keyName": "11_intensity",
+                    "description": "The graph multiplies this value by two and publishes the result live.",
+                    "defaultValue": "2.5",
+                    "hidden": false,
+                    "validatorMode": "range",
+                    "customValidator": "",
+                    "useSlider": true,
+                    "minimum": "0",
+                    "maximum": "10",
+                    "enumName": "",
+                    "enumOptions": [],
+                    "reaction": "startup-saved",
+                    "hideLabel": false
+                  },
+                  {
+                    "id": "setting-show-details",
+                    "kind": "setting",
+                    "valueType": "bool",
+                    "fieldName": "ShowRuntimeDetails",
+                    "keyName": "12_show_runtime_details",
+                    "description": "Uses Set Configuration Visibility to reveal the initially hidden Details Inline Row.",
+                    "defaultValue": "false",
+                    "hidden": false,
+                    "validatorMode": "none",
+                    "customValidator": "",
+                    "useSlider": false,
+                    "minimum": "0",
+                    "maximum": "100",
+                    "enumName": "",
+                    "enumOptions": [],
+                    "reaction": "startup-saved",
+                    "hideLabel": false
+                  },
+                  {
+                    "id": "setting-horizontal-controls",
+                    "kind": "setting",
+                    "valueType": "bool",
+                    "fieldName": "HorizontalControls",
+                    "keyName": "13_horizontal_controls",
+                    "description": "Switches the Demo Controls Inline Row between horizontal and vertical layout at runtime.",
+                    "defaultValue": "true",
+                    "hidden": false,
+                    "validatorMode": "none",
+                    "customValidator": "",
+                    "useSlider": false,
+                    "minimum": "0",
+                    "maximum": "100",
+                    "enumName": "",
+                    "enumOptions": [],
+                    "reaction": "startup-saved",
+                    "hideLabel": false
+                  },
+                  {
+                    "id": "setting-show-apply-label",
+                    "kind": "setting",
+                    "valueType": "bool",
+                    "fieldName": "ShowApplyLabel",
+                    "keyName": "14_show_apply_label",
+                    "description": "Shows or hides the left-side label of the Apply button cell at runtime.",
+                    "defaultValue": "false",
+                    "hidden": false,
+                    "validatorMode": "none",
+                    "customValidator": "",
+                    "useSlider": false,
+                    "minimum": "0",
+                    "maximum": "100",
+                    "enumName": "",
+                    "enumOptions": [],
+                    "reaction": "startup-saved",
+                    "hideLabel": false
+                  },
+                  {
+                    "id": "row-demo-controls",
+                    "kind": "layoutRow",
+                    "label": "Demo Controls",
+                    "description": "A 65/20/15 Inline Row controlled by the Runtime Graph.",
+                    "horizontal": true,
+                    "hidden": false,
+                    "children": [
+                      {
+                        "id": "setting-demo-message",
+                        "kind": "setting",
+                        "valueType": "string",
+                        "fieldName": "DemoMessage",
+                        "keyName": "15_demo_message",
+                        "description": "This draft is saved before Apply runs, so the button action does not reset the text.",
+                        "defaultValue": "Hello from the compiled Runtime Graph!",
+                        "hidden": false,
+                        "validatorMode": "none",
+                        "customValidator": "",
+                        "useSlider": false,
+                        "minimum": "0",
+                        "maximum": "100",
+                        "enumName": "",
+                        "enumOptions": [],
+                        "reaction": "startup-saved",
+                        "hideLabel": false,
+                        "layoutWidthPercent": 65
+                      },
+                      {
+                        "id": "button-apply-demo",
+                        "kind": "setting",
+                        "valueType": "button",
+                        "fieldName": "ApplyDemo",
+                        "keyName": "16_apply_demo",
+                        "description": "Saves all current menu drafts, branches on Demo Enabled and applies the runtime widths.",
+                        "defaultValue": "",
+                        "hidden": false,
+                        "validatorMode": "none",
+                        "customValidator": "",
+                        "useSlider": false,
+                        "minimum": "0",
+                        "maximum": "100",
+                        "enumName": "",
+                        "enumOptions": [],
+                        "reaction": "stored",
+                        "hideLabel": true,
+                        "layoutWidthPercent": 20,
+                        "buttonLabel": "Apply + Save"
+                      },
+                      {
+                        "id": "button-reset-menu",
+                        "kind": "setting",
+                        "valueType": "button",
+                        "fieldName": "ResetDemoMenu",
+                        "keyName": "17_reset_demo_menu",
+                        "description": "Saves drafts, removes runtime menu overrides and restores the Configuration Outline layout.",
+                        "defaultValue": "",
+                        "hidden": false,
+                        "validatorMode": "none",
+                        "customValidator": "",
+                        "useSlider": false,
+                        "minimum": "0",
+                        "maximum": "100",
+                        "enumName": "",
+                        "enumOptions": [],
+                        "reaction": "stored",
+                        "hideLabel": true,
+                        "layoutWidthPercent": 15,
+                        "buttonLabel": "Reset Layout"
+                      }
+                    ]
+                  },
+                  {
+                    "id": "row-runtime-details",
+                    "kind": "layoutRow",
+                    "label": "Runtime Details",
+                    "description": "Initially hidden as a complete row; Show Runtime Details reveals it through graph logic.",
+                    "horizontal": true,
+                    "hidden": true,
+                    "children": [
+                      {
+                        "id": "setting-detail-note",
+                        "kind": "setting",
+                        "valueType": "string",
+                        "fieldName": "DetailNote",
+                        "keyName": "18_detail_note",
+                        "description": "A child of a runtime-controlled hidden Inline Row.",
+                        "defaultValue": "This complete row was revealed by Set Configuration Visibility.",
+                        "hidden": false,
+                        "validatorMode": "none",
+                        "customValidator": "",
+                        "useSlider": false,
+                        "minimum": "0",
+                        "maximum": "100",
+                        "enumName": "",
+                        "enumOptions": [],
+                        "reaction": "stored",
+                        "hideLabel": false,
+                        "layoutWidthPercent": 70
+                      },
+                      {
+                        "id": "setting-detail-strength",
+                        "kind": "setting",
+                        "valueType": "float",
+                        "fieldName": "DetailStrength",
+                        "keyName": "19_detail_strength",
+                        "description": "A second control proving that the entire Inline Row becomes visible.",
+                        "defaultValue": "0.75",
+                        "hidden": false,
+                        "validatorMode": "range",
+                        "customValidator": "",
+                        "useSlider": true,
+                        "minimum": "0",
+                        "maximum": "1",
+                        "enumName": "",
+                        "enumOptions": [],
+                        "reaction": "stored",
+                        "hideLabel": false,
+                        "layoutWidthPercent": 30
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "option-appearance",
+                "name": "Appearance",
+                "children": [
+                  {
+                    "id": "setting-quality",
+                    "kind": "setting",
+                    "valueType": "enum",
+                    "fieldName": "Quality",
+                    "keyName": "20_quality",
+                    "description": "A normal enum setting included to demonstrate the generated picker control.",
+                    "defaultValue": "Medium",
+                    "hidden": false,
+                    "validatorMode": "none",
+                    "customValidator": "",
+                    "useSlider": false,
+                    "minimum": "0",
+                    "maximum": "100",
+                    "enumName": "QualityLevel",
+                    "enumOptions": [
+                      "Low",
+                      "Medium",
+                      "High",
+                      "Ultra"
+                    ],
+                    "reaction": "startup-saved",
+                    "hideLabel": false
+                  },
+                  {
+                    "id": "setting-accent-color",
+                    "kind": "setting",
+                    "valueType": "colorX",
+                    "fieldName": "AccentColor",
+                    "keyName": "21_accent_color",
+                    "description": "An HDR-capable colorX setting rendered by the shared color picker.",
+                    "defaultValue": "colorX.Cyan",
+                    "hidden": false,
+                    "validatorMode": "none",
+                    "customValidator": "",
+                    "useSlider": false,
+                    "minimum": "0",
+                    "maximum": "100",
+                    "enumName": "",
+                    "enumOptions": [],
+                    "reaction": "startup-saved",
+                    "hideLabel": false,
+                    "colorProfile": "linear",
+                    "colorStrength": 1
+                  },
+                  {
+                    "id": "setting-ui-scale",
+                    "kind": "setting",
+                    "valueType": "float",
+                    "fieldName": "UiScale",
+                    "keyName": "22_ui_scale",
+                    "description": "A regular validated slider from 0.5 to 2.0.",
+                    "defaultValue": "1",
+                    "hidden": false,
+                    "validatorMode": "range",
+                    "customValidator": "",
+                    "useSlider": true,
+                    "minimum": "0.5",
+                    "maximum": "2",
+                    "enumName": "",
+                    "enumOptions": [],
+                    "reaction": "stored",
+                    "hideLabel": false
+                  }
+                ]
+              },
+              {
+                "id": "option-learn",
+                "name": "Learn",
+                "children": [
+                  {
+                    "id": "setting-try-this",
+                    "kind": "setting",
+                    "valueType": "string",
+                    "fieldName": "TryThisNext",
+                    "keyName": "30_try_this_next",
+                    "description": "A compact walkthrough stored directly inside the generated example menu.",
+                    "defaultValue": "Compile → open the menu → edit the message → press Apply + Save → toggle the runtime controls.",
+                    "hidden": false,
+                    "validatorMode": "none",
+                    "customValidator": "",
+                    "useSlider": false,
+                    "minimum": "0",
+                    "maximum": "100",
+                    "enumName": "",
+                    "enumOptions": [],
+                    "reaction": "stored",
+                    "hideLabel": false
+                  },
+                  {
+                    "id": "setting-demo-uri",
+                    "kind": "setting",
+                    "valueType": "Uri",
+                    "fieldName": "DemoResource",
+                    "keyName": "31_demo_resource",
+                    "description": "An ordinary URI field with the shared copy action.",
+                    "defaultValue": "https://github.com/resonite-modding-group/ResoniteModLoader",
+                    "hidden": false,
+                    "validatorMode": "none",
+                    "customValidator": "",
+                    "useSlider": false,
+                    "minimum": "0",
+                    "maximum": "100",
+                    "enumName": "",
+                    "enumOptions": [],
+                    "reaction": "stored",
+                    "hideLabel": false
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "nodes": [
+        {
+          "id": "graph-start-configuration",
+          "kind": "configuration",
+          "x": 100,
+          "y": 180,
+          "width": null,
+          "height": null,
+          "label": "00 · Configuration values and button impulses",
+          "parameters": {
+            "portLayout": "standard"
+          }
+        },
+        {
+          "id": "graph-menu-instance",
+          "kind": "operator",
+          "operatorId": "configuration.menuInstance",
+          "x": 100,
+          "y": 1120,
+          "width": null,
+          "height": null,
+          "label": "00 · Stable handles for every Outline item",
+          "parameters": {
+            "portLayout": "standard"
+          }
+        },
+        {
+          "id": "graph-text-active",
+          "kind": "operator",
+          "operatorId": "constant.string",
+          "x": 700,
+          "y": 80,
+          "width": null,
+          "height": null,
+          "label": "ACTIVE",
+          "parameters": {
+            "portLayout": "standard",
+            "value": "Demo is ACTIVE"
+          }
+        },
+        {
+          "id": "graph-text-paused",
+          "kind": "operator",
+          "operatorId": "constant.string",
+          "x": 700,
+          "y": 240,
+          "width": null,
+          "height": null,
+          "label": "PAUSED",
+          "parameters": {
+            "portLayout": "standard",
+            "value": "Demo is paused"
+          }
+        },
+        {
+          "id": "graph-select-status",
+          "kind": "operator",
+          "operatorId": "logic.select",
+          "x": 1030,
+          "y": 140,
+          "width": null,
+          "height": null,
+          "label": "01 · Select status text",
+          "parameters": {
+            "portLayout": "standard"
+          }
+        },
+        {
+          "id": "graph-live-status",
+          "kind": "operator",
+          "operatorId": "resonite.displayValue",
+          "x": 1400,
+          "y": 140,
+          "width": null,
+          "height": null,
+          "label": "Status",
+          "parameters": {
+            "portLayout": "standard"
+          }
+        },
+        {
+          "id": "graph-number-two",
+          "kind": "operator",
+          "operatorId": "constant.number",
+          "x": 720,
+          "y": 480,
+          "width": null,
+          "height": null,
+          "label": "Factor 2",
+          "parameters": {
+            "portLayout": "standard",
+            "valueType": "float",
+            "value": "2"
+          }
+        },
+        {
+          "id": "graph-multiply-intensity",
+          "kind": "operator",
+          "operatorId": "math.multiply",
+          "x": 1030,
+          "y": 430,
+          "width": null,
+          "height": null,
+          "label": "01 · Intensity × 2",
+          "parameters": {
+            "portLayout": "standard",
+            "variadicInputCount": 2
+          }
+        },
+        {
+          "id": "graph-live-intensity",
+          "kind": "operator",
+          "operatorId": "resonite.displayValue",
+          "x": 1400,
+          "y": 430,
+          "width": null,
+          "height": null,
+          "label": "Intensity × 2",
+          "parameters": {
+            "portLayout": "standard"
+          }
+        },
+        {
+          "id": "graph-live-message",
+          "kind": "operator",
+          "operatorId": "resonite.displayValue",
+          "x": 1400,
+          "y": 700,
+          "width": null,
+          "height": null,
+          "label": "Saved Message",
+          "parameters": {
+            "portLayout": "standard"
+          }
+        },
+        {
+          "id": "graph-set-details-visibility",
+          "kind": "operator",
+          "operatorId": "configuration.setVisibility",
+          "x": 1740,
+          "y": 1020,
+          "width": null,
+          "height": null,
+          "label": "02 · Reveal hidden Details row",
+          "parameters": {
+            "portLayout": "standard"
+          }
+        },
+        {
+          "id": "graph-set-controls-layout",
+          "kind": "operator",
+          "operatorId": "configuration.setLayout",
+          "x": 1740,
+          "y": 1320,
+          "width": null,
+          "height": null,
+          "label": "02 · Horizontal / vertical Controls row",
+          "parameters": {
+            "portLayout": "standard"
+          }
+        },
+        {
+          "id": "graph-set-apply-label",
+          "kind": "operator",
+          "operatorId": "configuration.setLabelVisibility",
+          "x": 1740,
+          "y": 1620,
+          "width": null,
+          "height": null,
+          "label": "02 · Show / hide Apply cell label",
+          "parameters": {
+            "portLayout": "standard"
+          }
+        },
+        {
+          "id": "graph-save-before-apply",
+          "kind": "operator",
+          "operatorId": "configuration.saveSettings",
+          "x": 2440,
+          "y": 120,
+          "width": null,
+          "height": null,
+          "label": "03 · Save every draft before Apply",
+          "parameters": {
+            "portLayout": "standard"
+          }
+        },
+        {
+          "id": "graph-branch-enabled",
+          "kind": "operator",
+          "operatorId": "flow.branch",
+          "x": 2780,
+          "y": 120,
+          "width": null,
+          "height": null,
+          "label": "03 · Is the demo enabled?",
+          "parameters": {
+            "portLayout": "standard"
+          }
+        },
+        {
+          "id": "graph-apply-sequence",
+          "kind": "operator",
+          "operatorId": "flow.sequence",
+          "x": 3120,
+          "y": 80,
+          "width": null,
+          "height": null,
+          "label": "03 · Apply four actions in order",
+          "parameters": {
+            "portLayout": "standard",
+            "variadicOutputCount": 4
+          }
+        },
+        {
+          "id": "graph-pulse-applied",
+          "kind": "operator",
+          "operatorId": "debug.displayImpulse",
+          "x": 3550,
+          "y": 20,
+          "width": null,
+          "height": null,
+          "label": "Apply Success",
+          "parameters": {
+            "portLayout": "standard"
+          }
+        },
+        {
+          "id": "graph-pulse-blocked",
+          "kind": "operator",
+          "operatorId": "debug.displayImpulse",
+          "x": 3120,
+          "y": 390,
+          "width": null,
+          "height": null,
+          "label": "Apply Blocked",
+          "parameters": {
+            "portLayout": "standard"
+          }
+        },
+        {
+          "id": "graph-width-message",
+          "kind": "operator",
+          "operatorId": "configuration.setWidth",
+          "x": 3550,
+          "y": 230,
+          "width": null,
+          "height": null,
+          "label": "Message width · 65%",
+          "parameters": {
+            "portLayout": "standard"
+          }
+        },
+        {
+          "id": "graph-width-apply",
+          "kind": "operator",
+          "operatorId": "configuration.setWidth",
+          "x": 3550,
+          "y": 500,
+          "width": null,
+          "height": null,
+          "label": "Apply width · 20%",
+          "parameters": {
+            "portLayout": "standard"
+          }
+        },
+        {
+          "id": "graph-width-reset",
+          "kind": "operator",
+          "operatorId": "configuration.setWidth",
+          "x": 3550,
+          "y": 770,
+          "width": null,
+          "height": null,
+          "label": "Reset width · 15%",
+          "parameters": {
+            "portLayout": "standard"
+          }
+        },
+        {
+          "id": "graph-number-65",
+          "kind": "operator",
+          "operatorId": "constant.number",
+          "x": 3960,
+          "y": 230,
+          "width": null,
+          "height": null,
+          "label": "65%",
+          "parameters": {
+            "portLayout": "mirrored",
+            "valueType": "float",
+            "value": "65"
+          }
+        },
+        {
+          "id": "graph-number-20",
+          "kind": "operator",
+          "operatorId": "constant.number",
+          "x": 3960,
+          "y": 500,
+          "width": null,
+          "height": null,
+          "label": "20%",
+          "parameters": {
+            "portLayout": "mirrored",
+            "valueType": "float",
+            "value": "20"
+          }
+        },
+        {
+          "id": "graph-number-15",
+          "kind": "operator",
+          "operatorId": "constant.number",
+          "x": 3960,
+          "y": 770,
+          "width": null,
+          "height": null,
+          "label": "15%",
+          "parameters": {
+            "portLayout": "mirrored",
+            "valueType": "float",
+            "value": "15"
+          }
+        },
+        {
+          "id": "graph-save-before-reset",
+          "kind": "operator",
+          "operatorId": "configuration.saveSettings",
+          "x": 2440,
+          "y": 1120,
+          "width": null,
+          "height": null,
+          "label": "04 · Save every draft before Reset",
+          "parameters": {
+            "portLayout": "standard"
+          }
+        },
+        {
+          "id": "graph-reset-menu",
+          "kind": "operator",
+          "operatorId": "configuration.resetMenu",
+          "x": 2810,
+          "y": 1120,
+          "width": null,
+          "height": null,
+          "label": "04 · Restore the Outline layout",
+          "parameters": {
+            "portLayout": "standard"
+          }
+        },
+        {
+          "id": "graph-pulse-reset",
+          "kind": "operator",
+          "operatorId": "debug.displayImpulse",
+          "x": 3190,
+          "y": 1120,
+          "width": null,
+          "height": null,
+          "label": "Menu Reset",
+          "parameters": {
+            "portLayout": "standard"
+          }
+        },
+        {
+          "id": "graph-merge-save-failures",
+          "kind": "operator",
+          "operatorId": "flow.impulseMerge",
+          "x": 2810,
+          "y": 1480,
+          "width": null,
+          "height": null,
+          "label": "04 · Merge both save failures",
+          "parameters": {
+            "portLayout": "standard",
+            "variadicInputCount": 2
+          }
+        },
+        {
+          "id": "graph-pulse-save-failed",
+          "kind": "operator",
+          "operatorId": "debug.displayImpulse",
+          "x": 3190,
+          "y": 1480,
+          "width": null,
+          "height": null,
+          "label": "Save Failed",
+          "parameters": {
+            "portLayout": "standard"
+          }
+        }
+      ],
+      "connections": [
+        {
+          "id": "wire-001",
+          "fromNode": "graph-start-configuration",
+          "fromPort": "config-setting-demo-enabled",
+          "toNode": "graph-select-status",
+          "toPort": "condition",
+          "points": [
+            {
+              "id": "wire-001-enabled-trunk",
+              "x": 540,
+              "y": 370
+            },
+            {
+              "id": "wire-001-p2",
+              "x": 940,
+              "y": 370
+            },
+            {
+              "id": "wire-001-p3",
+              "x": 940,
+              "y": 220
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-002",
+          "fromNode": "graph-text-active",
+          "fromPort": "value",
+          "toNode": "graph-select-status",
+          "toPort": "true",
+          "points": [
+            {
+              "id": "wire-002-p1",
+              "x": 1000,
+              "y": 155
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-003",
+          "fromNode": "graph-text-paused",
+          "fromPort": "value",
+          "toNode": "graph-select-status",
+          "toPort": "false",
+          "points": [
+            {
+              "id": "wire-003-p1",
+              "x": 1000,
+              "y": 285
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-004",
+          "fromNode": "graph-select-status",
+          "fromPort": "result",
+          "toNode": "graph-live-status",
+          "toPort": "value",
+          "points": [
+            {
+              "id": "wire-004-p1",
+              "x": 1375,
+              "y": 205
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-005",
+          "fromNode": "graph-start-configuration",
+          "fromPort": "config-setting-live-values",
+          "toNode": "graph-live-status",
+          "toPort": "rmlMenu",
+          "points": [
+            {
+              "id": "wire-005-p1",
+              "x": 520,
+              "y": 20
+            },
+            {
+              "id": "wire-005-live-display-trunk",
+              "x": 1260,
+              "y": 20
+            },
+            {
+              "id": "wire-005-p3",
+              "x": 1320,
+              "y": 235
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-006",
+          "fromNode": "graph-start-configuration",
+          "fromPort": "config-setting-intensity",
+          "toNode": "graph-multiply-intensity",
+          "toPort": "a",
+          "points": [
+            {
+              "id": "wire-006-p1",
+              "x": 560,
+              "y": 420
+            },
+            {
+              "id": "wire-006-p2",
+              "x": 960,
+              "y": 420
+            },
+            {
+              "id": "wire-006-p3",
+              "x": 960,
+              "y": 510
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-007",
+          "fromNode": "graph-number-two",
+          "fromPort": "value",
+          "toNode": "graph-multiply-intensity",
+          "toPort": "b",
+          "points": [
+            {
+              "id": "wire-007-p1",
+              "x": 1015,
+              "y": 550
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-008",
+          "fromNode": "graph-multiply-intensity",
+          "fromPort": "result",
+          "toNode": "graph-live-intensity",
+          "toPort": "value",
+          "points": [
+            {
+              "id": "wire-008-p1",
+              "x": 1375,
+              "y": 505
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-009",
+          "fromNode": "graph-start-configuration",
+          "fromPort": "config-setting-live-values",
+          "toNode": "graph-live-intensity",
+          "toPort": "rmlMenu",
+          "points": [
+            {
+              "id": "wire-009-p1",
+              "x": 1300,
+              "y": 20
+            },
+            {
+              "id": "wire-009-p2",
+              "x": 1320,
+              "y": 525
+            }
+          ],
+          "branchFrom": {
+            "connectionId": "wire-005",
+            "pointId": "wire-005-live-display-trunk"
+          }
+        },
+        {
+          "id": "wire-010",
+          "fromNode": "graph-start-configuration",
+          "fromPort": "config-setting-demo-message",
+          "toNode": "graph-live-message",
+          "toPort": "value",
+          "points": [
+            {
+              "id": "wire-010-p1",
+              "x": 580,
+              "y": 900
+            },
+            {
+              "id": "wire-010-p2",
+              "x": 1320,
+              "y": 900
+            },
+            {
+              "id": "wire-010-p3",
+              "x": 1320,
+              "y": 785
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-011",
+          "fromNode": "graph-start-configuration",
+          "fromPort": "config-setting-live-values",
+          "toNode": "graph-live-message",
+          "toPort": "rmlMenu",
+          "points": [
+            {
+              "id": "wire-011-p1",
+              "x": 1340,
+              "y": 20
+            },
+            {
+              "id": "wire-011-p2",
+              "x": 1340,
+              "y": 805
+            }
+          ],
+          "branchFrom": {
+            "connectionId": "wire-005",
+            "pointId": "wire-005-live-display-trunk"
+          }
+        },
+        {
+          "id": "wire-012",
+          "fromNode": "graph-start-configuration",
+          "fromPort": "config-setting-show-details",
+          "toNode": "graph-set-details-visibility",
+          "toPort": "call",
+          "points": [
+            {
+              "id": "wire-012-p1",
+              "x": 600,
+              "y": 920
+            },
+            {
+              "id": "wire-012-details-bool-trunk",
+              "x": 1620,
+              "y": 920
+            },
+            {
+              "id": "wire-012-p3",
+              "x": 1660,
+              "y": 1090
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-013",
+          "fromNode": "graph-start-configuration",
+          "fromPort": "config-setting-show-details",
+          "toNode": "graph-set-details-visibility",
+          "toPort": "visible",
+          "points": [
+            {
+              "id": "wire-013-p1",
+              "x": 1640,
+              "y": 920
+            },
+            {
+              "id": "wire-013-p2",
+              "x": 1680,
+              "y": 1190
+            }
+          ],
+          "branchFrom": {
+            "connectionId": "wire-012",
+            "pointId": "wire-012-details-bool-trunk"
+          }
+        },
+        {
+          "id": "wire-014",
+          "fromNode": "graph-menu-instance",
+          "fromPort": "item-row-runtime-details",
+          "toNode": "graph-set-details-visibility",
+          "toPort": "item",
+          "points": [
+            {
+              "id": "wire-014-p1",
+              "x": 620,
+              "y": 980
+            },
+            {
+              "id": "wire-014-p2",
+              "x": 1600,
+              "y": 980
+            },
+            {
+              "id": "wire-014-p3",
+              "x": 1680,
+              "y": 1140
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-015",
+          "fromNode": "graph-start-configuration",
+          "fromPort": "config-setting-horizontal-controls",
+          "toNode": "graph-set-controls-layout",
+          "toPort": "call",
+          "points": [
+            {
+              "id": "wire-015-p1",
+              "x": 620,
+              "y": 1250
+            },
+            {
+              "id": "wire-015-layout-bool-trunk",
+              "x": 1620,
+              "y": 1250
+            },
+            {
+              "id": "wire-015-p3",
+              "x": 1660,
+              "y": 1390
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-016",
+          "fromNode": "graph-start-configuration",
+          "fromPort": "config-setting-horizontal-controls",
+          "toNode": "graph-set-controls-layout",
+          "toPort": "horizontal",
+          "points": [
+            {
+              "id": "wire-016-p1",
+              "x": 1640,
+              "y": 1250
+            },
+            {
+              "id": "wire-016-p2",
+              "x": 1680,
+              "y": 1490
+            }
+          ],
+          "branchFrom": {
+            "connectionId": "wire-015",
+            "pointId": "wire-015-layout-bool-trunk"
+          }
+        },
+        {
+          "id": "wire-017",
+          "fromNode": "graph-menu-instance",
+          "fromPort": "item-row-demo-controls",
+          "toNode": "graph-set-controls-layout",
+          "toPort": "item",
+          "points": [
+            {
+              "id": "wire-017-p1",
+              "x": 660,
+              "y": 1280
+            },
+            {
+              "id": "wire-017-p2",
+              "x": 1600,
+              "y": 1280
+            },
+            {
+              "id": "wire-017-p3",
+              "x": 1680,
+              "y": 1440
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-018",
+          "fromNode": "graph-start-configuration",
+          "fromPort": "config-setting-show-apply-label",
+          "toNode": "graph-set-apply-label",
+          "toPort": "call",
+          "points": [
+            {
+              "id": "wire-018-p1",
+              "x": 640,
+              "y": 1550
+            },
+            {
+              "id": "wire-018-label-bool-trunk",
+              "x": 1620,
+              "y": 1550
+            },
+            {
+              "id": "wire-018-p3",
+              "x": 1660,
+              "y": 1690
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-019",
+          "fromNode": "graph-start-configuration",
+          "fromPort": "config-setting-show-apply-label",
+          "toNode": "graph-set-apply-label",
+          "toPort": "visible",
+          "points": [
+            {
+              "id": "wire-019-p1",
+              "x": 1640,
+              "y": 1550
+            },
+            {
+              "id": "wire-019-p2",
+              "x": 1680,
+              "y": 1790
+            }
+          ],
+          "branchFrom": {
+            "connectionId": "wire-018",
+            "pointId": "wire-018-label-bool-trunk"
+          }
+        },
+        {
+          "id": "wire-020",
+          "fromNode": "graph-menu-instance",
+          "fromPort": "item-button-apply-demo",
+          "toNode": "graph-set-apply-label",
+          "toPort": "item",
+          "points": [
+            {
+              "id": "wire-020-p1",
+              "x": 700,
+              "y": 1580
+            },
+            {
+              "id": "wire-020-p2",
+              "x": 1600,
+              "y": 1580
+            },
+            {
+              "id": "wire-020-p3",
+              "x": 1680,
+              "y": 1740
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-021",
+          "fromNode": "graph-start-configuration",
+          "fromPort": "config-button-apply-demo",
+          "toNode": "graph-save-before-apply",
+          "toPort": "call",
+          "points": [
+            {
+              "id": "wire-021-p1",
+              "x": 500,
+              "y": -20
+            },
+            {
+              "id": "wire-021-p2",
+              "x": 2360,
+              "y": -20
+            },
+            {
+              "id": "wire-021-p3",
+              "x": 2360,
+              "y": 180
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-022",
+          "fromNode": "graph-save-before-apply",
+          "fromPort": "done",
+          "toNode": "graph-branch-enabled",
+          "toPort": "call",
+          "points": [
+            {
+              "id": "wire-022-p1",
+              "x": 2760,
+              "y": 185
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-023",
+          "fromNode": "graph-start-configuration",
+          "fromPort": "config-setting-demo-enabled",
+          "toNode": "graph-branch-enabled",
+          "toPort": "condition",
+          "points": [
+            {
+              "id": "wire-023-p1",
+              "x": 580,
+              "y": -50
+            },
+            {
+              "id": "wire-023-p2",
+              "x": 2700,
+              "y": -50
+            },
+            {
+              "id": "wire-023-p3",
+              "x": 2700,
+              "y": 245
+            }
+          ],
+          "branchFrom": {
+            "connectionId": "wire-001",
+            "pointId": "wire-001-enabled-trunk"
+          }
+        },
+        {
+          "id": "wire-024",
+          "fromNode": "graph-branch-enabled",
+          "fromPort": "true",
+          "toNode": "graph-apply-sequence",
+          "toPort": "call",
+          "points": [
+            {
+              "id": "wire-024-p1",
+              "x": 3100,
+              "y": 175
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-025",
+          "fromNode": "graph-branch-enabled",
+          "fromPort": "false",
+          "toNode": "graph-pulse-blocked",
+          "toPort": "call",
+          "points": [
+            {
+              "id": "wire-025-p1",
+              "x": 3060,
+              "y": 350
+            },
+            {
+              "id": "wire-025-p2",
+              "x": 3085,
+              "y": 445
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-026",
+          "fromNode": "graph-apply-sequence",
+          "fromPort": "first",
+          "toNode": "graph-pulse-applied",
+          "toPort": "call",
+          "points": [
+            {
+              "id": "wire-026-p1",
+              "x": 3480,
+              "y": 120
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-027",
+          "fromNode": "graph-apply-sequence",
+          "fromPort": "second",
+          "toNode": "graph-width-message",
+          "toPort": "call",
+          "points": [
+            {
+              "id": "wire-027-p1",
+              "x": 3445,
+              "y": 245
+            },
+            {
+              "id": "wire-027-p2",
+              "x": 3480,
+              "y": 295
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-028",
+          "fromNode": "graph-apply-sequence",
+          "fromPort": "third",
+          "toNode": "graph-width-apply",
+          "toPort": "call",
+          "points": [
+            {
+              "id": "wire-028-p1",
+              "x": 3435,
+              "y": 420
+            },
+            {
+              "id": "wire-028-p2",
+              "x": 3480,
+              "y": 565
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-029",
+          "fromNode": "graph-apply-sequence",
+          "fromPort": "fourth",
+          "toNode": "graph-width-reset",
+          "toPort": "call",
+          "points": [
+            {
+              "id": "wire-029-p1",
+              "x": 3425,
+              "y": 620
+            },
+            {
+              "id": "wire-029-p2",
+              "x": 3470,
+              "y": 835
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-030",
+          "fromNode": "graph-menu-instance",
+          "fromPort": "item-setting-demo-message",
+          "toNode": "graph-width-message",
+          "toPort": "item",
+          "points": [
+            {
+              "id": "wire-030-p1",
+              "x": 760,
+              "y": 2020
+            },
+            {
+              "id": "wire-030-p2",
+              "x": 3500,
+              "y": 2020
+            },
+            {
+              "id": "wire-030-p3",
+              "x": 3500,
+              "y": 365
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-031",
+          "fromNode": "graph-number-65",
+          "fromPort": "value",
+          "toNode": "graph-width-message",
+          "toPort": "width",
+          "points": [
+            {
+              "id": "wire-031-p1",
+              "x": 3890,
+              "y": -10
+            },
+            {
+              "id": "wire-031-p2",
+              "x": 3470,
+              "y": -10
+            },
+            {
+              "id": "wire-031-p3",
+              "x": 3470,
+              "y": 390
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-032",
+          "fromNode": "graph-menu-instance",
+          "fromPort": "item-button-apply-demo",
+          "toNode": "graph-width-apply",
+          "toPort": "item",
+          "points": [
+            {
+              "id": "wire-032-p1",
+              "x": 780,
+              "y": 2070
+            },
+            {
+              "id": "wire-032-p2",
+              "x": 3450,
+              "y": 2070
+            },
+            {
+              "id": "wire-032-p3",
+              "x": 3450,
+              "y": 635
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-033",
+          "fromNode": "graph-number-20",
+          "fromPort": "value",
+          "toNode": "graph-width-apply",
+          "toPort": "width",
+          "points": [
+            {
+              "id": "wire-033-p1",
+              "x": 3900,
+              "y": 1000
+            },
+            {
+              "id": "wire-033-p2",
+              "x": 3430,
+              "y": 1000
+            },
+            {
+              "id": "wire-033-p3",
+              "x": 3430,
+              "y": 660
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-034",
+          "fromNode": "graph-menu-instance",
+          "fromPort": "item-button-reset-menu",
+          "toNode": "graph-width-reset",
+          "toPort": "item",
+          "points": [
+            {
+              "id": "wire-034-p1",
+              "x": 800,
+              "y": 2120
+            },
+            {
+              "id": "wire-034-p2",
+              "x": 3410,
+              "y": 2120
+            },
+            {
+              "id": "wire-034-p3",
+              "x": 3410,
+              "y": 905
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-035",
+          "fromNode": "graph-number-15",
+          "fromPort": "value",
+          "toNode": "graph-width-reset",
+          "toPort": "width",
+          "points": [
+            {
+              "id": "wire-035-p1",
+              "x": 3920,
+              "y": 1060
+            },
+            {
+              "id": "wire-035-p2",
+              "x": 3390,
+              "y": 1060
+            },
+            {
+              "id": "wire-035-p3",
+              "x": 3390,
+              "y": 930
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-036",
+          "fromNode": "graph-start-configuration",
+          "fromPort": "config-button-reset-menu",
+          "toNode": "graph-save-before-reset",
+          "toPort": "call",
+          "points": [
+            {
+              "id": "wire-036-p1",
+              "x": 720,
+              "y": 1980
+            },
+            {
+              "id": "wire-036-p2",
+              "x": 2360,
+              "y": 1980
+            },
+            {
+              "id": "wire-036-p3",
+              "x": 2360,
+              "y": 1200
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-037",
+          "fromNode": "graph-save-before-reset",
+          "fromPort": "done",
+          "toNode": "graph-reset-menu",
+          "toPort": "call",
+          "points": [
+            {
+              "id": "wire-037-p1",
+              "x": 2770,
+              "y": 1190
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-038",
+          "fromNode": "graph-menu-instance",
+          "fromPort": "menu",
+          "toNode": "graph-reset-menu",
+          "toPort": "menu",
+          "points": [
+            {
+              "id": "wire-038-p1",
+              "x": 680,
+              "y": 2170
+            },
+            {
+              "id": "wire-038-p2",
+              "x": 2740,
+              "y": 2170
+            },
+            {
+              "id": "wire-038-p3",
+              "x": 2740,
+              "y": 1260
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-039",
+          "fromNode": "graph-reset-menu",
+          "fromPort": "done",
+          "toNode": "graph-pulse-reset",
+          "toPort": "call",
+          "points": [
+            {
+              "id": "wire-039-p1",
+              "x": 3165,
+              "y": 1190
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-040",
+          "fromNode": "graph-save-before-apply",
+          "fromPort": "failed",
+          "toNode": "graph-merge-save-failures",
+          "toPort": "a",
+          "points": [
+            {
+              "id": "wire-040-p1",
+              "x": 2740,
+              "y": 340
+            },
+            {
+              "id": "wire-040-p2",
+              "x": 2740,
+              "y": 1420
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-041",
+          "fromNode": "graph-save-before-reset",
+          "fromPort": "failed",
+          "toNode": "graph-merge-save-failures",
+          "toPort": "b",
+          "points": [
+            {
+              "id": "wire-041-p1",
+              "x": 2730,
+              "y": 1370
+            },
+            {
+              "id": "wire-041-p2",
+              "x": 2780,
+              "y": 1550
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-042",
+          "fromNode": "graph-merge-save-failures",
+          "fromPort": "out",
+          "toNode": "graph-pulse-save-failed",
+          "toPort": "call",
+          "points": [
+            {
+              "id": "wire-042-p1",
+              "x": 3170,
+              "y": 1550
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-043",
+          "fromNode": "graph-start-configuration",
+          "fromPort": "config-setting-action-events",
+          "toNode": "graph-pulse-applied",
+          "toPort": "rmlMenu",
+          "points": [
+            {
+              "id": "wire-043-action-source-trunk",
+              "x": 500,
+              "y": -80
+            },
+            {
+              "id": "wire-043-action-top-branch",
+              "x": 2600,
+              "y": -80
+            },
+            {
+              "id": "wire-043-p3",
+              "x": 3460,
+              "y": -80
+            },
+            {
+              "id": "wire-043-p4",
+              "x": 3460,
+              "y": 155
+            }
+          ],
+          "branchFrom": null
+        },
+        {
+          "id": "wire-044",
+          "fromNode": "graph-start-configuration",
+          "fromPort": "config-setting-action-events",
+          "toNode": "graph-pulse-blocked",
+          "toPort": "rmlMenu",
+          "points": [
+            {
+              "id": "wire-044-p1",
+              "x": 3040,
+              "y": -80
+            },
+            {
+              "id": "wire-044-p2",
+              "x": 3040,
+              "y": 485
+            }
+          ],
+          "branchFrom": {
+            "connectionId": "wire-043",
+            "pointId": "wire-043-action-top-branch"
+          }
+        },
+        {
+          "id": "wire-045",
+          "fromNode": "graph-start-configuration",
+          "fromPort": "config-setting-action-events",
+          "toNode": "graph-pulse-reset",
+          "toPort": "rmlMenu",
+          "points": [
+            {
+              "id": "wire-045-p1",
+              "x": 540,
+              "y": -80
+            },
+            {
+              "id": "wire-045-p2",
+              "x": 540,
+              "y": 2220
+            },
+            {
+              "id": "wire-045-action-bottom-branch",
+              "x": 3060,
+              "y": 2220
+            },
+            {
+              "id": "wire-045-p4",
+              "x": 3060,
+              "y": 1215
+            }
+          ],
+          "branchFrom": {
+            "connectionId": "wire-043",
+            "pointId": "wire-043-action-source-trunk"
+          }
+        },
+        {
+          "id": "wire-046",
+          "fromNode": "graph-start-configuration",
+          "fromPort": "config-setting-action-events",
+          "toNode": "graph-pulse-save-failed",
+          "toPort": "rmlMenu",
+          "points": [
+            {
+              "id": "wire-046-p1",
+              "x": 3100,
+              "y": 2220
+            },
+            {
+              "id": "wire-046-p2",
+              "x": 3100,
+              "y": 1575
+            }
+          ],
+          "branchFrom": {
+            "connectionId": "wire-045",
+            "pointId": "wire-045-action-bottom-branch"
+          }
+        }
+      ],
+      "viewport": {
+        "x": 24,
+        "y": 36,
+        "scale": 0.26
+      },
+      "selectedNodeId": null,
+      "selectedConnectionId": null,
+      "selectedWirePoint": null,
+      "nextSequence": 76
+    }
+  },
   "workspace": {
-    "selectedId": "controller-main",
+    "selectedId": "controller-demo-pages",
     "activeContainerId": "root",
     "collapsedPaletteGroups": []
   }
