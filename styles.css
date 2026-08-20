@@ -8090,6 +8090,29 @@ dialog[open] > #rml-setup-assistant.rml-setup-modal-demonstration
   pointer-events: auto;
 }
 
+.rml-setup-live-controls[data-live-placement="bottom-left"] {
+  right: auto;
+  bottom: 14px;
+  left: 14px;
+  top: auto;
+  justify-content: flex-start;
+}
+
+.rml-setup-live-controls[data-live-placement="top-right"] {
+  right: 14px;
+  bottom: auto;
+  left: auto;
+  top: 14px;
+}
+
+.rml-setup-live-controls[data-live-placement="top-left"] {
+  right: auto;
+  bottom: auto;
+  left: 14px;
+  top: 14px;
+  justify-content: flex-start;
+}
+
 .rml-setup-live-controls[hidden] {
   display: none !important;
 }
@@ -8195,6 +8218,56 @@ dialog[open] > #rml-setup-assistant.rml-setup-modal-demonstration
   font-size: 9px;
 }
 
+.rml-setup-step-badge[hidden] {
+  display: none !important;
+}
+
+.rml-graph-inspector.rml-setup-graph-panel-visible-reveal,
+.inspector.panel.rml-setup-graph-panel-visible-reveal {
+  transform-origin: right center;
+  animation: rml-setup-graph-panel-visible-reveal 420ms cubic-bezier(.2, .8, .2, 1) both;
+}
+
+.rml-setup-card.rml-setup-card-hidden-during-panel-reveal {
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+@keyframes rml-setup-graph-panel-visible-reveal {
+  from {
+    opacity: 0;
+    transform: translateX(28px) scaleX(.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scaleX(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rml-graph-inspector.rml-setup-graph-panel-visible-reveal,
+  .inspector.panel.rml-setup-graph-panel-visible-reveal {
+    animation-duration: 1ms;
+  }
+}
+
+.rml-setup-viewport-warning {
+  margin-top: 10px;
+  padding: 9px 10px;
+  border: 1px solid rgba(255, 209, 129, .58);
+  border-radius: 7px;
+  background: rgba(255, 209, 129, .10);
+  color: #ffe2ac;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.rml-setup-viewport-warning[hidden] {
+  display: none !important;
+}
+
 @media (max-width: 780px) {
   .rml-setup-card {
     width: calc(100vw - 18px);
@@ -8235,6 +8308,12 @@ dialog[open] > #rml-setup-assistant.rml-setup-modal-demonstration
 }
 
 .rml-setup-demo-mouse.active { opacity: 1; }
+
+.rml-setup-demo-mouse.rml-setup-mouse-hard-hidden {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  transition: none !important;
+}
 
 .rml-setup-demo-mouse svg {
   display: block;
@@ -8402,6 +8481,24 @@ dialog[open] > #rml-setup-assistant.rml-setup-modal-demonstration
     right: 9px;
     bottom: 9px;
     max-width: calc(100vw - 18px);
+  }
+  .rml-setup-live-controls[data-live-placement="bottom-left"] {
+    right: auto;
+    bottom: 9px;
+    left: 9px;
+    top: auto;
+  }
+  .rml-setup-live-controls[data-live-placement="top-right"] {
+    right: 9px;
+    bottom: auto;
+    left: auto;
+    top: 9px;
+  }
+  .rml-setup-live-controls[data-live-placement="top-left"] {
+    right: auto;
+    bottom: auto;
+    left: 9px;
+    top: 9px;
   }
   .rml-setup-demo-label {
     max-width: 160px;
@@ -10188,6 +10285,7 @@ dialog.builder-message-dialog::backdrop {
     minmax(var(--rml-setup-adaptive-text-min-height, 1.56em), 1fr)
     auto
     auto
+    auto
     auto !important;
   align-content: stretch;
   overflow: hidden !important;
@@ -10248,6 +10346,6 @@ dialog.builder-message-dialog::backdrop {
 
 @media (max-width: 520px) {
   #rml-setup-assistant.rml-setup-adaptive-narration-card .rml-setup-card {
-    max-width: calc(100vw - 18px) !important;
+    max-width: var(--rml-setup-adaptive-card-max-width, calc(100vw - 18px)) !important;
   }
 }

@@ -25682,7 +25682,13 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     ) {
       graph = incomingGraph;
       pruneConnections();
-      persistGraph(true);
+      if (incoming === null) {
+        lastPersistedGraphJson = incomingJson;
+        typedGraphCodegenCacheKey = "";
+        typedGraphCodegenCache = null;
+      } else {
+        persistGraph(true);
+      }
     }
 
     cacheDom();
@@ -25822,10 +25828,12 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     injectStyles();
     cacheDom();
 
-    graph = sanitizeGraphState(
+    const initialExtensionState =
       bridge.getExtensionState(
         EXTENSION_NAME
-      )
+      );
+    graph = sanitizeGraphState(
+      initialExtensionState
     );
 
     loadGraphPaletteUiState();
@@ -25841,7 +25849,15 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
     synchronizeRuntimeBridgeSubscription();
     pruneConnections();
-    persistGraph(true);
+    if (initialExtensionState === null) {
+      lastPersistedGraphJson = JSON.stringify(
+        graphSerializableState()
+      );
+      typedGraphCodegenCacheKey = "";
+      typedGraphCodegenCache = null;
+    } else {
+      persistGraph(true);
+    }
 
     ensurePackButton();
     loadGraphPanelLayout();
@@ -26146,7 +26162,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
   Object.defineProperty(window, "RMLDynamicGraphHost", {
     value: Object.freeze({
-      version: 14,
+      version: 16,
       getState() { return graph; },
       getGuidedInteractionState() {
         if (!activeInteraction) return null;
@@ -26437,7 +26453,8 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         parentConnectionId,
         inputEndpoint,
         clientX,
-        clientY
+        clientY,
+        preferredSegmentIndex = null
       ) {
         const parent =
           graphConnectionById(
@@ -26502,12 +26519,114 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           };
         }
 
-        const paths = [
+        const allPaths = [
           ...dom.wires?.querySelectorAll(
             `.rml-graph-wire-hit[data-connection-id="${CSS.escape(parent.id)}"]`
           ) || []
-        ];
-        const path = paths[0] || null;
+        ].filter(path =>
+          path.isConnected &&
+          dom.wires?.contains(path)
+        );
+        const normalizedPreferredSegment =
+          Number.isInteger(preferredSegmentIndex)
+            ? Math.max(0, preferredSegmentIndex)
+            : null;
+        const preferredPaths =
+          normalizedPreferredSegment === null
+            ? []
+            : allPaths.filter(path =>
+                Math.max(
+                  0,
+                  Math.trunc(
+                    finiteNumber(
+                      path.dataset.segmentIndex,
+                      0
+                    )
+                  )
+                ) === normalizedPreferredSegment
+              );
+        const paths = preferredPaths.length
+          ? preferredPaths
+          : allPaths;
+        const targetPosition =
+          clientToGraph(
+            finiteNumber(clientX, 0),
+            finiteNumber(clientY, 0)
+          );
+        const nearestSegment = paths
+          .map(path => {
+            const position =
+              nearestGraphPointOnSvgPath(
+                path,
+                finiteNumber(clientX, 0),
+                finiteNumber(clientY, 0)
+              );
+            return {
+              path,
+              position,
+              distance: Math.hypot(
+                position.x - targetPosition.x,
+                position.y - targetPosition.y
+              )
+            };
+          })
+          .sort((a, b) =>
+            a.distance - b.distance
+          )[0] || null;
+        const segmentDistance =
+          nearestSegment?.distance ?? null;
+        const segmentDistanceClient =
+          Number.isFinite(segmentDistance)
+            ? segmentDistance * Math.max(
+                .001,
+                finiteNumber(
+                  graph.viewport.scale,
+                  1
+                )
+              )
+            : null;
+        const viewportRectangle =
+          dom.viewport?.getBoundingClientRect();
+        const targetInsideViewport = Boolean(
+          viewportRectangle &&
+          clientX >= viewportRectangle.left &&
+          clientX <= viewportRectangle.right &&
+          clientY >= viewportRectangle.top &&
+          clientY <= viewportRectangle.bottom
+        );
+        if (
+          !nearestSegment ||
+          !nearestSegment.path?.isConnected ||
+          targetInsideViewport !== true ||
+          !Number.isFinite(segmentDistanceClient) ||
+          segmentDistanceClient > 12
+        ) {
+          return {
+            ok: false,
+            created: false,
+            connectionId: "",
+            reason:
+              "The deterministic branch target is not on a live visible segment of the parent wire.",
+            preferredSegmentIndex:
+              normalizedPreferredSegment,
+            segmentIndex:
+              nearestSegment?.path
+                ? Math.max(
+                    0,
+                    Math.trunc(
+                      finiteNumber(
+                        nearestSegment.path.dataset.segmentIndex,
+                        0
+                      )
+                    )
+                  )
+                : null,
+            segmentDistance,
+            segmentDistanceClient,
+            targetInsideViewport
+          };
+        }
+        const path = nearestSegment?.path || null;
         const segmentIndex = Math.max(
           0,
           Math.trunc(
@@ -26518,11 +26637,8 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           )
         );
         const position =
-          nearestGraphPointOnSvgPath(
-            path,
-            finiteNumber(clientX, 0),
-            finiteNumber(clientY, 0)
-          );
+          nearestSegment?.position ||
+          targetPosition;
         const junction =
           ensureWireJunctionPoint(
             parent,
@@ -26569,7 +26685,12 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           ok: true,
           created: true,
           connectionId: branch.id,
-          pointId: junction.id
+          pointId: junction.id,
+          segmentIndex,
+          segmentDistance,
+          segmentDistanceClient,
+          preferredSegmentIndex:
+            normalizedPreferredSegment
         };
       },
       ensureWirePoint(

@@ -2,12 +2,15 @@
   "use strict";
 
   const SCRIPT_BASE = document.currentScript?.src || window.location.href;
-  const TEMPLATE_URL = new URL("setup_template.html?v=74-immediate-ready-repeat-previous-v272", SCRIPT_BASE).href;
-  const TEMPLATE_SCRIPT_URL = new URL("setup_template.js?v=74-immediate-ready-repeat-previous-v272", SCRIPT_BASE).href;
+  const TEMPLATE_URL = new URL("setup_template.html?v=91-step12-visible-repeat-isolation-v289", SCRIPT_BASE).href;
+  const TEMPLATE_SCRIPT_URL = new URL("setup_template.js?v=91-step12-visible-repeat-isolation-v289", SCRIPT_BASE).href;
   let templatePromise = null;
   let snapshot = null;
   let snapshotFingerprint = "";
   let stepSnapshots = new Map();
+  let stepEnvironmentSnapshots = new Map();
+  let stepReadySnapshots = new Map();
+  let stepReadyEnvironmentSnapshots = new Map();
   let originalTourUiState = null;
   let stepIndex = 0;
   let currentTarget = null;
@@ -29,6 +32,8 @@
   let pendingNarrationAdvances = 0;
   let narrationCardMetrics = null;
   let narrationReadingMetrics = null;
+  let narrationReservedRevealRect = null;
+  let graphInspectorToggleVisibilityState = null;
   let stableTourViewport = null;
   let outlineNestedPreparationHelperIds = [];
   let startPromise = null;
@@ -43,6 +48,7 @@
   const narratedStepIndexes = new Set();
   const attemptedDemonstrationIndexes = new Set();
   let blockedRepeatCount = 0;
+  let teacherMouseSafetyState = null;
 
   const TOUR_DEBUG_LIMIT = 5000;
   const TOUR_CONSTRAINT_EPSILON = .5;
@@ -88,7 +94,7 @@
     rejectedCount: 0
   };
   const tourDebugState = {
-    build: "stable-tour-step4-build259-plus-vertical-live-wheel-20260819-v272",
+    build: "stable-tour-step12-visible-repeat-isolation-20260820-v289",
     events: [],
     assertions: []
   };
@@ -655,6 +661,7 @@
     const assertion = {
       ...data,
       name,
+      controlledRepeat: repeatPreviousInFlight === true,
       passed: rawPassed || Boolean(constraintCertificate),
       rawPassed,
       constraintHandled: Boolean(constraintCertificate),
@@ -850,6 +857,7 @@
   Object.defineProperty(window, "RMLTourDebug", {
     value: Object.freeze({
       build: tourDebugState.build,
+      visualTestProtocolVersion: "1.0",
       clear() {
         tourDebugState.events.length = 0;
         tourDebugState.assertions.length = 0;
@@ -874,6 +882,8 @@
             narratedStepIndexes: [...narratedStepIndexes],
             attemptedDemonstrationIndexes:
               [...attemptedDemonstrationIndexes],
+            repeatReadySnapshotIndexes:
+              [...stepReadySnapshots.keys()],
             blockedRepeatCount,
             controlledRepeatCount,
             controlledRepeatInFlight: repeatPreviousInFlight
@@ -910,6 +920,11 @@
       },
       getInteractionCapabilities() {
         return tourInteractionCapabilitySummary();
+      },
+      evaluateViewportSupport(width, height) {
+        return JSON.parse(JSON.stringify(
+          evaluateTourViewportSupport(width, height)
+        ));
       },
       async openStep(index) {
         const testMode =
@@ -976,6 +991,154 @@
           }
         );
         return completed;
+      },
+      async repeatPreviousForTest() {
+        const testMode =
+          new URLSearchParams(window.location.search).has("rmlTourTest") ||
+          window.location.hash.includes("rmlTourTest");
+        if (!testMode) {
+          throw new Error(
+            "repeatPreviousForTest is available only in the visual test harness."
+          );
+        }
+        return repeatPreviousDemonstration();
+      },
+      async finishAndRestoreForTest() {
+        const testMode =
+          new URLSearchParams(window.location.search).has("rmlTourTest") ||
+          window.location.hash.includes("rmlTourTest");
+        if (!testMode) {
+          throw new Error(
+            "finishAndRestoreForTest is available only in the visual test harness."
+          );
+        }
+        const ui = elements();
+        const repeatCountBefore = controlledRepeatCount;
+        const repeatButtonReady = Boolean(
+          stepIndex === steps.length - 1 &&
+          stepPhase === "explain" &&
+          ui.repeatPrevious &&
+          !ui.repeatPrevious.hidden &&
+          !ui.repeatPrevious.disabled
+        );
+        const repeatWaitStarted = performance.now();
+        if (repeatButtonReady) {
+          ui.repeatPrevious.click();
+          while (
+            (
+              controlledRepeatCount === repeatCountBefore ||
+              repeatPreviousInFlight
+            ) &&
+            performance.now() - repeatWaitStarted < 25000
+          ) {
+            await new Promise(resolve => window.setTimeout(resolve, 40));
+          }
+        }
+        const repeatCompletion = [...tourDebugState.events]
+          .reverse()
+          .find(event =>
+            event.type === "controlled-repeat-previous-complete" &&
+            event.transaction === controlledRepeatCount
+          ) || null;
+        const repeatButtonTransactionPassed = tourDebugAssert(
+          "tour-complete-repeat-previous-button-transaction",
+          Boolean(
+            repeatButtonReady &&
+            controlledRepeatCount === repeatCountBefore + 1 &&
+            !repeatPreviousInFlight &&
+            repeatCompletion?.demonstrationCompleted === true &&
+            repeatCompletion?.readySnapshotUsed === true &&
+            repeatCompletion?.returnStateRestored === true &&
+            stepIndex === steps.length - 1 &&
+            stepPhase === "explain" &&
+            ui.repeatPrevious &&
+            !ui.repeatPrevious.hidden &&
+            !ui.repeatPrevious.disabled &&
+            ui.next?.textContent === "Finish"
+          ),
+          {
+            repeatButtonReady,
+            repeatCountBefore,
+            repeatCountAfter: controlledRepeatCount,
+            waitedForMs: Math.round(
+              performance.now() - repeatWaitStarted
+            ),
+            repeatPreviousInFlight,
+            repeatCompletion,
+            returnedStepIndex: stepIndex,
+            returnedPhase: stepPhase,
+            repeatButtonVisible: Boolean(
+              ui.repeatPrevious && !ui.repeatPrevious.hidden
+            ),
+            repeatButtonEnabled: Boolean(
+              ui.repeatPrevious && !ui.repeatPrevious.disabled
+            ),
+            finishLabel: ui.next?.textContent || "",
+            policy:
+              "the Evergreen completion path clicks the real Repeat previous button, requires the complete Step 12 action, and must receive the same usable Tour complete dialog back"
+          }
+        );
+        if (!repeatButtonTransactionPassed) {
+          throw new Error(
+            "[RML Tour · Complete] Repeat previous did not complete its Step 12 round trip."
+          );
+        }
+        const completionStarted = performance.now();
+        const completionVisible = Boolean(
+          stepIndex === steps.length - 1 &&
+          stepPhase === "explain" &&
+          ui.root &&
+          !ui.root.hidden &&
+          ui.card &&
+          tourElementActuallyVisible(ui.card) &&
+          ui.next &&
+          !ui.next.hidden &&
+          !ui.next.disabled &&
+          ui.next.textContent === "Finish"
+        );
+        hardHideTeacherMouse("visual-test-tour-complete");
+        if (completionVisible) {
+          await wait(1200);
+        }
+        const completionHeld = tourDebugAssert(
+          "tour-complete-visible-before-sandbox-restore",
+          Boolean(
+            completionVisible &&
+            performance.now() - completionStarted >= 1150 &&
+            ui.root &&
+            !ui.root.hidden &&
+            ui.card &&
+            tourElementActuallyVisible(ui.card) &&
+            ui.next?.textContent === "Finish" &&
+            ui.mouse?.classList.contains(
+              "rml-setup-mouse-hard-hidden"
+            )
+          ),
+          {
+            completionVisible,
+            heldForMs: Math.round(
+              performance.now() - completionStarted
+            ),
+            finishLabel: ui.next?.textContent || "",
+            teacherMouseHardHidden: Boolean(
+              ui.mouse?.classList.contains(
+                "rml-setup-mouse-hard-hidden"
+              )
+            ),
+            policy:
+              "the complete Step 12 result hands off to a stable Tour complete card before the visual harness restores the sandbox"
+          }
+        );
+        if (!completionHeld) {
+          throw new Error(
+            "[RML Tour · Complete] The final card was not held visibly before sandbox restoration."
+          );
+        }
+        await restoreAndClose(false);
+        return tourDebugState.assertions.some(assertion =>
+          assertion.name === "tour-sandbox-full-restore-contract" &&
+          assertion.passed === true
+        );
       }
     }),
     configurable: true,
@@ -1111,8 +1274,8 @@
       target: ".rml-graph-viewport",
       mode: "graph",
       title: "8. Connect ports",
-      text: "Drag a connection from a matching output on the Start node to the input on the NOT node. Ports that belong together can connect, while unsuitable combinations are refused. No additional nodes are needed for this step.",
-      hint: "The existing nodes are reused to create one clear connection between them.",
+      text: "Connect the two existing teaching nodes: drag from the compatible output on the Start node to the matching input on the NOT node. The node glows identify both connection partners, then the port glows identify the exact drag path. Unsuitable port combinations are refused, and this step creates no additional node.",
+      hint: "Follow the two glowing ports: Start output → NOT input.",
       demo: "graph-wire"
     },
     {
@@ -1220,6 +1383,7 @@
       title: root?.querySelector("[data-setup-title]"),
       text: root?.querySelector("[data-setup-text]"),
       hint: root?.querySelector("[data-setup-hint]"),
+      viewportWarning: root?.querySelector("[data-setup-viewport-warning]"),
       progress: root?.querySelector("[data-setup-progress]"),
       next: root?.querySelector("[data-setup-next]"),
       skip: root?.querySelector("[data-setup-skip]"),
@@ -1317,6 +1481,54 @@
       stableTourViewport = { ...resolved };
     }
     return resolved;
+  }
+
+  const TOUR_MINIMUM_VIEWPORT = Object.freeze({
+    width: 414,
+    height: 896
+  });
+
+  function evaluateTourViewportSupport(
+    width = tourViewport().width,
+    height = tourViewport().height
+  ) {
+    const actualWidth = Math.max(1, Math.floor(Number(width) || 1));
+    const actualHeight = Math.max(1, Math.floor(Number(height) || 1));
+    const reasons = [];
+    if (actualWidth < TOUR_MINIMUM_VIEWPORT.width) {
+      reasons.push("width-below-verified-tour-minimum");
+    }
+    if (actualHeight < TOUR_MINIMUM_VIEWPORT.height) {
+      reasons.push("height-below-verified-tour-minimum");
+    }
+    return {
+      supported: reasons.length === 0,
+      actual: {
+        width: actualWidth,
+        height: actualHeight
+      },
+      minimum: { ...TOUR_MINIMUM_VIEWPORT },
+      reasons
+    };
+  }
+
+  function renderWelcomeViewportWarning(index = stepIndex) {
+    const ui = elements();
+    const support = evaluateTourViewportSupport();
+    if (!ui.viewportWarning) return support;
+    const visible = index === 0 && !support.supported;
+    ui.viewportWarning.hidden = !visible;
+    ui.viewportWarning.textContent = visible
+      ? (
+          `Viewport warning: ${support.actual.width}×${support.actual.height} CSS pixels are below the complete tour minimum of ` +
+          `${support.minimum.width}×${support.minimum.height}. Adaptive safety checks will contain or skip geometry that cannot be demonstrated reliably. Rotate the device or enlarge the window for the complete tour.`
+        )
+      : "";
+    ui.root?.setAttribute(
+      "data-setup-viewport-supported",
+      String(support.supported)
+    );
+    return support;
   }
 
   function tourEffectViewport() {
@@ -1436,6 +1648,158 @@
     }).filter(tourElementActuallyVisible))];
   }
 
+  function graphInspectorToggleVisibilityProof(toggle) {
+    const ui = elements();
+    const viewport = tourEffectViewport();
+    const visibleTop = Math.max(
+      viewport.top + 2,
+      tourHeaderBottom() + 2
+    );
+    const usableViewport = {
+      left: viewport.left + 2,
+      top: visibleTop,
+      right: viewport.right - 2,
+      bottom: viewport.bottom - 2
+    };
+    const rect = toggle instanceof HTMLElement
+      ? toggle.getBoundingClientRect()
+      : null;
+    const elementArea = rect
+      ? Math.max(0, rect.width * rect.height)
+      : 0;
+    const visibleArea = rect
+      ? rectangleIntersectionArea(rect, usableViewport)
+      : 0;
+    const visibleRatio = elementArea > 0
+      ? Math.max(0, Math.min(1, visibleArea / elementArea))
+      : 0;
+    const blockers = [
+      ["description-card", ui.card],
+      ["live-skip-controls", ui.liveControls],
+      ["demo-label", ui.demoLabel],
+      ["key-overlay", ui.keys]
+    ].filter(([, element]) =>
+      element instanceof HTMLElement &&
+      !element.hidden &&
+      tourElementActuallyVisible(element)
+    );
+    const blockerDetails = blockers.map(([name, element]) => {
+      const blockerRect = element.getBoundingClientRect();
+      return {
+        name,
+        rect: tourDebugRect(element),
+        overlapArea: rectangleIntersectionArea(rect, blockerRect)
+      };
+    });
+    const blockerOverlapArea = Math.min(
+      elementArea,
+      blockerDetails.reduce(
+        (sum, blocker) => sum + blocker.overlapArea,
+        0
+      )
+    );
+    const uncoveredByTourUi = elementArea > 0
+      ? Math.max(0, 1 - blockerOverlapArea / elementArea)
+      : 0;
+    const center = rect
+      ? {
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2
+        }
+      : null;
+    const assistantRoot = ui.root;
+    const productHit = center
+      ? document.elementsFromPoint(center.x, center.y).find(element =>
+          !(assistantRoot instanceof HTMLElement) ||
+          !assistantRoot.contains(element)
+        ) || null
+      : null;
+    const centerHitTestPassed = Boolean(
+      toggle instanceof HTMLElement &&
+      productHit instanceof Element &&
+      (productHit === toggle || toggle.contains(productHit))
+    );
+    const fullyInsideViewport = visibleRatio >= .995;
+    const passed = Boolean(
+      toggle instanceof HTMLElement &&
+      !toggle.disabled &&
+      tourElementActuallyVisible(toggle) &&
+      fullyInsideViewport &&
+      uncoveredByTourUi >= .995 &&
+      centerHitTestPassed
+    );
+    return {
+      passed,
+      rect: tourDebugRect(toggle),
+      usableViewport,
+      visibleRatio,
+      fullyInsideViewport,
+      blockerOverlapArea,
+      uncoveredByTourUi,
+      blockerDetails,
+      center,
+      centerHitTestPassed,
+      productHit: tourPerceptionElementLabel(productHit),
+      disabled: toggle instanceof HTMLButtonElement
+        ? toggle.disabled
+        : false
+    };
+  }
+
+  function sampleGraphInspectorToggleVisibility(toggle, phase) {
+    const proof = graphInspectorToggleVisibilityProof(toggle);
+    const state = graphInspectorToggleVisibilityState;
+    if (state && state.toggle === toggle) {
+      state.samples += 1;
+      state.minimumVisibleRatio = Math.min(
+        state.minimumVisibleRatio,
+        proof.visibleRatio
+      );
+      state.minimumUncoveredRatio = Math.min(
+        state.minimumUncoveredRatio,
+        proof.uncoveredByTourUi
+      );
+      state.maximumBlockerOverlapArea = Math.max(
+        state.maximumBlockerOverlapArea,
+        proof.blockerOverlapArea
+      );
+      if (!proof.passed) {
+        state.violations += 1;
+        if (!state.firstViolation) {
+          state.firstViolation = { phase, ...proof };
+        }
+      }
+      state.lastProof = proof;
+    }
+    return proof;
+  }
+
+  async function prepareGraphInspectorToggleForNarration(runId) {
+    const toggle = document.querySelector(
+      ".rml-graph-panel-toggle-right, [data-rml-graph-toggle-right]"
+    );
+    if (!(toggle instanceof HTMLElement) || runId !== demoRunId) {
+      return null;
+    }
+    const viewport = tourEffectViewport();
+    const rect = toggle.getBoundingClientRect();
+    const visibleTop = Math.max(viewport.top + 4, tourHeaderBottom() + 4);
+    const inside =
+      rect.left >= viewport.left + 4 &&
+      rect.right <= viewport.right - 4 &&
+      rect.top >= visibleTop &&
+      rect.bottom <= viewport.bottom - 4;
+    if (!inside) {
+      toggle.scrollIntoView({
+        behavior: "auto",
+        block: "center",
+        inline: "center"
+      });
+      await nextTwoFrames();
+    }
+    return runId === demoRunId ? toggle : null;
+  }
+
   function narrationSegmentsForStep(step) {
     const allIdentityFields = ids => () => ids
       .map(id => document.getElementById(id)?.closest("label"))
@@ -1443,9 +1807,16 @@
     const visibleController = () => [...document.querySelectorAll(
       ".node-card.controller[data-node-id]"
     )].find(card => card.querySelector(":scope > .controller-options"));
-    const visibleGraphNode = () => [...document.querySelectorAll(
-      ".rml-graph-node"
-    )].find(tourElementActuallyVisible);
+    const visibleGraphWireNodes = () => {
+      const pair = graphDemoSocketPair(false);
+      return [pair?.sourceNode, pair?.targetNode]
+        .filter(tourElementActuallyVisible);
+    };
+    const visibleGraphWirePorts = () => {
+      const pair = graphDemoSocketPair(false);
+      return [pair?.output, pair?.input]
+        .filter(tourElementActuallyVisible);
+    };
     const visibleNotFlipNode = () => {
       const visibleFlipNodes = [...document.querySelectorAll(
         ".rml-graph-node"
@@ -1572,12 +1943,16 @@
       ],
       "graph-wire": [
         {
-          targets: visibleGraphNode,
-          text: "A matching output on the Start node provides the beginning of the connection."
+          targets: visibleGraphWireNodes,
+          separateTargets: true,
+          graphWireHighlight: "nodes",
+          text: "These are the two existing connection partners: the Start node provides the value, and the NOT node receives it. Both nodes glow together so their relationship is clear."
         },
         {
-          targets: ".rml-graph-viewport",
-          text: "That output connects to the input on the existing NOT node. No additional nodes are created."
+          targets: visibleGraphWirePorts,
+          separateTargets: true,
+          graphWireHighlight: "ports",
+          text: "Now the exact endpoints glow separately. Drag from the output on Start to the matching input on NOT. Incompatible port types are rejected, and no additional node is created."
         }
       ],
       "graph-flip": [
@@ -1603,6 +1978,11 @@
         }
       ],
       "graph-inspector": [
+        {
+          targets: ".rml-graph-panel-toggle-right, [data-rml-graph-toggle-right]",
+          text: "The Node inspector is still hidden so the graph keeps the same spacious layout as the previous lesson. This visible sidebar button now opens it before its contents are explained.",
+          afterNarrationAction: "open-graph-right-sidebar"
+        },
         {
           targets: ".rml-graph-viewport",
           text: "Select the node that should be changed."
@@ -1684,18 +2064,24 @@
     }
   }
 
-  function addNarrationOutline(targets) {
+  function addNarrationOutline(targets, { separateTargets = false } = {}) {
     const visible = tourVisibleTargets(targets);
     activeNarrationTargets = visible;
     if (!visible.length) return null;
-    const element = document.createElement("div");
-    element.className = "rml-setup-narration-outline is-entering";
-    element.setAttribute("aria-hidden", "true");
-    document.getElementById("rml-setup-assistant")?.appendChild(element);
-    narrationOutlineGroups.push({ element, targets: visible });
+    const groups = separateTargets
+      ? visible.map(target => [target])
+      : [visible];
+    const elements = groups.map(groupTargets => {
+      const element = document.createElement("div");
+      element.className = "rml-setup-narration-outline is-entering";
+      element.setAttribute("aria-hidden", "true");
+      document.getElementById("rml-setup-assistant")?.appendChild(element);
+      narrationOutlineGroups.push({ element, targets: groupTargets });
+      requestAnimationFrame(() => element.classList.remove("is-entering"));
+      return element;
+    });
     updateNarrationOutlines();
-    requestAnimationFrame(() => element.classList.remove("is-entering"));
-    return element;
+    return elements[0] || null;
   }
 
   function waitForNarrationScene(milliseconds) {
@@ -1815,10 +2201,225 @@
     completeText,
     runId
   ) {
-    if (
-      segment?.afterNarrationAction !== "open-responsive-topbar" ||
-      runId !== demoRunId
-    ) {
+    if (runId !== demoRunId) {
+      return true;
+    }
+    if (segment?.afterNarrationAction === "open-graph-right-sidebar") {
+      const toggle = document.querySelector(
+        ".rml-graph-panel-toggle-right, [data-rml-graph-toggle-right]"
+      );
+      const hiddenBefore = graphSidebarIsHidden("right");
+      const finalToggleVisibility = sampleGraphInspectorToggleVisibility(
+        toggle,
+        "explanation-complete"
+      );
+      const toggleVisibilityState = graphInspectorToggleVisibilityState;
+      const toggleStayedVisible = Boolean(
+        toggleVisibilityState &&
+        toggleVisibilityState.samples >= 2 &&
+        toggleVisibilityState.violations === 0 &&
+        finalToggleVisibility.passed
+      );
+      graphInspectorToggleVisibilityState = null;
+      const explainedWhileHidden = tourDebugAssert(
+        "graph-inspector-sidebar-explained-before-visible-open",
+        hiddenBefore &&
+          toggle instanceof HTMLElement &&
+          visibleTargets.includes(toggle) &&
+          toggleStayedVisible &&
+          completeText.includes(String(segment.text || "")),
+        {
+          hiddenBefore,
+          toggleVisible: finalToggleVisibility.passed,
+          toggleFullyInsideViewport:
+            finalToggleVisibility.fullyInsideViewport,
+          toggleUncoveredByDescriptionAndSkipControls:
+            finalToggleVisibility.uncoveredByTourUi,
+          toggleCenterHitTestPassed:
+            finalToggleVisibility.centerHitTestPassed,
+          toggleVisibilitySamples:
+            toggleVisibilityState?.samples || 0,
+          toggleVisibilityViolations:
+            toggleVisibilityState?.violations || 0,
+          minimumToggleVisibleRatio:
+            toggleVisibilityState?.minimumVisibleRatio || 0,
+          minimumToggleUncoveredRatio:
+            toggleVisibilityState?.minimumUncoveredRatio || 0,
+          maximumToggleBlockerOverlapArea:
+            toggleVisibilityState?.maximumBlockerOverlapArea || 0,
+          firstToggleVisibilityViolation:
+            toggleVisibilityState?.firstViolation || null,
+          toggleWasNarrationTarget: visibleTargets.includes(toggle),
+          explanationRenderedBeforeOpen:
+            completeText.includes(String(segment.text || "")),
+          policy:
+            "the real right-sidebar arrow must remain fully inside the usable viewport, uncovered by the narration card and Skip controls, and perceptually hit-testable throughout its explanation"
+        }
+      );
+      if (!explainedWhileHidden) {
+        throw new Error(
+          "[RML Tour · Graph inspector] The right sidebar was not explained while it was still hidden."
+        );
+      }
+
+      clearNarrationOutlines();
+      const revealPanel = document.querySelector(
+        ".workspace > .inspector.panel, .workspace > .inspector, .rml-graph-inspector"
+      );
+      narrationReservedRevealRect = measureHiddenGraphInspectorRevealRect();
+      fitNarrationCardToContent({ followText: false });
+      await nextTwoFrames();
+      const preparedCoverage = graphInspectorRevealCoverage(
+        narrationReservedRevealRect
+      );
+      const corridorPrepared = tourDebugAssert(
+        "graph-inspector-reveal-corridor-reserved-before-open",
+        Boolean(
+          narrationReservedRevealRect &&
+          preparedCoverage &&
+          preparedCoverage.actualUncoveredRatio >=
+            preparedCoverage.bestPossibleUncoveredRatio - .035
+        ),
+        {
+          revealRect: narrationReservedRevealRect,
+          cardRect: tourDebugRect(elements().card),
+          ...preparedCoverage,
+          policy:
+            "reserve the complete future inspector footprint before the teacher opens it; when the viewport is tight, use the mathematically least-obstructing readable card position"
+        }
+      );
+      if (!corridorPrepared) {
+        narrationReservedRevealRect = null;
+        throw new Error(
+          "[RML Tour · Graph inspector] No unobstructed reveal corridor could be reserved before opening the right sidebar."
+        );
+      }
+
+      let clicked = false;
+      let revealSamples = [];
+      const hideCardDuringReveal =
+        preparedCoverage.bestPossibleUncoveredRatio < .995;
+      const narrationCard = elements().card;
+      if (hideCardDuringReveal) {
+        narrationCard?.classList.add(
+          "rml-setup-card-hidden-during-panel-reveal"
+        );
+      }
+      revealPanel?.classList.add("rml-setup-graph-panel-visible-reveal");
+      try {
+        clicked = await teacherClickElement(
+          toggle,
+          "Open the real Node inspector sidebar",
+          runId,
+          {
+            focus: document.querySelector(".workspace"),
+            keepFocusVisible: true,
+            preserveCardPlacement: true
+          }
+        );
+        if (
+          revealPanel instanceof HTMLElement &&
+          !clipRectToTourViewport(revealPanel.getBoundingClientRect())
+        ) {
+          hardHideTeacherMouse("graph-inspector-reveal-scroll");
+          revealPanel.scrollIntoView({
+            behavior: "auto",
+            block: "start",
+            inline: "nearest"
+          });
+          await nextTwoFrames();
+        }
+        revealSamples = await sampleGraphInspectorRevealCoverage(
+          revealPanel,
+          runId,
+          440
+        );
+        await nextTwoFrames();
+      } finally {
+        revealPanel?.classList.remove("rml-setup-graph-panel-visible-reveal");
+        narrationCard?.classList.remove(
+          "rml-setup-card-hidden-during-panel-reveal"
+        );
+        narrationReservedRevealRect = null;
+      }
+      const visibleRevealSamples = revealSamples.filter(sample =>
+        Number.isFinite(sample.actualUncoveredRatio)
+      );
+      const minimumRevealCoverage = visibleRevealSamples.length
+        ? Math.min(...visibleRevealSamples.map(sample =>
+            sample.actualUncoveredRatio
+          ))
+        : 0;
+      const minimumBestPossibleCoverage = visibleRevealSamples.length
+        ? Math.min(...visibleRevealSamples.map(sample =>
+            sample.bestPossibleUncoveredRatio
+          ))
+        : 0;
+      const revealUnobstructed = tourDebugAssert(
+        "graph-inspector-opening-animation-unobstructed-by-description-card",
+        visibleRevealSamples.length > 0 &&
+          visibleRevealSamples.every(sample =>
+            sample.actualUncoveredRatio >=
+              sample.bestPossibleUncoveredRatio - .045
+          ),
+        {
+          sampleCount: visibleRevealSamples.length,
+          minimumRevealCoverage,
+          minimumBestPossibleCoverage,
+          cardHiddenOnlyWhenNoFreeReadableCorridor:
+            hideCardDuringReveal,
+          finalCardRect: tourDebugRect(elements().card),
+          finalInspectorRect: tourDebugRect(revealPanel),
+          policy:
+            "the narration card must never cover the inspector opening animation when a non-overlapping readable position exists"
+        }
+      );
+      const opened = tourDebugAssert(
+        "graph-inspector-sidebar-opened-visibly-after-explanation",
+        clicked === true &&
+          !graphSidebarIsHidden("right") &&
+          revealUnobstructed,
+        {
+          hiddenBefore,
+          openedByTeacher: clicked === true,
+          rightOpen: !graphSidebarIsHidden("right"),
+          revealUnobstructed,
+          revealSampleCount: visibleRevealSamples.length
+        }
+      );
+      fitNarrationCardToContent({ followText: false });
+      if (!opened) {
+        throw new Error(
+          "[RML Tour · Graph inspector] The real right sidebar did not open in an unobstructed visible corridor after its explanation."
+        );
+      }
+      const teachingPair = await ensureGraphTeachingPairVisible(runId);
+      if (runId !== demoRunId) return true;
+      const pairVisibleAfterSidebarOpen = tourDebugAssert(
+        "graph-inspector-teaching-pair-visible-after-sidebar-open",
+        graphTeachingPairCompletelyVisible(teachingPair, 10),
+        {
+          teachingNodeIds: [
+            teachingPair?.boolNode?.dataset?.graphNodeId || "",
+            teachingPair?.notNode?.dataset?.graphNodeId || ""
+          ].filter(Boolean),
+          graphVisibleRect: visibleGraphClientRect(10),
+          graphViewportRect: tourDebugRect(
+            document.querySelector(".rml-graph-viewport")
+          ),
+          rightSidebarOpen: !graphSidebarIsHidden("right"),
+          policy:
+            "after the animated inspector reveal, the page returns to the graph and refits both complete teaching nodes inside the reduced live graph viewport before narration continues"
+        }
+      );
+      if (!pairVisibleAfterSidebarOpen) {
+        throw new Error(
+          "[RML Tour · Graph inspector] The complete teaching pair was not visible after opening the right sidebar."
+        );
+      }
+      return true;
+    }
+    if (segment?.afterNarrationAction !== "open-responsive-topbar") {
       return true;
     }
 
@@ -1930,6 +2531,15 @@
     for (const [segmentIndex, segment] of segments.entries()) {
       if (runId !== demoRunId || stepIndex !== index) return;
       clearNarrationOutlines();
+      graphInspectorToggleVisibilityState = null;
+      if (step.demo === "graph-pan" && segmentIndex === 0) {
+        await prepareGraphPanToolbarForNarration(runId);
+        if (runId !== demoRunId || stepIndex !== index) return;
+      }
+      if (segment?.afterNarrationAction === "open-graph-right-sidebar") {
+        await prepareGraphInspectorToggleForNarration(runId);
+        if (runId !== demoRunId || stepIndex !== index) return;
+      }
       let visibleTargets = tourVisibleTargets(segment.targets);
       let compactMenuHandoff = null;
       if (
@@ -1949,7 +2559,93 @@
       if (visibleTargets.length > 0) {
         highlightedSegments += 1;
       }
-      addNarrationOutline(visibleTargets);
+      if (step.demo === "graph-wire") {
+        const pair = graphDemoSocketPair(false);
+        const expectedTargets = segment.graphWireHighlight === "nodes"
+          ? [pair?.sourceNode, pair?.targetNode]
+          : segment.graphWireHighlight === "ports"
+            ? [pair?.output, pair?.input]
+            : [];
+        const exactExpectedTargets = expectedTargets.filter(Boolean);
+        const exactTargetSet = new Set(exactExpectedTargets);
+        const actualTargetSet = new Set(visibleTargets);
+        const exactPairHighlighted = tourDebugAssert(
+          segment.graphWireHighlight === "ports"
+            ? "graph-wire-narration-highlights-exact-output-and-input"
+            : "graph-wire-narration-highlights-both-existing-nodes",
+          exactExpectedTargets.length === 2 &&
+            actualTargetSet.size === 2 &&
+            exactExpectedTargets.every(target => actualTargetSet.has(target)) &&
+            visibleTargets.every(target => exactTargetSet.has(target)) &&
+            visibleTargets.every(target =>
+              !target.matches(".rml-graph-viewport")
+            ),
+          {
+            segmentIndex,
+            highlightRole: segment.graphWireHighlight || "",
+            expectedTargetCount: exactExpectedTargets.length,
+            actualTargetCount: visibleTargets.length,
+            targetNodeIds: visibleTargets.map(target =>
+              target.dataset?.graphNodeId || target.dataset?.nodeId || ""
+            ),
+            targetPortIds: visibleTargets.map(target =>
+              target.dataset?.portId || ""
+            ),
+            includesWholeCanvas: visibleTargets.some(target =>
+              target.matches(".rml-graph-viewport")
+            ),
+            policy:
+              "Step 8 explains the two real teaching nodes first and their exact output/input second; the whole graph canvas is never substituted for either partner"
+          }
+        );
+        if (!exactPairHighlighted) {
+          throw new Error(
+            "[RML Tour · Step 8] Narration did not resolve the exact Start → NOT teaching pair."
+          );
+        }
+      }
+      addNarrationOutline(visibleTargets, {
+        separateTargets: segment?.separateTargets === true
+      });
+      if (segment?.afterNarrationAction === "open-graph-right-sidebar") {
+        const toggle = document.querySelector(
+          ".rml-graph-panel-toggle-right, [data-rml-graph-toggle-right]"
+        );
+        fitNarrationCardToContent({ followText: false });
+        await nextTwoFrames();
+        graphInspectorToggleVisibilityState = {
+          toggle,
+          samples: 0,
+          violations: 0,
+          minimumVisibleRatio: 1,
+          minimumUncoveredRatio: 1,
+          maximumBlockerOverlapArea: 0,
+          firstViolation: null,
+          lastProof: null
+        };
+        const initialToggleVisibility =
+          sampleGraphInspectorToggleVisibility(
+            toggle,
+            "before-explanation"
+          );
+        const toggleReady = tourDebugAssert(
+          "graph-inspector-toggle-fully-visible-before-explanation",
+          visibleTargets.includes(toggle) &&
+            initialToggleVisibility.passed,
+          {
+            toggleWasNarrationTarget: visibleTargets.includes(toggle),
+            ...initialToggleVisibility,
+            policy:
+              "Step 12 may start the sidebar explanation only while the real expansion arrow is fully on-screen, uncovered, enabled and perceptually hit-testable"
+          }
+        );
+        if (!toggleReady) {
+          graphInspectorToggleVisibilityState = null;
+          throw new Error(
+            "[RML Tour · Graph inspector] The real right-sidebar expansion arrow was not completely visible before its explanation."
+          );
+        }
+      }
       if (compactMenuHandoff) {
         const state = responsiveTopActionsState();
         const action = compactMenuHandoff?.action || null;
@@ -2189,6 +2885,28 @@
         finalPhase: stepPhase
       }
     );
+    const readyState = captureTourState();
+    const readyEnvironment = captureTourEnvironmentState();
+    stepReadySnapshots.set(index, readyState);
+    stepReadyEnvironmentSnapshots.set(index, readyEnvironment);
+    tourDebugAssert(
+      `tour-step-${index}-repeat-ready-snapshot-captured`,
+      Boolean(
+        readyState &&
+        readyEnvironment &&
+        stepPhase === "ready" &&
+        stepIndex === index
+      ),
+      {
+        narratedStepIndex: index,
+        phase: stepPhase,
+        graphMode: readyEnvironment?.graphMode === true,
+        graphRightPanelOpen:
+          readyEnvironment?.graphRightCollapsed === false,
+        policy:
+          "Repeat previous restores the fully prepared Demonstrate state after narration, including panel reveals, instead of the earlier lesson-entry state"
+      }
+    );
   }
 
   async function beginStepNarrationSafely(step, index, runId) {
@@ -2270,6 +2988,173 @@
     const width = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left));
     const height = Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
     return width * height;
+  }
+
+  function clipRectToTourViewport(rect, inset = 0) {
+    if (!rect) return null;
+    const viewport = tourViewport();
+    const left = Math.max(viewport.left + inset, Number(rect.left) || 0);
+    const top = Math.max(viewport.top + inset, Number(rect.top) || 0);
+    const right = Math.min(
+      viewport.right - inset,
+      Number(rect.right) || 0
+    );
+    const bottom = Math.min(
+      viewport.bottom - inset,
+      Number(rect.bottom) || 0
+    );
+    if (right - left < 2 || bottom - top < 2) return null;
+    return {
+      left,
+      top,
+      right,
+      bottom,
+      width: right - left,
+      height: bottom - top
+    };
+  }
+
+  function measureHiddenGraphInspectorRevealRect() {
+    const panel = document.querySelector(
+      ".workspace > .inspector.panel, .workspace > .inspector, .rml-graph-inspector"
+    );
+    if (!(panel instanceof HTMLElement)) return null;
+
+    const body = document.body;
+    const workspace = document.querySelector(".workspace");
+    const collapsedClass = "rml-graph-right-collapsed";
+    const wasCollapsed = body.classList.contains(collapsedClass);
+    const saved = new Map([
+      ["visibility", rememberInlineProperty(panel, "visibility")],
+      ["pointer-events", rememberInlineProperty(panel, "pointer-events")],
+      ["animation", rememberInlineProperty(panel, "animation")],
+      ["transition", rememberInlineProperty(panel, "transition")]
+    ]);
+
+    try {
+      panel.style.setProperty("visibility", "hidden", "important");
+      panel.style.setProperty("pointer-events", "none", "important");
+      panel.style.setProperty("animation", "none", "important");
+      panel.style.setProperty("transition", "none", "important");
+      body.classList.remove(collapsedClass);
+      void (workspace?.offsetWidth || panel.offsetWidth);
+      const measured = panel.getBoundingClientRect();
+      const clipped = clipRectToTourViewport(measured);
+      if (clipped) return clipped;
+
+      // In the one-column graph layout the inspector is initially below the
+      // canvas. Model the exact visible footprint after the post-click
+      // scrollIntoView, so the card can move or temporarily yield before the
+      // panel exists in the viewport.
+      const viewport = tourViewport();
+      const width = Math.min(measured.width, viewport.width);
+      const height = Math.min(measured.height, viewport.height);
+      const left = Math.max(
+        viewport.left,
+        Math.min(measured.left, viewport.right - width)
+      );
+      return {
+        left,
+        top: viewport.top,
+        right: left + width,
+        bottom: viewport.top + height,
+        width,
+        height
+      };
+    } finally {
+      if (wasCollapsed) body.classList.add(collapsedClass);
+      for (const [property, value] of saved) {
+        restoreInlineProperty(panel, property, value);
+      }
+      void (workspace?.offsetWidth || panel.offsetWidth);
+    }
+  }
+
+  function graphInspectorRevealCoverage(revealRect) {
+    const visibleReveal = clipRectToTourViewport(revealRect);
+    const card = elements().card;
+    if (!visibleReveal || !(card instanceof HTMLElement)) return null;
+    const viewport = tourViewport();
+    const margin = viewport.width <= 780 ? 9 : 12;
+    const measuredCard = card.getBoundingClientRect();
+    const width = Math.min(
+      measuredCard.width,
+      Math.max(1, viewport.width - margin * 2)
+    );
+    const height = Math.min(
+      measuredCard.height,
+      Math.max(1, viewport.height - margin * 2)
+    );
+    const revealArea = visibleReveal.width * visibleReveal.height;
+    if (!(revealArea > 0)) return null;
+
+    const uncoveredRatio = rect => Math.max(
+      0,
+      1 - rectangleIntersectionArea(rect, visibleReveal) / revealArea
+    );
+    const cardVisuallyYielded = card.classList.contains(
+      "rml-setup-card-hidden-during-panel-reveal"
+    );
+    const actualUncoveredRatio = cardVisuallyYielded
+      ? 1
+      : uncoveredRatio(measuredCard);
+    const lefts = [
+      viewport.left + margin,
+      viewport.left + (viewport.width - width) / 2,
+      viewport.right - width - margin
+    ];
+    const tops = [
+      viewport.top + margin,
+      viewport.top + (viewport.height - height) / 2,
+      viewport.bottom - height - margin
+    ];
+    let bestPossibleUncoveredRatio = 0;
+    for (const left of lefts) {
+      for (const top of tops) {
+        bestPossibleUncoveredRatio = Math.max(
+          bestPossibleUncoveredRatio,
+          uncoveredRatio({
+            left,
+            top,
+            right: left + width,
+            bottom: top + height
+          })
+        );
+      }
+    }
+    return {
+      actualUncoveredRatio,
+      bestPossibleUncoveredRatio: cardVisuallyYielded
+        ? 1
+        : bestPossibleUncoveredRatio,
+      overlapArea: cardVisuallyYielded
+        ? 0
+        : rectangleIntersectionArea(measuredCard, visibleReveal),
+      cardVisuallyYielded,
+      revealArea,
+      revealRect: visibleReveal
+    };
+  }
+
+  async function sampleGraphInspectorRevealCoverage(
+    panel,
+    runId,
+    duration = 440
+  ) {
+    const samples = [];
+    const started = performance.now();
+    while (
+      runId === demoRunId &&
+      performance.now() - started <= duration
+    ) {
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      if (!(panel instanceof HTMLElement) || runId !== demoRunId) break;
+      const coverage = graphInspectorRevealCoverage(
+        panel.getBoundingClientRect()
+      );
+      if (coverage) samples.push(coverage);
+    }
+    return samples;
   }
 
   function setSemanticSceneState(state = "armed") {
@@ -2564,7 +3449,181 @@
     return true;
   }
 
-  function positionNarrationCardAwayFromTargets() {
+  function narrationProtectedFocusRect() {
+    const visibleTargets = activeNarrationTargets.filter(
+      tourElementActuallyVisible
+    );
+    const targetFocus = narrationOutlineRect(visibleTargets);
+    const step = steps[stepIndex];
+    if (step?.demo !== "topbar-identity-workflow") {
+      return targetFocus;
+    }
+
+    const topbar = document.querySelector(".topbar");
+    const actions = document.querySelector("#top-actions");
+    const targetsTopbarControl = visibleTargets.some(target =>
+      topbar instanceof HTMLElement && topbar.contains(target)
+    );
+    if (!targetsTopbarControl) return targetFocus;
+
+    const protectedElements = [topbar];
+    if (tourElementActuallyVisible(actions)) {
+      protectedElements.push(actions);
+    }
+    const topbarFocus = narrationOutlineRect(protectedElements);
+    if (!targetFocus) return topbarFocus;
+    if (!topbarFocus) return targetFocus;
+    const viewport = tourViewport();
+    return {
+      left: Math.max(
+        viewport.left + 4,
+        Math.min(targetFocus.left, topbarFocus.left)
+      ),
+      top: Math.max(
+        viewport.top + 4,
+        Math.min(targetFocus.top, topbarFocus.top)
+      ),
+      right: Math.min(
+        viewport.right - 4,
+        Math.max(targetFocus.right, topbarFocus.right)
+      ),
+      bottom: Math.min(
+        viewport.bottom - 4,
+        Math.max(targetFocus.bottom, topbarFocus.bottom)
+      )
+    };
+  }
+
+  function narrationAdaptiveCardBounds({
+    viewport,
+    margin,
+    baseMaximumWidth,
+    baseMaximumHeight,
+    minimumWidth,
+    minimumHeight,
+    desiredWidth,
+    desiredHeight
+  }) {
+    const focus = narrationReservedRevealRect ||
+      narrationProtectedFocusRect();
+    const viewportRegion = {
+      left: viewport.left + margin,
+      top: viewport.top + margin,
+      right: viewport.right - margin,
+      bottom: viewport.bottom - margin
+    };
+    if (!focus) {
+      return {
+        key: "viewport",
+        maximumWidth: baseMaximumWidth,
+        maximumHeight: baseMaximumHeight,
+        region: viewportRegion,
+        focus: null,
+        wholeGlowVisiblePossible: true,
+        minimumWidth,
+        minimumHeight
+      };
+    }
+
+    const gap = viewport.width <= 780 ? 10 : 14;
+    const rawRegions = [
+      {
+        key: "above-glow",
+        left: viewportRegion.left,
+        top: viewportRegion.top,
+        right: viewportRegion.right,
+        bottom: Math.min(viewportRegion.bottom, focus.top - gap)
+      },
+      {
+        key: "below-glow",
+        left: viewportRegion.left,
+        top: Math.max(viewportRegion.top, focus.bottom + gap),
+        right: viewportRegion.right,
+        bottom: viewportRegion.bottom
+      },
+      {
+        key: "left-of-glow",
+        left: viewportRegion.left,
+        top: viewportRegion.top,
+        right: Math.min(viewportRegion.right, focus.left - gap),
+        bottom: viewportRegion.bottom
+      },
+      {
+        key: "right-of-glow",
+        left: Math.max(viewportRegion.left, focus.right + gap),
+        top: viewportRegion.top,
+        right: viewportRegion.right,
+        bottom: viewportRegion.bottom
+      }
+    ];
+    const candidates = rawRegions.map(region => {
+      const width = Math.max(0, region.right - region.left);
+      const height = Math.max(0, region.bottom - region.top);
+      const maximumWidth = Math.min(baseMaximumWidth, width);
+      const maximumHeight = Math.min(baseMaximumHeight, height);
+      return {
+        ...region,
+        width,
+        height,
+        maximumWidth,
+        maximumHeight,
+        supportsMinimum:
+          maximumWidth >= minimumWidth &&
+          maximumHeight >= minimumHeight,
+        fitsDesired:
+          maximumWidth >= Math.min(baseMaximumWidth, desiredWidth) &&
+          maximumHeight >= Math.min(baseMaximumHeight, desiredHeight),
+        usableArea: maximumWidth * maximumHeight
+      };
+    }).filter(candidate => candidate.supportsMinimum);
+    candidates.sort((left, right) =>
+      Number(right.fitsDesired) - Number(left.fitsDesired) ||
+      right.usableArea - left.usableArea ||
+      right.maximumHeight - left.maximumHeight ||
+      right.maximumWidth - left.maximumWidth ||
+      left.key.localeCompare(right.key)
+    );
+    const best = candidates[0] || null;
+    if (best) {
+      return {
+        key: best.key,
+        maximumWidth: best.maximumWidth,
+        maximumHeight: best.maximumHeight,
+        region: {
+          left: best.left,
+          top: best.top,
+          right: best.right,
+          bottom: best.bottom
+        },
+        focus,
+        wholeGlowVisiblePossible: true,
+        minimumWidth,
+        minimumHeight,
+        candidateCount: candidates.length
+      };
+    }
+
+    const fallbackHeight = Math.min(
+      baseMaximumHeight,
+      Math.max(
+        minimumHeight,
+        Math.min(baseMaximumHeight, viewport.height * .48)
+      )
+    );
+    return {
+      key: "minimum-readable-overlap-fallback",
+      maximumWidth: baseMaximumWidth,
+      maximumHeight: fallbackHeight,
+      region: null,
+      focus,
+      wholeGlowVisiblePossible: false,
+      minimumWidth,
+      minimumHeight,
+      candidateCount: 0
+    };
+  }
+
+  function positionNarrationCardAwayFromTargets(bounds = null) {
     const { card } = elements();
     if (!(card instanceof HTMLElement)) return null;
 
@@ -2579,9 +3638,8 @@
       cardRect.height,
       Math.max(1, viewport.height - margin * 2)
     );
-    const focus = narrationOutlineRect(
-      activeNarrationTargets.filter(tourElementActuallyVisible)
-    );
+    const focus = narrationReservedRevealRect ||
+      narrationProtectedFocusRect();
     if (!focus) {
       positionCard(null, { force: true });
       return {
@@ -2590,6 +3648,42 @@
         top: card.getBoundingClientRect().top,
         overlap: 0,
         distance: 0
+      };
+    }
+    if (bounds?.region && bounds.wholeGlowVisiblePossible === true) {
+      const region = bounds.region;
+      const regionWidth = Math.max(0, region.right - region.left);
+      const regionHeight = Math.max(0, region.bottom - region.top);
+      const left = Math.max(
+        region.left,
+        Math.min(
+          region.right - width,
+          region.left + (regionWidth - width) / 2
+        )
+      );
+      const top = Math.max(
+        region.top,
+        Math.min(
+          region.bottom - height,
+          region.top + (regionHeight - height) / 2
+        )
+      );
+      const rect = {
+        left,
+        top,
+        right: left + width,
+        bottom: top + height
+      };
+      card.style.transform = "none";
+      card.style.left = `${left}px`;
+      card.style.top = `${top}px`;
+      return {
+        key: bounds.key,
+        left,
+        top,
+        overlap: rectangleIntersectionArea(rect, focus),
+        distance: 0,
+        wholeGlowVisiblePossible: true
       };
     }
     const lefts = [
@@ -2694,6 +3788,14 @@
     const glowRects = visibleOutlines.map(element =>
       element.getBoundingClientRect()
     );
+    const glowUncoveredRatios = glowRects.map(rect => {
+      const area = Math.max(0, rect.width * rect.height);
+      if (area <= 0) return 1;
+      return Math.max(
+        0,
+        1 - rectangleIntersectionArea(rect, cardRect) / area
+      );
+    });
     return {
       cardRect,
       actionRect,
@@ -2711,6 +3813,10 @@
         inside(rect, viewportRect)
       ),
       glowCount: glowRects.length,
+      glowUncoveredRatios,
+      minimumGlowUncoveredRatio: glowUncoveredRatios.length
+        ? Math.min(...glowUncoveredRatios)
+        : 1,
       glowCardOverlapArea: glowRects.reduce(
         (sum, rect) => sum + rectangleIntersectionArea(rect, cardRect),
         0
@@ -2897,7 +4003,7 @@
     const viewport = tourViewport();
     const margin = viewport.width <= 780 ? 9 : 12;
     const usableWidth = Math.max(260, viewport.width - margin * 2);
-    const maximumWidth = Math.min(
+    const baseMaximumWidth = Math.min(
       usableWidth,
       viewport.width >= 1600
         ? 720
@@ -2909,7 +4015,8 @@
               ? 560
               : usableWidth
     );
-    const minimumWidth = viewport.width <= 520
+    let maximumWidth = baseMaximumWidth;
+    let minimumWidth = viewport.width <= 520
       ? maximumWidth
       : Math.min(
           maximumWidth,
@@ -2917,35 +4024,42 @@
         );
     const characterCount = text.textContent?.length || 0;
     const widthProgress = 1 - Math.exp(-characterCount / 260);
-    const contentDesiredWidth = Math.min(
-      maximumWidth,
-      minimumWidth + (maximumWidth - minimumWidth) * widthProgress
-    );
     const priorRequestedWidth =
       narrationCardMetrics?.requestedWidth || 0;
-    const requestedWidth = Math.min(
-      maximumWidth,
-      Math.max(
-        contentDesiredWidth,
-        Math.min(maximumWidth, priorRequestedWidth)
-      )
-    );
+    const requestedWidthForBounds = () => {
+      const contentDesiredWidth = Math.min(
+        maximumWidth,
+        minimumWidth + (maximumWidth - minimumWidth) * widthProgress
+      );
+      return Math.min(
+        maximumWidth,
+        Math.max(
+          contentDesiredWidth,
+          Math.min(maximumWidth, priorRequestedWidth)
+        )
+      );
+    };
+    let requestedWidth = requestedWidthForBounds();
     const viewportBoundHeight = Math.max(
       1,
       viewport.height - margin * 2
     );
-    const maximumHeight = viewport.width <= 780
+    const baseMaximumHeight = viewport.width <= 780
       ? viewportBoundHeight
       : Math.min(720, viewportBoundHeight);
+    let maximumHeight = baseMaximumHeight;
 
-    card.style.setProperty(
-      "--rml-setup-adaptive-card-width",
-      `${Math.round(requestedWidth)}px`
-    );
-    card.style.setProperty(
-      "--rml-setup-adaptive-card-max-width",
-      `${Math.round(maximumWidth)}px`
-    );
+    const applyNarrationWidth = () => {
+      card.style.setProperty(
+        "--rml-setup-adaptive-card-width",
+        `${Math.round(requestedWidth)}px`
+      );
+      card.style.setProperty(
+        "--rml-setup-adaptive-card-max-width",
+        `${Math.round(maximumWidth)}px`
+      );
+    };
+    applyNarrationWidth();
     ui.root?.classList.add("rml-setup-adaptive-narration-card");
 
     const textStyle = getComputedStyle(text);
@@ -2954,40 +4068,100 @@
     const computedLineHeight =
       Number.parseFloat(textStyle.lineHeight) ||
       computedFontSize * 1.56;
-    const minimumFirstLineHeight = Math.ceil(
-      computedLineHeight + 2
+    const minimumVisibleTextLineCount = 3;
+    const textVerticalPadding =
+      (Number.parseFloat(textStyle.paddingTop) || 0) +
+      (Number.parseFloat(textStyle.paddingBottom) || 0);
+    const textVerticalBorders =
+      (Number.parseFloat(textStyle.borderTopWidth) || 0) +
+      (Number.parseFloat(textStyle.borderBottomWidth) || 0);
+    const textVerticalMargins =
+      (Number.parseFloat(textStyle.marginTop) || 0) +
+      (Number.parseFloat(textStyle.marginBottom) || 0);
+    const minimumTextHeight = Math.ceil(
+      computedLineHeight * minimumVisibleTextLineCount +
+      textVerticalPadding +
+      textVerticalBorders +
+      textVerticalMargins +
+      2
     );
     card.style.setProperty(
       "--rml-setup-adaptive-text-min-height",
-      `${minimumFirstLineHeight}px`
+      `${minimumTextHeight}px`
     );
 
     const previousScrollTop = text.scrollTop;
-    card.style.setProperty(
-      "--rml-setup-adaptive-card-max-height",
-      "none"
-    );
-    card.style.setProperty("--rml-setup-adaptive-card-height", "auto");
-    card.style.removeProperty("--rml-setup-adaptive-text-max-height");
-    void card.offsetHeight;
-
-    const naturalHeight = Math.max(
-      card.scrollHeight,
-      card.getBoundingClientRect().height
-    );
-    const naturalTextHeight = Math.max(
-      minimumFirstLineHeight,
-      text.scrollHeight
-    );
-    const chromeHeight = Math.max(
-      0,
-      naturalHeight - naturalTextHeight
+    const measureNaturalCard = () => {
+      card.style.setProperty(
+        "--rml-setup-adaptive-card-max-height",
+        "none"
+      );
+      card.style.setProperty("--rml-setup-adaptive-card-height", "auto");
+      card.style.removeProperty("--rml-setup-adaptive-text-max-height");
+      void card.offsetHeight;
+      const naturalHeight = Math.max(
+        card.scrollHeight,
+        card.getBoundingClientRect().height
+      );
+      const naturalTextHeight = Math.max(
+        minimumTextHeight,
+        text.scrollHeight
+      );
+      const chromeHeight = Math.max(
+        0,
+        naturalHeight - naturalTextHeight
+      );
+      return { naturalHeight, naturalTextHeight, chromeHeight };
+    };
+    let measurement = measureNaturalCard();
+    let adaptiveBounds = null;
+    for (let pass = 0; pass < 2; pass += 1) {
+      const minimumCardHeight = Math.min(
+        baseMaximumHeight,
+        measurement.chromeHeight + minimumTextHeight
+      );
+      const dynamicMinimumWidth = Math.min(
+        baseMaximumWidth,
+        viewport.width <= 520
+          ? Math.max(260, Math.min(baseMaximumWidth, viewport.width * .68))
+          : minimumWidth
+      );
+      adaptiveBounds = narrationAdaptiveCardBounds({
+        viewport,
+        margin,
+        baseMaximumWidth,
+        baseMaximumHeight,
+        minimumWidth: dynamicMinimumWidth,
+        minimumHeight: minimumCardHeight,
+        desiredWidth: requestedWidth,
+        desiredHeight: measurement.naturalHeight
+      });
+      maximumWidth = Math.max(
+        dynamicMinimumWidth,
+        adaptiveBounds.maximumWidth
+      );
+      maximumHeight = Math.max(
+        minimumCardHeight,
+        adaptiveBounds.maximumHeight
+      );
+      minimumWidth = Math.min(minimumWidth, maximumWidth);
+      requestedWidth = requestedWidthForBounds();
+      applyNarrationWidth();
+      measurement = measureNaturalCard();
+    }
+    const naturalHeight = measurement.naturalHeight;
+    const naturalTextHeight = measurement.naturalTextHeight;
+    const chromeHeight = measurement.chromeHeight;
+    const minimumCardHeight = Math.min(
+      maximumHeight,
+      chromeHeight + minimumTextHeight
     );
     const priorRequestedHeight = narrationCardMetrics?.requestedHeight || 0;
-    const requestedHeight = Math.min(
+    let requestedHeight = Math.min(
       maximumHeight,
       Math.max(
         naturalHeight,
+        minimumCardHeight,
         Math.min(maximumHeight, priorRequestedHeight)
       )
     );
@@ -3009,16 +4183,65 @@
       Math.max(0, text.scrollHeight - text.clientHeight)
     );
 
-    const placement = positionNarrationCardAwayFromTargets();
+    let placement = positionNarrationCardAwayFromTargets(adaptiveBounds);
     updateNarrationOutlines();
-    const cardRect = card.getBoundingClientRect();
+    let cardRect = card.getBoundingClientRect();
     const overflowing = text.scrollHeight > text.clientHeight + 1;
     const lineFollow = followText && overflowing
       ? followNarrationActiveLine(text, computedLineHeight)
       : { autoScrolled: false, activeLineVisible: true };
     const fontSize = computedFontSize;
-    const visibility = narrationSurfaceVisibility();
+    let visibility = narrationSurfaceVisibility();
+    let visibilityRepairApplied = false;
+    if (
+      !visibility.controlsFullyVisible ||
+      !visibility.actionFrameFullyVisible ||
+      !visibility.cardFullyVisible
+    ) {
+      visibilityRepairApplied = true;
+      const repairedNaturalHeight = Math.max(
+        card.scrollHeight,
+        card.getBoundingClientRect().height
+      );
+      requestedHeight = Math.min(
+        maximumHeight,
+        Math.max(requestedHeight, repairedNaturalHeight)
+      );
+      card.style.setProperty(
+        "--rml-setup-adaptive-card-height",
+        `${Math.ceil(requestedHeight)}px`
+      );
+      void card.offsetHeight;
+      placement = positionNarrationCardAwayFromTargets(adaptiveBounds);
+      void card.offsetHeight;
+      cardRect = card.getBoundingClientRect();
+      visibility = narrationSurfaceVisibility();
+    }
     const firstLine = narrationFirstLineGeometry();
+    const visibleTextLineCount = Math.max(
+      0,
+      (text.clientHeight - textVerticalPadding) / computedLineHeight
+    );
+    const dynamicBoundsRespected = Boolean(
+      cardRect.width <= maximumWidth + 2 &&
+      cardRect.height <= maximumHeight + 2
+    );
+    const glowPresent = visibility.glowCount > 0;
+    const wholeGlowVisibleThisFrame = Boolean(
+      !glowPresent ||
+      adaptiveBounds?.wholeGlowVisiblePossible !== true ||
+      visibility.minimumGlowUncoveredRatio >= .995
+    );
+    const finalHintAlreadyRevealed = Boolean(
+      ui.hint?.hidden === false &&
+      String(ui.hint?.textContent || "").trim()
+    );
+    const hintBoxHiddenThisNarrationFrame =
+      stepPhase !== "narrating" ||
+      finalHintAlreadyRevealed || Boolean(
+        ui.hint?.hidden === true &&
+        getComputedStyle(ui.hint).display === "none"
+      );
 
     if (reset || !narrationCardMetrics) {
       narrationCardMetrics = {
@@ -3027,6 +4250,31 @@
         minimumWidth,
         maximumWidth,
         maximumHeight,
+        minimumVisibleTextLineCount,
+        minimumObservedVisibleTextLines: visibleTextLineCount,
+        dynamicBoundsAlwaysRespected: dynamicBoundsRespected,
+        dynamicBoundsChangedCount: 0,
+        dynamicBoundsKey: adaptiveBounds?.key || "viewport",
+        wholeGlowVisibleWheneverPossible:
+          wholeGlowVisibleThisFrame,
+        glowAvoidancePossibleCount:
+          glowPresent &&
+          adaptiveBounds?.wholeGlowVisiblePossible === true
+            ? 1
+            : 0,
+        glowAvoidanceFailureCount:
+          glowPresent &&
+          adaptiveBounds?.wholeGlowVisiblePossible === true &&
+          !wholeGlowVisibleThisFrame
+            ? 1
+            : 0,
+        unavoidableGlowOverlapCount:
+          glowPresent &&
+          adaptiveBounds?.wholeGlowVisiblePossible !== true
+            ? 1
+            : 0,
+        hintBoxHiddenThroughoutNarration:
+          hintBoxHiddenThisNarrationFrame,
         maxObservedWidth: cardRect.width,
         maxObservedHeight: cardRect.height,
         lastObservedWidth: cardRect.width,
@@ -3052,29 +4300,72 @@
         cardAlwaysFullyVisible: visibility.cardFullyVisible,
         glowsAlwaysFullyVisible: visibility.glowsFullyVisible,
         maxGlowCardOverlapArea: visibility.glowCardOverlapArea,
+        minimumGlowUncoveredRatio:
+          visibility.minimumGlowUncoveredRatio,
         finalGlowCount: visibility.glowCount,
         firstLineMeasured: firstLine.measured,
         firstLineAlwaysClearOfTitle:
           !firstLine.measured ||
           (firstLine.clearOfTitle && firstLine.firstGlyphFullyVisible),
-        firstLineGeometry: firstLine
+        firstLineGeometry: firstLine,
+        visibilityRepairCount: visibilityRepairApplied ? 1 : 0,
+        maximumWidthRegressionPx: 0
       };
     } else {
-      if (
-        cardRect.width < narrationCardMetrics.lastObservedWidth - 1
-      ) {
+      const previousMaximumWidth = narrationCardMetrics.maximumWidth;
+      const previousMaximumHeight = narrationCardMetrics.maximumHeight;
+      const widthBoundShrank =
+        maximumWidth < previousMaximumWidth - 1;
+      const heightBoundShrank =
+        maximumHeight < previousMaximumHeight - 1;
+      const widthRegressionPx = Math.max(
+        0,
+        narrationCardMetrics.lastObservedWidth - cardRect.width
+      );
+      if (widthRegressionPx > 2.5 && !widthBoundShrank) {
         narrationCardMetrics.widthRegressionCount += 1;
       }
+      narrationCardMetrics.maximumWidthRegressionPx = Math.max(
+        narrationCardMetrics.maximumWidthRegressionPx || 0,
+        widthRegressionPx
+      );
       if (
-        cardRect.height < narrationCardMetrics.lastObservedHeight - 1
+        cardRect.height < narrationCardMetrics.lastObservedHeight - 1 &&
+        !heightBoundShrank
       ) {
         narrationCardMetrics.heightRegressionCount += 1;
+      }
+      if (widthBoundShrank || heightBoundShrank) {
+        narrationCardMetrics.dynamicBoundsChangedCount += 1;
       }
       narrationCardMetrics.lastObservedWidth = cardRect.width;
       narrationCardMetrics.lastObservedHeight = cardRect.height;
       narrationCardMetrics.minimumWidth = minimumWidth;
       narrationCardMetrics.maximumWidth = maximumWidth;
       narrationCardMetrics.maximumHeight = maximumHeight;
+      narrationCardMetrics.minimumObservedVisibleTextLines = Math.min(
+        narrationCardMetrics.minimumObservedVisibleTextLines,
+        visibleTextLineCount
+      );
+      narrationCardMetrics.dynamicBoundsAlwaysRespected &&=
+        dynamicBoundsRespected;
+      narrationCardMetrics.dynamicBoundsKey =
+        adaptiveBounds?.key || "viewport";
+      narrationCardMetrics.wholeGlowVisibleWheneverPossible &&=
+        wholeGlowVisibleThisFrame;
+      if (
+        glowPresent &&
+        adaptiveBounds?.wholeGlowVisiblePossible === true
+      ) {
+        narrationCardMetrics.glowAvoidancePossibleCount += 1;
+        if (!wholeGlowVisibleThisFrame) {
+          narrationCardMetrics.glowAvoidanceFailureCount += 1;
+        }
+      } else if (glowPresent) {
+        narrationCardMetrics.unavoidableGlowOverlapCount += 1;
+      }
+      narrationCardMetrics.hintBoxHiddenThroughoutNarration &&=
+        hintBoxHiddenThisNarrationFrame;
       narrationCardMetrics.maxObservedWidth = Math.max(
         narrationCardMetrics.maxObservedWidth,
         cardRect.width
@@ -3111,7 +4402,13 @@
         narrationCardMetrics.maxGlowCardOverlapArea,
         visibility.glowCardOverlapArea
       );
+      narrationCardMetrics.minimumGlowUncoveredRatio = Math.min(
+        narrationCardMetrics.minimumGlowUncoveredRatio ?? 1,
+        visibility.minimumGlowUncoveredRatio
+      );
       narrationCardMetrics.finalGlowCount = visibility.glowCount;
+      narrationCardMetrics.visibilityRepairCount +=
+        visibilityRepairApplied ? 1 : 0;
       if (
         !narrationCardMetrics.firstLineMeasured &&
         firstLine.measured
@@ -3127,6 +4424,12 @@
           firstLine
         );
       }
+    }
+    if (graphInspectorToggleVisibilityState?.toggle) {
+      sampleGraphInspectorToggleVisibility(
+        graphInspectorToggleVisibilityState.toggle,
+        "adaptive-card-fit"
+      );
     }
     return {
       cardRect,
@@ -3162,13 +4465,103 @@
       metrics &&
       metrics.maxObservedHeight >= metrics.initialHeight + 8
     );
+    const viewportSupport = evaluateTourViewportSupport(
+      viewport.width,
+      viewport.height
+    );
+    const dynamicNarrationContract = Boolean(
+      metrics &&
+      metrics.dynamicBoundsAlwaysRespected === true &&
+      metrics.minimumObservedVisibleTextLines >= 2.9 &&
+      metrics.wholeGlowVisibleWheneverPossible === true &&
+      metrics.glowAvoidanceFailureCount === 0
+    );
+    tourDebugAssert(
+      `tour-step-${index}-mobile-narration-preserves-subject-reveal-area`,
+      viewport.width > 780 || !viewportSupport.supported ||
+        dynamicNarrationContract,
+      {
+        mobileRevealPolicyApplies:
+          viewport.width <= 780 && viewportSupport.supported,
+        viewportSupport,
+        dynamicNarrationContract,
+        dynamicBoundsKey: metrics?.dynamicBoundsKey || "",
+        dynamicBoundsChangedCount:
+          metrics?.dynamicBoundsChangedCount || 0,
+        dynamicBoundsAlwaysRespected:
+          metrics?.dynamicBoundsAlwaysRespected === true,
+        minimumObservedVisibleTextLines:
+          metrics?.minimumObservedVisibleTextLines || 0,
+        requiredVisibleTextLines: 3,
+        wholeGlowVisibleWheneverPossible:
+          metrics?.wholeGlowVisibleWheneverPossible === true,
+        glowAvoidancePossibleCount:
+          metrics?.glowAvoidancePossibleCount || 0,
+        glowAvoidanceFailureCount:
+          metrics?.glowAvoidanceFailureCount || 0,
+        unavoidableGlowOverlapCount:
+          metrics?.unavoidableGlowOverlapCount || 0,
+        minimumGlowUncoveredRatio:
+          metrics?.minimumGlowUncoveredRatio ?? 0,
+        policy:
+          "On supported compact viewports the card derives its maximum width, maximum height and placement from the live glow. It keeps the complete glow unobstructed whenever a readable three-line card fits beside it; otherwise only the mathematically unavoidable overlap is allowed."
+      }
+    );
+    tourDebugAssert(
+      `tour-step-${index}-dynamic-narration-bounds-and-three-lines`,
+      dynamicNarrationContract,
+      {
+        viewportSupport,
+        dynamicBoundsKey: metrics?.dynamicBoundsKey || "",
+        minimumWidth: metrics?.minimumWidth || 0,
+        maximumWidth: metrics?.maximumWidth || 0,
+        maximumHeight: metrics?.maximumHeight || 0,
+        minimumObservedVisibleTextLines:
+          metrics?.minimumObservedVisibleTextLines || 0,
+        requiredVisibleTextLines: 3,
+        wholeGlowVisibleWheneverPossible:
+          metrics?.wholeGlowVisibleWheneverPossible === true,
+        glowAvoidancePossibleCount:
+          metrics?.glowAvoidancePossibleCount || 0,
+        glowAvoidanceFailureCount:
+          metrics?.glowAvoidanceFailureCount || 0,
+        unavoidableGlowOverlapCount:
+          metrics?.unavoidableGlowOverlapCount || 0
+      }
+    );
+    const ui = elements();
+    const finalHintVisible = Boolean(
+      !steps[index]?.hint ||
+      (
+        ui.hint?.hidden === false &&
+        getComputedStyle(ui.hint).display !== "none"
+      )
+    );
+    tourDebugAssert(
+      `tour-step-${index}-hint-box-hidden-until-final-blue-text`,
+      Boolean(
+        metrics?.hintBoxHiddenThroughoutNarration === true &&
+        finalHintVisible
+      ),
+      {
+        hiddenThroughoutNarration:
+          metrics?.hintBoxHiddenThroughoutNarration === true,
+        finalHintVisible,
+        finalHintText: ui.hint?.textContent || "",
+        behavior:
+          "The bordered hint consumes no layout height while narration is typing and appears only together with the final blue hint text."
+      }
+    );
     return tourDebugAssert(
       `tour-step-${index}-adaptive-narration-card-growth-and-scroll`,
       Boolean(metrics) &&
-        (widthAlreadyAtLimit || widthGrew) &&
-        heightGrew &&
-        metrics.maxObservedWidth <= metrics.maximumWidth + 2 &&
-        metrics.maxObservedHeight <= metrics.maximumHeight + 2 &&
+        (widthAlreadyAtLimit || widthGrew ||
+          metrics.dynamicBoundsChangedCount > 0) &&
+        (heightGrew || metrics.dynamicBoundsChangedCount > 0 ||
+          metrics.minimumObservedVisibleTextLines >= 2.9) &&
+        metrics.dynamicBoundsAlwaysRespected === true &&
+        metrics.minimumObservedVisibleTextLines >= 2.9 &&
+        metrics.wholeGlowVisibleWheneverPossible === true &&
         metrics.widthRegressionCount === 0 &&
         metrics.heightRegressionCount === 0 &&
         metrics.activeLineAlwaysVisible === true &&
@@ -3432,11 +4825,206 @@
     }
   }
 
+  function captureTourStorageState() {
+    const entries = [];
+    try {
+      for (let index = 0; index < window.localStorage.length; index += 1) {
+        const key = window.localStorage.key(index);
+        if (key != null) {
+          entries.push([key, window.localStorage.getItem(key)]);
+        }
+      }
+    } catch {
+      // Storage may be unavailable in hardened browser profiles.
+    }
+    entries.sort(([left], [right]) => left.localeCompare(right));
+    return entries;
+  }
+
+  function restoreTourStorageState(entries) {
+    if (!Array.isArray(entries)) return false;
+    try {
+      const desired = new Map(entries);
+      const currentKeys = [];
+      for (let index = 0; index < window.localStorage.length; index += 1) {
+        const key = window.localStorage.key(index);
+        if (key != null) currentKeys.push(key);
+      }
+      for (const key of currentKeys) {
+        if (!desired.has(key)) window.localStorage.removeItem(key);
+      }
+      for (const [key, value] of desired) {
+        window.localStorage.setItem(key, value == null ? "" : String(value));
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function tourStorageFingerprint(entries = captureTourStorageState()) {
+    try {
+      return JSON.stringify(entries);
+    } catch {
+      return "";
+    }
+  }
+
+  function captureTourOverlayState() {
+    return {
+      dialogs: [...document.querySelectorAll("dialog")].map(dialog => ({
+        id: dialog.id || "",
+        open: dialog.open === true
+      })),
+      graphSearchOverlays: [...document.querySelectorAll(
+        ".rml-graph-search-overlay"
+      )].map((overlay, index) => ({
+        index,
+        hidden: overlay.hidden === true
+      }))
+    };
+  }
+
+  function restoreTourOverlayState(state) {
+    if (!state) return false;
+    restoreTourSurfaceFromModal(false);
+    const expectedDialogs = new Map(
+      (state.dialogs || []).map(item => [item.id, item])
+    );
+    for (const dialog of document.querySelectorAll("dialog")) {
+      const expected = expectedDialogs.get(dialog.id || "");
+      const shouldBeOpen = expected?.open === true;
+      if (!shouldBeOpen && dialog.open) {
+        try {
+          dialog.close();
+        } catch {
+          dialog.removeAttribute("open");
+        }
+      } else if (shouldBeOpen && !dialog.open) {
+        try {
+          dialog.showModal();
+        } catch {
+          dialog.setAttribute("open", "");
+        }
+      }
+    }
+    const graphSearchOverlays = [...document.querySelectorAll(
+      ".rml-graph-search-overlay"
+    )];
+    graphSearchOverlays.forEach((overlay, index) => {
+      overlay.hidden = state.graphSearchOverlays?.[index]?.hidden !== false;
+    });
+    return tourOverlayStateMatches(state);
+  }
+
+  function tourOverlayStateMatches(state) {
+    if (!state) return false;
+    const actual = captureTourOverlayState();
+    const expectedDialogs = new Map(
+      (state.dialogs || []).map(item => [item.id, item.open === true])
+    );
+    const dialogsMatch = actual.dialogs.every(item =>
+      item.open === (expectedDialogs.get(item.id) === true)
+    ) && [...expectedDialogs].every(([id, open]) =>
+      actual.dialogs.some(item => item.id === id && item.open === open)
+    );
+    const graphSearchMatches = actual.graphSearchOverlays.every(
+      (item, index) =>
+        item.hidden === (state.graphSearchOverlays?.[index]?.hidden !== false)
+    );
+    return dialogsMatch && graphSearchMatches;
+  }
+
+  function captureTourScrollSurfaces() {
+    return [...document.querySelectorAll("[id]")]
+      .filter(element =>
+        element instanceof HTMLElement &&
+        (element.scrollTop !== 0 || element.scrollLeft !== 0)
+      )
+      .map(element => ({
+        id: element.id,
+        top: element.scrollTop,
+        left: element.scrollLeft
+      }));
+  }
+
+  function restoreTourScrollSurfaces(entries = []) {
+    for (const entry of entries) {
+      const element = document.getElementById(entry.id);
+      if (element instanceof HTMLElement) {
+        element.scrollTop = Number(entry.top) || 0;
+        element.scrollLeft = Number(entry.left) || 0;
+      }
+    }
+  }
+
+  function captureTourEnvironmentState({ includeStorage = true } = {}) {
+    const topActions = document.querySelector("#top-actions");
+    const topMenuToggle = document.querySelector("#top-menu-toggle");
+    return {
+      overlay: captureTourOverlayState(),
+      storage: includeStorage ? captureTourStorageState() : null,
+      graphMode: document.body.classList.contains("rml-node-graph-mode"),
+      graphLeftCollapsed: document.body.classList.contains(
+        "rml-graph-left-collapsed"
+      ),
+      graphRightCollapsed: document.body.classList.contains(
+        "rml-graph-right-collapsed"
+      ),
+      topMenuOpen: Boolean(
+        topActions?.classList.contains("mobile-menu-open") &&
+        topMenuToggle?.getAttribute("aria-expanded") === "true"
+      ),
+      page: { x: window.scrollX, y: window.scrollY },
+      scrollSurfaces: captureTourScrollSurfaces(),
+      activeElementId: document.activeElement?.id || ""
+    };
+  }
+
+  async function restoreTourEnvironmentState(state, { storage = true } = {}) {
+    if (!state) return false;
+    restoreTourOverlayState(state.overlay);
+    if (storage && state.storage) restoreTourStorageState(state.storage);
+
+    const topActions = document.querySelector("#top-actions");
+    const topMenuToggle = document.querySelector("#top-menu-toggle");
+    topActions?.classList.toggle("mobile-menu-open", state.topMenuOpen === true);
+    if (topMenuToggle) {
+      topMenuToggle.setAttribute("aria-expanded", String(state.topMenuOpen === true));
+      topMenuToggle.setAttribute(
+        "aria-label",
+        state.topMenuOpen === true ? "Close menu" : "Open menu"
+      );
+    }
+
+    document.body.classList.toggle(
+      "rml-graph-left-collapsed",
+      state.graphLeftCollapsed === true
+    );
+    document.body.classList.toggle(
+      "rml-graph-right-collapsed",
+      state.graphRightCollapsed === true
+    );
+    window.scrollTo(Number(state.page?.x) || 0, Number(state.page?.y) || 0);
+    restoreTourScrollSurfaces(state.scrollSurfaces);
+    await nextTwoFrames();
+    restoreTourOverlayState(state.overlay);
+    window.scrollTo(Number(state.page?.x) || 0, Number(state.page?.y) || 0);
+    restoreTourScrollSurfaces(state.scrollSurfaces);
+    if (state.activeElementId) {
+      document.getElementById(state.activeElementId)?.focus?.({
+        preventScroll: true
+      });
+    }
+    return true;
+  }
+
   function clearDemoVisuals() {
     const ui = elements();
 
     clearNarrationOutlines();
 
+    hardHideTeacherMouse("clear-demo-visuals");
     ui.mouse?.classList.remove(
       "active",
       "pressed",
@@ -3485,6 +5073,16 @@
 
   function cancelDemo() {
     demoRunId += 1;
+    narrationReservedRevealRect = null;
+    graphInspectorToggleVisibilityState = null;
+    elements().card?.classList.remove(
+      "rml-setup-card-hidden-during-panel-reveal"
+    );
+    document.querySelectorAll(".rml-setup-graph-panel-visible-reveal")
+      .forEach(panel => panel.classList.remove(
+        "rml-setup-graph-panel-visible-reveal"
+      ));
+    hardHideTeacherMouse("cancel-demo-before-surface-restore");
     clearTimeout(autoAdvanceTimer);
     autoAdvanceTimer = 0;
     for (const timer of demoTimers) clearTimeout(timer);
@@ -3528,6 +5126,7 @@
     }
     restoreTourSurfaceFromModal(true);
     clearDemoVisuals();
+    teacherMouseSafetyState = null;
     releaseSemanticScene();
     document
       .getElementById("rml-setup-assistant")
@@ -3551,6 +5150,47 @@
       "scrolling",
       "horizontal-wheel"
     );
+  }
+
+  function hardHideTeacherMouse(reason = "scene-transition") {
+    const { mouse } = elements();
+    if (!(mouse instanceof HTMLElement)) return false;
+    mouse.classList.remove(
+      "active",
+      "pressed",
+      "scrolling",
+      "horizontal-wheel"
+    );
+    mouse.classList.add("rml-setup-mouse-hard-hidden");
+    mouse.dataset.hardHiddenReason = reason;
+    return true;
+  }
+
+  async function hideTeacherMouseBeforeTransition(
+    runId,
+    reason = "scene-transition"
+  ) {
+    const { mouse } = elements();
+    if (!(mouse instanceof HTMLElement)) return false;
+    hideMouse();
+    await wait(220);
+    if (runId !== demoRunId) return false;
+    hardHideTeacherMouse(reason);
+    await nextTwoFrames();
+    const style = getComputedStyle(mouse);
+    const hidden = Boolean(
+      mouse.classList.contains("rml-setup-mouse-hard-hidden") &&
+      style.visibility === "hidden" &&
+      Number.parseFloat(style.opacity || "0") <= .01
+    );
+    tourDebugRecord("teacher-mouse-hidden-before-scene-transition", {
+      reason,
+      hidden,
+      opacity: Number.parseFloat(style.opacity || "0"),
+      visibility: style.visibility,
+      point: teacherMouseCoordinates()
+    });
+    return hidden;
   }
 
   function removeLandingGuides() {
@@ -4061,6 +5701,190 @@
       : null;
   }
 
+  function teacherMouseVisualCoordinates() {
+    const mouse = elements().mouse;
+    const rect = mouse?.getBoundingClientRect?.();
+    return rect && rect.width > 0 && rect.height > 0
+      ? {
+          x: rect.left + rect.width * .5,
+          y: rect.top + rect.height * .5
+        }
+      : teacherMouseCoordinates();
+  }
+
+  function tourPointDistanceToRect(point, rect) {
+    const dx = Math.max(rect.left - point.x, 0, point.x - rect.right);
+    const dy = Math.max(rect.top - point.y, 0, point.y - rect.bottom);
+    return Math.hypot(dx, dy);
+  }
+
+  function tourSegmentIntersectsRect(from, to, rect) {
+    let minimum = 0;
+    let maximum = 1;
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    for (const [p, q] of [
+      [-dx, from.x - rect.left],
+      [dx, rect.right - from.x],
+      [-dy, from.y - rect.top],
+      [dy, rect.bottom - from.y]
+    ]) {
+      if (Math.abs(p) < .000001) {
+        if (q < 0) return false;
+        continue;
+      }
+      const ratio = q / p;
+      if (p < 0) minimum = Math.max(minimum, ratio);
+      else maximum = Math.min(maximum, ratio);
+      if (minimum > maximum) return false;
+    }
+    return true;
+  }
+
+  function positionLiveControlsAwayFromMouseRoute(points, reason = "mouse-route") {
+    const controls = elements().liveControls;
+    if (
+      !(controls instanceof HTMLElement) ||
+      controls.hidden ||
+      stepPhase !== "demonstrating"
+    ) {
+      return true;
+    }
+    const route = (Array.isArray(points) ? points : [points]).filter(point =>
+      Number.isFinite(point?.x) && Number.isFinite(point?.y)
+    );
+    if (route.length === 0) return true;
+
+    const controlsRect = controls.getBoundingClientRect();
+    const margin = window.innerWidth <= 780 ? 9 : 14;
+    const width = Math.max(1, controlsRect.width);
+    const height = Math.max(1, controlsRect.height);
+    const viewport = {
+      left: 0,
+      top: 0,
+      right: window.innerWidth,
+      bottom: window.innerHeight
+    };
+    const placements = [
+      {
+        name: "bottom-right",
+        rect: {
+          left: viewport.right - margin - width,
+          top: viewport.bottom - margin - height,
+          right: viewport.right - margin,
+          bottom: viewport.bottom - margin
+        }
+      },
+      {
+        name: "bottom-left",
+        rect: {
+          left: margin,
+          top: viewport.bottom - margin - height,
+          right: margin + width,
+          bottom: viewport.bottom - margin
+        }
+      },
+      {
+        name: "top-right",
+        rect: {
+          left: viewport.right - margin - width,
+          top: margin,
+          right: viewport.right - margin,
+          bottom: margin + height
+        }
+      },
+      {
+        name: "top-left",
+        rect: {
+          left: margin,
+          top: margin,
+          right: margin + width,
+          bottom: margin + height
+        }
+      }
+    ];
+    const safety = 48;
+    for (const placement of placements) {
+      const expanded = {
+        left: placement.rect.left - safety,
+        top: placement.rect.top - safety,
+        right: placement.rect.right + safety,
+        bottom: placement.rect.bottom + safety
+      };
+      const segments = route.slice(1).map((point, index) => [
+        route[index],
+        point
+      ]);
+      placement.blocked = route.some(point =>
+        point.x >= expanded.left && point.x <= expanded.right &&
+        point.y >= expanded.top && point.y <= expanded.bottom
+      ) || segments.some(([from, to]) =>
+        tourSegmentIntersectsRect(from, to, expanded)
+      );
+      placement.clearance = Math.min(
+        ...route.map(point => tourPointDistanceToRect(point, placement.rect))
+      );
+      placement.current = controls.dataset.livePlacement === placement.name;
+    }
+    const currentSafe = placements.find(placement =>
+      placement.current &&
+      !placement.blocked &&
+      placement.clearance >= safety
+    );
+    placements.sort((left, right) =>
+      Number(left.blocked) - Number(right.blocked) ||
+      right.clearance - left.clearance ||
+      Number(right.current) - Number(left.current)
+    );
+    const selected = currentSafe || placements[0];
+    const previous = controls.dataset.livePlacement || "bottom-right";
+    controls.dataset.livePlacement = selected.name;
+
+    if (teacherMouseSafetyState) {
+      teacherMouseSafetyState.samples += 1;
+      teacherMouseSafetyState.minimumClearance = Math.min(
+        teacherMouseSafetyState.minimumClearance,
+        selected.clearance
+      );
+      if (selected.blocked) teacherMouseSafetyState.violations += 1;
+      if (previous !== selected.name) teacherMouseSafetyState.relocations += 1;
+    }
+    if (previous !== selected.name) {
+      tourDebugRecord("teacher-mouse-live-controls-relocated", {
+        reason,
+        previous,
+        placement: selected.name,
+        route,
+        predictedClearance: Math.round(selected.clearance * 10) / 10,
+        collisionFree: !selected.blocked
+      });
+    }
+    return !selected.blocked;
+  }
+
+  function setTeacherMousePoint(
+    point,
+    duration = 0,
+    routePoints = [],
+    reason = "mouse-point"
+  ) {
+    const mouse = elements().mouse;
+    if (!(mouse instanceof HTMLElement) || !point) return false;
+    mouse.classList.remove("rml-setup-mouse-hard-hidden");
+    delete mouse.dataset.hardHiddenReason;
+    const current = teacherMouseVisualCoordinates() || teacherMouseCoordinates();
+    const route = [
+      current,
+      ...(Array.isArray(routePoints) ? routePoints : []),
+      point
+    ].filter(Boolean);
+    positionLiveControlsAwayFromMouseRoute(route, reason);
+    mouse.style.setProperty("--mouse-duration", `${Math.max(0, duration)}ms`);
+    mouse.style.setProperty("--mouse-x", `${point.x}px`);
+    mouse.style.setProperty("--mouse-y", `${point.y}px`);
+    return true;
+  }
+
   async function waitForNativeHorizontalOptionMarker(
     host,
     heldPoint,
@@ -4189,11 +6013,16 @@
   async function moveMouse(point, duration = 720, runId = demoRunId) {
     const { mouse } = elements();
     if (!mouse || runId !== demoRunId) return false;
+    mouse.classList.remove("rml-setup-mouse-hard-hidden");
+    delete mouse.dataset.hardHiddenReason;
     mouse.classList.add("active");
-    mouse.style.setProperty("--mouse-x", `${point.x}px`);
-    mouse.style.setProperty("--mouse-y", `${point.y}px`);
     const effectiveDuration = tourPresentationDuration(duration);
-    mouse.style.setProperty("--mouse-duration", `${effectiveDuration}ms`);
+    setTeacherMousePoint(
+      point,
+      effectiveDuration,
+      [],
+      "teacher-mouse-transition"
+    );
     const ghost = elements().dragGhost;
     if (ghost && !ghost.hidden) {
       ghost.style.transition = `left ${effectiveDuration}ms cubic-bezier(.22,.75,.2,1), top ${effectiveDuration}ms cubic-bezier(.22,.75,.2,1)`;
@@ -4231,7 +6060,9 @@
         ? options.focus
         : element;
     positionShades(focus);
-    if (options.keepFocusVisible === true) {
+    if (options.preserveCardPlacement === true) {
+      // The caller already placed the card around a reserved future UI area.
+    } else if (options.keepFocusVisible === true) {
       positionCardAwayFromPath(
         centerOf(focus, .08, .08),
         centerOf(focus, .92, .92)
@@ -4502,6 +6333,146 @@
 
     elements().mouse?.classList.remove("scrolling");
     return elementVisibleInsideScroller(element, scroller, 4);
+  }
+
+  function elementVisibleRatioInsideRect(element, boundary) {
+    if (!(element instanceof HTMLElement) || !boundary) return 0;
+    const rect = element.getBoundingClientRect();
+    const area = Math.max(0, rect.width * rect.height);
+    if (!(area > 0)) return 0;
+    return Math.max(
+      0,
+      Math.min(1, rectangleIntersectionArea(rect, boundary) / area)
+    );
+  }
+
+  function topbarOpeningFrameVisibility() {
+    const topbar = document.querySelector(".topbar");
+    const toggle = document.querySelector("#top-menu-toggle");
+    const actions = document.querySelector("#top-actions");
+    const viewport = tourViewport();
+    const viewportRect = {
+      left: viewport.left,
+      top: viewport.top,
+      right: viewport.right,
+      bottom: viewport.bottom
+    };
+    const topbarVisibleRatio = elementVisibleRatioInsideRect(
+      topbar,
+      viewportRect
+    );
+    const responsive = tourElementActuallyVisible(toggle);
+    const menuOpen = Boolean(
+      actions?.classList.contains("mobile-menu-open") &&
+      toggle?.getAttribute("aria-expanded") === "true"
+    );
+    const actionSelectors = [
+      "#new-blank",
+      "#information-open",
+      "#setup-guide-open",
+      "#preview-open",
+      "#project-manager",
+      "#download-code"
+    ];
+    const actionProofs = actionSelectors.map(selector => {
+      const element = document.querySelector(selector);
+      const visibleRatio = elementVisibleRatioInsideRect(
+        element,
+        viewportRect
+      );
+      return {
+        selector,
+        visible: tourElementActuallyVisible(element),
+        visibleRatio,
+        rect: tourDebugRect(element)
+      };
+    });
+    const toggleVisibleRatio = elementVisibleRatioInsideRect(
+      toggle,
+      viewportRect
+    );
+    const actionsOpacity = actions instanceof HTMLElement
+      ? Number.parseFloat(getComputedStyle(actions).opacity || "0")
+      : 0;
+    const responsiveOpeningReady = Boolean(
+      responsive &&
+      toggleVisibleRatio >= .995 &&
+      menuOpen === false &&
+      actionsOpacity <= .02
+    );
+    const desktopOpeningReady = Boolean(
+      !responsive &&
+      actionProofs.length === actionSelectors.length &&
+      actionProofs.every(action =>
+        action.visible && action.visibleRatio >= .995
+      )
+    );
+    const passed = Boolean(
+      topbar instanceof HTMLElement &&
+      tourElementActuallyVisible(topbar) &&
+      topbarVisibleRatio >= .995 &&
+      (responsiveOpeningReady || desktopOpeningReady)
+    );
+    return {
+      passed,
+      viewport: viewportRect,
+      pageTop: Number(
+        (document.scrollingElement || document.documentElement)
+          ?.scrollTop || 0
+      ),
+      topbarRect: tourDebugRect(topbar),
+      topbarVisibleRatio,
+      responsive,
+      menuOpen,
+      toggleRect: tourDebugRect(toggle),
+      toggleVisibleRatio,
+      actionsRect: tourDebugRect(actions),
+      actionsOpacity,
+      responsiveOpeningReady,
+      desktopOpeningReady,
+      actionProofs
+    };
+  }
+
+  async function prepareTopbarOpeningFrame(runId = demoRunId) {
+    const scroller =
+      document.scrollingElement || document.documentElement;
+    const startingPageTop = Number(scroller?.scrollTop || 0);
+    await animateTourPageScroll(
+      0,
+      TOUR_SCROLL_TIMING.pageScrollDuration,
+      runId
+    );
+    if (runId !== demoRunId) return false;
+    if (scroller) scroller.scrollTop = 0;
+    await nextTwoFrames();
+
+    await prepareTopbarBeforeNarration(runId);
+    if (runId !== demoRunId) return false;
+    const actions = document.querySelector("#top-actions");
+    if (actions instanceof HTMLElement) {
+      actions.scrollLeft = 0;
+    }
+    if (scroller) scroller.scrollTop = 0;
+    await nextTwoFrames();
+
+    const proof = topbarOpeningFrameVisibility();
+    const restored = tourDebugAssert(
+      "topbar-opening-frame-restored-from-arbitrary-page-scroll",
+      proof.passed && proof.pageTop <= 1,
+      {
+        startingPageTop,
+        ...proof,
+        policy:
+          "Step 1 always starts at the canonical page top: the complete real top bar is visible, all desktop actions are on-screen, or the responsive Hamburger is visible while its actions remain intentionally closed until explained"
+      }
+    );
+    if (!restored) {
+      throw new Error(
+        "[RML Tour · Step 1] The complete top bar opening frame could not be restored after the page started scrolled away from the top."
+      );
+    }
+    return true;
   }
 
   function responsiveTopActionsState(control = null) {
@@ -4928,9 +6899,12 @@
     if (runId !== demoRunId) return false;
 
     const dispatchMove = point => {
-      mouse?.style.setProperty("--mouse-x", point.x + "px");
-      mouse?.style.setProperty("--mouse-y", point.y + "px");
-      mouse?.style.setProperty("--mouse-duration", "0ms");
+      setTeacherMousePoint(
+        point,
+        0,
+        [],
+        "native-user-pointer-drag"
+      );
       document.dispatchEvent(
         new PointerEvent("pointermove", {
           bubbles: true,
@@ -5420,17 +7394,11 @@
         y: from.y + (to.y - from.y) * eased
       };
 
-      mouse?.style.setProperty(
-        "--mouse-x",
-        `${point.x}px`
-      );
-      mouse?.style.setProperty(
-        "--mouse-y",
-        `${point.y}px`
-      );
-      mouse?.style.setProperty(
-        "--mouse-duration",
-        "0ms"
+      setTeacherMousePoint(
+        point,
+        0,
+        [],
+        "native-graph-viewport-pan"
       );
 
       viewport.dispatchEvent(
@@ -5981,29 +7949,413 @@
     hideMouse();
   }
 
+  function graphInspectorEditNodeVisibilityProof(node, inset = 16) {
+    const viewport = document.querySelector(".rml-graph-viewport");
+    const visible = visibleGraphClientRect(inset);
+    const rect = node?.getBoundingClientRect?.() || null;
+    const intersection = rect && visible
+      ? {
+          left: Math.max(rect.left, visible.left),
+          right: Math.min(rect.right, visible.right),
+          top: Math.max(rect.top, visible.top),
+          bottom: Math.min(rect.bottom, visible.bottom)
+        }
+      : null;
+    const intersectionArea = intersection
+      ? Math.max(0, intersection.right - intersection.left) *
+        Math.max(0, intersection.bottom - intersection.top)
+      : 0;
+    const nodeArea = rect
+      ? Math.max(0, rect.width) * Math.max(0, rect.height)
+      : 0;
+    const visibleRatio = nodeArea > 0
+      ? intersectionArea / nodeArea
+      : 0;
+    const completeFootprintInside = graphNodeRectInsideVisibleGraph(
+      node,
+      inset
+    );
+    const visiblyRendered = graphDemoVisible(node);
+
+    return {
+      ok: Boolean(
+        viewport instanceof HTMLElement &&
+        visiblyRendered &&
+        completeFootprintInside &&
+        visibleRatio >= .999
+      ),
+      inset,
+      visiblyRendered,
+      completeFootprintInside,
+      visibleRatio,
+      nodeRect: tourDebugRect(node),
+      visibleGraphRect: visible,
+      viewportRect: tourDebugRect(viewport)
+    };
+  }
+
+  async function ensureGraphInspectorEditNodeFullyVisible(
+    nodeId,
+    runId,
+    phase
+  ) {
+    const resolveNode = () => document.querySelector(
+      `.rml-graph-node[data-graph-node-id="${CSS.escape(nodeId)}"]`
+    );
+    const attempts = [];
+    let repaired = false;
+    let viewportUsable = await ensureGraphViewportWindow(runId);
+    if (runId !== demoRunId) {
+      return {
+        ok: false,
+        reason: "demonstration-cancelled",
+        phase,
+        node: resolveNode(),
+        repaired,
+        attempts,
+        viewportUsable
+      };
+    }
+    await nextTwoFrames();
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      if (runId !== demoRunId) break;
+      const node = resolveNode();
+      const proof = graphInspectorEditNodeVisibilityProof(node, 16);
+      const entry = {
+        attempt,
+        phase,
+        viewportUsable,
+        proof
+      };
+      attempts.push(entry);
+      if (proof.ok) {
+        return {
+          ok: true,
+          phase,
+          node,
+          nodeId,
+          repaired,
+          attempts,
+          viewportUsable,
+          finalProof: proof
+        };
+      }
+
+      if (attempt > 0) {
+        viewportUsable = await ensureGraphViewportWindow(runId);
+        if (runId !== demoRunId) break;
+      }
+      const visible = visibleGraphClientRect(16);
+      if (!node || !visible || visible.width <= 0 || visible.height <= 0) {
+        entry.action = "graph-window-unavailable";
+        await nextTwoFrames();
+        continue;
+      }
+
+      const currentScale = Number(
+        window.RMLDynamicGraphHost?.getState?.()?.viewport?.scale
+      ) || 1;
+      const fitted = window.RMLDynamicGraphHost?.fitNodesToClientRect?.(
+        [nodeId],
+        visible,
+        {
+          padding: 28 + attempt * 8,
+          maxScale: Math.min(1, currentScale)
+        }
+      ) || null;
+      entry.action = "fit-node-camera-to-complete-visible-footprint";
+      entry.result = fitted;
+      repaired ||= fitted?.ok === true;
+      await nextTwoFrames();
+    }
+
+    const node = resolveNode();
+    const finalProof = graphInspectorEditNodeVisibilityProof(node, 16);
+    return {
+      ok: finalProof.ok,
+      reason: "edit-node-complete-footprint-remained-clipped",
+      phase,
+      node,
+      nodeId,
+      repaired,
+      attempts,
+      viewportUsable,
+      finalProof
+    };
+  }
+
   async function runGraphInspectorDemo(runId) {
     await ensureGraphDemoNodes(runId);
     if (runId !== demoRunId) return;
-    const node = graphDemoFindNode(/(?:^|\s)NOT(?:\s|$)/i) ||
+    let node = graphDemoFindNode(/(?:^|\s)NOT(?:\s|$)/i) ||
       document.querySelector(".rml-graph-node");
-    if (!node) return;
-    await teacherClickElement(
+    if (!(node instanceof HTMLElement)) {
+      graphDemoError(
+        "Step 12 could not find the real graph node that must be edited."
+      );
+    }
+    const graphHost = window.RMLDynamicGraphHost;
+    const nodeId = String(node.dataset.graphNodeId || "");
+    if (!nodeId) {
+      graphDemoError(
+        "Step 12 found a rendered node without a graph-node identity."
+      );
+    }
+    const beforeSelectionVisibility =
+      await ensureGraphInspectorEditNodeFullyVisible(
+        nodeId,
+        runId,
+        "before-selection"
+      );
+    if (runId !== demoRunId) return;
+    node = beforeSelectionVisibility.node || node;
+    const completeBeforeSelection = tourDebugAssert(
+      "graph-inspector-edit-node-complete-footprint-visible-before-selection",
+      beforeSelectionVisibility.ok === true,
+      {
+        nodeId,
+        repaired: beforeSelectionVisibility.repaired,
+        viewportUsable: beforeSelectionVisibility.viewportUsable,
+        finalProof: beforeSelectionVisibility.finalProof,
+        attempts: beforeSelectionVisibility.attempts
+      }
+    );
+    if (!completeBeforeSelection) {
+      graphDemoError(
+        "Step 12 could not place the complete node that must be edited inside the visible graph before selection.",
+        {
+          nodeId,
+          visibility: beforeSelectionVisibility
+        }
+      );
+    }
+    const selected = await teacherClickElement(
       node,
       "Select the real runtime node",
       runId
     );
     if (runId !== demoRunId) return;
-    const inspector = document.querySelector(".rml-graph-inspector");
-    const labelInput = inspector?.querySelector(".rml-graph-inspector-card input");
-    if (labelInput) {
-      await teacherTypeInput(
-        labelInput,
-        "Demo NOT",
-        "Change the existing NOT node label in the real Node inspector",
-        runId
+    const selectedNodeId = String(
+      graphHost?.getState?.()?.selectedNodeId || ""
+    );
+    const selectionCommitted = tourDebugAssert(
+      "graph-inspector-real-node-selection-committed",
+      selected === true && selectedNodeId === nodeId,
+      {
+        requestedNodeId: nodeId,
+        selectedNodeId,
+        clickCompleted: selected === true
+      }
+    );
+    if (!selectionCommitted) {
+      graphDemoError(
+        "Step 12 did not commit the selected node to the real graph model.",
+        { requestedNodeId: nodeId, selectedNodeId }
       );
     }
-    hideMouse();
+    await nextTwoFrames();
+    const afterSelectionVisibility =
+      await ensureGraphInspectorEditNodeFullyVisible(
+        nodeId,
+        runId,
+        "after-selection"
+      );
+    if (runId !== demoRunId) return;
+    node = afterSelectionVisibility.node || node;
+    const completeAfterSelection = tourDebugAssert(
+      "graph-inspector-edit-node-complete-footprint-visible-after-selection",
+      afterSelectionVisibility.ok === true,
+      {
+        nodeId,
+        repaired: afterSelectionVisibility.repaired,
+        viewportUsable: afterSelectionVisibility.viewportUsable,
+        finalProof: afterSelectionVisibility.finalProof,
+        attempts: afterSelectionVisibility.attempts,
+        selectedNodeId
+      }
+    );
+    if (!completeAfterSelection) {
+      graphDemoError(
+        "Step 12 selected the node, but opening the real inspector clipped the node's complete graph footprint.",
+        {
+          nodeId,
+          visibility: afterSelectionVisibility
+        }
+      );
+    }
+    const inspector = document.querySelector(".rml-graph-inspector");
+    const labelInput = [...(
+      inspector?.querySelectorAll(
+        ".rml-graph-inspector-card label"
+      ) || []
+    )].find(label =>
+      /custom\s+node\s+label/i.test(label.textContent || "") &&
+      label.querySelector("input") instanceof HTMLInputElement
+    )?.querySelector("input") || null;
+    if (
+      labelInput instanceof HTMLInputElement &&
+      !tourElementActuallyVisible(labelInput)
+    ) {
+      await nativeTourScrollTargetIntoView(labelInput, runId);
+      if (runId !== demoRunId) return;
+      await nextTwoFrames();
+    }
+    const labelInputReady = tourDebugAssert(
+      "graph-inspector-custom-label-input-visible",
+      Boolean(
+        inspector instanceof HTMLElement &&
+        labelInput instanceof HTMLInputElement &&
+        tourElementActuallyVisible(labelInput)
+      ),
+      {
+        inspectorVisible: tourElementActuallyVisible(inspector),
+        inputFound: labelInput instanceof HTMLInputElement,
+        inputVisible: tourElementActuallyVisible(labelInput),
+        selectedNodeId
+      }
+    );
+    if (!labelInputReady) {
+      graphDemoError(
+        "Step 12 selected the node, but its real Custom node label field was not visibly available.",
+        { selectedNodeId }
+      );
+    }
+    const demonstrationLabel = "Demo NOT";
+    await teacherTypeInput(
+      labelInput,
+      demonstrationLabel,
+      "Change the existing NOT node label in the real Node inspector",
+      runId
+    );
+    if (runId !== demoRunId) return;
+    await nextTwoFrames();
+    const afterEditVisibility =
+      await ensureGraphInspectorEditNodeFullyVisible(
+        nodeId,
+        runId,
+        "after-edit"
+      );
+    if (runId !== demoRunId) return;
+    const completeAfterEdit = tourDebugAssert(
+      "graph-inspector-edit-node-complete-footprint-visible-after-edit",
+      afterEditVisibility.ok === true,
+      {
+        nodeId,
+        repaired: afterEditVisibility.repaired,
+        viewportUsable: afterEditVisibility.viewportUsable,
+        finalProof: afterEditVisibility.finalProof,
+        attempts: afterEditVisibility.attempts
+      }
+    );
+    if (!completeAfterEdit) {
+      graphDemoError(
+        "Step 12 committed the edit, but could not return the complete edited node to the visible graph.",
+        {
+          nodeId,
+          visibility: afterEditVisibility
+        }
+      );
+    }
+    const graphState = graphHost?.getState?.() || null;
+    const modelNode = Array.isArray(graphState?.nodes)
+      ? graphState.nodes.find(item => String(item?.id || "") === nodeId)
+      : null;
+    const renderedNode = afterEditVisibility.node ||
+      document.querySelector(
+        `.rml-graph-node[data-graph-node-id="${CSS.escape(nodeId)}"]`
+      );
+    const renderedTitle = renderedNode?.querySelector(
+      ".rml-graph-node-title strong"
+    );
+    const labelCommitted = tourDebugAssert(
+      "graph-inspector-label-edit-committed-to-model-and-node",
+      Boolean(
+        labelInput.value === demonstrationLabel &&
+        modelNode?.label === demonstrationLabel &&
+        renderedTitle?.textContent?.trim() === demonstrationLabel &&
+        tourElementActuallyVisible(renderedTitle) &&
+        afterEditVisibility.ok === true &&
+        graphState?.selectedNodeId === nodeId &&
+        !document.body.classList.contains("rml-graph-right-collapsed")
+      ),
+      {
+        nodeId,
+        inspectorValue: labelInput.value,
+        modelLabel: modelNode?.label || "",
+        renderedTitle: renderedTitle?.textContent?.trim() || "",
+        renderedTitleVisible: tourElementActuallyVisible(renderedTitle),
+        completeNodeVisible: afterEditVisibility.ok === true,
+        completeNodeVisibilityProof: afterEditVisibility.finalProof,
+        selectedNodeId: graphState?.selectedNodeId || "",
+        rightInspectorOpen:
+          !document.body.classList.contains("rml-graph-right-collapsed")
+      }
+    );
+    if (!labelCommitted) {
+      graphDemoError(
+        "Step 12 typed the label, but the inspector, graph model and visible node did not agree on the committed result.",
+        {
+          nodeId,
+          inspectorValue: labelInput.value,
+          modelLabel: modelNode?.label || "",
+          renderedTitle: renderedTitle?.textContent?.trim() || ""
+        }
+      );
+    }
+    const finalStateStarted = performance.now();
+    const finalTarget = renderedTitle instanceof HTMLElement
+      ? renderedTitle
+      : renderedNode;
+    const finalStateShown = await teacherPointElement(
+      finalTarget,
+      "The new label is committed in the inspector and visible on the graph node",
+      runId,
+      1050
+    );
+    if (runId !== demoRunId) return;
+    const finalVisibilityProof =
+      graphInspectorEditNodeVisibilityProof(renderedNode, 16);
+    const finalStateHeld = tourDebugAssert(
+      "graph-inspector-final-state-held-before-completion",
+      Boolean(
+        finalStateShown === true &&
+        performance.now() - finalStateStarted >= 1000 &&
+        modelNode?.label === demonstrationLabel &&
+        renderedTitle?.textContent?.trim() === demonstrationLabel &&
+        finalVisibilityProof.ok === true
+      ),
+      {
+        nodeId,
+        heldForMs: Math.round(performance.now() - finalStateStarted),
+        modelLabel: modelNode?.label || "",
+        renderedTitle: renderedTitle?.textContent?.trim() || "",
+        completeNodeVisibilityProof: finalVisibilityProof
+      }
+    );
+    if (!finalStateHeld) {
+      graphDemoError(
+        "Step 12 did not keep the completed edit visibly on screen before advancing."
+      );
+    }
+    const mouseHidden = await hideTeacherMouseBeforeTransition(
+      runId,
+      "graph-inspector-complete"
+    );
+    const cleanHandoff = tourDebugAssert(
+      "graph-inspector-mouse-hidden-before-completion-handoff",
+      mouseHidden === true,
+      {
+        nodeId,
+        policy:
+          "the teacher mouse is fully invisible before Step 12 releases or reparents any teaching surface"
+      }
+    );
+    if (!cleanHandoff) {
+      graphDemoError(
+        "Step 12 could not hide the teacher mouse before the completion handoff."
+      );
+    }
   }
 
   async function runModeSwitchGraphDemo(runId) {
@@ -7933,9 +10285,12 @@
         x: from.x + (to.x - from.x) * eased,
         y: from.y + (to.y - from.y) * eased
       };
-      mouse?.style.setProperty("--mouse-x", `${point.x}px`);
-      mouse?.style.setProperty("--mouse-y", `${point.y}px`);
-      mouse?.style.setProperty("--mouse-duration", "0ms");
+      setTeacherMousePoint(
+        point,
+        0,
+        [],
+        "native-held-section-drag"
+      );
       dispatchNativeSectionPointer(
         eventTarget,
         "pointermove",
@@ -8713,7 +11068,8 @@
   async function tourPerceiveAndRepairStepTarget(
     step,
     target,
-    runId
+    runId,
+    controlledRepeat = false
   ) {
     let resolved = findTarget(step) || target;
     const before = tourPerceiveElement(resolved);
@@ -8733,6 +11089,7 @@
     const after = tourPerceiveElement(resolved);
     tourDebugRecord("tour-live-perception-target-confirmed", {
       demo: step?.demo || "",
+      controlledRepeat: controlledRepeat === true,
       before,
       after,
       repairedByScroll,
@@ -12805,9 +15162,12 @@
           x: from.x + (targetPoint.x - from.x) * eased,
           y: from.y + (targetPoint.y - from.y) * eased
         };
-        mouse?.style.setProperty("--mouse-x", `${point.x}px`);
-        mouse?.style.setProperty("--mouse-y", `${point.y}px`);
-        mouse?.style.setProperty("--mouse-duration", "0ms");
+        setTeacherMousePoint(
+          point,
+          0,
+          [],
+          "native-graph-node-drag"
+        );
         header.dispatchEvent(new PointerEvent("pointermove", {
           bubbles: true, cancelable: true, pointerId, pointerType: "mouse",
           isPrimary: true, button: -1, buttons: 1, clientX: point.x, clientY: point.y
@@ -12896,9 +15256,12 @@
         x: from.x + (to.x - from.x) * eased,
         y: from.y + (to.y - from.y) * eased
       };
-      mouse?.style.setProperty("--mouse-x", `${point.x}px`);
-      mouse?.style.setProperty("--mouse-y", `${point.y}px`);
-      mouse?.style.setProperty("--mouse-duration", "0ms");
+      setTeacherMousePoint(
+        point,
+        0,
+        [],
+        "native-graph-node-resize"
+      );
       handle.dispatchEvent(new PointerEvent("pointermove", {
         bubbles: true,
         cancelable: true,
@@ -12992,12 +15355,25 @@
       );
     }
 
-    const resolveTargetPoint = () =>
-      targetTarget instanceof Element
-        ? centerOf(targetTarget)
-        : targetTarget;
+    const resolveTargetPoint = () => {
+      const resolved =
+        typeof targetTarget === "function"
+          ? targetTarget()
+          : targetTarget;
+      return resolved instanceof Element
+        ? centerOf(resolved)
+        : resolved;
+    };
     const initialTargetPoint =
       resolveTargetPoint();
+    if (
+      !Number.isFinite(initialTargetPoint?.x) ||
+      !Number.isFinite(initialTargetPoint?.y)
+    ) {
+      graphDemoError(
+        "Pointer drag could not resolve a live target point before pointerdown."
+      );
+    }
     const from = centerOf(startElement);
     const { mouse } = elements();
     let pointerIsDown = false;
@@ -13074,7 +15450,8 @@
 
       while (runId === demoRunId) {
         const liveTargetPoint =
-          resolveTargetPoint();
+          resolveTargetPoint() ||
+          initialTargetPoint;
         const raw = Math.min(
           1,
           (performance.now() - started) /
@@ -13091,17 +15468,11 @@
             (liveTargetPoint.y - from.y) * eased
         };
 
-        mouse?.style.setProperty(
-          "--mouse-x",
-          `${point.x}px`
-        );
-        mouse?.style.setProperty(
-          "--mouse-y",
-          `${point.y}px`
-        );
-        mouse?.style.setProperty(
-          "--mouse-duration",
-          "0ms"
+        setTeacherMousePoint(
+          point,
+          0,
+          [],
+          "native-graph-wire-drag"
         );
 
         startElement.dispatchEvent(
@@ -13140,7 +15511,8 @@
       }
 
       const finalTargetPoint =
-        resolveTargetPoint();
+        resolveTargetPoint() ||
+        initialTargetPoint;
 
       startElement.dispatchEvent(
         new PointerEvent(
@@ -14414,6 +16786,7 @@
     ignoredElements = []
   ) {
     const candidates = [];
+    const visible = visibleGraphClientRect(8);
     const ignoredPaths = [
       path,
       ...ignoredElements.filter(element =>
@@ -14440,10 +16813,18 @@
         point.x - targetPoint.x,
         point.y - targetPoint.y
       );
+      const insideVisibleGraph = Boolean(
+        visible &&
+        point.x >= visible.left &&
+        point.x <= visible.right &&
+        point.y >= visible.top &&
+        point.y <= visible.bottom
+      );
 
       candidates.push({
         point,
         fraction,
+        insideVisibleGraph,
         pointAnalysis,
         routeAnalysis,
         priority,
@@ -14461,40 +16842,44 @@
       });
     }
 
-    candidates.sort((a, b) =>
+    const visibleCandidates = candidates.filter(
+      candidate => candidate.insideVisibleGraph
+    );
+    visibleCandidates.sort((a, b) =>
       a.priority.tier - b.priority.tier ||
       b.score - a.score
     );
-    const best = candidates[0];
-    const fallback = graphSvgPathPoint(path, .55);
-    const result = best?.point || fallback;
+    const best = visibleCandidates[0] || null;
+    if (!best) return null;
+    const result = best.point;
     result.tourRouteAnalysis = {
       kind: "junction",
       candidateCount: candidates.length,
-      selectedFraction: best?.fraction ?? .55,
-      selectedTier: best?.priority.tier ?? 4,
-      selectedPriority: best?.priority || null,
-      pointAnalysis: best?.pointAnalysis || null,
-      routeAnalysis: best?.routeAnalysis || null,
-      perfectAvailable: candidates.some(
+      visibleCandidateCount: visibleCandidates.length,
+      selectedFraction: best.fraction,
+      selectedTier: best.priority.tier,
+      selectedPriority: best.priority,
+      pointAnalysis: best.pointAnalysis,
+      routeAnalysis: best.routeAnalysis,
+      perfectAvailable: visibleCandidates.some(
         candidate => candidate.priority.tier === 0
       ),
-      pointProtectedAvailable: candidates.some(
+      pointProtectedAvailable: visibleCandidates.some(
         candidate =>
           candidate.priority.pointProtected &&
           candidate.priority.cardBlocked !== true
       ),
-      nodeClearPointAvailable: candidates.some(
+      nodeClearPointAvailable: visibleCandidates.some(
         candidate =>
           candidate.priority.pointNodeClear &&
           candidate.priority.cardBlocked !== true
       ),
-      nodeClearRouteAvailable: candidates.some(
+      nodeClearRouteAvailable: visibleCandidates.some(
         candidate =>
           !candidate.priority.routeNodeBlocked &&
           candidate.priority.cardBlocked !== true
       ),
-      pointProtectedNodeClearRouteAvailable: candidates.some(
+      pointProtectedNodeClearRouteAvailable: visibleCandidates.some(
         candidate =>
           candidate.priority.pointProtected &&
           !candidate.priority.routeNodeBlocked &&
@@ -14622,6 +17007,12 @@
 
     candidates.sort((a, b) =>
       a.priority.tier - b.priority.tier ||
+      Number(a.priority.routeNodeBlocked) -
+        Number(b.priority.routeNodeBlocked) ||
+      Number(a.priority.routePointBlocked) -
+        Number(b.priority.routePointBlocked) ||
+      Number(a.priority.routeLineBlocked) -
+        Number(b.priority.routeLineBlocked) ||
       b.score - a.score
     );
     const best = candidates[0];
@@ -14923,38 +17314,88 @@
     return null;
   }
 
-  function graphNativeWireHit(connectionId) {
+  function graphNativeWireHit(
+    connectionId,
+    preferredSegmentIndex = null
+  ) {
     if (!connectionId) return null;
-    return [...document.querySelectorAll(".rml-graph-wire-hit")].find(
-      hit => {
-        if (
-          hit.dataset.connectionId !==
-          connectionId ||
-          typeof hit.getTotalLength !==
-            "function"
-        ) {
-          return false;
-        }
+    const visible = visibleGraphClientRect(2);
+    if (!visible) return null;
+
+    const candidates = [...document.querySelectorAll(
+      ".rml-graph-wire-hit"
+    )]
+      .filter(hit =>
+        hit.isConnected &&
+        hit.dataset.connectionId === connectionId &&
+        typeof hit.getTotalLength === "function"
+      )
+      .map(hit => {
         let length = 0;
         try {
           length = hit.getTotalLength();
         } catch {
-          return false;
+          return null;
         }
-        if (length <= 2) return false;
-        const visible =
-          visibleGraphClientRect(2);
-        const point =
-          graphSvgPathPoint(hit, .5);
-        return Boolean(
-          visible &&
-          point.x >= visible.left &&
-          point.x <= visible.right &&
-          point.y >= visible.top &&
-          point.y <= visible.bottom
-        );
-      }
-    ) || null;
+        if (length <= 2) return null;
+
+        let visibleSampleCount = 0;
+        let centerDistance = Number.POSITIVE_INFINITY;
+        const center = {
+          x: (visible.left + visible.right) / 2,
+          y: (visible.top + visible.bottom) / 2
+        };
+        for (let index = 0; index <= 48; index += 1) {
+          const point = graphSvgPathPoint(
+            hit,
+            index / 48
+          );
+          const inside =
+            point.x >= visible.left &&
+            point.x <= visible.right &&
+            point.y >= visible.top &&
+            point.y <= visible.bottom;
+          if (!inside) continue;
+          visibleSampleCount += 1;
+          centerDistance = Math.min(
+            centerDistance,
+            Math.hypot(
+              point.x - center.x,
+              point.y - center.y
+            )
+          );
+        }
+        return {
+          hit,
+          visibleSampleCount,
+          centerDistance,
+          segmentIndex: Number(
+            hit.dataset.segmentIndex || 0
+          )
+        };
+      })
+      .filter(candidate =>
+        candidate?.visibleSampleCount > 0
+      )
+      .sort((a, b) =>
+        (
+          Number.isInteger(preferredSegmentIndex) &&
+          a.segmentIndex === preferredSegmentIndex
+            ? -1
+            : 0
+        ) -
+        (
+          Number.isInteger(preferredSegmentIndex) &&
+          b.segmentIndex === preferredSegmentIndex
+            ? -1
+            : 0
+        ) ||
+        b.visibleSampleCount - a.visibleSampleCount ||
+        a.centerDistance - b.centerDistance ||
+        a.segmentIndex - b.segmentIndex
+      );
+
+    return candidates[0]?.hit || null;
   }
 
   function graphSocketEndpoint(socket) {
@@ -15425,6 +17866,13 @@
   }
 
   async function ensureGraphTeachingPairVisible(runId) {
+    const viewportReady = await ensureGraphViewportWindow(runId);
+    if (runId !== demoRunId) return graphDemoSocketPair(false);
+    if (!viewportReady) {
+      graphDemoError(
+        "The Runtime Graph viewport could not be returned to the visible page before fitting the teaching pair."
+      );
+    }
     let pair = graphDemoSocketPair(false);
     if (!pair.output || !pair.input) return pair;
 
@@ -15440,14 +17888,9 @@
       pair = graphDemoSocketPair(false);
     }
 
-    if (
-      !pair.output ||
-      !pair.input ||
-      !graphTeachingElementInsideViewport(pair.output, 12) ||
-      !graphTeachingElementInsideViewport(pair.input, 12)
-    ) {
+    if (!graphTeachingPairCompletelyVisible(pair, 12)) {
       graphDemoError(
-        "The complete cable scene cannot be made visible without hiding an endpoint."
+        "The complete cable scene cannot be made visible without hiding a teaching node or endpoint."
       );
     }
     return pair;
@@ -16169,7 +18612,7 @@
 
     const guidedGraphHostReady = tourDebugAssert(
       "graph-route-guided-automatic-helper-suppression-available",
-      Number(graphHost?.version || 0) >= 14 &&
+      Number(graphHost?.version || 0) >= 16 &&
         typeof graphHost
           ?.setGuidedAutomaticNodeCreationSuppressed ===
           "function" &&
@@ -16191,7 +18634,7 @@
     );
     if (!guidedGraphHostReady) {
       graphDemoError(
-        "Routing step requires Runtime Graph host version 14 with guided automatic-helper suppression."
+        "Routing step requires Runtime Graph host version 16 with live-wire target identity, guided automatic-helper suppression and guarded branch fallback."
       );
     }
 
@@ -16267,6 +18710,29 @@
       await wait(850);
       return;
     }
+
+    const requireLiveParentHit = (
+      phase,
+      preferredSegmentIndex = null
+    ) => {
+      const hit = graphNativeWireHit(
+        baseConnection.id,
+        preferredSegmentIndex
+      );
+      if (!hit?.isConnected) {
+        graphDemoError(
+          `Routing step lost its live base-wire hit path during ${phase}.`,
+          {
+            connectionId: baseConnection.id,
+            preferredSegmentIndex,
+            renderedSegmentCount: document.querySelectorAll(
+              `.rml-graph-wire-hit[data-connection-id="${CSS.escape(baseConnection.id)}"]`
+            ).length
+          }
+        );
+      }
+      return hit;
+    };
 
     let parentHit =
       graphNativeWireHit(
@@ -16618,7 +19084,9 @@
       );
     }
 
-    parentHit = graphNativeWireHit(baseConnection.id) || parentHit;
+    parentHit = requireLiveParentHit(
+      "branch-node creation"
+    );
     let placedWireAnalysis = graphDemoRectWireAnalysis(
       branchNode.getBoundingClientRect(),
       {
@@ -16662,7 +19130,9 @@
         `.rml-graph-node[data-graph-node-id="${CSS.escape(branchId)}"]`
       ) || branchNode;
       branchNode.dataset.rmlTourStep10Branch = "true";
-      parentHit = graphNativeWireHit(baseConnection.id) || parentHit;
+      parentHit = requireLiveParentHit(
+        "wire-clear branch placement"
+      );
       placedWireAnalysis = graphDemoRectWireAnalysis(
         branchNode.getBoundingClientRect(),
         {
@@ -16734,10 +19204,9 @@
       );
     }
 
-    parentHit =
-      graphNativeWireHit(
-        baseConnection.id
-      ) || parentHit;
+    parentHit = requireLiveParentHit(
+      "branch-input orientation"
+    );
 
     const routeAnchor =
       graphSvgPathPoint(parentHit, .58);
@@ -16778,10 +19247,9 @@
 
     await nextTwoFrames();
     branchInput = resolveLiveBranchInput();
-    parentHit =
-      graphNativeWireHit(
-        baseConnection.id
-      ) || parentHit;
+    parentHit = requireLiveParentHit(
+      "pre-pointerdown stabilization"
+    );
 
     if (
       !branchInput ||
@@ -16848,8 +19316,39 @@
         inputPoint,
         [branchNode]
       );
+    if (!junctionTarget) {
+      graphDemoError(
+        "Routing step could not select a visible point on the live base wire."
+      );
+    }
     const junctionPlan =
       junctionTarget.tourRouteAnalysis || {};
+    const junctionSegmentIndex = Math.max(
+      0,
+      Math.trunc(
+        Number(parentHit.dataset.segmentIndex || 0)
+      )
+    );
+    const junctionFraction =
+      Number(junctionPlan.selectedFraction);
+    const resolveLiveJunctionTarget = () => {
+      const livePath = graphNativeWireHit(
+        baseConnection.id,
+        junctionSegmentIndex
+      );
+      if (
+        !livePath?.isConnected ||
+        Number(livePath.dataset.segmentIndex || 0) !==
+          junctionSegmentIndex ||
+        !Number.isFinite(junctionFraction)
+      ) {
+        return null;
+      }
+      return graphSvgPathPoint(
+        livePath,
+        junctionFraction
+      );
+    };
     const junctionPlanVerified = tourDebugAssert(
       "graph-route-junction-target-prioritizes-visible-points-before-line-overlap",
       (
@@ -16895,7 +19394,7 @@
     const branchPointerObserved =
       await nativeGraphPointerDrag(
         branchInput,
-        junctionTarget,
+        resolveLiveJunctionTarget,
         760,
         runId,
         9112
@@ -16907,6 +19406,23 @@
       graphHost
         ?.getGuidedConnectionDropState?.() ||
       null;
+    tourDebugAssert(
+      "graph-route-native-wire-hit-committed-with-live-target",
+      Boolean(branchDropState) &&
+        branchDropState.ok === true &&
+        branchDropState.targetKind === "wire",
+      {
+        graphHostVersion:
+          Number(graphHost?.version || 0),
+        branchDropState,
+        plannedTarget: junctionTarget,
+        liveTarget: resolveLiveJunctionTarget(),
+        junctionSegmentIndex,
+        junctionFraction,
+        policy:
+          "the guided native socket drag must release on a currently connected wire segment; a fallback may preserve state but must not conceal a broken native hit"
+      }
+    );
     const automaticHelperIsolationPassed =
       tourDebugAssert(
         "graph-route-guided-branch-drag-created-no-automatic-helper-node",
@@ -16933,6 +19449,7 @@
     }
 
     let branchConnection = null;
+    let deterministicBranchFallback = null;
 
     for (
       let attempt = 0;
@@ -16960,20 +19477,28 @@
     }
 
     if (!branchConnection) {
-      const forced =
+      const liveFallbackTarget =
+        resolveLiveJunctionTarget();
+      if (!liveFallbackTarget) {
+        graphDemoError(
+          "Routing fallback could not resolve the same live wire target used by the native drag."
+        );
+      }
+      deterministicBranchFallback =
         window.RMLDynamicGraphHost
           ?.ensureBranch?.(
             baseConnection.id,
             branchEndpoint,
-            junctionTarget.x,
-            junctionTarget.y
+            liveFallbackTarget.x,
+            liveFallbackTarget.y,
+            junctionSegmentIndex
           );
-      if (!forced?.ok) {
+      if (!deterministicBranchFallback?.ok) {
         graphDemoError(
           "The graph engine did not create the requested branch connection.",
           {
             branchPointerObserved,
-            deterministicFallback: forced
+            deterministicFallback: deterministicBranchFallback
           }
         );
       }
@@ -16984,8 +19509,54 @@
           ?.connections?.find(
             connection =>
               connection.id ===
-              forced.connectionId
+              deterministicBranchFallback.connectionId
           ) || null;
+    }
+
+    const deterministicFallbackSegmentVerified = tourDebugAssert(
+      "graph-route-deterministic-fallback-used-nearest-wire-segment",
+      !deterministicBranchFallback ||
+        (
+          deterministicBranchFallback.ok === true &&
+          (
+            deterministicBranchFallback.created === false ||
+            (
+              Number.isInteger(
+                deterministicBranchFallback.segmentIndex
+              ) &&
+              Number.isFinite(
+                deterministicBranchFallback.segmentDistance
+              ) &&
+              deterministicBranchFallback.segmentDistance <= 4
+            )
+          )
+        ),
+      {
+        branchPointerObserved,
+        deterministicBranchFallback,
+        junctionTarget,
+        liveJunctionTarget:
+          resolveLiveJunctionTarget(),
+        junctionSegmentIndex,
+        policy:
+          "when the native hit area misses, the deterministic fallback may use only the same currently connected wire segment and live client target demonstrated to the user"
+      }
+    );
+    if (!deterministicFallbackSegmentVerified) {
+      graphDemoError(
+        "Routing step fallback did not commit on the wire segment nearest to the demonstrated target.",
+        deterministicBranchFallback
+      );
+    }
+
+    if (!branchConnection?.branchFrom?.pointId) {
+      graphDemoError(
+        "Routing step could not retain the exact committed branch-point identity.",
+        {
+          branchConnection,
+          deterministicBranchFallback
+        }
+      );
     }
 
     await new Promise(resolve =>
@@ -16996,12 +19567,27 @@
 
     if (runId !== demoRunId) return;
 
+    parentHit = requireLiveParentHit(
+      "post-branch commit",
+      junctionSegmentIndex
+    );
+
+    const branchPointId =
+      branchConnection.branchFrom.pointId;
+    const parentConnectionId =
+      branchConnection.branchFrom.connectionId ||
+      baseConnection.id;
+    const exactJunction =
+      document.querySelector(
+        `.rml-graph-wire-point[data-connection-id="${CSS.escape(parentConnectionId)}"][data-point-id="${CSS.escape(branchPointId)}"]`
+      );
     const junctions =
       [...document.querySelectorAll(
-        ".rml-graph-wire-point"
+        `.rml-graph-wire-point[data-connection-id="${CSS.escape(parentConnectionId)}"]`
       )].filter(graphDemoVisible);
 
     const junction =
+      exactJunction ||
       junctions.find(point => {
         const rect =
           point.getBoundingClientRect();
@@ -17019,12 +19605,31 @@
           center.y - junctionTarget.y
         ) < 45;
       }) ||
-      junctions[0] ||
       null;
 
-    if (!junction) {
+    const exactJunctionIdentityVerified = tourDebugAssert(
+      "graph-route-committed-junction-resolved-by-branch-point-identity",
+      Boolean(
+        exactJunction &&
+        junction === exactJunction &&
+        exactJunction.dataset.pointId === branchPointId &&
+        exactJunction.dataset.connectionId === parentConnectionId
+      ),
+      {
+        branchConnectionId: branchConnection.id || "",
+        parentConnectionId,
+        branchPointId,
+        exactJunction: tourDebugRect(exactJunction),
+        junctionTarget,
+        deterministicBranchFallback,
+        policy:
+          "the committed branch is evaluated through its own branchFrom point identity; no unrelated first junction may be substituted"
+      }
+    );
+
+    if (!junction || !exactJunctionIdentityVerified) {
       graphDemoError(
-        "Routing step could not resolve the junction created by the native Graph Engine."
+        "Routing step could not resolve its exact committed junction from the native Graph Engine."
       );
     }
 
@@ -17206,17 +19811,11 @@
             segmentStart.y +
             (bendTarget.y - segmentStart.y) * eased
         };
-        mouse?.style.setProperty(
-          "--mouse-x",
-          `${point.x}px`
-        );
-        mouse?.style.setProperty(
-          "--mouse-y",
-          `${point.y}px`
-        );
-        mouse?.style.setProperty(
-          "--mouse-duration",
-          "0ms"
+        setTeacherMousePoint(
+          point,
+          0,
+          [],
+          "native-graph-bend-drag"
         );
 
         document.dispatchEvent(
@@ -17852,6 +20451,199 @@
       ) || null;
   }
 
+  function graphPanToolbarControls() {
+    const toolbar = document.querySelector(".rml-graph-toolbar");
+    const center = graphToolbarButton("Center Graph");
+    const zoomOut = graphToolbarButtonByTitle("Zoom out");
+    const zoomIn = graphToolbarButtonByTitle("Zoom in");
+    return {
+      toolbar,
+      center,
+      zoomOut,
+      zoomIn,
+      controls: [center, zoomOut, zoomIn].filter(Boolean)
+    };
+  }
+
+  function graphPanToolbarVisibilityProof() {
+    const scene = graphPanToolbarControls();
+    const toolbarRect = scene.toolbar?.getBoundingClientRect?.() || null;
+    const viewport = tourViewport();
+    const safeRect = {
+      left: viewport.left,
+      right: viewport.right,
+      top: Math.max(viewport.top, tourHeaderBottom()),
+      bottom: viewport.bottom
+    };
+    const controlSafeRect = {
+      left: safeRect.left + 2,
+      right: safeRect.right - 2,
+      top: safeRect.top + 2,
+      bottom: safeRect.bottom - 2
+    };
+    const toolbarArea = toolbarRect
+      ? Math.max(0, toolbarRect.width) * Math.max(0, toolbarRect.height)
+      : 0;
+    const toolbarVisibleRatio = toolbarArea > 0
+      ? rectangleIntersectionArea(toolbarRect, safeRect) / toolbarArea
+      : 0;
+    const controlProofs = scene.controls.map(control => {
+      const rect = control.getBoundingClientRect();
+      const insideToolbar = elementVisibleInsideScroller(
+        control,
+        scene.toolbar,
+        3
+      );
+      const insideViewport = Boolean(
+        rect.left >= controlSafeRect.left &&
+        rect.right <= controlSafeRect.right &&
+        rect.top >= controlSafeRect.top &&
+        rect.bottom <= controlSafeRect.bottom
+      );
+      return {
+        label: control.title || control.textContent?.trim() || "",
+        insideToolbar,
+        insideViewport,
+        rect: tourDebugRect(control)
+      };
+    });
+    const allControlsFound = Boolean(
+      scene.toolbar instanceof HTMLElement &&
+      scene.center instanceof HTMLElement &&
+      scene.zoomOut instanceof HTMLElement &&
+      scene.zoomIn instanceof HTMLElement
+    );
+    return {
+      ok: Boolean(
+        allControlsFound &&
+        toolbarVisibleRatio >= .995 &&
+        controlProofs.every(proof =>
+          proof.insideToolbar && proof.insideViewport
+        )
+      ),
+      allControlsFound,
+      toolbarVisibleRatio,
+      toolbarRect: tourDebugRect(scene.toolbar),
+      safeRect,
+      controlSafeRect,
+      scrollLeft: Number(scene.toolbar?.scrollLeft || 0),
+      scrollWidth: Number(scene.toolbar?.scrollWidth || 0),
+      clientWidth: Number(scene.toolbar?.clientWidth || 0),
+      controls: controlProofs,
+      scene
+    };
+  }
+
+  async function animateGraphToolbarScrollLeft(
+    toolbar,
+    desiredLeft,
+    runId,
+    duration = 360
+  ) {
+    if (!(toolbar instanceof HTMLElement) || runId !== demoRunId) {
+      return false;
+    }
+    const maximum = Math.max(0, toolbar.scrollWidth - toolbar.clientWidth);
+    const from = Number(toolbar.scrollLeft || 0);
+    const to = Math.max(0, Math.min(maximum, Number(desiredLeft) || 0));
+    if (Math.abs(to - from) <= 1) {
+      toolbar.scrollLeft = to;
+      return true;
+    }
+    const started = performance.now();
+    await new Promise(resolve => {
+      const frame = now => {
+        if (runId !== demoRunId) {
+          resolve();
+          return;
+        }
+        const raw = Math.min(1, (now - started) / Math.max(1, duration));
+        const eased = 1 - Math.pow(1 - raw, 3);
+        toolbar.scrollLeft = from + (to - from) * eased;
+        if (raw >= 1) {
+          toolbar.scrollLeft = to;
+          resolve();
+          return;
+        }
+        requestAnimationFrame(frame);
+      };
+      requestAnimationFrame(frame);
+    });
+    return runId === demoRunId && Math.abs(toolbar.scrollLeft - to) <= 1;
+  }
+
+  async function prepareGraphPanToolbarForNarration(runId) {
+    if (runId !== demoRunId) return false;
+    const before = graphTeachingSceneSnapshot(
+      "graph-pan-toolbar-reveal-before"
+    );
+    let scene = graphPanToolbarControls();
+    if (
+      !(scene.toolbar instanceof HTMLElement) ||
+      scene.controls.length !== 3
+    ) {
+      return false;
+    }
+
+    await nativeTourScrollTargetIntoView(scene.toolbar, runId);
+    if (runId !== demoRunId) return false;
+    await nextTwoFrames();
+    scene = graphPanToolbarControls();
+
+    const offsets = scene.controls.map(control => ({
+      left: Number(control.offsetLeft || 0),
+      right: Number(control.offsetLeft || 0) +
+        Number(control.offsetWidth || 0)
+    }));
+    const groupLeft = Math.min(...offsets.map(offset => offset.left)) - 4;
+    const groupRight = Math.max(...offsets.map(offset => offset.right)) + 4;
+    const groupWidth = Math.max(0, groupRight - groupLeft);
+    const availableWidth = Math.max(1, scene.toolbar.clientWidth);
+    const minimumLeft = Math.max(0, groupRight - availableWidth);
+    const maximumLeft = Math.max(0, groupLeft);
+    const desiredLeft = groupWidth <= availableWidth
+      ? Math.max(
+          minimumLeft,
+          Math.min(maximumLeft, Number(scene.toolbar.scrollLeft || 0))
+        )
+      : Math.max(0, groupLeft);
+
+    await animateGraphToolbarScrollLeft(
+      scene.toolbar,
+      desiredLeft,
+      runId
+    );
+    if (runId !== demoRunId) return false;
+    await nextTwoFrames();
+
+    const proof = graphPanToolbarVisibilityProof();
+    const after = graphTeachingSceneSnapshot(
+      "graph-pan-toolbar-reveal-after"
+    );
+    const productComparison = compareGraphProductState(before, after);
+    const passed = tourDebugAssert(
+      "graph-pan-toolbar-controls-visible-before-explanation",
+      proof.ok === true && productComparison.exact === true,
+      {
+        proof: {
+          ...proof,
+          scene: undefined
+        },
+        graphProductComparison: productComparison,
+        pageScrollAllowed: true,
+        toolbarScrollAllowed: true,
+        policy:
+          "reveal Center Graph, Zoom out and Zoom in by scrolling only the page and toolbar; node coordinates, connections and graph camera remain unchanged"
+      }
+    );
+    if (!passed) {
+      throw new Error(
+        "[RML Tour · Step 10] Center Graph and zoom controls were not completely visible before their explanation."
+      );
+    }
+    return true;
+  }
+
   function graphNeedsCentering() {
     const viewport = document.querySelector(".rml-graph-viewport");
     if (!tourElementActuallyVisible(viewport)) return false;
@@ -17941,6 +20733,11 @@
         id: node.id || "",
         kind: node.kind || "",
         operatorId: node.operatorId || "",
+        label: node.label || "",
+        portLayout:
+          node.parameters?.portLayout === "mirrored"
+            ? "mirrored"
+            : "standard",
         x: Number(node.x || 0),
         y: Number(node.y || 0)
       }))
@@ -18071,6 +20868,18 @@
     for (const node of expectedNodes) {
       const current = actualNodeMap.get(node.id);
       if (!current) continue;
+      exact(`node.${node.id}.kind`, node.kind, current.kind);
+      exact(
+        `node.${node.id}.operatorId`,
+        node.operatorId,
+        current.operatorId
+      );
+      exact(`node.${node.id}.label`, node.label, current.label);
+      exact(
+        `node.${node.id}.portLayout`,
+        node.portLayout,
+        current.portLayout
+      );
       close(`node.${node.id}.x`, node.x, current.x, .02);
       close(`node.${node.id}.y`, node.y, current.y, .02);
     }
@@ -18080,6 +20889,51 @@
       JSON.stringify(actual.connections || [])
     );
     return { exact: mismatches.length === 0, mismatches };
+  }
+
+  function compareGraphProductState(expected, actual) {
+    const comparison = compareGraphTeachingScenes(expected, actual);
+    const presentationOnlyPrefixes = [
+      "page.",
+      "viewportRect.",
+      "visibleGraph.",
+      "pair.sourceRect.",
+      "pair.targetRect.",
+      "pair.outputRect.",
+      "pair.inputRect."
+    ];
+    const mismatches = comparison.mismatches.filter(mismatch =>
+      !presentationOnlyPrefixes.some(prefix =>
+        String(mismatch?.name || "").startsWith(prefix)
+      )
+    );
+    const ignoredPresentationMismatches = comparison.mismatches.filter(
+      mismatch => !mismatches.includes(mismatch)
+    );
+    return {
+      exact: mismatches.length === 0,
+      mismatches,
+      ignoredPresentationMismatches
+    };
+  }
+
+  function graphTeachingPairExistingConnection(
+    pair = graphDemoSocketPair(false)
+  ) {
+    const direct = graphDemoConnectionFor(pair?.output, pair?.input);
+    if (direct) return direct;
+    const sourceId = String(
+      pair?.boolNode?.dataset?.graphNodeId || ""
+    );
+    const targetId = String(
+      pair?.notNode?.dataset?.graphNodeId || ""
+    );
+    if (!sourceId || !targetId) return null;
+    return window.RMLDynamicGraphHost?.getState?.()?.connections?.find(
+      connection =>
+        String(connection?.fromNode || "") === sourceId &&
+        String(connection?.toNode || "") === targetId
+    ) || null;
   }
 
   function graphSceneHandoffEvaluation(step) {
@@ -18100,7 +20954,20 @@
       opening
     );
     const pair = graphDemoSocketPair(false);
-    const targetReady = handoff.toDemo === "graph-create-node"
+    const connection = graphTeachingPairExistingConnection(pair);
+    const preserveExactGraphState = Boolean(
+      handoff.preserveExactGraphState === true &&
+      handoff.skippedDemonstration === true
+    );
+    const targetReady = preserveExactGraphState
+      ? Boolean(
+          opening.graphMode &&
+          opening.graphActive &&
+          pair?.boolNode &&
+          pair?.notNode &&
+          connection
+        )
+      : handoff.toDemo === "graph-create-node"
       ? Boolean(
           graphCreateNodePreparedDropPlan?.complete === true &&
           graphCreateNodePreparedDropHit("logic.not")
@@ -18111,6 +20978,8 @@
       handoff,
       opening,
       comparison,
+      preserveExactGraphState,
+      connectedTeachingPair: Boolean(connection),
       pairVisible: graphTeachingPairCompletelyVisible(pair, 10),
       targetReady,
       reusable: comparison.exact === true && targetReady
@@ -18186,6 +21055,128 @@
       ? { fromDemo: step.demo, toDemo, terminal }
       : null;
     return ready;
+  }
+
+  function recordSkippedGraphSceneHandoff(step) {
+    const toDemo = GRAPH_CONTINUOUS_SCENE_NEXT[step?.demo];
+    if (!toDemo || step?.mode !== "graph") {
+      graphTeachingSceneHandoff = null;
+      return null;
+    }
+    const targetStep = steps.find(candidate => candidate.demo === toDemo);
+    const requirements = graphPanelRequirementsForStep(targetStep);
+    const terminal = graphTeachingSceneSnapshot(
+      `${step.demo}-skipped-terminal-for-${toDemo}`
+    );
+    const pair = graphDemoSocketPair(false);
+    const pairReady = !graphStepUsesTeachingPair(targetStep) ||
+      graphTeachingPairCompletelyVisible(pair, 10);
+    const existingConnection = graphTeachingPairExistingConnection(pair);
+    const preserveExactGraphState = Boolean(
+      step.demo === "graph-flip" &&
+      pair?.boolNode &&
+      pair?.notNode &&
+      existingConnection
+    );
+    const spacing = step.demo === "graph-flip"
+      ? graphTeachingPairSpacingProof(pair, {
+          minimumGraphGap: 120,
+          maximumGraphGap: 920,
+          minimumClientGap: window.innerWidth < 480 ? 24 : 32
+        })
+      : null;
+    const spacingReady = spacing?.ok !== false;
+    const visible = visibleGraphClientRect(0);
+    const panelsReady = Boolean(
+      terminal.panels.leftOpen === requirements.left &&
+      terminal.panels.rightOpen === requirements.right
+    );
+    const ordinaryReady = Boolean(
+      terminal.graphMode &&
+      terminal.graphActive &&
+      panelsReady &&
+      visible &&
+      visible.width >= 280 &&
+      visible.height >= graphLessonMinimumVisibleHeight() &&
+      pairReady &&
+      spacingReady
+    );
+    const ready = preserveExactGraphState
+      ? Boolean(terminal.graphMode && terminal.graphActive)
+      : ordinaryReady;
+    const handoff = ready
+      ? {
+          fromDemo: step.demo,
+          toDemo,
+          terminal,
+          skippedDemonstration: true,
+          preserveExactGraphState
+        }
+      : null;
+    graphTeachingSceneHandoff = handoff;
+    tourDebugRecord("graph-scene-skip-handoff-terminal", {
+      fromDemo: step.demo,
+      toDemo,
+      ready,
+      panelsReady,
+      pairReady,
+      connectedTeachingPair: Boolean(existingConnection),
+      preserveExactGraphState,
+      spacingReady,
+      spacing,
+      requirements,
+      scene: terminal,
+      policy:
+        "skipping a graph action carries the current readable scene forward without moving either node"
+    });
+    tourDebugAssert(
+      `${step.demo}-skip-scene-handoff-decision-recorded`,
+      Boolean(handoff) === ready,
+      {
+        fromDemo: step.demo,
+        toDemo,
+        panelsReady,
+        pairReady,
+        connectedTeachingPair: Boolean(existingConnection),
+        preserveExactGraphState,
+        spacingReady,
+        spacing,
+        requirements,
+        visibleGraph: visible,
+        scene: terminal
+      }
+    );
+    if (step.demo === "graph-flip") {
+      tourDebugRecord(
+        "graph-flip-skip-handoff-decision",
+        {
+          ready,
+          fromDemo: step.demo,
+          toDemo,
+          panelsReady,
+          pairReady,
+          connectedTeachingPair: Boolean(existingConnection),
+          preserveExactGraphState,
+          spacingReady,
+          spacing,
+          visibleGraph: visible,
+          scene: terminal,
+          policy:
+            "reuse the exact Step 9 scene when possible; otherwise prepare Step 10 with complete-footprint spacing"
+        }
+      );
+    }
+    return {
+      ready,
+      handoff,
+      terminal,
+      panelsReady,
+      pairReady,
+      connectedTeachingPair: Boolean(existingConnection),
+      preserveExactGraphState,
+      spacingReady,
+      spacing
+    };
   }
 
   async function finalizeGraphSceneForNextLesson(step, runId) {
@@ -18313,7 +21304,8 @@
         "graph-wire",
         "graph-flip",
         "graph-pan",
-        "graph-route"
+        "graph-route",
+        "graph-inspector"
       ].includes(step?.demo)
     ) {
       return {
@@ -18345,40 +21337,222 @@
     ].filter(Boolean);
   }
 
+  function graphTeachingPairSpacingProof(
+    pair = graphDemoSocketPair(false),
+    options = {}
+  ) {
+    const state = window.RMLDynamicGraphHost?.getState?.() || null;
+    const nodes = new Map(
+      (state?.nodes || []).map(node => [String(node.id || ""), node])
+    );
+    const footprint = element => {
+      const id = String(element?.dataset?.graphNodeId || "");
+      const model = nodes.get(id) || null;
+      if (!(element instanceof HTMLElement) || !model) return null;
+      const width = Math.max(
+        1,
+        Number(element.offsetWidth) ||
+          (model.kind === "configuration" ? 390 : 280)
+      );
+      const height = Math.max(1, Number(element.offsetHeight) || 180);
+      const left = Number(model.x || 0);
+      const top = Number(model.y || 0);
+      return {
+        id,
+        left,
+        top,
+        right: left + width,
+        bottom: top + height,
+        width,
+        height
+      };
+    };
+    const source = footprint(pair?.boolNode);
+    const target = footprint(pair?.notNode);
+    const sourceClient = pair?.boolNode?.getBoundingClientRect?.() || null;
+    const targetClient = pair?.notNode?.getBoundingClientRect?.() || null;
+    const separation = (first, second) => {
+      if (!first || !second) {
+        return {
+          xGap: 0,
+          yGap: 0,
+          edgeGap: 0,
+          overlapX: 0,
+          overlapY: 0,
+          overlaps: true
+        };
+      }
+      const xGap = Math.max(
+        second.left - first.right,
+        first.left - second.right,
+        0
+      );
+      const yGap = Math.max(
+        second.top - first.bottom,
+        first.top - second.bottom,
+        0
+      );
+      const overlapX = Math.max(
+        0,
+        Math.min(first.right, second.right) -
+          Math.max(first.left, second.left)
+      );
+      const overlapY = Math.max(
+        0,
+        Math.min(first.bottom, second.bottom) -
+          Math.max(first.top, second.top)
+      );
+      return {
+        xGap,
+        yGap,
+        edgeGap: Math.hypot(xGap, yGap),
+        overlapX,
+        overlapY,
+        overlaps: overlapX > .5 && overlapY > .5
+      };
+    };
+    const logical = separation(source, target);
+    const client = separation(sourceClient, targetClient);
+    const minimumGraphGap = Math.max(
+      80,
+      Number(options.minimumGraphGap) || 120
+    );
+    const maximumGraphGap = Math.max(
+      minimumGraphGap + 100,
+      Number(options.maximumGraphGap) || 920
+    );
+    const minimumClientGap = Math.max(
+      16,
+      Number(options.minimumClientGap) || 32
+    );
+    const requireClient = options.requireClient !== false;
+    const logicalOk = Boolean(
+      source &&
+      target &&
+      !logical.overlaps &&
+      logical.edgeGap >= minimumGraphGap &&
+      logical.edgeGap <= maximumGraphGap
+    );
+    const clientOk = Boolean(
+      sourceClient &&
+      targetClient &&
+      !client.overlaps &&
+      client.edgeGap >= minimumClientGap
+    );
+    return {
+      ok: logicalOk && (!requireClient || clientOk),
+      logicalOk,
+      clientOk,
+      logical,
+      client,
+      source,
+      target,
+      sourceClient: tourDebugRect(pair?.boolNode),
+      targetClient: tourDebugRect(pair?.notNode),
+      minimumGraphGap,
+      maximumGraphGap,
+      minimumClientGap,
+      requireClient
+    };
+  }
+
   function normalizeGraphTeachingPairSpacing() {
     const pair = graphDemoSocketPair(false);
     const boolId = pair?.boolNode?.dataset.graphNodeId || "";
     const notId = pair?.notNode?.dataset.graphNodeId || "";
-    if (!boolId || !notId) return false;
+    if (!boolId || !notId) {
+      return {
+        ok: false,
+        changed: false,
+        reason: "teaching-pair-unavailable"
+      };
+    }
 
     const state = window.RMLDynamicGraphHost?.getState?.();
     const boolNode = state?.nodes?.find(node => node.id === boolId);
     const notNode = state?.nodes?.find(node => node.id === notId);
-    if (!boolNode || !notNode) return false;
+    if (!boolNode || !notNode) {
+      return {
+        ok: false,
+        changed: false,
+        reason: "teaching-pair-model-unavailable"
+      };
+    }
 
-    const distance = Math.hypot(
-      Number(boolNode.x || 0) - Number(notNode.x || 0),
-      Number(boolNode.y || 0) - Number(notNode.y || 0)
-    );
-    if (distance >= 240 && distance <= 920) return false;
+    const before = graphTeachingPairSpacingProof(pair, {
+      requireClient: false
+    });
+    if (before.logicalOk) {
+      return {
+        ok: true,
+        changed: false,
+        reason: "existing-edge-spacing-preserved",
+        before,
+        after: before
+      };
+    }
 
-    const anchorX =
-      (Number(boolNode.x || 0) + Number(notNode.x || 0)) / 2;
-    const anchorY =
-      (Number(boolNode.y || 0) + Number(notNode.y || 0)) / 2;
-    const first =
-      window.RMLDynamicGraphHost?.setNodePosition?.(
-        boolId,
-        anchorX - 330,
-        anchorY - 20
-      );
-    const second =
-      window.RMLDynamicGraphHost?.setNodePosition?.(
-        notId,
-        anchorX + 40,
-        anchorY + 20
-      );
-    return first?.ok === true && second?.ok === true;
+    const source = before.source;
+    const target = before.target;
+    if (!source || !target) {
+      return {
+        ok: false,
+        changed: false,
+        reason: "teaching-pair-footprint-unavailable",
+        before
+      };
+    }
+    const sourceCenter = {
+      x: source.left + source.width * .5,
+      y: source.top + source.height * .5
+    };
+    const targetCenter = {
+      x: target.left + target.width * .5,
+      y: target.top + target.height * .5
+    };
+    const deltaX = targetCenter.x - sourceCenter.x;
+    const deltaY = targetCenter.y - sourceCenter.y;
+    const horizontal = Math.abs(deltaX) >= Math.abs(deltaY);
+    const desiredGap = 190;
+    let nextX = target.left;
+    let nextY = target.top;
+
+    if (horizontal) {
+      const targetOnRight = deltaX >= 0;
+      nextX = targetOnRight
+        ? source.right + desiredGap
+        : source.left - target.width - desiredGap;
+      nextY = sourceCenter.y - target.height * .5;
+    } else {
+      const targetBelow = deltaY >= 0;
+      nextX = sourceCenter.x - target.width * .5;
+      nextY = targetBelow
+        ? source.bottom + desiredGap
+        : source.top - target.height - desiredGap;
+    }
+
+    const moved = window.RMLDynamicGraphHost?.setNodePosition?.(
+      notId,
+      nextX,
+      nextY
+    ) || null;
+    const livePair = graphDemoSocketPair(false);
+    const after = graphTeachingPairSpacingProof(livePair, {
+      requireClient: false
+    });
+    return {
+      ok: moved?.ok === true && after.logicalOk,
+      changed: moved?.ok === true,
+      reason: "actual-node-footprints-normalized",
+      orientation: horizontal ? "horizontal" : "vertical",
+      desiredGap,
+      preservedNodeId: boolId,
+      movedNodeId: notId,
+      requestedPosition: { x: nextX, y: nextY },
+      moved,
+      before,
+      after
+    };
   }
 
   function graphStepHasPreparedPanels(step) {
@@ -18801,7 +21975,8 @@
       }
 
       if (graphStepUsesTeachingPair(step)) {
-        normalizeGraphTeachingPairSpacing();
+        const spacingNormalization =
+          normalizeGraphTeachingPairSpacing();
         quietlyFitGraphNodes(
           graphTeachingNodeIdsFromState(),
           {
@@ -18817,6 +21992,32 @@
         );
         await nextTwoFrames();
         const pair = graphDemoSocketPair(false);
+        const spacingProof = graphTeachingPairSpacingProof(pair, {
+          minimumGraphGap: 120,
+          maximumGraphGap: 920,
+          minimumClientGap: window.innerWidth < 480 ? 24 : 32
+        });
+        const readableSpacing = tourDebugAssert(
+          "graph-teaching-pair-uses-complete-footprint-spacing",
+          spacingNormalization.ok === true && spacingProof.ok === true,
+          {
+            target: step.demo,
+            normalization: spacingNormalization,
+            proof: spacingProof,
+            policy:
+              "pair spacing is measured from the real outer node rectangles, never from their top-left coordinates"
+          }
+        );
+        if (!readableSpacing) {
+          graphDemoError(
+            "Preparation could not keep a readable non-overlapping gap between the complete teaching nodes.",
+            {
+              target: step.demo,
+              normalization: spacingNormalization,
+              proof: spacingProof
+            }
+          );
+        }
         if (!graphTeachingPairCompletelyVisible(pair, 12)) {
           graphDemoError(
             "Preparation could not fit the complete teaching scene into the visible graph area."
@@ -19078,13 +22279,31 @@
       step?.mode === "graph" &&
       graphStepUsesTeachingPair(step)
     ) {
-      const pair = graphDemoSocketPair(false);
-      if (!graphTeachingPairCompletelyVisible(pair, 10)) {
-        quietlyFitGraphNodes(
-          graphTeachingNodeIdsFromState(),
-          { inset: 20, padding: 30, maxScale: 1.02 }
+      const pair = await ensureGraphTeachingPairVisible(runId);
+      if (runId !== demoRunId) return null;
+      if (step?.demo === "graph-inspector") {
+        const inspectorPairReady = tourDebugAssert(
+          "graph-inspector-teaching-pair-visible-before-demonstrate",
+          graphTeachingPairCompletelyVisible(pair, 10),
+          {
+            teachingNodeIds: [
+              pair?.boolNode?.dataset?.graphNodeId || "",
+              pair?.notNode?.dataset?.graphNodeId || ""
+            ].filter(Boolean),
+            graphVisibleRect: visibleGraphClientRect(10),
+            graphViewportRect: tourDebugRect(
+              document.querySelector(".rml-graph-viewport")
+            ),
+            rightSidebarOpen: !graphSidebarIsHidden("right"),
+            policy:
+              "Step 12 may begin its action-only demonstration only after the page and graph camera show both complete teaching nodes inside the post-sidebar viewport"
+          }
         );
-        await nextTwoFrames();
+        if (!inspectorPairReady) {
+          graphDemoError(
+            "Step 12 could not keep both complete teaching nodes visible before Demonstrate."
+          );
+        }
       }
     }
 
@@ -19461,20 +22680,75 @@
       centerOf(scrollDemo.body, .58, .52);
     const immediateMouse = elements().mouse;
     immediateMouse?.classList.add("active");
-    immediateMouse?.style.setProperty(
-      "--mouse-x",
-      `${immediateNodePoint.x}px`
-    );
-    immediateMouse?.style.setProperty(
-      "--mouse-y",
-      `${immediateNodePoint.y}px`
-    );
-    immediateMouse?.style.setProperty(
-      "--mouse-duration",
-      "0ms"
+    setTeacherMousePoint(
+      immediateNodePoint,
+      0,
+      [],
+      "graph-scroll-start"
     );
 
     let keepMouseVisible = false;
+    const ctrlWheelVisualState = {
+      cycles: 0,
+      visibleCycles: 0,
+      failures: []
+    };
+
+    const beginCtrlWheelVisual = async (point, label) => {
+      const ui = elements();
+      ui.mouse?.classList.remove("horizontal-wheel");
+      ui.mouse?.classList.add("scrolling");
+      showKeys(["Ctrl"], point);
+      showDemoLabel(label, point);
+      await waitForAnimationFrames(1);
+      const wheelStyle = ui.mouseWheel
+        ? getComputedStyle(ui.mouseWheel)
+        : null;
+      const beforeContent = ui.mouse
+        ? getComputedStyle(ui.mouse, "::before").content
+        : "";
+      const afterContent = ui.mouse
+        ? getComputedStyle(ui.mouse, "::after").content
+        : "";
+      const visible = Boolean(
+        ui.mouse?.classList.contains("scrolling") &&
+        !ui.mouse.classList.contains("horizontal-wheel") &&
+        ui.keys &&
+        !ui.keys.hidden &&
+        /Ctrl/i.test(ui.keys.textContent || "") &&
+        wheelStyle?.animationName?.includes("rml-setup-wheel-scroll") &&
+        /↑/.test(beforeContent) &&
+        /↓/.test(afterContent)
+      );
+      ctrlWheelVisualState.cycles += 1;
+      if (visible) ctrlWheelVisualState.visibleCycles += 1;
+      else {
+        ctrlWheelVisualState.failures.push({
+          label,
+          mouseClasses: ui.mouse?.className || "",
+          keyText: ui.keys?.textContent || "",
+          wheelAnimation: wheelStyle?.animationName || "",
+          beforeContent,
+          afterContent
+        });
+      }
+      tourDebugRecord("ctrl-wheel-visual-cycle", {
+        label,
+        visible,
+        wheelAnimation: wheelStyle?.animationName || "",
+        arrows: { beforeContent, afterContent }
+      });
+      return visible;
+    };
+
+    const endCtrlWheelVisual = () => {
+      releaseTourScrollModifier();
+      hideKeys();
+      elements().mouse?.classList.remove(
+        "scrolling",
+        "horizontal-wheel"
+      );
+    };
 
     const selectedWheel = async (
       target,
@@ -19507,31 +22781,27 @@
       maxAttempts = 8,
       deltaY = 150
     ) => {
-      elements().mouse?.classList.remove(
-        "scrolling",
-        "horizontal-wheel"
-      );
-      showKeys(["Ctrl"], point);
-      showDemoLabel(label, point);
-      await wait(TOUR_SCROLL_TIMING.modifierLeadIn);
+      await beginCtrlWheelVisual(point, label);
+      try {
+        await wait(TOUR_SCROLL_TIMING.modifierLeadIn);
 
-      const found =
-        await cycleTourScrollLayerUntil(
-          target,
-          matcher,
-          runId,
-          maxAttempts,
-          deltaY
-        );
+        const found =
+          await cycleTourScrollLayerUntil(
+            target,
+            matcher,
+            runId,
+            maxAttempts,
+            deltaY
+          );
 
-      if (runId !== demoRunId) {
-        return false;
+        if (runId !== demoRunId) return false;
+        return found;
+      } finally {
+        endCtrlWheelVisual();
+        if (runId === demoRunId) {
+          await wait(TOUR_SCROLL_TIMING.modifierReleasePause);
+        }
       }
-
-      releaseTourScrollModifier();
-      hideKeys();
-      await wait(TOUR_SCROLL_TIMING.modifierReleasePause);
-      return found;
     };
 
     const ensureCodePanelFullyVisible = async () => {
@@ -19740,21 +23010,23 @@
         codePanel ||
         document.body;
 
-      showKeys(["Ctrl"], returnPoint);
-      showDemoLabel(
-        "Finally: Ctrl + Wheel selects <html> again → Wheel returns to the graph",
-        returnPoint
+      await beginCtrlWheelVisual(
+        returnPoint,
+        "Finally: Ctrl + Wheel selects <html> again → Wheel returns to the graph"
       );
-      const foundReturnHtml = await cycleTourScrollLayerUntil(
-        returnTarget,
-        /<html>|Page ROOT/i,
-        runId,
-        12,
-        150
-      );
+      let foundReturnHtml = false;
+      try {
+        foundReturnHtml = await cycleTourScrollLayerUntil(
+          returnTarget,
+          /<html>|Page ROOT/i,
+          runId,
+          12,
+          150
+        );
+      } finally {
+        endCtrlWheelVisual();
+      }
       if (runId !== demoRunId) return;
-      releaseTourScrollModifier();
-      hideKeys();
 
       if (foundReturnHtml) {
         elements().mouse?.classList.add("scrolling");
@@ -19796,6 +23068,23 @@
       );
       keepMouseVisible = true;
       await wait(520);
+      const ctrlWheelVisualsComplete = tourDebugAssert(
+        "graph-route-ctrl-wheel-shows-key-wheel-and-vertical-arrows",
+        ctrlWheelVisualState.cycles >= 3 &&
+          ctrlWheelVisualState.visibleCycles === ctrlWheelVisualState.cycles,
+        {
+          cycles: ctrlWheelVisualState.cycles,
+          visibleCycles: ctrlWheelVisualState.visibleCycles,
+          failures: ctrlWheelVisualState.failures,
+          policy:
+            "every Ctrl + Wheel hierarchy-selection cycle shows Ctrl, the animated wheel and the vertical direction arrows together"
+        }
+      );
+      if (!ctrlWheelVisualsComplete) {
+        throw new Error(
+          "[RML Tour · Step 11] Ctrl + Wheel did not keep the key, wheel animation and vertical arrows visible together."
+        );
+      }
     } finally {
       window.RMLTypedNodeGraphScrollLayers?.clear?.();
       window.RMLUniversalScrollLayers?.clear?.();
@@ -19978,14 +23267,44 @@
       ui.skipDemo.hidden = !(step.demo && phase === "ready");
       ui.skipDemo.disabled = phase !== "ready" || demoInFlight;
     }
+    const liveSkipPhase =
+      phase === "preparing" || phase === "demonstrating";
     if (ui.liveControls) {
-      ui.liveControls.hidden = phase !== "demonstrating";
+      ui.liveControls.hidden = !liveSkipPhase;
+      if (liveSkipPhase && !ui.liveControls.dataset.livePlacement) {
+        ui.liveControls.dataset.livePlacement = "bottom-right";
+      }
     }
     if (ui.liveSkipDemo) {
-      ui.liveSkipDemo.disabled = phase !== "demonstrating";
+      ui.liveSkipDemo.disabled = !liveSkipPhase;
     }
     if (ui.liveSkipTour) {
-      ui.liveSkipTour.disabled = phase !== "demonstrating";
+      ui.liveSkipTour.disabled = !liveSkipPhase;
+    }
+
+    if (phase === "preparing") {
+      tourDebugAssert(
+        "tour-live-preparation-skip-available",
+        Boolean(
+          ui.liveControls &&
+          !ui.liveControls.hidden &&
+          ui.liveSkipDemo &&
+          !ui.liveSkipDemo.disabled &&
+          ui.liveSkipTour &&
+          !ui.liveSkipTour.disabled
+        ),
+        {
+          preparedStepIndex: stepIndex,
+          skipDemonstrationEnabled: Boolean(
+            ui.liveSkipDemo && !ui.liveSkipDemo.disabled
+          ),
+          skipTourEnabled: Boolean(
+            ui.liveSkipTour && !ui.liveSkipTour.disabled
+          ),
+          policy:
+            "the live Skip controls remain usable while the next lesson is being prepared and while its demonstration runs"
+        }
+      );
     }
 
     if (phase === "demonstrating") {
@@ -20103,8 +23422,14 @@
     }
 
     const previousDemo = steps[stepIndex]?.demo || "";
+    const restoreTransaction =
+      options.restoreTransaction &&
+      typeof options.restoreTransaction === "object"
+        ? options.restoreTransaction
+        : null;
     const expectedGraphHandoff = Boolean(
       options.restoreEntry !== true &&
+      !restoreTransaction &&
       graphTeachingSceneHandoff &&
       graphTeachingSceneHandoff.fromDemo === previousDemo &&
       graphTeachingSceneHandoff.toDemo === step.demo
@@ -20120,11 +23445,104 @@
     }
     const runId = demoRunId;
 
-    if (options.restoreEntry === true) {
+    if (restoreTransaction) {
+      restoreTourState(restoreTransaction.state);
+      await restoreTourEnvironmentState(
+        restoreTransaction.environment
+      );
+      await nextTwoFrames();
+      const restoredFingerprint = tourStateFingerprint(
+        captureTourState()
+      );
+      const expectedFingerprint = tourStateFingerprint(
+        restoreTransaction.state
+      );
+      const topMenuState = responsiveTopActionsState();
+      const graphModeMatches =
+        document.body.classList.contains("rml-node-graph-mode") ===
+          (restoreTransaction.environment?.graphMode === true);
+      const graphLeftPanelMatches =
+        document.body.classList.contains("rml-graph-left-collapsed") ===
+          (restoreTransaction.environment?.graphLeftCollapsed === true);
+      const graphRightPanelMatches =
+        document.body.classList.contains("rml-graph-right-collapsed") ===
+          (restoreTransaction.environment?.graphRightCollapsed === true);
+      const topMenuMatches =
+        topMenuState.open ===
+          (restoreTransaction.environment?.topMenuOpen === true);
+      const pagePositionMatches = Boolean(
+        Math.abs(
+          window.scrollX -
+          (Number(restoreTransaction.environment?.page?.x) || 0)
+        ) <= 1 &&
+        Math.abs(
+          window.scrollY -
+          (Number(restoreTransaction.environment?.page?.y) || 0)
+        ) <= 1
+      );
+      const transactionRestored = tourDebugAssert(
+        `tour-step-${index}-controlled-repeat-transaction-state-restored`,
+        Boolean(
+          restoreTransaction.state &&
+          restoreTransaction.environment &&
+          restoredFingerprint === expectedFingerprint &&
+          graphModeMatches &&
+          graphLeftPanelMatches &&
+          graphRightPanelMatches &&
+          topMenuMatches &&
+          pagePositionMatches &&
+          tourStorageFingerprint() ===
+            tourStorageFingerprint(
+              restoreTransaction.environment.storage || []
+            ) &&
+          tourOverlayStateMatches(
+            restoreTransaction.environment.overlay
+          )
+        ),
+        {
+          restoredStepIndex: index,
+          transactionRole:
+            restoreTransaction.role || "repeat-transaction",
+          builderStateMatches:
+            restoredFingerprint === expectedFingerprint,
+          overlayStateMatches: tourOverlayStateMatches(
+            restoreTransaction.environment?.overlay
+          ),
+          graphModeMatches,
+          graphLeftPanelMatches,
+          graphRightPanelMatches,
+          topMenuMatches,
+          pagePositionMatches,
+          storageStateMatches:
+            tourStorageFingerprint() ===
+            tourStorageFingerprint(
+              restoreTransaction.environment?.storage || []
+            ),
+          expectedGraphRightPanelOpen:
+            restoreTransaction.environment?.graphRightCollapsed === false,
+          actualGraphRightPanelOpen:
+            !document.body.classList.contains(
+              "rml-graph-right-collapsed"
+            )
+        }
+      );
+      if (!transactionRestored) {
+        throw new Error(
+          `[RML Tour · Repeat] The ${restoreTransaction.role || "requested"} state for Step ${index} could not be restored exactly.`
+        );
+      }
+    } else if (options.restoreEntry === true) {
       restoreTourState(stepSnapshots.get(index));
+      await restoreTourEnvironmentState(
+        stepEnvironmentSnapshots.get(index)
+      );
       await nextTwoFrames();
     } else if (options.captureEntry !== false) {
       stepSnapshots.set(index, captureTourState());
+      stepEnvironmentSnapshots.set(
+        index,
+        captureTourEnvironmentState()
+      );
     }
     if (runId !== demoRunId) return false;
 
@@ -20155,15 +23573,14 @@
     const outlineNestedPreparationNeeded =
       step.demo === "outline-nested";
     const topbarPreparationNeeded =
-      step.demo === "topbar-identity-workflow" &&
-      responsiveTopActionsState().responsive;
+      step.demo === "topbar-identity-workflow";
     const compactPackPreparationNeeded =
       step.demo === "mode-switch-graph" &&
       responsiveTopActionsState(
         document.querySelector(".rml-pack-button") ||
         document.querySelector("#pack-into-node")
       ).responsive;
-    const preparationNeeded = Boolean(
+    const preparationNeeded = !restoreTransaction && Boolean(
       canActuallyScroll ||
       graphPreparationNeeded ||
       outlinePalettePreparationNeeded ||
@@ -20220,15 +23637,8 @@
 
       try {
         if (topbarPreparationNeeded) {
-          await prepareTopbarBeforeNarration(runId);
+          await prepareTopbarOpeningFrame(runId);
           if (runId !== demoRunId) return false;
-          if (canActuallyScroll) {
-            await animateTourPageScroll(
-              plan.desiredScrollTop,
-              TOUR_SCROLL_TIMING.pageScrollDuration,
-              runId
-            );
-          }
         } else if (compactPackPreparationNeeded) {
           await prepareCompactPackBeforeNarration(runId);
         } else if (graphPreparationNeeded) {
@@ -20489,12 +23899,16 @@
     return true;
   }
 
-  async function returnFromControlledRepeat(index) {
+  async function returnFromControlledRepeat(
+    index,
+    returnTransaction = null
+  ) {
     const returned = await transitionToStep(index, {
       captureEntry: false,
       controlledReentry: true,
       deferNarration: true,
-      repeatReturn: true
+      repeatReturn: true,
+      restoreTransaction: returnTransaction
     });
     if (!returned) return false;
     if (steps[index]?.demo) {
@@ -20513,6 +23927,11 @@
     )
       ? options.repeatReturnStepIndex
       : -1;
+    const repeatReturnTransaction =
+      options.repeatReturnTransaction &&
+      typeof options.repeatReturnTransaction === "object"
+        ? options.repeatReturnTransaction
+        : null;
     if (
       controlledRepeat &&
       (
@@ -20553,6 +23972,13 @@
     cancelDemo();
     const runId = demoRunId;
     demoInFlight = true;
+    teacherMouseSafetyState = {
+      stepIndex: attemptedStepIndex,
+      samples: 0,
+      relocations: 0,
+      violations: 0,
+      minimumClearance: Infinity
+    };
     setStepPhase("demonstrating");
     const root = document.getElementById("rml-setup-assistant");
     root?.classList.add("rml-setup-demonstration-only");
@@ -20623,6 +24049,7 @@
       assertActionOnlyDemonstration("before-action");
       tourDebugRecord("tour-live-perception-before-demonstration", {
         demo: step.demo,
+        controlledRepeat,
         availableCapabilities: tourInteractionCapabilitySummary().map(
           capability => capability.id
         ),
@@ -20667,7 +24094,8 @@
       target = await tourPerceiveAndRepairStepTarget(
         step,
         target,
-        runId
+        runId,
+        controlledRepeat
       );
       if (runId !== demoRunId) return false;
 
@@ -20678,6 +24106,33 @@
       if (runId !== demoRunId) return false;
       assertActionOnlyDemonstration("after-action");
       verifyGraphDemoNodeBudget(step, graphNodesBefore);
+      const mouseSafety = teacherMouseSafetyState || {
+        samples: 0,
+        relocations: 0,
+        violations: 1,
+        minimumClearance: 0
+      };
+      const mouseNeverCrossedLiveControls = tourDebugAssert(
+        `tour-step-${attemptedStepIndex}-teacher-mouse-clear-of-live-skip-controls`,
+        mouseSafety.samples > 0 && mouseSafety.violations === 0,
+        {
+          samples: mouseSafety.samples,
+          relocations: mouseSafety.relocations,
+          violations: mouseSafety.violations,
+          minimumPredictedClearance: Number.isFinite(
+            mouseSafety.minimumClearance
+          )
+            ? Math.round(mouseSafety.minimumClearance * 10) / 10
+            : null,
+          policy:
+            "the live Skip controls move to a collision-free viewport corner before every teacher-mouse transition or held drag frame"
+        }
+      );
+      if (!mouseNeverCrossedLiveControls) {
+        throw new Error(
+          `[RML Tour · Step ${attemptedStepIndex}] The teacher mouse could not keep a safe route clear of the live Skip controls.`
+        );
+      }
 
       releaseSemanticScene();
       await wait(520);
@@ -20695,9 +24150,15 @@
       }
 
       if (controlledRepeat) {
-        await returnFromControlledRepeat(
-          repeatReturnStepIndex
+        const returned = await returnFromControlledRepeat(
+          repeatReturnStepIndex,
+          repeatReturnTransaction
         );
+        if (!returned) {
+          throw new Error(
+            `[RML Tour · Repeat] Step ${attemptedStepIndex} completed, but its originating dialog could not be restored.`
+          );
+        }
       } else if (stepIndex >= steps.length - 1) {
         void restoreAndClose(true);
       } else {
@@ -20719,7 +24180,8 @@
               String(error || "Unknown demonstration error")
           });
           await returnFromControlledRepeat(
-            repeatReturnStepIndex
+            repeatReturnStepIndex,
+            repeatReturnTransaction
           );
           return false;
         }
@@ -20809,6 +24271,7 @@
           "rml-setup-demonstration-active"
         );
         demoInFlight = false;
+        teacherMouseSafetyState = null;
       }
     }
   }
@@ -20833,10 +24296,81 @@
 
   function tourStateFingerprint(value) {
     try {
-      return JSON.stringify(value || null);
+      const canonicalize = item => {
+        if (Array.isArray(item)) {
+          return item.map(canonicalize);
+        }
+        if (item && typeof item === "object") {
+          return Object.keys(item)
+            .sort()
+            .reduce((result, key) => {
+              result[key] = canonicalize(item[key]);
+              return result;
+            }, {});
+        }
+        return Object.is(item, -0) ? 0 : item;
+      };
+      return JSON.stringify(canonicalize(value || null));
     } catch {
       return "";
     }
+  }
+
+  function tourStateDifferences(expected, actual, path = "$", output = []) {
+    if (output.length >= 24) return output;
+    if (Object.is(expected, actual)) return output;
+    const expectedArray = Array.isArray(expected);
+    const actualArray = Array.isArray(actual);
+    if (expectedArray || actualArray) {
+      if (!expectedArray || !actualArray || expected.length !== actual.length) {
+        output.push({
+          path,
+          expectedType: expectedArray ? "array" : typeof expected,
+          actualType: actualArray ? "array" : typeof actual,
+          expectedLength: expectedArray ? expected.length : null,
+          actualLength: actualArray ? actual.length : null
+        });
+        return output;
+      }
+      for (let index = 0; index < expected.length; index += 1) {
+        tourStateDifferences(
+          expected[index],
+          actual[index],
+          `${path}[${index}]`,
+          output
+        );
+        if (output.length >= 24) break;
+      }
+      return output;
+    }
+    const expectedObject = expected && typeof expected === "object";
+    const actualObject = actual && typeof actual === "object";
+    if (expectedObject && actualObject) {
+      const keys = [...new Set([
+        ...Object.keys(expected),
+        ...Object.keys(actual)
+      ])].sort();
+      for (const key of keys) {
+        if (!(key in expected) || !(key in actual)) {
+          output.push({
+            path: `${path}.${key}`,
+            expectedPresent: key in expected,
+            actualPresent: key in actual
+          });
+        } else {
+          tourStateDifferences(
+            expected[key],
+            actual[key],
+            `${path}.${key}`,
+            output
+          );
+        }
+        if (output.length >= 24) break;
+      }
+      return output;
+    }
+    output.push({ path, expected, actual });
+    return output;
   }
 
   function restoreTourState(value) {
@@ -20891,8 +24425,15 @@
     if (options.statePrepared !== true) {
       if (options.restoreEntry === true) {
         restoreTourState(stepSnapshots.get(index));
+        void restoreTourEnvironmentState(
+          stepEnvironmentSnapshots.get(index)
+        );
       } else if (options.captureEntry !== false) {
         stepSnapshots.set(index, captureTourState());
+        stepEnvironmentSnapshots.set(
+          index,
+          captureTourEnvironmentState()
+        );
       }
     }
 
@@ -20910,6 +24451,7 @@
     });
     ui.title.textContent = step.title;
     ui.hint.hidden = false;
+    renderWelcomeViewportWarning(index);
     ui.progress.style.width =
       ((index + 1) / steps.length) * 100 + "%";
     const root = ui.root;
@@ -20946,19 +24488,21 @@
   async function skipCurrentDemonstration() {
     const skippedIndex = stepIndex;
     const step = steps[skippedIndex];
-    const skippingLiveDemonstration = Boolean(
+    const skippingLiveScene = Boolean(
       step?.demo &&
-      demoInFlight &&
-      stepPhase === "demonstrating"
+      (
+        stepPhase === "preparing" ||
+        (demoInFlight && stepPhase === "demonstrating")
+      )
     );
     if (
       !step?.demo ||
-      (!skippingLiveDemonstration && stepPhase !== "ready")
+      (!skippingLiveScene && stepPhase !== "ready")
     ) {
       return false;
     }
 
-    if (skippingLiveDemonstration) {
+    if (skippingLiveScene) {
       cancelDemo();
       demoInFlight = false;
       document.documentElement.classList.remove(
@@ -20972,22 +24516,111 @@
       );
       const entry = stepSnapshots.get(skippedIndex);
       if (entry) restoreTourState(entry);
+      await restoreTourEnvironmentState(
+        stepEnvironmentSnapshots.get(skippedIndex)
+      );
       await nextTwoFrames();
+      restoreTourOverlayState(
+        stepEnvironmentSnapshots.get(skippedIndex)?.overlay
+      );
     }
+
+    const skippedGraphHandoff = step.mode === "graph"
+      ? recordSkippedGraphSceneHandoff(step)
+      : null;
 
     tourDebugRecord("single-demonstration-skipped", {
       skippedStepIndex: skippedIndex,
       skippedStepTitle: step.title || "",
       skippedDemo: step.demo,
-      skippedWhileRunning: skippingLiveDemonstration
+      skippedWhileRunning: skippingLiveScene,
+      skippedPhase: stepPhase,
+      graphSceneCarriedForward:
+        skippedGraphHandoff?.ready === true,
+      graphSceneTarget:
+        skippedGraphHandoff?.handoff?.toDemo || "",
+      overlayStateRestored: tourOverlayStateMatches(
+        stepEnvironmentSnapshots.get(skippedIndex)?.overlay
+      )
     });
 
     if (skippedIndex >= steps.length - 1) {
       await restoreAndClose(true);
     } else {
-      await transitionToStep(skippedIndex + 1, {
+      const transitioned = await transitionToStep(skippedIndex + 1, {
         captureEntry: true
       });
+      let skipSceneComparison = null;
+      let exactSkipHandoff = false;
+      if (transitioned && skippedGraphHandoff?.ready === true) {
+        const opening = graphTeachingSceneSnapshot(
+          `${step.demo}-skip-preserved-opening`
+        );
+        skipSceneComparison = compareGraphProductState(
+          skippedGraphHandoff.terminal,
+          opening
+        );
+        exactSkipHandoff = tourDebugAssert(
+          `${step.demo}-skip-preserved-exact-graph-scene`,
+          skipSceneComparison.exact === true,
+          {
+            skippedStepIndex: skippedIndex,
+            fromDemo: step.demo,
+            toDemo: skippedGraphHandoff.handoff?.toDemo || "",
+            terminal: skippedGraphHandoff.terminal,
+            opening,
+            mismatches: skipSceneComparison.mismatches,
+            ignoredPresentationMismatches:
+              skipSceneComparison.ignoredPresentationMismatches,
+            policy:
+              "Skip preserves the complete graph product state; only page and toolbar scrolling needed to reveal Step 10 controls is allowed"
+          }
+        );
+      }
+      if (transitioned && step.demo === "graph-flip") {
+        await nextTwoFrames();
+        const pair = graphDemoSocketPair(false);
+        const connection = graphTeachingPairExistingConnection(pair);
+        if (skippedGraphHandoff?.preserveExactGraphState === true) {
+          tourDebugAssert(
+            "graph-flip-connected-skip-zero-graph-mutation",
+            Boolean(
+              exactSkipHandoff &&
+              skipSceneComparison?.exact === true &&
+              connection
+            ),
+            {
+              skippedStepIndex,
+              connectedBeforeSkip:
+                skippedGraphHandoff.connectedTeachingPair === true,
+              connectedAfterSkip: Boolean(connection),
+              comparison: skipSceneComparison,
+              terminal: skippedGraphHandoff.terminal,
+              opening: graphTeachingSceneSnapshot(
+                "graph-flip-connected-skip-zero-mutation-verification"
+              ),
+              policy:
+                "with both nodes and their cable already present, Step 9 Skip changes no node coordinate, connection, camera, zoom, selection or panel; page and toolbar scrolling may only reveal Step 10 controls"
+            }
+          );
+        } else {
+          const spacing = graphTeachingPairSpacingProof(pair, {
+            minimumGraphGap: 120,
+            maximumGraphGap: 920,
+            minimumClientGap: window.innerWidth < 480 ? 24 : 32
+          });
+          tourDebugAssert(
+            "graph-flip-skip-fallback-keeps-nodes-visibly-separated",
+            spacing.ok === true,
+            {
+              skippedStepIndex,
+              spacing,
+              policy:
+                "only an incomplete graph may use preparation, and its complete node rectangles must remain separated"
+            }
+          );
+        }
+      }
     }
     return true;
   }
@@ -21006,7 +24639,9 @@
           : stepPhase === "explain"
       )
     );
-    const repeatSnapshot = stepSnapshots.get(repeatStepIndex);
+    const repeatSnapshot = stepReadySnapshots.get(repeatStepIndex);
+    const repeatEnvironmentSnapshot =
+      stepReadyEnvironmentSnapshots.get(repeatStepIndex);
 
     if (
       repeatPreviousInFlight ||
@@ -21014,7 +24649,8 @@
       restoreInFlight ||
       repeatStepIndex < 0 ||
       !repeatAllowedFromCurrentPhase ||
-      !repeatSnapshot
+      !repeatSnapshot ||
+      !repeatEnvironmentSnapshot
     ) {
       tourDebugRecord("controlled-repeat-previous-rejected", {
         returnStepIndex,
@@ -21024,12 +24660,21 @@
         demoInFlight,
         restoreInFlight,
         snapshotAvailable: Boolean(repeatSnapshot),
+        environmentSnapshotAvailable: Boolean(
+          repeatEnvironmentSnapshot
+        ),
         policy:
-          "Repeat is available only from the next ready dialog and uses the previous lesson's immutable entry snapshot."
+          "Repeat is available only from the next ready dialog and uses the previous lesson's immutable post-narration Demonstrate snapshot."
       });
       return false;
     }
 
+    const returnTransaction = {
+      role: "repeat-return-dialog",
+      state: captureTourState(),
+      environment: captureTourEnvironmentState(),
+      phase: stepPhase
+    };
     repeatPreviousInFlight = true;
     controlledRepeatCount += 1;
     setStepPhase(stepPhase);
@@ -21041,20 +24686,31 @@
       returnStepIndex,
       returnStepTitle: returnStep.title || "",
       previousNarrationWillRun: false,
-      snapshotRestored: true
+      snapshotRestored: true,
+      snapshotKind: "post-narration-demonstrate-ready",
+      returnStateCaptured: Boolean(
+        returnTransaction.state && returnTransaction.environment
+      )
     });
 
     try {
       const opened = await transitionToStep(repeatStepIndex, {
-        restoreEntry: true,
         captureEntry: false,
         controlledReentry: true,
         deferNarration: true,
-        directDemonstration: true
+        directDemonstration: true,
+        restoreTransaction: {
+          role: "repeat-demonstration-ready",
+          state: repeatSnapshot,
+          environment: repeatEnvironmentSnapshot
+        }
       });
       if (!opened) {
         if (stepIndex !== returnStepIndex) {
-          await returnFromControlledRepeat(returnStepIndex);
+          await returnFromControlledRepeat(
+            returnStepIndex,
+            returnTransaction
+          );
         }
         return false;
       }
@@ -21064,7 +24720,8 @@
         findTarget(steps[repeatStepIndex]),
         {
           controlledRepeat: true,
-          repeatReturnStepIndex: returnStepIndex
+          repeatReturnStepIndex: returnStepIndex,
+          repeatReturnTransaction: returnTransaction
         }
       );
       tourDebugRecord("controlled-repeat-previous-complete", {
@@ -21073,7 +24730,9 @@
         returnStepIndex,
         returnedToRequestedDialog: stepIndex === returnStepIndex,
         previousNarrationRepeated: false,
-        demonstrationCompleted: repeated
+        demonstrationCompleted: repeated,
+        readySnapshotUsed: true,
+        returnStateRestored: stepIndex === returnStepIndex
       });
       return repeated;
     } catch (error) {
@@ -21085,7 +24744,10 @@
         message: error?.message || String(error || "Unknown repeat error")
       });
       if (stepIndex !== returnStepIndex) {
-        await returnFromControlledRepeat(returnStepIndex);
+        await returnFromControlledRepeat(
+          returnStepIndex,
+          returnTransaction
+        );
       }
       return false;
     } finally {
@@ -21095,6 +24757,56 @@
         setStepPhase(stepPhase);
         fitNarrationCardToContent({ followText: false });
       }
+      const repeatAbortedByTourClose = Boolean(
+        currentUi.root?.hidden || restoreInFlight || !snapshot
+      );
+      if (repeatAbortedByTourClose) {
+        tourDebugRecord("controlled-repeat-ended-by-tour-close", {
+          returnStepIndex,
+          actualStepIndex: stepIndex,
+          assistantHidden: Boolean(currentUi.root?.hidden),
+          restoreInFlight,
+          snapshotAvailable: Boolean(snapshot),
+          policy:
+            "an explicit full-tour Skip remains authoritative and does not create a false repeat-transaction failure"
+        });
+      } else {
+        const returnDialogRestored = tourDebugAssert(
+          "controlled-repeat-previous-return-dialog-restored",
+          Boolean(
+            stepIndex === returnStepIndex &&
+            stepPhase === returnTransaction.phase &&
+            currentUi.root &&
+            !currentUi.root.hidden &&
+            !demoInFlight &&
+            !repeatPreviousInFlight &&
+            currentUi.repeatPrevious &&
+            !currentUi.repeatPrevious.hidden &&
+            !currentUi.repeatPrevious.disabled
+          ),
+          {
+            returnStepIndex,
+            actualStepIndex: stepIndex,
+            expectedPhase: returnTransaction.phase,
+            actualPhase: stepPhase,
+            repeatButtonVisible: Boolean(
+              currentUi.repeatPrevious &&
+              !currentUi.repeatPrevious.hidden
+            ),
+            repeatButtonEnabled: Boolean(
+              currentUi.repeatPrevious &&
+              !currentUi.repeatPrevious.disabled
+            ),
+            policy:
+              "after the previous demonstration finishes, the exact originating dialog is restored and Repeat previous remains available for another explicit click"
+          }
+        );
+        if (!returnDialogRestored) {
+          console.error(
+            "[RML Tour · Repeat] The originating dialog was not restored after the controlled repetition."
+          );
+        }
+      }
     }
   }
 
@@ -21102,18 +24814,93 @@
     if (restoreInFlight) return;
     restoreInFlight = true;
     const ui = elements();
+    const expectedState = snapshot;
+    const expectedFingerprint = snapshotFingerprint;
+    const expectedEnvironment = originalTourUiState;
     try {
       cancelDemo();
       clearTarget();
       document.documentElement.classList.remove("rml-setup-tour-active");
+      document.documentElement.classList.remove(
+        "rml-setup-demonstration-active"
+      );
       if (ui.root) ui.root.hidden = true;
+      if (ui.liveControls) ui.liveControls.hidden = true;
+      if (ui.liveSkipDemo) ui.liveSkipDemo.disabled = true;
+      if (ui.liveSkipTour) ui.liveSkipTour.disabled = true;
 
       await restoreSandboxSnapshot();
+      await restoreTourEnvironmentState(expectedEnvironment);
+      await nextTwoFrames();
+      restoreTourStorageState(expectedEnvironment?.storage);
+      restoreTourOverlayState(expectedEnvironment?.overlay);
+      window.scrollTo(
+        Number(expectedEnvironment?.page?.x) || 0,
+        Number(expectedEnvironment?.page?.y) || 0
+      );
+      restoreTourScrollSurfaces(expectedEnvironment?.scrollSurfaces);
+      await nextTwoFrames();
 
-      if (originalTourUiState) {
-        window.scrollTo(
-          originalTourUiState.scrollX,
-          originalTourUiState.scrollY
+      const actualState = captureTourState();
+      const actualFingerprint = tourStateFingerprint(actualState);
+      const builderStateMatches =
+        actualFingerprint === expectedFingerprint;
+      const builderStateDifferences = builderStateMatches
+        ? []
+        : tourStateDifferences(expectedState, actualState);
+      const storageMatches =
+        tourStorageFingerprint() ===
+        tourStorageFingerprint(expectedEnvironment?.storage || []);
+      const overlayMatches = tourOverlayStateMatches(
+        expectedEnvironment?.overlay
+      );
+      const modeMatches = Boolean(
+        expectedEnvironment &&
+        document.body.classList.contains("rml-node-graph-mode") ===
+          expectedEnvironment.graphMode &&
+        document.body.classList.contains("rml-graph-left-collapsed") ===
+          expectedEnvironment.graphLeftCollapsed &&
+        document.body.classList.contains("rml-graph-right-collapsed") ===
+          expectedEnvironment.graphRightCollapsed
+      );
+      const topMenuState = responsiveTopActionsState();
+      const topMenuMatches = Boolean(
+        expectedEnvironment &&
+        topMenuState.open === expectedEnvironment.topMenuOpen
+      );
+      const sandboxRestored = tourDebugAssert(
+        "tour-sandbox-full-restore-contract",
+        Boolean(
+          expectedState &&
+          expectedFingerprint &&
+          builderStateMatches &&
+          storageMatches &&
+          overlayMatches &&
+          modeMatches &&
+          topMenuMatches &&
+          ui.root?.hidden &&
+          !document.documentElement.classList.contains(
+            "rml-setup-demonstration-active"
+          )
+        ),
+        {
+          builderStateMatches,
+          builderStateDifferences,
+          storageMatches,
+          overlayMatches,
+          modeMatches,
+          topMenuMatches,
+          assistantHidden: Boolean(ui.root?.hidden),
+          liveControlsHidden: Boolean(ui.liveControls?.hidden),
+          expectedDialogs: expectedEnvironment?.overlay?.dialogs || [],
+          actualDialogs: captureTourOverlayState().dialogs,
+          policy:
+            "Finish and every full-tour Skip restore the immutable builder, storage, mode, menu, scroll and product-overlay entry state before the assistant closes"
+        }
+      );
+      if (!sandboxRestored) {
+        console.error(
+          "[RML Tour] The sandbox restore contract did not return every captured surface to its entry state."
         );
       }
 
@@ -21124,6 +24911,9 @@
       snapshot = null;
       snapshotFingerprint = "";
       stepSnapshots.clear();
+      stepEnvironmentSnapshots.clear();
+      stepReadySnapshots.clear();
+      stepReadyEnvironmentSnapshots.clear();
       originalTourUiState = null;
       firstRunSession = false;
       mobileTopbarPreparedForNarration = false;
@@ -21275,6 +25065,10 @@
       viewportGeometryFrame = requestAnimationFrame(() => {
         if (ui.root.hidden) return;
 
+        if (stepIndex === 0) {
+          renderWelcomeViewportWarning(0);
+        }
+
         if (activeSemanticScene?.locked) {
           const visibleMembers = activeSemanticScene.elements.filter(
             tourElementActuallyVisible
@@ -21360,12 +25154,11 @@
       repeatPreviousInFlight = false;
       snapshot = captureTourState();
       snapshotFingerprint = tourStateFingerprint(snapshot);
-      originalTourUiState = {
-        graphMode: document.body.classList.contains("rml-node-graph-mode"),
-        scrollX: window.scrollX,
-        scrollY: window.scrollY
-      };
+      originalTourUiState = captureTourEnvironmentState();
       stepSnapshots.clear();
+      stepEnvironmentSnapshots.clear();
+      stepReadySnapshots.clear();
+      stepReadyEnvironmentSnapshots.clear();
 
       window.RMLBuilderSetupBridge.prepareTourDemo?.();
 
@@ -21390,6 +25183,32 @@
       positionCard(null, { force: true });
 
       const viewport = tourViewport();
+      const viewportSupport = renderWelcomeViewportWarning(0);
+      const warningContractPassed = tourDebugAssert(
+        "tour-welcome-viewport-support-warning-contract",
+        Boolean(ui.viewportWarning) &&
+          ui.viewportWarning.hidden === viewportSupport.supported &&
+          (
+            viewportSupport.supported ||
+            (
+              ui.viewportWarning.textContent.includes(
+                `${viewportSupport.actual.width}×${viewportSupport.actual.height}`
+              ) &&
+              ui.viewportWarning.textContent.includes(
+                `${viewportSupport.minimum.width}×${viewportSupport.minimum.height}`
+              )
+            )
+          ),
+        {
+          ...viewportSupport,
+          warningVisible: Boolean(
+            ui.viewportWarning && !ui.viewportWarning.hidden
+          ),
+          warningText: ui.viewportWarning?.textContent || "",
+          policy:
+            "414×896 is the smallest verified full-tour viewport; only a smaller viewport receives the first-overlay safety warning"
+        }
+      );
       const cardRect = ui.card?.getBoundingClientRect?.() || null;
       const cardCenteredBeforeReveal = Boolean(
         cardRect &&
@@ -21413,7 +25232,7 @@
       );
       tourDebugAssert(
         "tour-first-visible-frame-prepositioned",
-        cardCenteredBeforeReveal,
+        cardCenteredBeforeReveal && warningContractPassed,
         {
           cardRect: cardRect ? tourDebugRect(ui.card) : null,
           viewport,
