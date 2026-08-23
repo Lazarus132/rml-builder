@@ -28,7 +28,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "stable-sequential-static-scanner-probe-20260823-v366f1";
+  "stable-edit-mode-root-scroll-20260823-v371f1";
 
 function exposeRmlBuilderBuildId() {
   document.documentElement.dataset
@@ -21912,7 +21912,7 @@ function ensureSetupAssistantLoaded(firstRun = false) {
 
   setupAssistantLoadPromise = new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = new URL("setup_assistant.js?v=176-sequential-static-scanner-probe-v366f1", APP_SCRIPT_BASE_URL).href;
+    script.src = new URL("setup_assistant.js?v=181-edit-mode-root-scroll-v371f1", APP_SCRIPT_BASE_URL).href;
     script.async = true;
     script.dataset.rmlSetupAssistant = "true";
     script.addEventListener("load", () => resolve(true), { once: true });
@@ -23485,7 +23485,27 @@ function installUniversalScrollLayerSelector() {
   const htmlElement = () =>
     document.documentElement;
 
+  const editModeScrollElement = () => {
+    if (
+      !document.body.classList.contains(
+        "rml-graph-edit-mode"
+      )
+    ) {
+      return null;
+    }
+
+    const workspace =
+      document.querySelector(
+        "body.rml-graph-edit-mode > main > .workspace"
+      );
+
+    return workspace instanceof HTMLElement
+      ? workspace
+      : null;
+  };
+
   const documentScrollElement = () =>
+    editModeScrollElement() ||
     document.scrollingElement ||
     document.documentElement;
 
@@ -23805,6 +23825,13 @@ function installUniversalScrollLayerSelector() {
 
   const semanticElementLabel =
     element => {
+      if (
+        element ===
+          editModeScrollElement()
+      ) {
+        return "Edit Mode · Workspace ROOT";
+      }
+
       if (element === htmlElement()) {
         return "<html> · Page ROOT";
       }
@@ -24322,7 +24349,9 @@ function installUniversalScrollLayerSelector() {
         add(scrolling);
       }
 
-      add(htmlElement());
+      if (!editModeScrollElement()) {
+        add(htmlElement());
+      }
 
       dbgTable(
         options.includeViewportWide === true
@@ -24988,7 +25017,7 @@ function installUniversalScrollLayerSelector() {
       ) {
         candidates = [
           descriptorFor(
-            htmlElement()
+            documentScrollElement()
           )
         ].filter(Boolean);
       }
@@ -25061,7 +25090,7 @@ function installUniversalScrollLayerSelector() {
         event.target instanceof
           HTMLElement
           ? event.target
-          : htmlElement();
+          : documentScrollElement();
       const delta =
         normalizedWheelDelta(
           event,
@@ -25345,7 +25374,7 @@ function installUniversalScrollLayerSelector() {
       const descriptor =
         candidates[0] ||
         descriptorFor(
-          htmlElement()
+          documentScrollElement()
         );
 
       return {

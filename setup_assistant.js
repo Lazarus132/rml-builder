@@ -102,7 +102,7 @@
     rejectedCount: 0
   };
   const tourDebugState = {
-    build: "stable-sequential-static-scanner-probe-20260823-v366f1",
+    build: "stable-edit-mode-root-scroll-20260823-v371f1",
     events: [],
     assertions: []
   };
@@ -24168,7 +24168,14 @@
     return [...document.querySelectorAll(".rml-graph-toolbar .button")]
       .find(button =>
         tourElementActuallyVisible(button) &&
-        button.textContent.trim() === label
+        (
+          button.textContent.trim() === label ||
+          String(
+            button.getAttribute("aria-label") ||
+            button.dataset.help ||
+            ""
+          ).trim() === label
+        )
       ) || null;
   }
 
@@ -24176,7 +24183,11 @@
     return [...document.querySelectorAll(".rml-graph-toolbar .button")]
       .find(button =>
         tourElementActuallyVisible(button) &&
-        button.title.trim() === title
+        String(
+          button.title ||
+          button.dataset.help ||
+          ""
+        ).trim() === title
       ) || null;
   }
 

@@ -983,6 +983,8 @@
   let graphMessageTimer = 0;
   let graphNodeSearchQuery = "";
   let graphNodeSearchIndex = -1;
+  let graphEditModeScrollY = 0;
+  let graphEditViewportFrame = 0;
   const GRAPH_SEARCHABLE_LIST_THRESHOLD = 8;
   const GRAPH_PANEL_LAYOUT_STORAGE_KEY =
     RML_GRAPH_VISUAL_TEST && RML_GRAPH_TEST_STORAGE_SCOPE
@@ -1145,6 +1147,7 @@
     nodesHost: null,
     toast: null,
     sourceBadge: null,
+    editModeButton: null,
     leftPanelToggle: null,
     rightPanelToggle: null
   };
@@ -11364,10 +11367,13 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         position: relative;
         display: grid;
         width: 100%;
+        max-width: 100%;
+        min-width: 0;
         height: 100%;
         min-height: 0;
         grid-template-rows: 46px minmax(0, 1fr);
         overflow: hidden;
+        contain: inline-size paint;
         background: #090b12;
         color: #f4f7fa;
       }
@@ -11390,14 +11396,51 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         font-size: 9px;
       }
 
+      .rml-graph-icon-button {
+        position: relative;
+        display: grid;
+        width: 34px;
+        min-width: 34px;
+        height: 32px;
+        min-height: 32px !important;
+        flex: 0 0 34px;
+        place-items: center;
+        padding: 0 !important;
+      }
+
+      .rml-graph-icon-button svg {
+        display: block;
+        width: 18px;
+        height: 18px;
+        overflow: visible;
+        fill: none;
+        stroke: currentColor;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-width: 1.8;
+        pointer-events: none;
+      }
+
+      .rml-graph-icon-button svg[hidden] {
+        display: none !important;
+      }
+
+      .rml-graph-toolbar-sr-label {
+        position: absolute !important;
+        width: 1px !important;
+        height: 1px !important;
+        margin: -1px !important;
+        padding: 0 !important;
+        overflow: hidden !important;
+        clip: rect(0 0 0 0) !important;
+        clip-path: inset(50%) !important;
+        border: 0 !important;
+        white-space: nowrap !important;
+      }
+
       .rml-graph-compact-search-button {
         display: none;
-        width: 32px;
-        min-width: 32px;
-        padding: 0 !important;
         place-items: center;
-        font-size: 19px !important;
-        line-height: 1;
       }
 
       .rml-graph-search-overlay {
@@ -11464,7 +11507,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       }
 
       .rml-graph-search-overlay-next {
-        flex: 0 0 auto;
+        flex: 0 0 34px;
       }
 
       .rml-graph-root.rml-graph-compact-toolbar .rml-graph-node-search {
@@ -12739,6 +12782,303 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           max-width: 190px;
         }
       }
+
+      .rml-graph-edit-mode-button {
+        flex: 0 0 auto;
+      }
+
+      .rml-graph-edit-mode-button.active,
+      .rml-graph-edit-mode-button[aria-pressed="true"] {
+        border-color: rgba(108, 232, 155, 0.56);
+        background:
+          linear-gradient(
+            145deg,
+            rgba(38, 94, 65, 0.92),
+            rgba(22, 58, 42, 0.96)
+          );
+        color: #c9ffdc;
+        box-shadow:
+          inset 0 1px rgba(255, 255, 255, 0.045),
+          0 0 0 1px rgba(108, 232, 155, 0.08);
+      }
+
+      @media (min-width: 1181px) {
+        html:not(.rml-setup-tour-active) body.rml-node-graph-mode:not(.rml-graph-edit-mode) .workspace {
+          height: clamp(480px, 72dvh, 820px);
+          min-height: 0;
+        }
+
+        html:not(.rml-setup-tour-active) body.rml-node-graph-mode:not(.rml-graph-edit-mode) .workspace > .palette,
+        html:not(.rml-setup-tour-active) body.rml-node-graph-mode:not(.rml-graph-edit-mode) .workspace > .canvas,
+        html:not(.rml-setup-tour-active) body.rml-node-graph-mode:not(.rml-graph-edit-mode) .workspace > .inspector {
+          height: 100%;
+          min-height: 0;
+        }
+
+        html:not(.rml-setup-tour-active) body.rml-node-graph-mode:not(.rml-graph-edit-mode) #builder-canvas {
+          height: auto;
+          min-height: 0;
+          flex: 1 1 auto;
+        }
+      }
+
+      @media (min-width: 781px) and (max-width: 1180px) {
+        html:not(.rml-setup-tour-active) body.rml-node-graph-mode:not(.rml-graph-edit-mode) .workspace {
+          height: auto;
+          min-height: 0;
+        }
+
+        html:not(.rml-setup-tour-active) body.rml-node-graph-mode:not(.rml-graph-edit-mode) .workspace > .palette,
+        html:not(.rml-setup-tour-active) body.rml-node-graph-mode:not(.rml-graph-edit-mode) .workspace > .canvas {
+          height: clamp(400px, 72dvh, 760px);
+          min-height: 0;
+        }
+
+        html:not(.rml-setup-tour-active) body.rml-node-graph-mode:not(.rml-graph-edit-mode) #builder-canvas {
+          height: auto;
+          min-height: 0;
+          flex: 1 1 auto;
+        }
+      }
+
+      @media (max-width: 780px) {
+        html:not(.rml-setup-tour-active) body.rml-node-graph-mode:not(.rml-graph-edit-mode) .workspace > .canvas {
+          height: auto;
+          min-height: 0;
+        }
+
+        html:not(.rml-setup-tour-active) body.rml-node-graph-mode:not(.rml-graph-edit-mode) #builder-canvas {
+          height: clamp(260px, 70dvh, 640px);
+          min-height: clamp(260px, 70dvh, 640px);
+          flex: 0 0 clamp(260px, 70dvh, 640px);
+        }
+      }
+
+      html.rml-graph-edit-mode,
+      body.rml-graph-edit-mode {
+        height: var(--rml-graph-edit-viewport-height, 100dvh);
+        overflow: hidden !important;
+        overscroll-behavior: none !important;
+      }
+
+      html.rml-graph-edit-mode {
+        width: 100%;
+        min-width: 0 !important;
+        max-width: 100%;
+      }
+
+      body.rml-graph-edit-mode {
+        position: fixed;
+        z-index: 0;
+        top: var(--rml-graph-edit-viewport-top, 0px);
+        left: var(--rml-graph-edit-viewport-left, 0px);
+        width: 100%;
+        width: min(100%, var(--rml-graph-edit-viewport-width, 100%));
+        min-width: 0 !important;
+        max-width: 100%;
+        margin: 0;
+        overflow-x: clip !important;
+      }
+
+      body.rml-graph-edit-mode > .topbar,
+      body.rml-graph-edit-mode > main > :not(.workspace),
+      body.rml-graph-edit-mode > footer {
+        display: none !important;
+      }
+
+      body.rml-node-graph-mode.rml-graph-edit-mode main {
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+        height: var(--rml-graph-edit-viewport-height, 100dvh);
+        margin: 0;
+        overflow: hidden;
+        overflow: clip;
+      }
+
+      body.rml-node-graph-mode.rml-graph-edit-mode .workspace {
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+        height: var(--rml-graph-edit-viewport-height, 100dvh);
+        min-height: 0;
+        margin: 0;
+        overflow-x: hidden;
+        overflow-x: clip;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+      }
+
+      @media (min-width: 1181px) {
+        body.rml-node-graph-mode.rml-graph-edit-mode .workspace {
+          grid-template-columns:
+            clamp(190px, 16vw, 250px)
+            minmax(0, 1fr)
+            clamp(250px, 22vw, 340px);
+        }
+      }
+
+      body.rml-node-graph-mode.rml-graph-edit-mode .workspace > .palette,
+      body.rml-node-graph-mode.rml-graph-edit-mode .workspace > .canvas,
+      body.rml-node-graph-mode.rml-graph-edit-mode .workspace > .inspector {
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+        min-height: 0;
+      }
+
+      body.rml-node-graph-mode.rml-graph-edit-mode .workspace > .canvas {
+        height: 100%;
+        overflow: hidden;
+      }
+
+      body.rml-node-graph-mode.rml-graph-edit-mode #builder-canvas {
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+        height: auto;
+        min-height: 0;
+        flex: 1 1 auto;
+        overflow: hidden !important;
+      }
+
+      body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-root,
+      body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-toolbar,
+      body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-viewport {
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+      }
+
+      @media (max-width: 1180px) {
+        body.rml-node-graph-mode.rml-graph-edit-mode .workspace {
+          overflow-x: hidden;
+          overflow-y: auto;
+          overscroll-behavior: contain;
+        }
+      }
+
+      @media (min-width: 781px) and (max-width: 1180px) {
+        body.rml-node-graph-mode.rml-graph-edit-mode .workspace > .palette,
+        body.rml-node-graph-mode.rml-graph-edit-mode .workspace > .canvas {
+          height: var(--rml-graph-edit-viewport-height, 100dvh);
+          min-height: 0;
+        }
+      }
+
+      @media (max-width: 780px) {
+        body.rml-node-graph-mode .rml-graph-palette-scroll,
+        body.rml-node-graph-mode .rml-graph-palette-item {
+          touch-action: pan-y;
+        }
+
+        body.rml-node-graph-mode .rml-graph-palette-scroll {
+          -webkit-overflow-scrolling: touch;
+        }
+
+        body.rml-node-graph-mode.rml-graph-edit-mode main {
+          width: 100%;
+          min-width: 0;
+          max-width: 100%;
+        }
+
+        body.rml-node-graph-mode.rml-graph-edit-mode .workspace {
+          display: grid;
+          width: 100%;
+          min-width: 0;
+          max-width: 100%;
+          height: var(--rml-graph-edit-viewport-height, 100dvh);
+          grid-auto-rows: max-content;
+          align-content: start;
+          gap: 8px;
+          overflow-x: hidden;
+          overflow-x: clip;
+          overflow-y: auto;
+          -webkit-overflow-scrolling: touch;
+        }
+
+        body.rml-node-graph-mode.rml-graph-edit-mode .workspace > .palette {
+          height: var(
+            --rml-graph-edit-palette-height,
+            clamp(320px, 68dvh, 680px)
+          ) !important;
+          max-height: none !important;
+          overflow: hidden !important;
+        }
+
+        body.rml-node-graph-mode.rml-graph-edit-mode .workspace > .inspector {
+          height: var(
+            --rml-graph-edit-inspector-height,
+            clamp(300px, 62dvh, 640px)
+          ) !important;
+          max-height: none !important;
+          overflow-x: hidden !important;
+          overflow-y: hidden !important;
+        }
+
+        body.rml-node-graph-mode.rml-graph-edit-mode #palette-content {
+          height: calc(100% - 52px) !important;
+          min-height: 0 !important;
+          max-height: none !important;
+          overflow: hidden !important;
+        }
+
+        body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-palette {
+          height: 100%;
+          min-height: 0;
+        }
+
+        body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-palette-scroll {
+          min-height: 0;
+          overflow-x: hidden !important;
+          overflow-y: auto !important;
+          overscroll-behavior-y: contain;
+          touch-action: pan-y;
+          -webkit-overflow-scrolling: touch;
+        }
+
+        body.rml-node-graph-mode.rml-graph-edit-mode #inspector-content {
+          height: calc(100% - 52px);
+          min-height: 0;
+          overflow-x: hidden;
+          overflow-y: auto;
+          overscroll-behavior-y: contain;
+          -webkit-overflow-scrolling: touch;
+        }
+
+        body.rml-node-graph-mode.rml-graph-edit-mode .workspace > .canvas {
+          width: 100%;
+          min-width: 0;
+          max-width: 100%;
+          height: var(--rml-graph-edit-viewport-height, 100dvh);
+          min-height: var(--rml-graph-edit-viewport-height, 100dvh);
+          overflow: hidden;
+        }
+
+        body.rml-node-graph-mode.rml-graph-edit-mode #builder-canvas {
+          width: 100%;
+          min-width: 0;
+          max-width: 100%;
+          height: 100%;
+          min-height: 0;
+          flex: 1 1 auto;
+          overflow: hidden !important;
+        }
+
+        body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-toolbar {
+          gap: 3px;
+          padding-inline: 4px;
+          overflow-x: auto;
+          overflow-y: hidden;
+          overscroll-behavior-x: contain;
+        }
+
+        body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-icon-button {
+          width: 32px;
+          min-width: 32px;
+          flex-basis: 32px;
+        }
+      }
     `;
 
     document.head.appendChild(style);
@@ -13574,6 +13914,280 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     );
   }
 
+  function graphEditModeActive() {
+    return document.body.classList.contains(
+      "rml-graph-edit-mode"
+    );
+  }
+
+  function clearGraphEditViewportMetrics() {
+    if (graphEditViewportFrame) {
+      cancelAnimationFrame(
+        graphEditViewportFrame
+      );
+      graphEditViewportFrame = 0;
+    }
+
+    const rootStyle =
+      document.documentElement.style;
+    rootStyle.removeProperty(
+      "--rml-graph-edit-viewport-width"
+    );
+    rootStyle.removeProperty(
+      "--rml-graph-edit-viewport-height"
+    );
+    rootStyle.removeProperty(
+      "--rml-graph-edit-viewport-left"
+    );
+    rootStyle.removeProperty(
+      "--rml-graph-edit-viewport-top"
+    );
+    rootStyle.removeProperty(
+      "--rml-graph-edit-palette-height"
+    );
+    rootStyle.removeProperty(
+      "--rml-graph-edit-inspector-height"
+    );
+  }
+
+  function updateGraphEditViewportMetrics() {
+    if (!graphEditModeActive()) {
+      return;
+    }
+
+    if (graphEditViewportFrame) {
+      cancelAnimationFrame(
+        graphEditViewportFrame
+      );
+    }
+
+    graphEditViewportFrame =
+      requestAnimationFrame(() => {
+        graphEditViewportFrame = 0;
+
+        const viewport =
+          window.visualViewport;
+        const width = Math.max(
+          1,
+          Math.floor(
+            viewport?.width ||
+            window.innerWidth ||
+            document.documentElement.clientWidth ||
+            1
+          )
+        );
+        const height = Math.max(
+          1,
+          Math.floor(
+            viewport?.height ||
+            window.innerHeight ||
+            document.documentElement.clientHeight ||
+            1
+          )
+        );
+        const left = Math.max(
+          0,
+          Math.round(
+            viewport?.offsetLeft ||
+            0
+          )
+        );
+        const top = Math.max(
+          0,
+          Math.round(
+            viewport?.offsetTop ||
+            0
+          )
+        );
+        const paletteHeight =
+          Math.min(
+            680,
+            Math.max(
+              320,
+              Math.round(
+                height * 0.68
+              )
+            )
+          );
+        const inspectorHeight =
+          Math.min(
+            640,
+            Math.max(
+              300,
+              Math.round(
+                height * 0.62
+              )
+            )
+          );
+        const rootStyle =
+          document.documentElement.style;
+
+        rootStyle.setProperty(
+          "--rml-graph-edit-viewport-width",
+          `${width}px`
+        );
+        rootStyle.setProperty(
+          "--rml-graph-edit-viewport-height",
+          `${height}px`
+        );
+        rootStyle.setProperty(
+          "--rml-graph-edit-viewport-left",
+          `${left}px`
+        );
+        rootStyle.setProperty(
+          "--rml-graph-edit-viewport-top",
+          `${top}px`
+        );
+        rootStyle.setProperty(
+          "--rml-graph-edit-palette-height",
+          `${paletteHeight}px`
+        );
+        rootStyle.setProperty(
+          "--rml-graph-edit-inspector-height",
+          `${inspectorHeight}px`
+        );
+
+        applyGraphPanelLayout();
+        renderGraphWires();
+        scheduleGraphScrollLayerVisualRefresh();
+      });
+  }
+
+  function updateGraphEditModeButton() {
+    if (!dom.editModeButton) {
+      return;
+    }
+
+    const active = graphEditModeActive();
+    const label =
+      active
+        ? "Exit Edit Mode"
+        : "Edit Mode";
+    const labelElement =
+      dom.editModeButton.querySelector(
+        ".rml-graph-toolbar-sr-label"
+      );
+    const enterIcon =
+      dom.editModeButton.querySelector(
+        ".rml-graph-edit-enter-icon"
+      );
+    const exitIcon =
+      dom.editModeButton.querySelector(
+        ".rml-graph-edit-exit-icon"
+      );
+
+    if (labelElement) {
+      labelElement.textContent = label;
+    }
+    if (enterIcon) {
+      enterIcon.hidden = active;
+    }
+    if (exitIcon) {
+      exitIcon.hidden = !active;
+    }
+    dom.editModeButton.title =
+      active
+        ? "Show the normal page areas above and below the Runtime Graph"
+        : "Hide only the page areas above and below the Runtime Graph";
+    dom.editModeButton.dataset.help =
+      dom.editModeButton.title;
+    dom.editModeButton.setAttribute(
+      "aria-label",
+      dom.editModeButton.title
+    );
+    dom.editModeButton.setAttribute(
+      "aria-pressed",
+      String(active)
+    );
+    dom.editModeButton.classList.toggle(
+      "active",
+      active
+    );
+  }
+
+  function refreshGraphAfterEditModeChange() {
+    requestAnimationFrame(() => {
+      applyGraphPanelLayout();
+
+      requestAnimationFrame(() => {
+        renderGraphWires();
+        scheduleGraphScrollLayerVisualRefresh();
+      });
+    });
+  }
+
+  function setGraphEditMode(
+    active,
+    restoreScroll = true
+  ) {
+    const next =
+      active === true &&
+      graph?.active === true;
+    const current =
+      graphEditModeActive();
+
+    if (next === current) {
+      updateGraphEditModeButton();
+      if (next) {
+        updateGraphEditViewportMetrics();
+      }
+      return current;
+    }
+
+    if (next) {
+      graphEditModeScrollY =
+        Math.max(
+          0,
+          window.scrollY ||
+          window.pageYOffset ||
+          0
+        );
+    }
+
+    document.documentElement.classList.toggle(
+      "rml-graph-edit-mode",
+      next
+    );
+    document.body.classList.toggle(
+      "rml-graph-edit-mode",
+      next
+    );
+
+    clearGraphScrollLayerSelection();
+    window.RMLUniversalScrollLayers
+      ?.clear?.();
+
+    if (next) {
+      updateGraphEditViewportMetrics();
+    } else {
+      clearGraphEditViewportMetrics();
+    }
+
+    updateGraphEditModeButton();
+    refreshGraphAfterEditModeChange();
+
+    if (!next && restoreScroll) {
+      const scrollY =
+        graphEditModeScrollY;
+
+      requestAnimationFrame(() => {
+        window.scrollTo({
+          left: 0,
+          top: scrollY,
+          behavior: "auto"
+        });
+      });
+    }
+
+    return next;
+  }
+
+  function toggleGraphEditMode() {
+    setGraphEditMode(
+      !graphEditModeActive()
+    );
+  }
+
   function activateGraphMode() {
     cacheDom();
 
@@ -13614,6 +14228,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
   }
 
   function deactivateGraphMode() {
+    setGraphEditMode(false);
     captureGraphPaletteUiState();
     persistGraphPaletteUiState();
     clearRuntimeBridgeSubscription();
@@ -13656,6 +14271,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     dom.nodesHost = null;
     dom.toast = null;
     dom.sourceBadge = null;
+    dom.editModeButton = null;
   }
 
   function createPaletteItem(
@@ -15607,6 +16223,71 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     return button;
   }
 
+  const GRAPH_TOOLBAR_ICONS =
+    Object.freeze({
+      center: `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"></path>
+          <circle cx="12" cy="12" r="2.5"></circle>
+        </svg>`,
+      clear: `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"></path>
+        </svg>`,
+      zoomOut: `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="10.5" cy="10.5" r="6.5"></circle>
+          <path d="M15.5 15.5 21 21M7.5 10.5h6"></path>
+        </svg>`,
+      zoomIn: `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="10.5" cy="10.5" r="6.5"></circle>
+          <path d="M15.5 15.5 21 21M7.5 10.5h6M10.5 7.5v6"></path>
+        </svg>`,
+      editMode: `
+        <svg class="rml-graph-edit-enter-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"></path>
+        </svg>
+        <svg class="rml-graph-edit-exit-icon" viewBox="0 0 24 24" aria-hidden="true" hidden>
+          <path d="M4 9h5V4M20 9h-5V4M4 15h5v5M20 15h-5v5"></path>
+        </svg>`,
+      search: `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="10.5" cy="10.5" r="6.5"></circle>
+          <path d="M15.5 15.5 21 21"></path>
+        </svg>`,
+      next: `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M5 6h14M12 5v13M7.5 14.5 12 19l4.5-4.5"></path>
+        </svg>`
+    });
+
+  function createToolbarIconButton(
+    iconMarkup,
+    label,
+    handler,
+    className = "secondary"
+  ) {
+    const button =
+      createToolbarButton(
+        "",
+        handler,
+        className
+      );
+    button.classList.add(
+      "rml-graph-icon-button"
+    );
+    button.innerHTML =
+      `${iconMarkup}<span class="rml-graph-toolbar-sr-label">${label}</span>`;
+    button.title = label;
+    button.dataset.help = label;
+    button.setAttribute(
+      "aria-label",
+      label
+    );
+    return button;
+  }
+
   function graphNodeSearchText(node) {
     const definition = nodeDefinition(node);
     return [
@@ -15700,31 +16381,49 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       "rml-graph-toolbar";
 
     toolbar.append(
-      createToolbarButton(
+      createToolbarIconButton(
+        GRAPH_TOOLBAR_ICONS.center,
         "Center Graph",
         centerGraph
       ),
-      createToolbarButton(
+      createToolbarIconButton(
+        GRAPH_TOOLBAR_ICONS.clear,
         "Clear Operators",
         clearGraphOperators
       )
     );
 
     const zoomOut =
-      createToolbarButton(
-        "−",
+      createToolbarIconButton(
+        GRAPH_TOOLBAR_ICONS.zoomOut,
+        "Zoom out",
         () => zoomGraphBy(-0.1)
       );
-    zoomOut.title = "Zoom out";
     const zoomIn =
-      createToolbarButton(
-        "+",
+      createToolbarIconButton(
+        GRAPH_TOOLBAR_ICONS.zoomIn,
+        "Zoom in",
         () => zoomGraphBy(0.1)
       );
-    zoomIn.title = "Zoom in";
     toolbar.append(
       zoomOut,
       zoomIn
+    );
+
+    const editModeButton =
+      createToolbarIconButton(
+        GRAPH_TOOLBAR_ICONS.editMode,
+        "Edit Mode",
+        toggleGraphEditMode
+      );
+    editModeButton.classList.add(
+      "rml-graph-edit-mode-button"
+    );
+    dom.editModeButton =
+      editModeButton;
+    updateGraphEditModeButton();
+    toolbar.appendChild(
+      editModeButton
     );
 
     const nodeSearch = document.createElement("div");
@@ -15733,10 +16432,23 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     nodeSearchInput.type = "search";
     nodeSearchInput.placeholder = "Find node in graph…";
     nodeSearchInput.autocomplete = "off";
-    const nodeSearchNext = createToolbarButton("Next", () =>
-      focusGraphNodeSearch(nodeSearchInput.value, true)
+    const nodeSearchNext = createToolbarIconButton(
+      GRAPH_TOOLBAR_ICONS.next,
+      "Next",
+      () =>
+        focusGraphNodeSearch(
+          nodeSearchInput.value,
+          true
+        )
     );
-    nodeSearchNext.title = "Jump to the next matching node";
+    nodeSearchNext.title =
+      "Jump to the next matching node";
+    nodeSearchNext.dataset.help =
+      nodeSearchNext.title;
+    nodeSearchNext.setAttribute(
+      "aria-label",
+      nodeSearchNext.title
+    );
     nodeSearchInput.addEventListener("keydown", event => {
       if (event.key === "Enter") {
         event.preventDefault();
@@ -15752,29 +16464,35 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     toolbar.appendChild(nodeSearch);
 
     const compactSearchButton =
-      createToolbarButton("⌕", () => {
-        const overlay = root.querySelector(
-          ":scope > .rml-graph-search-overlay"
-        );
+      createToolbarIconButton(
+        GRAPH_TOOLBAR_ICONS.search,
+        "Find node in graph",
+        () => {
+          const overlay = root.querySelector(
+            ":scope > .rml-graph-search-overlay"
+          );
 
-        if (!overlay) {
-          return;
-        }
+          if (!overlay) {
+            return;
+          }
 
-        overlay.hidden = false;
-        const input = overlay.querySelector("input");
-        if (input instanceof HTMLInputElement) {
-          input.value = nodeSearchInput.value;
-          requestAnimationFrame(() => {
-            input.focus({ preventScroll: true });
-            input.select();
-          });
+          overlay.hidden = false;
+          const input = overlay.querySelector("input");
+          if (input instanceof HTMLInputElement) {
+            input.value = nodeSearchInput.value;
+            requestAnimationFrame(() => {
+              input.focus({ preventScroll: true });
+              input.select();
+            });
+          }
         }
-      });
+      );
     compactSearchButton.classList.add(
       "rml-graph-compact-search-button"
     );
     compactSearchButton.title = "Find node in graph";
+    compactSearchButton.dataset.help =
+      compactSearchButton.title;
     compactSearchButton.setAttribute(
       "aria-label",
       "Find node in graph"
@@ -15794,7 +16512,10 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         </div>
         <div class="rml-graph-search-overlay-body">
           <input type="search" autocomplete="off" placeholder="Find node in graph…">
-          <button class="button secondary rml-graph-search-overlay-next" type="button">Next</button>
+          <button class="button secondary rml-graph-icon-button rml-graph-search-overlay-next" type="button" title="Jump to the next matching node" aria-label="Jump to the next matching node">
+            ${GRAPH_TOOLBAR_ICONS.next}
+            <span class="rml-graph-toolbar-sr-label">Next</span>
+          </button>
         </div>
       </div>`;
 
@@ -16303,8 +17024,24 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     persistGraph();
   }
 
+  function graphEditModeScrollElement() {
+    if (!graphEditModeActive()) {
+      return null;
+    }
+
+    const workspace =
+      document.querySelector(
+        "body.rml-graph-edit-mode > main > .workspace"
+      );
+
+    return workspace instanceof HTMLElement
+      ? workspace
+      : null;
+  }
+
   function graphDocumentScrollElement() {
     return (
+      graphEditModeScrollElement() ||
       document.scrollingElement ||
       document.documentElement
     );
@@ -16739,6 +17476,13 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
   function graphScrollLayerLabel(
     element
   ) {
+    if (
+      element ===
+        graphEditModeScrollElement()
+    ) {
+      return "Edit Mode · Workspace ROOT";
+    }
+
     if (
       element ===
         document.documentElement
@@ -17446,16 +18190,18 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       }
     }
 
-    const html =
-      graphScrollLayerDescriptor(
-        document.documentElement
-      );
+    if (!graphEditModeScrollElement()) {
+      const html =
+        graphScrollLayerDescriptor(
+          document.documentElement
+        );
 
-    if (
-      html &&
-      !keys.has(html.key)
-    ) {
-      candidates.push(html);
+      if (
+        html &&
+        !keys.has(html.key)
+      ) {
+        candidates.push(html);
+      }
     }
 
 
@@ -18120,7 +18866,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     if (candidates.length === 0) {
       candidates = [
         graphScrollLayerDescriptor(
-          document.documentElement
+          graphDocumentScrollElement()
         )
       ].filter(Boolean);
     }
@@ -25228,7 +25974,12 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       return;
     }
 
-    event.preventDefault();
+    const touchScrollPending =
+      event.pointerType === "touch";
+
+    if (!touchScrollPending) {
+      event.preventDefault();
+    }
     event.stopPropagation();
 
     paletteClickSuppression = null;
@@ -25249,16 +26000,19 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       startY: event.clientY,
       clientX: event.clientX,
       clientY: event.clientY,
+      touchScrollPending,
       dragging: false,
       ghost: null
     };
 
-    try {
-      event.currentTarget
-        .setPointerCapture(
-          event.pointerId
-        );
-    } catch {
+    if (!touchScrollPending) {
+      try {
+        event.currentTarget
+          .setPointerCapture(
+            event.pointerId
+          );
+      } catch {
+      }
     }
   }
 
@@ -25651,6 +26405,47 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       return;
     }
 
+    if (
+      activeInteraction.kind ===
+        "palette" &&
+      activeInteraction.touchScrollPending
+    ) {
+      const deltaX =
+        event.clientX -
+        activeInteraction.startX;
+      const deltaY =
+        event.clientY -
+        activeInteraction.startY;
+      const horizontalDistance =
+        Math.abs(deltaX);
+      const verticalDistance =
+        Math.abs(deltaY);
+
+      if (
+        verticalDistance >= 6 &&
+        verticalDistance >
+          horizontalDistance
+      ) {
+        activeInteraction = null;
+        return;
+      }
+
+      if (horizontalDistance < 7) {
+        return;
+      }
+
+      activeInteraction.touchScrollPending =
+        false;
+
+      try {
+        activeInteraction.sourceButton
+          ?.setPointerCapture?.(
+            event.pointerId
+          );
+      } catch {
+      }
+    }
+
     event.preventDefault();
     event.stopImmediatePropagation();
 
@@ -25729,6 +26524,15 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       event.pointerId !==
         activeInteraction.pointerId
     ) {
+      return;
+    }
+
+    if (
+      activeInteraction.kind ===
+        "palette" &&
+      activeInteraction.touchScrollPending
+    ) {
+      activeInteraction = null;
       return;
     }
 
@@ -25902,6 +26706,37 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       if (cancelInteraction(true)) {
         event.preventDefault();
         event.stopImmediatePropagation();
+        return;
+      }
+
+      const searchOverlayOpen =
+        Boolean(
+          dom.root?.querySelector(
+            ":scope > .rml-graph-search-overlay:not([hidden])"
+          )
+        );
+      const nestedEditorOpen =
+        Boolean(
+          event.target?.closest?.(
+            ".rml-graph-searchable-select.open"
+          )
+        );
+      const dialogOpen =
+        Boolean(
+          document.querySelector(
+            "dialog[open]"
+          )
+        );
+
+      if (
+        graphEditModeActive() &&
+        !searchOverlayOpen &&
+        !nestedEditorOpen &&
+        !dialogOpen
+      ) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        setGraphEditMode(false);
       }
       return;
     }
@@ -26139,6 +26974,18 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       { passive: true }
     );
 
+    window.addEventListener(
+      "resize",
+      updateGraphEditViewportMetrics,
+      { passive: true }
+    );
+
+    window.addEventListener(
+      "orientationchange",
+      updateGraphEditViewportMetrics,
+      { passive: true }
+    );
+
     synchronizeRuntimeBridgeSubscription();
     pruneConnections();
     if (initialExtensionState === null) {
@@ -26294,8 +27141,26 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
     window.visualViewport
       ?.addEventListener(
+        "resize",
+        updateGraphEditViewportMetrics,
+        {
+          passive: true
+        }
+      );
+
+    window.visualViewport
+      ?.addEventListener(
         "scroll",
         scheduleGraphScrollLayerVisualRefresh,
+        {
+          passive: true
+        }
+      );
+
+    window.visualViewport
+      ?.addEventListener(
+        "scroll",
+        updateGraphEditViewportMetrics,
         {
           passive: true
         }
