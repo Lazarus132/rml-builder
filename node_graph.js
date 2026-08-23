@@ -26251,14 +26251,6 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     initializeImmediately();
   }
 
-
-  // ---------------------------------------------------------------------------
-  // Guided Step 11 global motion planner
-  // ---------------------------------------------------------------------------
-  // This planner lives inside the authoritative graph engine. It dry-runs the
-  // complete final node/wire/camera scene before the assistant performs a real
-  // pointer action. setup_assistant.js only replays the returned plan visibly.
-
   function guidedStep11Finite(value, fallback = 0) {
     const number = Number(value);
     return Number.isFinite(number) ? number : fallback;
@@ -28602,10 +28594,6 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           "input"
         );
 
-        // WebKit can defer the RAF wire pass after the node DOM was replaced.
-        // Rebuild missing real sockets synchronously, then paint the wire from
-        // those sockets in the same task. This is a render repair only; it does
-        // not alter the graph model or fabricate a tour-only cable.
         if (!output || !input) {
           renderGraphNodes();
           output = socketElement(

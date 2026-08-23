@@ -102,7 +102,7 @@
     rejectedCount: 0
   };
   const tourDebugState = {
-    build: "stable-tour-step6-idempotent-hamburger-20260823-v359f1",
+    build: "stable-mobile-topbar-composed-path-close-20260823-v360f1",
     events: [],
     assertions: []
   };
