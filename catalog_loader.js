@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const LOADER_VERSION = 22;
+  const LOADER_VERSION = 23;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
   const CATALOG_PATH = "/resonite_api_catalog.json";
@@ -693,37 +693,21 @@
   async function probeDirectScannerRange() {
     const urls = directScannerUrls();
 
-    if (activeScannerCatalogUrl) {
+    for (const url of urls) {
       try {
-        const active =
+        const live =
           await probeDirectScannerUrl(
-            activeScannerCatalogUrl
+            url
           );
 
-        if (active) {
-          return active;
+        if (live) {
+          return live;
         }
       } catch {
       }
     }
 
-    const candidates = await Promise.all(
-      urls
-        .filter(url =>
-          url !== activeScannerCatalogUrl
-        )
-        .map(async url => {
-          try {
-            return await probeDirectScannerUrl(
-              url
-            );
-          } catch {
-            return null;
-          }
-        })
-    );
-
-    return candidates.find(Boolean) || null;
+    return null;
   }
 
   async function probeBuilderScannerBridge() {

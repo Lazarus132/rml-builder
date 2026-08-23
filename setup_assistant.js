@@ -102,7 +102,7 @@
     rejectedCount: 0
   };
   const tourDebugState = {
-    build: "stable-static-host-live-scanner-20260823-v365f1",
+    build: "stable-sequential-static-scanner-probe-20260823-v366f1",
     events: [],
     assertions: []
   };
