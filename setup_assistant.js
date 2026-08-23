@@ -99,7 +99,7 @@
     rejectedCount: 0
   };
   const tourDebugState = {
-    build: "stable-tour-no-small-viewport-warning-20260823-v347f1",
+    build: "stable-tour-step3-preserve-step4-reference-20260823-v349f1",
     events: [],
     assertions: []
   };
@@ -5865,17 +5865,258 @@
     };
   }
 
+  async function stabilizeStep3NativeReleasePoint(
+    expectedHost,
+    initialPoint,
+    dispatchMove,
+    runId
+  ) {
+    const pageScroller =
+      document.scrollingElement || document.documentElement;
+    let candidate = {
+      x: Number(initialPoint?.x),
+      y: Number(initialPoint?.y)
+    };
+    let previousSample = null;
+    let stableFrames = 0;
+    const samples = [];
+
+    for (
+      let attempt = 0;
+      attempt < 12 && runId === demoRunId;
+      attempt += 1
+    ) {
+      if (
+        !Number.isFinite(candidate.x) ||
+        !Number.isFinite(candidate.y)
+      ) {
+        break;
+      }
+
+      dispatchMove(candidate);
+      await nextTwoFrames();
+      if (runId !== demoRunId) break;
+
+      const marker = expectedHost?.querySelector?.(
+        ":scope > .drag-reorder-placeholder"
+      ) || document.querySelector(".drag-reorder-placeholder");
+      const markerHost = marker?.parentElement || null;
+      const markerRect = marker instanceof HTMLElement
+        ? marker.getBoundingClientRect()
+        : null;
+      const hostRect = expectedHost?.getBoundingClientRect?.() || null;
+      const pageTop = Number(pageScroller?.scrollTop || 0);
+      const contract = nativeStep3ReleaseMarkerContract(
+        expectedHost,
+        candidate
+      );
+      const sameMarkerHost = Boolean(
+        previousSample &&
+        markerHost instanceof HTMLElement &&
+        markerHost === expectedHost &&
+        previousSample.markerHost === markerHost
+      );
+      const layoutStable = Boolean(
+        sameMarkerHost &&
+        markerRect &&
+        previousSample.markerRect &&
+        hostRect &&
+        previousSample.hostRect &&
+        Math.abs(pageTop - previousSample.pageTop) <= .5 &&
+        Math.abs(markerRect.left - previousSample.markerRect.left) <= .75 &&
+        Math.abs(markerRect.top - previousSample.markerRect.top) <= .75 &&
+        Math.abs(markerRect.width - previousSample.markerRect.width) <= .75 &&
+        Math.abs(markerRect.height - previousSample.markerRect.height) <= .75 &&
+        Math.abs(hostRect.left - previousSample.hostRect.left) <= .75 &&
+        Math.abs(hostRect.top - previousSample.hostRect.top) <= .75
+      );
+      const sample = {
+        attempt,
+        candidate: { ...candidate },
+        markerHost,
+        markerRect: markerRect
+          ? {
+              left: markerRect.left,
+              top: markerRect.top,
+              width: markerRect.width,
+              height: markerRect.height
+            }
+          : null,
+        hostRect: hostRect
+          ? {
+              left: hostRect.left,
+              top: hostRect.top,
+              width: hostRect.width,
+              height: hostRect.height
+            }
+          : null,
+        pageTop,
+        layoutStable,
+        safe: contract.safe,
+        reason: contract.reason
+      };
+      samples.push({
+        attempt,
+        candidate: sample.candidate,
+        markerRect: tourDebugRect(marker),
+        hostRect: tourDebugRect(expectedHost),
+        pageTop,
+        layoutStable,
+        safe: contract.safe,
+        reason: contract.reason
+      });
+
+      if (contract.safe && layoutStable) {
+        stableFrames += 1;
+        if (stableFrames >= 2) {
+          return {
+            passed: true,
+            point: candidate,
+            contract,
+            stableFrames,
+            samples
+          };
+        }
+      } else {
+        stableFrames = 0;
+      }
+
+      let nextPoint = null;
+      const viewport = tourViewport();
+      if (
+        markerRect &&
+        markerHost === expectedHost &&
+        hostRect
+      ) {
+        const minimumX = Math.max(
+          hostRect.left + 2,
+          viewport.left + 2
+        );
+        const maximumX = Math.min(
+          hostRect.right - 2,
+          viewport.right - 2
+        );
+        const minimumY = Math.max(
+          hostRect.top + 2,
+          viewport.top + 2
+        );
+        const maximumY = Math.min(
+          hostRect.bottom - 2,
+          viewport.bottom - 2
+        );
+        if (maximumX >= minimumX && maximumY >= minimumY) {
+          nextPoint = {
+            x: Math.max(
+              minimumX,
+              Math.min(
+                maximumX,
+                markerRect.left + markerRect.width * .5
+              )
+            ),
+            y: Math.max(
+              minimumY,
+              Math.min(
+                maximumY,
+                markerRect.top + markerRect.height * .5
+              )
+            )
+          };
+        }
+      }
+
+      if (!nextPoint && expectedHost instanceof HTMLElement) {
+        const corridor = outlineNestedVerticalCorridor();
+        const slot = verticalInsertionSlots(expectedHost)
+          .filter(item =>
+            item.top >= corridor.safeTop &&
+            item.top <= corridor.safeBottom &&
+            item.left + item.width >=
+              viewport.left + corridor.horizontalInset &&
+            item.left <=
+              viewport.right - corridor.horizontalInset &&
+            !verticalSlotCrossesLiveContent(expectedHost, item)
+          )
+          .sort((left, right) =>
+            Math.abs(left.top - candidate.y) -
+            Math.abs(right.top - candidate.y)
+          )[0] || null;
+        if (slot) {
+          nextPoint = {
+            x: Math.max(
+              viewport.left + 2,
+              Math.min(
+                viewport.right - 2,
+                slot.left + slot.width * .5
+              )
+            ),
+            y: Math.max(
+              viewport.top + 2,
+              Math.min(viewport.bottom - 2, slot.top)
+            )
+          };
+        }
+      }
+
+      if (!nextPoint) break;
+      candidate = nextPoint;
+      previousSample = sample;
+    }
+
+    const contract = nativeStep3ReleaseMarkerContract(
+      expectedHost,
+      candidate
+    );
+    return {
+      passed: false,
+      point: candidate,
+      contract,
+      stableFrames,
+      samples
+    };
+  }
+
+  function outlineStep4ReferenceController() {
+    return [...document.querySelectorAll(
+      ".node-card.controller[data-node-id]"
+    )].find(card =>
+      card.querySelector(
+        ":scope > .node-head .node-copy > strong"
+      )?.textContent?.trim() === "DisplayMode"
+    ) || null;
+  }
+
+  function outlineStep3ScenePreservesStep4Reference(scene) {
+    if (!scene?.host || !scene?.source) return false;
+    const reference = outlineStep4ReferenceController();
+    if (!(reference instanceof HTMLElement)) return true;
+    return Boolean(
+      !reference.contains(scene.host) &&
+      scene.source !== reference &&
+      !reference.contains(scene.source) &&
+      !scene.source.contains(reference)
+    );
+  }
+
   function bestVerticalOutlineScene() {
+    const step4Reference = outlineStep4ReferenceController();
     const candidates = [
       document.querySelector("#builder-canvas"),
       ...document.querySelectorAll(".drop-zone")
-    ].filter(Boolean);
+    ].filter(host =>
+      host instanceof HTMLElement &&
+      !step4Reference?.contains(host)
+    );
     const viewport = tourViewport();
     const viewportCenterY = viewport.top + viewport.height * .5;
 
     const scenes = candidates.flatMap(host => {
       const cards = directChildrenWithClass(host, "node-card")
-        .filter(card => !card.classList.contains("node-pointer-ghost"));
+        .filter(card =>
+          !card.classList.contains("node-pointer-ghost") &&
+          card !== step4Reference &&
+          !step4Reference?.contains(card) &&
+          !card.contains(step4Reference)
+        );
       if (cards.length < 2) return [];
 
       const preferred = cards.filter(card =>
@@ -9996,7 +10237,7 @@
     const markerBelongsToCanvas = Boolean(
       markerHost instanceof HTMLElement &&
       canvas instanceof HTMLElement &&
-      (markerHost === canvas || canvas.contains(markerHost))
+      markerHost === canvas
     );
     const markerNearPoint = Boolean(
       markerRect && point &&
@@ -10047,6 +10288,7 @@
       const marker = liveCanvas?.querySelector?.(
         ":scope > .drag-reorder-placeholder"
       ) || document.querySelector(".drag-reorder-placeholder");
+      const markerHost = marker?.parentElement || null;
       const markerRect = marker instanceof HTMLElement
         ? marker.getBoundingClientRect()
         : null;
@@ -10100,7 +10342,11 @@
       }
 
       let nextPoint = null;
-      if (markerRect && canvasRect) {
+      if (
+        markerRect &&
+        canvasRect &&
+        markerHost === liveCanvas
+      ) {
         nextPoint = {
           x: Math.max(
             Math.max(canvasRect.left + 4, viewport.left + 4),
@@ -10150,16 +10396,13 @@
       state.pointerId === pointerId &&
       state.payload?.kind === "palette" &&
       state.payload?.value === "bool" &&
-      typeof state.targetContainerId === "string" &&
-      state.targetContainerId.length > 0 &&
+      state.targetContainerId === "root" &&
       state.marker?.visible === true &&
       state.marker?.insideBuilderCanvas === true &&
       canvas instanceof HTMLElement &&
-      canvas.contains(
-        document.querySelector(
-          ".drag-reorder-placeholder"
-        )
-      )
+      document.querySelector(
+        ".drag-reorder-placeholder"
+      )?.parentElement === canvas
     );
     return {
       ready,
@@ -10432,9 +10675,7 @@
               liveCanvas,
               9201
             );
-          const releaseReady =
-            contract.pointInViewport === true &&
-            contract.pointInCanvas === true;
+          const releaseReady = contract.passed === true;
           tourDebugAssert(
             "outline-palette-release-point-resolved-before-commit",
             releaseReady,
@@ -10444,7 +10685,7 @@
               controller: controller.state,
               domContractPassed: contract.passed,
               policy:
-                "the visible release point must remain inside the real Outline canvas; controller arming is diagnostic because synthetic pointer capture is not a browser platform gesture"
+                "the visible release point and native insertion marker must belong directly to the root Outline canvas; nested containers reserved by later lessons are never valid Step 2 targets"
             }
           );
           return tourDebugAssert(
@@ -10490,6 +10731,7 @@
             result?.inserted === true &&
             result?.payloadKind === "palette" &&
             result?.payloadValue === "bool" &&
+            result?.containerId === "root" &&
             result?.createdNodeId
           );
           tourDebugAssert(
@@ -10526,6 +10768,7 @@
       authoritativeDrop?.inserted === true &&
       authoritativeDrop?.payloadKind === "palette" &&
       authoritativeDrop?.payloadValue === "bool" &&
+      authoritativeDrop?.containerId === "root" &&
       authoritativeDrop?.createdNodeId
     );
     tourDebugRecord(
@@ -10698,6 +10941,29 @@
     if (!host || !source) {
       throw new Error(
         "[RML Tour · Step 3] No stable Outline reorder source with a sibling was available."
+      );
+    }
+    const step4ReferenceProtected =
+      outlineStep3ScenePreservesStep4Reference({ host, source });
+    tourDebugAssert(
+      "outline-reorder-preserves-step4-displaymode-reference",
+      step4ReferenceProtected,
+      {
+        sourceName: source.querySelector(
+          ":scope > .node-head .node-copy > strong"
+        )?.textContent?.trim() || "",
+        sourceRect: tourDebugRect(source),
+        hostRect: tourDebugRect(host),
+        referenceRect: tourDebugRect(
+          outlineStep4ReferenceController()
+        ),
+        policy:
+          "Step 3 may reorder only an independent native host; the complete DisplayMode reference subtree required by Step 4 is immutable during this lesson"
+      }
+    );
+    if (!step4ReferenceProtected) {
+      throw new Error(
+        "[RML Tour · Step 3] The selected reorder scene overlaps the DisplayMode reference reserved for Step 4."
       );
     }
     if (!tourTargetComfortablyVisible(source)) {
@@ -11002,61 +11268,50 @@
           };
         },
         onBeforeRelease: async ({ point, dispatchMove }) => {
-          dispatchMove(point);
-          await nextTwoFrames();
-          const liveMarker = chosenReleaseHost?.querySelector?.(
-            ":scope > .drag-reorder-placeholder"
-          ) || document.querySelector(".drag-reorder-placeholder");
-          const liveMarkerRect = liveMarker instanceof HTMLElement
-            ? liveMarker.getBoundingClientRect()
-            : null;
-          const viewport = tourViewport();
-          const hostRect = chosenReleaseHost?.getBoundingClientRect?.() || null;
-          const authoritativePoint = liveMarkerRect && hostRect
-            ? {
-                x: Math.max(
-                  Math.max(hostRect.left + 2, viewport.left + 2),
-                  Math.min(
-                    Math.min(hostRect.right - 2, viewport.right - 2),
-                    liveMarkerRect.left + liveMarkerRect.width * .5
-                  )
-                ),
-                y: Math.max(
-                  viewport.top + 2,
-                  Math.min(
-                    viewport.bottom - 2,
-                    liveMarkerRect.top + liveMarkerRect.height * .5
-                  )
-                )
-              }
-            : point;
-          dispatchMove(authoritativePoint);
-          await nextTwoFrames();
-          const markerState = nativeStep3ReleaseMarkerContract(
-            chosenReleaseHost,
-            authoritativePoint
-          );
-          nativeReleaseVerified = markerState.safe;
-          nativeReleaseMarker = markerState.markerRect;
+          const stabilization =
+            await stabilizeStep3NativeReleasePoint(
+              chosenReleaseHost,
+              point,
+              dispatchMove,
+              runId
+            );
+          const markerState = stabilization.contract;
+          nativeReleaseVerified = stabilization.passed === true;
+          nativeReleaseMarker = markerState?.markerRect || null;
           nativeReleaseDetails = {
-            reason: markerState.reason,
-            hostId: markerState.hostId,
-            hostClasses: markerState.hostClasses,
-            expectedHostId: markerState.expectedHostId,
-            expectedHostClasses: markerState.expectedHostClasses,
-            hostMatched: markerState.hostMatched,
-            markerVisible: markerState.markerVisible,
-            pointVisible: markerState.pointVisible,
-            pointInsideHost: markerState.pointInsideHost,
-            pointNearMarker: markerState.pointNearMarker,
-            clearOfControls: markerState.clearOfControls,
-            visibleWidth: markerState.visibleWidth,
-            visibleHeight: markerState.visibleHeight
+            reason: markerState?.reason || "stabilization-cancelled",
+            hostId: markerState?.hostId || "",
+            hostClasses: markerState?.hostClasses || "",
+            expectedHostId: markerState?.expectedHostId || "",
+            expectedHostClasses:
+              markerState?.expectedHostClasses || "",
+            hostMatched: markerState?.hostMatched === true,
+            markerVisible: markerState?.markerVisible === true,
+            pointVisible: markerState?.pointVisible === true,
+            pointInsideHost: markerState?.pointInsideHost === true,
+            pointNearMarker: markerState?.pointNearMarker === true,
+            clearOfControls: markerState?.clearOfControls === true,
+            visibleWidth: markerState?.visibleWidth || 0,
+            visibleHeight: markerState?.visibleHeight || 0,
+            stableFrames: stabilization.stableFrames,
+            attempts: stabilization.samples.length,
+            samples: stabilization.samples
           };
           if (chosenReleaseSlot) {
-            chosenReleaseSlot.nativeMarker = markerState.markerRect;
+            chosenReleaseSlot.nativeMarker =
+              markerState?.markerRect || null;
           }
-          return { startPoint: authoritativePoint };
+          tourDebugRecord("outline-reorder-native-release-stabilized", {
+            passed: stabilization.passed === true,
+            stableFrames: stabilization.stableFrames,
+            attempts: stabilization.samples.length,
+            point: stabilization.point,
+            reason: markerState?.reason || "missing-marker-contract"
+          });
+          if (!stabilization.passed) {
+            return { cancel: true };
+          }
+          return { startPoint: stabilization.point };
         },
         commitHoldMs: 260
       }
@@ -25168,6 +25423,7 @@
           (document.scrollingElement?.clientHeight || 0)
       );
       const success = Boolean(
+        outlineStep3ScenePreservesStep4Reference(scene) &&
         sourceVisible &&
         visibleSlots.length > 0 &&
         range >= 48
@@ -25178,6 +25434,11 @@
         {
           sourceRect: tourDebugRect(scene.source),
           hostRect: tourDebugRect(scene.host),
+          step4ReferenceProtected:
+            outlineStep3ScenePreservesStep4Reference(scene),
+          step4ReferenceRect: tourDebugRect(
+            outlineStep4ReferenceController()
+          ),
           visibleGapCount: visibleSlots.length,
           range
         }
