@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const LOADER_VERSION = 21;
+  const LOADER_VERSION = 22;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
   const CATALOG_PATH = "/resonite_api_catalog.json";
@@ -445,12 +445,67 @@
     ).trim();
   }
 
+  function isPrivateIpv4Hostname(hostname) {
+    const parts = String(hostname || "")
+      .split(".")
+      .map(part => Number(part));
+
+    if (
+      parts.length !== 4 ||
+      parts.some(part =>
+        !Number.isInteger(part) ||
+        part < 0 ||
+        part > 255
+      )
+    ) {
+      return false;
+    }
+
+    return (
+      parts[0] === 10 ||
+      parts[0] === 127 ||
+      (parts[0] === 169 &&
+        parts[1] === 254) ||
+      (parts[0] === 172 &&
+        parts[1] >= 16 &&
+        parts[1] <= 31) ||
+      (parts[0] === 192 &&
+        parts[1] === 168)
+    );
+  }
+
+  function isLocalBuilderOrigin() {
+    if (
+      window.location.protocol !== "http:" &&
+      window.location.protocol !== "https:"
+    ) {
+      return false;
+    }
+
+    const hostname = String(
+      window.location.hostname || ""
+    )
+      .trim()
+      .toLowerCase()
+      .replace(/^\[|\]$/g, "");
+
+    return (
+      hostname === "localhost" ||
+      hostname === "::1" ||
+      hostname.endsWith(".localhost") ||
+      hostname.endsWith(".local") ||
+      (hostname.includes(":") &&
+        hostname.startsWith("fc")) ||
+      (hostname.includes(":") &&
+        hostname.startsWith("fd")) ||
+      hostname.startsWith("fe80:") ||
+      isPrivateIpv4Hostname(hostname)
+    );
+  }
+
   function builderBridgeUrl(path) {
     try {
-      if (
-        window.location.protocol !== "http:" &&
-        window.location.protocol !== "https:"
-      ) {
+      if (!isLocalBuilderOrigin()) {
         return "";
       }
 
@@ -535,6 +590,142 @@
     };
   }
 
+  function directScannerUrls() {
+    const urls = [];
+
+    if (activeScannerCatalogUrl) {
+      urls.push(activeScannerCatalogUrl);
+    }
+
+    for (
+      let port = DEFAULT_PORT_FIRST;
+      port <= DEFAULT_PORT_LAST;
+      port += 1
+    ) {
+      const url =
+        `http://127.0.0.1:${port}${CATALOG_PATH}`;
+
+      if (!urls.includes(url)) {
+        urls.push(url);
+      }
+    }
+
+    return urls;
+  }
+
+  function loopbackScannerCatalogUrl(
+    value
+  ) {
+    try {
+      const url = new URL(
+        String(value || "").trim()
+      );
+      const hostname = url.hostname
+        .toLowerCase()
+        .replace(/^\[|\]$/g, "");
+      const port = Number(url.port);
+
+      if (
+        url.protocol !== "http:" ||
+        (
+          hostname !== "127.0.0.1" &&
+          hostname !== "localhost" &&
+          hostname !== "::1"
+        ) ||
+        !Number.isInteger(port) ||
+        port < DEFAULT_PORT_FIRST ||
+        port > DEFAULT_PORT_LAST ||
+        url.pathname !== CATALOG_PATH
+      ) {
+        return "";
+      }
+
+      url.search = "";
+      url.hash = "";
+      return url.href;
+    } catch {
+      return "";
+    }
+  }
+
+  function healthUrlFor(catalogUrl) {
+    try {
+      const url = new URL(
+        catalogUrl,
+        window.location.href
+      );
+      url.pathname = HEALTH_PATH;
+      url.search = "";
+      url.hash = "";
+      return url.href;
+    } catch {
+      return "";
+    }
+  }
+
+  async function probeDirectScannerUrl(
+    catalogUrl
+  ) {
+    const healthUrl =
+      healthUrlFor(catalogUrl);
+
+    if (!healthUrl) {
+      return null;
+    }
+
+    const health = await fetchJson(
+      healthUrl,
+      BUILDER_PROBE_TIMEOUT_MS
+    );
+
+    if (
+      health.ok !== true ||
+      health.catalogReady !== true
+    ) {
+      return null;
+    }
+
+    return probeConfiguredScannerUrl(
+      catalogUrl
+    );
+  }
+
+  async function probeDirectScannerRange() {
+    const urls = directScannerUrls();
+
+    if (activeScannerCatalogUrl) {
+      try {
+        const active =
+          await probeDirectScannerUrl(
+            activeScannerCatalogUrl
+          );
+
+        if (active) {
+          return active;
+        }
+      } catch {
+      }
+    }
+
+    const candidates = await Promise.all(
+      urls
+        .filter(url =>
+          url !== activeScannerCatalogUrl
+        )
+        .map(async url => {
+          try {
+            return await probeDirectScannerUrl(
+              url
+            );
+          } catch {
+            return null;
+          }
+        })
+    );
+
+    return candidates.find(Boolean) || null;
+  }
+
   async function probeBuilderScannerBridge() {
     const statusUrl = builderBridgeUrl(
       BUILDER_SCANNER_STATUS_PATH
@@ -602,11 +793,20 @@
       }
 
       try {
-        const live = configured
-          ? await probeConfiguredScannerUrl(
+        let live = null;
+
+        if (configured) {
+          live =
+            await probeConfiguredScannerUrl(
               configured
-            )
-          : await probeBuilderScannerBridge();
+            );
+        } else if (isLocalBuilderOrigin()) {
+          live =
+            await probeBuilderScannerBridge();
+        } else {
+          live =
+            await probeDirectScannerRange();
+        }
 
         if (live) {
           return live;
@@ -790,6 +990,11 @@
       await readCachedLiveCatalog();
 
     if (cached) {
+      activeScannerCatalogUrl =
+        loopbackScannerCatalogUrl(
+          cached.sourceUrl
+        );
+
       return installCatalog(
         normalizeCatalog(
           cached.catalog,
