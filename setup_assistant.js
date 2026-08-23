@@ -42,9 +42,12 @@
   let outlineNestedTransactionSerial = 0;
   let graphPaletteRevealState = null;
   let graphCreateNodePreparedDropPlan = null;
-  let graphRoutePreparedDropPlan = null;
   let graphTeachingSceneHandoff = null;
   let graphStep11LastWireTargetCandidates = [];
+  let graphStep11ActiveStage = "idle";
+  let graphStep11LastStageData = {};
+  let graphStep11RunStartedAt = 0;
+  let graphStep11LastFailureSnapshot = null;
   const tourInteractionCapabilities = new Map();
   const enteredStepIndexes = new Set();
   const narratedStepIndexes = new Set();
@@ -99,7 +102,7 @@
     rejectedCount: 0
   };
   const tourDebugState = {
-    build: "stable-tour-step3-preserve-step4-reference-20260823-v349f1",
+    build: "stable-tour-step11-post-drop-separation-20260823-v353f1",
     events: [],
     assertions: []
   };
@@ -14934,11 +14937,190 @@
     }
   }
 
+  function graphStep11IsCurrentLesson() {
+    return steps[stepIndex]?.demo === "graph-route";
+  }
+
+  function graphStep11MarkStage(stage, data = {}) {
+    graphStep11ActiveStage = String(stage || "unknown");
+    graphStep11LastStageData = data && typeof data === "object"
+      ? { ...data }
+      : { value: data };
+    if (graphStep11IsCurrentLesson()) {
+      tourDebugRecord("graph-step11-stage", {
+        stage: graphStep11ActiveStage,
+        stageData: graphStep11LastStageData
+      });
+    }
+    return graphStep11ActiveStage;
+  }
+
+  function graphStep11FailureSnapshot(stage, cause = null) {
+    const host = window.RMLDynamicGraphHost;
+    const state = host?.getState?.() || null;
+    const viewport = document.querySelector(".rml-graph-viewport");
+    const mouse = elements().mouse;
+    const nodes = (state?.nodes || []).map(node => {
+      const id = String(node?.id || "");
+      const article = graphStep11NodeArticle(id);
+      return {
+        id,
+        kind: String(node?.kind || ""),
+        operatorId: String(node?.operatorId || ""),
+        title: graphDemoNodeTitle(article),
+        model: {
+          x: Number(node?.x) || 0,
+          y: Number(node?.y) || 0
+        },
+        rendered: Boolean(article),
+        visible: graphDemoVisible(article),
+        rect: tourDebugRect(article),
+        sockets: article
+          ? [...article.querySelectorAll(".rml-graph-socket")].map(socket => ({
+              nodeId: String(socket.dataset.nodeId || ""),
+              portId: String(socket.dataset.portId || ""),
+              direction: String(socket.dataset.direction || ""),
+              visible: graphDemoVisible(socket),
+              rect: tourDebugRect(socket)
+            }))
+          : []
+      };
+    });
+    const connections = (state?.connections || []).map(connection => ({
+      id: String(connection?.id || ""),
+      fromNode: String(connection?.fromNode || ""),
+      fromPort: String(connection?.fromPort || ""),
+      toNode: String(connection?.toNode || ""),
+      toPort: String(connection?.toPort || ""),
+      branchFrom: connection?.branchFrom
+        ? {
+            connectionId: String(connection.branchFrom.connectionId || ""),
+            pointId: String(connection.branchFrom.pointId || "")
+          }
+        : null,
+      pointIds: (connection?.points || []).map(point => String(point?.id || ""))
+    }));
+    const recentStages = tourDebugState.events
+      .filter(event => event.type === "graph-step11-stage")
+      .slice(-12)
+      .map(event => ({
+        sequence: event.sequence,
+        time: event.time,
+        stage: event.stage,
+        stageData: event.stageData
+      }));
+    const root = document.scrollingElement || document.documentElement;
+    const snapshot = {
+      build: tourDebugState.build,
+      stage: String(stage || graphStep11ActiveStage || "unknown"),
+      activeStage: graphStep11ActiveStage,
+      activeStageData: graphStep11LastStageData,
+      elapsedMs: graphStep11RunStartedAt > 0
+        ? Math.max(0, Math.round(performance.now() - graphStep11RunStartedAt))
+        : null,
+      cause,
+      step: {
+        index: stepIndex,
+        title: steps[stepIndex]?.title || "",
+        demo: steps[stepIndex]?.demo || "",
+        phase: stepPhase,
+        runId: demoRunId
+      },
+      viewport: {
+        innerWidth: window.innerWidth,
+        innerHeight: window.innerHeight,
+        devicePixelRatio: window.devicePixelRatio,
+        visualViewport: window.visualViewport
+          ? {
+              width: window.visualViewport.width,
+              height: window.visualViewport.height,
+              offsetLeft: window.visualViewport.offsetLeft,
+              offsetTop: window.visualViewport.offsetTop,
+              scale: window.visualViewport.scale
+            }
+          : null,
+        pageLeft: Number(root?.scrollLeft || 0),
+        pageTop: Number(root?.scrollTop || 0)
+      },
+      graph: {
+        active: state?.active === true,
+        viewportState: host?.getViewportState?.() || null,
+        viewportRect: tourDebugRect(viewport),
+        visibleRect: visibleGraphClientRect(0),
+        leftPanelOpen: !graphSidebarIsHidden("left"),
+        rightPanelOpen: !graphSidebarIsHidden("right"),
+        nodes,
+        connections,
+        lastWireTargets: graphStep11LastWireTargetCandidates.map(candidate => ({
+          point: candidate?.point || null,
+          fraction: Number(candidate?.fraction),
+          segmentIndex: Number(candidate?.segmentIndex),
+          tier: Number(candidate?.tier),
+          nativeHit: candidate?.nativeHit === true,
+          score: Number(candidate?.score)
+        }))
+      },
+      presentation: {
+        mouseVisible: graphDemoVisible(mouse),
+        mouseRect: tourDebugRect(mouse),
+        mouseClasses: mouse?.className || "",
+        liveControlsRect: tourDebugRect(elements().liveControls),
+        teacherMouseSafety: teacherMouseSafetyState
+          ? { ...teacherMouseSafetyState }
+          : null
+      },
+      recentStages
+    };
+    graphStep11LastFailureSnapshot = snapshot;
+    window.RMLStep11FailureDebug = snapshot;
+    return snapshot;
+  }
+
+  function graphStep11AttachFailureDetails(
+    error,
+    stage = "unclassified-step11-error",
+    suppliedDetails = null
+  ) {
+    if (!graphStep11IsCurrentLesson()) {
+      return error?.details ?? suppliedDetails ?? null;
+    }
+    if (error?._rmlStep11FailureCaptured === true && error?.details) {
+      return error.details;
+    }
+    const snapshot = graphStep11FailureSnapshot(
+      graphStep11ActiveStage || stage,
+      suppliedDetails ?? error?.details ?? null
+    );
+    const details = {
+      stage: snapshot.activeStage || stage,
+      message: error?.message || String(error || "Unknown Step 11 error"),
+      cause: suppliedDetails ?? error?.details ?? null,
+      snapshot
+    };
+    if (error && typeof error === "object") {
+      error.details = details;
+      Object.defineProperty(error, "_rmlStep11FailureCaptured", {
+        value: true,
+        configurable: true
+      });
+    }
+    graphStep11LastFailureSnapshot = details;
+    window.RMLStep11FailureDebug = details;
+    return details;
+  }
+
   function graphDemoError(message, details = null) {
     const error = new Error(`[RML Tour · Graph demo] ${message}`);
     error.details = details;
-    if (details !== null) {
-      console.warn(error.message, details);
+    const effectiveDetails = graphStep11IsCurrentLesson()
+      ? graphStep11AttachFailureDetails(
+          error,
+          `graph-demo-error:${graphStep11ActiveStage}`,
+          details
+        )
+      : details;
+    if (effectiveDetails !== null) {
+      console.warn(error.message, effectiveDetails);
     } else {
       console.warn(error.message);
     }
@@ -15064,6 +15246,29 @@
     };
   }
 
+  function graphPaletteItemFullyVisible(
+    element,
+    scroller = null,
+    margin = 2
+  ) {
+    if (!(element instanceof HTMLElement) || !element.isConnected) {
+      return false;
+    }
+    const rect = element.getBoundingClientRect();
+    const host = scroller instanceof HTMLElement
+      ? scroller.getBoundingClientRect()
+      : rect;
+    const viewport = tourViewport();
+    return Boolean(
+      rect.width > 0 &&
+      rect.height > 0 &&
+      rect.left >= Math.max(host.left, viewport.left) + margin &&
+      rect.right <= Math.min(host.right, viewport.right) - margin &&
+      rect.top >= Math.max(host.top, viewport.top) + margin &&
+      rect.bottom <= Math.min(host.bottom, viewport.bottom) - margin
+    );
+  }
+
   async function teacherRevealRuntimeGraphPaletteItem(
     operatorId,
     runId = demoRunId
@@ -15143,20 +15348,30 @@
     const pageScrollTopBefore = pageScroller.scrollTop;
     let pageScrollRepaired = false;
     let source = graphPaletteSourceHitPoint(item, scroll, 3);
+    let sourceFullyVisible = graphPaletteItemFullyVisible(
+      item,
+      scroll,
+      2
+    );
 
-    if (!source?.geometricVisible && tourPageRootCanHelpTarget(item)) {
+    if (!sourceFullyVisible && tourPageRootCanHelpTarget(item)) {
       graphPaletteRevealState.phase = "reveal-palette-in-page";
       pageScrollRepaired = await nativeTourScrollTargetIntoView(item, runId);
       await nextTwoFrames();
       if (runId !== demoRunId) return null;
       item = paletteRoot.querySelector(selector);
       source = graphPaletteSourceHitPoint(item, scroll, 3);
+      sourceFullyVisible = graphPaletteItemFullyVisible(
+        item,
+        scroll,
+        2
+      );
     }
     const scrollTopBefore = scroll.scrollTop;
     let wheelSteps = 0;
     let directScrollRepairs = 0;
 
-    if (!source?.geometricVisible) {
+    if (!sourceFullyVisible || source?.directHit !== true) {
       graphPaletteRevealState.phase = "scroll-to-item";
       const hostRect = scroll.getBoundingClientRect();
       const point = {
@@ -15207,6 +15422,11 @@
         }
         item = paletteRoot.querySelector(selector);
         source = graphPaletteSourceHitPoint(item, scroll, 3);
+        sourceFullyVisible = graphPaletteItemFullyVisible(
+          item,
+          scroll,
+          2
+        );
         tourDebugRecord("graph-create-node-reveal-progress", {
           operatorId,
           step: index,
@@ -15214,19 +15434,30 @@
           requestedTop,
           actualTop: scroll.scrollTop,
           directHit: source?.directHit === true,
-          geometricVisible: source?.geometricVisible === true
+          geometricVisible: source?.geometricVisible === true,
+          fullyVisible: sourceFullyVisible
         });
-        if (source?.geometricVisible === true) break;
+        if (
+          sourceFullyVisible &&
+          source?.directHit === true
+        ) break;
       }
       elements().mouse?.classList.remove("scrolling");
     }
 
     item = paletteRoot.querySelector(selector);
     source = graphPaletteSourceHitPoint(item, scroll, 2);
+    sourceFullyVisible = graphPaletteItemFullyVisible(
+      item,
+      scroll,
+      2
+    );
     const elapsedMs = Math.round(performance.now() - revealStarted);
     const complete = Boolean(
       item &&
       !item.disabled &&
+      sourceFullyVisible &&
+      source?.directHit === true &&
       source?.geometricVisible === true &&
       runId === demoRunId
     );
@@ -15248,11 +15479,12 @@
       sourcePoint: source?.point || null,
       sourceTop: source?.topLabel || "",
       sourceStack: source?.stack || [],
+      sourceFullyVisible,
       itemRect: tourDebugRect(item)
     };
     const revealComplete = tourDebugAssert(
       "graph-create-node-reveal-state-machine-complete",
-      complete && elapsedMs < 2600,
+      complete,
       graphPaletteRevealState
     );
     tourDebugRecord(
@@ -21394,40 +21626,6 @@
     hideMouse();
   }
 
-  function graphRouteNodeReserve(node = null) {
-    const visible = visibleGraphClientRect(18);
-    const rect = node?.getBoundingClientRect?.() || null;
-    const metrics = window.RMLDynamicGraphHost
-      ?.getOperatorPlacementMetrics?.("logic.not") || null;
-    const nodeWidth = Math.max(
-      1,
-      Number(rect?.width) || Number(metrics?.clientWidth) || 220
-    );
-    const nodeHeight = Math.max(
-      1,
-      Number(rect?.height) || Number(metrics?.clientHeight) || 150
-    );
-    const compact = window.innerWidth <= 390 || window.innerHeight <= 700;
-    const desiredWidth = compact
-      ? Math.max(220, nodeWidth + 44)
-      : Math.max(310, nodeWidth + 54);
-    const desiredHeight = compact
-      ? Math.max(138, nodeHeight + 36)
-      : Math.max(190, nodeHeight + 48);
-    return {
-      width: visible
-        ? Math.min(desiredWidth, Math.max(nodeWidth + 24, visible.width - 44))
-        : desiredWidth,
-      height: visible
-        ? Math.min(desiredHeight, Math.max(nodeHeight + 24, visible.height - 44))
-        : desiredHeight,
-      nodeWidth,
-      nodeHeight,
-      compact,
-      visible
-    };
-  }
-
   function graphStep11NodeArticle(nodeId) {
     return nodeId
       ? document.querySelector(
@@ -21521,6 +21719,7 @@
   }
 
   function graphStep11Failure(stage, details = {}) {
+    graphStep11MarkStage(`failed:${stage}`, details);
     graphDemoError(
       `Step 11 could not complete “${stage}”.`,
       details
@@ -21624,49 +21823,408 @@
     );
   }
 
-  function graphStep11SimpleDropPoint(viewport) {
-    const prepared = graphRoutePreparedDropHit();
-    if (prepared?.ok === true) {
-      return prepared.point;
+  function graphStep11VisibleDropWorkFrame(viewport) {
+    const visible = visibleGraphClientRect(10);
+    if (!(viewport instanceof HTMLElement) || !visible) {
+      return {
+        ready: false,
+        dropPoint: null,
+        reason: "graph-not-visible",
+        visibleGraph: visible,
+        graphViewport: tourDebugRect(viewport)
+      };
     }
+    const minimumVisibleWidth = Math.min(96, window.innerWidth * .28);
+    const minimumVisibleHeight = Math.min(140, window.innerHeight * .24);
+    const graphAreaReady = Boolean(
+      visible.width >= minimumVisibleWidth &&
+      visible.height >= minimumVisibleHeight
+    );
+    const metrics = window.RMLDynamicGraphHost
+      ?.getOperatorPlacementMetrics?.("logic.not") || null;
+    const footprintWidth = Math.max(
+      80,
+      Number(metrics?.clientWidth) || 280
+    );
+    const footprintHeight = Math.max(
+      72,
+      Number(metrics?.clientHeight) || 190
+    );
+    const pointerOffsetX = Math.max(
+      0,
+      Math.min(
+        footprintWidth,
+        Number(metrics?.clientPointerOffsetX) || footprintWidth * .465
+      )
+    );
+    const pointerOffsetY = Math.max(
+      0,
+      Math.min(
+        footprintHeight,
+        Number(metrics?.clientPointerOffsetY) || footprintHeight * .185
+      )
+    );
+    const nodeRects = [...document.querySelectorAll(".rml-graph-node")]
+      .filter(graphDemoVisible)
+      .map(element => element.getBoundingClientRect());
+    const controlRects = [...document.querySelectorAll(
+      ".rml-graph-toolbar, .rml-graph-panel-toggle, " +
+      ".rml-graph-toast, .rml-graph-search-overlay:not([hidden])"
+    )]
+      .filter(graphDemoVisible)
+      .map(element => element.getBoundingClientRect());
+    const obstacleRects = [...nodeRects, ...controlRects];
+    const fractions = [
+      [.72, .5], [.28, .5], [.5, .5],
+      [.72, .28], [.28, .28],
+      [.72, .72], [.28, .72],
+      [.5, .28], [.5, .72]
+    ];
+    let completeFootprintCandidate = null;
+    let pointOnlyFallback = null;
+    if (graphAreaReady) {
+      for (const [xFactor, yFactor] of fractions) {
+        const point = {
+          x: visible.left + visible.width * xFactor,
+          y: visible.top + visible.height * yFactor
+        };
+        const pointBlocked = obstacleRects.some(rect =>
+          point.x >= rect.left - 8 &&
+          point.x <= rect.right + 8 &&
+          point.y >= rect.top - 8 &&
+          point.y <= rect.bottom + 8
+        );
+        if (pointBlocked) continue;
+        const footprint = {
+          left: point.x - pointerOffsetX,
+          right: point.x - pointerOffsetX + footprintWidth,
+          top: point.y - pointerOffsetY,
+          bottom: point.y - pointerOffsetY + footprintHeight,
+          width: footprintWidth,
+          height: footprintHeight
+        };
+        const footprintInside = Boolean(
+          footprint.left >= visible.left + 6 &&
+          footprint.right <= visible.right - 6 &&
+          footprint.top >= visible.top + 6 &&
+          footprint.bottom <= visible.bottom - 6
+        );
+        const footprintBlocked = obstacleRects.some(rect => !(
+          footprint.right + 10 < rect.left ||
+          footprint.left - 10 > rect.right ||
+          footprint.bottom + 10 < rect.top ||
+          footprint.top - 10 > rect.bottom
+        ));
+        const candidate = {
+          point,
+          footprint,
+          footprintInside,
+          footprintBlocked
+        };
+        pointOnlyFallback ||= candidate;
+        if (footprintInside && !footprintBlocked) {
+          completeFootprintCandidate = candidate;
+          break;
+        }
+      }
+    }
+    const selected = completeFootprintCandidate || pointOnlyFallback;
+    const ready = Boolean(selected);
+    return {
+      ready,
+      dropPoint: selected?.point || null,
+      dropFootprint: selected?.footprint || null,
+      footprintClearBeforeDrop: Boolean(completeFootprintCandidate),
+      pointOnlyFallback: Boolean(
+        selected && !completeFootprintCandidate
+      ),
+      reason: ready
+        ? completeFootprintCandidate
+          ? "visible-complete-not-footprint"
+          : "visible-point-with-post-drop-separation"
+        : graphAreaReady
+          ? "nine-fixed-graph-points-occupied"
+          : "graph-area-not-yet-visible-enough",
+      visibleGraph: visible,
+      graphViewport: tourDebugRect(viewport),
+      minimumVisibleWidth,
+      minimumVisibleHeight,
+      graphAreaReady,
+      testedPositions: fractions.length,
+      obstacleCount: obstacleRects.length,
+      footprintRequiredBeforeDrop: false,
+      nodeVisibilityRequired: false,
+      lineVisibilityRequired: false
+    };
+  }
 
-    const visible = visibleGraphClientRect(18);
-    if (!visible || visible.width < 72 || visible.height < 120) {
+  function graphStep11RenderedNodeRects(ignoredNode = null) {
+    return [...document.querySelectorAll(".rml-graph-node")]
+      .filter(node => {
+        if (!(node instanceof HTMLElement) || node === ignoredNode) {
+          return false;
+        }
+        const style = getComputedStyle(node);
+        const rect = node.getBoundingClientRect();
+        return node.isConnected &&
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          rect.width > 0 &&
+          rect.height > 0;
+      })
+      .map(node => ({
+        node,
+        rect: node.getBoundingClientRect()
+      }));
+  }
+
+  function graphStep11CreatedNodeClearance(article, padding = 10) {
+    const visible = visibleGraphClientRect(10);
+    const rect = article?.getBoundingClientRect?.() || null;
+    const otherNodes = graphStep11RenderedNodeRects(article);
+    const overlapping = rect
+      ? otherNodes.filter(({ rect: other }) => !(
+          rect.right + padding < other.left ||
+          rect.left - padding > other.right ||
+          rect.bottom + padding < other.top ||
+          rect.top - padding > other.bottom
+        ))
+      : [];
+    const completelyVisible = Boolean(
+      visible &&
+      rect &&
+      rect.width > 0 &&
+      rect.height > 0 &&
+      rect.left >= visible.left &&
+      rect.right <= visible.right &&
+      rect.top >= visible.top &&
+      rect.bottom <= visible.bottom
+    );
+    return {
+      ok: Boolean(completelyVisible && overlapping.length === 0),
+      completelyVisible,
+      overlapCount: overlapping.length,
+      nodeRect: tourDebugRect(article),
+      visibleGraph: visible,
+      overlappingNodes: overlapping.map(({ node }) => ({
+        nodeId: node.dataset.graphNodeId || "",
+        title: graphDemoNodeTitle(node),
+        rect: tourDebugRect(node)
+      }))
+    };
+  }
+
+  function graphStep11FreeCreatedNodeCenter(article, padding = 12) {
+    if (!(article instanceof HTMLElement)) return null;
+    const visible = visibleGraphClientRect(12);
+    const rect = article.getBoundingClientRect();
+    if (
+      !visible ||
+      rect.width + padding * 2 > visible.width ||
+      rect.height + padding * 2 > visible.height
+    ) {
       return null;
     }
-
-    const reserve = graphRouteNodeReserve();
-    const requested = graphDemoSafeEmptyDropPoint(
-      viewport,
-      {
-        x: visible.left + visible.width * .5,
-        y: visible.top + visible.height * .5
-      },
-      {
-        prefer: "right",
-        reserveWidth: reserve.width,
-        reserveHeight: reserve.height,
-        allowOccupiedFallback: true
+    const minimumX = visible.left + rect.width * .5 + padding;
+    const maximumX = visible.right - rect.width * .5 - padding;
+    const minimumY = visible.top + rect.height * .5 + padding;
+    const maximumY = visible.bottom - rect.height * .5 - padding;
+    const otherRects = graphStep11RenderedNodeRects(article)
+      .map(({ rect: other }) => other);
+    const current = centerOf(article);
+    const fractions = [0, .25, .5, .75, 1];
+    const candidates = [];
+    for (const yFactor of fractions) {
+      for (const xFactor of fractions) {
+        const point = {
+          x: minimumX + (maximumX - minimumX) * xFactor,
+          y: minimumY + (maximumY - minimumY) * yFactor
+        };
+        const candidateRect = {
+          left: point.x - rect.width * .5,
+          right: point.x + rect.width * .5,
+          top: point.y - rect.height * .5,
+          bottom: point.y + rect.height * .5
+        };
+        const blocked = otherRects.some(other => !(
+          candidateRect.right + padding < other.left ||
+          candidateRect.left - padding > other.right ||
+          candidateRect.bottom + padding < other.top ||
+          candidateRect.top - padding > other.bottom
+        ));
+        if (blocked) continue;
+        candidates.push({
+          point,
+          candidateRect,
+          movement: Math.hypot(
+            point.x - current.x,
+            point.y - current.y
+          )
+        });
       }
+    }
+    candidates.sort((left, right) =>
+      left.movement - right.movement
     );
-    const perceived = graphPaletteDropPerception(
-      viewport,
-      requested,
-      {
-        operatorId: "logic.not",
-        footprintMargin: 10
-      }
-    );
+    return candidates[0] || null;
+  }
 
-    return perceived?.point || {
-      x: Math.max(
-        visible.left + 24,
-        Math.min(visible.right - 24, requested?.x || visible.left + visible.width * .5)
-      ),
-      y: Math.max(
-        visible.top + 24,
-        Math.min(visible.bottom - 24, requested?.y || visible.top + visible.height * .5)
-      )
+  async function graphStep11SeparateCreatedNode(nodeId, runId) {
+    let article = graphStep11NodeArticle(nodeId);
+    let clearance = graphStep11CreatedNodeClearance(article);
+    if (clearance.ok || runId !== demoRunId) {
+      return {
+        ok: clearance.ok,
+        moved: false,
+        zoomed: false,
+        article,
+        clearance
+      };
+    }
+
+    let target = graphStep11FreeCreatedNodeCenter(article);
+    let zoomed = false;
+    if (!target && article instanceof HTMLElement) {
+      const state = window.RMLDynamicGraphHost?.getState?.() || null;
+      const nodeIds = (state?.nodes || [])
+        .map(node => node.id)
+        .filter(Boolean);
+      const visible = visibleGraphClientRect(12);
+      const renderedRects = [
+        { rect: article.getBoundingClientRect() },
+        ...graphStep11RenderedNodeRects(article)
+      ].map(({ rect }) => rect);
+      const largestWidth = renderedRects.reduce(
+        (value, rect) => Math.max(value, rect.width),
+        1
+      );
+      const largestHeight = renderedRects.reduce(
+        (value, rect) => Math.max(value, rect.height),
+        1
+      );
+      const itemCount = Math.max(2, renderedRects.length + 1);
+      const aspect = Math.max(.5, Math.min(2, (
+        Number(visible?.width) || 1
+      ) / Math.max(1, Number(visible?.height) || 1)));
+      const columns = Math.max(
+        2,
+        Math.ceil(Math.sqrt(itemCount * aspect))
+      );
+      const rows = Math.max(2, Math.ceil(itemCount / columns));
+      const currentScale = Math.max(
+        .08,
+        Number(state?.viewport?.scale) || 1
+      );
+      const zoomFactor = Math.max(
+        .12,
+        Math.min(
+          .72,
+          (Number(visible?.width) || largestWidth) /
+            Math.max(1, largestWidth * (columns + .6)),
+          (Number(visible?.height) || largestHeight) /
+            Math.max(1, largestHeight * (rows + .6))
+        )
+      );
+      showDemoLabel(
+        "Zoom out once to make a clear place for the new NOT",
+        centerOf(article)
+      );
+      zoomed = await animateGraphNodesToReadableFrame(
+        nodeIds,
+        runId,
+        {
+          inset: 12,
+          padding: 10,
+          maxScale: currentScale * zoomFactor,
+          duration: 440,
+          allowZoomIn: true,
+          reason: "step11-created-not-separation-room"
+        }
+      );
+      await nextTwoFrames();
+      article = graphStep11NodeArticle(nodeId);
+      clearance = graphStep11CreatedNodeClearance(article);
+      target = clearance.ok
+        ? null
+        : graphStep11FreeCreatedNodeCenter(article);
+    }
+
+    if (clearance.ok) {
+      return {
+        ok: true,
+        moved: false,
+        zoomed,
+        article,
+        clearance
+      };
+    }
+    if (!target || !(article instanceof HTMLElement)) {
+      graphStep11Failure(
+        "no-visible-non-overlapping-place-for-created-not",
+        {
+          nodeId,
+          zoomed,
+          clearance,
+          policy:
+            "one bounded zoom and a fixed five-by-five placement grid"
+        }
+      );
+    }
+
+    showDemoLabel(
+      "Move the new NOT clear of the existing nodes",
+      centerOf(article)
+    );
+    const dragged = await nativeGraphNodeDrag(
+      article,
+      target.point,
+      520,
+      runId
+    );
+    await nextTwoFrames();
+    article = graphStep11NodeArticle(nodeId);
+    clearance = graphStep11CreatedNodeClearance(article);
+    let deterministicRepair = null;
+    if (!clearance.ok && runId === demoRunId) {
+      deterministicRepair = window.RMLDynamicGraphHost
+        ?.setNodeClientCenter?.(
+          nodeId,
+          target.point.x,
+          target.point.y
+        ) || null;
+      await nextTwoFrames();
+      article = graphStep11NodeArticle(nodeId);
+      clearance = graphStep11CreatedNodeClearance(article);
+    }
+    if (!clearance.ok) {
+      graphStep11Failure(
+        "created-not-remained-overlapping-after-visible-drag",
+        {
+          nodeId,
+          zoomed,
+          dragged,
+          deterministicRepair,
+          target,
+          clearance
+        }
+      );
+    }
+    graphStep11MarkStage("created-not-separated", {
+      nodeId,
+      zoomed,
+      dragged,
+      deterministicRepair,
+      target,
+      clearance
+    });
+    return {
+      ok: true,
+      moved: true,
+      zoomed,
+      dragged,
+      deterministicRepair,
+      article,
+      clearance
     };
   }
 
@@ -21677,29 +22235,46 @@
       return null;
     }
 
-    if (graphRoutePreparedDropHit()?.ok !== true) {
-      await prepareGraphRoutePlacementArea(runId, {
-        animateCamera: true
-      });
-    }
-    if (runId !== demoRunId) return null;
-
     const beforeIds = new Set(
       (host?.getState?.()?.nodes || []).map(node => node.id)
     );
-    let palette = await teacherRevealRuntimeGraphPaletteItem(
+    const palette = await teacherRevealRuntimeGraphPaletteItem(
       "logic.not",
       runId
     );
-    palette ||= document.querySelector(
-      '.rml-graph-palette-item[data-graph-operator="logic.not"]'
+    const paletteScroll = palette?.closest?.(
+      ".rml-graph-palette-scroll"
     );
+    const paletteReady = Boolean(
+      palette instanceof HTMLElement &&
+      paletteScroll instanceof HTMLElement &&
+      graphPaletteItemFullyVisible(palette, paletteScroll, 2) &&
+      graphPaletteSourceHitPoint(palette, paletteScroll, 2)?.directHit === true
+    );
+    if (!paletteReady) {
+      graphStep11Failure(
+        "not-library-item-not-fully-visible-before-pointerdown",
+        {
+          paletteFound: palette instanceof HTMLElement,
+          paletteRect: tourDebugRect(palette),
+          paletteScrollRect: tourDebugRect(paletteScroll),
+          revealState: graphPaletteRevealState
+        }
+      );
+    }
+    graphStep11MarkStage("not-library-item-fully-visible", {
+      paletteRect: tourDebugRect(palette),
+      paletteScrollRect: tourDebugRect(paletteScroll),
+      revealState: graphPaletteRevealState
+    });
 
-    let finalDropPoint = graphStep11SimpleDropPoint(viewport);
+    let visibleWorkFrame = graphStep11VisibleDropWorkFrame(viewport);
+    let finalDropPoint = visibleWorkFrame.ready
+      ? visibleWorkFrame.dropPoint
+      : null;
     let dragCompleted = false;
 
     if (palette instanceof HTMLElement && runId === demoRunId) {
-      const paletteScroll = palette.closest(".rml-graph-palette-scroll");
       const sourceHit = graphPaletteSourceHitPoint(
         palette,
         paletteScroll,
@@ -21710,8 +22285,20 @@
       const viewportRect = viewport.getBoundingClientRect();
       const needsHeldPageScroll = Boolean(
         sourceHit?.geometricVisible === true &&
-        !finalDropPoint &&
+        visibleWorkFrame.ready !== true &&
         page.canScrollY
+      );
+      if (!needsHeldPageScroll && visibleWorkFrame.ready !== true) {
+        graphStep11Failure(
+          "complete-graph-drop-area-not-visible-after-not-reveal",
+          visibleWorkFrame
+        );
+      }
+      graphStep11MarkStage(
+        needsHeldPageScroll
+          ? "held-not-scroll-to-graph-start"
+          : "graph-drop-area-already-visible",
+        visibleWorkFrame
       );
       const direction =
         (viewportRect.top + viewportRect.bottom) * .5 >=
@@ -21759,15 +22346,20 @@
                 : "VISIBLE RUNTIME GRAPH",
               minimumTeachingDuration: false,
               commitHoldMs: 260,
-              edgeHoldMs: needsHeldPageScroll ? 4200 : 0,
+              edgeHoldMs: needsHeldPageScroll ? 6200 : 0,
               edgeHoldMinMs: needsHeldPageScroll ? 300 : 0,
               onEdgeHoldStart: needsHeldPageScroll
                 ? () => elements().mouse?.classList.add("scrolling")
                 : null,
               onEdgeHoldFrame: needsHeldPageScroll
                 ? ({ point, elapsed }) => {
-                    finalDropPoint = graphStep11SimpleDropPoint(viewport);
-                    if (finalDropPoint) return;
+                    visibleWorkFrame = graphStep11VisibleDropWorkFrame(
+                      viewport
+                    );
+                    finalDropPoint = visibleWorkFrame.ready
+                      ? visibleWorkFrame.dropPoint
+                      : null;
+                    if (visibleWorkFrame.ready) return;
                     const liveRect = viewport.getBoundingClientRect();
                     const liveEffect = tourEffectViewport();
                     const remaining = direction > 0
@@ -21791,21 +22383,31 @@
                   }
                 : null,
               edgeHoldUntil: needsHeldPageScroll
-                ? () => Boolean(graphStep11SimpleDropPoint(viewport))
+                ? () => visibleWorkFrame.ready === true
                 : null,
               onEdgeHoldEnd: needsHeldPageScroll
                 ? () => elements().mouse?.classList.remove("scrolling")
                 : null,
               afterEdgeHold: needsHeldPageScroll
                 ? async (_edgePoint, dragContext) => {
-                    finalDropPoint = graphStep11SimpleDropPoint(viewport);
+                    visibleWorkFrame = graphStep11VisibleDropWorkFrame(
+                      viewport
+                    );
+                    finalDropPoint = visibleWorkFrame.ready
+                      ? visibleWorkFrame.dropPoint
+                      : null;
+                    if (!visibleWorkFrame.ready || !finalDropPoint) {
+                      graphStep11MarkStage(
+                        "held-scroll-work-frame-not-ready",
+                        visibleWorkFrame
+                      );
+                      return null;
+                    }
+                    graphStep11MarkStage(
+                      "graph-drop-area-fully-visible",
+                      visibleWorkFrame
+                    );
                     const visible = visibleGraphClientRect(12);
-                    finalDropPoint ||= visible
-                      ? {
-                          x: visible.left + visible.width * .58,
-                          y: visible.top + visible.height * .5
-                        }
-                      : pageEdge;
                     const retreat = visible
                       ? {
                           x: visible.left + Math.min(42, visible.width * .14),
@@ -21822,6 +22424,27 @@
                       stageLabel: "VISIBLE RUNTIME GRAPH"
                     };
                   }
+                : null,
+              onBeforeRelease: needsHeldPageScroll
+                ? async () => {
+                    visibleWorkFrame = graphStep11VisibleDropWorkFrame(
+                      viewport
+                    );
+                    if (!visibleWorkFrame.ready) {
+                      graphStep11MarkStage(
+                        "held-scroll-release-cancelled",
+                        visibleWorkFrame
+                      );
+                      return { cancel: true };
+                    }
+                    finalDropPoint = visibleWorkFrame.dropPoint;
+                    return null;
+                  }
+                : null,
+              releaseReady: needsHeldPageScroll
+                ? async () => graphStep11VisibleDropWorkFrame(
+                    viewport
+                  ).ready === true
                 : null
             }
           );
@@ -21830,6 +22453,12 @@
           host?.setGuidedAutoPanSuppressed?.(false);
         }
         await nextTwoFrames();
+      }
+      if (needsHeldPageScroll && !dragCompleted) {
+        graphStep11Failure(
+          "held-page-scroll-did-not-reveal-complete-graph-drop-area",
+          graphStep11VisibleDropWorkFrame(viewport)
+        );
       }
     }
 
@@ -21846,12 +22475,20 @@
     )?.id || "";
 
     if (!nodeId) {
+      const deterministicDropFrame =
+        graphStep11VisibleDropWorkFrame(viewport);
+      finalDropPoint ||= deterministicDropFrame.dropPoint;
+      if (!deterministicDropFrame.ready || !finalDropPoint) {
+        graphStep11Failure(
+          "no-complete-visible-drop-area-for-deterministic-commit",
+          deterministicDropFrame
+        );
+      }
       const fallback = host?.ensureOperatorNode?.(
         "logic.not",
         { allowDuplicate: true }
       ) || null;
       nodeId = fallback?.ok === true ? String(fallback.nodeId || "") : "";
-      finalDropPoint ||= graphStep11SimpleDropPoint(viewport);
       if (nodeId && finalDropPoint) {
         host?.setNodeClientCenter?.(
           nodeId,
@@ -21870,7 +22507,12 @@
       runId,
       { inset: 10 }
     );
-    const article = visibility.node || graphStep11NodeArticle(nodeId);
+    let article = visibility.node || graphStep11NodeArticle(nodeId);
+    const separation = await graphStep11SeparateCreatedNode(
+      nodeId,
+      runId
+    );
+    article = separation.article || graphStep11NodeArticle(nodeId) || article;
     if (article instanceof HTMLElement) {
       article.dataset.rmlTourStep10Branch = "true";
       pulseAt(article, "rml-setup-demo-drop");
@@ -21879,7 +22521,8 @@
       nodeId,
       article,
       dragCompleted,
-      fallbackUsed: dragCompleted !== true
+      fallbackUsed: dragCompleted !== true,
+      separation
     };
   }
 
@@ -22709,10 +23352,22 @@
     const host = window.RMLDynamicGraphHost;
     if (!(viewport instanceof HTMLElement) || runId !== demoRunId) return;
 
+    graphStep11RunStartedAt = performance.now();
+    graphStep11MarkStage("route-start", {
+      viewport: tourDebugRect(viewport),
+      visibleGraph: visibleGraphClientRect(0)
+    });
     const pair = await ensureGraphDemoNodes(runId);
     if (runId !== demoRunId) return;
+    graphStep11MarkStage("teaching-nodes-resolved", {
+      output: graphSocketEndpoint(pair?.output),
+      input: graphSocketEndpoint(pair?.input)
+    });
     await ensureGraphTeachingPairVisible(runId);
     if (runId !== demoRunId) return;
+    graphStep11MarkStage("teaching-pair-visible", {
+      visibleGraph: visibleGraphClientRect(0)
+    });
 
     const freshPair = graphDemoSocketPair(false);
     const output = freshPair?.output || pair?.output;
@@ -22734,6 +23389,9 @@
       ))?.connection || null;
     }
     if (!baseConnection || runId !== demoRunId) return;
+    graphStep11MarkStage("base-connection-ready", {
+      connectionId: baseConnection.id || ""
+    });
 
     const created = await graphStep11CreateSimpleBranchNode(runId);
     if (!created?.nodeId || runId !== demoRunId) {
@@ -22745,6 +23403,12 @@
       hideMouse();
       return;
     }
+    graphStep11MarkStage("branch-node-created", {
+      nodeId: created.nodeId,
+      dragCompleted: created.dragCompleted === true,
+      fallbackUsed: created.fallbackUsed === true,
+      rect: tourDebugRect(created.article)
+    });
 
     const allNodeIds = () => (host?.getState?.()?.nodes || [])
       .map(node => node.id)
@@ -22755,6 +23419,11 @@
       runId
     );
     if (runId !== demoRunId) return;
+    graphStep11MarkStage("branch-action-prepared", {
+      nodeMoved: preparedAction?.nodeMoved === true,
+      plannedMovement: Number(preparedAction?.plannedMovement || 0),
+      target: preparedAction?.target?.point || null
+    });
 
     const branchConnection = await graphStep11ConnectSimpleBranch(
       baseConnection,
@@ -22773,6 +23442,11 @@
       hideMouse();
       return;
     }
+    graphStep11MarkStage("branch-connected", {
+      parentConnectionId: baseConnection.id,
+      branchConnectionId: branchConnection.id,
+      branchNodeId: created.nodeId
+    });
 
     const movedJunction = await graphStep11DragCreatedJunction(
       baseConnection.id,
@@ -22791,6 +23465,12 @@
         }
       );
     }
+    graphStep11MarkStage("junction-dragged", {
+      parentConnectionId: baseConnection.id,
+      branchConnectionId: branchConnection.id,
+      branchNodeId: created.nodeId,
+      movedJunction
+    });
 
     const beforeFinalFit = graphStep11BranchProof(
       baseConnection.id,
@@ -22830,6 +23510,10 @@
         }
       );
     }
+    graphStep11MarkStage("final-fit-complete", {
+      finalFit: finalFit === true,
+      visibleGraph: visibleGraphClientRect(0)
+    });
     await nextTwoFrames();
 
     const fittedBranch = graphStep11BranchProof(
@@ -22871,6 +23555,11 @@
     await wait(820);
     clearGraphConnectionScene();
     hideMouse();
+    graphStep11MarkStage("route-complete", {
+      parentConnectionId: baseConnection.id,
+      branchConnectionId: branchConnection.id,
+      branchNodeId: created.nodeId
+    });
   }
 
   function dispatchTourWheel(
@@ -24117,6 +24806,17 @@
       });
     }
     if (!verified) {
+      if (step.demo === "graph-route" && toDemo === "graph-inspector") {
+        graphStep11MarkStage("step12-handoff-deferred", {
+          ready,
+          hiddenCameraJumpBlocked,
+          mismatches: completionComparison.mismatches,
+          policy:
+            "A narrow iPhone handoff is prepared by Step 12 itself; it must not retroactively fail a completed Step 11 action."
+        });
+        graphTeachingSceneHandoff = null;
+        return false;
+      }
       graphDemoError(
         `${step.demo} could not finish on the complete scene required by ${toDemo}.`
       );
@@ -24585,388 +25285,6 @@
       footprint.bottom <= reservedArea.bottom - margin
     );
     return { point, footprint, fits, metrics };
-  }
-
-  function graphRoutePreparedDropHit() {
-    const plan = graphRoutePreparedDropPlan;
-    if (plan?.complete !== true || !plan.orientation) return null;
-    const visible = visibleGraphClientRect(18);
-    if (!visible) return null;
-    const metrics = window.RMLDynamicGraphHost
-      ?.getOperatorPlacementMetrics?.("logic.not") || null;
-    const direct = plan.orientation === "direct" && plan.directCenter;
-    const regions = direct
-      ? {
-          orientation: "direct",
-          existingArea: visible,
-          reservedArea: visible
-        }
-      : graphCreateNodePlacementRegions(
-          visible,
-          plan.orientation
-        );
-    let pointerPlan = direct && metrics?.ok === true
-      ? (() => {
-          const width = Number(metrics.clientWidth) || 0;
-          const height = Number(metrics.clientHeight) || 0;
-          const anchorX = Number(metrics.clientPointerOffsetX) || width * .465;
-          const anchorY = Number(metrics.clientPointerOffsetY) || height * .185;
-          const footprint = {
-            left: Number(plan.directCenter.x) - width * .5,
-            top: Number(plan.directCenter.y) - height * .5,
-            width,
-            height
-          };
-          footprint.right = footprint.left + width;
-          footprint.bottom = footprint.top + height;
-          return {
-            point: {
-              x: footprint.left + anchorX,
-              y: footprint.top + anchorY
-            },
-            footprint,
-            fits: true,
-            metrics
-          };
-        })()
-      : graphCreateNodePointerPlan(
-          regions.reservedArea,
-          metrics,
-          window.innerWidth <= 390 || window.innerHeight <= 700 ? 10 : 16
-        );
-    if (!pointerPlan?.fits) return null;
-    const edgeInset = window.innerWidth <= 390 || window.innerHeight <= 700
-      ? 38
-      : 46;
-    const edgeSafe = Boolean(
-      pointerPlan.point.x >= visible.left + edgeInset &&
-      pointerPlan.point.x <= visible.right - edgeInset &&
-      pointerPlan.point.y >= visible.top + edgeInset &&
-      pointerPlan.point.y <= visible.bottom - edgeInset
-    );
-    const existingRects = graphTeachingNodeIdsFromState().map(nodeId =>
-      document.querySelector(
-        `.rml-graph-node[data-graph-node-id="${CSS.escape(nodeId)}"]`
-      )?.getBoundingClientRect?.()
-    ).filter(Boolean);
-    const existingInside = existingRects.every(rect =>
-      rect.left >= regions.existingArea.left + 6 &&
-      rect.right <= regions.existingArea.right - 6 &&
-      rect.top >= regions.existingArea.top + 6 &&
-      rect.bottom <= regions.existingArea.bottom - 6
-    );
-    const overlapsExisting = existingRects.some(rect => !(
-      pointerPlan.footprint.right + 10 < rect.left ||
-      pointerPlan.footprint.left - 10 > rect.right ||
-      pointerPlan.footprint.bottom + 10 < rect.top ||
-      pointerPlan.footprint.top - 10 > rect.bottom
-    ));
-    const footprintInside = Boolean(
-      pointerPlan.footprint.left >= visible.left + 6 &&
-      pointerPlan.footprint.right <= visible.right - 6 &&
-      pointerPlan.footprint.top >= visible.top + 6 &&
-      pointerPlan.footprint.bottom <= visible.bottom - 6
-    );
-    return {
-      ok:
-        edgeSafe &&
-        footprintInside &&
-        existingInside &&
-        !overlapsExisting,
-      point: pointerPlan.point,
-      footprint: pointerPlan.footprint,
-      metrics,
-      regions,
-      edgeSafe,
-      footprintInside,
-      existingInside,
-      overlapsExisting,
-      existingRects: existingRects.map(rect => ({
-        left: rect.left,
-        right: rect.right,
-        top: rect.top,
-        bottom: rect.bottom,
-        width: rect.width,
-        height: rect.height
-      }))
-    };
-  }
-
-  async function prepareGraphRoutePlacementArea(runId, options = {}) {
-    if (runId !== demoRunId) return false;
-    const animateCamera = options.animateCamera === true;
-    const visible = visibleGraphClientRect(18);
-    const nodeIds = graphTeachingNodeIdsFromState();
-    if (!visible || nodeIds.length < 2) {
-      graphRoutePreparedDropPlan = null;
-      return false;
-    }
-    const compact = window.innerWidth <= 390 || window.innerHeight <= 700;
-    const orientations = compact || visible.width < visible.height * .9
-      ? ["vertical", "horizontal"]
-      : ["horizontal", "vertical"];
-    const attempts = [];
-    const beforeViewport = window.RMLDynamicGraphHost
-      ?.getViewportState?.()?.viewport || null;
-
-    const viewport = document.querySelector(".rml-graph-viewport");
-    const directMetrics = window.RMLDynamicGraphHost
-      ?.getOperatorPlacementMetrics?.("logic.not") || null;
-    if (viewport && directMetrics?.ok === true) {
-      const directReserve = graphRouteNodeReserve();
-      for (const prefer of ["right", "left"]) {
-        const directCenter = graphDemoSafeEmptyDropPoint(
-          viewport,
-          centerOf(viewport),
-          {
-            prefer,
-            reserveWidth: Math.max(
-              directReserve.width,
-              Number(directMetrics.clientWidth) + 32
-            ),
-            reserveHeight: Math.max(
-              directReserve.height,
-              Number(directMetrics.clientHeight) + 32
-            ),
-            allowOccupiedFallback: false,
-            returnNullWhenUnavailable: true
-          }
-        );
-        if (!directCenter) continue;
-        graphRoutePreparedDropPlan = {
-          runId,
-          orientation: "direct",
-          directCenter,
-          complete: true,
-          beforeViewport,
-          afterViewport: beforeViewport,
-          zoomFallbackUsed: false
-        };
-        const directHit = graphRoutePreparedDropHit();
-        attempts.push({
-          orientation: "direct",
-          prefer,
-          directCenter,
-          hit: directHit,
-          zoomFallbackUsed: false,
-          complete: directHit?.ok === true
-        });
-        if (directHit?.ok === true) {
-          tourDebugAssert(
-            "graph-route-branch-footprint-prepared-visibly-after-demonstrate",
-            true,
-            {
-              orientation: "direct",
-              prefer,
-              footprint: directHit.footprint,
-              point: directHit.point,
-              existingRects: directHit.existingRects,
-              beforeViewport,
-              afterViewport: beforeViewport,
-              zoomFallbackUsed: false,
-              cameraPreparationVisible: animateCamera,
-              policy:
-                "use already free current-camera space first; pan or zoom only when no complete third-node footprint fits without overlapping the existing nodes"
-            }
-          );
-          return true;
-        }
-      }
-      graphRoutePreparedDropPlan = null;
-    }
-
-    for (const orientation of orientations) {
-      if (runId !== demoRunId) return false;
-      const beforeVisible = visibleGraphClientRect(18);
-      if (!beforeVisible) break;
-      const regions = graphCreateNodePlacementRegions(
-        beforeVisible,
-        orientation
-      );
-      const currentScale = Number(
-        window.RMLDynamicGraphHost?.getViewportState?.()?.viewport?.scale
-      ) || 1;
-      let panOnly = panGraphNodesIntoClientRect(
-        nodeIds,
-        regions.existingArea,
-        {
-          padding: compact ? 12 : 18,
-          apply: animateCamera ? false : true
-        }
-      );
-      if (
-        animateCamera &&
-        panOnly.ok === true &&
-        panOnly.changed === true
-      ) {
-        const animatedPan = await animateGraphViewportState(
-          panOnly.before ||
-            window.RMLDynamicGraphHost?.getViewportState?.()?.viewport,
-          panOnly.requested,
-          runId,
-          {
-            duration: 560,
-            reason: "step-11-visible-branch-space-pan"
-          }
-        );
-        panOnly = {
-          ...panOnly,
-          ok: animatedPan === true,
-          reason: animatedPan
-            ? "visibly-panned-without-changing-zoom"
-            : "visible-pan-commit-failed",
-          animated: true
-        };
-      }
-      await nextTwoFrames();
-      if (runId !== demoRunId) return false;
-      let fitted = {
-        ok: panOnly.ok === true,
-        method: "pan-first",
-        panOnly
-      };
-      graphRoutePreparedDropPlan = {
-        runId,
-        orientation,
-        fitted,
-        complete: fitted?.ok === true
-      };
-      let hit = graphRoutePreparedDropHit();
-      let zoomFallbackUsed = false;
-      if (hit?.ok !== true) {
-        const metrics = window.RMLDynamicGraphHost
-          ?.getOperatorPlacementMetrics?.("logic.not") || null;
-        const reserve = regions.reservedArea;
-        const margin = compact ? 10 : 16;
-        const widthFactor = metrics?.ok === true
-          ? (reserve.width - margin * 2) /
-            Math.max(1, Number(metrics.clientWidth) || 1)
-          : 1;
-        const heightFactor = metrics?.ok === true
-          ? (reserve.height - margin * 2) /
-            Math.max(1, Number(metrics.clientHeight) || 1)
-          : 1;
-        const futureFootprintFactor = Math.max(
-          .2,
-          Math.min(1, widthFactor, heightFactor)
-        );
-        const currentGeometryCannotFit = Boolean(
-          panOnly.reason === "current-scale-too-large" ||
-          futureFootprintFactor < .999
-        );
-        if (currentGeometryCannotFit) {
-          const fitPlan = window.RMLDynamicGraphHost?.fitNodesToClientRect?.(
-            nodeIds,
-            regions.existingArea,
-            {
-              padding: compact ? 12 : 18,
-              maxScale: Math.min(
-                currentScale,
-                currentScale * futureFootprintFactor
-              ),
-              apply: animateCamera ? false : true
-            }
-          ) || null;
-          if (
-            animateCamera &&
-            fitPlan?.ok === true &&
-            fitPlan?.viewport
-          ) {
-            const fitFrom = window.RMLDynamicGraphHost
-              ?.getViewportState?.()?.viewport || null;
-            const animatedFit = await animateGraphViewportState(
-              fitFrom,
-              fitPlan.viewport,
-              runId,
-              {
-                duration: 680,
-                reason: "step-11-last-resort-three-footprint-zoom"
-              }
-            );
-            fitted = {
-              ...fitPlan,
-              ok: animatedFit === true,
-              animated: true
-            };
-          } else {
-            fitted = fitPlan;
-          }
-          zoomFallbackUsed = Boolean(
-            fitted?.ok === true &&
-            Number(
-              window.RMLDynamicGraphHost?.getViewportState?.()?.viewport?.scale
-            ) < currentScale - .0005
-          );
-          await nextTwoFrames();
-          if (runId !== demoRunId) return false;
-          graphRoutePreparedDropPlan = {
-            runId,
-            orientation,
-            fitted,
-            complete: fitted?.ok === true
-          };
-          hit = graphRoutePreparedDropHit();
-        }
-      }
-      const attempt = {
-        orientation,
-        panOnly,
-        fitted,
-        hit,
-        zoomFallbackUsed,
-        complete: fitted?.ok === true && hit?.ok === true
-      };
-      attempts.push(attempt);
-      if (attempt.complete) {
-        const afterViewport = window.RMLDynamicGraphHost
-          ?.getViewportState?.()?.viewport || null;
-        graphRoutePreparedDropPlan = {
-          runId,
-          orientation,
-          fitted,
-          hit,
-          complete: true,
-          beforeViewport,
-          afterViewport,
-          zoomFallbackUsed: Boolean(
-            zoomFallbackUsed &&
-            Number(afterViewport?.scale) <
-              Number(beforeViewport?.scale) - .0005
-          )
-        };
-        tourDebugAssert(
-          "graph-route-branch-footprint-prepared-visibly-after-demonstrate",
-          true,
-          {
-            orientation,
-            footprint: hit.footprint,
-            point: hit.point,
-            existingRects: hit.existingRects,
-            edgeSafe: hit.edgeSafe,
-            beforeViewport,
-            afterViewport,
-            zoomFallbackUsed: graphRoutePreparedDropPlan.zoomFallbackUsed,
-            compactViewport: compact,
-            cameraPreparationVisible: animateCamera,
-            policy:
-              "reserve the complete future branch node only after Demonstrate begins; visibly pan first and reduce graph zoom only when the current camera cannot hold both teaching nodes plus that footprint"
-          }
-        );
-        return true;
-      }
-    }
-
-    graphRoutePreparedDropPlan = null;
-    tourDebugAssert(
-      "graph-route-branch-footprint-prepared-visibly-after-demonstrate",
-      false,
-      {
-        attempts,
-        beforeViewport,
-        compactViewport: compact
-      }
-    );
-    return false;
   }
 
   async function prepareGraphCreateNodePlacementArea(runId) {
@@ -25590,23 +25908,6 @@
         graphDemoError(
           "Step 7 lost its complete reserved NOT-node rectangle before Demonstrate."
         );
-      }
-    }
-
-    if (!explicitModeDemo && step?.demo === "graph-route") {
-      let preparedRouteDrop = graphRoutePreparedDropHit();
-      if (preparedRouteDrop?.ok !== true) {
-        const viewport = document.querySelector(".rml-graph-viewport");
-        showDemoLabel(
-          "Make enough visible room for one branch node",
-          centerOf(viewport)
-        );
-        await prepareGraphRoutePlacementArea(
-          runId,
-          { animateCamera: true }
-        );
-        if (runId !== demoRunId) return null;
-        preparedRouteDrop = graphRoutePreparedDropHit();
       }
     }
 
@@ -26926,9 +27227,6 @@
     if (step.demo !== "graph-create-node") {
       graphCreateNodePreparedDropPlan = null;
     }
-    if (step.demo !== "graph-route") {
-      graphRoutePreparedDropPlan = null;
-    }
     const runId = demoRunId;
 
     if (restoreTransaction) {
@@ -27619,6 +27917,16 @@
       }
     );
     try {
+      if (step.demo === "graph-route") {
+        graphStep11RunStartedAt = performance.now();
+        graphStep11MarkStage("demonstration-shared-preflight", {
+          inputLockReady,
+          target: tourDebugRect(target),
+          graphViewport: tourDebugRect(
+            document.querySelector(".rml-graph-viewport")
+          )
+        });
+      }
       if (!inputLockReady) {
         throw new Error(
           `[RML Tour · Step ${stepIndex}] The trusted user-input lock or its live skip controls were not ready before the demonstration.`
@@ -27665,6 +27973,14 @@
           `[RML Tour · Step ${stepIndex}] The original teacher-mouse size was not restored.`
         );
       }
+      if (step.demo === "graph-route") {
+        graphStep11MarkStage("teacher-mouse-preflight-complete", {
+          expectedMouseSize,
+          actualMouseSize: mouseRect
+            ? { width: mouseRect.width, height: mouseRect.height }
+            : null
+        });
+      }
       target =
         await teacherPrepareStep(
           step,
@@ -27673,6 +27989,12 @@
         );
 
       if (runId !== demoRunId) return false;
+      if (step.demo === "graph-route") {
+        graphStep11MarkStage("lesson-target-prepared", {
+          target: tourDebugRect(target),
+          visibleGraph: visibleGraphClientRect(0)
+        });
+      }
 
       target = await tourPerceiveAndRepairStepTarget(
         step,
@@ -27681,12 +28003,30 @@
         controlledRepeat
       );
       if (runId !== demoRunId) return false;
+      if (step.demo === "graph-route") {
+        graphStep11MarkStage("live-target-perceived", {
+          target: tourDebugRect(target),
+          visibleGraph: visibleGraphClientRect(0)
+        });
+      }
 
       const graphNodesBefore = graphDemoNodeCount();
       await runDemoOnce(step, target, runId);
       if (runId !== demoRunId) return false;
+      if (step.demo === "graph-route") {
+        graphStep11MarkStage("route-action-returned", {
+          graphNodesBefore,
+          graphNodesAfter: graphDemoNodeCount()
+        });
+      }
       await finalizeGraphSceneForNextLesson(step, runId);
       if (runId !== demoRunId) return false;
+      if (step.demo === "graph-route") {
+        graphStep11MarkStage("next-lesson-finalization-returned", {
+          graphNodesBefore,
+          graphNodesAfter: graphDemoNodeCount()
+        });
+      }
       assertActionOnlyDemonstration("after-action");
       verifyGraphDemoNodeBudget(step, graphNodesBefore);
       const mouseSafety = teacherMouseSafetyState || {
@@ -27824,6 +28164,13 @@
             true
           );
         }
+        const failureDetails = step?.demo === "graph-route"
+          ? graphStep11AttachFailureDetails(
+              error,
+              "run-demo-catch",
+              error?.details ?? null
+            )
+          : error?.details || null;
         tourDebugRecord("demonstration-error", {
           failedStepIndex,
           failedStepTitle: step?.title || "",
@@ -27833,9 +28180,14 @@
             error?.message ||
             String(error || "Unknown demonstration error"),
           stack: String(error?.stack || ""),
-          details:
-            error?.details || null
+          details: failureDetails
         });
+        if (step?.demo === "graph-route") {
+          console.error(
+            "[RML Tour · Step 11 · iPhone failure snapshot]",
+            failureDetails
+          );
+        }
         console.error(
           "[RML Tour] Demonstration failed once. The lesson will advance without reopening, restoring or retrying.",
           error
@@ -28768,7 +29120,6 @@
       controlledRepeatCount = 0;
       repeatPreviousInFlight = false;
       graphCreateNodePreparedDropPlan = null;
-      graphRoutePreparedDropPlan = null;
       snapshot = captureTourState();
       snapshotFingerprint = tourStateFingerprint(snapshot);
       originalTourUiState = captureTourEnvironmentState();
