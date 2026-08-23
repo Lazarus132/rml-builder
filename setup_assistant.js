@@ -102,7 +102,7 @@
     rejectedCount: 0
   };
   const tourDebugState = {
-    build: "stable-mobile-topbar-composed-path-close-20260823-v360f1",
+    build: "stable-api-catalog-collapsed-groups-20260823-v361f1",
     events: [],
     assertions: []
   };

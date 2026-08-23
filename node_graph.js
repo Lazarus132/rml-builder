@@ -11340,6 +11340,26 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         line-height: 1.3;
       }
 
+      .rml-graph-palette-more {
+        width: 100%;
+        min-height: 34px;
+        padding: 7px 9px;
+        border: 1px solid #334252;
+        border-radius: 7px;
+        background: #111a24;
+        color: #9edcff;
+        font-size: 9px;
+        font-weight: 760;
+        text-align: center;
+        cursor: pointer;
+      }
+
+      .rml-graph-palette-more:hover,
+      .rml-graph-palette-more:focus-visible {
+        border-color: #5fa8d3;
+        background: #182737;
+      }
+
       .rml-graph-root {
         position: relative;
         display: grid;
@@ -13849,6 +13869,15 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       );
 
     const MAX_SEARCH_RESULTS = 240;
+    const CATALOG_GROUP_BATCH_SIZE = 120;
+    const CATALOG_GROUP_NAMES = [
+      "API · Types & Enums",
+      "API · Constructors",
+      "API · Methods",
+      "API · Properties",
+      "API · Fields",
+      "API · Events"
+    ];
     let searchTimer = 0;
 
     const searchableText =
@@ -13878,10 +13907,6 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       entries,
       options = {}
     ) => {
-      if (entries.length === 0) {
-        return;
-      }
-
       const details =
         document.createElement("details");
       details.className =
@@ -13922,6 +13947,131 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
       details.append(summary, list);
       scroll.appendChild(details);
+    };
+
+    const appendCatalogGroup = (
+      group,
+      entries
+    ) => {
+      if (entries.length === 0) {
+        return;
+      }
+
+      const details =
+        document.createElement("details");
+      details.className =
+        "rml-graph-palette-group rml-graph-palette-catalog-group";
+      configureGraphPaletteGroup(
+        details,
+        `catalog:${group}`,
+        false
+      );
+
+      const summary =
+        document.createElement("summary");
+      const title =
+        document.createElement("span");
+      title.textContent =
+        group === "Advanced / Raw C#"
+          ? "API · Advanced / Raw C#"
+          : group;
+      const count =
+        document.createElement("b");
+      count.textContent =
+        entries.length.toLocaleString();
+      summary.append(title, count);
+
+      const list =
+        document.createElement("div");
+      list.className =
+        "rml-graph-palette-list";
+
+      let rendered = 0;
+      let initialized = false;
+      let moreButton = null;
+
+      const renderNextBatch = () => {
+        initialized = true;
+
+        if (entries.length === 0) {
+          const empty =
+            document.createElement("div");
+          empty.className =
+            "rml-graph-palette-status";
+          empty.textContent =
+            "No nodes of this category were generated from the loaded API catalog.";
+          list.appendChild(empty);
+          return;
+        }
+
+        moreButton?.remove();
+        moreButton = null;
+
+        const end = Math.min(
+          entries.length,
+          rendered +
+            CATALOG_GROUP_BATCH_SIZE
+        );
+        const fragment =
+          document.createDocumentFragment();
+
+        while (rendered < end) {
+          const [operatorId, definition] =
+            entries[rendered];
+          fragment.appendChild(
+            createPaletteItem(
+              operatorId,
+              definition
+            )
+          );
+          rendered += 1;
+        }
+
+        list.appendChild(fragment);
+
+        if (rendered < entries.length) {
+          moreButton =
+            document.createElement("button");
+          moreButton.type = "button";
+          moreButton.className =
+            "rml-graph-palette-more";
+          const remaining =
+            entries.length - rendered;
+          moreButton.textContent =
+            `Show next ${Math.min(
+              CATALOG_GROUP_BATCH_SIZE,
+              remaining
+            ).toLocaleString()} · ${rendered.toLocaleString()} of ${entries.length.toLocaleString()} loaded`;
+          moreButton.addEventListener(
+            "click",
+            renderNextBatch,
+            { once: true }
+          );
+          list.appendChild(moreButton);
+        }
+      };
+
+      const ensureFirstBatch = () => {
+        if (
+          details.open &&
+          !initialized
+        ) {
+          renderNextBatch();
+        }
+      };
+
+      details.addEventListener(
+        "toggle",
+        ensureFirstBatch
+      );
+      details.append(summary, list);
+      scroll.appendChild(details);
+
+      if (details.open) {
+        queueMicrotask(
+          ensureFirstBatch
+        );
+      }
     };
 
     const appendMessage = text => {
@@ -14097,6 +14247,18 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
       const normalGroups =
         new Map();
+      const catalogGroups =
+        new Map();
+
+      for (
+        const group of
+        CATALOG_GROUP_NAMES
+      ) {
+        catalogGroups.set(
+          group,
+          []
+        );
+      }
 
       for (
         const entry of allEntries
@@ -14105,7 +14267,6 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
         if (
           definition.hiddenFromPalette === true ||
-          definition.catalogGenerated === true ||
           (
             !showAdvanced &&
             definition.expertOnly === true
@@ -14117,6 +14278,18 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         const group =
           definition.group ||
           "Other";
+
+        if (
+          definition.catalogGenerated === true
+        ) {
+          if (!catalogGroups.has(group)) {
+            catalogGroups.set(group, []);
+          }
+
+          catalogGroups.get(group)
+            .push(entry);
+          continue;
+        }
 
         if (!normalGroups.has(group)) {
           normalGroups.set(group, []);
@@ -14153,6 +14326,34 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           group,
           entries,
           { open: false }
+        );
+      }
+
+      for (
+        const group of
+        OPERATOR_GROUP_ORDER
+      ) {
+        const entries =
+          catalogGroups.get(group);
+
+        if (!entries) {
+          continue;
+        }
+
+        appendCatalogGroup(
+          group,
+          entries
+        );
+        catalogGroups.delete(group);
+      }
+
+      for (
+        const [group, entries] of
+        catalogGroups
+      ) {
+        appendCatalogGroup(
+          group,
+          entries
         );
       }
 

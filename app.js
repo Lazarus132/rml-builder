@@ -28,7 +28,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "stable-mobile-topbar-composed-path-close-20260823-v360f1";
+  "stable-api-catalog-collapsed-groups-20260823-v361f1";
 
 function exposeRmlBuilderBuildId() {
   document.documentElement.dataset
@@ -21241,7 +21241,7 @@ function renderInformationNodeReference() {
   catalogNote.className = "information-node-tier-note catalog";
   catalogNote.innerHTML = `
     <strong>Live Resonite API catalog${catalogCount ? ` · ${catalogCount.toLocaleString()} generated nodes` : ""}</strong>
-    <span>Scanner-generated Type, Enum, Constructor, Method, Property, Field and Event nodes are version-derived rather than fixed builder nodes. Their complete live set is available through Node Search and changes with the loaded Resonite/FrooxEngine catalog. HarmonyLib scanner nodes are classified as Advanced / Raw C# because they are low-level runtime API calls; they do not infer a patch signature or an early rml_libs load phase.</span>`;
+    <span>Scanner-generated Type, Enum, Constructor, Method, Property, Field and Event nodes are version-derived rather than fixed builder nodes. Their collapsed groups and complete counts are always visible in the Node Library and load in safe batches; Node Search remains the fastest direct lookup. The set changes with the loaded Resonite/FrooxEngine catalog. HarmonyLib scanner nodes are classified as Advanced / Raw C# because they are low-level runtime API calls; they do not infer a patch signature or an early rml_libs load phase.</span>`;
   fragment.appendChild(catalogNote);
 
   host.replaceChildren(fragment);
@@ -21803,8 +21803,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "help_template.html?v=58-natural-narration-v225",
-    "help_template.js?v=58-natural-narration-v225",
+    "help_template.html?v=59-api-catalog-collapsed-groups-v361f1",
+    "help_template.js?v=59-api-catalog-collapsed-groups-v361f1",
     "help-template",
     "RMLHelpTemplateMarkup"
   )
@@ -21912,7 +21912,7 @@ function ensureSetupAssistantLoaded(firstRun = false) {
 
   setupAssistantLoadPromise = new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = new URL("setup_assistant.js?v=170-mobile-topbar-composed-path-close-v360f1", APP_SCRIPT_BASE_URL).href;
+    script.src = new URL("setup_assistant.js?v=171-api-catalog-collapsed-groups-v361f1", APP_SCRIPT_BASE_URL).href;
     script.async = true;
     script.dataset.rmlSetupAssistant = "true";
     script.addEventListener("load", () => resolve(true), { once: true });

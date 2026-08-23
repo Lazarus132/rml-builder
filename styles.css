@@ -10405,8 +10405,6 @@ dialog.builder-message-dialog::backdrop {
   }
 }
 
-/* Configuration Outline mobile reset. Graph-mode panel state must never
- * force desktop columns or horizontal overflow after returning to Outline. */
 @media (max-width: 780px) {
   body:not(.rml-node-graph-mode) main,
   body:not(.rml-node-graph-mode) footer {

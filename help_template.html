@@ -236,12 +236,14 @@
             <article class="information-content">
               <section id="info-library" class="information-section">
                 <span class="information-kicker">Node library</span>
-                <h3>Search-on-demand API catalog</h3>
+                <h3>Browsable and searchable API catalog</h3>
                 <p>
-                  The live Resonite API catalog is searched on demand so opening the
-                  graph does not create thousands of DOM buttons. Enter at least two
-                  characters in the node search to query catalog-generated API nodes.
-                  Search results are capped; refine broad searches when necessary.
+                  Every live Resonite API category and its complete count is always
+                  listed in the Node Library and starts collapsed. Opening a category
+                  creates its node cards in bounded batches instead of mounting the
+                  complete catalog at once. Enter at least two characters in Node Search
+                  for the fastest direct lookup. Search results are capped; refine broad
+                  searches when necessary.
                 </p>
               </section>
 
@@ -573,8 +575,10 @@
                 </p>
                 <p class="information-api-note">
                   Catalog-generated Resonite API nodes are version-derived rather than fixed
-                  builder nodes. Node Search remains the authoritative live index for each
-                  generated Type, Enum, Constructor, Method, Property, Field and Event node.
+                  builder nodes. Their collapsed categories and complete counts are always
+                  visible in the Node Library; opening one loads safe batches, while Node
+                  Search remains the fastest direct lookup for a generated Type, Enum,
+                  Constructor, Method, Property, Field or Event node.
                 </p>
               </div>
             </aside>
