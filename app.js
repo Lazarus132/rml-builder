@@ -28,7 +28,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "stable-tour-step12-visible-repeat-isolation-20260820-v289";
+  "stable-tour-no-small-viewport-warning-20260823-v347f1";
 
 function exposeRmlBuilderBuildId() {
   document.documentElement.dataset
@@ -21912,7 +21912,7 @@ function ensureSetupAssistantLoaded(firstRun = false) {
 
   setupAssistantLoadPromise = new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = new URL("setup_assistant.js?v=107-step12-visible-repeat-isolation-v289", APP_SCRIPT_BASE_URL).href;
+    script.src = new URL("setup_assistant.js?v=157-no-small-viewport-warning-v347f1", APP_SCRIPT_BASE_URL).href;
     script.async = true;
     script.dataset.rmlSetupAssistant = "true";
     script.addEventListener("load", () => resolve(true), { once: true });
@@ -22150,6 +22150,116 @@ function installSetupAssistantBridge() {
           reason: accepted
             ? ""
             : "The native horizontal insertion target rejected the held option."
+        };
+      },
+      setHeldOptionHorizontalIndex(
+        host,
+        requestedIndex
+      ) {
+        if (
+          !optionPointerDragActive ||
+          !activeDraggedOptionId ||
+          !activeDraggedOptionControllerId ||
+          !(host instanceof HTMLElement) ||
+          !host.isConnected
+        ) {
+          return {
+            accepted: false,
+            beforeIndex: null,
+            afterIndex: null,
+            reason: "No live held option drag is active."
+          };
+        }
+
+        const controllerCard = host.closest(
+          ".node-card.controller[data-node-id]"
+        );
+        const controllerId = controllerCard?.dataset.nodeId || "";
+        if (!controllerId) {
+          return {
+            accepted: false,
+            beforeIndex: null,
+            afterIndex: null,
+            reason: "The live controller could not be resolved."
+          };
+        }
+
+        const maximumIndex = directOptionLanes(host).length;
+        const numericIndex = Number(requestedIndex);
+        if (!Number.isFinite(numericIndex)) {
+          return {
+            accepted: false,
+            beforeIndex: null,
+            afterIndex: null,
+            maximumIndex,
+            reason: "The requested horizontal insertion index is invalid."
+          };
+        }
+
+        const beforeIndex =
+          state.dragInsertContainer === `controller:${controllerId}` &&
+          Number.isFinite(state.dragInsertIndex)
+            ? state.dragInsertIndex
+            : null;
+        const afterIndex = clamp(
+          Math.trunc(numericIndex),
+          0,
+          maximumIndex
+        );
+        const placeholder = ensureOptionDragPlaceholder();
+
+        if (optionPointerVisualFrame) {
+          cancelAnimationFrame(optionPointerVisualFrame);
+          optionPointerVisualFrame = 0;
+        }
+        optionPointerQueuedX = optionPointerX;
+        optionPointerQueuedY = optionPointerY;
+
+        optionContainerWheelTargetHost = null;
+        optionContainerWheelTargetContainerId = null;
+        optionContainerWheelDelta = 0;
+        optionContainerWheelManualIndex = null;
+        optionContainerWheelManualHost = null;
+        optionWheelTargetHost = host;
+        optionWheelTargetControllerId = controllerId;
+        optionWheelDelta = 0;
+        optionWheelManualHost = host;
+        optionWheelManualIndex = afterIndex;
+        state.dragInsertContainer = `controller:${controllerId}`;
+        state.dragInsertIndex = afterIndex;
+
+        document.querySelectorAll(
+          ".controller-options.option-drag-over"
+        ).forEach(currentHost => {
+          if (currentHost !== host) {
+            currentHost.classList.remove("option-drag-over");
+          }
+        });
+        host.classList.add("option-drag-over");
+        if (placeholder.parentElement !== host) {
+          host.appendChild(placeholder);
+        }
+        positionOptionInsertPlaceholder(host, afterIndex);
+        requestDragPlaceholderVisibility();
+
+        const accepted = Boolean(
+          optionWheelTargetHost === host &&
+          optionWheelTargetControllerId === controllerId &&
+          state.dragInsertContainer === `controller:${controllerId}` &&
+          state.dragInsertIndex === afterIndex &&
+          optionDragFeedbackPlaceholder?.isConnected === true
+        );
+        return {
+          accepted,
+          beforeIndex,
+          afterIndex: accepted ? afterIndex : null,
+          maximumIndex,
+          moved: accepted && beforeIndex !== afterIndex,
+          authoritative:
+            accepted && heldOptionWheelTargetIsAuthoritative(),
+          reason: accepted
+            ? ""
+            : "The exact native horizontal insertion index was not retained."
         };
       },
       stepHeldOptionHorizontal(
@@ -22423,6 +22533,115 @@ function installSetupAssistantBridge() {
           reason: accepted
             ? ""
             : "The native nested insertion target rejected the held option."
+        };
+      },
+      setHeldOptionContainerIndex(
+        host,
+        requestedIndex
+      ) {
+        if (
+          !optionPointerDragActive ||
+          !activeDraggedOptionId ||
+          !activeDraggedOptionControllerId ||
+          !(host instanceof HTMLElement) ||
+          !host.isConnected
+        ) {
+          return {
+            accepted: false,
+            beforeIndex: null,
+            afterIndex: null,
+            authoritative: false,
+            reason: "No live held option drag is active."
+          };
+        }
+
+        const lane = host.closest(
+          OUTLINE_CONTAINER_LANE_SELECTOR
+        );
+        const containerId = lane?.dataset.container || "";
+        const authoritativeHost = lane?.querySelector(
+          ":scope > .drop-zone"
+        );
+        const source = findControllerOption(
+          state.nodes,
+          activeDraggedOptionId
+        );
+        const maximumIndex = directNodeCards(host).length;
+        const numericIndex = Number(requestedIndex);
+
+        if (
+          !containerId ||
+          authoritativeHost !== host ||
+          !source ||
+          optionContainsContainer(source.option, containerId) ||
+          !Number.isFinite(numericIndex)
+        ) {
+          return {
+            accepted: false,
+            beforeIndex: null,
+            afterIndex: null,
+            maximumIndex,
+            authoritative: false,
+            reason: "The exact nested insertion target was invalid."
+          };
+        }
+
+        const beforeIndex =
+          state.dragInsertContainer === containerId &&
+          Number.isFinite(state.dragInsertIndex)
+            ? state.dragInsertIndex
+            : null;
+        const afterIndex = clamp(
+          Math.trunc(numericIndex),
+          0,
+          maximumIndex
+        );
+
+        if (optionPointerVisualFrame) {
+          cancelAnimationFrame(optionPointerVisualFrame);
+          optionPointerVisualFrame = 0;
+        }
+        optionPointerQueuedX = optionPointerX;
+        optionPointerQueuedY = optionPointerY;
+
+        setPointerContainerTarget(
+          containerId,
+          host,
+          afterIndex,
+          pointerOptionFeedbackEvent(
+            optionPointerX,
+            optionPointerY
+          )
+        );
+        optionContainerWheelDelta = 0;
+        optionContainerWheelManualHost = host;
+        optionContainerWheelManualIndex = afterIndex;
+        state.dragOverContainer = containerId;
+        state.dragInsertContainer = containerId;
+        state.dragInsertIndex = afterIndex;
+        positionNodeInsertPlaceholder(host, afterIndex);
+        requestDragPlaceholderVisibility();
+
+        const accepted = Boolean(
+          optionContainerWheelTargetHost === host &&
+          optionContainerWheelTargetContainerId === containerId &&
+          optionContainerWheelManualHost === host &&
+          optionContainerWheelManualIndex === afterIndex &&
+          state.dragInsertContainer === containerId &&
+          state.dragInsertIndex === afterIndex &&
+          dragFeedbackPlaceholder?.isConnected === true
+        );
+        return {
+          accepted,
+          beforeIndex,
+          afterIndex: accepted ? afterIndex : null,
+          maximumIndex,
+          moved: accepted && beforeIndex !== afterIndex,
+          authoritative: accepted,
+          containerId,
+          reason: accepted
+            ? ""
+            : "The exact native nested insertion index was not retained."
         };
       },
       inspectHeldOptionContainer(host) {

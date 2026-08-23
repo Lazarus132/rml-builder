@@ -32,7 +32,6 @@
     <h2 id="rml-setup-title" data-setup-title>Welcome</h2>
     <p data-setup-text></p>
     <span class="rml-setup-step-badge" data-setup-hint></span>
-    <div class="rml-setup-viewport-warning" data-setup-viewport-warning hidden role="status" aria-live="polite"></div>
     <div class="rml-setup-progress"><span data-setup-progress></span></div>
     <div class="rml-setup-actions">
       <button class="button secondary" type="button" data-setup-skip>Skip tour</button>

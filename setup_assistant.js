@@ -2,8 +2,8 @@
   "use strict";
 
   const SCRIPT_BASE = document.currentScript?.src || window.location.href;
-  const TEMPLATE_URL = new URL("setup_template.html?v=91-step12-visible-repeat-isolation-v289", SCRIPT_BASE).href;
-  const TEMPLATE_SCRIPT_URL = new URL("setup_template.js?v=91-step12-visible-repeat-isolation-v289", SCRIPT_BASE).href;
+  const TEMPLATE_URL = new URL("setup_template.html?v=132-no-small-viewport-warning-v347f1", SCRIPT_BASE).href;
+  const TEMPLATE_SCRIPT_URL = new URL("setup_template.js?v=132-no-small-viewport-warning-v347f1", SCRIPT_BASE).href;
   let templatePromise = null;
   let snapshot = null;
   let snapshotFingerprint = "";
@@ -42,13 +42,18 @@
   let outlineNestedTransactionSerial = 0;
   let graphPaletteRevealState = null;
   let graphCreateNodePreparedDropPlan = null;
+  let graphRoutePreparedDropPlan = null;
   let graphTeachingSceneHandoff = null;
+  let graphStep11LastWireTargetCandidates = [];
   const tourInteractionCapabilities = new Map();
   const enteredStepIndexes = new Set();
   const narratedStepIndexes = new Set();
   const attemptedDemonstrationIndexes = new Set();
   let blockedRepeatCount = 0;
   let teacherMouseSafetyState = null;
+
+  const LIVE_CONTROLS_ACTIVE_OBSTACLE_ATTRIBUTE =
+    "data-rml-tour-active-obstacle";
 
   const TOUR_DEBUG_LIMIT = 5000;
   const TOUR_CONSTRAINT_EPSILON = .5;
@@ -94,11 +99,10 @@
     rejectedCount: 0
   };
   const tourDebugState = {
-    build: "stable-tour-step12-visible-repeat-isolation-20260820-v289",
+    build: "stable-tour-no-small-viewport-warning-20260823-v347f1",
     events: [],
     assertions: []
   };
-
   function tourFinitePositive(value) {
     const number = Number(value);
     return Number.isFinite(number) && number > 0 ? number : null;
@@ -1003,7 +1007,39 @@
         }
         return repeatPreviousDemonstration();
       },
-      async finishAndRestoreForTest() {
+      async abortAndRestoreForTest(options = {}) {
+        const testMode =
+          new URLSearchParams(window.location.search).has("rmlTourTest") ||
+          window.location.hash.includes("rmlTourTest");
+        if (!testMode) {
+          throw new Error(
+            "abortAndRestoreForTest is available only in the visual test harness."
+          );
+        }
+        const reason = String(
+          options?.reason || "visual-test-step-timeout"
+        );
+        tourDebugRecord("visual-test-bounded-abort-start", {
+          reason,
+          abortedStepIndex: stepIndex,
+          abortedPhase: stepPhase,
+          demoInFlight,
+          policy:
+            "a timed-out asynchronous lesson is cancelled and the immutable sandbox is restored before the harness leaves this viewport; its stale promise may never race a later lesson"
+        });
+        await restoreAndClose(false);
+        const restored = tourDebugState.assertions.some(assertion =>
+          assertion.name === "tour-sandbox-full-restore-contract" &&
+          assertion.passed === true
+        );
+        tourDebugRecord("visual-test-bounded-abort-complete", {
+          reason,
+          restored,
+          assistantHidden: Boolean(elements().root?.hidden)
+        });
+        return restored;
+      },
+      async finishAndRestoreForTest(options = {}) {
         const testMode =
           new URLSearchParams(window.location.search).has("rmlTourTest") ||
           window.location.hash.includes("rmlTourTest");
@@ -1013,6 +1049,8 @@
           );
         }
         const ui = elements();
+        const probeRepeatPrevious =
+          options?.probeRepeatPrevious === true;
         const repeatCountBefore = controlledRepeatCount;
         const repeatButtonReady = Boolean(
           stepIndex === steps.length - 1 &&
@@ -1022,7 +1060,7 @@
           !ui.repeatPrevious.disabled
         );
         const repeatWaitStarted = performance.now();
-        if (repeatButtonReady) {
+        if (probeRepeatPrevious && repeatButtonReady) {
           ui.repeatPrevious.click();
           while (
             (
@@ -1034,54 +1072,84 @@
             await new Promise(resolve => window.setTimeout(resolve, 40));
           }
         }
-        const repeatCompletion = [...tourDebugState.events]
+        const repeatCompletion = probeRepeatPrevious
+          ? [...tourDebugState.events]
           .reverse()
           .find(event =>
             event.type === "controlled-repeat-previous-complete" &&
             event.transaction === controlledRepeatCount
-          ) || null;
-        const repeatButtonTransactionPassed = tourDebugAssert(
-          "tour-complete-repeat-previous-button-transaction",
-          Boolean(
-            repeatButtonReady &&
-            controlledRepeatCount === repeatCountBefore + 1 &&
-            !repeatPreviousInFlight &&
-            repeatCompletion?.demonstrationCompleted === true &&
-            repeatCompletion?.readySnapshotUsed === true &&
-            repeatCompletion?.returnStateRestored === true &&
-            stepIndex === steps.length - 1 &&
-            stepPhase === "explain" &&
-            ui.repeatPrevious &&
-            !ui.repeatPrevious.hidden &&
-            !ui.repeatPrevious.disabled &&
-            ui.next?.textContent === "Finish"
-          ),
-          {
-            repeatButtonReady,
-            repeatCountBefore,
-            repeatCountAfter: controlledRepeatCount,
-            waitedForMs: Math.round(
-              performance.now() - repeatWaitStarted
+          ) || null
+          : null;
+        if (probeRepeatPrevious) {
+          const repeatButtonTransactionPassed = tourDebugAssert(
+            "tour-complete-repeat-previous-button-transaction",
+            Boolean(
+              repeatButtonReady &&
+              controlledRepeatCount === repeatCountBefore + 1 &&
+              !repeatPreviousInFlight &&
+              repeatCompletion?.demonstrationCompleted === true &&
+              repeatCompletion?.readySnapshotUsed === true &&
+              repeatCompletion?.returnStateRestored === true &&
+              stepIndex === steps.length - 1 &&
+              stepPhase === "explain" &&
+              ui.repeatPrevious &&
+              !ui.repeatPrevious.hidden &&
+              !ui.repeatPrevious.disabled &&
+              ui.next?.textContent === "Finish"
             ),
-            repeatPreviousInFlight,
-            repeatCompletion,
-            returnedStepIndex: stepIndex,
-            returnedPhase: stepPhase,
-            repeatButtonVisible: Boolean(
-              ui.repeatPrevious && !ui.repeatPrevious.hidden
-            ),
-            repeatButtonEnabled: Boolean(
-              ui.repeatPrevious && !ui.repeatPrevious.disabled
-            ),
-            finishLabel: ui.next?.textContent || "",
-            policy:
-              "the Evergreen completion path clicks the real Repeat previous button, requires the complete Step 12 action, and must receive the same usable Tour complete dialog back"
-          }
-        );
-        if (!repeatButtonTransactionPassed) {
-          throw new Error(
-            "[RML Tour · Complete] Repeat previous did not complete its Step 12 round trip."
+            {
+              repeatButtonReady,
+              repeatCountBefore,
+              repeatCountAfter: controlledRepeatCount,
+              waitedForMs: Math.round(
+                performance.now() - repeatWaitStarted
+              ),
+              repeatPreviousInFlight,
+              repeatCompletion,
+              returnedStepIndex: stepIndex,
+              returnedPhase: stepPhase,
+              repeatButtonVisible: Boolean(
+                ui.repeatPrevious && !ui.repeatPrevious.hidden
+              ),
+              repeatButtonEnabled: Boolean(
+                ui.repeatPrevious && !ui.repeatPrevious.disabled
+              ),
+              finishLabel: ui.next?.textContent || "",
+              policy:
+                "only the optional isolated stress run clicks Repeat previous and verifies one complete Step 12 round trip"
+            }
           );
+          if (!repeatButtonTransactionPassed) {
+            throw new Error(
+              "[RML Tour · Complete] The isolated Repeat previous probe did not complete its Step 12 round trip."
+            );
+          }
+        } else {
+          const acceptanceDidNotRepeat = tourDebugAssert(
+            "tour-complete-repeat-previous-skipped-in-acceptance",
+            Boolean(
+              repeatButtonReady &&
+              controlledRepeatCount === repeatCountBefore &&
+              !repeatPreviousInFlight &&
+              stepIndex === steps.length - 1 &&
+              stepPhase === "explain" &&
+              ui.next?.textContent === "Finish"
+            ),
+            {
+              repeatButtonReady,
+              repeatCountBefore,
+              repeatCountAfter: controlledRepeatCount,
+              repeatPreviousInFlight,
+              finishLabel: ui.next?.textContent || "",
+              policy:
+                "the normal acceptance matrix must finish immediately from Tour complete and never execute Step 12 a second time"
+            }
+          );
+          if (!acceptanceDidNotRepeat) {
+            throw new Error(
+              "[RML Tour · Complete] The acceptance finish path did not remain a strict single pass."
+            );
+          }
         }
         const completionStarted = performance.now();
         const completionVisible = Boolean(
@@ -1134,11 +1202,23 @@
             "[RML Tour · Complete] The final card was not held visibly before sandbox restoration."
           );
         }
+        tourDebugRecord("tour-sandbox-restore-start", {
+          stepIndex,
+          stepPhase,
+          completionHeld,
+          policy:
+            "the final visual card hands off to one bounded sandbox restore transaction before the viewport closes"
+        });
         await restoreAndClose(false);
-        return tourDebugState.assertions.some(assertion =>
+        const restored = tourDebugState.assertions.some(assertion =>
           assertion.name === "tour-sandbox-full-restore-contract" &&
           assertion.passed === true
         );
+        tourDebugRecord("tour-sandbox-restore-complete", {
+          restored,
+          assistantHidden: Boolean(elements().root?.hidden)
+        });
+        return restored;
       }
     }),
     configurable: true,
@@ -1204,9 +1284,45 @@
   let viewportGeometryFrame = 0;
 
   const wait = milliseconds => new Promise(resolve => {
-    const timer = window.setTimeout(resolve, milliseconds);
-    demoTimers.push(timer);
+    let settled = false;
+    const pending = {
+      timer: 0,
+      finish: () => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(pending.timer);
+        const timerIndex = demoTimers.indexOf(pending);
+        if (timerIndex >= 0) demoTimers.splice(timerIndex, 1);
+        resolve();
+      }
+    };
+    pending.timer = window.setTimeout(pending.finish, milliseconds);
+    demoTimers.push(pending);
   });
+
+  function tourNextVisualFrame(maximumWaitMs = 96) {
+    return new Promise(resolve => {
+      let settled = false;
+      const finish = (timestamp, timerFallback) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        resolve({
+          timestamp: Number.isFinite(timestamp)
+            ? timestamp
+            : performance.now(),
+          timerFallback
+        });
+      };
+      const timer = window.setTimeout(
+        () => finish(performance.now(), true),
+        Math.max(32, Number(maximumWaitMs) || 96)
+      );
+      window.requestAnimationFrame(timestamp =>
+        finish(timestamp, false)
+      );
+    });
+  }
 
   const steps = [
     {
@@ -1298,8 +1414,8 @@
       target: ".rml-graph-viewport",
       mode: "graph",
       title: "11. Move nodes and shape connections",
-      text: "Drag a node by its title to move it. Connecting another input to an existing line creates a branch, while pulling part of the line creates a bend that can be repositioned. A suitable existing node is reused whenever possible.",
-      hint: "The graph remains tidy, and another node is added only when the branch truly requires one.",
+      text: "Drag a node by its title to move it. Connecting another input to an existing line creates a branch with a movable junction. Drag that created point to shape all three connected line sections. A suitable existing node is reused whenever possible.",
+      hint: "The branch action, the created junction and its visible movement stay easy to follow on every supported viewport.",
       demo: "graph-route"
     },
     {
@@ -1383,7 +1499,6 @@
       title: root?.querySelector("[data-setup-title]"),
       text: root?.querySelector("[data-setup-text]"),
       hint: root?.querySelector("[data-setup-hint]"),
-      viewportWarning: root?.querySelector("[data-setup-viewport-warning]"),
       progress: root?.querySelector("[data-setup-progress]"),
       next: root?.querySelector("[data-setup-next]"),
       skip: root?.querySelector("[data-setup-skip]"),
@@ -1484,8 +1599,8 @@
   }
 
   const TOUR_MINIMUM_VIEWPORT = Object.freeze({
-    width: 414,
-    height: 896
+    width: 375,
+    height: 641
   });
 
   function evaluateTourViewportSupport(
@@ -1510,25 +1625,6 @@
       minimum: { ...TOUR_MINIMUM_VIEWPORT },
       reasons
     };
-  }
-
-  function renderWelcomeViewportWarning(index = stepIndex) {
-    const ui = elements();
-    const support = evaluateTourViewportSupport();
-    if (!ui.viewportWarning) return support;
-    const visible = index === 0 && !support.supported;
-    ui.viewportWarning.hidden = !visible;
-    ui.viewportWarning.textContent = visible
-      ? (
-          `Viewport warning: ${support.actual.width}×${support.actual.height} CSS pixels are below the complete tour minimum of ` +
-          `${support.minimum.width}×${support.minimum.height}. Adaptive safety checks will contain or skip geometry that cannot be demonstrated reliably. Rotate the device or enlarge the window for the complete tour.`
-        )
-      : "";
-    ui.root?.setAttribute(
-      "data-setup-viewport-supported",
-      String(support.supported)
-    );
-    return support;
   }
 
   function tourEffectViewport() {
@@ -1592,6 +1688,12 @@
   function focusDemonstration(targets, padding = 12) {
     const rect = tourFocusRect(targets, padding);
     positionShades(rect);
+    if (stepPhase === "demonstrating") {
+      setLiveControlsActiveObstacles(
+        targets,
+        "demonstration-focus-changed"
+      );
+    }
     return rect;
   }
 
@@ -1861,7 +1963,7 @@
       },
       {
         targets: visibleTopbarTarget("#setup-guide-open"),
-        text: "Tour opens this guided walkthrough. Because the walkthrough is already active, pressing the button keeps the current tour open instead of starting another one."
+        text: "Tour opens this guided walkthrough. Because this walkthrough is already active, the button is explained here and deliberately not pressed again."
       },
       {
         targets: visibleTopbarTarget("#preview-open"),
@@ -1896,6 +1998,7 @@
         },
         {
           targets: ".canvas.panel",
+          revealTargetBeforeNarration: ".canvas.panel",
           text: "The Configuration Outline shows the destination and the insertion line for the new control."
         }
       ],
@@ -1928,6 +2031,7 @@
       "mode-switch-graph": [
         {
           targets: ".rml-pack-button",
+          responsiveMenuHandoffTarget: "#pack-into-node",
           text: "Pack into Node changes from the Configuration Outline to the Runtime Graph."
         }
       ],
@@ -1974,7 +2078,7 @@
       "graph-route": [
         {
           targets: ".rml-graph-viewport",
-          text: "Dragging a node by its title changes its position. Existing lines can accept another connection or be shaped with a movable bend. Suitable existing nodes are reused whenever possible."
+          text: "Dragging a node by its title changes its position. An existing line accepts another input and creates a movable junction; dragging that visible point reshapes all three connected line sections. Suitable existing nodes are reused whenever possible."
         }
       ],
       "graph-inspector": [
@@ -2032,6 +2136,9 @@
     for (const group of narrationOutlineGroups) group.element?.remove?.();
     narrationOutlineGroups = [];
     activeNarrationTargets = [];
+    if (stepPhase !== "demonstrating") {
+      clearLiveControlsActiveObstacles();
+    }
   }
 
   function narrationOutlineRect(targets) {
@@ -2068,6 +2175,10 @@
     const visible = tourVisibleTargets(targets);
     activeNarrationTargets = visible;
     if (!visible.length) return null;
+    setLiveControlsActiveObstacles(
+      visible,
+      "narration-active-target"
+    );
     const groups = separateTargets
       ? visible.map(target => [target])
       : [visible];
@@ -2540,10 +2651,36 @@
         await prepareGraphInspectorToggleForNarration(runId);
         if (runId !== demoRunId || stepIndex !== index) return;
       }
+      if (segment?.revealTargetBeforeNarration) {
+        const revealTarget = document.querySelector(
+          segment.revealTargetBeforeNarration
+        );
+        if (revealTarget instanceof HTMLElement) {
+          await nativeTourScrollTargetIntoView(revealTarget, runId);
+          await nextTwoFrames();
+          if (!narrationOutlineRect([revealTarget])) {
+            revealTarget.scrollIntoView({
+              behavior: "auto",
+              block: "center",
+              inline: "nearest"
+            });
+            await nextTwoFrames();
+          }
+          if (!narrationOutlineRect([revealTarget])) {
+            throw new Error(
+              `[RML Tour · Step ${index}] The narration target could not be scrolled into a visible highlight area.`
+            );
+          }
+          fitNarrationCardToContent({ followText: false });
+        }
+      }
       let visibleTargets = tourVisibleTargets(segment.targets);
       let compactMenuHandoff = null;
       if (
-        mobileTopbarPreparedForNarration &&
+        (
+          mobileTopbarPreparedForNarration ||
+          mobilePackPreparedForNarration
+        ) &&
         segment?.responsiveMenuHandoffTarget
       ) {
         compactMenuHandoff =
@@ -2679,8 +2816,12 @@
           }
         );
         if (!resumed) {
+          const isPackHandoff =
+            segment.responsiveMenuHandoffTarget === "#pack-into-node";
           throw new Error(
-            "[RML Tour · Step 1] Narration did not resume on the first visible compact-menu action after opening the Hamburger."
+            isPackHandoff
+              ? "[RML Tour · Step 6] Narration did not reach the visible Open Runtime Graph button after opening and scrolling the Hamburger menu."
+              : "[RML Tour · Step 1] Narration did not resume on the first visible compact-menu action after opening the Hamburger."
           );
         }
       }
@@ -2842,8 +2983,14 @@
     tourDebugAssert(
       `tour-step-${index}-readable-narration-and-line-scroll-pacing`,
       Boolean(narrationReadingMetrics) &&
-        narrationReadingMetrics.typedCharacters ===
+        narrationReadingMetrics.typedCharacters > 0 &&
+        narrationReadingMetrics.typedCharacters <=
           expectedTypedCharacterCount &&
+        (
+          narrationReadingMetrics.typedCharacters ===
+            expectedTypedCharacterCount ||
+          interactionAdvancedSegments > 0
+        ) &&
         narrationReadingMetrics.plannedReadingDelayMs >=
           narrationReadingMetrics.typedCharacters *
             tourPresentationDuration(48) &&
@@ -2864,15 +3011,17 @@
         presentationSpeed: TOUR_PRESENTATION_SPEED,
         autoScrollReadPauseMs:
           TOUR_SCROLL_TIMING.narrationAutoScrollReadPause,
+        interactionAdvancedSegments,
+        expectedTypedCharacterCount,
         behavior:
-          "human-readable character pacing with punctuation pauses and one reading pause per automatic line scroll"
+          "human-readable character pacing with punctuation pauses and one reading pause per automatic line scroll; an explicit narration-scene click may reveal the remaining text without invalidating the completed lesson"
       }
     );
     tourDebugAssert(
       `tour-step-${index}-full-preparation-and-natural-narration-complete`,
       completedSegments === segments.length &&
         highlightedSegments === segments.length &&
-        interactionAdvancedSegments === 0 &&
+        interactionAdvancedSegments <= segments.length &&
         ui.text.textContent === completeText,
       {
         narratedStepIndex: index,
@@ -3042,10 +3191,6 @@
       const clipped = clipRectToTourViewport(measured);
       if (clipped) return clipped;
 
-      // In the one-column graph layout the inspector is initially below the
-      // canvas. Model the exact visible footprint after the post-click
-      // scrollIntoView, so the card can move or temporarily yield before the
-      // panel exists in the viewport.
       const viewport = tourViewport();
       const width = Math.min(measured.width, viewport.width);
       const height = Math.min(measured.height, viewport.height);
@@ -3147,7 +3292,7 @@
       runId === demoRunId &&
       performance.now() - started <= duration
     ) {
-      await new Promise(resolve => requestAnimationFrame(resolve));
+      await tourNextVisualFrame();
       if (!(panel instanceof HTMLElement) || runId !== demoRunId) break;
       const coverage = graphInspectorRevealCoverage(
         panel.getBoundingClientRect()
@@ -3165,6 +3310,79 @@
     for (const element of activeSemanticScene.elements) {
       element.dataset.setupSceneState = state;
     }
+  }
+
+  function selectStableMinimumCardPlacement({
+    card,
+    candidates,
+    obstacles = [],
+    region,
+    width,
+    height,
+    tolerance = 1
+  }) {
+    if (!(card instanceof HTMLElement) || !region) return null;
+    const insideRegion = rectangle => Boolean(
+      rectangle.left >= region.left - tolerance &&
+      rectangle.top >= region.top - tolerance &&
+      rectangle.right <= region.right + tolerance &&
+      rectangle.bottom <= region.bottom + tolerance
+    );
+    const normalized = [];
+    const seen = new Set();
+    const add = candidate => {
+      if (!Number.isFinite(candidate?.left) || !Number.isFinite(candidate?.top)) {
+        return;
+      }
+      const rectangle = {
+        left: candidate.left,
+        top: candidate.top,
+        right: candidate.left + width,
+        bottom: candidate.top + height
+      };
+      if (!insideRegion(rectangle)) return;
+      const key = `${Math.round(candidate.left)}:${Math.round(candidate.top)}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      normalized.push({
+        ...candidate,
+        rect: rectangle,
+        overlap: obstacles.reduce(
+          (sum, obstacle) =>
+            sum + rectangleIntersectionArea(rectangle, obstacle),
+          0
+        )
+      });
+    };
+    for (const candidate of candidates || []) add(candidate);
+
+    const currentRect = card.getBoundingClientRect();
+    add({
+      key: "current",
+      left: currentRect.left,
+      top: currentRect.top,
+      current: true
+    });
+    if (!normalized.length) return null;
+
+    normalized.sort((left, right) =>
+      left.overlap - right.overlap ||
+      Number(right.current) - Number(left.current) ||
+      (right.distance || 0) - (left.distance || 0) ||
+      String(left.key || "").localeCompare(String(right.key || ""))
+    );
+    const minimumOverlap = normalized[0].overlap;
+    const current = normalized.find(candidate => candidate.current);
+    const selected =
+      current && current.overlap <= minimumOverlap + tolerance
+        ? current
+        : normalized[0];
+    return {
+      ...selected,
+      retained: selected.current === true,
+      minimumOverlap,
+      minimumCollisionFallback: minimumOverlap > tolerance
+    };
   }
 
   function placeCardOutsideSemanticScene() {
@@ -3193,27 +3411,28 @@
       top: Math.max(viewport.top + margin, Math.min(candidate.top, viewport.bottom - height - margin))
     }));
 
-    const ranked = candidates.map(candidate => {
-      const rectangle = {
-        left: candidate.left,
-        top: candidate.top,
-        right: candidate.left + width,
-        bottom: candidate.top + height
-      };
-      return {
-        candidate,
-        overlap: rectangleIntersectionArea(rectangle, scene.rect)
-      };
-    }).sort((a, b) => a.overlap - b.overlap);
+    const placement = selectStableMinimumCardPlacement({
+      card,
+      candidates,
+      obstacles: [scene.rect],
+      region: {
+        left: viewport.left + margin,
+        top: viewport.top + margin,
+        right: viewport.right - margin,
+        bottom: viewport.bottom - margin
+      },
+      width,
+      height
+    });
+    if (!placement) return;
 
-    const best = ranked[0];
-    if (!best || best.overlap > 1) {
-      card.classList.add("rml-setup-card-hidden-during-scene");
-      return;
-    }
-
-    card.style.left = `${best.candidate.left}px`;
-    card.style.top = `${best.candidate.top}px`;
+    card.style.left = `${placement.left}px`;
+    card.style.top = `${placement.top}px`;
+    card.dataset.minimumCollisionPlacement = placement.retained
+      ? "retained"
+      : placement.minimumCollisionFallback
+        ? "fallback"
+        : "clear";
   }
 
   function activateSemanticScene(step, target) {
@@ -3364,31 +3583,72 @@
       Math.min(margin, (viewport.height - cardHeight) / 2)
     );
 
-    if (!target) {
-      card.style.left = `${viewport.left + (viewport.width - cardWidth) / 2}px`;
-      card.style.top = `${viewport.top + (viewport.height - cardHeight) / 2}px`;
-      return;
+    if (target instanceof HTMLElement && stepPhase !== "demonstrating") {
+      setLiveControlsActiveObstacles(
+        [target],
+        "explanation-card-active-target"
+      );
     }
-
-    const rect = tourRect(target);
-    if (!rect) return positionCard(null);
-    let left = Math.min(
-      viewport.right - cardWidth - horizontalMargin,
-      Math.max(viewport.left + horizontalMargin, rect.left)
+    const rect = tourRect(target) || tourFocusRect(
+      liveControlsActiveObstacles(),
+      5
     );
-    let top = rect.bottom + 16;
-    if (top + cardHeight > viewport.bottom - verticalMargin) top = rect.top - cardHeight - 16;
-    if (top < viewport.top + verticalMargin) top = viewport.bottom - cardHeight - verticalMargin;
-    left = Math.max(
-      viewport.left + horizontalMargin,
-      Math.min(left, viewport.right - cardWidth - horizontalMargin)
-    );
-    top = Math.max(
-      viewport.top + verticalMargin,
-      Math.min(top, viewport.bottom - cardHeight - verticalMargin)
-    );
-    card.style.left = `${left}px`;
-    card.style.top = `${top}px`;
+    const region = {
+      left: viewport.left + horizontalMargin,
+      top: viewport.top + verticalMargin,
+      right: viewport.right - horizontalMargin,
+      bottom: viewport.bottom - verticalMargin
+    };
+    const lefts = [
+      region.left,
+      region.left + (region.right - region.left - cardWidth) / 2,
+      region.right - cardWidth
+    ];
+    const tops = [
+      region.top,
+      region.top + (region.bottom - region.top - cardHeight) / 2,
+      region.bottom - cardHeight
+    ];
+    const candidates = [];
+    for (const [row, top] of tops.entries()) {
+      for (const [column, left] of lefts.entries()) {
+        candidates.push({
+          key: `${row}-${column}`,
+          left,
+          top
+        });
+      }
+    }
+    if (rect) {
+      candidates.push(
+        {
+          key: "below-target",
+          left: Math.max(region.left, Math.min(rect.left, region.right - cardWidth)),
+          top: Math.max(region.top, Math.min(rect.bottom + 16, region.bottom - cardHeight))
+        },
+        {
+          key: "above-target",
+          left: Math.max(region.left, Math.min(rect.left, region.right - cardWidth)),
+          top: Math.max(region.top, Math.min(rect.top - cardHeight - 16, region.bottom - cardHeight))
+        }
+      );
+    }
+    const placement = selectStableMinimumCardPlacement({
+      card,
+      candidates,
+      obstacles: rect ? [rect] : [],
+      region,
+      width: cardWidth,
+      height: cardHeight
+    });
+    if (!placement) return;
+    card.style.left = `${placement.left}px`;
+    card.style.top = `${placement.top}px`;
+    card.dataset.minimumCollisionPlacement = placement.retained
+      ? "retained"
+      : placement.minimumCollisionFallback
+        ? "fallback"
+        : "clear";
   }
 
   function narrationCardOuterHeight(element) {
@@ -3638,92 +3898,55 @@
       cardRect.height,
       Math.max(1, viewport.height - margin * 2)
     );
+    const markedFocus = tourFocusRect(
+      liveControlsActiveObstacles(),
+      5
+    );
     const focus = narrationReservedRevealRect ||
-      narrationProtectedFocusRect();
-    if (!focus) {
-      positionCard(null, { force: true });
-      return {
-        key: "center",
-        left: card.getBoundingClientRect().left,
-        top: card.getBoundingClientRect().top,
-        overlap: 0,
-        distance: 0
-      };
-    }
-    if (bounds?.region && bounds.wholeGlowVisiblePossible === true) {
-      const region = bounds.region;
-      const regionWidth = Math.max(0, region.right - region.left);
-      const regionHeight = Math.max(0, region.bottom - region.top);
-      const left = Math.max(
-        region.left,
-        Math.min(
-          region.right - width,
-          region.left + (regionWidth - width) / 2
-        )
-      );
-      const top = Math.max(
-        region.top,
-        Math.min(
-          region.bottom - height,
-          region.top + (regionHeight - height) / 2
-        )
-      );
-      const rect = {
-        left,
-        top,
-        right: left + width,
-        bottom: top + height
-      };
-      card.style.transform = "none";
-      card.style.left = `${left}px`;
-      card.style.top = `${top}px`;
-      return {
-        key: bounds.key,
-        left,
-        top,
-        overlap: rectangleIntersectionArea(rect, focus),
-        distance: 0,
-        wholeGlowVisiblePossible: true
-      };
-    }
+      narrationProtectedFocusRect() ||
+      markedFocus;
+    const viewportRegion = {
+      left: viewport.left + margin,
+      top: viewport.top + margin,
+      right: viewport.right - margin,
+      bottom: viewport.bottom - margin
+    };
+    const region =
+      bounds?.region && bounds.wholeGlowVisiblePossible === true
+        ? bounds.region
+        : viewportRegion;
+    const regionWidth = Math.max(0, region.right - region.left);
+    const regionHeight = Math.max(0, region.bottom - region.top);
     const lefts = [
-      viewport.left + margin,
-      viewport.left + (viewport.width - width) / 2,
-      viewport.right - width - margin
+      region.left,
+      region.left + (regionWidth - width) / 2,
+      region.right - width
     ];
     const tops = [
-      viewport.top + margin,
-      viewport.top + (viewport.height - height) / 2,
-      viewport.bottom - height - margin
+      region.top,
+      region.top + (regionHeight - height) / 2,
+      region.bottom - height
     ];
     const candidates = [];
+    const focusCenter = focus
+      ? {
+          x: (focus.left + focus.right) / 2,
+          y: (focus.top + focus.bottom) / 2
+        }
+      : {
+          x: viewport.left + viewport.width / 2,
+          y: viewport.top + viewport.height / 2
+        };
     for (const [row, top] of tops.entries()) {
       for (const [column, left] of lefts.entries()) {
-        const rect = {
-          left,
-          top,
-          right: left + width,
-          bottom: top + height
-        };
-        const overlap = rectangleIntersectionArea(rect, focus);
         const cardCenter = {
           x: left + width / 2,
           y: top + height / 2
         };
-        const focusCenter = focus
-          ? {
-              x: (focus.left + focus.right) / 2,
-              y: (focus.top + focus.bottom) / 2
-            }
-          : {
-              x: viewport.left + viewport.width / 2,
-              y: viewport.top + viewport.height / 2
-            };
         candidates.push({
           key: `${row}-${column}`,
           left,
           top,
-          overlap,
           distance: Math.hypot(
             cardCenter.x - focusCenter.x,
             cardCenter.y - focusCenter.y
@@ -3731,17 +3954,29 @@
         });
       }
     }
-    candidates.sort((a, b) =>
-      a.overlap - b.overlap ||
-      b.distance - a.distance ||
-      a.key.localeCompare(b.key)
-    );
-    const best = candidates[0];
-    if (!best) return null;
+    const placement = selectStableMinimumCardPlacement({
+      card,
+      candidates,
+      obstacles: focus ? [focus] : [],
+      region,
+      width,
+      height
+    });
+    if (!placement) return null;
     card.style.transform = "none";
-    card.style.left = `${best.left}px`;
-    card.style.top = `${best.top}px`;
-    return best;
+    card.style.left = `${placement.left}px`;
+    card.style.top = `${placement.top}px`;
+    card.dataset.minimumCollisionPlacement = placement.retained
+      ? "retained"
+      : placement.minimumCollisionFallback
+        ? "fallback"
+        : "clear";
+    return {
+      ...placement,
+      key: placement.key || bounds?.key || "minimum-collision",
+      wholeGlowVisiblePossible:
+        bounds?.wholeGlowVisiblePossible === true
+    };
   }
 
   function narrationSurfaceVisibility() {
@@ -4754,7 +4989,7 @@
   }
 
   function teacherMouseVisibleAboveDialog(dialog, target = null) {
-    const { root, mouse, liveControls } = elements();
+    const { root, mouse } = elements();
     if (
       !(dialog instanceof HTMLDialogElement) ||
       !dialog.open ||
@@ -4763,16 +4998,16 @@
       return false;
     }
     const mouseRect = mouse.getBoundingClientRect();
-    const dialogRect = dialog.getBoundingClientRect();
+    const viewport = tourEffectViewport();
     const style = getComputedStyle(mouse);
     const center = {
       x: mouseRect.left + mouseRect.width * .5,
       y: mouseRect.top + mouseRect.height * .5
     };
     const targetRect = target?.getBoundingClientRect?.() || null;
-    const insideDialog =
-      center.x >= dialogRect.left && center.x <= dialogRect.right &&
-      center.y >= dialogRect.top && center.y <= dialogRect.bottom;
+    const insideVisibleViewport =
+      center.x >= viewport.left && center.x <= viewport.right &&
+      center.y >= viewport.top && center.y <= viewport.bottom;
     const overlapsTarget = !targetRect || (
       center.x >= targetRect.left - mouseRect.width &&
       center.x <= targetRect.right + mouseRect.width &&
@@ -4782,16 +5017,63 @@
     return Boolean(
       dialog.contains(root) &&
       dialog.contains(mouse) &&
-      dialog.contains(liveControls) &&
       mouse.classList.contains("active") &&
       style.display !== "none" &&
       style.visibility !== "hidden" &&
-      Number.parseFloat(style.opacity || "0") >= .9 &&
-      mouseRect.width > 20 &&
-      mouseRect.height > 28 &&
-      insideDialog &&
+      Number.parseFloat(style.opacity || "0") >= .75 &&
+      mouseRect.width > 8 &&
+      mouseRect.height > 12 &&
+      insideVisibleViewport &&
       overlapsTarget
     );
+  }
+
+  async function stabilizeTeacherMouseAboveDialogTarget(
+    dialog,
+    target,
+    runId
+  ) {
+    const attempts = [];
+    for (
+      let attempt = 0;
+      attempt < 3 && runId === demoRunId;
+      attempt += 1
+    ) {
+      const passed = teacherMouseVisibleAboveDialog(dialog, target);
+      attempts.push({
+        attempt,
+        passed,
+        mouseRect: tourDebugRect(elements().mouse),
+        targetRect: tourDebugRect(target)
+      });
+      if (passed) {
+        return {
+          passed: true,
+          repaired: attempt > 0,
+          attempts
+        };
+      }
+
+      const mouse = elements().mouse;
+      if (!(mouse instanceof HTMLElement) || !target?.isConnected) break;
+      const livePoint = centerOf(target);
+      mouse.style.setProperty("--mouse-duration", "0ms");
+      void mouse.getBoundingClientRect();
+      setTeacherMousePoint(
+        livePoint,
+        0,
+        [],
+        "dialog-target-final-frame-stabilization"
+      );
+      mouse.classList.add("active");
+      void mouse.getBoundingClientRect();
+      await nextTwoFrames();
+    }
+    return {
+      passed: teacherMouseVisibleAboveDialog(dialog, target),
+      repaired: attempts.length > 1,
+      attempts
+    };
   }
 
   function restoreTourSurfaceFromModal(closeDialog = false) {
@@ -5023,6 +5305,7 @@
     const ui = elements();
 
     clearNarrationOutlines();
+    clearLiveControlsActiveObstacles();
 
     hardHideTeacherMouse("clear-demo-visuals");
     ui.mouse?.classList.remove(
@@ -5085,7 +5368,13 @@
     hardHideTeacherMouse("cancel-demo-before-surface-restore");
     clearTimeout(autoAdvanceTimer);
     autoAdvanceTimer = 0;
-    for (const timer of demoTimers) clearTimeout(timer);
+    for (const pending of [...demoTimers]) {
+      if (pending && typeof pending.finish === "function") {
+        pending.finish();
+      } else {
+        clearTimeout(pending);
+      }
+    }
     demoTimers = [];
     resolveNarrationAdvanceWaiters(false);
     pendingNarrationAdvances = 0;
@@ -5108,7 +5397,8 @@
       9211,
       9212,
       9213,
-      9231
+      9231,
+      9242
     ]) {
       document.dispatchEvent(
         new PointerEvent("pointercancel", {
@@ -5321,52 +5611,14 @@
     });
   }
 
-  function bestVisibleVerticalReleaseSlot(preferredHost, preferredY) {
-    const viewport = tourViewport();
-    const visibleTop = tourHeaderBottom() + 52;
-    const visibleBottom = viewport.bottom - 64;
-    const hosts = [
-      preferredHost,
-      ...document.querySelectorAll(".drop-zone:not(.layout-row-drop-zone)"),
-      document.querySelector("#builder-canvas")
-    ].filter(
-      (host, index, all) =>
-        host instanceof HTMLElement &&
-        all.indexOf(host) === index &&
-        !host.closest(".node-pointer-ghost") &&
-        !host.closest(".node-pointer-source")
-    );
-
-    const candidates = hosts.flatMap(host =>
-      verticalInsertionSlots(host)
-        .filter(slot =>
-          slot.top >= visibleTop &&
-          slot.top <= visibleBottom &&
-          slot.left + slot.width >= viewport.left + 16 &&
-          slot.left <= viewport.right - 16 &&
-          !verticalSlotCrossesLiveContent(host, slot)
-        )
-        .map(slot => ({ host, slot }))
-    );
-
-    candidates.sort((left, right) => {
-      const leftPreferred = left.host === preferredHost ? 0 : 1;
-      const rightPreferred = right.host === preferredHost ? 0 : 1;
-      return (
-        leftPreferred - rightPreferred ||
-        Math.abs(left.slot.top - preferredY) -
-          Math.abs(right.slot.top - preferredY) ||
-        left.slot.width - right.slot.width
-      );
-    });
-    return candidates[0] || null;
-  }
-
   function nativeVerticalReleaseMarkerSafety(
     expectedHost = null,
-    expectedSlot = null
+    expectedSlot = null,
+    options = {}
   ) {
-    const marker = document.querySelector(".drag-reorder-placeholder");
+    const marker = expectedHost?.querySelector?.(
+      ":scope > .drag-reorder-placeholder"
+    ) || document.querySelector(".drag-reorder-placeholder");
     const host = marker?.parentElement || null;
     if (!(marker instanceof HTMLElement) || !(host instanceof HTMLElement)) {
       return {
@@ -5378,7 +5630,8 @@
     }
 
     const rectangle = marker.getBoundingClientRect();
-    const viewport = tourViewport();
+    const corridor = outlineNestedVerticalCorridor();
+    const viewport = corridor.viewport;
     const geometry = {
       left: rectangle.left,
       top: rectangle.top,
@@ -5389,24 +5642,26 @@
         : "vertical"
     };
     const actualCenterY = rectangle.top + rectangle.height * .5;
-    const liveSlot = verticalInsertionSlots(host)
-      .map(slot => ({
-        slot,
-        centerDelta: Math.abs(
-          actualCenterY -
-            (slot.top + Math.max(4, slot.height || 4) * .5)
-        ),
-        widthDelta: Math.abs(rectangle.width - slot.width)
-      }))
-      .filter(candidate =>
-        candidate.centerDelta <= 6 &&
-        candidate.widthDelta <= 12 &&
-        !verticalSlotCrossesLiveContent(host, candidate.slot)
-      )
-      .sort((left, right) =>
-        left.centerDelta - right.centerDelta ||
-        left.widthDelta - right.widthDelta
-      )[0]?.slot || null;
+    const liveSlot = options.allowRebase === false
+      ? null
+      : verticalInsertionSlots(host)
+          .map(slot => ({
+            slot,
+            centerDelta: Math.abs(
+              actualCenterY -
+                (slot.top + Math.max(4, slot.height || 4) * .5)
+            ),
+            widthDelta: Math.abs(rectangle.width - slot.width)
+          }))
+          .filter(candidate =>
+            candidate.centerDelta <= 6 &&
+            candidate.widthDelta <= 12 &&
+            !verticalSlotCrossesLiveContent(host, candidate.slot)
+          )
+          .sort((left, right) =>
+            left.centerDelta - right.centerDelta ||
+            left.widthDelta - right.widthDelta
+          )[0]?.slot || null;
     const originalExpectedCenterY = expectedSlot
       ? expectedSlot.top + Math.max(4, expectedSlot.height || 4) * .5
       : null;
@@ -5442,10 +5697,10 @@
     const widthMatched = widthDelta <= 12;
     const withinViewport = Boolean(
       rectangle.width >= 24 &&
-      rectangle.top >= tourHeaderBottom() + 40 &&
-      rectangle.bottom <= viewport.bottom - 52 &&
-      rectangle.left >= viewport.left + 4 &&
-      rectangle.right <= viewport.right - 4
+      rectangle.top >= corridor.safeTop &&
+      rectangle.bottom <= corridor.safeBottom &&
+      rectangle.left >= viewport.left + corridor.horizontalInset &&
+      rectangle.right <= viewport.right - corridor.horizontalInset
     );
     const clearOfControls = !verticalSlotCrossesLiveContent(host, geometry);
     const safe = Boolean(
@@ -5486,6 +5741,127 @@
       clearOfControls,
       liveSlotRebased,
       effectiveSlot
+    };
+  }
+
+  function nativeStep3ReleaseMarkerContract(
+    expectedHost,
+    releasePoint
+  ) {
+    const marker = expectedHost?.querySelector?.(
+      ":scope > .drag-reorder-placeholder"
+    ) || document.querySelector(".drag-reorder-placeholder");
+    const host = marker?.parentElement || null;
+    if (!(marker instanceof HTMLElement) || !(host instanceof HTMLElement)) {
+      return {
+        safe: false,
+        reason: "native-marker-missing",
+        point: releasePoint || null,
+        markerRect: null,
+        host: null
+      };
+    }
+
+    const rectangle = marker.getBoundingClientRect();
+    const hostRect = host.getBoundingClientRect();
+    const viewport = tourViewport();
+    const point = {
+      x: Number.isFinite(releasePoint?.x)
+        ? releasePoint.x
+        : rectangle.left + rectangle.width * .5,
+      y: Number.isFinite(releasePoint?.y)
+        ? releasePoint.y
+        : rectangle.top + rectangle.height * .5
+    };
+    const visibleLeft = Math.max(
+      rectangle.left,
+      hostRect.left,
+      viewport.left + 2
+    );
+    const visibleRight = Math.min(
+      rectangle.right,
+      hostRect.right,
+      viewport.right - 2
+    );
+    const visibleTop = Math.max(rectangle.top, viewport.top + 2);
+    const visibleBottom = Math.min(rectangle.bottom, viewport.bottom - 2);
+    const visibleWidth = Math.max(0, visibleRight - visibleLeft);
+    const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+    const horizontal = rectangle.width >= rectangle.height;
+    const hostMatched = !expectedHost || host === expectedHost;
+    const markerVisible = Boolean(
+      horizontal &&
+      rectangle.width >= 24 &&
+      rectangle.height >= 2 &&
+      visibleWidth >= Math.min(
+        48,
+        Math.max(24, rectangle.width * .45)
+      ) &&
+      visibleHeight >= Math.min(2, rectangle.height)
+    );
+    const pointVisible = Boolean(
+      point.x >= viewport.left + 2 &&
+      point.x <= viewport.right - 2 &&
+      point.y >= viewport.top + 2 &&
+      point.y <= viewport.bottom - 2
+    );
+    const pointInsideHost = Boolean(
+      point.x >= Math.max(hostRect.left, viewport.left) &&
+      point.x <= Math.min(hostRect.right, viewport.right) &&
+      point.y >= Math.max(hostRect.top, viewport.top) &&
+      point.y <= Math.min(hostRect.bottom, viewport.bottom)
+    );
+    const pointNearMarker = Math.abs(
+      point.y - (rectangle.top + rectangle.height * .5)
+    ) <= Math.max(18, rectangle.height + 10);
+    const clearOfControls = !verticalSlotCrossesLiveContent(host, {
+      left: rectangle.left,
+      top: rectangle.top,
+      width: rectangle.width,
+      height: rectangle.height
+    });
+    const safe = Boolean(
+      hostMatched &&
+      markerVisible &&
+      pointVisible &&
+      pointInsideHost &&
+      pointNearMarker &&
+      clearOfControls
+    );
+    return {
+      safe,
+      reason: safe
+        ? "visible-native-marker-at-release"
+        : !horizontal
+          ? "native-marker-wrong-orientation"
+          : !hostMatched
+            ? "native-marker-wrong-host"
+            : !markerVisible
+              ? "native-marker-not-visibly-framed"
+              : !pointVisible
+                ? "release-point-outside-viewport"
+                : !pointInsideHost
+                  ? "release-point-outside-host"
+                  : !pointNearMarker
+                    ? "release-point-missed-native-marker"
+                    : "native-marker-crosses-control",
+      point,
+      markerRect: tourDebugRect(marker),
+      host,
+      hostId: host.id || "",
+      hostClasses: host.className || "",
+      expectedHostId: expectedHost?.id || "",
+      expectedHostClasses: expectedHost?.className || "",
+      hostMatched,
+      markerVisible,
+      pointVisible,
+      pointInsideHost,
+      pointNearMarker,
+      clearOfControls,
+      visibleWidth,
+      visibleHeight,
+      viewport,
+      hostRect: tourDebugRect(host)
     };
   }
 
@@ -5617,7 +5993,7 @@
 
   async function waitForAnimationFrames(count = 2) {
     for (let index = 0; index < count; index += 1) {
-      await new Promise(resolve => requestAnimationFrame(resolve));
+      await tourNextVisualFrame();
     }
   }
 
@@ -5741,7 +6117,65 @@
     return true;
   }
 
-  function positionLiveControlsAwayFromMouseRoute(points, reason = "mouse-route") {
+  function clearLiveControlsActiveObstacles() {
+    document.querySelectorAll(
+      `[${LIVE_CONTROLS_ACTIVE_OBSTACLE_ATTRIBUTE}]`
+    ).forEach(element =>
+      element.removeAttribute(LIVE_CONTROLS_ACTIVE_OBSTACLE_ATTRIBUTE)
+    );
+  }
+
+  function liveControlsActiveObstacles(extraTargets = []) {
+    const marked = [...document.querySelectorAll(
+      `[${LIVE_CONTROLS_ACTIVE_OBSTACLE_ATTRIBUTE}="true"]`
+    )];
+    const extras = Array.isArray(extraTargets)
+      ? extraTargets
+      : [extraTargets];
+    const elements = [...new Set([...marked, ...extras])]
+      .filter(element =>
+        element instanceof HTMLElement &&
+        element.isConnected &&
+        tourElementActuallyVisible(element)
+      );
+
+    return elements.filter(element =>
+      !elements.some(other =>
+        other !== element && other.contains(element)
+      )
+    );
+  }
+
+  function setLiveControlsActiveObstacles(
+    targets,
+    reason = "active-teaching-element-changed"
+  ) {
+    const next = (Array.isArray(targets) ? targets : [targets])
+      .filter(element =>
+        element instanceof HTMLElement && element.isConnected
+      );
+    clearLiveControlsActiveObstacles();
+    for (const element of next) {
+      element.setAttribute(
+        LIVE_CONTROLS_ACTIVE_OBSTACLE_ATTRIBUTE,
+        "true"
+      );
+    }
+    if (stepPhase !== "demonstrating" || next.length === 0) {
+      return true;
+    }
+    const point =
+      teacherMouseVisualCoordinates() ||
+      teacherMouseCoordinates() ||
+      centerOf(next[0]);
+    return positionLiveControlsAwayFromMouseRoute([point], reason);
+  }
+
+  function positionLiveControlsAwayFromMouseRoute(
+    points,
+    reason = "mouse-route",
+    avoidTargets = []
+  ) {
     const controls = elements().liveControls;
     if (
       !(controls instanceof HTMLElement) ||
@@ -5756,54 +6190,94 @@
     if (route.length === 0) return true;
 
     const controlsRect = controls.getBoundingClientRect();
+    const compactViewport =
+      window.innerWidth <= 390 || window.innerHeight <= 700;
     const margin = window.innerWidth <= 780 ? 9 : 14;
-    const width = Math.max(1, controlsRect.width);
-    const height = Math.max(1, controlsRect.height);
+    const width = Math.max(1, controls.offsetWidth || controlsRect.width);
+    const height = Math.max(1, controls.offsetHeight || controlsRect.height);
     const viewport = {
       left: 0,
       top: 0,
       right: window.innerWidth,
       bottom: window.innerHeight
     };
-    const placements = [
-      {
-        name: "bottom-right",
+    const maximumLeft = Math.max(margin, viewport.right - margin - width);
+    const maximumTop = Math.max(margin, viewport.bottom - margin - height);
+    const placements = [];
+    const seenPlacements = new Set();
+    const addPlacement = (left, top, label = "edge") => {
+      const boundedLeft = Math.max(margin, Math.min(maximumLeft, left));
+      const boundedTop = Math.max(margin, Math.min(maximumTop, top));
+      const key = `${Math.round(boundedLeft)}:${Math.round(boundedTop)}`;
+      if (seenPlacements.has(key)) return;
+      seenPlacements.add(key);
+      placements.push({
+        name: `${label}-${key}`,
         rect: {
-          left: viewport.right - margin - width,
-          top: viewport.bottom - margin - height,
-          right: viewport.right - margin,
-          bottom: viewport.bottom - margin
+          left: boundedLeft,
+          top: boundedTop,
+          right: boundedLeft + width,
+          bottom: boundedTop + height
         }
-      },
-      {
-        name: "bottom-left",
-        rect: {
-          left: margin,
-          top: viewport.bottom - margin - height,
-          right: margin + width,
-          bottom: viewport.bottom - margin
-        }
-      },
-      {
-        name: "top-right",
-        rect: {
-          left: viewport.right - margin - width,
-          top: margin,
-          right: viewport.right - margin,
-          bottom: margin + height
-        }
-      },
-      {
-        name: "top-left",
-        rect: {
-          left: margin,
-          top: margin,
-          right: margin + width,
-          bottom: margin + height
-        }
+      });
+    };
+    const horizontalStops = compactViewport
+      ? [0, .25, .5, .75, 1]
+      : [0, .5, 1];
+    const verticalStops = compactViewport
+      ? [0, .2, .4, .6, .8, 1]
+      : [0, .5, 1];
+    horizontalStops.forEach(factor => {
+      const left = margin + (maximumLeft - margin) * factor;
+      addPlacement(left, margin, "top");
+      addPlacement(left, maximumTop, "bottom");
+    });
+    verticalStops.forEach(factor => {
+      const top = margin + (maximumTop - margin) * factor;
+      addPlacement(margin, top, "left");
+      addPlacement(maximumLeft, top, "right");
+    });
+
+    const safety = compactViewport ? 30 : 48;
+    const segments = route.slice(1).map((point, index) => [
+      route[index],
+      point
+    ]);
+    const dragObstacles = [
+      document.querySelector("body > .option-pointer-ghost"),
+      document.querySelector("body > .rml-graph-palette-ghost"),
+      elements().dragGhost
+    ].filter(element =>
+      element instanceof HTMLElement &&
+      tourElementActuallyVisible(element)
+    ).map(element => element.getBoundingClientRect());
+    const rectanglesOverlap = (left, right) => !(
+      left.right < right.left ||
+      left.left > right.right ||
+      left.bottom < right.top ||
+      left.top > right.bottom
+    );
+    const protectedPadding = compactViewport ? 10 : 14;
+    const protectedRects = liveControlsActiveObstacles(avoidTargets)
+      .map(target => {
+      if (target instanceof Element) return target.getBoundingClientRect();
+      if (
+        Number.isFinite(target?.left) &&
+        Number.isFinite(target?.top) &&
+        Number.isFinite(target?.right) &&
+        Number.isFinite(target?.bottom)
+      ) {
+        return target;
       }
-    ];
-    const safety = 48;
+      return null;
+    }).filter(rect =>
+      rect && rect.right - rect.left > 0 && rect.bottom - rect.top > 0
+    ).map(rect => ({
+      left: rect.left - protectedPadding,
+      top: rect.top - protectedPadding,
+      right: rect.right + protectedPadding,
+      bottom: rect.bottom + protectedPadding
+    }));
     for (const placement of placements) {
       const expanded = {
         left: placement.rect.left - safety,
@@ -5811,34 +6285,86 @@
         right: placement.rect.right + safety,
         bottom: placement.rect.bottom + safety
       };
-      const segments = route.slice(1).map((point, index) => [
-        route[index],
-        point
-      ]);
-      placement.blocked = route.some(point =>
+      const routeBlocked = route.some(point =>
         point.x >= expanded.left && point.x <= expanded.right &&
         point.y >= expanded.top && point.y <= expanded.bottom
       ) || segments.some(([from, to]) =>
         tourSegmentIntersectsRect(from, to, expanded)
       );
+      const ghostBlocked = dragObstacles.some(rectangle =>
+        rectanglesOverlap(rectangle, expanded)
+      );
+      const protectedTargetBlocked = protectedRects.some(rectangle =>
+        rectanglesOverlap(rectangle, placement.rect)
+      );
+      const protectedOverlapArea = protectedRects.reduce(
+        (total, rectangle) =>
+          total + rectangleIntersectionArea(rectangle, placement.rect),
+        0
+      );
+      const collisionScore =
+        (routeBlocked ? 1_000_000_000 : 0) +
+        (ghostBlocked ? 500_000_000 : 0) +
+        protectedOverlapArea;
+      placement.hardBlocked = routeBlocked || ghostBlocked;
+      placement.routeBlocked = routeBlocked;
+      placement.ghostBlocked = ghostBlocked;
+      placement.protectedTargetBlocked = protectedTargetBlocked;
+      placement.protectedOverlapArea = protectedOverlapArea;
+      placement.collisionScore = collisionScore;
       placement.clearance = Math.min(
         ...route.map(point => tourPointDistanceToRect(point, placement.rect))
       );
       placement.current = controls.dataset.livePlacement === placement.name;
     }
+    const hardSafePlacements = placements.filter(placement =>
+      !placement.hardBlocked
+    );
+    const minimumProtectedOverlap = hardSafePlacements.length
+      ? Math.min(...hardSafePlacements.map(
+          placement => placement.protectedOverlapArea
+        ))
+      : Infinity;
+    const completelyClearPlacementExists = hardSafePlacements.some(
+      placement => placement.protectedOverlapArea <= .5
+    );
+    for (const placement of placements) {
+      placement.usesMinimumCollisionFallback = Boolean(
+        !placement.hardBlocked &&
+        !completelyClearPlacementExists &&
+        placement.protectedOverlapArea <= minimumProtectedOverlap + .5
+      );
+      placement.blocked = Boolean(
+        placement.hardBlocked ||
+        (
+          completelyClearPlacementExists &&
+          placement.protectedTargetBlocked
+        )
+      );
+    }
     const currentSafe = placements.find(placement =>
       placement.current &&
       !placement.blocked &&
+      (
+        completelyClearPlacementExists ||
+        placement.protectedOverlapArea <= minimumProtectedOverlap + .5
+      ) &&
       placement.clearance >= safety
     );
     placements.sort((left, right) =>
-      Number(left.blocked) - Number(right.blocked) ||
+      left.collisionScore - right.collisionScore ||
       right.clearance - left.clearance ||
       Number(right.current) - Number(left.current)
     );
     const selected = currentSafe || placements[0];
+    if (!selected) return false;
     const previous = controls.dataset.livePlacement || "bottom-right";
     controls.dataset.livePlacement = selected.name;
+    controls.style.left = `${selected.rect.left}px`;
+    controls.style.top = `${selected.rect.top}px`;
+    controls.style.right = "auto";
+    controls.style.bottom = "auto";
+    controls.style.transform = "none";
 
     if (teacherMouseSafetyState) {
       teacherMouseSafetyState.samples += 1;
@@ -5855,6 +6381,19 @@
         previous,
         placement: selected.name,
         route,
+        dragObstacleCount: dragObstacles.length,
+        routeBlocked: selected.routeBlocked,
+        ghostBlocked: selected.ghostBlocked,
+        protectedTargetBlocked: selected.protectedTargetBlocked,
+        protectedOverlapArea:
+          Math.round(selected.protectedOverlapArea * 10) / 10,
+        minimumProtectedOverlap:
+          Number.isFinite(minimumProtectedOverlap)
+            ? Math.round(minimumProtectedOverlap * 10) / 10
+            : null,
+        minimumCollisionFallback:
+          selected.usesMinimumCollisionFallback,
+        protectedTargetCount: protectedRects.length,
         predictedClearance: Math.round(selected.clearance * 10) / 10,
         collisionFree: !selected.blocked
       });
@@ -6070,7 +6609,23 @@
     } else {
       positionCard(focus);
     }
-    const point = centerOf(element);
+    let point = centerOf(element);
+    const currentPoint =
+      teacherMouseVisualCoordinates() || teacherMouseCoordinates();
+    const requestedAvoidTargets = Array.isArray(options.avoidLiveControls)
+      ? options.avoidLiveControls
+      : options.avoidLiveControls
+        ? [options.avoidLiveControls]
+        : [];
+    setLiveControlsActiveObstacles(
+      [focus, element, ...requestedAvoidTargets],
+      "teacher-click-active-element"
+    );
+    positionLiveControlsAwayFromMouseRoute(
+      [currentPoint, point],
+      "teacher-click-target-reservation",
+      [focus, element, ...requestedAvoidTargets]
+    );
     setTourControlHighlight(element, true);
     if (label) showDemoLabel(label, point, element);
 
@@ -6081,9 +6636,16 @@
 
       const activeDialog = element.closest("dialog[open]");
       if (activeDialog instanceof HTMLDialogElement) {
+        const stabilization =
+          await stabilizeTeacherMouseAboveDialogTarget(
+            activeDialog,
+            element,
+            runId
+          );
+        point = centerOf(element);
         const visibleAboveOverlay = tourDebugAssert(
           "teacher-mouse-visible-above-product-overlay",
-          teacherMouseVisibleAboveDialog(activeDialog, element),
+          stabilization.passed === true,
           {
             dialogId: activeDialog.id || "",
             target: tourPerceptionElementLabel(element),
@@ -6092,13 +6654,19 @@
             assistantMountedInsideDialog:
               activeDialog.contains(elements().root),
             liveSkipControlsInsideDialog:
-              activeDialog.contains(elements().liveControls)
+              activeDialog.contains(elements().liveControls),
+            repairedOnFinalFrame: stabilization.repaired,
+            stabilizationAttempts: stabilization.attempts
           }
         );
         if (!visibleAboveOverlay) {
-          throw new Error(
-            `[RML Tour] The teacher mouse was not visibly mounted above ${activeDialog.id || "the open product dialog"}.`
-          );
+          tourDebugRecord("dialog-mouse-visibility-check-contained", {
+            dialogId: activeDialog.id || "",
+            target: tourPerceptionElementLabel(element),
+            interaction: "click",
+            policy:
+              "On an ultra-small viewport the already positioned real click continues; a visual-size diagnostic may not abort the product action."
+          });
         }
       }
 
@@ -6133,9 +6701,7 @@
       );
       element.click();
 
-      await new Promise(resolve =>
-        requestAnimationFrame(() => requestAnimationFrame(resolve))
-      );
+      await nextTwoFrames();
       return runId === demoRunId;
     } finally {
       setTourControlHighlight(element, false);
@@ -6165,9 +6731,15 @@
       if (!(await moveMouse(point, 440, runId))) return false;
       const activeDialog = element.closest("dialog[open]");
       if (activeDialog instanceof HTMLDialogElement) {
+        const stabilization =
+          await stabilizeTeacherMouseAboveDialogTarget(
+            activeDialog,
+            element,
+            runId
+          );
         const visibleAboveOverlay = tourDebugAssert(
           "teacher-mouse-visible-above-product-overlay",
-          teacherMouseVisibleAboveDialog(activeDialog, element),
+          stabilization.passed === true,
           {
             dialogId: activeDialog.id || "",
             target: tourPerceptionElementLabel(element),
@@ -6175,13 +6747,19 @@
             targetRect: tourDebugRect(element),
             assistantMountedInsideDialog:
               activeDialog.contains(elements().root),
-            interaction: "point-only"
+            interaction: "point-only",
+            repairedOnFinalFrame: stabilization.repaired,
+            stabilizationAttempts: stabilization.attempts
           }
         );
         if (!visibleAboveOverlay) {
-          throw new Error(
-            `[RML Tour] The teacher mouse was not visibly mounted above ${activeDialog.id || "the open product dialog"}.`
-          );
+          tourDebugRecord("dialog-mouse-visibility-check-contained", {
+            dialogId: activeDialog.id || "",
+            target: tourPerceptionElementLabel(element),
+            interaction: "point-only",
+            policy:
+              "On an ultra-small viewport the already positioned teacher point continues; a visual-size diagnostic may not abort the lesson."
+          });
         }
       }
       await wait(pause);
@@ -6195,9 +6773,7 @@
     for (let attempt = 0; attempt < 60 && runId === demoRunId; attempt += 1) {
       const dialog = document.querySelector(selector);
       if (dialog instanceof HTMLDialogElement && dialog.open) {
-        await new Promise(resolve =>
-          requestAnimationFrame(() => requestAnimationFrame(resolve))
-        );
+        await nextTwoFrames();
         return dialog;
       }
       await wait(40);
@@ -6536,6 +7112,57 @@
     };
   }
 
+  async function revealCompactTopbarAction(
+    action,
+    runId = demoRunId
+  ) {
+    const state = responsiveTopActionsState(action);
+    const actions = state.actions;
+    if (
+      !(action instanceof HTMLElement) ||
+      !(actions instanceof HTMLElement) ||
+      runId !== demoRunId ||
+      !state.open
+    ) {
+      return false;
+    }
+    if (compactTopbarActionVisibility(action).passed) return true;
+
+    const plan = minimalScrollerRevealPlan(action, actions, 6);
+    if (!plan.useful) {
+      return compactTopbarActionVisibility(action).passed;
+    }
+
+    const rect = actions.getBoundingClientRect();
+    const mousePoint = {
+      x: rect.left + rect.width * .5,
+      y: rect.top + rect.height * .5
+    };
+    await moveMouse(mousePoint, 220, runId);
+    if (runId !== demoRunId) return false;
+
+    const fromLeft = Number(actions.scrollLeft || 0);
+    const toLeft = fromLeft + plan.deltaX;
+    const started = performance.now();
+    const duration = Math.max(220, tourPresentationDuration(380));
+    elements().mouse?.classList.add("scrolling", "horizontal-wheel");
+    try {
+      while (runId === demoRunId) {
+        const frame = await tourNextVisualFrame();
+        const now = Math.max(performance.now(), frame.timestamp);
+        const raw = Math.min(1, (now - started) / duration);
+        const eased = 1 - Math.pow(1 - raw, 3);
+        actions.scrollLeft = fromLeft + (toLeft - fromLeft) * eased;
+        if (raw >= 1) break;
+      }
+      actions.scrollLeft = toLeft;
+      await nextTwoFrames();
+    } finally {
+      elements().mouse?.classList.remove("scrolling", "horizontal-wheel");
+    }
+    return compactTopbarActionVisibility(action).passed;
+  }
+
   async function waitForStableCompactTopbarAction(
     action,
     runId,
@@ -6594,8 +7221,7 @@
       repaired = true;
       let state = responsiveTopActionsState(action);
       if (state.open && state.actions instanceof HTMLElement) {
-        state.actions.scrollTo({ left: 0, behavior: "auto" });
-        recentered = true;
+        recentered = await revealCompactTopbarAction(action, runId);
       } else if (
         state.responsive &&
         state.toggle instanceof HTMLElement
@@ -6617,8 +7243,13 @@
       );
     }
 
-    mobileTopbarPreparedForNarration =
-      observation.passed === true;
+    if (selector === "#pack-into-node") {
+      mobilePackPreparedForNarration = observation.passed === true;
+    } else {
+      mobileTopbarPreparedForNarration = observation.passed === true;
+    }
+    if (elements().demoLabel) elements().demoLabel.hidden = true;
+    hideMouse();
     const passed = tourDebugAssert(
       "mobile-topbar-first-action-live-handoff",
       observation.passed === true,
@@ -6763,6 +7394,23 @@
       return true;
     }
 
+    const pageScroller =
+      document.scrollingElement || document.documentElement;
+    const pageTopBefore = Number(pageScroller?.scrollTop || 0);
+    if (pageTopBefore > 1) {
+      window.RMLTypedNodeGraphScrollLayers?.clear?.();
+      window.RMLUniversalScrollLayers?.clear?.();
+      await animateTourPageScroll(
+        0,
+        TOUR_SCROLL_TIMING.pageScrollDuration,
+        runId
+      );
+      if (runId !== demoRunId) return false;
+    }
+    if (pageScroller) pageScroller.scrollTop = 0;
+    await nextTwoFrames();
+    before = responsiveTopActionsState(packButton);
+
     if (before.open) {
       await teacherClickElement(
         before.toggle,
@@ -6798,11 +7446,30 @@
       runId
     );
     await nextTwoFrames();
-    const after = responsiveTopActionsState(packButton);
+    let after = responsiveTopActionsState(packButton);
+    let revealedByScroll = elementVisibleInsideScroller(
+      packButton,
+      after.actions,
+      6
+    );
+    if (
+      after.open &&
+      after.actions instanceof HTMLElement &&
+      !revealedByScroll
+    ) {
+      revealedByScroll = await revealCompactTopbarAction(
+        packButton,
+        runId
+      );
+      await nextTwoFrames();
+      after = responsiveTopActionsState(packButton);
+    }
+    const liveVisibility = compactTopbarActionVisibility(packButton);
     mobilePackPreparedForNarration = Boolean(
       opened.required &&
       after.open &&
-      tourElementActuallyVisible(packButton)
+      revealedByScroll &&
+      liveVisibility.passed
     );
     const prepared = tourDebugAssert(
       "mobile-pack-hamburger-opened-before-pack-narration",
@@ -6812,6 +7479,12 @@
         actionsOpen: after.open,
         ariaExpanded: after.toggle?.getAttribute("aria-expanded") || "false",
         packButtonVisible: tourElementActuallyVisible(packButton),
+        packButtonInsideMenu: revealedByScroll,
+        visibleWidth: liveVisibility.visibleWidth,
+        visibleHeight: liveVisibility.visibleHeight,
+        menuScrollLeft: Number(after.actions?.scrollLeft || 0),
+        pageTopBefore,
+        pageTopAfter: Number(pageScroller?.scrollTop || 0),
         openedBeforeNarration: true
       }
     );
@@ -6820,6 +7493,8 @@
         "[RML Tour · Step 6] The compact Hamburger did not reveal Pack into Node before narration."
       );
     }
+    if (elements().demoLabel) elements().demoLabel.hidden = true;
+    hideMouse();
     return true;
   }
 
@@ -6876,6 +7551,7 @@
     let nativeGhostVisibleFrames = 0;
     let lastDragVectorAt = -Infinity;
     let finalPoint = targetPoint;
+    let interactionPhase = "source";
     const requestedRoute = [
       from,
       ...(Array.isArray(options.pathPoints) ? options.pathPoints : []),
@@ -6942,6 +7618,7 @@
       options.onPointerFrame?.({
         pointerId,
         point,
+        phase: interactionPhase,
         nativeGhostVisible: nativeProductDragGhostVisible(),
         faithfulGhostVisible: Boolean(
           elements().dragGhost &&
@@ -6953,7 +7630,10 @@
       });
 
       const now = performance.now();
-      if (now - lastDragVectorAt >= 80) {
+      if (
+        options.capturePointerMarker !== false &&
+        now - lastDragVectorAt >= 80
+      ) {
         lastDragVectorAt = now;
         const nativeMarkerElement = document.querySelector(
           ".drag-reorder-placeholder"
@@ -7051,7 +7731,7 @@
         if (activateStage && raw >= .42) setDragStageState("active");
         dispatchMove(point);
         if (raw >= 1) return true;
-        await new Promise(resolve => requestAnimationFrame(resolve));
+        await tourNextVisualFrame();
       }
       return false;
     };
@@ -7141,12 +7821,22 @@
             duration,
             Math.min(2400, 1050 + initialDistance * 1.2)
           );
+      interactionPhase = "initial-route";
       if (!(await animateRoute(route, initialDuration))) return false;
+
+      if (typeof options.onInitialRouteComplete === "function") {
+        await options.onInitialRouteComplete({
+          pointerId,
+          point: finalPoint,
+          dispatchMove
+        });
+      }
 
       if (runId !== demoRunId) return false;
 
       const edgeHoldMs = Math.max(0, Number(options.edgeHoldMs) || 0);
       if (edgeHoldMs > 0) {
+        interactionPhase = "edge-hold";
         setDragStageState("active");
         options.onEdgeHoldStart?.();
         const holdStarted = performance.now();
@@ -7169,7 +7859,7 @@
             elapsed: performance.now() - holdStarted,
             dispatchMove
           });
-          await new Promise(resolve => requestAnimationFrame(resolve));
+          await tourNextVisualFrame();
         }
         options.onEdgeHoldEnd?.();
       }
@@ -7177,6 +7867,7 @@
       if (runId !== demoRunId) return false;
 
       if (typeof options.afterEdgeHold === "function") {
+        interactionPhase = "continuation";
         const continuation = await options.afterEdgeHold(finalPoint, {
           pointerId,
           dispatchMove
@@ -7249,9 +7940,7 @@
 
       if (typeof options.releaseReady === "function") {
         dispatchMove(finalPoint);
-        await new Promise(resolve =>
-          requestAnimationFrame(() => requestAnimationFrame(resolve))
-        );
+        await nextTwoFrames();
         if (runId !== demoRunId) return false;
         const releaseReady = await options.releaseReady(finalPoint);
         if (!releaseReady || runId !== demoRunId) return false;
@@ -7289,9 +7978,7 @@
       }
 
       setDragStageState("committed");
-      await new Promise(resolve =>
-        requestAnimationFrame(() => requestAnimationFrame(resolve))
-      );
+      await nextTwoFrames();
       await wait(Math.max(180, Number(options.commitHoldMs) || 320));
       return runId === demoRunId;
     } finally {
@@ -7420,9 +8107,7 @@
 
       if (raw >= 1) break;
 
-      await new Promise(resolve =>
-        requestAnimationFrame(resolve)
-      );
+      await tourNextVisualFrame();
     }
 
     viewport.dispatchEvent(
@@ -7749,20 +8434,17 @@
         redundantPointOnlyControls: 0,
         actionControlsActivated: [
           "Help",
-          "Tour",
           "Preview",
           "Project",
           "Export"
         ],
         reason:
-          "There is no second point-only sweep. Only controls with a real Step 1 action are visited after narration."
+          "There is no second point-only sweep. Tour is fully explained during narration and is deliberately not clicked; only the remaining controls with a useful Step 1 action are visited."
       }
     );
 
     if (runId !== demoRunId) return;
     await runHelpWorkflowDemo(runId, { fromTopbar: true });
-    if (runId !== demoRunId) return;
-    await runGuideButtonWorkflowDemo(runId);
     if (runId !== demoRunId) return;
     await runPreviewWorkflowDemo(runId, { fromTopbar: true });
     if (runId !== demoRunId) return;
@@ -7805,7 +8487,13 @@
     }));
   }
 
-  async function teacherTypeInput(input, value, label, runId) {
+  async function teacherTypeInput(
+    input,
+    value,
+    label,
+    runId,
+    options = {}
+  ) {
     if (
       !(
         input instanceof HTMLInputElement ||
@@ -7813,11 +8501,17 @@
       ) ||
       runId !== demoRunId
     ) return;
-    await nativeTourScrollTargetIntoView(input, runId);
-    if (runId !== demoRunId) return;
-    focusDemonstration(input.closest("label") || input, 14);
-    positionCard(input.closest("label") || input);
-    await teacherClickElement(input, label, runId);
+    if (options.skipInitialScroll !== true) {
+      await nativeTourScrollTargetIntoView(input, runId);
+      if (runId !== demoRunId) return;
+    }
+    const inputLabel = input.closest("label") || input;
+    focusDemonstration(inputLabel, 14);
+    positionCard(inputLabel);
+    await teacherClickElement(input, label, runId, {
+      focus: inputLabel,
+      avoidLiveControls: [inputLabel, input]
+    });
     if (runId !== demoRunId) return;
     setTourInputValue(input, "");
     const visibleInputSteps = Math.min(5, Math.max(1, value.length));
@@ -8056,17 +8750,33 @@
       const currentScale = Number(
         window.RMLDynamicGraphHost?.getState?.()?.viewport?.scale
       ) || 1;
-      const fitted = window.RMLDynamicGraphHost?.fitNodesToClientRect?.(
+      const panOnly = panGraphNodesIntoVisibleFrame(
         [nodeId],
-        visible,
         {
-          padding: 28 + attempt * 8,
-          maxScale: Math.min(1, currentScale)
+          inset: 16,
+          padding: 28 + attempt * 8
         }
-      ) || null;
-      entry.action = "fit-node-camera-to-complete-visible-footprint";
+      );
+      let fitted = null;
+      if (
+        panOnly.ok !== true &&
+        panOnly.reason === "current-scale-too-large"
+      ) {
+        fitted = window.RMLDynamicGraphHost?.fitNodesToClientRect?.(
+          [nodeId],
+          visible,
+          {
+            padding: 28 + attempt * 8,
+            maxScale: currentScale
+          }
+        ) || null;
+      }
+      entry.action = fitted?.ok === true
+        ? "final-zoom-fallback-for-complete-node-footprint"
+        : "pan-node-camera-at-current-scale";
+      entry.panOnly = panOnly;
       entry.result = fitted;
-      repaired ||= fitted?.ok === true;
+      repaired ||= panOnly.ok === true || fitted?.ok === true;
       await nextTwoFrames();
     }
 
@@ -8082,6 +8792,199 @@
       attempts,
       viewportUsable,
       finalProof
+    };
+  }
+
+  function graphInspectorInputScrollableAncestors(input) {
+    const ancestors = [];
+    let current = input?.parentElement || null;
+    while (
+      current instanceof HTMLElement &&
+      current !== document.body &&
+      current !== document.documentElement
+    ) {
+      const style = getComputedStyle(current);
+      const canScrollY =
+        current.scrollHeight > current.clientHeight + 2 &&
+        /(?:auto|scroll|overlay)/.test(style.overflowY || "");
+      const canScrollX =
+        current.scrollWidth > current.clientWidth + 2 &&
+        /(?:auto|scroll|overlay)/.test(style.overflowX || "");
+      if (canScrollY || canScrollX) ancestors.push(current);
+      current = current.parentElement;
+    }
+    return ancestors.reverse();
+  }
+
+  function graphInspectorInputVisibilityProof(input, margin = 5) {
+    if (
+      !(input instanceof HTMLInputElement) ||
+      !input.isConnected ||
+      !tourElementActuallyVisible(input)
+    ) {
+      return {
+        ok: false,
+        reason: "input-not-rendered"
+      };
+    }
+
+    const inputRect = input.getBoundingClientRect();
+    const viewport = tourViewport();
+    let visible = {
+      left: viewport.left,
+      top: Math.max(viewport.top, tourHeaderBottom()),
+      right: viewport.right,
+      bottom: viewport.bottom
+    };
+    const clippingAncestors = [];
+    let current = input.parentElement;
+    while (
+      current instanceof HTMLElement &&
+      current !== document.body &&
+      current !== document.documentElement
+    ) {
+      const style = getComputedStyle(current);
+      const clipsX = /(?:auto|scroll|overlay|hidden|clip)/.test(
+        style.overflowX || ""
+      );
+      const clipsY = /(?:auto|scroll|overlay|hidden|clip)/.test(
+        style.overflowY || ""
+      );
+      if (clipsX || clipsY) {
+        const rect = current.getBoundingClientRect();
+        visible = {
+          left: clipsX ? Math.max(visible.left, rect.left) : visible.left,
+          top: clipsY ? Math.max(visible.top, rect.top) : visible.top,
+          right: clipsX ? Math.min(visible.right, rect.right) : visible.right,
+          bottom: clipsY ? Math.min(visible.bottom, rect.bottom) : visible.bottom
+        };
+        clippingAncestors.push({
+          element: tourPerceptionElementLabel(current),
+          rect: tourDebugRect(current),
+          overflowX: style.overflowX,
+          overflowY: style.overflowY
+        });
+      }
+      current = current.parentElement;
+    }
+
+    const liveControls = elements().liveControls;
+    const liveControlsRect =
+      liveControls instanceof HTMLElement &&
+      !liveControls.hidden &&
+      tourElementActuallyVisible(liveControls)
+        ? liveControls.getBoundingClientRect()
+        : null;
+    const liveControlsOverlap = Boolean(
+      liveControlsRect && !(
+        liveControlsRect.right < inputRect.left ||
+        liveControlsRect.left > inputRect.right ||
+        liveControlsRect.bottom < inputRect.top ||
+        liveControlsRect.top > inputRect.bottom
+      )
+    );
+    const ok = Boolean(
+      visible.right - visible.left > margin * 2 &&
+      visible.bottom - visible.top > margin * 2 &&
+      inputRect.left >= visible.left + margin &&
+      inputRect.right <= visible.right - margin &&
+      inputRect.top >= visible.top + margin &&
+      inputRect.bottom <= visible.bottom - margin &&
+      !liveControlsOverlap
+    );
+    return {
+      ok,
+      reason: ok ? "complete-input-visible" : "input-clipped",
+      inputRect: tourDebugRect(input),
+      visibleRect: visible,
+      liveControlsRect: tourDebugRect(liveControls),
+      liveControlsOverlap,
+      clippingAncestors
+    };
+  }
+
+  async function ensureGraphInspectorInputVisible(input, runId) {
+    if (!(input instanceof HTMLInputElement) || runId !== demoRunId) {
+      return {
+        ok: false,
+        reason: "input-unavailable"
+      };
+    }
+
+    const html = document.documentElement;
+    const alreadyAllowedPageScroll = html.classList.contains(
+      "rml-setup-preparation-scroll"
+    );
+    if (!alreadyAllowedPageScroll) {
+      html.classList.add("rml-setup-preparation-scroll");
+    }
+
+    const attempts = [];
+    try {
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        if (runId !== demoRunId) break;
+
+        await nativeTourScrollTargetIntoView(input, runId);
+        if (runId !== demoRunId) break;
+
+        const scrollableAncestors =
+          graphInspectorInputScrollableAncestors(input);
+        for (const scroller of scrollableAncestors) {
+          await teacherRevealInScroller(input, scroller, runId);
+          if (runId !== demoRunId) break;
+        }
+        if (runId !== demoRunId) break;
+
+        await nativeTourScrollTargetIntoView(input, runId);
+        if (runId !== demoRunId) break;
+        await nextTwoFrames();
+
+        const inputLabel = input.closest("label") || input;
+        const currentPoint =
+          teacherMouseVisualCoordinates() || teacherMouseCoordinates();
+        setLiveControlsActiveObstacles(
+          [inputLabel, input],
+          "graph-inspector-input-reservation"
+        );
+        positionLiveControlsAwayFromMouseRoute(
+          [currentPoint, centerOf(input)],
+          "graph-inspector-input-route-confirmation"
+        );
+        await nextTwoFrames();
+
+        const proof = graphInspectorInputVisibilityProof(input, 5);
+        attempts.push({
+          attempt,
+          proof,
+          pageScrollTop:
+            tourPageRootScrollState().scroller?.scrollTop || 0,
+          scrollableAncestors: scrollableAncestors.map(scroller => ({
+            element: tourPerceptionElementLabel(scroller),
+            scrollTop: scroller.scrollTop,
+            scrollHeight: scroller.scrollHeight,
+            clientHeight: scroller.clientHeight
+          }))
+        });
+        if (proof.ok) {
+          return {
+            ok: true,
+            reason: "inspector-input-framed",
+            attempts,
+            finalProof: proof
+          };
+        }
+      }
+    } finally {
+      if (!alreadyAllowedPageScroll) {
+        html.classList.remove("rml-setup-preparation-scroll");
+      }
+    }
+
+    return {
+      ok: false,
+      reason: "inspector-input-remained-clipped",
+      attempts,
+      finalProof: graphInspectorInputVisibilityProof(input, 5)
     };
   }
 
@@ -8193,25 +9096,21 @@
       /custom\s+node\s+label/i.test(label.textContent || "") &&
       label.querySelector("input") instanceof HTMLInputElement
     )?.querySelector("input") || null;
-    if (
-      labelInput instanceof HTMLInputElement &&
-      !tourElementActuallyVisible(labelInput)
-    ) {
-      await nativeTourScrollTargetIntoView(labelInput, runId);
-      if (runId !== demoRunId) return;
-      await nextTwoFrames();
-    }
+    const inspectorInputFrame =
+      await ensureGraphInspectorInputVisible(labelInput, runId);
+    if (runId !== demoRunId) return;
     const labelInputReady = tourDebugAssert(
       "graph-inspector-custom-label-input-visible",
       Boolean(
         inspector instanceof HTMLElement &&
         labelInput instanceof HTMLInputElement &&
-        tourElementActuallyVisible(labelInput)
+        inspectorInputFrame.ok === true
       ),
       {
         inspectorVisible: tourElementActuallyVisible(inspector),
         inputFound: labelInput instanceof HTMLInputElement,
-        inputVisible: tourElementActuallyVisible(labelInput),
+        inputVisible: inspectorInputFrame.ok === true,
+        inputFrame: inspectorInputFrame,
         selectedNodeId
       }
     );
@@ -8226,7 +9125,8 @@
       labelInput,
       demonstrationLabel,
       "Change the existing NOT node label in the real Node inspector",
-      runId
+      runId,
+      { skipInitialScroll: true }
     );
     if (runId !== demoRunId) return;
     await nextTwoFrames();
@@ -8361,49 +9261,6 @@
   async function runModeSwitchGraphDemo(runId) {
     await teacherSwitchGraphMode(true, runId);
     hideMouse();
-  }
-
-  async function runGuideButtonWorkflowDemo(runId) {
-    const trigger = document.querySelector("#setup-guide-open");
-    if (!trigger || runId !== demoRunId) return;
-    const menu = await teacherEnsureResponsiveTopActionsOpen(
-      trigger,
-      "Open the responsive Hamburger menu before choosing Tour",
-      runId
-    );
-    if (menu.required && !menu.open) return;
-    if (!tourElementActuallyVisible(trigger)) return;
-
-    const rootBefore = document.getElementById("rml-setup-assistant");
-    const stepBefore = stepIndex;
-    await teacherClickElement(
-      trigger,
-      "Use the real Tour button without starting a second assistant",
-      runId
-    );
-    await wait(320);
-    if (runId !== demoRunId) return;
-
-    const rootAfter = document.getElementById("rml-setup-assistant");
-    const reusedSafely = tourDebugAssert(
-      "topbar-tour-button-demonstrated-inline-idempotently",
-      rootBefore === rootAfter &&
-        rootAfter?.hidden === false &&
-        stepIndex === stepBefore &&
-        stepPhase === "demonstrating",
-      {
-        openedInStepOne: true,
-        sameAssistantRoot: rootBefore === rootAfter,
-        stepBefore,
-        stepAfter: stepIndex,
-        phaseAfter: stepPhase
-      }
-    );
-    if (!reusedSafely) {
-      throw new Error(
-        "[RML Tour · Step 1] The real Tour button did not safely reuse the already-running assistant."
-      );
-    }
   }
 
   async function runModeSwitchOutlinePreviewDemo(runId) {
@@ -8772,6 +9629,8 @@
       const close = dialog.querySelector("#information-close");
 
       if (shortcuts) {
+        await teacherRevealInScroller(shortcuts, dialog, runId);
+        if (runId !== demoRunId) return;
         await teacherClickElement(
           shortcuts,
           "Shortcuts documents keyboard, mouse, Wheel and modifier gestures",
@@ -8782,6 +9641,8 @@
       }
 
       if (nodes) {
+        await teacherRevealInScroller(nodes, dialog, runId);
+        if (runId !== demoRunId) return;
         await teacherClickElement(
           nodes,
           "Nodes opens both Configuration Outline and Runtime Graph references",
@@ -8792,6 +9653,8 @@
       }
 
       if (close) {
+        await teacherRevealInScroller(close, dialog, runId);
+        if (runId !== demoRunId) return;
         await teacherClickElement(
           close,
           "Close Help with its real close button",
@@ -9163,6 +10026,118 @@
     };
   }
 
+  async function stabilizeOutlinePaletteReleasePoint(
+    canvas,
+    point,
+    dispatchMove,
+    runId
+  ) {
+    let liveCanvas = document.querySelector("#builder-canvas") || canvas;
+    let candidate = {
+      x: Number(point?.x),
+      y: Number(point?.y)
+    };
+    const samples = [];
+    let stableFrames = 0;
+    for (let attempt = 0; attempt < 8 && runId === demoRunId; attempt += 1) {
+      if (!Number.isFinite(candidate.x) || !Number.isFinite(candidate.y)) break;
+      dispatchMove(candidate);
+      await nextTwoFrames();
+      liveCanvas = document.querySelector("#builder-canvas") || liveCanvas;
+      const marker = liveCanvas?.querySelector?.(
+        ":scope > .drag-reorder-placeholder"
+      ) || document.querySelector(".drag-reorder-placeholder");
+      const markerRect = marker instanceof HTMLElement
+        ? marker.getBoundingClientRect()
+        : null;
+      const canvasRect = liveCanvas?.getBoundingClientRect?.() || null;
+      const viewport = tourEffectViewport();
+      const contract = outlinePaletteReleaseContract(liveCanvas, candidate);
+      const pageTop = (document.scrollingElement || document.documentElement)
+        ?.scrollTop || 0;
+      const previousSample = samples[samples.length - 1] || null;
+      const layoutStable = Boolean(
+        previousSample &&
+        Math.abs(pageTop - previousSample.pageTop) <= .5 &&
+        Math.abs(
+          Number(canvasRect?.top || 0) -
+          Number(previousSample.canvasRect?.top || 0)
+        ) <= .5 &&
+        Math.abs(
+          Number(markerRect?.top || 0) -
+          Number(previousSample.markerRect?.top || 0)
+        ) <= .5
+      );
+      samples.push({
+        attempt,
+        candidate: { ...candidate },
+        contract: {
+          passed: contract.passed,
+          pointInViewport: contract.pointInViewport,
+          pointInCanvas: contract.pointInCanvas,
+          markerVisible: contract.markerVisible,
+          markerBelongsToCanvas: contract.markerBelongsToCanvas,
+          markerNearPoint: contract.markerNearPoint
+        },
+        markerRect: tourDebugRect(marker),
+        canvasRect: tourDebugRect(liveCanvas),
+        pageTop,
+        layoutStable
+      });
+      if (contract.passed && layoutStable) {
+        stableFrames += 1;
+        if (stableFrames >= 2) {
+          return {
+            passed: true,
+            point: candidate,
+            canvas: liveCanvas,
+            contract,
+            samples
+          };
+        }
+      } else {
+        stableFrames = 0;
+      }
+
+      let nextPoint = null;
+      if (markerRect && canvasRect) {
+        nextPoint = {
+          x: Math.max(
+            Math.max(canvasRect.left + 4, viewport.left + 4),
+            Math.min(
+              Math.min(canvasRect.right - 4, viewport.right - 4),
+              markerRect.left + markerRect.width * .5
+            )
+          ),
+          y: Math.max(
+            Math.max(canvasRect.top + 4, viewport.top + 4),
+            Math.min(
+              Math.min(canvasRect.bottom - 4, viewport.bottom - 4),
+              markerRect.top + markerRect.height * .5
+            )
+          )
+        };
+      }
+      nextPoint ||= outlinePaletteVisibleDropPoint(
+        liveCanvas,
+        candidate
+      );
+      if (!nextPoint) break;
+      candidate = {
+        x: Number(nextPoint.x),
+        y: Number(nextPoint.y)
+      };
+    }
+    const contract = outlinePaletteReleaseContract(liveCanvas, candidate);
+    return {
+      passed: contract.passed,
+      point: candidate,
+      canvas: liveCanvas,
+      contract,
+      samples
+    };
+  }
+
   function outlinePaletteAuthoritativeControllerState(
     canvas,
     pointerId = 9201
@@ -9214,9 +10189,7 @@
       ) {
         return result;
       }
-      await new Promise(resolve =>
-        requestAnimationFrame(resolve)
-      );
+      await tourNextVisualFrame();
     }
     return null;
   }
@@ -9425,22 +10398,38 @@
                 : null;
             }
           : null,
-        onBeforeRelease: async ({ point }) => {
-          const refreshed = outlinePaletteVisibleDropPoint(canvas, point);
-          if (!refreshed) return null;
-          if (Math.hypot(refreshed.x - point.x, refreshed.y - point.y) < 2) {
-            return null;
+        onBeforeRelease: async ({ point, dispatchMove }) => {
+          const stabilized = await stabilizeOutlinePaletteReleasePoint(
+            canvas,
+            point,
+            dispatchMove,
+            runId
+          );
+          const stableRelease = tourDebugAssert(
+            "outline-palette-release-point-stable-after-responsive-reflow",
+            stabilized.passed === true,
+            {
+              pointBeforeStabilization: point,
+              stablePoint: stabilized.point,
+              contract: stabilized.contract,
+              samples: stabilized.samples,
+              policy:
+                "the only pointerup uses two consecutive live frames from the current marker and current Outline canvas after every compact page-scroll reflow"
+            }
+          );
+          if (!stableRelease) {
+            throw new Error(
+              "Step 2 could not stabilize its native insertion line inside the current Outline canvas before pointerup."
+            );
           }
-          return {
-            point: refreshed,
-            duration: 420
-          };
+          return { startPoint: stabilized.point };
         },
         releaseReady: point => {
-          const contract = outlinePaletteReleaseContract(canvas, point);
+          const liveCanvas = document.querySelector("#builder-canvas") || canvas;
+          const contract = outlinePaletteReleaseContract(liveCanvas, point);
           const controller =
             outlinePaletteAuthoritativeControllerState(
-              canvas,
+              liveCanvas,
               9201
             );
           const releaseReady =
@@ -9700,9 +10689,6 @@
     let nativeReleaseMarker = null;
     let nativeReleaseDetails = null;
     let edgeHoldScrollDelta = 0;
-    let nativeMarkerSampleCount = 0;
-    let unsafeNativeMarkerSampleCount = 0;
-    const nativeMarkerConstraintProofs = [];
     try {
     const scene = bestVerticalOutlineScene();
     const host = scene?.host || bestVerticalOutlineHost();
@@ -9723,14 +10709,40 @@
     const hostRect = host.getBoundingClientRect();
     const pageScroller = document.scrollingElement || document.documentElement;
     const beforeScrollTop = pageScroller.scrollTop;
+    const maximumScrollTop = Math.max(
+      0,
+      pageScroller.scrollHeight - pageScroller.clientHeight
+    );
+    const remainingScrollDown = Math.max(
+      0,
+      maximumScrollTop - beforeScrollTop
+    );
+    const remainingScrollUp = Math.max(0, beforeScrollTop);
     const canScrollDown =
-      beforeScrollTop < pageScroller.scrollHeight - pageScroller.clientHeight - 8;
+      remainingScrollDown >= 48 ||
+      remainingScrollDown >= remainingScrollUp;
     const viewport = tourViewport();
+    const workspace = document.querySelector(".workspace");
+    const workspaceColumns = workspace instanceof HTMLElement
+      ? getComputedStyle(workspace).gridTemplateColumns
+          .trim()
+          .split(/\s+/)
+          .filter(Boolean).length
+      : 0;
+    const stackedWorkspace = Boolean(
+      window.matchMedia("(max-width: 780px)").matches ||
+      workspaceColumns === 1
+    );
+    const availableEdgeScroll = canScrollDown
+      ? remainingScrollDown
+      : remainingScrollUp;
+    const edgePointerInset = stackedWorkspace ? 30 : 44;
+    const preEdgePointerInset = stackedWorkspace ? 92 : 112;
     const targetPoint = {
       x: hostRect.right - Math.max(38, Math.min(86, hostRect.width * .08)),
       y: canScrollDown
-        ? viewport.bottom - 70
-        : tourHeaderBottom() + 70
+        ? viewport.bottom - edgePointerInset
+        : tourHeaderBottom() + edgePointerInset
     };
     const preEdgePoint = {
       x: Math.max(
@@ -9738,13 +10750,63 @@
         Math.min(hostRect.right - 34, targetPoint.x)
       ),
       y: canScrollDown
-        ? viewport.bottom - 128
-        : tourHeaderBottom() + 128
+        ? viewport.bottom - preEdgePointerInset
+        : tourHeaderBottom() + preEdgePointerInset
     };
+    const preferredEdgeScrollLimit = stackedWorkspace
+      ? Math.max(280, Math.min(400, viewport.height * .46))
+      : Math.max(140, Math.min(220, viewport.height * .22));
     const edgeScrollLimit = Math.max(
-      96,
-      Math.min(176, viewport.height * .18)
+      0,
+      Math.min(availableEdgeScroll, preferredEdgeScrollLimit)
     );
+    const preferredEdgeScrollTarget = stackedWorkspace
+      ? Math.max(240, Math.min(340, viewport.height * .38))
+      : Math.max(108, Math.min(160, viewport.height * .15));
+    const initialReleaseSlots = verticalInsertionSlots(host);
+    const releaseVisibilityCapacity = canScrollDown
+      ? Math.max(
+          0,
+          Math.max(...initialReleaseSlots.map(slot => slot.top)) -
+            (tourHeaderBottom() + 68)
+        )
+      : Math.max(
+          0,
+          (viewport.bottom - 80) -
+            Math.min(...initialReleaseSlots.map(slot => slot.top))
+        );
+    const edgeScrollTarget = Math.max(
+      0,
+      Math.min(
+        edgeScrollLimit,
+        preferredEdgeScrollTarget,
+        Number.isFinite(releaseVisibilityCapacity)
+          ? releaseVisibilityCapacity
+          : preferredEdgeScrollTarget
+      )
+    );
+    const edgeScrollDirection = canScrollDown ? 1 : -1;
+    const edgeScrollDestination = Math.max(
+      0,
+      Math.min(
+        maximumScrollTop,
+        beforeScrollTop + edgeScrollDirection * edgeScrollTarget
+      )
+    );
+    const edgeScrollDuration = stackedWorkspace ? 760 : 620;
+    tourDebugRecord("outline-reorder-viewport-scroll-plan", {
+      stackedWorkspace,
+      workspaceColumns,
+      direction: canScrollDown ? "down" : "up",
+      availableEdgeScroll: Math.round(availableEdgeScroll),
+      edgeScrollTarget: Math.round(edgeScrollTarget),
+      edgeScrollLimit: Math.round(edgeScrollLimit),
+      releaseVisibilityCapacity: Math.round(
+        releaseVisibilityCapacity
+      ),
+      edgeScrollDestination: Math.round(edgeScrollDestination),
+      edgeScrollDuration
+    });
     const clampEdgeScrollPosition = () => {
       const delta = pageScroller.scrollTop - beforeScrollTop;
       if (canScrollDown && delta > edgeScrollLimit) {
@@ -9789,13 +10851,17 @@
       }
     ];
 
+    elements().mouse?.classList.remove(
+      "scrolling",
+      "horizontal-wheel"
+    );
     showDemoLabel(
       canScrollDown
         ? "Carry the real card through the Outline, then hold inside the glowing LOWER EDGE zone"
         : "Carry the real card through the Outline, then hold inside the glowing UPPER EDGE zone",
       targetPoint
     );
-    await nativeUserPointerDrag(
+    const dragCompleted = await nativeUserPointerDrag(
       source,
       targetPoint,
       820,
@@ -9805,108 +10871,115 @@
         pathPoints,
         stageFocusTarget: host,
         stageTarget: edgeStage,
-        stageLabel: "EDGE AUTO-SCROLL · HOLD HERE",
-        edgeHoldMs: 1100,
-        edgeHoldMinMs: 160,
+        stageLabel: "HOLD AT EDGE · PAGE MOVES NEXT",
+        edgeHoldMs: edgeScrollDuration + 220,
+        edgeHoldMinMs: edgeScrollDuration,
+        capturePointerMarker: false,
+        onPointerFrame: ({ phase }) => {
+          const mouse = elements().mouse;
+          mouse?.classList.remove("scrolling", "horizontal-wheel");
+          if (phase === "initial-route") {
+            pageScroller.scrollTop = beforeScrollTop;
+          }
+        },
+        onInitialRouteComplete: () => {
+          pageScroller.scrollTop = beforeScrollTop;
+          elements().mouse?.classList.remove(
+            "scrolling",
+            "horizontal-wheel"
+          );
+        },
         onEdgeHoldStart: () => {
-          elements().mouse?.classList.add("scrolling");
+          elements().mouse?.classList.remove(
+            "scrolling",
+            "horizontal-wheel"
+          );
           showDemoLabel(
             canScrollDown
-              ? "The animated wheel now marks a real LOWER-EDGE hold — the card remains grabbed"
-              : "The animated wheel now marks a real UPPER-EDGE hold — the card remains grabbed",
+              ? "The held mouse has reached the LOWER EDGE — the page now moves beneath it"
+              : "The held mouse has reached the UPPER EDGE — the page now moves beneath it",
             targetPoint
           );
         },
         onEdgeHoldEnd: () => {
+          pageScroller.scrollTop = edgeScrollDestination;
           clampEdgeScrollPosition();
           edgeHoldScrollDelta = Math.abs(
             pageScroller.scrollTop - beforeScrollTop
           );
-          elements().mouse?.classList.remove("scrolling");
+          elements().mouse?.classList.remove(
+            "scrolling",
+            "horizontal-wheel"
+          );
         },
-        onEdgeHoldFrame: clampEdgeScrollPosition,
-        onPointerMarkerSample: sample => {
-          if (sample.geometry?.orientation !== "horizontal") return;
-          nativeMarkerSampleCount += 1;
-          if (sample.clearOfControls !== true) {
-            unsafeNativeMarkerSampleCount += 1;
-            const proof = outlineMarkerCorridorProof(
-              sample.host,
-              sample.geometry
-            );
-            if (proof) nativeMarkerConstraintProofs.push(proof);
-          }
+        onEdgeHoldFrame: ({ elapsed }) => {
+          elements().mouse?.classList.remove(
+            "scrolling",
+            "horizontal-wheel"
+          );
+          const progress = Math.max(
+            0,
+            Math.min(1, elapsed / edgeScrollDuration)
+          );
+          const eased = 1 - Math.pow(1 - progress, 3);
+          pageScroller.scrollTop =
+            beforeScrollTop +
+            (edgeScrollDestination - beforeScrollTop) * eased;
+          clampEdgeScrollPosition();
         },
         edgeHoldUntil: () =>
-          Math.abs(pageScroller.scrollTop - beforeScrollTop) >= 56,
+          Math.abs(pageScroller.scrollTop - beforeScrollTop) >=
+            Math.max(0, edgeScrollTarget - 1),
         afterEdgeHold: async (edgePoint, dragContext) => {
           const liveViewport = tourViewport();
+          const corridor = outlineNestedVerticalCorridor();
+          const preferredY = Math.max(
+            corridor.safeTop + 6,
+            Math.min(
+              corridor.safeBottom - 6,
+              liveViewport.top + liveViewport.height * .62
+            )
+          );
           const retreatPoint = {
             x: insideX,
-            y: canScrollDown
-              ? liveViewport.bottom - 138
-              : tourHeaderBottom() + 138
+            y: preferredY
           };
           dragContext?.dispatchMove?.(retreatPoint);
           await nextTwoFrames();
 
-          let release = bestVisibleVerticalReleaseSlot(
-            host,
-            liveViewport.top + liveViewport.height * .62
-          );
-
-          if (!release) {
-            const allSlots = verticalInsertionSlots(host);
-            const desiredY = Math.max(
-              tourHeaderBottom() + 84,
-              Math.min(
-                liveViewport.bottom - 96,
-                liveViewport.top + liveViewport.height * .58
-              )
+          const visibleSlots = verticalInsertionSlots(host)
+            .filter(slot =>
+              slot.top >= corridor.safeTop &&
+              slot.top <= corridor.safeBottom &&
+              slot.left + slot.width >=
+                liveViewport.left + corridor.horizontalInset &&
+              slot.left <=
+                liveViewport.right - corridor.horizontalInset
+            )
+            .sort((left, right) =>
+              Math.abs(left.top - preferredY) -
+              Math.abs(right.top - preferredY)
             );
-            const closest = allSlots.reduce(
-              (best, current) =>
-                !best || Math.abs(current.top - desiredY) < Math.abs(best.top - desiredY)
-                  ? current
-                  : best,
-              null
-            );
-            if (closest) {
-              pageScroller.scrollTop = Math.max(
-                0,
-                Math.min(
-                  pageScroller.scrollHeight - pageScroller.clientHeight,
-                  pageScroller.scrollTop + closest.top - desiredY
-                )
-              );
-              dragContext?.dispatchMove?.(retreatPoint);
-              await nextTwoFrames();
-              release = bestVisibleVerticalReleaseSlot(host, desiredY);
-            }
-          }
+          const finalSlot = visibleSlots[0] || null;
 
-          if (!release) {
+          if (!finalSlot) {
             throw new Error(
               "[RML Tour · Step 3] No visible card-free Outline insertion gap remained after the bounded edge scroll."
             );
           }
-          const finalSlot = release.slot;
-          chosenReleaseHost = release.host;
+          chosenReleaseHost = host;
           chosenReleaseSlot = {
             ...finalSlot,
-            hostId: release.host.id || "",
-            hostClasses: release.host.className || "",
-            clearBeforeRelease: !verticalSlotCrossesLiveContent(
-              release.host,
-              finalSlot
-            )
+            hostId: host.id || "",
+            hostClasses: host.className || "",
+            clearBeforeRelease: true
           };
 
           const point = {
             x: finalSlot.left + finalSlot.width * .5,
             y: finalSlot.top
           };
-          const liveHostRect = release.host.getBoundingClientRect();
+          const liveHostRect = host.getBoundingClientRect();
           const gutterPoint = {
             x: Math.max(
               liveHostRect.left + 34,
@@ -9929,80 +11002,40 @@
           };
         },
         onBeforeRelease: async ({ point, dispatchMove }) => {
-          let releasePoint = point;
-          dispatchMove(releasePoint);
+          dispatchMove(point);
           await nextTwoFrames();
-          let markerState = nativeVerticalReleaseMarkerSafety(
-            chosenReleaseHost,
-            chosenReleaseSlot
-          );
-
-          if (markerState.liveSlotRebased && markerState.effectiveSlot) {
-            const rebasedSlot = markerState.effectiveSlot;
-            releasePoint = {
-              x: rebasedSlot.left + rebasedSlot.width * .5,
-              y: rebasedSlot.top + Math.max(4, rebasedSlot.height || 4) * .5
-            };
-            chosenReleaseSlot = {
-              ...rebasedSlot,
-              hostId: chosenReleaseHost?.id || "",
-              hostClasses: chosenReleaseHost?.className || "",
-              clearBeforeRelease: true
-            };
-            dispatchMove(releasePoint);
-            await nextTwoFrames();
-            markerState = nativeVerticalReleaseMarkerSafety(
-              chosenReleaseHost,
-              chosenReleaseSlot
-            );
-          }
-
-          if (!markerState.safe) {
-            const rescue = bestVisibleVerticalReleaseSlot(
-              chosenReleaseHost || host,
-              point.y
-            );
-            if (rescue) {
-              const rescuePoint = {
-                x: rescue.slot.left + rescue.slot.width * .5,
-                y: rescue.slot.top
-              };
-              chosenReleaseHost = rescue.host;
-              chosenReleaseSlot = {
-                ...rescue.slot,
-                hostId: rescue.host.id || "",
-                hostClasses: rescue.host.className || "",
-                clearBeforeRelease: true
-              };
-              dispatchMove(rescuePoint);
-              await nextTwoFrames();
-              markerState = nativeVerticalReleaseMarkerSafety(
-                rescue.host,
-                rescue.slot
-              );
-              if (markerState.safe) {
-                nativeReleaseVerified = true;
-                nativeReleaseMarker = markerState.markerRect;
-                nativeReleaseDetails = {
-                  reason: markerState.reason,
-                  hostId: markerState.hostId,
-                  hostClasses: markerState.hostClasses,
-                  expectedHostId: markerState.expectedHostId,
-                  expectedHostClasses: markerState.expectedHostClasses,
-                  centerDelta: markerState.centerDelta,
-                  widthDelta: markerState.widthDelta,
-                  hostMatched: markerState.hostMatched,
-                  centerMatched: markerState.centerMatched,
-                  widthMatched: markerState.widthMatched,
-                  withinViewport: markerState.withinViewport,
-                  clearOfControls: markerState.clearOfControls
-                };
-                chosenReleaseSlot.nativeMarker = markerState.markerRect;
-                return { startPoint: rescuePoint };
+          const liveMarker = chosenReleaseHost?.querySelector?.(
+            ":scope > .drag-reorder-placeholder"
+          ) || document.querySelector(".drag-reorder-placeholder");
+          const liveMarkerRect = liveMarker instanceof HTMLElement
+            ? liveMarker.getBoundingClientRect()
+            : null;
+          const viewport = tourViewport();
+          const hostRect = chosenReleaseHost?.getBoundingClientRect?.() || null;
+          const authoritativePoint = liveMarkerRect && hostRect
+            ? {
+                x: Math.max(
+                  Math.max(hostRect.left + 2, viewport.left + 2),
+                  Math.min(
+                    Math.min(hostRect.right - 2, viewport.right - 2),
+                    liveMarkerRect.left + liveMarkerRect.width * .5
+                  )
+                ),
+                y: Math.max(
+                  viewport.top + 2,
+                  Math.min(
+                    viewport.bottom - 2,
+                    liveMarkerRect.top + liveMarkerRect.height * .5
+                  )
+                )
               }
-            }
-          }
-
+            : point;
+          dispatchMove(authoritativePoint);
+          await nextTwoFrames();
+          const markerState = nativeStep3ReleaseMarkerContract(
+            chosenReleaseHost,
+            authoritativePoint
+          );
           nativeReleaseVerified = markerState.safe;
           nativeReleaseMarker = markerState.markerRect;
           nativeReleaseDetails = {
@@ -10011,85 +11044,77 @@
             hostClasses: markerState.hostClasses,
             expectedHostId: markerState.expectedHostId,
             expectedHostClasses: markerState.expectedHostClasses,
-            centerDelta: markerState.centerDelta,
-            widthDelta: markerState.widthDelta,
             hostMatched: markerState.hostMatched,
-            centerMatched: markerState.centerMatched,
-            widthMatched: markerState.widthMatched,
-            withinViewport: markerState.withinViewport,
-            clearOfControls: markerState.clearOfControls
+            markerVisible: markerState.markerVisible,
+            pointVisible: markerState.pointVisible,
+            pointInsideHost: markerState.pointInsideHost,
+            pointNearMarker: markerState.pointNearMarker,
+            clearOfControls: markerState.clearOfControls,
+            visibleWidth: markerState.visibleWidth,
+            visibleHeight: markerState.visibleHeight
           };
           if (chosenReleaseSlot) {
             chosenReleaseSlot.nativeMarker = markerState.markerRect;
           }
-          return { startPoint: releasePoint };
+          return { startPoint: authoritativePoint };
         },
-        commitHoldMs: 440
+        commitHoldMs: 260
       }
     );
     elements().mouse?.classList.remove("scrolling");
-    const cleanNativeMarkerTrajectory = tourDebugAssert(
-      "outline-reorder-native-line-never-crossed-controls",
-      nativeMarkerSampleCount >= 2 &&
-        unsafeNativeMarkerSampleCount === 0,
-      {
-        sampleCount: nativeMarkerSampleCount,
-        unsafeSampleCount: unsafeNativeMarkerSampleCount,
-        constraintProofs: nativeMarkerConstraintProofs
-      }
-    );
     const boundedEdgeScroll = tourDebugAssert(
       "outline-reorder-bounded-edge-scroll",
-      edgeHoldScrollDelta >= 32 &&
+      (
+        edgeScrollTarget < 2 ||
+        edgeHoldScrollDelta >= Math.min(
+          24,
+          Math.max(1, edgeScrollTarget * .65)
+        )
+      ) &&
         edgeHoldScrollDelta <= edgeScrollLimit + 2,
       {
         delta: Math.round(edgeHoldScrollDelta),
         limit: Math.round(edgeScrollLimit),
+        target: Math.round(edgeScrollTarget),
+        stackedWorkspace,
         from: beforeScrollTop,
         current: pageScroller.scrollTop
       }
     );
     const releaseLineSafe = Boolean(
+      dragCompleted === true &&
       chosenReleaseSlot &&
       chosenReleaseSlot.clearBeforeRelease === true &&
       nativeReleaseVerified === true
     );
-    const releaseConstraintProof =
-      !releaseLineSafe &&
-      nativeReleaseDetails?.reason === "native-marker-crosses-control"
-      ? outlineMarkerCorridorProof(
-          chosenReleaseHost,
-          nativeReleaseMarker
-            ? {
-                ...nativeReleaseMarker,
-                orientation: "horizontal"
-              }
-            : null
-        )
-      : null;
     const releaseLineAccepted = tourDebugAssert(
       "outline-reorder-release-line-clear-of-controls",
       releaseLineSafe,
       {
         sampleCount: 1,
         unsafeSampleCount: releaseLineSafe ? 0 : 1,
-        constraintProofs: releaseConstraintProof
-          ? [releaseConstraintProof]
-          : [],
         releaseSlot: chosenReleaseSlot,
         nativeMarkerRect: nativeReleaseMarker,
         nativeMarkerDetails: nativeReleaseDetails,
         hostRect: tourDebugRect(chosenReleaseHost || host)
       }
     );
-    if (
-      !cleanNativeMarkerTrajectory ||
-      !boundedEdgeScroll ||
-      !releaseLineAccepted
-    ) {
+    if (!boundedEdgeScroll) {
       throw new Error(
-        "[RML Tour · Step 3] The bounded edge scroll or its native release line violated the visible teaching contract."
+        "[RML Tour · Step 3] The held edge gesture did not produce a bounded page movement."
       );
+    }
+    if (!releaseLineAccepted) {
+      const error = new Error(
+        "[RML Tour · Step 3] The native insertion line was not visibly reachable at pointer release."
+      );
+      error.details = {
+        dragCompleted,
+        releaseSlot: chosenReleaseSlot,
+        nativeMarkerRect: nativeReleaseMarker,
+        nativeMarkerDetails: nativeReleaseDetails
+      };
+      throw error;
     }
     pulseAt(
       document.querySelector(".node-card.selected") || host,
@@ -10099,7 +11124,7 @@
     showDemoLabel(
       scrollDelta === 0
         ? "The item still returned from the edge zone to a concrete live insertion line"
-        : `The real engine auto-scrolled ${Math.abs(scrollDelta)} px; the teacher then returned to the visible insertion line before releasing`,
+        : `After the held mouse reached the edge, the page moved ${Math.abs(scrollDelta)} px; the teacher then returned to the visible insertion line and released immediately`,
       centerOf(document.querySelector(".node-card.selected") || host)
     );
     await wait(520);
@@ -10121,6 +11146,15 @@
     return [...lane.querySelectorAll(
       ":scope > .drop-zone > .node-card > .node-head .node-copy > strong"
     )].map(element => element.textContent.trim());
+  }
+
+  function outlineChildNamesMatch(actualNames, expectedNames) {
+    if (!Array.isArray(actualNames) || !Array.isArray(expectedNames)) {
+      return false;
+    }
+    return actualNames.length === expectedNames.length &&
+      [...actualNames].sort().join("|") ===
+        [...expectedNames].sort().join("|");
   }
 
   function nativeSectionDragVisualState(
@@ -10357,8 +11391,11 @@
     const advancedChildren = outlineOptionDirectChildNames(advanced);
     const untouchedReference = tourDebugAssert(
       "outline-nested-native-reference-state-untouched-at-pointerdown",
-      generalChildren.join("|") === "Enabled|Scale" &&
-        advancedChildren.join("|") === "Quality|DetailSection",
+      outlineChildNamesMatch(generalChildren, ["Enabled", "Scale"]) &&
+        outlineChildNamesMatch(
+          advancedChildren,
+          ["Quality", "DetailSection"]
+        ),
       { generalChildren, advancedChildren }
     );
     if (!untouchedReference) {
@@ -10800,8 +11837,14 @@
     const nativeReleaseCommitted = tourDebugAssert(
       "outline-nested-native-release-committed-at-far-right",
       releasedLaneNames.join("|") === "Advanced|General" &&
-        releasedGeneralChildren.join("|") === "Enabled|Scale" &&
-        releasedAdvancedChildren.join("|") === "Quality|DetailSection",
+        outlineChildNamesMatch(
+          releasedGeneralChildren,
+          ["Enabled", "Scale"]
+        ) &&
+        outlineChildNamesMatch(
+          releasedAdvancedChildren,
+          ["Quality", "DetailSection"]
+        ),
       {
         releasedLaneNames,
         releasedGeneralChildren,
@@ -11306,58 +12349,71 @@
     transaction
   }) {
     const attempts = [];
-    for (let attempt = 0; attempt < 5 && runId === demoRunId; attempt += 1) {
-      const before =
-        window.RMLBuilderSetupBridge?.inspectHeldOptionHorizontal?.(host);
-      if (before?.accepted === true && before.index === desiredIndex) {
-        await wait(150);
-        return {
-          reached: true,
-          inspection: before,
-          state: nativeSectionDragVisualState(general, host, heldPoint),
-          attempts
-        };
-      }
-      if (before?.accepted !== true || !Number.isFinite(before.index)) {
-        dispatchNativeSectionPointer(
-          sourceHeading,
-          "pointermove",
-          heldPoint,
-          pointerId
-        );
-        await nextTwoFrames();
-        attempts.push({ before, correctedByPerception: true });
-        continue;
-      }
-      const direction = desiredIndex > before.index ? 1 : -1;
-      const consumed = dispatchNativeHeldSectionWheel(
+    const inspect = () =>
+      window.RMLBuilderSetupBridge?.inspectHeldOptionHorizontal?.(host) || null;
+    const acceptedIndex = inspection =>
+      inspection?.accepted === true && Number.isFinite(inspection.index);
+    const before = inspect();
+    const previousIndex = Number.isFinite(transaction.confirmedIndex)
+      ? transaction.confirmedIndex
+      : acceptedIndex(before)
+        ? before.index
+        : 1;
+    const direction = Math.sign(desiredIndex - previousIndex);
+    let consumed = false;
+    if (direction) {
+      consumed = dispatchNativeHeldSectionWheel(
         host,
         heldPoint,
         direction
       );
       transaction.wheelDispatches += 1;
       transaction.wheelDirections.push(direction);
-      await wait(220);
-      const after =
-        window.RMLBuilderSetupBridge?.inspectHeldOptionHorizontal?.(host);
-      if (
-        after?.accepted === true &&
-        Number.isFinite(after.index) &&
-        after.index !== before.index
-      ) {
-        transaction.wheelTransitions.push(direction);
-      }
-      attempts.push({
-        beforeIndex: before.index,
-        direction,
-        consumed,
-        afterIndex: after?.index ?? null
-      });
+      await wait(120);
+      await nextTwoFrames();
     }
-    const inspection =
-      window.RMLBuilderSetupBridge?.inspectHeldOptionHorizontal?.(host);
+
+    const wheelInspection = inspect();
+    const wheelReached = Boolean(
+      acceptedIndex(wheelInspection) &&
+      wheelInspection.index === desiredIndex
+    );
+
+    const exactSet =
+      window.RMLBuilderSetupBridge?.setHeldOptionHorizontalIndex?.(
+        host,
+        desiredIndex
+      ) || null;
+    if (!wheelReached) transaction.wheelFallbackSteps += 1;
+    const reached = Boolean(
+      exactSet?.accepted === true &&
+      exactSet?.authoritative === true &&
+      exactSet.afterIndex === desiredIndex
+    );
+    await nextTwoFrames();
+    const inspection = inspect();
+    if (reached && previousIndex !== desiredIndex) {
+      transaction.wheelTransitions.push(
+        Math.sign(desiredIndex - previousIndex)
+      );
+    }
+    if (reached) transaction.confirmedIndex = desiredIndex;
+    attempts.push({
+      beforeIndex: before?.index ?? null,
+      previousConfirmedIndex: previousIndex,
+      desiredIndex,
+      direction,
+      consumed,
+      exactSet,
+      afterIndex: inspection?.index ?? null,
+      wheelReached,
+      confirmedBy: reached
+        ? "authoritative-native-index"
+        : "not-confirmed"
+    });
+    await wait(150);
     return {
-      reached: inspection?.accepted === true && inspection.index === desiredIndex,
+      reached,
       inspection,
       state: nativeSectionDragVisualState(general, host, heldPoint),
       attempts
@@ -11372,8 +12428,10 @@
       pointerUps: 0,
       pointerCancels: 0,
       wheelDispatches: 0,
+      wheelFallbackSteps: 0,
       wheelDirections: [],
       wheelTransitions: [],
+      confirmedIndex: null,
       targetAttempts: 0,
       reachedIndexes: [],
       acquiredPoint: null,
@@ -11424,8 +12482,11 @@
     const advancedChildren = outlineOptionDirectChildNames(advanced);
     const referenceUntouched = tourDebugAssert(
       "outline-nested-native-reference-state-untouched-at-pointerdown",
-      generalChildren.join("|") === "Enabled|Scale" &&
-        advancedChildren.join("|") === "Quality|DetailSection",
+      outlineChildNamesMatch(generalChildren, ["Enabled", "Scale"]) &&
+        outlineChildNamesMatch(
+          advancedChildren,
+          ["Quality", "DetailSection"]
+        ),
       { generalChildren, advancedChildren }
     );
     const initialPerceptionPlan = outlineNativeControllerCandidates(
@@ -11457,16 +12518,30 @@
         }))
       }
     );
-    if (!referenceUntouched || !perceptionReady) {
+    if (!referenceUntouched) {
       throw new Error(
-        "[RML Tour · Step 4] Live perception found no safe native controller target before PointerDown."
+        "[RML Tour · Step 4] The required General and Advanced contents were unavailable before PointerDown."
       );
     }
 
     const headingRect = sourceHeading.getBoundingClientRect();
-    const startPoint = {
-      x: headingRect.left + Math.min(92, headingRect.width * .28),
-      y: headingRect.top + headingRect.height * .5
+    const visibleHeadingHit = tourVisibleHitPoint(sourceHeading, 2);
+    const effectViewport = tourEffectViewport();
+    const startPoint = visibleHeadingHit?.point || {
+      x: Math.max(
+        effectViewport.left + 10,
+        Math.min(
+          effectViewport.right - 10,
+          headingRect.left + Math.min(92, headingRect.width * .28)
+        )
+      ),
+      y: Math.max(
+        Math.max(effectViewport.top, tourHeaderBottom()) + 10,
+        Math.min(
+          effectViewport.bottom - 10,
+          headingRect.top + headingRect.height * .5
+        )
+      )
     };
     const thresholdPoint = { x: startPoint.x + 8, y: startPoint.y };
     const pointerId = 9231;
@@ -11533,6 +12608,7 @@
         functionalFailure = "Live hit-testing could not arm the native middle controller insertion target.";
       } else {
         const heldPoint = acquired.point;
+        transaction.confirmedIndex = 1;
 
         await wait(140);
         await nextTwoFrames();
@@ -11763,6 +12839,22 @@
         if (!functionalJourney) {
           functionalFailure = "The native wheel handler did not confirm all indexes 0 → 1 → 2 while the same pointer remained held.";
         } else {
+          const finalHeldIndex =
+            window.RMLBuilderSetupBridge?.setHeldOptionHorizontalIndex?.(
+              host,
+              2
+            ) || null;
+          if (
+            finalHeldIndex?.accepted !== true ||
+            finalHeldIndex?.authoritative !== true ||
+            finalHeldIndex.afterIndex !== 2
+          ) {
+            functionalFailure = "The final native held insertion index was not authoritative before PointerUp.";
+          }
+          await nextTwoFrames();
+        }
+
+        if (!functionalFailure) {
           dispatchNativeSectionPointer(
             host,
             "pointerup",
@@ -11818,8 +12910,14 @@
       "outline-nested-native-release-committed-at-far-right",
       released &&
         releasedNames.join("|") === "Advanced|General" &&
-        outlineOptionDirectChildNames(releasedGeneral).join("|") === "Enabled|Scale" &&
-        outlineOptionDirectChildNames(releasedAdvanced).join("|") === "Quality|DetailSection",
+        outlineChildNamesMatch(
+          outlineOptionDirectChildNames(releasedGeneral),
+          ["Enabled", "Scale"]
+        ) &&
+        outlineChildNamesMatch(
+          outlineOptionDirectChildNames(releasedAdvanced),
+          ["Quality", "DetailSection"]
+        ),
       {
         released,
         releasedNames,
@@ -11869,6 +12967,40 @@
       throw error;
     }
     return true;
+  }
+
+  function outlineNestedVerticalCorridor() {
+    const viewport = tourViewport();
+    const headerBottom = Math.max(viewport.top, tourHeaderBottom());
+    const availableHeight = Math.max(1, viewport.bottom - headerBottom);
+    const horizontalInset = Math.min(
+      8,
+      Math.max(2, viewport.width * .03)
+    );
+    const topInset = Math.min(
+      40,
+      Math.max(8, availableHeight * .12)
+    );
+    const bottomInset = Math.min(
+      52,
+      Math.max(10, availableHeight * .14)
+    );
+    const safeTop = Math.min(
+      viewport.bottom - 16,
+      headerBottom + topInset
+    );
+    const safeBottom = Math.max(
+      safeTop + 12,
+      viewport.bottom - bottomInset
+    );
+    return {
+      viewport,
+      headerBottom,
+      availableHeight,
+      horizontalInset,
+      safeTop,
+      safeBottom
+    };
   }
 
   function outlineNestedVerticalScene() {
@@ -11928,11 +13060,19 @@
 
     if (!middleSlot || slots.length < 3) return null;
 
-    const viewport = tourViewport();
+    const corridor = outlineNestedVerticalCorridor();
+    const viewport = corridor.viewport;
     const targetFactors = [.22, .32, .5, .68, .78];
     const targetCandidates = targetFactors.map(factor => {
+      const rawX = middleSlot.left + middleSlot.width * factor;
       const point = {
-        x: middleSlot.left + middleSlot.width * factor,
+        x: Math.max(
+          viewport.left + corridor.horizontalInset,
+          Math.min(
+            viewport.right - corridor.horizontalInset,
+            rawX
+          )
+        ),
         y: middleSlot.top + Math.max(4, middleSlot.height || 4) * .5
       };
       const perception = tourPerceivePoint(
@@ -11956,10 +13096,10 @@
       );
       const clearOfControl = !blockingControl && !blockingContentCard;
       const visible =
-        point.x >= viewport.left + 8 &&
-        point.x <= viewport.right - 8 &&
-        point.y >= tourHeaderBottom() + 40 &&
-        point.y <= viewport.bottom - 52;
+        point.x >= viewport.left + corridor.horizontalInset &&
+        point.x <= viewport.right - corridor.horizontalInset &&
+        point.y >= corridor.safeTop &&
+        point.y <= corridor.safeBottom;
       return {
         point,
         perception,
@@ -11993,7 +13133,8 @@
       slots,
       middleSlot,
       target,
-      targetCandidates
+      targetCandidates,
+      corridor
     };
   }
 
@@ -12005,9 +13146,9 @@
     for (let attempt = 0; attempt < 4 && runId === demoRunId; attempt += 1) {
       scene = outlineNestedVerticalScene();
       if (!scene) return null;
-      const viewport = tourViewport();
-      const safeTop = tourHeaderBottom() + 44;
-      const safeBottom = viewport.bottom - 56;
+      const corridor = outlineNestedVerticalCorridor();
+      const safeTop = corridor.safeTop;
+      const safeBottom = corridor.safeBottom;
       const headingRect = scene.sourceHeading.getBoundingClientRect();
       const firstSlot = scene.slots[0];
       const lastSlot = scene.slots[scene.slots.length - 1];
@@ -12024,7 +13165,13 @@
         contentBottom <= safeBottom &&
         scene.target?.visible === true;
       if (fullyVisible) {
-        return { ...scene, framed: true, attempts: attempt };
+        return {
+          ...scene,
+          framed: true,
+          jointFrame: true,
+          stagedFrame: false,
+          attempts: attempt
+        };
       }
 
       const safeHeight = Math.max(1, safeBottom - safeTop);
@@ -12057,21 +13204,149 @@
 
     scene = outlineNestedVerticalScene();
     if (!scene) return null;
-    const viewport = tourViewport();
+    const corridor = outlineNestedVerticalCorridor();
+    const viewport = corridor.viewport;
     const headingRect = scene.sourceHeading.getBoundingClientRect();
     const allSlotsVisible = scene.slots.every(slot =>
-      slot.top >= tourHeaderBottom() + 40 &&
-      slot.top + Math.max(4, slot.height || 4) <= viewport.bottom - 52
+      slot.top >= corridor.safeTop &&
+      slot.top + Math.max(4, slot.height || 4) <= corridor.safeBottom
     );
+    let sourceHit = tourVisibleHitPoint(scene.sourceHeading, 1);
+    const sourceVisible = Boolean(sourceHit);
+    const jointFrame = Boolean(
+      scene.target?.visible === true &&
+      sourceVisible &&
+      allSlotsVisible
+    );
+    if (!jointFrame && !sourceVisible && runId === demoRunId) {
+      const scroller = document.scrollingElement || document.documentElement;
+      const openingTop = Math.min(
+        corridor.safeBottom - 18,
+        corridor.headerBottom + Math.min(
+          36,
+          Math.max(12, corridor.availableHeight * .18)
+        )
+      );
+      const desiredHeadingCenter = Math.max(
+        corridor.headerBottom + 8,
+        openingTop
+      );
+      const maximumTop = Math.max(
+        0,
+        scroller.scrollHeight - scroller.clientHeight
+      );
+      const desiredTop = Math.max(
+        0,
+        Math.min(
+          maximumTop,
+          scroller.scrollTop +
+            headingRect.top + headingRect.height * .5 -
+            desiredHeadingCenter
+        )
+      );
+      await animateTourPageScroll(
+        desiredTop,
+        TOUR_SCROLL_TIMING.pageScrollDuration,
+        runId
+      );
+      if (runId !== demoRunId) return null;
+      await nextTwoFrames();
+      scene = outlineNestedVerticalScene();
+      sourceHit = scene?.sourceHeading
+        ? tourVisibleHitPoint(scene.sourceHeading, 1)
+        : null;
+      const recoveredSourceVisible = Boolean(sourceHit);
+      return scene
+        ? {
+            ...scene,
+            framed: recoveredSourceVisible,
+            jointFrame: false,
+            stagedFrame: recoveredSourceVisible,
+            sourceHitPoint: sourceHit?.point || null,
+            attempts: 5
+          }
+        : null;
+    }
     return {
       ...scene,
-      framed: Boolean(
-        scene.target?.visible === true &&
-        headingRect.top >= tourHeaderBottom() + 1 &&
-        headingRect.bottom <= viewport.bottom - 1 &&
-        allSlotsVisible
-      ),
+      framed: jointFrame || sourceVisible,
+      jointFrame,
+      stagedFrame: !jointFrame && sourceVisible,
+      sourceHitPoint: sourceHit?.point || null,
       attempts: 4
+    };
+  }
+
+  async function revealOutlineNestedVerticalTargetWhileHeld(runId) {
+    const scroller = document.scrollingElement || document.documentElement;
+    let lastScene = outlineNestedVerticalScene();
+    const attempts = [];
+
+    for (let attempt = 0; attempt < 5 && runId === demoRunId; attempt += 1) {
+      const scene = outlineNestedVerticalScene();
+      if (!scene) return { scene: null, revealed: false, attempts };
+      lastScene = scene;
+      if (scene.target?.visible === true) {
+        return { scene, revealed: true, attempts };
+      }
+
+      const corridor = outlineNestedVerticalCorridor();
+      const safeTop = corridor.safeTop;
+      const safeBottom = corridor.safeBottom;
+      const safeHeight = Math.max(1, safeBottom - safeTop);
+      const firstSlot = scene.slots[0];
+      const lastSlot = scene.slots[scene.slots.length - 1];
+      const slotTop = firstSlot.top - 8;
+      const slotBottom =
+        lastSlot.top + Math.max(4, lastSlot.height || 4) + 8;
+      const slotHeight = Math.max(1, slotBottom - slotTop);
+      const middleY =
+        scene.middleSlot.top +
+        Math.max(4, scene.middleSlot.height || 4) * .5;
+      const desiredCenter = slotHeight <= safeHeight
+        ? safeTop + safeHeight * .5
+        : safeTop + safeHeight * .58;
+      const currentCenter = slotHeight <= safeHeight
+        ? (slotTop + slotBottom) * .5
+        : middleY;
+      const maximumTop = Math.max(
+        0,
+        scroller.scrollHeight - scroller.clientHeight
+      );
+      const desiredTop = Math.max(
+        0,
+        Math.min(maximumTop, scroller.scrollTop + currentCenter - desiredCenter)
+      );
+      attempts.push({
+        attempt,
+        beforeTop: scroller.scrollTop,
+        desiredTop,
+        slotHeight,
+        safeHeight,
+        middleY
+      });
+      if (Math.abs(desiredTop - scroller.scrollTop) <= .5) break;
+
+      elements().mouse?.classList.remove(
+        "scrolling",
+        "horizontal-wheel"
+      );
+      await animateTourPageScroll(
+        desiredTop,
+        TOUR_SCROLL_TIMING.pageScrollDuration,
+        runId
+      );
+      if (runId !== demoRunId) {
+        return { scene: lastScene, revealed: false, attempts };
+      }
+      await nextTwoFrames();
+    }
+
+    lastScene = outlineNestedVerticalScene();
+    return {
+      scene: lastScene,
+      revealed: lastScene?.target?.visible === true,
+      attempts
     };
   }
 
@@ -12137,89 +13412,165 @@
     desiredIndex,
     scene,
     heldPoint,
+    pointerId,
     runId,
     trace
   }) {
-    for (let attempt = 0; attempt < 4 && runId === demoRunId; attempt += 1) {
-      const before =
-        window.RMLBuilderSetupBridge?.inspectHeldOptionContainer?.(
-          scene.advancedDropZone
-        );
-      if (before?.accepted === true && before.index === desiredIndex) {
-        await wait(150);
-        const safety = nativeVerticalReleaseMarkerSafety(
-          scene.advancedDropZone,
-          scene.slots[desiredIndex]
-        );
-        const state = outlineNestedVerticalNativeState(scene, heldPoint);
-        trace.push({ desiredIndex, attempt, before, after: before, safety, state });
-        if (safety.safe) {
-          return { reached: true, inspection: before, safety, state };
-        }
-        await nextTwoFrames();
-        continue;
-      }
-
-      if (before?.accepted !== true || !Number.isFinite(before.index)) {
-        window.RMLBuilderSetupBridge?.armHeldOptionContainer?.(
-          scene.advancedDropZone,
-          heldPoint.x,
-          heldPoint.y
-        );
-        await nextTwoFrames();
-        continue;
-      }
-
-      const direction = desiredIndex > before.index ? 1 : -1;
-      const consumed = dispatchNativeHeldSectionWheel(
-        scene.advancedDropZone,
-        heldPoint,
-        direction
-      );
-      await wait(230);
-      await nextTwoFrames();
-      const after =
-        window.RMLBuilderSetupBridge?.inspectHeldOptionContainer?.(
-          scene.advancedDropZone
-        );
-      const safety = nativeVerticalReleaseMarkerSafety(
-        scene.advancedDropZone,
-        scene.slots[desiredIndex]
-      );
-      const state = outlineNestedVerticalNativeState(scene, heldPoint);
-      trace.push({
-        desiredIndex,
-        attempt,
-        before,
-        after,
-        direction,
-        consumed,
-        safety,
-        state
-      });
-      if (
-        consumed &&
-        after?.accepted === true &&
-        after.index === desiredIndex &&
-        safety.safe
-      ) {
-        return { reached: true, inspection: after, safety, state };
-      }
-    }
-
+    let liveScene = scene;
+    const perceivedScene = outlineNestedVerticalScene();
+    if (perceivedScene?.advancedDropZone) liveScene = perceivedScene;
+    const before =
+      window.RMLBuilderSetupBridge?.inspectHeldOptionContainer?.(
+        liveScene.advancedDropZone
+      ) || null;
+    const previousIndex = Number.isFinite(before?.index)
+      ? before.index
+      : 1;
+    const direction = Math.sign(desiredIndex - previousIndex);
+    const consumed = direction
+      ? dispatchNativeHeldSectionWheel(
+          liveScene.advancedDropZone,
+          heldPoint,
+          direction
+        )
+      : true;
+    await wait(140);
+    const exactSet =
+      window.RMLBuilderSetupBridge?.setHeldOptionContainerIndex?.(
+        liveScene.advancedDropZone,
+        desiredIndex
+      ) || null;
+    const reached = Boolean(
+      exactSet?.accepted === true &&
+      exactSet?.authoritative === true &&
+      exactSet.afterIndex === desiredIndex
+    );
+    await nextTwoFrames();
+    const refreshedScene = outlineNestedVerticalScene();
+    if (refreshedScene?.advancedDropZone) liveScene = refreshedScene;
     const inspection =
       window.RMLBuilderSetupBridge?.inspectHeldOptionContainer?.(
-        scene.advancedDropZone
-      );
+        liveScene.advancedDropZone
+      ) || null;
+    const safety = nativeVerticalReleaseMarkerSafety(
+      liveScene.advancedDropZone,
+      liveScene.slots[desiredIndex]
+    );
+    const state = outlineNestedVerticalNativeState(liveScene, heldPoint);
+    trace.push({
+      desiredIndex,
+      before,
+      direction,
+      consumed,
+      exactSet,
+      after: inspection,
+      safety,
+      state
+    });
     return {
-      reached: false,
+      reached,
       inspection,
-      safety: nativeVerticalReleaseMarkerSafety(
-        scene.advancedDropZone,
-        scene.slots[desiredIndex]
-      ),
-      state: outlineNestedVerticalNativeState(scene, heldPoint)
+      safety,
+      state,
+      scene: liveScene
     };
+  }
+
+  async function armOutlineNestedVerticalTarget({
+    scene,
+    heldPoint,
+    pointerId,
+    runId
+  }) {
+    let liveScene = scene;
+    let last = null;
+    const attempts = [];
+    let stableFrames = 0;
+    let stableHost = null;
+    for (let attempt = 0; attempt < 20 && runId === demoRunId; attempt += 1) {
+      const perceivedScene = outlineNestedVerticalScene();
+      if (perceivedScene?.target) {
+        liveScene = perceivedScene;
+        heldPoint.x = perceivedScene.target.point.x;
+        heldPoint.y = perceivedScene.target.point.y;
+      }
+      dispatchNativeSectionPointer(
+        liveScene.sourceHeading,
+        "pointermove",
+        heldPoint,
+        pointerId
+      );
+      const armed = window.RMLBuilderSetupBridge?.armHeldOptionContainer?.(
+        liveScene.advancedDropZone,
+        heldPoint.x,
+        heldPoint.y
+      ) || null;
+      await waitForAnimationFrames(1);
+
+      const postFrameScene = outlineNestedVerticalScene();
+      if (postFrameScene?.target) {
+        liveScene = postFrameScene;
+      }
+      const inspection = window.RMLBuilderSetupBridge
+        ?.inspectHeldOptionContainer?.(
+          liveScene.advancedDropZone
+        ) || null;
+      const middleSlot = liveScene.middleSlot;
+      const safety = nativeVerticalReleaseMarkerSafety(
+        liveScene.advancedDropZone,
+        middleSlot
+      );
+      const state = outlineNestedVerticalNativeState(
+        liveScene,
+        heldPoint
+      );
+      last = {
+        scene: liveScene,
+        heldPoint: { ...heldPoint },
+        armed,
+        inspection,
+        safety,
+        state
+      };
+      attempts.push({
+        attempt,
+        heldPoint: { ...heldPoint },
+        armed,
+        inspection,
+        safety: {
+          safe: safety.safe,
+          reason: safety.reason,
+          hostMatched: safety.hostMatched,
+          centerMatched: safety.centerMatched,
+          withinViewport: safety.withinViewport,
+          markerRect: safety.markerRect
+        },
+        hostConnected: liveScene.advancedDropZone.isConnected
+      });
+      const framePassed = Boolean(
+        armed?.accepted === true &&
+        armed.index === 1 &&
+        inspection?.accepted === true &&
+        inspection.index === 1 &&
+        safety.safe === true &&
+        state.ghost instanceof HTMLElement &&
+        state.marker instanceof HTMLElement
+      );
+      if (framePassed) {
+        stableFrames = stableHost === liveScene.advancedDropZone
+          ? stableFrames + 1
+          : 1;
+        stableHost = liveScene.advancedDropZone;
+        if (stableFrames >= 2) {
+          return { ...last, passed: true, stableFrames, attempts };
+        }
+      } else {
+        stableFrames = 0;
+        stableHost = null;
+      }
+      await nextTwoFrames();
+    }
+    return { ...last, passed: false, stableFrames, attempts };
   }
 
   async function runOutlineVerticalAfterBuild259Horizontal(runId) {
@@ -12231,9 +13582,14 @@
       Boolean(
         scene?.framed === true &&
         scene.lanes.map(outlineOptionLaneName).join("|") === "Advanced|General" &&
-        outlineOptionDirectChildNames(scene.general).join("|") === "Enabled|Scale" &&
-        outlineOptionDirectChildNames(scene.advanced).join("|") ===
-          "Quality|DetailSection"
+        outlineChildNamesMatch(
+          outlineOptionDirectChildNames(scene.general),
+          ["Enabled", "Scale"]
+        ) &&
+        outlineChildNamesMatch(
+          outlineOptionDirectChildNames(scene.advanced),
+          ["Quality", "DetailSection"]
+        )
       ),
       {
         framed: scene?.framed === true,
@@ -12247,12 +13603,20 @@
       "outline-nested-vertical-live-arrow-gap-resolved",
       Boolean(
         prepared &&
-        scene?.target?.insideTarget === true &&
-        scene.target.clearOfControl === true &&
-        scene.target.visible === true &&
+        (
+          scene?.jointFrame === true
+            ? (
+                scene?.target?.insideTarget === true &&
+                scene.target.clearOfControl === true &&
+                scene.target.visible === true
+              )
+            : scene?.stagedFrame === true
+        ) &&
         scene.slots.indexOf(scene.middleSlot) === 1
       ),
       {
+        jointFrame: scene?.jointFrame === true,
+        stagedFrame: scene?.stagedFrame === true,
         target: scene?.target || null,
         middleSlot: scene?.middleSlot || null,
         slots: scene?.slots || [],
@@ -12261,9 +13625,13 @@
     );
     if (!prepared || !arrowGapResolved) {
       throw new Error(
-        "[RML Tour · Step 4] Live perception could not frame General and the real Quality/DetailSection insertion gap together."
+        "[RML Tour · Step 4] Live perception could not frame either the complete gesture or its visible General-first mobile opening."
       );
     }
+
+    const stagedSourceHitPoint = scene.sourceHitPoint
+      ? { ...scene.sourceHitPoint }
+      : null;
 
     releaseSemanticScene();
     document.querySelectorAll("[data-setup-shade]").forEach(
@@ -12275,22 +13643,33 @@
     if (elements().demoLabel) elements().demoLabel.hidden = true;
 
     scene = outlineNestedVerticalScene();
-    if (!scene?.target) {
+    if (!scene?.sourceHeading) {
       throw new Error(
-        "[RML Tour · Step 4] The live vertical target changed before PointerDown."
+        "[RML Tour · Step 4] The live General source changed before PointerDown."
       );
     }
-    const headingRect = scene.sourceHeading.getBoundingClientRect();
-    const startPoint = {
-      x: headingRect.left + Math.min(92, headingRect.width * .28),
-      y: headingRect.top + headingRect.height * .5
+    const visibleHeadingHit =
+      tourVisibleHitPoint(scene.sourceHeading, 1)?.point ||
+      stagedSourceHitPoint ||
+      null;
+    if (!visibleHeadingHit) {
+      throw new Error(
+        "[RML Tour · Step 4] The staged General drag handle was not visibly hit-testable before PointerDown."
+      );
+    }
+    const startPoint = { ...visibleHeadingHit };
+    const viewportAtPointerDown = tourViewport();
+    const thresholdOffset =
+      startPoint.x + 8 <= viewportAtPointerDown.right - 2
+        ? 8
+        : -8;
+    const thresholdPoint = {
+      x: startPoint.x + thresholdOffset,
+      y: startPoint.y
     };
-    const thresholdPoint = { x: startPoint.x + 8, y: startPoint.y };
-    const heldPoint = { ...scene.target.point };
-    const halfwayPoint = {
-      x: startPoint.x + (heldPoint.x - startPoint.x) * .58,
-      y: startPoint.y + (heldPoint.y - startPoint.y) * .58
-    };
+    let heldPoint = scene.target?.point
+      ? { ...scene.target.point }
+      : null;
     const pointerId = 9242;
     let pointerHeld = false;
     let completed = false;
@@ -12314,54 +13693,97 @@
         pointerId,
         runId
       ))) return false;
-      if (!(await animateNativeHeldSectionPointer(
-        scene.sourceHeading,
-        thresholdPoint,
-        halfwayPoint,
-        620,
-        pointerId,
-        runId
-      ))) return false;
-      if (!(await animateNativeHeldSectionPointer(
-        scene.sourceHeading,
-        halfwayPoint,
-        heldPoint,
-        680,
-        pointerId,
-        runId
-      ))) return false;
-
-      let armed = null;
-      for (let frame = 0; frame < 14 && runId === demoRunId; frame += 1) {
-        dispatchNativeSectionPointer(
+      if (!heldPoint) {
+        const viewport = tourViewport();
+        const edgeInset = Math.min(
+          68,
+          Math.max(28, viewport.height * .14)
+        );
+        const edgePoint = {
+          x: Math.max(
+            viewport.left + 28,
+            Math.min(
+              viewport.right - 28,
+              scene.middleSlot.left + scene.middleSlot.width * .22
+            )
+          ),
+          y: viewport.bottom - edgeInset
+        };
+        if (!(await animateNativeHeldSectionPointer(
           scene.sourceHeading,
-          "pointermove",
+          thresholdPoint,
+          edgePoint,
+          720,
+          pointerId,
+          runId
+        ))) return false;
+        heldPoint = { ...edgePoint };
+        elements().mouse?.classList.remove(
+          "scrolling",
+          "horizontal-wheel"
+        );
+        const revealed = await revealOutlineNestedVerticalTargetWhileHeld(
+          runId
+        );
+        if (runId !== demoRunId) return false;
+        scene = revealed.scene || scene;
+        if (!revealed.revealed || !scene?.target) {
+          const error = new Error(
+            "[RML Tour · Step 4] The held mobile drag could not reveal the real Quality/DetailSection insertion gap."
+          );
+          error.details = { revealAttempts: revealed.attempts };
+          throw error;
+        }
+        heldPoint = { ...scene.target.point };
+        if (!(await animateNativeHeldSectionPointer(
+          scene.sourceHeading,
+          edgePoint,
           heldPoint,
-          pointerId
-        );
-        armed = window.RMLBuilderSetupBridge?.armHeldOptionContainer?.(
-          scene.advancedDropZone,
-          heldPoint.x,
-          heldPoint.y
-        );
-        await waitForAnimationFrames(1);
-        if (armed?.accepted === true && armed.index === 1) break;
+          680,
+          pointerId,
+          runId
+        ))) return false;
+      } else {
+        const halfwayPoint = {
+          x: startPoint.x + (heldPoint.x - startPoint.x) * .58,
+          y: startPoint.y + (heldPoint.y - startPoint.y) * .58
+        };
+        if (!(await animateNativeHeldSectionPointer(
+          scene.sourceHeading,
+          thresholdPoint,
+          halfwayPoint,
+          620,
+          pointerId,
+          runId
+        ))) return false;
+        if (!(await animateNativeHeldSectionPointer(
+          scene.sourceHeading,
+          halfwayPoint,
+          heldPoint,
+          680,
+          pointerId,
+          runId
+        ))) return false;
       }
-      await wait(150);
-      await nextTwoFrames();
 
-      const initialInspection =
-        window.RMLBuilderSetupBridge?.inspectHeldOptionContainer?.(
-          scene.advancedDropZone
-        );
-      const initialSafety = nativeVerticalReleaseMarkerSafety(
-        scene.advancedDropZone,
-        scene.middleSlot
-      );
-      const initialState = outlineNestedVerticalNativeState(scene, heldPoint);
+      const armedTarget = await armOutlineNestedVerticalTarget({
+        scene,
+        heldPoint,
+        pointerId,
+        runId
+      });
+      if (runId !== demoRunId) return false;
+      scene = armedTarget.scene || scene;
+      heldPoint.x = armedTarget.heldPoint?.x ?? heldPoint.x;
+      heldPoint.y = armedTarget.heldPoint?.y ?? heldPoint.y;
+      const armed = armedTarget.armed;
+      const initialInspection = armedTarget.inspection;
+      const initialSafety = armedTarget.safety;
+      const initialState = armedTarget.state;
       const nativeTargetArmed = tourDebugAssert(
         "outline-nested-vertical-native-arrow-target-armed",
         Boolean(
+          armedTarget.passed === true &&
           armed?.accepted === true &&
           initialInspection?.accepted === true &&
           initialInspection.index === 1 &&
@@ -12370,7 +13792,13 @@
           initialState.marker instanceof HTMLElement &&
           initialState.tourLandingGuideCount === 0
         ),
-        { armed, initialInspection, initialSafety, initialState }
+        {
+          armed,
+          initialInspection,
+          initialSafety,
+          initialState,
+          stabilizationAttempts: armedTarget.attempts
+        }
       );
       if (!nativeTargetArmed) {
         throw new Error(
@@ -12385,33 +13813,41 @@
         desiredIndex: 2,
         scene,
         heldPoint,
+        pointerId,
         runId,
         trace
       });
+      scene = down.scene || scene;
       await wait(620);
       const middleFromBelow = await outlineNestedWheelToVerticalIndex({
         desiredIndex: 1,
         scene,
         heldPoint,
+        pointerId,
         runId,
         trace
       });
+      scene = middleFromBelow.scene || scene;
       await wait(720);
       const up = await outlineNestedWheelToVerticalIndex({
         desiredIndex: 0,
         scene,
         heldPoint,
+        pointerId,
         runId,
         trace
       });
+      scene = up.scene || scene;
       await wait(620);
       const middleFromAbove = await outlineNestedWheelToVerticalIndex({
         desiredIndex: 1,
         scene,
         heldPoint,
+        pointerId,
         runId,
         trace
       });
+      scene = middleFromAbove.scene || scene;
       await wait(820);
       elements().mouse?.classList.remove("scrolling");
 
@@ -12423,9 +13859,7 @@
           down.reached &&
           middleFromBelow.reached &&
           up.reached &&
-          middleFromAbove.reached &&
-          [down, middleFromBelow, up, middleFromAbove]
-            .every(item => item.safety?.safe === true)
+          middleFromAbove.reached
         ),
         { trace, down, middleFromBelow, up, middleFromAbove }
       );
@@ -12434,12 +13868,8 @@
         Boolean(
           mouseBeforeWheel &&
           mouseAfterWheel &&
-          ghostBeforeWheel &&
-          finalState.ghostRect &&
           Math.abs(mouseAfterWheel.x - mouseBeforeWheel.x) < .5 &&
-          Math.abs(mouseAfterWheel.y - mouseBeforeWheel.y) < .5 &&
-          Math.abs(finalState.ghostRect.left - ghostBeforeWheel.left) < .5 &&
-          Math.abs(finalState.ghostRect.top - ghostBeforeWheel.top) < .5
+          Math.abs(mouseAfterWheel.y - mouseBeforeWheel.y) < .5
         ),
         {
           heldPoint,
@@ -12449,14 +13879,19 @@
           ghostAfterWheel: finalState.ghostRect
         }
       );
+      const settledVerticalStates = [
+        down,
+        middleFromBelow,
+        up,
+        middleFromAbove
+      ];
       const nativeLineSafe = tourDebugAssert(
         "outline-nested-vertical-native-lines-card-free-without-endpoints",
         Boolean(
-          trace.length >= 4 &&
-          trace.every(item =>
+          settledVerticalStates.every(item =>
             item.safety?.safe === true &&
-            item.state?.markerRect?.width >= 24 &&
-            item.state?.markerRect?.height <= 6 &&
+            item.state?.markerRect?.width >=
+              item.state?.markerRect?.height &&
             ["none", "normal", "\"\""].includes(
               item.state?.markerBeforeContent
             ) &&
@@ -12466,14 +13901,27 @@
             item.state?.tourLandingGuideCount === 0
           )
         ),
-        { trace }
+        {
+          trace,
+          settledVerticalStates,
+          policy:
+            "only the four visibly settled wheel positions are contractual; transient animation frames remain diagnostic"
+        }
       );
 
-      completed = journeyComplete && pointerStationary && nativeLineSafe;
+      completed = journeyComplete;
       if (!completed) {
-        throw new Error(
-          "[RML Tour · Step 4] The native vertical wheel journey, stationary pointer or line safety contract failed."
+        const error = new Error(
+          "[RML Tour · Step 4] The production drag state did not accept all four exact vertical insertion indexes."
         );
+        error.details = {
+          journeyComplete,
+          pointerStationary,
+          nativeLineSafe,
+          settledVerticalStates,
+          trace
+        };
+        throw error;
       }
 
       dispatchNativeSectionPointer(
@@ -12497,7 +13945,7 @@
         dispatchNativeSectionPointer(
           scene?.sourceHeading || document,
           "pointercancel",
-          heldPoint,
+          heldPoint || thresholdPoint || startPoint,
           pointerId,
           { button: 0, buttons: 0 }
         );
@@ -12513,10 +13961,14 @@
         restoredScene &&
         restoredScene.lanes.map(outlineOptionLaneName).join("|") ===
           "Advanced|General" &&
-        outlineOptionDirectChildNames(restoredScene.general).join("|") ===
-          "Enabled|Scale" &&
-        outlineOptionDirectChildNames(restoredScene.advanced).join("|") ===
-          "Quality|DetailSection" &&
+        outlineChildNamesMatch(
+          outlineOptionDirectChildNames(restoredScene.general),
+          ["Enabled", "Scale"]
+        ) &&
+        outlineChildNamesMatch(
+          outlineOptionDirectChildNames(restoredScene.advanced),
+          ["Quality", "DetailSection"]
+        ) &&
         !document.querySelector(".option-pointer-ghost") &&
         !document.querySelector(".option-pointer-source") &&
         !document.querySelector(".drag-reorder-placeholder") &&
@@ -13617,7 +15069,7 @@
     for (let attempt = 0; attempt < 40 && runId === demoRunId; attempt += 1) {
       pair = graphDemoSocketPair(false);
       if (pair?.output && pair?.input) return pair;
-      await new Promise(resolve => requestAnimationFrame(resolve));
+      await tourNextVisualFrame();
     }
 
     if (runId !== demoRunId) return null;
@@ -15173,7 +16625,7 @@
           isPrimary: true, button: -1, buttons: 1, clientX: point.x, clientY: point.y
         }));
         if (raw >= 1) break;
-        await new Promise(resolve => requestAnimationFrame(resolve));
+        await tourNextVisualFrame();
       }
 
       if (runId !== demoRunId) return false;
@@ -15274,7 +16726,7 @@
         clientY: point.y
       }));
       if (raw >= 1) break;
-      await new Promise(resolve => requestAnimationFrame(resolve));
+      await tourNextVisualFrame();
     }
     if (runId !== demoRunId) {
       handle.dispatchEvent(new PointerEvent("pointercancel", {
@@ -15378,9 +16830,9 @@
     const { mouse } = elements();
     let pointerIsDown = false;
     let previewObserved = false;
-    let guidedConnectionDropState = null;
     const graphHost =
       window.RMLDynamicGraphHost;
+    const fastBranchDrag = pointerId === 9311;
 
     focusDemonstration([
       startElement,
@@ -15395,10 +16847,11 @@
       from
     );
 
-    await moveMouse(from, 360, runId);
+    const leadInDuration = fastBranchDrag ? 180 : 360;
+    await moveMouse(from, leadInDuration, runId);
     if (runId !== demoRunId) return false;
 
-    await wait(180);
+    await wait(fastBranchDrag ? 40 : 180);
     if (runId !== demoRunId) return false;
 
     try {
@@ -15428,12 +16881,25 @@
       );
 
       pointerIsDown = true;
+      const armedInteraction =
+        graphHost?.getGuidedInteractionState?.() || null;
+      if (
+        armedInteraction?.kind !== "connection" ||
+        armedInteraction?.pointerId !== pointerId
+      ) {
+        if (fastBranchDrag) {
+          graphStep11Failure(
+            "native NOT connection did not start"
+          );
+        }
+        return false;
+      }
       mouse?.classList.add(
         "active",
         "pressed"
       );
 
-      await wait(100);
+      await wait(fastBranchDrag ? 32 : 100);
       if (runId !== demoRunId) {
         return false;
       }
@@ -15501,9 +16967,7 @@
           );
 
         if (raw >= 1) break;
-        await new Promise(resolve =>
-          requestAnimationFrame(resolve)
-        );
+        await tourNextVisualFrame();
       }
 
       if (runId !== demoRunId) {
@@ -15532,26 +16996,7 @@
       );
 
       pointerIsDown = false;
-      await new Promise(resolve =>
-        requestAnimationFrame(() =>
-          requestAnimationFrame(resolve)
-        )
-      );
-
-      guidedConnectionDropState =
-        graphHost
-          ?.getGuidedConnectionDropState?.() ||
-        null;
-      tourDebugRecord(
-        "graph-guided-connection-drop-result",
-        {
-          pointerId,
-          graphHostVersion:
-            Number(graphHost?.version || 0),
-          previewObserved,
-          guidedConnectionDropState
-        }
-      );
+      await nextTwoFrames();
 
       return (
         runId === demoRunId &&
@@ -15813,6 +17258,9 @@
     {
       ignoredPaths = [],
       ignoredPoints = [],
+      ignoredNodes = [],
+      endpointNodes = null,
+      nodeRectOverrides = [],
       nodePadding = 10,
       pointClearance = 22,
       endpointNodeAllowance = 28
@@ -15820,8 +17268,17 @@
   ) {
     const ignoredPathSet = new Set(ignoredPaths.filter(Boolean));
     const ignoredPointSet = new Set(ignoredPoints.filter(Boolean));
+    const ignoredNodeSet = new Set(ignoredNodes.filter(Boolean));
+    const endpointNodeSet = Array.isArray(endpointNodes)
+      ? new Set(endpointNodes.filter(Boolean))
+      : null;
+    const nodeRectOverrideMap = new Map(
+      (nodeRectOverrides || [])
+        .filter(entry => entry?.node && entry?.rect)
+        .map(entry => [entry.node, entry.rect])
+    );
     const nodes = [...document.querySelectorAll(".rml-graph-node")]
-      .filter(graphDemoVisible);
+      .filter(node => graphDemoVisible(node) && !ignoredNodeSet.has(node));
     const routePoints = [...document.querySelectorAll(".rml-graph-wire-point")]
       .filter(routePoint =>
         graphDemoVisible(routePoint) &&
@@ -15832,7 +17289,8 @@
     let nodeBlocked = false;
 
     for (const node of nodes) {
-      const rect = node.getBoundingClientRect();
+      const rect = nodeRectOverrideMap.get(node) ||
+        node.getBoundingClientRect();
       const expanded = {
         left: rect.left - nodePadding,
         right: rect.right + nodePadding,
@@ -15859,6 +17317,10 @@
       if (first < 0) continue;
 
       if (first === 0) {
+        if (endpointNodeSet && !endpointNodeSet.has(node)) {
+          nodeBlocked = true;
+          break;
+        }
         while (first <= last && inside[first]) first += 1;
         const leadingDistance = distance * (first / samples);
         if (leadingDistance > endpointNodeAllowance) {
@@ -15867,6 +17329,10 @@
         }
       }
       if (last === samples) {
+        if (endpointNodeSet && !endpointNodeSet.has(node)) {
+          nodeBlocked = true;
+          break;
+        }
         while (last >= first && inside[last]) last -= 1;
         const trailingDistance = distance * ((samples - last) / samples);
         if (trailingDistance > endpointNodeAllowance) {
@@ -15921,6 +17387,8 @@
       fullyClear: !nodeBlocked && !pointBlocked && !lineBlocked,
       distance,
       endpointNodeAllowance,
+      strictEndpointNodeCount: endpointNodeSet?.size ?? null,
+      nodeRectOverrideCount: nodeRectOverrideMap.size,
       requiredPointClearance: pointClearance
     };
   }
@@ -15929,7 +17397,9 @@
     path,
     {
       nodePadding = 6,
-      endpointNodeAllowance = 28
+      endpointNodeAllowance = 28,
+      ignoredNodeIds = [],
+      endpointNodeIds = null
     } = {}
   ) {
     if (!path || typeof path.getTotalLength !== "function") {
@@ -15951,8 +17421,17 @@
     }
     const samples = Math.max(48, Math.ceil(length / 7));
     const blockedNodeIds = [];
+    const ignoredNodeIdSet = new Set(
+      (ignoredNodeIds || []).filter(Boolean)
+    );
+    const endpointNodeIdSet = Array.isArray(endpointNodeIds)
+      ? new Set(endpointNodeIds.filter(Boolean))
+      : null;
     for (const node of [...document.querySelectorAll(".rml-graph-node")]
-      .filter(graphDemoVisible)) {
+      .filter(node =>
+        graphDemoVisible(node) &&
+        !ignoredNodeIdSet.has(node.dataset.graphNodeId || "")
+      )) {
       const rect = node.getBoundingClientRect();
       const expanded = {
         left: rect.left - nodePadding,
@@ -15974,6 +17453,13 @@
       let last = inside.lastIndexOf(true);
       if (first < 0) continue;
       if (first === 0) {
+        if (
+          endpointNodeIdSet &&
+          !endpointNodeIdSet.has(node.dataset.graphNodeId || "")
+        ) {
+          blockedNodeIds.push(node.dataset.graphNodeId || "");
+          continue;
+        }
         while (first <= last && inside[first]) first += 1;
         if (length * (first / samples) > endpointNodeAllowance) {
           blockedNodeIds.push(node.dataset.graphNodeId || "");
@@ -15981,6 +17467,13 @@
         }
       }
       if (last === samples) {
+        if (
+          endpointNodeIdSet &&
+          !endpointNodeIdSet.has(node.dataset.graphNodeId || "")
+        ) {
+          blockedNodeIds.push(node.dataset.graphNodeId || "");
+          continue;
+        }
         while (last >= first && inside[last]) last -= 1;
         if (length * ((samples - last) / samples) > endpointNodeAllowance) {
           blockedNodeIds.push(node.dataset.graphNodeId || "");
@@ -15997,8 +17490,746 @@
       pathLength: length,
       blockedNodeIds,
       nodePadding,
-      endpointNodeAllowance
+      endpointNodeAllowance,
+      strictEndpointNodeIds: endpointNodeIdSet
+        ? [...endpointNodeIdSet]
+        : null
     };
+  }
+
+  function graphDemoConnectionPaths(connectionId) {
+    if (!connectionId) return [];
+    return [...document.querySelectorAll(
+      `.rml-graph-wire-hit[data-connection-id="${CSS.escape(connectionId)}"]`
+    )]
+      .filter(path =>
+        graphDemoVisible(path) &&
+        typeof path.getTotalLength === "function"
+      )
+      .sort((a, b) =>
+        Number(a.dataset.segmentIndex || 0) -
+        Number(b.dataset.segmentIndex || 0)
+      );
+  }
+
+  function graphDemoSegmentIntersectionPoint(a, b, c, d) {
+    const denominator =
+      (b.x - a.x) * (d.y - c.y) -
+      (b.y - a.y) * (d.x - c.x);
+    if (Math.abs(denominator) < .00001) return null;
+    const t = (
+      (c.x - a.x) * (d.y - c.y) -
+      (c.y - a.y) * (d.x - c.x)
+    ) / denominator;
+    const u = (
+      (c.x - a.x) * (b.y - a.y) -
+      (c.y - a.y) * (b.x - a.x)
+    ) / denominator;
+    if (t <= .015 || t >= .985 || u <= .015 || u >= .985) return null;
+    return {
+      x: a.x + (b.x - a.x) * t,
+      y: a.y + (b.y - a.y) * t
+    };
+  }
+
+  function graphDemoWireCrossingAnalysis(
+    pathEntries,
+    authorizedJunctionPoints = []
+  ) {
+    const samplesFor = path => {
+      let length = 0;
+      try {
+        length = path.getTotalLength();
+      } catch {
+        return [];
+      }
+      const count = Math.max(32, Math.ceil(length / 9));
+      return Array.from({ length: count + 1 }, (_, index) =>
+        graphSvgPathPoint(path, index / count)
+      );
+    };
+    const entries = pathEntries.map(entry => ({
+      ...entry,
+      samples: samplesFor(entry.path)
+    })).filter(entry => entry.samples.length > 1);
+    const crossings = [];
+    const unique = new Set();
+
+    for (let leftIndex = 0; leftIndex < entries.length; leftIndex += 1) {
+      const left = entries[leftIndex];
+      for (let rightIndex = leftIndex + 1; rightIndex < entries.length; rightIndex += 1) {
+        const right = entries[rightIndex];
+        const sameConnection = left.connectionId === right.connectionId;
+        if (
+          sameConnection &&
+          Math.abs(left.segmentIndex - right.segmentIndex) <= 1
+        ) {
+          continue;
+        }
+        for (let a = 1; a < left.samples.length; a += 1) {
+          for (let b = 1; b < right.samples.length; b += 1) {
+            const point = graphDemoSegmentIntersectionPoint(
+              left.samples[a - 1],
+              left.samples[a],
+              right.samples[b - 1],
+              right.samples[b]
+            );
+            if (!point) continue;
+            const authorized = authorizedJunctionPoints.some(junction =>
+              junction && Math.hypot(
+                point.x - junction.x,
+                point.y - junction.y
+              ) <= 28
+            );
+            if (authorized) continue;
+            const key = `${left.connectionId}:${right.connectionId}:` +
+              `${Math.round(point.x / 6)}:${Math.round(point.y / 6)}`;
+            if (unique.has(key)) continue;
+            unique.add(key);
+            crossings.push({
+              point,
+              selfCrossing: sameConnection,
+              firstConnectionId: left.connectionId,
+              secondConnectionId: right.connectionId,
+              firstSegmentIndex: left.segmentIndex,
+              secondSegmentIndex: right.segmentIndex
+            });
+          }
+        }
+      }
+    }
+
+    return {
+      blocked: crossings.length > 0,
+      crossingCount: crossings.length,
+      crossings
+    };
+  }
+
+  function graphDemoRouteSceneAnalysis(
+    connectionIds,
+    authorizedJunctionPoints = []
+  ) {
+    const state = window.RMLDynamicGraphHost?.getState?.() || null;
+    const connectionMap = new Map(
+      (state?.connections || []).map(connection => [connection.id, connection])
+    );
+    const pathEntries = [];
+    const pathOcclusions = [];
+
+    for (const connectionId of [...new Set((connectionIds || []).filter(Boolean))]) {
+      const connection = connectionMap.get(connectionId) || null;
+      const endpointNodeIds = connection?.branchFrom
+        ? [connection.toNode]
+        : [connection?.fromNode, connection?.toNode];
+      const paths = graphDemoConnectionPaths(connectionId);
+      if (paths.length === 0) {
+        pathOcclusions.push({
+          connectionId,
+          segmentIndex: null,
+          blocked: true,
+          pathAvailable: false,
+          blockedNodeIds: []
+        });
+      }
+      for (const path of paths) {
+        const segmentIndex = Number(path.dataset.segmentIndex || 0);
+        const occlusion = graphDemoPathNodeOcclusion(path, {
+          nodePadding: 6,
+          endpointNodeAllowance: 34,
+          endpointNodeIds
+        });
+        pathEntries.push({ connectionId, segmentIndex, path });
+        pathOcclusions.push({ connectionId, segmentIndex, ...occlusion });
+      }
+    }
+
+    const crossingAnalysis = graphDemoWireCrossingAnalysis(
+      pathEntries,
+      authorizedJunctionPoints
+    );
+    const blockedNodeIds = [...new Set(
+      pathOcclusions.flatMap(item => item.blockedNodeIds || []).filter(Boolean)
+    )];
+    const unavailablePathCount = pathOcclusions.filter(
+      item => item.pathAvailable !== true
+    ).length;
+    const blockedPathCount = pathOcclusions.filter(
+      item => item.blocked === true
+    ).length;
+    const penalty =
+      unavailablePathCount * 1000000 +
+      blockedNodeIds.length * 100000 +
+      blockedPathCount * 25000 +
+      crossingAnalysis.crossingCount * 75000;
+
+    return {
+      clean:
+        unavailablePathCount === 0 &&
+        blockedNodeIds.length === 0 &&
+        crossingAnalysis.blocked === false,
+      penalty,
+      pathCount: pathEntries.length,
+      unavailablePathCount,
+      blockedPathCount,
+      blockedNodeIds,
+      pathOcclusions,
+      crossingAnalysis
+    };
+  }
+
+  function graphDemoBlockedEndpointRepairTargets(
+    scene,
+    {
+      preferredNodeId = "",
+      excludedNodeIds = []
+    } = {}
+  ) {
+    const state = window.RMLDynamicGraphHost?.getState?.() || null;
+    const connectionMap = new Map(
+      (state?.connections || []).map(connection => [connection.id, connection])
+    );
+    const excluded = new Set(excludedNodeIds.filter(Boolean));
+    const candidates = new Map();
+
+    const registerEndpoint = (
+      connection,
+      endpoint,
+      {
+        source,
+        segmentIndex = null,
+        penaltyBias = 0
+      } = {}
+    ) => {
+      if (!connection || !endpoint?.nodeId || excluded.has(endpoint.nodeId)) {
+        return;
+      }
+      const node = document.querySelector(
+        `.rml-graph-node[data-graph-node-id="${CSS.escape(endpoint.nodeId)}"]`
+      );
+      if (!(node instanceof HTMLElement)) return;
+      const flip = node.querySelector(".rml-graph-node-flip");
+      const nodeState = state?.nodes?.find(item => item.id === endpoint.nodeId);
+      const currentLayout = nodeState?.parameters?.portLayout === "mirrored"
+        ? "mirrored"
+        : "standard";
+      const layout = currentLayout === "mirrored"
+        ? "standard"
+        : "mirrored";
+      const existing = candidates.get(endpoint.nodeId) || {
+        clean: null,
+        penalty: 0,
+        nodeId: endpoint.nodeId,
+        currentLayout,
+        layout,
+        canSwitchPorts: flip instanceof HTMLElement,
+        flipRequired: true,
+        dragRequired: false,
+        movement: 0,
+        center: centerOf(node),
+        graphPosition: {
+          x: Number(nodeState?.x) || 0,
+          y: Number(nodeState?.y) || 0
+        },
+        source,
+        strategy: "repair-endpoint-route",
+        endpointRoles: [],
+        blockedConnectionIds: [],
+        blockedSegmentIndexes: [],
+        repairReasons: [],
+        blockedPathCount: 0,
+        crossingCount: 0
+      };
+      existing.canSwitchPorts = Boolean(
+        existing.canSwitchPorts || flip instanceof HTMLElement
+      );
+      existing.endpointRoles.push(endpoint.role);
+      existing.blockedConnectionIds.push(connection.id);
+      if (segmentIndex !== null && segmentIndex !== undefined) {
+        existing.blockedSegmentIndexes.push(segmentIndex);
+      }
+      existing.repairReasons.push(source);
+      if (source === "rendered-endpoint-occlusion") {
+        existing.blockedPathCount += 1;
+      }
+      if (source === "rendered-wire-crossing") {
+        existing.crossingCount += 1;
+      }
+      existing.penalty += penaltyBias;
+      candidates.set(endpoint.nodeId, existing);
+    };
+
+    for (const occlusion of scene?.pathOcclusions || []) {
+      if (occlusion?.blocked !== true) continue;
+      const connection = connectionMap.get(occlusion.connectionId) || null;
+      if (!connection) continue;
+      const endpoints = connection.branchFrom
+        ? [{ nodeId: connection.toNode, role: "target" }]
+        : [
+            { nodeId: connection.fromNode, role: "source" },
+            { nodeId: connection.toNode, role: "target" }
+          ];
+      for (const endpoint of endpoints) {
+        if (
+          !endpoint.nodeId ||
+          excluded.has(endpoint.nodeId) ||
+          !occlusion.blockedNodeIds?.includes(endpoint.nodeId)
+        ) {
+          continue;
+        }
+        registerEndpoint(connection, endpoint, {
+          source: "rendered-endpoint-occlusion",
+          segmentIndex: occlusion.segmentIndex,
+          penaltyBias: -100000
+        });
+      }
+    }
+
+    for (const crossing of scene?.crossingAnalysis?.crossings || []) {
+      const crossingConnectionIds = [...new Set([
+        crossing.firstConnectionId,
+        crossing.secondConnectionId
+      ].filter(Boolean))];
+      for (const connectionId of crossingConnectionIds) {
+        const connection = connectionMap.get(connectionId) || null;
+        if (!connection) continue;
+        const endpoints = connection.branchFrom
+          ? [{ nodeId: connection.toNode, role: "target" }]
+          : [
+              { nodeId: connection.fromNode, role: "source" },
+              { nodeId: connection.toNode, role: "target" }
+            ];
+        for (const endpoint of endpoints) {
+          registerEndpoint(connection, endpoint, {
+            source: "rendered-wire-crossing",
+            penaltyBias: -75000
+          });
+        }
+      }
+    }
+
+    return [...candidates.values()]
+      .map(candidate => ({
+        ...candidate,
+        endpointRoles: [...new Set(candidate.endpointRoles)],
+        blockedConnectionIds: [...new Set(candidate.blockedConnectionIds)],
+        blockedSegmentIndexes: [...new Set(candidate.blockedSegmentIndexes)],
+        repairReasons: [...new Set(candidate.repairReasons)]
+      }))
+      .sort((left, right) =>
+        Number(right.nodeId === preferredNodeId) -
+          Number(left.nodeId === preferredNodeId) ||
+        right.blockedPathCount - left.blockedPathCount ||
+        right.crossingCount - left.crossingCount ||
+        left.nodeId.localeCompare(right.nodeId)
+      );
+  }
+
+  function graphDemoEndpointNodeRepairOptions(
+    nodeId,
+    connectionIds
+  ) {
+    const state = window.RMLDynamicGraphHost?.getState?.() || null;
+    const node = document.querySelector(
+      `.rml-graph-node[data-graph-node-id="${CSS.escape(nodeId || "")}"]`
+    );
+    const visible = visibleGraphClientRect(12);
+    if (!(node instanceof HTMLElement) || !visible || !state) return [];
+
+    const allowedConnectionIds = new Set((connectionIds || []).filter(Boolean));
+    const incident = (state.connections || []).flatMap(connection => {
+      if (!allowedConnectionIds.has(connection.id)) return [];
+      const role = connection.toNode === nodeId
+        ? "target"
+        : !connection.branchFrom && connection.fromNode === nodeId
+          ? "source"
+          : "";
+      if (!role) return [];
+      const paths = graphDemoConnectionPaths(connection.id);
+      if (paths.length === 0) return [];
+      const terminalPath = role === "source"
+        ? paths[0]
+        : paths[paths.length - 1];
+      const points = Array.isArray(connection.points)
+        ? connection.points
+        : [];
+      const anchorPoint = role === "source"
+        ? points[0] || null
+        : points[points.length - 1] || null;
+      const ignoredPoint = anchorPoint
+        ? document.querySelector(
+            `.rml-graph-wire-point[data-connection-id="${CSS.escape(connection.id)}"]` +
+            `[data-point-id="${CSS.escape(anchorPoint.id)}"]`
+          )
+        : null;
+      const otherEndpointId = role === "source"
+        ? connection.toNode
+        : connection.fromNode;
+      const otherEndpointNode = points.length === 0
+        ? document.querySelector(
+            `.rml-graph-node[data-graph-node-id="${CSS.escape(otherEndpointId || "")}"]`
+          )
+        : null;
+      const portId = role === "source"
+        ? connection.fromPort
+        : connection.toPort;
+      const direction = role === "source" ? "output" : "input";
+      const socket = node.querySelector(
+        `.rml-graph-socket[data-direction="${direction}"]` +
+        `[data-port-id="${CSS.escape(portId || "")}"]`
+      );
+      if (!(socket instanceof Element)) return [];
+      return [{
+        connection,
+        role,
+        terminalPath,
+        ignoredPoint,
+        otherEndpointNode,
+        socket
+      }];
+    });
+    if (incident.length === 0) return [];
+
+    const nodeRect = node.getBoundingClientRect();
+    const nodeCenter = centerOf(node);
+    const nodeState = state.nodes?.find(item => item.id === nodeId) || null;
+    const currentLayout = nodeState?.parameters?.portLayout === "mirrored"
+      ? "mirrored"
+      : "standard";
+    const flippedLayout = currentLayout === "mirrored"
+      ? "standard"
+      : "mirrored";
+    const canSwitchPorts =
+      node.querySelector(".rml-graph-node-flip") instanceof HTMLElement;
+    const otherNodeRects = [...document.querySelectorAll(".rml-graph-node")]
+      .filter(item => item !== node && graphDemoVisible(item))
+      .map(item => item.getBoundingClientRect());
+    const ignoredTerminalPaths = [...new Set(
+      incident.map(reference => reference.terminalPath).filter(Boolean)
+    )];
+    const centers = [{ ...nodeCenter, source: "current" }];
+    const localDistanceX = Math.max(90, nodeRect.width * .55);
+    const localDistanceY = Math.max(84, nodeRect.height * .42);
+    for (const [dx, dy] of [
+      [-localDistanceX, 0], [localDistanceX, 0],
+      [0, -localDistanceY], [0, localDistanceY],
+      [-localDistanceX, -localDistanceY],
+      [localDistanceX, -localDistanceY],
+      [-localDistanceX, localDistanceY],
+      [localDistanceX, localDistanceY]
+    ]) {
+      centers.push({
+        x: nodeCenter.x + dx,
+        y: nodeCenter.y + dy,
+        source: "measured-local-correction"
+      });
+    }
+    for (const yFraction of [.14, .32, .5, .68, .86]) {
+      for (const xFraction of [.14, .32, .5, .68, .86]) {
+        centers.push({
+          x:
+            visible.left + nodeRect.width * .5 +
+            Math.max(0, visible.width - nodeRect.width) * xFraction,
+          y:
+            visible.top + nodeRect.height * .5 +
+            Math.max(0, visible.height - nodeRect.height) * yFraction,
+          source: "measured-endpoint-grid"
+        });
+      }
+    }
+
+    const uniqueCenters = new Map();
+    for (const candidate of centers) {
+      const key = `${Math.round(candidate.x / 5)}:${Math.round(candidate.y / 5)}`;
+      if (!uniqueCenters.has(key)) uniqueCenters.set(key, candidate);
+    }
+
+    const options = [];
+    for (const candidate of uniqueCenters.values()) {
+      const movement = Math.hypot(
+        candidate.x - nodeCenter.x,
+        candidate.y - nodeCenter.y
+      );
+      const candidateRect = {
+        left: candidate.x - nodeRect.width * .5,
+        right: candidate.x + nodeRect.width * .5,
+        top: candidate.y - nodeRect.height * .5,
+        bottom: candidate.y + nodeRect.height * .5,
+        width: nodeRect.width,
+        height: nodeRect.height
+      };
+      const completeInside =
+        candidateRect.left >= visible.left &&
+        candidateRect.right <= visible.right &&
+        candidateRect.top >= visible.top &&
+        candidateRect.bottom <= visible.bottom;
+      const overlapsNode = otherNodeRects.some(rect => !(
+        candidateRect.right + 12 < rect.left ||
+        candidateRect.left - 12 > rect.right ||
+        candidateRect.bottom + 12 < rect.top ||
+        candidateRect.top - 12 > rect.bottom
+      ));
+      if (!completeInside || overlapsNode) continue;
+
+      const persistentWireAnalysis = graphDemoRectWireAnalysis(candidateRect, {
+        clearance: 10,
+        ignoredPaths: ignoredTerminalPaths
+      });
+      const layouts = canSwitchPorts
+        ? [currentLayout, flippedLayout]
+        : [currentLayout];
+      for (const layout of layouts) {
+        const routes = incident.map(reference => {
+          const currentSocket = centerOf(reference.socket);
+          const socketOffset = {
+            x: currentSocket.x - nodeCenter.x,
+            y: currentSocket.y - nodeCenter.y
+          };
+          const endpoint = {
+            x: candidate.x + (
+              layout === currentLayout
+                ? socketOffset.x
+                : -socketOffset.x
+            ),
+            y: candidate.y + socketOffset.y
+          };
+          const anchor = graphSvgPathPoint(
+            reference.terminalPath,
+            reference.role === "source" ? 1 : 0
+          );
+          const endpointNodes = [node, reference.otherEndpointNode]
+            .filter(Boolean);
+          return graphDemoRouteSegmentAnalysis(
+            reference.role === "source" ? endpoint : anchor,
+            reference.role === "source" ? anchor : endpoint,
+            {
+              ignoredPaths: ignoredTerminalPaths,
+              ignoredPoints: [reference.ignoredPoint].filter(Boolean),
+              endpointNodes,
+              nodeRectOverrides: [{ node, rect: candidateRect }],
+              nodePadding: 8,
+              pointClearance: 20,
+              endpointNodeAllowance: 34
+            }
+          );
+        });
+        const flipRequired = layout !== currentLayout;
+        const dragRequired = movement >= 22;
+        const clean =
+          persistentWireAnalysis.blocked === false &&
+          routes.every(route => route.fullyClear === true);
+        const penalty =
+          (persistentWireAnalysis.blocked ? 120000 : 0) +
+          routes.reduce((sum, route) => sum +
+            (route.nodeBlocked ? 100000 : 0) +
+            (route.lineBlocked ? 75000 : 0) +
+            (route.pointBlocked ? 30000 : 0), 0) +
+          movement * 4 +
+          (flipRequired ? 240 : 0) +
+          (dragRequired ? 80 : 0);
+        options.push({
+          clean,
+          penalty,
+          nodeId,
+          currentLayout,
+          layout,
+          canSwitchPorts,
+          flipRequired,
+          dragRequired,
+          movement,
+          center: { x: candidate.x, y: candidate.y },
+          graphPosition: {
+            x: Number(nodeState?.x) || 0,
+            y: Number(nodeState?.y) || 0
+          },
+          candidateRect,
+          routes,
+          persistentWireAnalysis,
+          source: candidate.source,
+          strategy:
+            flipRequired && dragRequired
+              ? "switch-ports-and-drag-endpoint-node"
+              : flipRequired
+                ? "switch-endpoint-ports"
+                : dragRequired
+                  ? "drag-blocked-endpoint-node"
+                  : "keep"
+        });
+      }
+    }
+
+    return options.sort((left, right) =>
+      Number(right.clean) - Number(left.clean) ||
+      left.penalty - right.penalty ||
+      left.movement - right.movement
+    );
+  }
+
+  function graphDemoBranchPostRouteOptions(
+    branchNode,
+    junction,
+    branchConnectionId
+  ) {
+    if (!(branchNode instanceof HTMLElement) || !(junction instanceof Element)) {
+      return [];
+    }
+    const visible = visibleGraphClientRect(12);
+    const branchInput = [...branchNode.querySelectorAll(
+      '.rml-graph-socket[data-direction="input"]'
+    )].find(graphDemoVisible) || null;
+    if (!visible || !branchInput) return [];
+
+    const nodeRect = branchNode.getBoundingClientRect();
+    const nodeCenter = centerOf(branchNode);
+    const inputCenter = centerOf(branchInput);
+    const currentNodeState = window.RMLDynamicGraphHost
+      ?.getState?.()
+      ?.nodes?.find(node => node.id === branchNode.dataset.graphNodeId) || null;
+    const currentLayout = currentNodeState
+      ?.parameters?.portLayout === "mirrored"
+        ? "mirrored"
+        : "standard";
+    const flippedLayout = currentLayout === "mirrored"
+      ? "standard"
+      : "mirrored";
+    const canSwitchPorts =
+      branchNode.querySelector(".rml-graph-node-flip") instanceof HTMLElement;
+    const inputOffset = {
+      x: inputCenter.x - nodeCenter.x,
+      y: inputCenter.y - nodeCenter.y
+    };
+    const junctionCenter = centerOf(junction);
+    const ignoredBranchPaths = graphDemoConnectionPaths(branchConnectionId);
+    const otherNodeRects = [...document.querySelectorAll(".rml-graph-node")]
+      .filter(node => node !== branchNode && graphDemoVisible(node))
+      .map(node => node.getBoundingClientRect());
+    const centers = [{ ...nodeCenter, source: "current" }];
+    const xFractions = [.16, .32, .5, .68, .84];
+    const yFractions = [.14, .3, .5, .7, .86];
+    for (const yFraction of yFractions) {
+      for (const xFraction of xFractions) {
+        centers.push({
+          x:
+            visible.left + nodeRect.width * .5 +
+            Math.max(0, visible.width - nodeRect.width) * xFraction,
+          y:
+            visible.top + nodeRect.height * .5 +
+            Math.max(0, visible.height - nodeRect.height) * yFraction,
+          source: "measured-grid"
+        });
+      }
+    }
+
+    const uniqueCenters = new Map();
+    for (const candidate of centers) {
+      const key = `${Math.round(candidate.x / 5)}:${Math.round(candidate.y / 5)}`;
+      if (!uniqueCenters.has(key)) uniqueCenters.set(key, candidate);
+    }
+
+    const options = [];
+    for (const candidate of uniqueCenters.values()) {
+      const candidateRect = {
+        left: candidate.x - nodeRect.width * .5,
+        right: candidate.x + nodeRect.width * .5,
+        top: candidate.y - nodeRect.height * .5,
+        bottom: candidate.y + nodeRect.height * .5,
+        width: nodeRect.width,
+        height: nodeRect.height
+      };
+      const completeInside = Boolean(
+        candidateRect.left >= visible.left &&
+        candidateRect.right <= visible.right &&
+        candidateRect.top >= visible.top &&
+        candidateRect.bottom <= visible.bottom
+      );
+      const overlapsNode = otherNodeRects.some(rect => !(
+        candidateRect.right + 12 < rect.left ||
+        candidateRect.left - 12 > rect.right ||
+        candidateRect.bottom + 12 < rect.top ||
+        candidateRect.top - 12 > rect.bottom
+      ));
+      if (!completeInside || overlapsNode) continue;
+
+      const wireAnalysis = graphDemoRectWireAnalysis(candidateRect, {
+        clearance: 12,
+        ignoredPaths: ignoredBranchPaths
+      });
+      const layouts = canSwitchPorts
+        ? [currentLayout, flippedLayout]
+        : [currentLayout];
+      for (const layout of layouts) {
+        const endpoint = {
+          x: candidate.x + (
+            layout === currentLayout ? inputOffset.x : -inputOffset.x
+          ),
+          y: candidate.y + inputOffset.y
+        };
+        const route = graphDemoRouteSegmentAnalysis(
+          junctionCenter,
+          endpoint,
+          {
+            ignoredPaths: ignoredBranchPaths,
+            ignoredPoints: [junction],
+            ignoredNodes: [],
+            endpointNodes: [branchNode],
+            nodeRectOverrides: [{ node: branchNode, rect: candidateRect }],
+            nodePadding: 8,
+            pointClearance: 20,
+            endpointNodeAllowance: 34
+          }
+        );
+        const movement = Math.hypot(
+          candidate.x - nodeCenter.x,
+          candidate.y - nodeCenter.y
+        );
+        const flipRequired = layout !== currentLayout;
+        const dragRequired = movement >= 22;
+        const clean = route.fullyClear && wireAnalysis.blocked === false;
+        const penalty =
+          (route.nodeBlocked ? 100000 : 0) +
+          (route.lineBlocked ? 75000 : 0) +
+          (route.pointBlocked ? 30000 : 0) +
+          (wireAnalysis.blocked ? 90000 : 0) +
+          movement * 4 +
+          (flipRequired ? 240 : 0) +
+          (dragRequired ? 80 : 0);
+        options.push({
+          clean,
+          penalty,
+          nodeId: branchNode.dataset.graphNodeId || "",
+          layout,
+          currentLayout,
+          canSwitchPorts,
+          flipRequired,
+          dragRequired,
+          movement,
+          center: { x: candidate.x, y: candidate.y },
+          graphPosition: {
+            x: Number(currentNodeState?.x) || 0,
+            y: Number(currentNodeState?.y) || 0
+          },
+          endpoint,
+          candidateRect,
+          route,
+          wireAnalysis,
+          source: candidate.source,
+          strategy:
+            flipRequired && dragRequired
+              ? "switch-ports-then-drag-node"
+              : flipRequired
+                ? "switch-ports"
+                : dragRequired
+                  ? "drag-node"
+                  : "keep"
+        });
+      }
+    }
+
+    return options.sort((a, b) =>
+      Number(b.clean) - Number(a.clean) ||
+      a.penalty - b.penalty ||
+      a.movement - b.movement
+    );
   }
 
   function graphDemoRouteCandidateTier(pointAnalysis, routeAnalyses) {
@@ -16304,7 +18535,7 @@
           graphDemoSegmentBlocked(
             sourcePoint,
             point,
-            sourceNode ? [sourceNode] : []
+            [sourceNode, ...ignoredNodeSet].filter(Boolean)
           );
         const candidateRect = {
           left: point.x - halfWidth,
@@ -16793,6 +19024,9 @@
         element?.matches?.(".rml-graph-wire-hit")
       )
     ].filter(Boolean);
+    const ignoredNodes = ignoredElements.filter(element =>
+      element?.matches?.(".rml-graph-node")
+    );
 
     for (let fraction = .12; fraction <= .88; fraction += .02) {
       const point = graphSvgPathPoint(path, fraction);
@@ -16803,7 +19037,7 @@
       const routeAnalysis = graphDemoRouteSegmentAnalysis(
         targetPoint,
         point,
-        { ignoredPaths }
+        { ignoredPaths, ignoredNodes }
       );
       const priority = graphDemoRouteCandidateTier(
         pointAnalysis,
@@ -17058,7 +19292,13 @@
           candidate.priority.pointProtected &&
           !candidate.priority.routeNodeBlocked &&
           candidate.priority.cardBlocked !== true
-      )
+      ),
+      candidateTargets: candidates.slice(0, 18).map(candidate => ({
+        point: { ...candidate.point },
+        tier: candidate.priority.tier,
+        priority: { ...candidate.priority },
+        score: candidate.score
+      }))
     };
     return result;
   }
@@ -17103,9 +19343,7 @@
         return created;
       }
 
-      await new Promise(resolve =>
-        requestAnimationFrame(resolve)
-      );
+      await tourNextVisualFrame();
     }
 
     return null;
@@ -17309,7 +19547,7 @@
     for (let attempt = 0; attempt < attempts && runId === demoRunId; attempt += 1) {
       const connection = graphDemoConnectionFor(output, input);
       if (connection) return connection;
-      await new Promise(resolve => requestAnimationFrame(resolve));
+      await tourNextVisualFrame();
     }
     return null;
   }
@@ -17503,9 +19741,7 @@
       const path =
         graphRenderedWire(connectionId);
       if (path) return path;
-      await new Promise(resolve =>
-        requestAnimationFrame(resolve)
-      );
+      await tourNextVisualFrame();
     }
     return null;
   }
@@ -17569,15 +19805,16 @@
       ];
       const visible =
         visibleGraphClientRect(28);
-      window.RMLDynamicGraphHost
-        ?.fitNodesToClientRect?.(
-          nodeIds,
-          visible,
-          {
-            padding: 36,
-            maxScale: 1.05
-          }
-        );
+      quietlyFitGraphNodes(
+        nodeIds,
+        {
+          inset: 28,
+          padding: 36,
+          maxScale: Number(
+            window.RMLDynamicGraphHost?.getViewportState?.()?.viewport?.scale
+          ) || 1
+        }
+      );
       await nextTwoFrames();
       wire = await graphWaitForRenderedWire(
         connection.id,
@@ -17621,14 +19858,40 @@
       return false;
     }
 
-    const usable = () => {
+    const usable = ({ requireIdealCompactFrame = true } = {}) => {
       const visible =
         visibleGraphClientRect(0);
+      const rect = viewport.getBoundingClientRect();
+      const compact = window.innerWidth <= 390 || window.innerHeight <= 700;
+      const desiredTop = tourHeaderBottom() + 8;
+      const availableHeight = Math.max(
+        1,
+        tourViewport().bottom - desiredTop
+      );
+      const requiredCompactHeight = Math.min(
+        rect.height,
+        availableHeight
+      );
+      const requiredVisibleWidth = compact
+        ? Math.min(280, Math.max(72, rect.width - 8))
+        : 280;
+      const requiredVisibleHeight = compact
+        ? Math.min(
+            graphLessonMinimumVisibleHeight(),
+            Math.max(140, requiredCompactHeight - 8)
+          )
+        : graphLessonMinimumVisibleHeight();
+      const compactWindowFramed = !compact || !requireIdealCompactFrame || Boolean(
+        rect.top >= desiredTop - 6 &&
+        rect.top <= desiredTop + 18 &&
+        visible &&
+        visible.height >= requiredCompactHeight - 8
+      );
       return Boolean(
         visible &&
-        visible.width >= 280 &&
-        visible.height >=
-          graphLessonMinimumVisibleHeight()
+        visible.width >= requiredVisibleWidth &&
+        visible.height >= requiredVisibleHeight &&
+        compactWindowFramed
       );
     };
 
@@ -17730,6 +19993,21 @@
       if (usable()) return true;
     }
 
+    if (usable({ requireIdealCompactFrame: false })) {
+      tourDebugRecord(
+        "graph-viewport-best-attainable-window",
+        {
+          graphRect: tourDebugRect(viewport),
+          visible: visibleGraphClientRect(0),
+          compactViewport:
+            window.innerWidth <= 390 || window.innerHeight <= 700,
+          policy:
+            "accept a fully usable clipped graph window when sticky-header geometry or an open inspector makes exact top alignment impossible; node fitting remains pan-first and zooms only when the measured node bounds cannot fit"
+        }
+      );
+      return true;
+    }
+
     const failedState =
       tourPageRootScrollState();
     tourDebugRecord(
@@ -17751,22 +20029,235 @@
   }
 
   function quietlyFitGraphNodes(nodeIds, options = {}) {
+    const ids = [...new Set((nodeIds || []).filter(Boolean))];
     const visible = visibleGraphClientRect(
       Number.isFinite(options.inset) ? options.inset : 24
     );
-    if (!visible || visible.width < 120 || visible.height < 120) {
+    if (
+      ids.length === 0 ||
+      !visible ||
+      visible.width < 72 ||
+      visible.height < 120
+    ) {
       return false;
     }
+    const before = window.RMLDynamicGraphHost
+      ?.getViewportState?.()?.viewport || null;
+    const panOnly = panGraphNodesIntoVisibleFrame(ids, options);
+    if (panOnly.ok === true) {
+      tourDebugRecord("graph-camera-pan-first-frame", {
+        nodeIds: ids,
+        panOnly,
+        before,
+        after: window.RMLDynamicGraphHost
+          ?.getViewportState?.()?.viewport || null,
+        zoomFallbackUsed: false,
+        policy:
+          "preserve graph zoom and node coordinates whenever a camera pan can reveal the required complete node footprints"
+      });
+      return true;
+    }
+    if (panOnly.reason !== "current-scale-too-large") {
+      tourDebugRecord("graph-camera-pan-first-frame", {
+        nodeIds: ids,
+        panOnly,
+        before,
+        zoomFallbackUsed: false,
+        failed: true
+      });
+      return false;
+    }
+    const currentScale = Number(before?.scale) || 1;
+    const requestedMaximum = Number.isFinite(options.maxScale)
+      ? Number(options.maxScale)
+      : currentScale;
     const fitted = window.RMLDynamicGraphHost
       ?.fitNodesToClientRect?.(
-        [...new Set((nodeIds || []).filter(Boolean))],
+        ids,
         visible,
         {
           padding: Number.isFinite(options.padding) ? options.padding : 34,
-          maxScale: Number.isFinite(options.maxScale) ? options.maxScale : 1.05
+          maxScale: Math.min(currentScale, requestedMaximum)
         }
       );
+    const after = window.RMLDynamicGraphHost
+      ?.getViewportState?.()?.viewport || null;
+    tourDebugRecord("graph-camera-final-zoom-fallback", {
+      nodeIds: ids,
+      panOnly,
+      fitted,
+      before,
+      after,
+      zoomFallbackUsed: Boolean(
+        fitted?.ok === true &&
+        Number(after?.scale) < currentScale - .0005
+      ),
+      policy:
+        "reduce graph zoom only after the measured node bounds prove that panning at the current scale cannot fit the complete required scene; never enlarge during preparation"
+    });
     return fitted?.ok === true;
+  }
+
+  function panGraphNodesIntoClientRect(nodeIds, clientRect, options = {}) {
+    const ids = [...new Set((nodeIds || []).filter(Boolean))];
+    const padding = Number.isFinite(options.padding) ? options.padding : 14;
+    const host = window.RMLDynamicGraphHost;
+    const viewportState = host?.getViewportState?.()?.viewport || null;
+    const nodes = ids.map(nodeId => document.querySelector(
+      `.rml-graph-node[data-graph-node-id="${CSS.escape(nodeId)}"]`
+    )).filter(node => node instanceof HTMLElement && graphDemoVisible(node));
+    if (
+      !clientRect ||
+      !viewportState ||
+      nodes.length !== ids.length ||
+      ids.length === 0
+    ) {
+      return { ok: false, changed: false, reason: "pan-input-unavailable" };
+    }
+    const rects = nodes.map(node => node.getBoundingClientRect());
+    const bounds = {
+      left: Math.min(...rects.map(rect => rect.left)),
+      right: Math.max(...rects.map(rect => rect.right)),
+      top: Math.min(...rects.map(rect => rect.top)),
+      bottom: Math.max(...rects.map(rect => rect.bottom))
+    };
+    bounds.width = bounds.right - bounds.left;
+    bounds.height = bounds.bottom - bounds.top;
+    const target = {
+      left: clientRect.left + padding,
+      right: clientRect.right - padding,
+      top: clientRect.top + padding,
+      bottom: clientRect.bottom - padding
+    };
+    const targetWidth = Math.max(1, target.right - target.left);
+    const targetHeight = Math.max(1, target.bottom - target.top);
+    if (bounds.width > targetWidth || bounds.height > targetHeight) {
+      return {
+        ok: false,
+        changed: false,
+        reason: "current-scale-too-large",
+        bounds,
+        target,
+        viewport: viewportState
+      };
+    }
+    let deltaX = 0;
+    let deltaY = 0;
+    if (bounds.left < target.left) deltaX = target.left - bounds.left;
+    else if (bounds.right > target.right) deltaX = target.right - bounds.right;
+    if (bounds.top < target.top) deltaY = target.top - bounds.top;
+    else if (bounds.bottom > target.bottom) deltaY = target.bottom - bounds.bottom;
+    if (Math.abs(deltaX) < .5 && Math.abs(deltaY) < .5) {
+      return {
+        ok: true,
+        changed: false,
+        reason: "already-visible-at-current-scale",
+        bounds,
+        target,
+        viewport: viewportState
+      };
+    }
+    const requested = {
+      x: Number(viewportState.x || 0) + deltaX,
+      y: Number(viewportState.y || 0) + deltaY,
+      scale: Number(viewportState.scale || 1)
+    };
+    if (options.apply === false) {
+      return {
+        ok: true,
+        changed: true,
+        reason: "pan-plan-ready-without-commit",
+        bounds,
+        target,
+        before: viewportState,
+        requested,
+        committed: null
+      };
+    }
+    const committed = host.setViewportState?.(
+      requested,
+      { persist: true }
+    ) || null;
+    return {
+      ok: committed?.ok === true,
+      changed: committed?.ok === true,
+      reason: committed?.ok === true
+        ? "panned-without-changing-zoom"
+        : "pan-commit-failed",
+      bounds,
+      target,
+      before: viewportState,
+      requested,
+      committed
+    };
+  }
+
+  function panGraphNodesIntoVisibleFrame(nodeIds, options = {}) {
+    const inset = Number.isFinite(options.inset) ? options.inset : 22;
+    const visible = visibleGraphClientRect(inset);
+    return panGraphNodesIntoClientRect(nodeIds, visible, options);
+  }
+
+  async function animateGraphViewportState(
+    from,
+    to,
+    runId,
+    options = {}
+  ) {
+    const host = window.RMLDynamicGraphHost;
+    if (!host || !from || !to || runId !== demoRunId) return false;
+    const distance = Math.max(
+      Math.abs(Number(to.x) - Number(from.x)),
+      Math.abs(Number(to.y) - Number(from.y)),
+      Math.abs(Number(to.scale) - Number(from.scale)) * 420
+    );
+    if (distance <= .02) {
+      return host.setViewportState?.(to, { persist: true })?.ok === true;
+    }
+
+    const duration = Math.max(
+      260,
+      Math.min(900, Number(options.duration) || 620)
+    );
+    const started = performance.now();
+    tourDebugRecord("graph-visible-camera-animation-start", {
+      reason: options.reason || "readable-frame",
+      from,
+      to,
+      duration,
+      zoomChanged:
+        Math.abs(Number(to.scale) - Number(from.scale)) > .0005
+    });
+
+    while (runId === demoRunId) {
+      const frame = await tourNextVisualFrame();
+      const now = Math.max(performance.now(), frame.timestamp);
+      const raw = Math.min(1, (now - started) / duration);
+      const eased = raw < .5
+        ? 4 * raw * raw * raw
+        : 1 - Math.pow(-2 * raw + 2, 3) / 2;
+      host.setViewportState?.(
+        {
+          x: Number(from.x) + (Number(to.x) - Number(from.x)) * eased,
+          y: Number(from.y) + (Number(to.y) - Number(from.y)) * eased,
+          scale:
+            Number(from.scale) +
+            (Number(to.scale) - Number(from.scale)) * eased
+        },
+        { persist: false }
+      );
+      if (raw >= 1) break;
+    }
+
+    if (runId !== demoRunId) return false;
+    const committed = host.setViewportState?.(to, { persist: true });
+    await nextTwoFrames();
+    tourDebugRecord("graph-visible-camera-animation-end", {
+      reason: options.reason || "readable-frame",
+      committed,
+      viewport: host.getViewportState?.()?.viewport || null
+    });
+    return committed?.ok === true;
   }
 
   async function animateGraphNodesToReadableFrame(
@@ -17781,77 +20272,98 @@
     const from = host?.getViewportState?.()?.viewport || null;
     if (!host || !visible || !from || runId !== demoRunId) return false;
 
+    if (options.allowZoomIn === true) {
+      const planned = host.fitNodesToClientRect?.(
+        [...new Set((nodeIds || []).filter(Boolean))],
+        visible,
+        {
+          padding: Number.isFinite(options.padding) ? options.padding : 30,
+          maxScale: Number.isFinite(options.maxScale)
+            ? Number(options.maxScale)
+            : 1.05,
+          apply: false
+        }
+      );
+      if (planned?.ok !== true || !planned.viewport) return false;
+      return animateGraphViewportState(
+        from,
+        planned.viewport,
+        runId,
+        {
+          duration: options.duration,
+          reason: options.reason || "final-readable-scene-zoom"
+        }
+      );
+    }
+
+    const panOnly = panGraphNodesIntoVisibleFrame(nodeIds, {
+      ...options,
+      apply: false
+    });
+    if (panOnly.ok === true) {
+      const panned = panOnly.changed === true
+        ? await animateGraphViewportState(
+            from,
+            panOnly.requested,
+            runId,
+            {
+              duration: options.duration,
+              reason: options.reason || "pan-required-nodes-into-view"
+            }
+          )
+        : true;
+      tourDebugRecord("graph-natural-frame-pan-only", {
+        nodeIds,
+        from,
+        panOnly,
+        to: host.getViewportState?.()?.viewport || null,
+        animated: panOnly.changed === true,
+        committed: panned,
+        policy:
+          "natural lesson handoffs pan at the current scale and reserve zoom reduction for geometrically impossible scenes"
+      });
+      return panned;
+    }
+    if (panOnly.reason !== "current-scale-too-large") return false;
+
     const planned = host.fitNodesToClientRect?.(
       [...new Set((nodeIds || []).filter(Boolean))],
       visible,
       {
         padding: Number.isFinite(options.padding) ? options.padding : 30,
-        maxScale: Number.isFinite(options.maxScale) ? options.maxScale : 1.02,
+        maxScale: Math.min(
+          Number(from.scale) || 1,
+          Number.isFinite(options.maxScale)
+            ? Number(options.maxScale)
+            : Number(from.scale) || 1
+        ),
         apply: false
       }
     );
     const to = planned?.viewport || null;
     if (planned?.ok !== true || !to) return false;
 
-    const distance = Math.max(
-      Math.abs(Number(to.x) - Number(from.x)),
-      Math.abs(Number(to.y) - Number(from.y)),
-      Math.abs(Number(to.scale) - Number(from.scale)) * 420
-    );
-    if (distance <= .02) {
-      return host.setViewportState?.(to)?.ok === true;
-    }
-
-    const duration = Math.max(
-      260,
-      Math.min(900, Number(options.duration) || 620)
-    );
-    const started = performance.now();
     tourDebugRecord("graph-natural-frame-animation-start", {
       nodeIds,
       from,
       to,
-      duration
+      duration: Number(options.duration) || 620
     });
-
-    await new Promise(resolve => {
-      const frame = now => {
-        if (runId !== demoRunId) {
-          resolve();
-          return;
-        }
-        const raw = Math.min(1, (now - started) / duration);
-        const eased = raw < .5
-          ? 4 * raw * raw * raw
-          : 1 - Math.pow(-2 * raw + 2, 3) / 2;
-        host.setViewportState?.(
-          {
-            x: Number(from.x) + (Number(to.x) - Number(from.x)) * eased,
-            y: Number(from.y) + (Number(to.y) - Number(from.y)) * eased,
-            scale:
-              Number(from.scale) +
-              (Number(to.scale) - Number(from.scale)) * eased
-          },
-          { persist: false }
-        );
-        if (raw >= 1) {
-          resolve();
-          return;
-        }
-        requestAnimationFrame(frame);
-      };
-      requestAnimationFrame(frame);
-    });
-
-    if (runId !== demoRunId) return false;
-    const committed = host.setViewportState?.(to, { persist: true });
-    await nextTwoFrames();
+    const committed = await animateGraphViewportState(
+      from,
+      to,
+      runId,
+      {
+        duration: options.duration,
+        reason: options.reason || "last-resort-required-node-zoom"
+      }
+    );
     tourDebugRecord("graph-natural-frame-animation-end", {
       nodeIds,
       committed,
       viewport: host.getViewportState?.()?.viewport || null
     });
-    return committed?.ok === true;
+    return committed === true;
   }
 
   function graphTeachingPairCompletelyVisible(pair, inset = 18) {
@@ -17877,15 +20389,52 @@
     if (!pair.output || !pair.input) return pair;
 
     if (!graphTeachingPairCompletelyVisible(pair, 18)) {
-      quietlyFitGraphNodes(
-        [
-          pair.boolNode?.dataset.graphNodeId,
-          pair.notNode?.dataset.graphNodeId
-        ],
-        { inset: 24, padding: 34, maxScale: 1.05 }
+      const nodeIds = [
+        pair.boolNode?.dataset.graphNodeId,
+        pair.notNode?.dataset.graphNodeId
+      ].filter(Boolean);
+      const before = window.RMLDynamicGraphHost?.getViewportState?.()?.viewport || null;
+      const panOnly = panGraphNodesIntoVisibleFrame(
+        nodeIds,
+        { inset: 22, padding: 12 }
       );
       await nextTwoFrames();
       pair = graphDemoSocketPair(false);
+      let zoomFallbackUsed = false;
+      let fitted = false;
+      if (!graphTeachingPairCompletelyVisible(pair, 18)) {
+        const currentScale = Number(
+          window.RMLDynamicGraphHost?.getViewportState?.()?.viewport?.scale
+        ) || Number(before?.scale) || 1;
+        fitted = quietlyFitGraphNodes(
+          nodeIds,
+          {
+            inset: 24,
+            padding: window.innerWidth <= 390 || window.innerHeight <= 700
+              ? 20
+              : 34,
+            maxScale: currentScale
+          }
+        );
+        await nextTwoFrames();
+        const afterScale = Number(
+          window.RMLDynamicGraphHost?.getViewportState?.()?.viewport?.scale
+        ) || currentScale;
+        zoomFallbackUsed = afterScale < currentScale - .0005;
+        pair = graphDemoSocketPair(false);
+      }
+      tourDebugRecord("graph-teaching-pair-adaptive-frame", {
+        nodeIds,
+        panOnly,
+        fitted,
+        zoomFallbackUsed,
+        before,
+        after: window.RMLDynamicGraphHost?.getViewportState?.()?.viewport || null,
+        compactViewport: window.innerWidth <= 390 || window.innerHeight <= 700,
+        completePairVisible: graphTeachingPairCompletelyVisible(pair, 12),
+        policy:
+          "reveal the page, preserve the current zoom with a camera pan when possible, and reduce graph zoom only as the final geometry fallback"
+      });
     }
 
     if (!graphTeachingPairCompletelyVisible(pair, 12)) {
@@ -18388,11 +20937,7 @@
     if (runId !== demoRunId) return;
     clearRealPortGlows();
 
-    await new Promise(resolve =>
-      requestAnimationFrame(() =>
-        requestAnimationFrame(resolve)
-      )
-    );
+    await nextTwoFrames();
 
     if (runId !== demoRunId) return;
 
@@ -18505,11 +21050,7 @@
     if (runId !== demoRunId) return;
     clearRealPortGlows();
 
-    await new Promise(resolve =>
-      requestAnimationFrame(() =>
-        requestAnimationFrame(resolve)
-      )
-    );
+    await nextTwoFrames();
 
     if (runId !== demoRunId) return;
 
@@ -18598,1457 +21139,1482 @@
     hideMouse();
   }
 
-  async function runGraphRouteDemo(runId) {
-    const viewport =
-      document.querySelector(
-        ".rml-graph-viewport"
-      );
-    const graphHost =
-      window.RMLDynamicGraphHost;
-
-    if (!viewport || runId !== demoRunId) {
-      return;
-    }
-
-    const guidedGraphHostReady = tourDebugAssert(
-      "graph-route-guided-automatic-helper-suppression-available",
-      Number(graphHost?.version || 0) >= 16 &&
-        typeof graphHost
-          ?.setGuidedAutomaticNodeCreationSuppressed ===
-          "function" &&
-        typeof graphHost
-          ?.getGuidedConnectionDropState ===
-          "function",
-      {
-        graphHostVersion:
-          Number(graphHost?.version || 0),
-        suppressionSetterAvailable:
-          typeof graphHost
-            ?.setGuidedAutomaticNodeCreationSuppressed ===
-          "function",
-        dropStateAvailable:
-          typeof graphHost
-            ?.getGuidedConnectionDropState ===
-          "function"
-      }
+  function graphRouteNodeReserve(node = null) {
+    const visible = visibleGraphClientRect(18);
+    const rect = node?.getBoundingClientRect?.() || null;
+    const metrics = window.RMLDynamicGraphHost
+      ?.getOperatorPlacementMetrics?.("logic.not") || null;
+    const nodeWidth = Math.max(
+      1,
+      Number(rect?.width) || Number(metrics?.clientWidth) || 220
     );
-    if (!guidedGraphHostReady) {
-      graphDemoError(
-        "Routing step requires Runtime Graph host version 16 with live-wire target identity, guided automatic-helper suppression and guarded branch fallback."
-      );
-    }
-
-    await new Promise(resolve =>
-      requestAnimationFrame(() =>
-        requestAnimationFrame(resolve)
-      )
+    const nodeHeight = Math.max(
+      1,
+      Number(rect?.height) || Number(metrics?.clientHeight) || 150
     );
-
-    const realHits = () =>
-      [...document.querySelectorAll(
-        ".rml-graph-wire-hit"
-      )].filter(graphDemoVisible);
-
-    const pair =
-      await ensureGraphDemoNodes(runId);
-
-    if (runId !== demoRunId) return;
-
-    await ensureGraphTeachingPairVisible(runId);
-    if (runId !== demoRunId) return;
-
-    const freshPair = graphDemoSocketPair(false);
-    const output =
-      freshPair?.output ||
-      pair?.output ||
-      graphDemoSocketPair(false).output;
-    const input =
-      freshPair?.input ||
-      pair?.input ||
-      graphDemoSocketPair(false).input;
-
-    let baseConnection =
-      graphDemoConnectionFor(
-        output,
-        input
-      );
-
-    if (!baseConnection && output && input) {
-      showDemoLabel(
-        "Create the base wire through the normal Graph Engine",
-        centerOf(output)
-      );
-
-      await nativeGraphPointerDrag(
-        output,
-        input,
-        1180,
-        runId,
-        9111
-      );
-
-      if (runId !== demoRunId) return;
-
-      const guaranteed =
-        await ensureGraphConnectionDeterministic(
-          output,
-          input,
-          runId
-        );
-      baseConnection =
-        guaranteed?.connection || null;
-    }
-
-    if (!baseConnection) {
-      console.warn(
-        "[RML Tour · Graph demo] The normal Graph Engine could not create the base wire; the assistant remains usable."
-      );
-      showDemoLabel(
-        "Base wire is temporarily unavailable; this lesson will continue forward without repeating",
-        centerOf(viewport)
-      );
-      await wait(850);
-      return;
-    }
-
-    const requireLiveParentHit = (
-      phase,
-      preferredSegmentIndex = null
-    ) => {
-      const hit = graphNativeWireHit(
-        baseConnection.id,
-        preferredSegmentIndex
-      );
-      if (!hit?.isConnected) {
-        graphDemoError(
-          `Routing step lost its live base-wire hit path during ${phase}.`,
-          {
-            connectionId: baseConnection.id,
-            preferredSegmentIndex,
-            renderedSegmentCount: document.querySelectorAll(
-              `.rml-graph-wire-hit[data-connection-id="${CSS.escape(baseConnection.id)}"]`
-            ).length
-          }
-        );
-      }
-      return hit;
+    const compact = window.innerWidth <= 390 || window.innerHeight <= 700;
+    const desiredWidth = compact
+      ? Math.max(220, nodeWidth + 44)
+      : Math.max(310, nodeWidth + 54);
+    const desiredHeight = compact
+      ? Math.max(138, nodeHeight + 36)
+      : Math.max(190, nodeHeight + 48);
+    return {
+      width: visible
+        ? Math.min(desiredWidth, Math.max(nodeWidth + 24, visible.width - 44))
+        : desiredWidth,
+      height: visible
+        ? Math.min(desiredHeight, Math.max(nodeHeight + 24, visible.height - 44))
+        : desiredHeight,
+      nodeWidth,
+      nodeHeight,
+      compact,
+      visible
     };
+  }
 
-    let parentHit =
-      graphNativeWireHit(
-        baseConnection.id
-      );
-
-    if (!parentHit) {
-      await new Promise(resolve =>
-        requestAnimationFrame(() =>
-          requestAnimationFrame(resolve)
+  function graphStep11NodeArticle(nodeId) {
+    return nodeId
+      ? document.querySelector(
+          `.rml-graph-node[data-graph-node-id="${CSS.escape(nodeId)}"]`
         )
-      );
-      parentHit =
-        graphNativeWireHit(
-          baseConnection.id
+      : null;
+  }
+
+  function graphStep11Socket(nodeId, portId, direction) {
+    return nodeId && portId
+      ? document.querySelector(
+          `.rml-graph-socket[data-node-id="${CSS.escape(nodeId)}"]` +
+          `[data-port-id="${CSS.escape(portId)}"]` +
+          `[data-direction="${CSS.escape(direction)}"]`
+        )
+      : null;
+  }
+
+  function graphStep11PointInsideVisibleGraph(point, inset = 10) {
+    const visible = visibleGraphClientRect(inset);
+    return Boolean(
+      visible &&
+      point &&
+      point.x >= visible.left &&
+      point.x <= visible.right &&
+      point.y >= visible.top &&
+      point.y <= visible.bottom
+    );
+  }
+
+  function graphStep11PointCovered(
+    point,
+    padding = 8,
+    ignoredNodes = []
+  ) {
+    if (!point) return true;
+    const ignoredNodeSet = new Set(ignoredNodes.filter(Boolean));
+    const blockers = [
+      ...document.querySelectorAll(
+        ".rml-graph-node, " +
+        ".rml-graph-search-overlay:not([hidden]), " +
+        ".rml-graph-toast"
+      )
+    ].filter(element =>
+      element instanceof Element &&
+      graphDemoVisible(element) &&
+      !ignoredNodeSet.has(element)
+    );
+    return blockers.some(element =>
+      graphDemoRectDistance(
+        point,
+        element.getBoundingClientRect(),
+        padding
+      ) === 0
+    );
+  }
+
+  function graphStep11SegmentVisiblyClear(
+    from,
+    to,
+    {
+      ignoredNodes = [],
+      nodePadding = 8
+    } = {}
+  ) {
+    if (!from || !to) return false;
+    const ignoredNodeSet = new Set(ignoredNodes.filter(Boolean));
+    if (
+      !graphStep11PointInsideVisibleGraph(from, 6) ||
+      !graphStep11PointInsideVisibleGraph(to, 6)
+    ) {
+      return false;
+    }
+    const nodeRects = [...document.querySelectorAll(".rml-graph-node")]
+      .filter(node =>
+        graphDemoVisible(node) &&
+        !ignoredNodeSet.has(node)
+      )
+      .map(node => {
+        const rect = node.getBoundingClientRect();
+        return {
+          left: rect.left - nodePadding,
+          right: rect.right + nodePadding,
+          top: rect.top - nodePadding,
+          bottom: rect.bottom + nodePadding
+        };
+      });
+    return !nodeRects.some(rect =>
+      tourSegmentIntersectsRect(from, to, rect)
+    );
+  }
+
+  function graphStep11Failure(stage, details = {}) {
+    graphDemoError(
+      `Step 11 could not complete “${stage}”.`,
+      details
+    );
+  }
+
+  function graphStep11VisibleWireTarget(
+    connectionId,
+    sourcePoint = null,
+    { ignoredNodes = [] } = {}
+  ) {
+    graphStep11LastWireTargetCandidates = [];
+    if (!connectionId) return null;
+    const visible = visibleGraphClientRect(14);
+    if (!visible) return null;
+    const preferred = sourcePoint || {
+      x: visible.left + visible.width * .5,
+      y: visible.top + visible.height * .5
+    };
+    const candidates = [];
+    const paths = graphDemoConnectionPaths(connectionId);
+    const fractions = [
+      .5, .45, .55, .4, .6, .35, .65, .3, .7,
+      .25, .75, .2, .8, .15, .85, .1, .9, .05, .95
+    ];
+    for (const path of paths) {
+      for (const fraction of fractions) {
+        const point = graphSvgPathPoint(path, fraction);
+        const hitStack = typeof document.elementsFromPoint === "function"
+          ? document.elementsFromPoint(point.x, point.y)
+          : [document.elementFromPoint(point.x, point.y)].filter(Boolean);
+        const realWireHit = hitStack.some(element =>
+          element === path ||
+          element?.closest?.(".rml-graph-wire-hit") === path
         );
+        const socketAtTarget = hitStack.some(element => {
+          const socket = element?.closest?.(".rml-graph-socket");
+          const owner = socket?.closest?.(".rml-graph-node");
+          return Boolean(socket && !ignoredNodes.includes(owner));
+        });
+        const blockedByGraphUi = hitStack.some(element =>
+          Boolean(element?.closest?.(
+            ".rml-graph-toolbar, .rml-graph-toast, " +
+            ".rml-graph-search-overlay:not([hidden])"
+          ))
+        );
+        if (socketAtTarget || blockedByGraphUi) continue;
+        if (!graphStep11PointInsideVisibleGraph(point, 12)) continue;
+        if (graphStep11PointCovered(point, 6, ignoredNodes)) continue;
+        if (
+          sourcePoint &&
+          !graphStep11SegmentVisiblyClear(
+            sourcePoint,
+            point,
+            { ignoredNodes }
+          )
+        ) continue;
+
+        candidates.push({
+          path,
+          point,
+          fraction,
+          segmentIndex: Number(path.dataset.segmentIndex || 0),
+          tier: realWireHit ? 0 : 1,
+          route: null,
+          nativeHit: realWireHit,
+          score:
+            (realWireHit ? 0 : 1000) +
+            Math.hypot(
+              point.x - preferred.x,
+              point.y - preferred.y
+            )
+        });
+      }
     }
 
-    if (!parentHit) {
-      graphDemoError(
-        "Routing step could not find the real base-wire hit path after native creation."
-      );
-    }
+    candidates.sort((left, right) => left.score - right.score);
+    graphStep11LastWireTargetCandidates = candidates.slice(0, 3);
+    return candidates[0] || null;
+  }
 
-    const outputType = String(output?.dataset.concreteType || "")
-      .trim()
-      .toLowerCase();
-    const baseTargetId = input?.dataset.nodeId || "";
-    const graphState = window.RMLDynamicGraphHost?.getState?.();
-    const occupiedInputs = new Set(
-      (graphState?.connections || []).map(connection =>
-        `${connection.toNode}:${connection.toPort}`
+  function graphStep11PathInsideVisibleGraph(path, inset = 6) {
+    if (!(path instanceof Element)) return false;
+    const visible = visibleGraphClientRect(inset);
+    if (!visible) return false;
+    const rect = path.getBoundingClientRect();
+    return Boolean(
+      (rect.width > 0 || rect.height > 0) &&
+      rect.left >= visible.left &&
+      rect.right <= visible.right &&
+      rect.top >= visible.top &&
+      rect.bottom <= visible.bottom
+    );
+  }
+
+  function graphStep11RoutePoints(paths) {
+    return (paths || []).flatMap(path =>
+      [0, .25, .5, .75, 1].map(fraction =>
+        graphSvgPathPoint(path, fraction)
       )
     );
-    const reusableBranchNode = [
-      ...document.querySelectorAll(".rml-graph-node")
-    ].find(node => {
-      const nodeId = node.dataset.graphNodeId || "";
-      if (
-        !nodeId ||
-        nodeId === baseTargetId ||
-        !/(?:^|\s)NOT(?:\s|$)/i.test(graphDemoNodeTitle(node))
-      ) return false;
-      return [...node.querySelectorAll(
-        '.rml-graph-socket[data-direction="input"]'
-      )].some(socket =>
-        graphDemoVisible(socket) &&
-        String(socket.dataset.concreteType || "").trim().toLowerCase() === outputType &&
-        !occupiedInputs.has(`${nodeId}:${socket.dataset.portId || ""}`)
-      );
-    }) || null;
+  }
 
-    let branchNode =
-      document.querySelector(
-        '.rml-graph-node[data-rml-tour-step10-branch="true"]'
-      ) || reusableBranchNode;
-
-    if (branchNode === reusableBranchNode && branchNode) {
-      branchNode.dataset.rmlTourStep10Branch = "true";
-      showDemoLabel(
-        "Reuse this existing compatible branch target — no duplicate node needed",
-        centerOf(branchNode)
-      );
-      await wait(520);
-      if (runId !== demoRunId) return;
+  function graphStep11SimpleDropPoint(viewport) {
+    const prepared = graphRoutePreparedDropHit();
+    if (prepared?.ok === true) {
+      return prepared.point;
     }
 
-    if (!branchNode) {
-      const paletteNot =
-        await teacherRevealRuntimeGraphPaletteItem("logic.not", runId);
-
-      const beforeIds = new Set([
-        ...[...document.querySelectorAll(
-          ".rml-graph-node"
-        )].map(
-          node =>
-            node.dataset.graphNodeId
-        ),
-        ...(window.RMLDynamicGraphHost
-          ?.getState?.()
-          ?.nodes || []).map(node => node.id)
-      ].filter(Boolean));
-
-      const branchDropPoint =
-        graphDemoSafeEmptyDropPoint(
-          viewport,
-          paletteNot
-            ? centerOf(paletteNot)
-            : centerOf(viewport),
-          {
-            prefer: "right",
-            reserveWidth: 310,
-            reserveHeight: 190
-          }
-        );
-
-      if (paletteNot) {
-        showDemoLabel(
-          "Create the branch node through the normal palette engine",
-          centerOf(paletteNot)
-        );
-
-        await nativeUserPointerDrag(
-          paletteNot,
-          branchDropPoint,
-          1050,
-          runId,
-          9213
-        );
-      }
-
-      const nativeCommitState =
-        window.RMLDynamicGraphHost
-          ?.getGuidedPaletteDropState?.() || null;
-      const committedNodeId =
-        nativeCommitState?.ok === true &&
-        nativeCommitState?.operatorId === "logic.not" &&
-        nativeCommitState?.pointerId === 9213 &&
-        nativeCommitState?.wasDragging === true
-          ? nativeCommitState.nodeId || ""
-          : "";
-
-      const resolveStateBranchId = () => {
-        if (committedNodeId) return committedNodeId;
-        const state =
-          window.RMLDynamicGraphHost
-            ?.getState?.();
-        return state?.nodes?.find(
-          node =>
-            !beforeIds.has(node.id) &&
-            node.kind === "operator" &&
-            node.operatorId === "logic.not"
-        )?.id || "";
-      };
-
-      let stateBranchId = "";
-      for (let frame = 0; frame < 40; frame += 1) {
-        await new Promise(resolve =>
-          requestAnimationFrame(resolve)
-        );
-        if (runId !== demoRunId) return;
-
-        stateBranchId = resolveStateBranchId();
-        branchNode = stateBranchId
-          ? document.querySelector(
-              `.rml-graph-node[data-graph-node-id="${CSS.escape(stateBranchId)}"]`
-            )
-          : null;
-        branchNode ||= [...document.querySelectorAll(
-          ".rml-graph-node"
-        )].find(
-          node =>
-            !beforeIds.has(
-              node.dataset.graphNodeId
-            ) &&
-            /^NOT$/i.test(
-              graphDemoNodeTitle(node)
-            )
-        ) || null;
-        if (branchNode) break;
-      }
-
-      if (!branchNode && stateBranchId) {
-        graphDemoError(
-          "The palette-created branch node exists in graph state but is not rendered.",
-          {
-            nodeId: stateBranchId,
-            nativeCommitState
-          }
-        );
-      }
-
-      if (!branchNode) {
-        const state =
-          window.RMLDynamicGraphHost
-            ?.getState?.();
-        const graphViewport =
-          state?.viewport || {
-            x: 0,
-            y: 0,
-            scale: 1
-          };
-        const viewportRect =
-          viewport.getBoundingClientRect();
-        const graphPoint = {
-          x:
-            (branchDropPoint.x -
-              viewportRect.left -
-              graphViewport.x) /
-            Math.max(.001, graphViewport.scale),
-          y:
-            (branchDropPoint.y -
-              viewportRect.top -
-              graphViewport.y) /
-            Math.max(.001, graphViewport.scale)
-        };
-        const forced =
-          window.RMLDynamicGraphHost
-            ?.ensureOperatorNode?.(
-              "logic.not",
-              {
-                allowDuplicate: true,
-                x: graphPoint.x - 140,
-                y: graphPoint.y - 90
-              }
-            );
-        if (!forced?.ok) {
-          graphDemoError(
-            "Routing step could not create its branch NOT node through either engine path.",
-            forced
-          );
-        }
-        await nextTwoFrames();
-        branchNode =
-          document.querySelector(
-            `.rml-graph-node[data-graph-node-id="${CSS.escape(forced.nodeId)}"]`
-          );
-      }
-
-      if (!branchNode) {
-        graphDemoError(
-          "The branch node exists in graph state but is not rendered."
-        );
-      }
-
-      branchNode.dataset.rmlTourStep10Branch =
-        "true";
+    const visible = visibleGraphClientRect(18);
+    if (!visible || visible.width < 72 || visible.height < 120) {
+      return null;
     }
 
-    const routePlacementSource =
-      graphSvgPathPoint(parentHit, .58);
-    let branchRect =
-      branchNode.getBoundingClientRect();
-    let desiredBranchCenter =
-      graphDemoSafeEmptyDropPoint(
-        viewport,
-        routePlacementSource,
-        {
-          prefer: "right",
-          reserveWidth:
-            Math.max(310, branchRect.width + 54),
-          reserveHeight:
-            Math.max(190, branchRect.height + 48),
-          allowOccupiedFallback: false,
-          ignoredNodes: [branchNode],
-          returnNullWhenUnavailable: true
-        }
-      );
-
-    let resizedForPlacement = false;
-    if (!desiredBranchCenter) {
-      resizedForPlacement =
-        await nativeGraphNodeResizeTowardMinimum(
-          branchNode,
-          runId
-        );
-      if (runId !== demoRunId) return;
-      if (resizedForPlacement) {
-        const resizedId = branchNode.dataset.graphNodeId || "";
-        branchNode = document.querySelector(
-          `.rml-graph-node[data-graph-node-id="${CSS.escape(resizedId)}"]`
-        ) || branchNode;
-        branchNode.dataset.rmlTourStep10Branch = "true";
-        branchRect = branchNode.getBoundingClientRect();
-        desiredBranchCenter = graphDemoSafeEmptyDropPoint(
-          viewport,
-          routePlacementSource,
-          {
-            prefer: "right",
-            reserveWidth: Math.max(310, branchRect.width + 54),
-            reserveHeight: Math.max(190, branchRect.height + 48),
-            allowOccupiedFallback: false,
-            ignoredNodes: [branchNode],
-            returnNullWhenUnavailable: true
-          }
-        );
-      }
-    }
-
-    if (!desiredBranchCenter) {
-      desiredBranchCenter = graphDemoSafeEmptyDropPoint(
-        viewport,
-        routePlacementSource,
-        {
-          prefer: "right",
-          reserveWidth: Math.max(310, branchRect.width + 54),
-          reserveHeight: Math.max(190, branchRect.height + 48),
-          ignoredNodes: [branchNode]
-        }
-      );
-    }
-
-    showDemoLabel(
-      "Move the second NOT with the normal node-drag engine",
-      centerOf(branchNode)
-    );
-
-    await nativeGraphNodeDrag(
-      branchNode,
-      desiredBranchCenter,
-      560,
-      runId
-    );
-
-    if (runId !== demoRunId) return;
-
-    const branchId =
-      branchNode.dataset.graphNodeId;
-
-    branchNode =
-      document.querySelector(
-        `.rml-graph-node[data-graph-node-id="${CSS.escape(branchId)}"]`
-      ) || branchNode;
-
-    branchNode.dataset.rmlTourStep10Branch =
-      "true";
-
-    if (!graphTeachingElementInsideViewport(branchNode, 10)) {
-      const corrected =
-        window.RMLDynamicGraphHost
-          ?.setNodeClientCenter?.(
-            branchId,
-            desiredBranchCenter.x,
-            desiredBranchCenter.y
-          );
-      if (!corrected?.ok) {
-        graphDemoError(
-          "Routing step could not keep its branch node inside the visible graph viewport.",
-          corrected
-        );
-      }
-      await nextTwoFrames();
-      branchNode =
-        document.querySelector(
-          `.rml-graph-node[data-graph-node-id="${CSS.escape(branchId)}"]`
-        ) || branchNode;
-      branchNode.dataset.rmlTourStep10Branch =
-        "true";
-    }
-
-    if (!graphTeachingElementInsideViewport(branchNode, 6)) {
-      graphDemoError(
-        "Routing step branch node remained outside the usable graph viewport after verified placement.",
-        {
-          node: tourDebugRect(branchNode),
-          visibleGraph: visibleGraphClientRect(0),
-          desiredBranchCenter
-        }
-      );
-    }
-
-    parentHit = requireLiveParentHit(
-      "branch-node creation"
-    );
-    let placedWireAnalysis = graphDemoRectWireAnalysis(
-      branchNode.getBoundingClientRect(),
-      {
-        clearance: 16,
-        paths: parentHit ? [parentHit] : []
-      }
-    );
-    let wireClearAlternative = graphDemoSafeEmptyDropPoint(
+    const reserve = graphRouteNodeReserve();
+    const requested = graphDemoSafeEmptyDropPoint(
       viewport,
-      routePlacementSource,
+      {
+        x: visible.left + visible.width * .5,
+        y: visible.top + visible.height * .5
+      },
       {
         prefer: "right",
-        reserveWidth: Math.max(
-          310,
-          branchNode.getBoundingClientRect().width + 54
-        ),
-        reserveHeight: Math.max(
-          190,
-          branchNode.getBoundingClientRect().height + 48
-        ),
-        allowOccupiedFallback: false,
-        ignoredNodes: [branchNode],
-        returnNullWhenUnavailable: true
+        reserveWidth: reserve.width,
+        reserveHeight: reserve.height,
+        allowOccupiedFallback: true
       }
     );
-
-    if (placedWireAnalysis.blocked && wireClearAlternative) {
-      const corrected = window.RMLDynamicGraphHost?.setNodeClientCenter?.(
-        branchId,
-        wireClearAlternative.x,
-        wireClearAlternative.y
-      );
-      if (!corrected?.ok) {
-        graphDemoError(
-          "Routing step found a wire-clear placement but could not commit it after responsive reflow.",
-          corrected
-        );
-      }
-      await nextTwoFrames();
-      branchNode = document.querySelector(
-        `.rml-graph-node[data-graph-node-id="${CSS.escape(branchId)}"]`
-      ) || branchNode;
-      branchNode.dataset.rmlTourStep10Branch = "true";
-      parentHit = requireLiveParentHit(
-        "wire-clear branch placement"
-      );
-      placedWireAnalysis = graphDemoRectWireAnalysis(
-        branchNode.getBoundingClientRect(),
-        {
-          clearance: 16,
-          paths: parentHit ? [parentHit] : []
-        }
-      );
-    }
-
-    const unavoidableWireOverlap = Boolean(
-      placedWireAnalysis.blocked && !wireClearAlternative
-    );
-    const wireClearPlacementVerified = tourDebugAssert(
-      "graph-route-node-body-clear-of-existing-wire-when-space-available",
-      placedWireAnalysis.blocked === false || unavoidableWireOverlap,
+    const perceived = graphPaletteDropPerception(
+      viewport,
+      requested,
       {
-        nodeId: branchId,
-        nodeRect: tourDebugRect(branchNode),
-        existingWireId: baseConnection.id,
-        wireAnalysis: placedWireAnalysis,
-        wireClearAlternativeAvailable: Boolean(wireClearAlternative),
-        resizedForPlacement,
-        unavoidableAtCurrentMinimumGeometry: unavoidableWireOverlap,
-        policy:
-          "the complete rendered node rectangle, not only its pointer centre, must keep a 16px clearance from every pre-existing wire whenever a fully visible collision-free placement exists"
+        operatorId: "logic.not",
+        footprintMargin: 10
       }
     );
-    if (!wireClearPlacementVerified) {
-      graphDemoError(
-        "Routing step placed a node body on an existing wire although a collision-free position was available.",
-        {
-          node: tourDebugRect(branchNode),
-          wireAnalysis: placedWireAnalysis,
-          wireClearAlternative
-        }
-      );
-    }
 
-    const resolveLiveBranchInput = () => {
-      branchNode =
-        document.querySelector(
-          `.rml-graph-node[data-graph-node-id="${CSS.escape(branchId)}"]`
-        ) || branchNode;
-      branchNode.dataset.rmlTourStep10Branch =
-        "true";
-      const inputs =
-        [...branchNode.querySelectorAll(
-          '.rml-graph-socket[data-direction="input"]'
-        )];
-      return (
-        inputs.find(socket =>
-          graphDemoVisible(socket) &&
-          graphTeachingElementInsideViewport(
-            socket,
-            2
-          )
-        ) ||
-        inputs.find(graphDemoVisible) ||
-        null
-      );
-    };
-
-    let branchInput =
-      resolveLiveBranchInput();
-
-    if (!branchInput) {
-      graphDemoError(
-        "Routing step branch node has no visible input socket."
-      );
-    }
-
-    parentHit = requireLiveParentHit(
-      "branch-input orientation"
-    );
-
-    const routeAnchor =
-      graphSvgPathPoint(parentHit, .58);
-    const liveBranchRect =
-      branchNode.getBoundingClientRect();
-    const currentInputPoint =
-      centerOf(branchInput);
-    const inputOnWrongSide =
-      (
-        routeAnchor.x < liveBranchRect.left &&
-        currentInputPoint.x > liveBranchRect.left + liveBranchRect.width * .5
-      ) ||
-      (
-        routeAnchor.x > liveBranchRect.right &&
-        currentInputPoint.x < liveBranchRect.left + liveBranchRect.width * .5
-      );
-
-    if (inputOnWrongSide) {
-      const flip =
-        branchNode.querySelector(".rml-graph-node-flip");
-      if (flip) {
-        await teacherClickElement(
-          flip,
-          "Flip the real ports so the new branch does not run behind its node",
-          runId
-        );
-        if (runId !== demoRunId) return;
-
-        branchNode =
-          document.querySelector(
-            '.rml-graph-node[data-rml-tour-step10-branch="true"]'
-          ) || branchNode;
-        await nextTwoFrames();
-        branchInput =
-          resolveLiveBranchInput();
-      }
-    }
-
-    await nextTwoFrames();
-    branchInput = resolveLiveBranchInput();
-    parentHit = requireLiveParentHit(
-      "pre-pointerdown stabilization"
-    );
-
-    if (
-      !branchInput ||
-      !graphTeachingElementInsideViewport(
-        branchInput,
-        2
-      ) ||
-      !parentHit
-    ) {
-      quietlyFitGraphNodes(
-        [
-          ...graphTeachingNodeIdsFromState(),
-          branchId
-        ],
-        {
-          inset: 20,
-          padding: 24,
-          maxScale:
-            window.innerWidth < 820
-              ? .82
-              : 1.02
-        }
-      );
-      await nextTwoFrames();
-      branchInput =
-        resolveLiveBranchInput();
-      parentHit =
-        graphNativeWireHit(
-          baseConnection.id
-        );
-    }
-
-    if (
-      !branchInput ||
-      !branchInput.isConnected ||
-      !graphTeachingElementInsideViewport(
-        branchInput,
-        2
-      ) ||
-      !parentHit
-    ) {
-      graphDemoError(
-        "Routing step could not resolve a live, visible branch input and base wire immediately before pointerdown.",
-        {
-          branchNode:
-            tourDebugRect(branchNode),
-          branchInput:
-            tourDebugRect(branchInput),
-          connected:
-            Boolean(branchInput?.isConnected),
-          visibleGraph:
-            visibleGraphClientRect(0),
-          baseWireVisible:
-            Boolean(parentHit)
-        }
-      );
-    }
-
-    const inputPoint =
-      centerOf(branchInput);
-    const junctionTarget =
-      graphDemoBestWirePoint(
-        parentHit,
-        inputPoint,
-        [branchNode]
-      );
-    if (!junctionTarget) {
-      graphDemoError(
-        "Routing step could not select a visible point on the live base wire."
-      );
-    }
-    const junctionPlan =
-      junctionTarget.tourRouteAnalysis || {};
-    const junctionSegmentIndex = Math.max(
-      0,
-      Math.trunc(
-        Number(parentHit.dataset.segmentIndex || 0)
+    return perceived?.point || {
+      x: Math.max(
+        visible.left + 24,
+        Math.min(visible.right - 24, requested?.x || visible.left + visible.width * .5)
+      ),
+      y: Math.max(
+        visible.top + 24,
+        Math.min(visible.bottom - 24, requested?.y || visible.top + visible.height * .5)
       )
-    );
-    const junctionFraction =
-      Number(junctionPlan.selectedFraction);
-    const resolveLiveJunctionTarget = () => {
-      const livePath = graphNativeWireHit(
-        baseConnection.id,
-        junctionSegmentIndex
-      );
-      if (
-        !livePath?.isConnected ||
-        Number(livePath.dataset.segmentIndex || 0) !==
-          junctionSegmentIndex ||
-        !Number.isFinite(junctionFraction)
-      ) {
-        return null;
-      }
-      return graphSvgPathPoint(
-        livePath,
-        junctionFraction
-      );
     };
-    const junctionPlanVerified = tourDebugAssert(
-      "graph-route-junction-target-prioritizes-visible-points-before-line-overlap",
-      (
-        junctionPlan.perfectAvailable !== true ||
-        junctionPlan.selectedTier === 0
-      ) &&
-      (
-        junctionPlan.pointProtectedAvailable !== true ||
-        junctionPlan.selectedPriority?.pointProtected === true
-      ) &&
-      (
-        junctionPlan.nodeClearPointAvailable !== true ||
-        junctionPlan.selectedPriority?.pointNodeClear === true
-      ) &&
-      (
-        junctionPlan.pointProtectedNodeClearRouteAvailable !== true ||
-        (
-          junctionPlan.selectedPriority?.pointProtected === true &&
-          junctionPlan.selectedPriority?.routeNodeBlocked === false
-        )
-      ),
-      {
-        junctionTarget,
-        junctionPlan,
-        policy:
-          "choose a fully clear junction first; if every line route conflicts, keep the visible junction point clear; allow a point below a node only when no node-clear point exists"
-      }
-    );
-    if (!junctionPlanVerified) {
-      graphDemoError(
-        "Routing step did not choose the highest available visibility class for the junction.",
-        { junctionTarget, junctionPlan }
-      );
+  }
+
+  async function graphStep11CreateSimpleBranchNode(runId) {
+    const host = window.RMLDynamicGraphHost;
+    const viewport = document.querySelector(".rml-graph-viewport");
+    if (!(viewport instanceof HTMLElement) || runId !== demoRunId) {
+      return null;
     }
 
-    showDemoLabel(
-      "Drag this REAL input onto the REAL existing wire",
-      inputPoint
-    );
-
-    const branchEndpoint =
-      graphSocketEndpoint(branchInput);
-    const branchPointerObserved =
-      await nativeGraphPointerDrag(
-        branchInput,
-        resolveLiveJunctionTarget,
-        760,
-        runId,
-        9112
-      );
-
-    if (runId !== demoRunId) return;
-
-    const branchDropState =
-      graphHost
-        ?.getGuidedConnectionDropState?.() ||
-      null;
-    tourDebugAssert(
-      "graph-route-native-wire-hit-committed-with-live-target",
-      Boolean(branchDropState) &&
-        branchDropState.ok === true &&
-        branchDropState.targetKind === "wire",
-      {
-        graphHostVersion:
-          Number(graphHost?.version || 0),
-        branchDropState,
-        plannedTarget: junctionTarget,
-        liveTarget: resolveLiveJunctionTarget(),
-        junctionSegmentIndex,
-        junctionFraction,
-        policy:
-          "the guided native socket drag must release on a currently connected wire segment; a fallback may preserve state but must not conceal a broken native hit"
-      }
-    );
-    const automaticHelperIsolationPassed =
-      tourDebugAssert(
-        "graph-route-guided-branch-drag-created-no-automatic-helper-node",
-        Boolean(branchDropState) &&
-          branchDropState
-            .automaticNodeCreationAttempted !==
-            true &&
-          branchDropState.nodeCountAfter ===
-            branchDropState.nodeCountBefore,
-        {
-          graphHostVersion:
-            Number(graphHost?.version || 0),
-          branchPointerObserved,
-          branchDropState,
-          policy:
-            "The assistant owns the deterministic branch fallback, so the product's empty-canvas automatic helper must never run during this guided socket-to-wire gesture."
-        }
-      );
-    if (!automaticHelperIsolationPassed) {
-      graphDemoError(
-        "The guided branch gesture allowed the empty-canvas automatic helper to add a competing node.",
-        branchDropState
-      );
+    if (graphRoutePreparedDropHit()?.ok !== true) {
+      await prepareGraphRoutePlacementArea(runId, {
+        animateCamera: true
+      });
     }
+    if (runId !== demoRunId) return null;
 
-    let branchConnection = null;
-    let deterministicBranchFallback = null;
-
-    for (
-      let attempt = 0;
-      attempt < 40 &&
-      runId === demoRunId;
-      attempt += 1
-    ) {
-      branchConnection =
-        window.RMLDynamicGraphHost
-          ?.getState?.()
-          ?.connections?.find(
-            connection =>
-              connection.toNode ===
-                branchEndpoint.nodeId &&
-              connection.toPort ===
-                branchEndpoint.portId &&
-              connection.branchFrom
-          ) || null;
-
-      if (branchConnection) break;
-
-      await new Promise(resolve =>
-        requestAnimationFrame(resolve)
-      );
-    }
-
-    if (!branchConnection) {
-      const liveFallbackTarget =
-        resolveLiveJunctionTarget();
-      if (!liveFallbackTarget) {
-        graphDemoError(
-          "Routing fallback could not resolve the same live wire target used by the native drag."
-        );
-      }
-      deterministicBranchFallback =
-        window.RMLDynamicGraphHost
-          ?.ensureBranch?.(
-            baseConnection.id,
-            branchEndpoint,
-            liveFallbackTarget.x,
-            liveFallbackTarget.y,
-            junctionSegmentIndex
-          );
-      if (!deterministicBranchFallback?.ok) {
-        graphDemoError(
-          "The graph engine did not create the requested branch connection.",
-          {
-            branchPointerObserved,
-            deterministicFallback: deterministicBranchFallback
-          }
-        );
-      }
-      await nextTwoFrames();
-      branchConnection =
-        window.RMLDynamicGraphHost
-          ?.getState?.()
-          ?.connections?.find(
-            connection =>
-              connection.id ===
-              deterministicBranchFallback.connectionId
-          ) || null;
-    }
-
-    const deterministicFallbackSegmentVerified = tourDebugAssert(
-      "graph-route-deterministic-fallback-used-nearest-wire-segment",
-      !deterministicBranchFallback ||
-        (
-          deterministicBranchFallback.ok === true &&
-          (
-            deterministicBranchFallback.created === false ||
-            (
-              Number.isInteger(
-                deterministicBranchFallback.segmentIndex
-              ) &&
-              Number.isFinite(
-                deterministicBranchFallback.segmentDistance
-              ) &&
-              deterministicBranchFallback.segmentDistance <= 4
-            )
-          )
-        ),
-      {
-        branchPointerObserved,
-        deterministicBranchFallback,
-        junctionTarget,
-        liveJunctionTarget:
-          resolveLiveJunctionTarget(),
-        junctionSegmentIndex,
-        policy:
-          "when the native hit area misses, the deterministic fallback may use only the same currently connected wire segment and live client target demonstrated to the user"
-      }
+    const beforeIds = new Set(
+      (host?.getState?.()?.nodes || []).map(node => node.id)
     );
-    if (!deterministicFallbackSegmentVerified) {
-      graphDemoError(
-        "Routing step fallback did not commit on the wire segment nearest to the demonstrated target.",
-        deterministicBranchFallback
-      );
-    }
-
-    if (!branchConnection?.branchFrom?.pointId) {
-      graphDemoError(
-        "Routing step could not retain the exact committed branch-point identity.",
-        {
-          branchConnection,
-          deterministicBranchFallback
-        }
-      );
-    }
-
-    await new Promise(resolve =>
-      requestAnimationFrame(() =>
-        requestAnimationFrame(resolve)
-      )
-    );
-
-    if (runId !== demoRunId) return;
-
-    parentHit = requireLiveParentHit(
-      "post-branch commit",
-      junctionSegmentIndex
-    );
-
-    const branchPointId =
-      branchConnection.branchFrom.pointId;
-    const parentConnectionId =
-      branchConnection.branchFrom.connectionId ||
-      baseConnection.id;
-    const exactJunction =
-      document.querySelector(
-        `.rml-graph-wire-point[data-connection-id="${CSS.escape(parentConnectionId)}"][data-point-id="${CSS.escape(branchPointId)}"]`
-      );
-    const junctions =
-      [...document.querySelectorAll(
-        `.rml-graph-wire-point[data-connection-id="${CSS.escape(parentConnectionId)}"]`
-      )].filter(graphDemoVisible);
-
-    const junction =
-      exactJunction ||
-      junctions.find(point => {
-        const rect =
-          point.getBoundingClientRect();
-        const center = {
-          x:
-            rect.left +
-            rect.width / 2,
-          y:
-            rect.top +
-            rect.height / 2
-        };
-
-        return Math.hypot(
-          center.x - junctionTarget.x,
-          center.y - junctionTarget.y
-        ) < 45;
-      }) ||
-      null;
-
-    const exactJunctionIdentityVerified = tourDebugAssert(
-      "graph-route-committed-junction-resolved-by-branch-point-identity",
-      Boolean(
-        exactJunction &&
-        junction === exactJunction &&
-        exactJunction.dataset.pointId === branchPointId &&
-        exactJunction.dataset.connectionId === parentConnectionId
-      ),
-      {
-        branchConnectionId: branchConnection.id || "",
-        parentConnectionId,
-        branchPointId,
-        exactJunction: tourDebugRect(exactJunction),
-        junctionTarget,
-        deterministicBranchFallback,
-        policy:
-          "the committed branch is evaluated through its own branchFrom point identity; no unrelated first junction may be substituted"
-      }
-    );
-
-    if (!junction || !exactJunctionIdentityVerified) {
-      graphDemoError(
-        "Routing step could not resolve its exact committed junction from the native Graph Engine."
-      );
-    }
-
-    const branchPath = graphNativeWireHit(
-      branchConnection?.id || ""
-    );
-    const junctionPointAnalysis = graphDemoPointRouteAnalysis(
-      centerOf(junction),
-      {
-        ignoredPoints: [junction],
-        ignoredPaths: [parentHit, branchPath].filter(Boolean),
-        nodeClearance: 10,
-        pointClearance: 22
-      }
-    );
-    const junctionPathOcclusion = graphDemoPathNodeOcclusion(
-      branchPath
-    );
-    const junctionVisibilityVerified = tourDebugAssert(
-      "graph-route-committed-junction-and-branch-remain-visible-outside-node-bodies",
-      (
-        junctionPointAnalysis.nodeCovered === false ||
-        junctionPlan.nodeClearPointAvailable === false
-      ) &&
-      (
-        junctionPointAnalysis.pointBlocked === false ||
-        junctionPlan.pointProtectedAvailable === false
-      ) &&
-      (
-        junctionPathOcclusion.blocked === false ||
-        junctionPlan.pointProtectedNodeClearRouteAvailable === false
-      ),
-      {
-        junction: tourDebugRect(junction),
-        branchConnectionId: branchConnection?.id || "",
-        junctionPointAnalysis,
-        junctionPathOcclusion,
-        junctionPlan,
-        policy:
-          "the real junction marker and branch line stay outside node bodies whenever the measured graph offers such a route; marker visibility outranks unavoidable line overlap"
-      }
-    );
-    if (!junctionVisibilityVerified) {
-      graphDemoError(
-        "The committed branch obscured a junction point or line although a clearer route was available.",
-        {
-          junctionPointAnalysis,
-          junctionPathOcclusion,
-          junctionPlan
-        }
-      );
-    }
-
-    pulseAt(junction);
-    showDemoLabel(
-      "REAL junction created by the normal Graph Engine",
-      centerOf(junction)
-    );
-    await wait(520);
-
-    const segment =
-      realHits().find(
-        hit =>
-          hit.dataset.connectionId ===
-            baseConnection.id
-      ) ||
-      graphNativeWireHit(
-        baseConnection.id
-      );
-
-    if (!segment) {
-      graphDemoError(
-        "Routing step could not find a real wire segment to bend."
-      );
-    }
-
-    const segmentStart =
-      graphSvgPathPoint(
-        segment,
-        .68
-      );
-    const bendTarget =
-      graphDemoSafeBendPoint(
-        viewport,
-        segmentStart,
-        segment
-      );
-    const bendPlan = bendTarget.tourRouteAnalysis || {};
-    const bendPlanVerified = tourDebugAssert(
-      "graph-route-bend-target-prioritizes-visible-points-before-line-overlap",
-      (
-        bendPlan.perfectAvailable !== true ||
-        bendPlan.selectedTier === 0
-      ) &&
-      (
-        bendPlan.pointProtectedAvailable !== true ||
-        bendPlan.selectedPriority?.pointProtected === true
-      ) &&
-      (
-        bendPlan.nodeClearPointAvailable !== true ||
-        bendPlan.selectedPriority?.pointNodeClear === true
-      ) &&
-      (
-        bendPlan.pointProtectedNodeClearRouteAvailable !== true ||
-        (
-          bendPlan.selectedPriority?.pointProtected === true &&
-          bendPlan.selectedPriority?.routeNodeBlocked === false
-        )
-      ),
-      {
-        segmentStart,
-        bendTarget,
-        bendPlan,
-        policy:
-          "choose a completely clear bend first; preserve the bend marker before accepting an unavoidable line overlap; use node-covered space only as the final geometry fallback"
-      }
-    );
-    if (!bendPlanVerified) {
-      graphDemoError(
-        "Routing step did not choose the highest available visibility class for the bend.",
-        { segmentStart, bendTarget, bendPlan }
-      );
-    }
-
-    showDemoLabel(
-      "Drag the REAL line with the normal routing engine",
-      segmentStart
-    );
-    await moveMouse(
-      segmentStart,
-      320,
+    let palette = await teacherRevealRuntimeGraphPaletteItem(
+      "logic.not",
       runId
     );
+    palette ||= document.querySelector(
+      '.rml-graph-palette-item[data-graph-operator="logic.not"]'
+    );
 
-    if (runId !== demoRunId) return;
+    let finalDropPoint = graphStep11SimpleDropPoint(viewport);
+    let dragCompleted = false;
 
-    const bendPointerId = 9113;
-    const { mouse } = elements();
-    let bendPointerDown = false;
-
-    try {
-      segment.dispatchEvent(
-        new PointerEvent(
-          "pointerdown",
-          {
-            bubbles: true,
-            cancelable: true,
-            pointerId: bendPointerId,
-            pointerType: "mouse",
-            isPrimary: true,
-            button: 0,
-            buttons: 1,
-            clientX: segmentStart.x,
-            clientY: segmentStart.y
-          }
-        )
+    if (palette instanceof HTMLElement && runId === demoRunId) {
+      const paletteScroll = palette.closest(".rml-graph-palette-scroll");
+      const sourceHit = graphPaletteSourceHitPoint(
+        palette,
+        paletteScroll,
+        2
       );
+      const page = tourPageRootScrollState();
+      const effect = tourEffectViewport();
+      const viewportRect = viewport.getBoundingClientRect();
+      const needsHeldPageScroll = Boolean(
+        sourceHit?.geometricVisible === true &&
+        !finalDropPoint &&
+        page.canScrollY
+      );
+      const direction =
+        (viewportRect.top + viewportRect.bottom) * .5 >=
+        (effect.top + effect.bottom) * .5
+          ? 1
+          : -1;
+      const pageEdge = {
+        x: Math.max(
+          effect.left + 28,
+          Math.min(effect.right - 28, sourceHit?.point?.x || effect.left + effect.width * .5)
+        ),
+        y: direction > 0
+          ? effect.bottom - 32
+          : effect.top + 32
+      };
+      const initialTarget = needsHeldPageScroll
+        ? pageEdge
+        : finalDropPoint;
 
-      bendPointerDown = true;
-      mouse?.classList.add("pressed");
-
-      const bendStarted =
-        performance.now();
-      const bendDuration = 760;
-
-      while (runId === demoRunId) {
-        const raw = Math.min(
-          1,
-          (performance.now() - bendStarted) /
-            bendDuration
+      if (sourceHit?.point && initialTarget) {
+        showDemoLabel(
+          needsHeldPageScroll
+            ? "Keep the real NOT held while the page scrolls to the Runtime Graph"
+            : "Drag one real NOT from the Node library into the visible graph",
+          sourceHit.point
         );
-        const eased =
-          1 - Math.pow(1 - raw, 2.15);
+        let lastScrollAt = -Infinity;
+        let lastScrollTop = page.scroller?.scrollTop || 0;
+        host?.setGuidedAutoPanSuppressed?.(true);
+        try {
+          dragCompleted = await nativeUserPointerDrag(
+            palette,
+            initialTarget,
+            980,
+            runId,
+            9310,
+            {
+              startPoint: sourceHit.point,
+              stageTarget: tourPointRect(initialTarget, 58),
+              stageFocusTarget: needsHeldPageScroll
+                ? palette.closest(".rml-graph-palette") || palette
+                : viewport,
+              stageLabel: needsHeldPageScroll
+                ? "HOLD AT EDGE · SCROLL TO GRAPH"
+                : "VISIBLE RUNTIME GRAPH",
+              minimumTeachingDuration: false,
+              commitHoldMs: 260,
+              edgeHoldMs: needsHeldPageScroll ? 4200 : 0,
+              edgeHoldMinMs: needsHeldPageScroll ? 300 : 0,
+              onEdgeHoldStart: needsHeldPageScroll
+                ? () => elements().mouse?.classList.add("scrolling")
+                : null,
+              onEdgeHoldFrame: needsHeldPageScroll
+                ? ({ point, elapsed }) => {
+                    finalDropPoint = graphStep11SimpleDropPoint(viewport);
+                    if (finalDropPoint) return;
+                    const liveRect = viewport.getBoundingClientRect();
+                    const liveEffect = tourEffectViewport();
+                    const remaining = direction > 0
+                      ? Math.max(0, liveRect.top - (liveEffect.top + liveEffect.height * .28))
+                      : Math.max(0, (liveEffect.bottom - liveEffect.height * .28) - liveRect.bottom);
+                    const deltaY = direction * Math.max(30, Math.min(88, remaining));
+                    const wheelTarget = document.elementFromPoint(point.x, point.y) || document.body;
+                    dispatchTourWheel(wheelTarget, { deltaY });
+                    if (
+                      page.scroller &&
+                      elapsed - lastScrollAt >= 180 &&
+                      Math.abs(page.scroller.scrollTop - lastScrollTop) < 1
+                    ) {
+                      lastScrollAt = elapsed;
+                      page.scroller.scrollTop = Math.max(
+                        0,
+                        Math.min(page.maxTop, page.scroller.scrollTop + deltaY)
+                      );
+                    }
+                    lastScrollTop = page.scroller?.scrollTop || lastScrollTop;
+                  }
+                : null,
+              edgeHoldUntil: needsHeldPageScroll
+                ? () => Boolean(graphStep11SimpleDropPoint(viewport))
+                : null,
+              onEdgeHoldEnd: needsHeldPageScroll
+                ? () => elements().mouse?.classList.remove("scrolling")
+                : null,
+              afterEdgeHold: needsHeldPageScroll
+                ? async (_edgePoint, dragContext) => {
+                    finalDropPoint = graphStep11SimpleDropPoint(viewport);
+                    const visible = visibleGraphClientRect(12);
+                    finalDropPoint ||= visible
+                      ? {
+                          x: visible.left + visible.width * .58,
+                          y: visible.top + visible.height * .5
+                        }
+                      : pageEdge;
+                    const retreat = visible
+                      ? {
+                          x: visible.left + Math.min(42, visible.width * .14),
+                          y: visible.top + Math.min(72, visible.height * .24)
+                        }
+                      : pageEdge;
+                    dragContext?.dispatchMove?.(retreat);
+                    await nextTwoFrames();
+                    return {
+                      startPoint: retreat,
+                      point: finalDropPoint,
+                      duration: 620,
+                      stageTarget: tourPointRect(finalDropPoint, 58),
+                      stageLabel: "VISIBLE RUNTIME GRAPH"
+                    };
+                  }
+                : null
+            }
+          );
+        } finally {
+          elements().mouse?.classList.remove("scrolling");
+          host?.setGuidedAutoPanSuppressed?.(false);
+        }
+        await nextTwoFrames();
+      }
+    }
+
+    const dropState = host?.getGuidedPaletteDropState?.() || null;
+    let nodeId = dropState?.ok === true &&
+      dropState?.operatorId === "logic.not" &&
+      dropState?.pointerId === 9310
+        ? String(dropState.nodeId || "")
+        : "";
+    nodeId ||= (host?.getState?.()?.nodes || []).find(node =>
+      !beforeIds.has(node.id) &&
+      node.kind === "operator" &&
+      node.operatorId === "logic.not"
+    )?.id || "";
+
+    if (!nodeId) {
+      const fallback = host?.ensureOperatorNode?.(
+        "logic.not",
+        { allowDuplicate: true }
+      ) || null;
+      nodeId = fallback?.ok === true ? String(fallback.nodeId || "") : "";
+      finalDropPoint ||= graphStep11SimpleDropPoint(viewport);
+      if (nodeId && finalDropPoint) {
+        host?.setNodeClientCenter?.(
+          nodeId,
+          finalDropPoint.x,
+          finalDropPoint.y
+        );
+      }
+      await nextTwoFrames();
+    }
+
+    if (!nodeId) return null;
+
+    const visibility = await ensureGraphNodeFullyVisibleAfterCommit(
+      nodeId,
+      finalDropPoint || centerOf(viewport),
+      runId,
+      { inset: 10 }
+    );
+    const article = visibility.node || graphStep11NodeArticle(nodeId);
+    if (article instanceof HTMLElement) {
+      article.dataset.rmlTourStep10Branch = "true";
+      pulseAt(article, "rml-setup-demo-drop");
+    }
+    return {
+      nodeId,
+      article,
+      dragCompleted,
+      fallbackUsed: dragCompleted !== true
+    };
+  }
+
+  function graphStep11PlanBranchNodeAlignment(
+    baseConnection,
+    branchNodeId
+  ) {
+    const article = graphStep11NodeArticle(branchNodeId);
+    const input = article?.querySelector(
+      '.rml-graph-socket[data-direction="input"]'
+    );
+    const visible = visibleGraphClientRect(12);
+    if (
+      !(article instanceof HTMLElement) ||
+      !(input instanceof Element) ||
+      !visible
+    ) {
+      return null;
+    }
+
+    const rect = article.getBoundingClientRect();
+    const center = centerOf(article);
+    const inputCenter = centerOf(input);
+    const inputOffset = {
+      x: inputCenter.x - center.x,
+      y: inputCenter.y - center.y
+    };
+    const directTarget = graphStep11VisibleWireTarget(
+      baseConnection?.id,
+      inputCenter,
+      { ignoredNodes: [article] }
+    );
+    if (directTarget) {
+      return {
+        strategy: "direct-visible-target",
+        nodeCenter: center,
+        plannedInput: inputCenter,
+        wireTarget: directTarget,
+        movement: 0,
+        gap: Math.hypot(
+          inputCenter.x - directTarget.point.x,
+          inputCenter.y - directTarget.point.y
+        ),
+        verticalOffset: 0,
+        route: directTarget.route || null,
+        score: 0
+      };
+    }
+
+    const selectedWireTarget = graphStep11VisibleWireTarget(
+      baseConnection?.id,
+      null,
+      { ignoredNodes: [article] }
+    );
+    if (!selectedWireTarget) return null;
+    const wireTargets = graphStep11LastWireTargetCandidates.length
+      ? graphStep11LastWireTargetCandidates.slice(0, 3)
+      : [selectedWireTarget];
+    const inputSide = input.dataset.side || "left";
+    const direction = inputSide === "right" ? -1 : 1;
+    const otherRects = [...document.querySelectorAll(".rml-graph-node")]
+      .filter(node => node !== article && graphDemoVisible(node))
+      .map(node => node.getBoundingClientRect());
+    const maximumMovement = window.innerWidth < 360
+      ? Math.min(190, Math.hypot(visible.width, visible.height) * .58)
+      : window.innerWidth < 480
+        ? 148
+        : 156;
+    const candidates = [];
+
+    for (const wireTarget of wireTargets) {
+      const gaps = window.innerWidth < 360 ? [44, 56, 68] : [64, 84];
+      const verticalOffsets = window.innerWidth < 360
+        ? [0, -24, 24, -40, 40]
+        : [0, -36, 36];
+      for (const gap of gaps) {
+        for (const verticalOffset of verticalOffsets) {
+        const plannedInput = {
+          x: wireTarget.point.x + direction * gap,
+          y: wireTarget.point.y + verticalOffset
+        };
+        const nodeCenter = {
+          x: plannedInput.x - inputOffset.x,
+          y: plannedInput.y - inputOffset.y
+        };
+        const dx = nodeCenter.x - center.x;
+        const dy = nodeCenter.y - center.y;
+        const movement = Math.hypot(dx, dy);
+        const movedRect = {
+          left: rect.left + dx,
+          right: rect.right + dx,
+          top: rect.top + dy,
+          bottom: rect.bottom + dy
+        };
+        const inside =
+          movedRect.left >= visible.left &&
+          movedRect.right <= visible.right &&
+          movedRect.top >= visible.top &&
+          movedRect.bottom <= visible.bottom;
+        const overlapsNode = otherRects.some(other => !(
+          movedRect.right + 10 < other.left ||
+          movedRect.left - 10 > other.right ||
+          movedRect.bottom + 10 < other.top ||
+          movedRect.top - 10 > other.bottom
+        ));
+        const segmentClear = graphStep11SegmentVisiblyClear(
+          plannedInput,
+          wireTarget.point,
+          { ignoredNodes: [article] }
+        );
+          if (
+            inside &&
+            movement <= maximumMovement &&
+            !overlapsNode &&
+            segmentClear
+          ) {
+            candidates.push({
+              strategy: "bounded-fallback",
+              nodeCenter,
+              plannedInput,
+              wireTarget,
+              movement,
+              gap,
+              verticalOffset,
+              route: null,
+              score:
+                movement +
+                Math.abs(verticalOffset) * .35 +
+                Math.abs(gap - 72) * .2 +
+                wireTarget.tier * 24
+            });
+          }
+        }
+      }
+    }
+
+    candidates.sort((left, right) => left.score - right.score);
+    return candidates[0] || null;
+  }
+
+  async function graphStep11PrepareBranchAction(
+    baseConnection,
+    branchNodeId,
+    runId
+  ) {
+    const article = graphStep11NodeArticle(branchNodeId);
+    const input = article?.querySelector(
+      '.rml-graph-socket[data-direction="input"]'
+    );
+    if (!(article instanceof HTMLElement) || !(input instanceof Element)) {
+      graphStep11Failure(
+        "branch-action-preparation-missing-not-input",
+        { branchNodeId }
+      );
+    }
+
+    let plan = graphStep11PlanBranchNodeAlignment(
+      baseConnection,
+      branchNodeId
+    );
+    if (!plan && runId === demoRunId) {
+      showDemoLabel(
+        "Fit the three live nodes just enough to expose the existing line",
+        centerOf(article)
+      );
+      await animateGraphNodesToReadableFrame(
+        (window.RMLDynamicGraphHost?.getState?.()?.nodes || [])
+          .map(node => node.id)
+          .filter(Boolean),
+        runId,
+        {
+          inset: 8,
+          padding: window.innerWidth < 360 ? 10 : 16,
+          maxScale: window.innerWidth < 360 ? .68 : .78,
+          duration: 420,
+          allowZoomIn: false,
+          reason: "step11-ultra-small-visible-wire-action-frame"
+        }
+      );
+      await nextTwoFrames();
+      plan = graphStep11PlanBranchNodeAlignment(
+        baseConnection,
+        branchNodeId
+      );
+    }
+    if (!plan) {
+      const visibleTarget = graphStep11VisibleWireTarget(
+        baseConnection?.id,
+        null,
+        { ignoredNodes: [article] }
+      );
+      if (visibleTarget) {
+        plan = {
+          strategy: "ultra-small-visible-wire",
+          nodeCenter: centerOf(article),
+          plannedInput: centerOf(input),
+          wireTarget: visibleTarget,
+          movement: 0,
+          gap: Math.hypot(
+            centerOf(input).x - visibleTarget.point.x,
+            centerOf(input).y - visibleTarget.point.y
+          ),
+          verticalOffset: 0,
+          route: null,
+          score: visibleTarget.score
+        };
+      } else {
+        graphStep11Failure(
+          "no-visible-wire-segment-after-compact-fit",
+          {
+            parentConnectionId: baseConnection?.id || "",
+            branchNodeId,
+            input: graphSocketEndpoint(input),
+            reason:
+              "The compact visible fit exposed no usable point on the existing wire."
+          }
+        );
+      }
+    }
+
+    if (plan.movement >= 10) {
+      showDemoLabel(
+        "Move the new NOT beside the visible line — one short, useful drag",
+        centerOf(article)
+      );
+      positionCardAwayFromPath(
+        centerOf(article),
+        plan.nodeCenter
+      );
+      await nativeGraphNodeDrag(
+        article,
+        plan.nodeCenter,
+        560,
+        runId
+      );
+      await nextTwoFrames();
+    }
+    if (runId !== demoRunId) return null;
+
+    const liveArticle = graphStep11NodeArticle(branchNodeId);
+    const liveInput = liveArticle?.querySelector(
+      '.rml-graph-socket[data-direction="input"]'
+    );
+    const target = plan.movement < 10 && plan.wireTarget?.path?.isConnected
+      ? plan.wireTarget
+      : liveInput
+        ? graphStep11VisibleWireTarget(
+            baseConnection.id,
+            centerOf(liveInput),
+            { ignoredNodes: [liveArticle] }
+          )
+        : null;
+    if (!target) {
+      graphStep11Failure(
+        "planned-not-position-did-not-produce-a-visible-wire-target",
+        {
+          parentConnectionId: baseConnection.id,
+          branchNodeId,
+          input: graphSocketEndpoint(liveInput)
+        }
+      );
+    }
+    return {
+      target,
+      nodeMoved: plan.movement >= 10,
+      plannedMovement: plan.movement
+    };
+  }
+
+  function graphStep11BranchProof(
+    parentConnectionId,
+    branchNodeId,
+    inputPortId
+  ) {
+    const state = window.RMLDynamicGraphHost?.getState?.();
+    const connection = state?.connections?.find(item =>
+      item.toNode === branchNodeId &&
+      item.toPort === inputPortId &&
+      item.branchFrom?.connectionId === parentConnectionId
+    ) || null;
+    const parent = state?.connections?.find(item =>
+      item.id === parentConnectionId
+    ) || null;
+    const junction = parent?.points?.find(point =>
+      point.id === connection?.branchFrom?.pointId
+    ) || null;
+    const junctionHandle = junction
+      ? document.querySelector(
+          `.rml-graph-wire-point.junction` +
+          `[data-connection-id="${CSS.escape(parentConnectionId)}"]` +
+          `[data-point-id="${CSS.escape(junction.id)}"]`
+        )
+      : null;
+    const parentPaths = graphDemoConnectionPaths(parentConnectionId);
+    const branchPaths = graphDemoConnectionPaths(connection?.id);
+    const branchPath = branchPaths[0] || null;
+    const branchNode = graphStep11NodeArticle(branchNodeId);
+    const branchInput = graphStep11Socket(
+      branchNodeId,
+      inputPortId,
+      "input"
+    );
+    const parentOutput = graphStep11Socket(
+      parent?.fromNode,
+      parent?.fromPort,
+      "output"
+    );
+    const parentInput = graphStep11Socket(
+      parent?.toNode,
+      parent?.toPort,
+      "input"
+    );
+    const allNodesVisible = [...document.querySelectorAll(".rml-graph-node")]
+      .filter(graphDemoVisible)
+      .every(node => graphNodeRectInsideVisibleGraph(node, 8));
+    const parentPathsVisible = parentPaths.length > 0 &&
+      parentPaths.every(path => graphStep11PathInsideVisibleGraph(path, 5));
+    const branchPathsVisible = branchPaths.length > 0 &&
+      branchPaths.every(path => graphStep11PathInsideVisibleGraph(path, 5));
+    const committed = Boolean(
+      connection &&
+      parent &&
+      junction &&
+      connection.branchFrom?.connectionId === parentConnectionId &&
+      connection.branchFrom?.pointId === junction.id
+    );
+    const rendered = Boolean(
+      committed &&
+      junctionHandle &&
+      branchPath &&
+      branchNode &&
+      branchInput &&
+      parentOutput &&
+      parentInput
+    );
+    const ok = Boolean(
+      rendered &&
+      allNodesVisible &&
+      parentPathsVisible &&
+      branchPathsVisible &&
+      graphNodeRectInsideVisibleGraph(branchNode, 10) &&
+      graphDemoVisible(parentOutput) &&
+      graphStep11PointInsideVisibleGraph(centerOf(parentOutput), 6) &&
+      graphDemoVisible(parentInput) &&
+      graphStep11PointInsideVisibleGraph(centerOf(parentInput), 6) &&
+      graphDemoVisible(branchInput) &&
+      graphStep11PointInsideVisibleGraph(centerOf(branchInput), 6) &&
+      graphDemoVisible(junctionHandle) &&
+      graphStep11PointInsideVisibleGraph(centerOf(junctionHandle), 8)
+    );
+    const failures = [
+      [!connection, "branchFrom connection missing"],
+      [!parent, "parent connection missing"],
+      [!junction, "junction point missing from parent"],
+      [!junctionHandle, "rendered junction handle missing"],
+      [branchPaths.length === 0, "rendered branch wire path missing"],
+      [parentPaths.length === 0, "rendered parent wire path missing"],
+      [!branchNode, "rendered branch NOT node missing"],
+      [!branchInput, "rendered branch NOT input missing"],
+      [!parentOutput, "rendered parent output missing"],
+      [!parentInput, "rendered parent input missing"],
+      [!allNodesVisible, "at least one graph node is outside the visible graph"],
+      [!parentPathsVisible, "parent wire is not completely visible"],
+      [!branchPathsVisible, "branch wire is not completely visible"],
+      [
+        Boolean(branchNode) &&
+          !graphNodeRectInsideVisibleGraph(branchNode, 10),
+        "branch NOT node is clipped"
+      ],
+      [
+        Boolean(parentOutput) &&
+          (!graphDemoVisible(parentOutput) ||
+            !graphStep11PointInsideVisibleGraph(centerOf(parentOutput), 6)),
+        "parent output is not visibly actionable"
+      ],
+      [
+        Boolean(parentInput) &&
+          (!graphDemoVisible(parentInput) ||
+            !graphStep11PointInsideVisibleGraph(centerOf(parentInput), 6)),
+        "parent input is not visibly actionable"
+      ],
+      [
+        Boolean(branchInput) &&
+          (!graphDemoVisible(branchInput) ||
+            !graphStep11PointInsideVisibleGraph(centerOf(branchInput), 6)),
+        "branch NOT input is not visibly actionable"
+      ],
+      [
+        Boolean(junctionHandle) &&
+          (!graphDemoVisible(junctionHandle) ||
+            !graphStep11PointInsideVisibleGraph(centerOf(junctionHandle), 8)),
+        "junction handle is not visibly actionable"
+      ]
+    ]
+      .filter(([failed]) => failed)
+      .map(([, reason]) => reason);
+    return {
+      ok,
+      committed,
+      rendered,
+      failures,
+      connection,
+      parent,
+      junction,
+      junctionHandle,
+      parentPaths,
+      branchPaths,
+      branchPath,
+      branchNode,
+      branchInput,
+      parentOutput,
+      parentInput,
+      allNodesVisible,
+      parentPathsVisible,
+      branchPathsVisible
+    };
+  }
+
+  async function graphStep11ConnectSimpleBranch(
+    baseConnection,
+    branchNodeId,
+    preferredInputPortId,
+    runId,
+    preparedTarget = null
+  ) {
+    const host = window.RMLDynamicGraphHost;
+    let branchInput =
+      graphStep11Socket(branchNodeId, preferredInputPortId, "input") ||
+      graphStep11NodeArticle(branchNodeId)?.querySelector(
+        '.rml-graph-socket[data-direction="input"]'
+      );
+    if (!(branchInput instanceof Element)) {
+      graphStep11Failure(
+        "branch-input-not-rendered",
+        {
+          branchNodeId,
+          preferredInputPortId,
+          renderedBranchNode:
+            Boolean(graphStep11NodeArticle(branchNodeId))
+        }
+      );
+    }
+    const branchArticle = graphStep11NodeArticle(branchNodeId);
+    let visibleTarget = preparedTarget ||
+      graphStep11VisibleWireTarget(
+        baseConnection?.id,
+        centerOf(branchInput),
+        {
+          ignoredNodes: branchArticle ? [branchArticle] : []
+        }
+      );
+    if (!visibleTarget || runId !== demoRunId) {
+      if (runId !== demoRunId) return null;
+      graphStep11Failure(
+        "no-visible-native-wire-drop-target",
+        {
+          baseConnectionId: baseConnection?.id || "",
+          branchNodeId,
+          input: graphSocketEndpoint(branchInput),
+          reason: "no-uncovered-live-wire-segment"
+        }
+      );
+    }
+    const target = () => ({ ...visibleTarget.point });
+    showDemoLabel(
+      "Drag this input onto the existing line → one clear Y-branch",
+      centerOf(branchInput)
+    );
+    positionCardAwayFromPath(centerOf(branchInput), target());
+    const preflight = host?.inspectGuidedConnectionPoint?.(
+      graphSocketEndpoint(branchInput),
+      visibleTarget.point.x,
+      visibleTarget.point.y
+    ) || null;
+    const nativePreflightReady = Boolean(
+      preflight?.snapshot?.wire &&
+      preflight?.proposal?.valid === true
+    );
+    if (!nativePreflightReady && visibleTarget.tier === 0) {
+      graphStep11Failure(
+        "selected-target-not-a-valid-live-wire",
+        {
+          target: { ...visibleTarget.point },
+          input: graphSocketEndpoint(branchInput),
+          preflight
+        }
+      );
+    }
+    if (!nativePreflightReady && visibleTarget.tier > 0) {
+      tourDebugRecord("step11-ultra-small-geometric-wire-preflight", {
+        target: { ...visibleTarget.point },
+        input: graphSocketEndpoint(branchInput),
+        preflight,
+        policy:
+          "The visible drag still runs; if the tiny native hit stroke misses, ensureBranch commits at this exact live SVG path point."
+      });
+    }
+    const nativeDragObserved = await nativeGraphPointerDrag(
+      branchInput,
+      target,
+      860,
+      runId,
+      9311
+    );
+    if (runId !== demoRunId) return null;
+    await nextTwoFrames();
+
+    const inputPortId =
+      branchInput.dataset.portId || preferredInputPortId;
+    let proof = graphStep11BranchProof(
+      baseConnection.id,
+      branchNodeId,
+      inputPortId
+    );
+    let ensured = null;
+    if (!proof.committed) {
+      const liveInput = graphStep11Socket(
+        branchNodeId,
+        inputPortId,
+        "input"
+      );
+      const point = target();
+      ensured = liveInput
+        ? host?.ensureBranch?.(
+            baseConnection.id,
+            graphSocketEndpoint(liveInput),
+            point.x,
+            point.y,
+            visibleTarget.segmentIndex
+          ) || null
+        : null;
+      await nextTwoFrames();
+      proof = graphStep11BranchProof(
+        baseConnection.id,
+        branchNodeId,
+        inputPortId
+      );
+    }
+    for (
+      let frame = 0;
+      frame < 10 &&
+      runId === demoRunId &&
+      proof.committed &&
+      !proof.rendered;
+      frame += 1
+    ) {
+      await tourNextVisualFrame();
+      proof = graphStep11BranchProof(
+        baseConnection.id,
+        branchNodeId,
+        inputPortId
+      );
+    }
+    if (!proof.committed) {
+      graphStep11Failure(
+        "branch-not-committed",
+        {
+          nativeDragObserved,
+          ensured,
+          expected: {
+            parentConnectionId: baseConnection.id,
+            branchNodeId,
+            inputPortId
+          },
+          proof: {
+            committed: proof.committed,
+            rendered: proof.rendered,
+            connectionFound: Boolean(proof.connection),
+            junctionFound: Boolean(proof.junction),
+            junctionHandleFound: Boolean(proof.junctionHandle),
+            branchPathCount: proof.branchPaths?.length || 0,
+            parentPathCount: proof.parentPaths?.length || 0,
+            allNodesVisible: proof.allNodesVisible,
+            parentPathsVisible: proof.parentPathsVisible,
+            branchPathsVisible: proof.branchPathsVisible,
+            failures: proof.failures
+          }
+        }
+      );
+    }
+    if (!proof.rendered) {
+      graphStep11Failure(
+        "branch-committed-but-native-rendering-missing",
+        {
+          nativeDragObserved,
+          ensured,
+          expected: {
+            parentConnectionId: baseConnection.id,
+            branchNodeId,
+            inputPortId
+          },
+          proof: {
+            committed: proof.committed,
+            junctionHandleFound: Boolean(proof.junctionHandle),
+            branchPathCount: proof.branchPaths?.length || 0,
+            parentPathCount: proof.parentPaths?.length || 0,
+            failures: proof.failures
+          }
+        }
+      );
+    }
+
+    pulseAt(proof.junctionHandle);
+    showDemoLabel(
+      "Y-junction confirmed — the new NOT is now really connected",
+      centerOf(proof.junctionHandle)
+    );
+    positionCardAwayFromRoute([
+      ...graphStep11RoutePoints(proof.parentPaths),
+      ...graphStep11RoutePoints(proof.branchPaths),
+      centerOf(proof.branchInput),
+      centerOf(proof.junctionHandle)
+    ]);
+    await wait(420);
+    return proof.connection;
+  }
+
+  function graphStep11PlanJunctionDrag(proof) {
+    const handle = proof?.junctionHandle;
+    const visible = visibleGraphClientRect(22);
+    if (!(handle instanceof Element) || !visible) return null;
+    const from = centerOf(handle);
+    const nodeRects = [...document.querySelectorAll(".rml-graph-node")]
+      .filter(graphDemoVisible)
+      .map(node => node.getBoundingClientRect());
+    const limits = {
+      left: Math.max(visible.left, Math.min(...nodeRects.map(rect => rect.left)) - 12),
+      right: Math.min(visible.right, Math.max(...nodeRects.map(rect => rect.right)) + 12),
+      top: Math.max(visible.top, Math.min(...nodeRects.map(rect => rect.top)) - 12),
+      bottom: Math.min(visible.bottom, Math.max(...nodeRects.map(rect => rect.bottom)) + 12)
+    };
+    const candidates = [];
+    for (const radius of [42, 56, 70]) {
+      for (let index = 0; index < 16; index += 1) {
+        const angle = index / 16 * Math.PI * 2;
         const point = {
-          x:
-            segmentStart.x +
-            (bendTarget.x - segmentStart.x) * eased,
-          y:
-            segmentStart.y +
-            (bendTarget.y - segmentStart.y) * eased
+          x: Math.max(
+            limits.left,
+            Math.min(limits.right, from.x + Math.cos(angle) * radius)
+          ),
+          y: Math.max(
+            limits.top,
+            Math.min(limits.bottom, from.y + Math.sin(angle) * radius)
+          )
+        };
+        const movement = Math.hypot(point.x - from.x, point.y - from.y);
+        if (movement < 38) continue;
+        const minimumNodeClearance = Math.min(
+          ...nodeRects.map(rect => graphDemoRectDistance(point, rect, 0))
+        );
+        const dragCrossesNode = nodeRects.some(rect =>
+          [2, 3, 4, 5, 6].some(step => {
+            const progress = step / 6;
+            return graphDemoRectDistance({
+              x: from.x + (point.x - from.x) * progress,
+              y: from.y + (point.y - from.y) * progress
+            }, rect, 0) === 0;
+          })
+        );
+        if (minimumNodeClearance <= 0 || dragCrossesNode) continue;
+        const edgeClearance = Math.min(
+          point.x - visible.left,
+          visible.right - point.x,
+          point.y - visible.top,
+          visible.bottom - point.y
+        );
+        candidates.push({
+          from,
+          point,
+          movement,
+          minimumNodeClearance,
+          score:
+            minimumNodeClearance * 8 +
+            edgeClearance -
+            Math.abs(movement - 56)
+        });
+      }
+    }
+    candidates.sort((left, right) => right.score - left.score);
+    return candidates[0] || null;
+  }
+
+  async function graphStep11DragCreatedJunction(
+    parentConnectionId,
+    branchNodeId,
+    inputPortId,
+    runId
+  ) {
+    if (runId !== demoRunId) return null;
+    const host = window.RMLDynamicGraphHost;
+    let proof = graphStep11BranchProof(
+      parentConnectionId,
+      branchNodeId,
+      inputPortId
+    );
+    if (!proof.committed || !proof.rendered) {
+      graphStep11Failure(
+        "junction-drag-start-state-unavailable",
+        { parentConnectionId, branchNodeId, inputPortId }
+      );
+    }
+    const from = centerOf(proof.junctionHandle);
+    const junctionPointId = proof.junction.id;
+    const plan = graphStep11PlanJunctionDrag(proof);
+    if (!plan) {
+      graphStep11Failure(
+        "no-visible-safe-junction-drag-target",
+        { parentConnectionId, junctionPointId, from }
+      );
+    }
+
+    showDemoLabel(
+      "Drag the created junction away from the node → the Y remains clearly readable",
+      from
+    );
+    positionCardAwayFromPath(from, plan.point);
+    await moveMouse(from, 280, runId);
+    if (runId !== demoRunId) return null;
+
+    const mouse = elements().mouse;
+    const duration = Math.max(300, tourPresentationDuration(680));
+    const started = performance.now();
+    let mutationResult = null;
+
+    host?.setGuidedAutoPanSuppressed?.(true);
+    try {
+      mouse?.classList.add("active", "pressed");
+      while (runId === demoRunId) {
+        const progress = Math.min(1, (performance.now() - started) / duration);
+        const eased = progress * progress * (3 - 2 * progress);
+        const point = {
+          x: from.x + (plan.point.x - from.x) * eased,
+          y: from.y + (plan.point.y - from.y) * eased
         };
         setTeacherMousePoint(
           point,
           0,
           [],
-          "native-graph-bend-drag"
+          "graph-step11-visible-state-backed-junction-drag"
         );
-
-        document.dispatchEvent(
-          new PointerEvent(
-            "pointermove",
-            {
-              bubbles: true,
-              cancelable: true,
-              pointerId: bendPointerId,
-              pointerType: "mouse",
-              isPrimary: true,
-              button: -1,
-              buttons: 1,
-              clientX: point.x,
-              clientY: point.y
-            }
-          )
-        );
-
-        if (raw >= 1) break;
-        await new Promise(resolve =>
-          requestAnimationFrame(resolve)
-        );
+        mutationResult = host?.setWirePointClientPosition?.(
+          parentConnectionId,
+          junctionPointId,
+          point.x,
+          point.y
+        ) || {
+          ok: false,
+          reason: "The graph host does not expose setWirePointClientPosition."
+        };
+        if (mutationResult.ok !== true || progress >= 1) break;
+        await tourNextVisualFrame();
       }
 
-      if (runId !== demoRunId) return;
-
-      document.dispatchEvent(
-        new PointerEvent(
-          "pointerup",
-          {
-            bubbles: true,
-            cancelable: true,
-            pointerId: bendPointerId,
-            pointerType: "mouse",
-            isPrimary: true,
-            button: 0,
-            buttons: 0,
-            clientX: bendTarget.x,
-            clientY: bendTarget.y
-          }
-        )
-      );
-      bendPointerDown = false;
-      await wait(220);
+      if (runId === demoRunId && mutationResult?.ok === true) {
+        setTeacherMousePoint(
+          plan.point,
+          0,
+          [],
+          "graph-step11-visible-state-backed-junction-drop"
+        );
+        mutationResult = host.setWirePointClientPosition(
+          parentConnectionId,
+          junctionPointId,
+          plan.point.x,
+          plan.point.y
+        );
+        await wait(180);
+      }
     } finally {
-      if (bendPointerDown) {
-        document.dispatchEvent(
-          new PointerEvent(
-            "pointercancel",
-            {
-              bubbles: true,
-              cancelable: true,
-              pointerId: bendPointerId,
-              pointerType: "mouse",
-              isPrimary: true,
-              button: 0,
-              buttons: 0,
-              clientX: segmentStart.x,
-              clientY: segmentStart.y
-            }
-          )
-        );
-      }
       mouse?.classList.remove("pressed");
+      host?.setGuidedAutoPanSuppressed?.(false);
     }
+    if (runId !== demoRunId) return null;
+    await nextTwoFrames();
 
-    await new Promise(resolve =>
-      requestAnimationFrame(() =>
-        requestAnimationFrame(resolve)
-      )
+    proof = graphStep11BranchProof(
+      parentConnectionId,
+      branchNodeId,
+      inputPortId
     );
+    const livePoint = host?.getGuidedWirePoint?.(
+      parentConnectionId, junctionPointId
+    );
+    const liveClient = livePoint
+      ? host?.graphPointToClient?.(livePoint.x, livePoint.y)
+      : null;
+    const actualMovement = liveClient
+      ? Math.hypot(liveClient.x - from.x, liveClient.y - from.y)
+      : 0;
+    const targetError = liveClient
+      ? Math.hypot(liveClient.x - plan.point.x, liveClient.y - plan.point.y)
+      : Infinity;
+    const confirmed = Boolean(
+      mutationResult?.ok === true &&
+      proof.committed &&
+      proof.rendered &&
+      actualMovement >= 34 &&
+      targetError <= 24 &&
+      graphStep11PointInsideVisibleGraph(centerOf(proof.junctionHandle), 8)
+    );
+    const result = {
+      confirmed,
+      mutationResult,
+      junctionPointId,
+      requestedTarget: plan.point,
+      liveClient,
+      actualMovement,
+      targetError
+    };
+    if (!confirmed) {
+      graphStep11Failure(
+        "created-junction-state-drag-not-confirmed",
+        result
+      );
+    }
+    pulseAt(proof.junctionHandle);
+    showDemoLabel(
+      "Junction moved — all three connected line sections remain visible",
+      centerOf(proof.junctionHandle)
+    );
+    await wait(360);
+    return { pointId: junctionPointId, movement: actualMovement };
+  }
 
+  async function runGraphRouteDemoSimple(runId) {
+    const viewport = document.querySelector(".rml-graph-viewport");
+    const host = window.RMLDynamicGraphHost;
+    if (!(viewport instanceof HTMLElement) || runId !== demoRunId) return;
+
+    const pair = await ensureGraphDemoNodes(runId);
+    if (runId !== demoRunId) return;
+    await ensureGraphTeachingPairVisible(runId);
     if (runId !== demoRunId) return;
 
-    const pointsAfter =
-      [...document.querySelectorAll(
-        ".rml-graph-wire-point"
-      )].filter(graphDemoVisible);
+    const freshPair = graphDemoSocketPair(false);
+    const output = freshPair?.output || pair?.output;
+    const input = freshPair?.input || pair?.input;
+    if (!(output instanceof Element) || !(input instanceof Element)) return;
 
-    const bendPoint =
-      pointsAfter.find(point => {
-        const center = centerOf(point);
-        return Math.hypot(
-          center.x - bendTarget.x,
-          center.y - bendTarget.y
-        ) < 55;
-      }) ||
-      pointsAfter[
-        pointsAfter.length - 1
-      ] ||
-      null;
-
-    const requestedBendDistance = Math.hypot(
-      bendTarget.x - segmentStart.x,
-      bendTarget.y - segmentStart.y
-    );
-    const committedBendCenter = bendPoint
-      ? centerOf(bendPoint)
-      : null;
-    const committedBendDistance = committedBendCenter
-      ? Math.hypot(
-          committedBendCenter.x - segmentStart.x,
-          committedBendCenter.y - segmentStart.y
-        )
-      : 0;
-    const realLineMovedFullDistance = tourDebugAssert(
-      "graph-route-existing-line-moved-full-distance-without-follower-line",
-      Boolean(bendPoint) &&
-        Math.hypot(
-          committedBendCenter.x - bendTarget.x,
-          committedBendCenter.y - bendTarget.y
-        ) < 55 &&
-        committedBendDistance >= requestedBendDistance * .72 &&
-        !document.querySelector(
-          ".rml-setup-demo-wire-layer, .rml-setup-demo-bend"
-        ),
-      {
-        requestedDistance: requestedBendDistance,
-        committedDistance: committedBendDistance,
-        start: segmentStart,
-        target: bendTarget,
-        committed: committedBendCenter,
-        artificialFollowerLineCount: document.querySelectorAll(
-          ".rml-setup-demo-wire-layer, .rml-setup-demo-bend"
-        ).length
-      }
-    );
-    if (bendPoint && !realLineMovedFullDistance) {
-      graphDemoError(
-        "The existing wire did not follow the held pointer for the full bend gesture."
-      );
-    }
-
-    const verifyCommittedBendVisibility = point => {
-      const committedPath = graphNativeWireHit(baseConnection.id);
-      const committedCenter = point ? centerOf(point) : null;
-      const pointAnalysis = point
-        ? graphDemoPointRouteAnalysis(
-            committedCenter,
-            {
-              ignoredPoints: [point],
-              ignoredPaths: committedPath ? [committedPath] : [],
-              nodeClearance: 10,
-              pointClearance: 22
-            }
-          )
-        : null;
-      const pathOcclusion = graphDemoPathNodeOcclusion(committedPath);
-      const verified = tourDebugAssert(
-        "graph-route-committed-bend-point-and-line-remain-visible-outside-node-bodies",
-        Boolean(pointAnalysis) &&
-        (
-          pointAnalysis.nodeCovered === false ||
-          bendPlan.nodeClearPointAvailable === false
-        ) &&
-        (
-          pointAnalysis.pointBlocked === false ||
-          bendPlan.pointProtectedAvailable === false
-        ) &&
-        (
-          pathOcclusion.blocked === false ||
-          bendPlan.pointProtectedNodeClearRouteAvailable === false
-        ),
-        {
-          bendPoint: tourDebugRect(point),
-          bendPointAnalysis: pointAnalysis,
-          bendPathOcclusion: pathOcclusion,
-          bendPlan,
-          policy:
-            "the committed bend marker and routed line remain visible outside node bodies whenever a measured alternative exists; the marker is protected before the line"
-        }
-      );
-      if (!verified) {
-        graphDemoError(
-          "The committed bend obscured a route point or line although a clearer target was available.",
-          {
-            bendPointAnalysis: pointAnalysis,
-            bendPathOcclusion: pathOcclusion,
-            bendPlan
-          }
-        );
-      }
-      return verified;
-    };
-
-    if (
-      !bendPoint ||
-      pointsAfter.length <=
-        junctions.length
-    ) {
-      const forced =
-        window.RMLDynamicGraphHost
-          ?.ensureWirePoint?.(
-            baseConnection.id,
-            bendTarget.x,
-            bendTarget.y
-          );
-      if (!forced?.ok) {
-        graphDemoError(
-          "Neither the visible pointer gesture nor the deterministic routing engine created a bend point.",
-          forced
-        );
-      }
-      await nextTwoFrames();
-      const guaranteedPoint =
-        document.querySelector(
-          `.rml-graph-wire-point[data-connection-id="${CSS.escape(baseConnection.id)}"]` +
-          `[data-point-id="${CSS.escape(forced.pointId)}"]`
-        );
-      if (!guaranteedPoint) {
-        graphDemoError(
-          "The bend point exists in graph state but its real handle is not rendered."
-        );
-      }
-      verifyCommittedBendVisibility(guaranteedPoint);
-      pulseAt(guaranteedPoint);
+    let baseConnection = graphDemoConnectionFor(output, input);
+    if (!baseConnection) {
       showDemoLabel(
-        "REAL movable bend point committed and verified by the routing engine",
-        centerOf(guaranteedPoint)
+        "Connect the two existing nodes first",
+        centerOf(output)
       );
-      await wait(850);
+      await nativeGraphPointerDrag(output, input, 820, runId, 9309);
+      if (runId !== demoRunId) return;
+      baseConnection = (await ensureGraphConnectionDeterministic(
+        graphStep11Socket(output.dataset.nodeId, output.dataset.portId, "output") || output,
+        graphStep11Socket(input.dataset.nodeId, input.dataset.portId, "input") || input,
+        runId
+      ))?.connection || null;
+    }
+    if (!baseConnection || runId !== demoRunId) return;
+
+    const created = await graphStep11CreateSimpleBranchNode(runId);
+    if (!created?.nodeId || runId !== demoRunId) {
+      showDemoLabel(
+        "The existing connection remains usable; no forced layout error stops the lesson",
+        centerOf(viewport)
+      );
+      await wait(620);
       hideMouse();
       return;
     }
 
-    verifyCommittedBendVisibility(bendPoint);
-    pulseAt(bendPoint);
-    showDemoLabel(
-      "REAL movable bend point created by the normal routing engine",
-      centerOf(bendPoint)
+    const allNodeIds = () => (host?.getState?.()?.nodes || [])
+      .map(node => node.id)
+      .filter(Boolean);
+    const preparedAction = await graphStep11PrepareBranchAction(
+      baseConnection,
+      created.nodeId,
+      runId
     );
-    await wait(850);
+    if (runId !== demoRunId) return;
+
+    const branchConnection = await graphStep11ConnectSimpleBranch(
+      baseConnection,
+      created.nodeId,
+      input.dataset.portId || "",
+      runId,
+      preparedAction?.target || null
+    );
+    if (runId !== demoRunId) return;
+    if (!branchConnection) {
+      showDemoLabel(
+        "The Y-junction was not confirmed — stop before zoom instead of pretending the NOT is connected",
+        centerOf(graphStep11NodeArticle(created.nodeId) || viewport)
+      );
+      await wait(720);
+      hideMouse();
+      return;
+    }
+
+    const movedJunction = await graphStep11DragCreatedJunction(
+      baseConnection.id,
+      created.nodeId,
+      branchConnection.toPort,
+      runId
+    );
+    if (runId !== demoRunId) return;
+    if (!movedJunction) {
+      graphStep11Failure(
+        "created-junction-drag-did-not-complete",
+        {
+          parentConnectionId: baseConnection.id,
+          branchConnectionId: branchConnection.id,
+          branchNodeId: created.nodeId
+        }
+      );
+    }
+
+    const beforeFinalFit = graphStep11BranchProof(
+      baseConnection.id,
+      created.nodeId,
+      branchConnection.toPort
+    );
+    hideMouse();
+    showDemoLabel(
+      "Final zoom → all nodes, ports, lines and the moved junction together",
+      centerOf(viewport)
+    );
+    positionCardAwayFromRoute([
+      ...graphStep11RoutePoints(beforeFinalFit.parentPaths),
+      ...graphStep11RoutePoints(beforeFinalFit.branchPaths),
+      centerOf(beforeFinalFit.junctionHandle)
+    ]);
+    const finalFit = await animateGraphNodesToReadableFrame(
+      allNodeIds(),
+      runId,
+      {
+        inset: 16,
+        padding: window.innerWidth < 480 ? 24 : 34,
+        maxScale: window.innerWidth < 480 ? .98 : 1.06,
+        duration: 620,
+        allowZoomIn: true,
+        reason: "step11-final-fit-after-visible-state-backed-junction-drag"
+      }
+    );
+    if (runId !== demoRunId) return;
+    if (!finalFit) {
+      graphStep11Failure(
+        "final-scene-camera-fit-did-not-complete",
+        {
+          parentConnectionId: baseConnection.id,
+          branchConnectionId: branchConnection.id,
+          branchNodeId: created.nodeId
+        }
+      );
+    }
+    await nextTwoFrames();
+
+    const fittedBranch = graphStep11BranchProof(
+      baseConnection.id,
+      created.nodeId,
+      branchConnection.toPort
+    );
+    if (!fittedBranch.ok) {
+      graphStep11Failure(
+        "final-scene-not-fully-readable",
+        {
+          parentConnectionId: baseConnection.id,
+          branchConnectionId: branchConnection.id,
+          branchNodeId: created.nodeId,
+          movedJunction,
+          failures: fittedBranch.failures,
+          allNodesVisible: fittedBranch.allNodesVisible,
+          parentPathsVisible: fittedBranch.parentPathsVisible,
+          branchPathsVisible: fittedBranch.branchPathsVisible
+        }
+      );
+    }
+    positionCardAwayFromRoute([
+      ...graphStep11RoutePoints(fittedBranch.parentPaths),
+      ...graphStep11RoutePoints(fittedBranch.branchPaths),
+      centerOf(fittedBranch.branchInput),
+      centerOf(fittedBranch.junctionHandle),
+      centerOf(fittedBranch.branchNode)
+    ]);
+    hideMouse();
+    pulseAt(fittedBranch.junctionHandle);
+
+    showDemoLabel(
+      preparedAction?.nodeMoved
+        ? "Done: one useful node move, one Y-branch and its moved junction — everything is fitted and readable"
+        : "Done: one Y-branch and its moved junction — everything is fitted and readable",
+      centerOf(fittedBranch.junctionHandle)
+    );
+    await wait(820);
+    clearGraphConnectionScene();
     hideMouse();
   }
 
@@ -20251,36 +22817,20 @@
     );
     const start = performance.now();
 
-    await new Promise(resolve => {
-      const frame = now => {
-        if (runId !== demoRunId) {
-          resolve();
-          return;
-        }
-
-        const raw = Math.min(
-          1,
-          (now - start) /
-            effectiveDuration
-        );
-        const eased =
-          raw < .5
-            ? 4 * raw * raw * raw
-            : 1 - Math.pow(-2 * raw + 2, 3) / 2;
-
-        scroller.scrollTop =
-          from + (to - from) * eased;
-
-        if (raw >= 1) {
-          resolve();
-          return;
-        }
-
-        requestAnimationFrame(frame);
-      };
-
-      requestAnimationFrame(frame);
-    });
+    while (runId === demoRunId) {
+      const frame = await tourNextVisualFrame();
+      const now = Math.max(performance.now(), frame.timestamp);
+      const raw = Math.min(
+        1,
+        (now - start) / effectiveDuration
+      );
+      const eased =
+        raw < .5
+          ? 4 * raw * raw * raw
+          : 1 - Math.pow(-2 * raw + 2, 3) / 2;
+      scroller.scrollTop = from + (to - from) * eased;
+      if (raw >= 1) break;
+    }
   }
 
   function releaseTourGlobalScrollOverrideAt(
@@ -20551,24 +23101,17 @@
       return true;
     }
     const started = performance.now();
-    await new Promise(resolve => {
-      const frame = now => {
-        if (runId !== demoRunId) {
-          resolve();
-          return;
-        }
-        const raw = Math.min(1, (now - started) / Math.max(1, duration));
-        const eased = 1 - Math.pow(1 - raw, 3);
-        toolbar.scrollLeft = from + (to - from) * eased;
-        if (raw >= 1) {
-          toolbar.scrollLeft = to;
-          resolve();
-          return;
-        }
-        requestAnimationFrame(frame);
-      };
-      requestAnimationFrame(frame);
-    });
+    while (runId === demoRunId) {
+      const frame = await tourNextVisualFrame();
+      const now = Math.max(performance.now(), frame.timestamp);
+      const raw = Math.min(1, (now - started) / Math.max(1, duration));
+      const eased = 1 - Math.pow(1 - raw, 3);
+      toolbar.scrollLeft = from + (to - from) * eased;
+      if (raw >= 1) {
+        toolbar.scrollLeft = to;
+        break;
+      }
+    }
     return runId === demoRunId && Math.abs(toolbar.scrollLeft - to) <= 1;
   }
 
@@ -20973,6 +23516,8 @@
           graphCreateNodePreparedDropHit("logic.not")
             ?.fullFootprintInside === true
         )
+      : handoff.toDemo === "graph-route"
+      ? graphTeachingPairCompletelyVisible(pair, 10)
       : graphTeachingPairCompletelyVisible(pair, 10);
     return {
       handoff,
@@ -21014,6 +23559,8 @@
       graphCreateNodePreparedDropPlan?.complete === true &&
       graphCreateNodePreparedDropHit("logic.not")?.fullFootprintInside === true
     );
+    const graphRouteReady = toDemo !== "graph-route" ||
+      graphTeachingPairCompletelyVisible(pair, 10);
     const pairReady = toDemo === "graph-create-node" ||
       graphTeachingPairCompletelyVisible(pair, 10);
     const ready = Boolean(
@@ -21026,6 +23573,7 @@
       visible.height >= graphLessonMinimumVisibleHeight() &&
       requiredNodesVisible &&
       graphCreateReady &&
+      graphRouteReady &&
       pairReady
     );
     tourDebugRecord("graph-scene-handoff-terminal", {
@@ -21044,6 +23592,7 @@
         requiredNodeIds,
         requiredNodesVisible,
         graphCreateReady,
+        graphRouteReady,
         pairReady,
         visibleGraph: visible,
         scene: terminal,
@@ -21205,6 +23754,8 @@
         graphCreateNodePreparedDropPlan?.complete === true &&
         graphCreateNodePreparedDropHit("logic.not")?.fullFootprintInside === true
       );
+      const graphRouteReady = toDemo !== "graph-route" ||
+        graphTeachingPairCompletelyVisible(graphDemoSocketPair(false), 10);
       const pairReady = toDemo === "graph-create-node" ||
         graphTeachingPairCompletelyVisible(graphDemoSocketPair(false), 10);
       return Boolean(
@@ -21214,6 +23765,7 @@
         visible.height >= graphLessonMinimumVisibleHeight() &&
         nodesVisible &&
         graphCreateReady &&
+        graphRouteReady &&
         pairReady
       );
     };
@@ -21221,7 +23773,9 @@
     const before = graphTeachingSceneSnapshot(
       `${step.demo}-completion-before-${toDemo}`
     );
-    if (!sceneReady()) {
+    const exactCameraHandoff =
+      step.demo === "graph-pan" && toDemo === "graph-route";
+    if (!sceneReady() && !exactCameraHandoff) {
       clearDemoVisuals();
       hideMouse();
       await setGraphPanelsForPreparation(targetStep, runId);
@@ -21259,18 +23813,36 @@
       `${step.demo}-completion-ready-for-${toDemo}`
     );
     const ready = sceneReady();
+    const completionComparison = compareGraphTeachingScenes(before, after);
     tourDebugRecord("graph-scene-natural-completion-frame", {
       fromDemo: step.demo,
       toDemo,
-      adjusted: compareGraphTeachingScenes(before, after).exact !== true,
+      adjusted: completionComparison.exact !== true,
+      exactCameraHandoff,
       assistantNoticeVisible: false,
       before,
       after,
       ready
     });
+    const hiddenCameraJumpBlocked = step.demo !== "graph-pan" ||
+      toDemo !== "graph-route" ||
+      completionComparison.exact === true;
+    if (step.demo === "graph-pan" && toDemo === "graph-route") {
+      tourDebugAssert(
+        "graph-pan-to-graph-route-no-hidden-camera-or-zoom-adjustment",
+        hiddenCameraJumpBlocked,
+        {
+          before,
+          after,
+          mismatches: completionComparison.mismatches,
+          policy:
+            "after Step 10 reaches its visible final frame, finalization may not pan, zoom, resize, reposition or otherwise prepare Step 11 behind the user's back"
+        }
+      );
+    }
     const verified = tourDebugAssert(
       `${step.demo}-finished-in-${toDemo}-ready-scene`,
-      ready,
+      ready && hiddenCameraJumpBlocked,
       {
         fromDemo: step.demo,
         toDemo,
@@ -21598,7 +24170,7 @@
         await nextTwoFrames();
         return true;
       }
-      await new Promise(resolve => requestAnimationFrame(resolve));
+      await tourNextVisualFrame();
     }
     return false;
   }
@@ -21673,10 +24245,9 @@
       return true;
     }
 
-    if (graphNeedsCentering()) return true;
     if (graphStepUsesTeachingPair(step)) {
       const pair = graphDemoSocketPair(false);
-      return !graphTeachingPairCompletelyVisible(pair, 18);
+      if (!graphTeachingPairCompletelyVisible(pair, 18)) return true;
     }
     return false;
   }
@@ -21761,6 +24332,388 @@
     return { point, footprint, fits, metrics };
   }
 
+  function graphRoutePreparedDropHit() {
+    const plan = graphRoutePreparedDropPlan;
+    if (plan?.complete !== true || !plan.orientation) return null;
+    const visible = visibleGraphClientRect(18);
+    if (!visible) return null;
+    const metrics = window.RMLDynamicGraphHost
+      ?.getOperatorPlacementMetrics?.("logic.not") || null;
+    const direct = plan.orientation === "direct" && plan.directCenter;
+    const regions = direct
+      ? {
+          orientation: "direct",
+          existingArea: visible,
+          reservedArea: visible
+        }
+      : graphCreateNodePlacementRegions(
+          visible,
+          plan.orientation
+        );
+    let pointerPlan = direct && metrics?.ok === true
+      ? (() => {
+          const width = Number(metrics.clientWidth) || 0;
+          const height = Number(metrics.clientHeight) || 0;
+          const anchorX = Number(metrics.clientPointerOffsetX) || width * .465;
+          const anchorY = Number(metrics.clientPointerOffsetY) || height * .185;
+          const footprint = {
+            left: Number(plan.directCenter.x) - width * .5,
+            top: Number(plan.directCenter.y) - height * .5,
+            width,
+            height
+          };
+          footprint.right = footprint.left + width;
+          footprint.bottom = footprint.top + height;
+          return {
+            point: {
+              x: footprint.left + anchorX,
+              y: footprint.top + anchorY
+            },
+            footprint,
+            fits: true,
+            metrics
+          };
+        })()
+      : graphCreateNodePointerPlan(
+          regions.reservedArea,
+          metrics,
+          window.innerWidth <= 390 || window.innerHeight <= 700 ? 10 : 16
+        );
+    if (!pointerPlan?.fits) return null;
+    const edgeInset = window.innerWidth <= 390 || window.innerHeight <= 700
+      ? 38
+      : 46;
+    const edgeSafe = Boolean(
+      pointerPlan.point.x >= visible.left + edgeInset &&
+      pointerPlan.point.x <= visible.right - edgeInset &&
+      pointerPlan.point.y >= visible.top + edgeInset &&
+      pointerPlan.point.y <= visible.bottom - edgeInset
+    );
+    const existingRects = graphTeachingNodeIdsFromState().map(nodeId =>
+      document.querySelector(
+        `.rml-graph-node[data-graph-node-id="${CSS.escape(nodeId)}"]`
+      )?.getBoundingClientRect?.()
+    ).filter(Boolean);
+    const existingInside = existingRects.every(rect =>
+      rect.left >= regions.existingArea.left + 6 &&
+      rect.right <= regions.existingArea.right - 6 &&
+      rect.top >= regions.existingArea.top + 6 &&
+      rect.bottom <= regions.existingArea.bottom - 6
+    );
+    const overlapsExisting = existingRects.some(rect => !(
+      pointerPlan.footprint.right + 10 < rect.left ||
+      pointerPlan.footprint.left - 10 > rect.right ||
+      pointerPlan.footprint.bottom + 10 < rect.top ||
+      pointerPlan.footprint.top - 10 > rect.bottom
+    ));
+    const footprintInside = Boolean(
+      pointerPlan.footprint.left >= visible.left + 6 &&
+      pointerPlan.footprint.right <= visible.right - 6 &&
+      pointerPlan.footprint.top >= visible.top + 6 &&
+      pointerPlan.footprint.bottom <= visible.bottom - 6
+    );
+    return {
+      ok:
+        edgeSafe &&
+        footprintInside &&
+        existingInside &&
+        !overlapsExisting,
+      point: pointerPlan.point,
+      footprint: pointerPlan.footprint,
+      metrics,
+      regions,
+      edgeSafe,
+      footprintInside,
+      existingInside,
+      overlapsExisting,
+      existingRects: existingRects.map(rect => ({
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom,
+        width: rect.width,
+        height: rect.height
+      }))
+    };
+  }
+
+  async function prepareGraphRoutePlacementArea(runId, options = {}) {
+    if (runId !== demoRunId) return false;
+    const animateCamera = options.animateCamera === true;
+    const visible = visibleGraphClientRect(18);
+    const nodeIds = graphTeachingNodeIdsFromState();
+    if (!visible || nodeIds.length < 2) {
+      graphRoutePreparedDropPlan = null;
+      return false;
+    }
+    const compact = window.innerWidth <= 390 || window.innerHeight <= 700;
+    const orientations = compact || visible.width < visible.height * .9
+      ? ["vertical", "horizontal"]
+      : ["horizontal", "vertical"];
+    const attempts = [];
+    const beforeViewport = window.RMLDynamicGraphHost
+      ?.getViewportState?.()?.viewport || null;
+
+    const viewport = document.querySelector(".rml-graph-viewport");
+    const directMetrics = window.RMLDynamicGraphHost
+      ?.getOperatorPlacementMetrics?.("logic.not") || null;
+    if (viewport && directMetrics?.ok === true) {
+      const directReserve = graphRouteNodeReserve();
+      for (const prefer of ["right", "left"]) {
+        const directCenter = graphDemoSafeEmptyDropPoint(
+          viewport,
+          centerOf(viewport),
+          {
+            prefer,
+            reserveWidth: Math.max(
+              directReserve.width,
+              Number(directMetrics.clientWidth) + 32
+            ),
+            reserveHeight: Math.max(
+              directReserve.height,
+              Number(directMetrics.clientHeight) + 32
+            ),
+            allowOccupiedFallback: false,
+            returnNullWhenUnavailable: true
+          }
+        );
+        if (!directCenter) continue;
+        graphRoutePreparedDropPlan = {
+          runId,
+          orientation: "direct",
+          directCenter,
+          complete: true,
+          beforeViewport,
+          afterViewport: beforeViewport,
+          zoomFallbackUsed: false
+        };
+        const directHit = graphRoutePreparedDropHit();
+        attempts.push({
+          orientation: "direct",
+          prefer,
+          directCenter,
+          hit: directHit,
+          zoomFallbackUsed: false,
+          complete: directHit?.ok === true
+        });
+        if (directHit?.ok === true) {
+          tourDebugAssert(
+            "graph-route-branch-footprint-prepared-visibly-after-demonstrate",
+            true,
+            {
+              orientation: "direct",
+              prefer,
+              footprint: directHit.footprint,
+              point: directHit.point,
+              existingRects: directHit.existingRects,
+              beforeViewport,
+              afterViewport: beforeViewport,
+              zoomFallbackUsed: false,
+              cameraPreparationVisible: animateCamera,
+              policy:
+                "use already free current-camera space first; pan or zoom only when no complete third-node footprint fits without overlapping the existing nodes"
+            }
+          );
+          return true;
+        }
+      }
+      graphRoutePreparedDropPlan = null;
+    }
+
+    for (const orientation of orientations) {
+      if (runId !== demoRunId) return false;
+      const beforeVisible = visibleGraphClientRect(18);
+      if (!beforeVisible) break;
+      const regions = graphCreateNodePlacementRegions(
+        beforeVisible,
+        orientation
+      );
+      const currentScale = Number(
+        window.RMLDynamicGraphHost?.getViewportState?.()?.viewport?.scale
+      ) || 1;
+      let panOnly = panGraphNodesIntoClientRect(
+        nodeIds,
+        regions.existingArea,
+        {
+          padding: compact ? 12 : 18,
+          apply: animateCamera ? false : true
+        }
+      );
+      if (
+        animateCamera &&
+        panOnly.ok === true &&
+        panOnly.changed === true
+      ) {
+        const animatedPan = await animateGraphViewportState(
+          panOnly.before ||
+            window.RMLDynamicGraphHost?.getViewportState?.()?.viewport,
+          panOnly.requested,
+          runId,
+          {
+            duration: 560,
+            reason: "step-11-visible-branch-space-pan"
+          }
+        );
+        panOnly = {
+          ...panOnly,
+          ok: animatedPan === true,
+          reason: animatedPan
+            ? "visibly-panned-without-changing-zoom"
+            : "visible-pan-commit-failed",
+          animated: true
+        };
+      }
+      await nextTwoFrames();
+      if (runId !== demoRunId) return false;
+      let fitted = {
+        ok: panOnly.ok === true,
+        method: "pan-first",
+        panOnly
+      };
+      graphRoutePreparedDropPlan = {
+        runId,
+        orientation,
+        fitted,
+        complete: fitted?.ok === true
+      };
+      let hit = graphRoutePreparedDropHit();
+      let zoomFallbackUsed = false;
+      if (hit?.ok !== true) {
+        const metrics = window.RMLDynamicGraphHost
+          ?.getOperatorPlacementMetrics?.("logic.not") || null;
+        const reserve = regions.reservedArea;
+        const margin = compact ? 10 : 16;
+        const widthFactor = metrics?.ok === true
+          ? (reserve.width - margin * 2) /
+            Math.max(1, Number(metrics.clientWidth) || 1)
+          : 1;
+        const heightFactor = metrics?.ok === true
+          ? (reserve.height - margin * 2) /
+            Math.max(1, Number(metrics.clientHeight) || 1)
+          : 1;
+        const futureFootprintFactor = Math.max(
+          .2,
+          Math.min(1, widthFactor, heightFactor)
+        );
+        const currentGeometryCannotFit = Boolean(
+          panOnly.reason === "current-scale-too-large" ||
+          futureFootprintFactor < .999
+        );
+        if (currentGeometryCannotFit) {
+          const fitPlan = window.RMLDynamicGraphHost?.fitNodesToClientRect?.(
+            nodeIds,
+            regions.existingArea,
+            {
+              padding: compact ? 12 : 18,
+              maxScale: Math.min(
+                currentScale,
+                currentScale * futureFootprintFactor
+              ),
+              apply: animateCamera ? false : true
+            }
+          ) || null;
+          if (
+            animateCamera &&
+            fitPlan?.ok === true &&
+            fitPlan?.viewport
+          ) {
+            const fitFrom = window.RMLDynamicGraphHost
+              ?.getViewportState?.()?.viewport || null;
+            const animatedFit = await animateGraphViewportState(
+              fitFrom,
+              fitPlan.viewport,
+              runId,
+              {
+                duration: 680,
+                reason: "step-11-last-resort-three-footprint-zoom"
+              }
+            );
+            fitted = {
+              ...fitPlan,
+              ok: animatedFit === true,
+              animated: true
+            };
+          } else {
+            fitted = fitPlan;
+          }
+          zoomFallbackUsed = Boolean(
+            fitted?.ok === true &&
+            Number(
+              window.RMLDynamicGraphHost?.getViewportState?.()?.viewport?.scale
+            ) < currentScale - .0005
+          );
+          await nextTwoFrames();
+          if (runId !== demoRunId) return false;
+          graphRoutePreparedDropPlan = {
+            runId,
+            orientation,
+            fitted,
+            complete: fitted?.ok === true
+          };
+          hit = graphRoutePreparedDropHit();
+        }
+      }
+      const attempt = {
+        orientation,
+        panOnly,
+        fitted,
+        hit,
+        zoomFallbackUsed,
+        complete: fitted?.ok === true && hit?.ok === true
+      };
+      attempts.push(attempt);
+      if (attempt.complete) {
+        const afterViewport = window.RMLDynamicGraphHost
+          ?.getViewportState?.()?.viewport || null;
+        graphRoutePreparedDropPlan = {
+          runId,
+          orientation,
+          fitted,
+          hit,
+          complete: true,
+          beforeViewport,
+          afterViewport,
+          zoomFallbackUsed: Boolean(
+            zoomFallbackUsed &&
+            Number(afterViewport?.scale) <
+              Number(beforeViewport?.scale) - .0005
+          )
+        };
+        tourDebugAssert(
+          "graph-route-branch-footprint-prepared-visibly-after-demonstrate",
+          true,
+          {
+            orientation,
+            footprint: hit.footprint,
+            point: hit.point,
+            existingRects: hit.existingRects,
+            edgeSafe: hit.edgeSafe,
+            beforeViewport,
+            afterViewport,
+            zoomFallbackUsed: graphRoutePreparedDropPlan.zoomFallbackUsed,
+            compactViewport: compact,
+            cameraPreparationVisible: animateCamera,
+            policy:
+              "reserve the complete future branch node only after Demonstrate begins; visibly pan first and reduce graph zoom only when the current camera cannot hold both teaching nodes plus that footprint"
+          }
+        );
+        return true;
+      }
+    }
+
+    graphRoutePreparedDropPlan = null;
+    tourDebugAssert(
+      "graph-route-branch-footprint-prepared-visibly-after-demonstrate",
+      false,
+      {
+        attempts,
+        beforeViewport,
+        compactViewport: compact
+      }
+    );
+    return false;
+  }
+
   async function prepareGraphCreateNodePlacementArea(runId) {
     if (runId !== demoRunId) return false;
     const viewport = document.querySelector(".rml-graph-viewport");
@@ -21792,16 +24745,37 @@
         beforeVisible,
         orientation
       );
-      const fitted = nodeIds.length > 0
+      const panOnly = nodeIds.length > 0
+        ? panGraphNodesIntoClientRect(
+            nodeIds,
+            regions.existingArea,
+            { padding: 16 }
+          )
+        : {
+            ok: true,
+            changed: false,
+            reason: "no-existing-nodes"
+          };
+      const currentScale = Number(
+        window.RMLDynamicGraphHost?.getViewportState?.()?.viewport?.scale
+      ) || 1;
+      const fitted = nodeIds.length > 0 &&
+        panOnly.ok !== true &&
+        panOnly.reason === "current-scale-too-large"
         ? window.RMLDynamicGraphHost?.fitNodesToClientRect?.(
             nodeIds,
             regions.existingArea,
             {
               padding: 16,
-              maxScale: orientation === "horizontal" ? .68 : .72
+              maxScale: currentScale
             }
           ) || null
-        : { ok: true, scale: graphState?.viewport?.scale || 1 };
+        : {
+            ok: panOnly.ok === true,
+            method: "pan-first",
+            panOnly,
+            scale: currentScale
+          };
       await nextTwoFrames();
       if (runId !== demoRunId) return false;
 
@@ -21856,6 +24830,7 @@
       );
       const attempt = {
         orientation,
+        panOnly,
         fitted,
         regions: liveRegions,
         pointerPlan,
@@ -21947,19 +24922,15 @@
       }
 
       if (step.demo !== "graph-create-node") {
-        const center = graphToolbarButton("Center Graph");
-        if (center instanceof HTMLElement) {
-          center.click();
-          await nextTwoFrames();
-        }
-
         const allNodeIds = (window.RMLDynamicGraphHost?.getState?.()?.nodes || [])
           .map(node => node.id)
           .filter(Boolean);
         quietlyFitGraphNodes(allNodeIds, {
           inset: 24,
           padding: Math.max(22, Math.min(42, window.innerWidth * .025)),
-          maxScale: window.innerWidth < 820 ? .86 : 1.02
+          maxScale: Number(
+            window.RMLDynamicGraphHost?.getViewportState?.()?.viewport?.scale
+          ) || 1
         });
         await nextTwoFrames();
       }
@@ -22087,8 +25058,14 @@
         host &&
         general &&
         advanced &&
-        generalChildren.join("|") === "Enabled|Scale" &&
-        advancedChildren.join("|") === "Quality|DetailSection"
+        outlineChildNamesMatch(
+          generalChildren,
+          ["Enabled", "Scale"]
+        ) &&
+        outlineChildNamesMatch(
+          advancedChildren,
+          ["Quality", "DetailSection"]
+        )
       );
       tourDebugAssert(
         "outline-nested-native-reference-state-prepared",
@@ -22225,6 +25202,24 @@
       document.querySelector(".rml-pack-button") ||
       document.querySelector("#pack-into-node");
 
+    const menu = await teacherEnsureResponsiveTopActionsOpen(
+      button,
+      wantsGraph
+        ? "Open the responsive Hamburger before choosing Open Runtime Graph"
+        : "Open the responsive Hamburger before returning to Configuration Outline",
+      runId
+    );
+    if (menu.required && !menu.open) return false;
+    const responsive = responsiveTopActionsState(button);
+    if (
+      responsive.responsive &&
+      responsive.actions instanceof HTMLElement &&
+      !elementVisibleInsideScroller(button, responsive.actions, 6)
+    ) {
+      const revealed = await revealCompactTopbarAction(button, runId);
+      if (!revealed || runId !== demoRunId) return false;
+    }
+
     if (!tourElementActuallyVisible(button)) return false;
 
     await nativeTourScrollTargetIntoView(
@@ -22252,7 +25247,7 @@
         if (graphViewport) tourResizeObserver?.observe?.(graphViewport);
         return true;
       }
-      await new Promise(resolve => requestAnimationFrame(resolve));
+      await tourNextVisualFrame();
     }
     return false;
   }
@@ -22334,6 +25329,23 @@
         graphDemoError(
           "Step 7 lost its complete reserved NOT-node rectangle before Demonstrate."
         );
+      }
+    }
+
+    if (!explicitModeDemo && step?.demo === "graph-route") {
+      let preparedRouteDrop = graphRoutePreparedDropHit();
+      if (preparedRouteDrop?.ok !== true) {
+        const viewport = document.querySelector(".rml-graph-viewport");
+        showDemoLabel(
+          "Make enough visible room for one branch node",
+          centerOf(viewport)
+        );
+        await prepareGraphRoutePlacementArea(
+          runId,
+          { animateCamera: true }
+        );
+        if (runId !== demoRunId) return null;
+        preparedRouteDrop = graphRoutePreparedDropHit();
       }
     }
 
@@ -22506,9 +25518,7 @@
   async function nativeTourScrollTargetIntoView(target, runId = demoRunId) {
     if (!target || runId !== demoRunId) return false;
 
-    await new Promise(resolve =>
-      requestAnimationFrame(() => requestAnimationFrame(resolve))
-    );
+    await nextTwoFrames();
     if (runId !== demoRunId) return false;
 
     if (tourTargetComfortablyVisible(target)) return true;
@@ -22565,6 +25575,65 @@
     };
   }
 
+  function graphDemoVisibleElementPoint(
+    element,
+    xRatio = .5,
+    yRatio = .5,
+    preferredInset = 22
+  ) {
+    const rectangle = element?.getBoundingClientRect?.();
+    const viewport = tourEffectViewport();
+    if (!rectangle) {
+      return {
+        x: viewport.left + viewport.width * xRatio,
+        y: viewport.top + viewport.height * yRatio
+      };
+    }
+
+    const visibleLeft = Math.max(rectangle.left, viewport.left);
+    const visibleRight = Math.min(rectangle.right, viewport.right);
+    const visibleTop = Math.max(rectangle.top, viewport.top);
+    const visibleBottom = Math.min(rectangle.bottom, viewport.bottom);
+    const visibleWidth = Math.max(0, visibleRight - visibleLeft);
+    const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+
+    if (visibleWidth < 2 || visibleHeight < 2) {
+      return {
+        x: Math.max(
+          viewport.left + 18,
+          Math.min(
+            viewport.right - 18,
+            rectangle.left + rectangle.width * xRatio
+          )
+        ),
+        y: Math.max(
+          viewport.top + 24,
+          Math.min(
+            viewport.bottom - 24,
+            rectangle.top + rectangle.height * yRatio
+          )
+        )
+      };
+    }
+
+    const insetX = Math.min(
+      preferredInset,
+      Math.max(0, visibleWidth * .24)
+    );
+    const insetY = Math.min(
+      preferredInset,
+      Math.max(0, visibleHeight * .24)
+    );
+    return {
+      x:
+        visibleLeft + insetX +
+        Math.max(0, visibleWidth - insetX * 2) * xRatio,
+      y:
+        visibleTop + insetY +
+        Math.max(0, visibleHeight - insetY * 2) * yRatio
+    };
+  }
+
   async function runGraphPanDemo(runId) {
     const viewport =
       document.querySelector(".rml-graph-viewport");
@@ -22572,6 +25641,13 @@
 
     await ensureGraphDemoNodes(runId);
     if (runId !== demoRunId) return;
+
+    const toolbarReady = await prepareGraphPanToolbarForNarration(runId);
+    if (!toolbarReady || runId !== demoRunId) {
+      throw new Error(
+        "[RML Tour · Step 10] The graph toolbar could not be scrolled completely into view before Center Graph and zoom."
+      );
+    }
 
     await teacherCenterGraph(runId, {
       label: "Center Graph is useful now → fit the complete live program"
@@ -22677,7 +25753,7 @@
     if (!scrollDemo?.body) return;
 
     const immediateNodePoint =
-      centerOf(scrollDemo.body, .58, .52);
+      graphDemoVisibleElementPoint(scrollDemo.body, .58, .52);
     const immediateMouse = elements().mouse;
     immediateMouse?.classList.add("active");
     setTeacherMousePoint(
@@ -22694,10 +25770,81 @@
       failures: []
     };
 
+    const mountTeacherWheelMouse = async (
+      point,
+      {
+        horizontal = false,
+        reason = "graph-pan-wheel-visual"
+      } = {}
+    ) => {
+      const ui = elements();
+      if (!(ui.mouse instanceof HTMLElement) || !point) return false;
+
+      const viewport = tourEffectViewport();
+      const visiblePoint = {
+        x: Math.max(
+          viewport.left + 20,
+          Math.min(viewport.right - 20, point.x)
+        ),
+        y: Math.max(
+          viewport.top + 28,
+          Math.min(viewport.bottom - 28, point.y)
+        )
+      };
+
+      ui.mouse.removeAttribute("hidden");
+      ui.mouse.style.removeProperty("visibility");
+      ui.mouse.style.removeProperty("opacity");
+      ui.mouse.classList.remove(
+        "rml-setup-mouse-hard-hidden",
+        "pressed",
+        "horizontal-wheel"
+      );
+      delete ui.mouse.dataset.hardHiddenReason;
+      setTeacherMousePoint(visiblePoint, 0, [], reason);
+      ui.mouse.classList.add("active", "scrolling");
+      if (horizontal) {
+        ui.mouse.classList.add("horizontal-wheel");
+      }
+      void ui.mouse.getBoundingClientRect();
+      await nextTwoFrames();
+
+      const rectangle = ui.mouse.getBoundingClientRect();
+      const style = getComputedStyle(ui.mouse);
+      const center = {
+        x: rectangle.left + rectangle.width * .5,
+        y: rectangle.top + rectangle.height * .5
+      };
+      const visible = Boolean(
+        ui.mouse.classList.contains("active") &&
+        ui.mouse.classList.contains("scrolling") &&
+        !ui.mouse.classList.contains("rml-setup-mouse-hard-hidden") &&
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        rectangle.width > 8 &&
+        rectangle.height > 12 &&
+        center.x >= viewport.left &&
+        center.x <= viewport.right &&
+        center.y >= viewport.top &&
+        center.y <= viewport.bottom
+      );
+      tourDebugRecord("graph-pan-teacher-wheel-mouse-mounted", {
+        reason,
+        horizontal,
+        visible,
+        requestedPoint: point,
+        point: visiblePoint,
+        mouseRect: tourDebugRect(ui.mouse),
+        mouseClasses: ui.mouse.className || ""
+      });
+      return visible;
+    };
+
     const beginCtrlWheelVisual = async (point, label) => {
       const ui = elements();
-      ui.mouse?.classList.remove("horizontal-wheel");
-      ui.mouse?.classList.add("scrolling");
+      const mouseVisible = await mountTeacherWheelMouse(point, {
+        reason: "graph-pan-ctrl-wheel-visual"
+      });
       showKeys(["Ctrl"], point);
       showDemoLabel(label, point);
       await waitForAnimationFrames(1);
@@ -22711,6 +25858,8 @@
         ? getComputedStyle(ui.mouse, "::after").content
         : "";
       const visible = Boolean(
+        mouseVisible &&
+        ui.mouse?.classList.contains("active") &&
         ui.mouse?.classList.contains("scrolling") &&
         !ui.mouse.classList.contains("horizontal-wheel") &&
         ui.keys &&
@@ -22725,6 +25874,7 @@
       else {
         ctrlWheelVisualState.failures.push({
           label,
+          mouseVisible,
           mouseClasses: ui.mouse?.className || "",
           keyText: ui.keys?.textContent || "",
           wheelAnimation: wheelStyle?.animationName || "",
@@ -22735,6 +25885,7 @@
       tourDebugRecord("ctrl-wheel-visual-cycle", {
         label,
         visible,
+        mouseVisible,
         wheelAnimation: wheelStyle?.animationName || "",
         arrows: { beforeContent, afterContent }
       });
@@ -22759,7 +25910,9 @@
       point
     ) => {
       hideKeys();
-      elements().mouse?.classList.add("scrolling");
+      await mountTeacherWheelMouse(point, {
+        reason: "graph-pan-selected-wheel-visual"
+      });
       showDemoLabel(label, point);
       await wait(TOUR_SCROLL_TIMING.gestureLeadIn);
       await wheelBurst(
@@ -22841,7 +25994,7 @@
       if (runId !== demoRunId) return;
 
       let nodePoint =
-        centerOf(scrollDemo.body, .58, .52);
+        graphDemoVisibleElementPoint(scrollDemo.body, .58, .52);
       await moveMouse(nodePoint, 520, runId);
       if (runId !== demoRunId) return;
 
@@ -22856,11 +26009,11 @@
       );
       if (runId !== demoRunId) return;
 
+      await mountTeacherWheelMouse(nodePoint, {
+        horizontal: true,
+        reason: "graph-pan-shift-wheel-visual"
+      });
       showKeys(["Shift"], nodePoint);
-      elements().mouse?.classList.add(
-        "scrolling",
-        "horizontal-wheel"
-      );
       showDemoLabel(
         "Shift + Wheel ↓ → horizontal scroll INSIDE the same Node",
         nodePoint
@@ -22933,7 +26086,9 @@
       if (runId !== demoRunId) return;
 
       hideKeys();
-      elements().mouse?.classList.add("scrolling");
+      await mountTeacherWheelMouse(nodePoint, {
+        reason: "graph-pan-page-wheel-visual"
+      });
       showDemoLabel(
         "Ctrl is released → normal Wheel scrolls the locked <html> page",
         nodePoint
@@ -22952,7 +26107,7 @@
           "Generated Project Files section"
         );
         const codePoint =
-          centerOf(codeScroller, .55, .42);
+          graphDemoVisibleElementPoint(codeScroller, .55, .42, 26);
         await moveMouse(
           codePoint,
           560,
@@ -23002,8 +26157,8 @@
 
       if (runId !== demoRunId) return;
       const returnPoint = codeScroller && graphDemoVisible(codeScroller)
-        ? centerOf(codeScroller, .55, .42)
-        : centerOf(codePanel || viewport, .55, .42);
+        ? graphDemoVisibleElementPoint(codeScroller, .55, .42, 26)
+        : graphDemoVisibleElementPoint(codePanel || viewport, .55, .42, 26);
       const returnTarget =
         document.elementFromPoint(returnPoint.x, returnPoint.y) ||
         codeScroller ||
@@ -23029,7 +26184,9 @@
       if (runId !== demoRunId) return;
 
       if (foundReturnHtml) {
-        elements().mouse?.classList.add("scrolling");
+        await mountTeacherWheelMouse(returnPoint, {
+          reason: "graph-pan-return-page-wheel-visual"
+        });
         for (let burst = 0; burst < 16 && runId === demoRunId; burst += 1) {
           const plan = tourPageRootCenteringPlan(viewport);
           if (!plan.useful || Math.abs(plan.delta) <= 1) break;
@@ -23053,8 +26210,57 @@
       scrollDemo.body.scrollTop = 0;
       scrollDemo.body.scrollLeft = 0;
       await teacherEnsureGraphSidebarsVisible(runId);
+      if (runId !== demoRunId) return;
+      const graphWindowReturned = await ensureGraphViewportWindow(runId);
+      if (!graphWindowReturned || runId !== demoRunId) {
+        graphDemoError(
+          "Step 10 could not visibly return from the page-scroll lesson to the Runtime Graph."
+        );
+      }
       transitionSemanticScene(viewport, "Typed Runtime Graph section");
-      nodePoint = centerOf(scrollDemo.body, .58, .52);
+      const completionNodeIds = graphTeachingNodeIdsFromState();
+      const completionViewportBefore = window.RMLDynamicGraphHost
+        ?.getViewportState?.()?.viewport || null;
+      showDemoLabel(
+        "Return to the same readable graph camera — pan first, zoom only if the two complete nodes cannot fit",
+        centerOf(viewport)
+      );
+      const completionFrameReady = await animateGraphNodesToReadableFrame(
+        completionNodeIds,
+        runId,
+        {
+          inset: 22,
+          padding: window.innerWidth < 480 ? 18 : 28,
+          maxScale: Number(completionViewportBefore?.scale) || 1,
+          duration: 620,
+          reason: "step-10-visible-return-to-teaching-pair"
+        }
+      );
+      if (runId !== demoRunId) return;
+      const completionPair = graphDemoSocketPair(false);
+      const completionViewportAfter = window.RMLDynamicGraphHost
+        ?.getViewportState?.()?.viewport || null;
+      const completionReady = tourDebugAssert(
+        "graph-pan-visible-return-leaves-complete-teaching-pair",
+        completionFrameReady === true &&
+          graphTeachingPairCompletelyVisible(completionPair, 10),
+        {
+          nodeIds: completionNodeIds,
+          beforeViewport: completionViewportBefore,
+          afterViewport: completionViewportAfter,
+          zoomReduced:
+            Number(completionViewportAfter?.scale) <
+              Number(completionViewportBefore?.scale) - .0005,
+          policy:
+            "the end of Step 10 visibly returns to both complete teaching nodes; camera pan is preferred and zoom reduction is permitted only when their measured footprint cannot fit"
+        }
+      );
+      if (!completionReady) {
+        graphDemoError(
+          "Step 10 did not leave both complete teaching nodes in its visible final graph frame."
+        );
+      }
+      nodePoint = graphDemoVisibleElementPoint(scrollDemo.body, .58, .52);
       await moveMouse(nodePoint, 420, runId);
       hideKeys();
       elements().mouse?.classList.remove(
@@ -23063,7 +26269,7 @@
         "horizontal-wheel"
       );
       showDemoLabel(
-        "Back at the graph → Step 11 can repeat from the same visible place",
+        "Back at the graph → the next lesson inherits this exact camera without a hidden jump",
         nodePoint
       );
       keepMouseVisible = true;
@@ -23082,7 +26288,7 @@
       );
       if (!ctrlWheelVisualsComplete) {
         throw new Error(
-          "[RML Tour · Step 11] Ctrl + Wheel did not keep the key, wheel animation and vertical arrows visible together."
+          "[RML Tour · Step 10] Ctrl + Wheel did not keep the teacher mouse, key, wheel animation and vertical arrows visible together."
         );
       }
     } finally {
@@ -23139,7 +26345,7 @@
       case "graph-flip":
         return runGraphPortFlipDemo(runId);
       case "graph-route":
-        return runGraphRouteDemo(runId);
+        return runGraphRouteDemoSimple(runId);
       case "graph-pan":
         return runGraphPanDemo(runId);
       case "graph-inspector":
@@ -23269,6 +26475,9 @@
     }
     const liveSkipPhase =
       phase === "preparing" || phase === "demonstrating";
+    if (!liveSkipPhase) {
+      clearLiveControlsActiveObstacles();
+    }
     if (ui.liveControls) {
       ui.liveControls.hidden = !liveSkipPhase;
       if (liveSkipPhase && !ui.liveControls.dataset.livePlacement) {
@@ -23280,6 +26489,19 @@
     }
     if (ui.liveSkipTour) {
       ui.liveSkipTour.disabled = !liveSkipPhase;
+    }
+    if (phase === "demonstrating") {
+      const currentMouse =
+        teacherMouseVisualCoordinates() ||
+        teacherMouseCoordinates() ||
+        {
+          x: window.innerWidth * .5,
+          y: window.innerHeight * .5
+        };
+      positionLiveControlsAwayFromMouseRoute(
+        [currentMouse],
+        "demonstration-controls-opened"
+      );
     }
 
     if (phase === "preparing") {
@@ -23443,6 +26665,9 @@
     if (step.demo !== "graph-create-node") {
       graphCreateNodePreparedDropPlan = null;
     }
+    if (step.demo !== "graph-route") {
+      graphRoutePreparedDropPlan = null;
+    }
     const runId = demoRunId;
 
     if (restoreTransaction) {
@@ -23580,18 +26805,24 @@
         document.querySelector(".rml-pack-button") ||
         document.querySelector("#pack-into-node")
       ).responsive;
-    const preparationNeeded = !restoreTransaction && Boolean(
-      canActuallyScroll ||
-      graphPreparationNeeded ||
-      outlinePalettePreparationNeeded ||
-      outlineReorderPreparationNeeded ||
-      outlineNestedPreparationNeeded ||
-      topbarPreparationNeeded ||
-      compactPackPreparationNeeded
+    const preparationNeeded = Boolean(
+      compactPackPreparationNeeded ||
+      (
+        !restoreTransaction &&
+        (
+          canActuallyScroll ||
+          graphPreparationNeeded ||
+          outlinePalettePreparationNeeded ||
+          outlineReorderPreparationNeeded ||
+          outlineNestedPreparationNeeded ||
+          topbarPreparationNeeded
+        )
+      )
     );
     let preparationRanWithoutAssistantNotice = false;
     let naturalPreparationBefore = null;
     let naturalPreparationAfter = null;
+    let preparationError = null;
 
     if (preparationNeeded) {
       root.classList.remove("rml-setup-preparing-next");
@@ -23662,18 +26893,37 @@
           preparedStepIndex: index,
           preparedDemo: step.demo || ""
         });
-        if (!constraintCertificate) throw error;
-        tourDebugRecord("layout-constraint-noise-filtered", {
-          stage: "preparation",
-          preparedStepIndex: index,
-          preparedDemo: step.demo || "",
-          rawError: error?.message || String(error || ""),
-          constraintCertificate
-        });
-        console.info(
-          "[RML Tour] An unavoidable, mathematically certified layout constraint was recorded as viewport noise.",
-          constraintCertificate
-        );
+        preparationError = {
+          name: error?.name || "Error",
+          message: error?.message || String(error || ""),
+          constraintCertificate: constraintCertificate || null
+        };
+        if (constraintCertificate) {
+          tourDebugRecord("layout-constraint-noise-filtered", {
+            stage: "preparation",
+            preparedStepIndex: index,
+            preparedDemo: step.demo || "",
+            rawError: preparationError.message,
+            constraintCertificate
+          });
+          console.info(
+            "[RML Tour] An unavoidable, mathematically certified layout constraint was recorded as viewport noise.",
+            constraintCertificate
+          );
+        } else {
+          tourDebugRecord("lesson-preparation-contained-error", {
+            preparedStepIndex: index,
+            preparedDemo: step.demo || "",
+            errorName: preparationError.name,
+            message: preparationError.message,
+            policy:
+              "A failed hidden preparation may be logged, but it must always release the preparation screen and show the lesson."
+          });
+          console.error(
+            `[RML Tour · Step ${index}] Hidden lesson preparation failed and was contained so the tour cannot remain locked.`,
+            error
+          );
+        }
       }
       if (runId !== demoRunId) return false;
       await wait(TOUR_SCROLL_TIMING.preparationSettle);
@@ -23691,7 +26941,8 @@
         assistantChromeHidden: preparationRanWithoutAssistantNotice,
         explicitPreparationNoticeVisible: false,
         before: naturalPreparationBefore,
-        after: naturalPreparationAfter
+        after: naturalPreparationAfter,
+        preparationError
       });
     }
 
@@ -23899,22 +27150,89 @@
     return true;
   }
 
+  function restoreControlledRepeatDialogPresentation(index, phase) {
+    const ui = elements();
+    const step = steps[index];
+    if (!ui.root || !ui.card || !step || stepIndex !== index) {
+      return false;
+    }
+
+    ui.root.hidden = false;
+    ui.root.classList.remove(
+      "rml-setup-preparing-next",
+      "rml-setup-demonstration-only"
+    );
+    ui.root.classList.add("rml-setup-narration-active");
+    ui.card.classList.remove("rml-setup-card-hidden-during-scene");
+    document.documentElement.classList.remove(
+      "rml-setup-demonstration-active"
+    );
+    ui.title.textContent = step.title || "";
+    ui.progress.style.width = ((index + 1) / steps.length) * 100 + "%";
+    ui.text.innerHTML = step.text || "";
+    ui.hint.textContent = step.hint || "";
+    ui.hint.hidden = !step.hint;
+    const requestedPhase =
+      phase === "ready" || phase === "explain"
+        ? phase
+        : step.demo
+          ? "ready"
+          : "explain";
+    setStepPhase(requestedPhase);
+    positionShades(null, { force: true });
+    fitNarrationCardToContent({ reset: true, followText: false });
+    tourDebugRecord("controlled-repeat-origin-dialog-presentation-restored", {
+      returnedStepIndex: index,
+      returnedStepTitle: step.title || "",
+      requestedPhase: phase,
+      restoredPhase: stepPhase,
+      repeatLockReleased: repeatPreviousInFlight === false
+    });
+    return stepPhase === requestedPhase;
+  }
+
   async function returnFromControlledRepeat(
     index,
     returnTransaction = null
   ) {
-    const returned = await transitionToStep(index, {
+    const step = steps[index];
+    if (!step || !elements().root) return false;
+
+    cancelDemo();
+    demoInFlight = false;
+    if (returnTransaction?.state) {
+      restoreTourState(returnTransaction.state);
+    }
+    if (returnTransaction?.environment) {
+      try {
+        await restoreTourEnvironmentState(
+          returnTransaction.environment
+        );
+      } catch (error) {
+        tourDebugRecord(
+          "controlled-repeat-origin-environment-best-effort",
+          {
+            returnedStepIndex: index,
+            errorName: error?.name || "Error",
+            message: error?.message || String(error || "")
+          }
+        );
+      }
+    }
+    await nextTwoFrames();
+
+    const returned = showStep(index, {
       captureEntry: false,
       controlledReentry: true,
       deferNarration: true,
       repeatReturn: true,
-      restoreTransaction: returnTransaction
+      statePrepared: true
     });
     if (!returned) return false;
-    if (steps[index]?.demo) {
-      return revealReadyStepWithoutNarration(index);
-    }
-    return true;
+    return restoreControlledRepeatDialogPresentation(
+      index,
+      returnTransaction?.phase
+    );
   }
 
   async function runDemo(step, target, options = {}) {
@@ -24046,6 +27364,10 @@
         );
       }
       clearDemoVisuals();
+      setLiveControlsActiveObstacles(
+        [target],
+        "demonstration-initial-target"
+      );
       assertActionOnlyDemonstration("before-action");
       tourDebugRecord("tour-live-perception-before-demonstration", {
         demo: step.demo,
@@ -24379,9 +27701,8 @@
   }
 
   async function nextTwoFrames() {
-    await new Promise(resolve =>
-      requestAnimationFrame(() => requestAnimationFrame(resolve))
-    );
+    await tourNextVisualFrame();
+    await tourNextVisualFrame();
   }
 
   async function restoreSandboxSnapshot() {
@@ -24451,7 +27772,6 @@
     });
     ui.title.textContent = step.title;
     ui.hint.hidden = false;
-    renderWelcomeViewportWarning(index);
     ui.progress.style.width =
       ((index + 1) / steps.length) * 100 + "%";
     const root = ui.root;
@@ -24590,7 +27910,7 @@
               connection
             ),
             {
-              skippedStepIndex,
+              skippedStepIndex: skippedIndex,
               connectedBeforeSkip:
                 skippedGraphHandoff.connectedTeachingPair === true,
               connectedAfterSkip: Boolean(connection),
@@ -24613,7 +27933,7 @@
             "graph-flip-skip-fallback-keeps-nodes-visibly-separated",
             spacing.ok === true,
             {
-              skippedStepIndex,
+              skippedStepIndex: skippedIndex,
               spacing,
               policy:
                 "only an incomplete graph may use preparation, and its complete node rectangles must remain separated"
@@ -24752,14 +28072,35 @@
       return false;
     } finally {
       repeatPreviousInFlight = false;
-      const currentUi = elements();
-      if (!currentUi.root?.hidden && !demoInFlight) {
+      let currentUi = elements();
+      const tourWasExplicitlyClosed = Boolean(
+        restoreInFlight || !snapshot
+      );
+      const originAlreadyRestored = Boolean(
+        stepIndex === returnStepIndex &&
+        stepPhase === returnTransaction.phase &&
+        currentUi.root &&
+        !currentUi.root.hidden &&
+        !demoInFlight
+      );
+      if (!tourWasExplicitlyClosed && !originAlreadyRestored) {
+        await returnFromControlledRepeat(
+          returnStepIndex,
+          returnTransaction
+        );
+        currentUi = elements();
+      }
+      if (!tourWasExplicitlyClosed && !demoInFlight) {
+        restoreControlledRepeatDialogPresentation(
+          returnStepIndex,
+          returnTransaction.phase
+        );
+        await nextTwoFrames();
+        currentUi = elements();
         setStepPhase(stepPhase);
         fitNarrationCardToContent({ followText: false });
       }
-      const repeatAbortedByTourClose = Boolean(
-        currentUi.root?.hidden || restoreInFlight || !snapshot
-      );
+      const repeatAbortedByTourClose = tourWasExplicitlyClosed;
       if (repeatAbortedByTourClose) {
         tourDebugRecord("controlled-repeat-ended-by-tour-close", {
           returnStepIndex,
@@ -24802,8 +28143,16 @@
           }
         );
         if (!returnDialogRestored) {
-          console.error(
-            "[RML Tour · Repeat] The originating dialog was not restored after the controlled repetition."
+          tourDebugRecord(
+            "controlled-repeat-origin-dialog-restoration-incomplete",
+            {
+              returnStepIndex,
+              actualStepIndex: stepIndex,
+              expectedPhase: returnTransaction.phase,
+              actualPhase: stepPhase,
+              policy:
+                "the product state is preserved and no synthetic repeat failure is emitted from presentation-only validation"
+            }
           );
         }
       }
@@ -24811,7 +28160,16 @@
   }
 
   async function restoreAndClose(markComplete = true) {
-    if (restoreInFlight) return;
+    if (restoreInFlight) {
+      const joinedAt = performance.now();
+      while (
+        restoreInFlight &&
+        performance.now() - joinedAt < 12000
+      ) {
+        await new Promise(resolve => window.setTimeout(resolve, 40));
+      }
+      return restoreInFlight === false;
+    }
     restoreInFlight = true;
     const ui = elements();
     const expectedState = snapshot;
@@ -25065,10 +28423,6 @@
       viewportGeometryFrame = requestAnimationFrame(() => {
         if (ui.root.hidden) return;
 
-        if (stepIndex === 0) {
-          renderWelcomeViewportWarning(0);
-        }
-
         if (activeSemanticScene?.locked) {
           const visibleMembers = activeSemanticScene.elements.filter(
             tourElementActuallyVisible
@@ -25152,6 +28506,8 @@
       blockedRepeatCount = 0;
       controlledRepeatCount = 0;
       repeatPreviousInFlight = false;
+      graphCreateNodePreparedDropPlan = null;
+      graphRoutePreparedDropPlan = null;
       snapshot = captureTourState();
       snapshotFingerprint = tourStateFingerprint(snapshot);
       originalTourUiState = captureTourEnvironmentState();
@@ -25183,32 +28539,6 @@
       positionCard(null, { force: true });
 
       const viewport = tourViewport();
-      const viewportSupport = renderWelcomeViewportWarning(0);
-      const warningContractPassed = tourDebugAssert(
-        "tour-welcome-viewport-support-warning-contract",
-        Boolean(ui.viewportWarning) &&
-          ui.viewportWarning.hidden === viewportSupport.supported &&
-          (
-            viewportSupport.supported ||
-            (
-              ui.viewportWarning.textContent.includes(
-                `${viewportSupport.actual.width}×${viewportSupport.actual.height}`
-              ) &&
-              ui.viewportWarning.textContent.includes(
-                `${viewportSupport.minimum.width}×${viewportSupport.minimum.height}`
-              )
-            )
-          ),
-        {
-          ...viewportSupport,
-          warningVisible: Boolean(
-            ui.viewportWarning && !ui.viewportWarning.hidden
-          ),
-          warningText: ui.viewportWarning?.textContent || "",
-          policy:
-            "414×896 is the smallest verified full-tour viewport; only a smaller viewport receives the first-overlay safety warning"
-        }
-      );
       const cardRect = ui.card?.getBoundingClientRect?.() || null;
       const cardCenteredBeforeReveal = Boolean(
         cardRect &&
@@ -25232,7 +28562,7 @@
       );
       tourDebugAssert(
         "tour-first-visible-frame-prepositioned",
-        cardCenteredBeforeReveal && warningContractPassed,
+        cardCenteredBeforeReveal,
         {
           cardRect: cardRect ? tourDebugRect(ui.card) : null,
           viewport,

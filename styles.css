@@ -8113,6 +8113,39 @@ dialog[open] > #rml-setup-assistant.rml-setup-modal-demonstration
   justify-content: flex-start;
 }
 
+.rml-setup-live-controls[data-live-placement="middle-right"] {
+  right: 14px;
+  bottom: auto;
+  left: auto;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.rml-setup-live-controls[data-live-placement="middle-left"] {
+  right: auto;
+  bottom: auto;
+  left: 14px;
+  top: 50%;
+  justify-content: flex-start;
+  transform: translateY(-50%);
+}
+
+.rml-setup-live-controls[data-live-placement="top-center"] {
+  right: auto;
+  bottom: auto;
+  left: 50%;
+  top: 14px;
+  transform: translateX(-50%);
+}
+
+.rml-setup-live-controls[data-live-placement="bottom-center"] {
+  right: auto;
+  bottom: 14px;
+  left: 50%;
+  top: auto;
+  transform: translateX(-50%);
+}
+
 .rml-setup-live-controls[hidden] {
   display: none !important;
 }
@@ -8252,22 +8285,6 @@ dialog[open] > #rml-setup-assistant.rml-setup-modal-demonstration
   }
 }
 
-.rml-setup-viewport-warning {
-  margin-top: 10px;
-  padding: 9px 10px;
-  border: 1px solid rgba(255, 209, 129, .58);
-  border-radius: 7px;
-  background: rgba(255, 209, 129, .10);
-  color: #ffe2ac;
-  font-size: 11px;
-  font-weight: 650;
-  line-height: 1.45;
-}
-
-.rml-setup-viewport-warning[hidden] {
-  display: none !important;
-}
-
 @media (max-width: 780px) {
   .rml-setup-card {
     width: calc(100vw - 18px);
@@ -8293,7 +8310,7 @@ dialog[open] > #rml-setup-assistant.rml-setup-modal-demonstration
   --mouse-y: calc(100vh - 68px);
   --mouse-duration: 520ms;
   position: fixed;
-  z-index: 10003;
+  z-index: 10006;
   left: 0;
   top: 0;
   width: 34px;
@@ -8500,6 +8517,18 @@ dialog[open] > #rml-setup-assistant.rml-setup-modal-demonstration
     left: 9px;
     top: 9px;
   }
+  .rml-setup-live-controls[data-live-placement="middle-right"] {
+    right: 9px;
+  }
+  .rml-setup-live-controls[data-live-placement="middle-left"] {
+    left: 9px;
+  }
+  .rml-setup-live-controls[data-live-placement="top-center"] {
+    top: 9px;
+  }
+  .rml-setup-live-controls[data-live-placement="bottom-center"] {
+    bottom: 9px;
+  }
   .rml-setup-demo-label {
     max-width: 160px;
     font-size: 8px;
@@ -8509,6 +8538,26 @@ dialog[open] > #rml-setup-assistant.rml-setup-modal-demonstration
     max-width: 155px;
     padding: 7px 9px;
     font-size: 9px;
+  }
+}
+
+@media (max-width: 390px), (max-height: 700px) {
+  .rml-setup-live-controls {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    gap: 4px;
+    width: min(138px, calc(100vw - 18px));
+    max-width: min(138px, calc(100vw - 18px));
+    padding: 5px;
+  }
+
+  .rml-setup-live-controls > button {
+    min-height: 28px;
+    width: 100%;
+    padding: 5px 7px;
+    font-size: 10px;
+    line-height: 1.1;
+    white-space: normal;
   }
 }
 
@@ -10347,5 +10396,65 @@ dialog.builder-message-dialog::backdrop {
 @media (max-width: 520px) {
   #rml-setup-assistant.rml-setup-adaptive-narration-card .rml-setup-card {
     max-width: var(--rml-setup-adaptive-card-max-width, calc(100vw - 18px)) !important;
+  }
+}
+
+/* Configuration Outline mobile reset. Graph-mode panel state must never
+ * force desktop columns or horizontal overflow after returning to Outline. */
+@media (max-width: 780px) {
+  body:not(.rml-node-graph-mode) main,
+  body:not(.rml-node-graph-mode) footer {
+    width: calc(100% - 16px);
+    min-width: 0;
+  }
+
+  body:not(.rml-node-graph-mode) .workspace {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr) !important;
+    align-items: start;
+    overflow: visible;
+  }
+
+  body:not(.rml-node-graph-mode) .workspace > .palette,
+  body:not(.rml-node-graph-mode) .workspace > .canvas,
+  body:not(.rml-node-graph-mode) .workspace > .inspector {
+    display: block !important;
+    width: 100%;
+    min-width: 0;
+    grid-column: 1 / -1;
+  }
+
+  body:not(.rml-node-graph-mode) .workspace > .canvas {
+    display: flex !important;
+  }
+
+  body:not(.rml-node-graph-mode) .canvas-title {
+    height: auto;
+    flex-wrap: wrap;
+    padding-block: 9px;
+  }
+
+  body:not(.rml-node-graph-mode) .canvas-title > span,
+  body:not(.rml-node-graph-mode) .canvas-title > em {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  body:not(.rml-node-graph-mode) .canvas-title > em {
+    width: 100%;
+  }
+
+  body:not(.rml-node-graph-mode) .builder-canvas {
+    width: 100%;
+    min-width: 0;
+    min-height: clamp(440px, calc(100dvh - 120px), 657px);
+    overflow-x: hidden;
+  }
+
+  body:not(.rml-node-graph-mode) .controller-options {
+    grid-template-columns: minmax(0, 1fr) !important;
   }
 }
