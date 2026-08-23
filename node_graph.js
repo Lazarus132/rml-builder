@@ -12608,25 +12608,69 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           flex: 0 0 auto;
         }
 
+        body.rml-node-graph-mode {
+          width: 100%;
+          min-width: 0;
+          max-width: 100%;
+          overflow-x: hidden;
+        }
+
+        body.rml-node-graph-mode main,
+        body.rml-node-graph-mode footer {
+          width: calc(100% - 16px);
+          min-width: 0;
+          max-width: calc(100% - 16px);
+        }
+
         body.rml-node-graph-mode .workspace {
           display: grid;
           width: 100%;
+          max-width: 100%;
           height: auto;
           min-height: 0;
           grid-template-columns: minmax(0, 1fr) !important;
+          overflow: hidden;
         }
 
         body.rml-node-graph-mode .workspace > .palette,
         body.rml-node-graph-mode .workspace > .canvas,
         body.rml-node-graph-mode .workspace > .inspector {
+          display: block !important;
           grid-column: 1 / -1;
           width: 100%;
+          max-width: 100%;
           min-width: 0;
         }
 
         body.rml-node-graph-mode .workspace > .canvas {
+          display: flex !important;
           min-height: calc(100vh + 52px);
           min-height: calc(100dvh + 52px);
+        }
+
+        body.rml-node-graph-mode.rml-graph-left-collapsed .workspace > .palette,
+        body.rml-node-graph-mode.rml-graph-right-collapsed .workspace > .inspector {
+          display: block !important;
+        }
+
+        .rml-graph-panel-toggle {
+          display: none !important;
+        }
+
+        .rml-workspace-toggle-title {
+          display: grid !important;
+          height: auto;
+          grid-template-columns: minmax(0, 1fr) !important;
+          gap: 7px !important;
+          padding-block: 9px;
+        }
+
+        .rml-workspace-toggle-title > span,
+        .rml-workspace-toggle-title > em {
+          grid-column: 1 !important;
+          width: 100%;
+          min-width: 0;
+          max-width: 100%;
         }
 
         body.rml-node-graph-mode #palette-content {
@@ -12635,6 +12679,9 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         }
 
         body.rml-node-graph-mode #builder-canvas {
+          width: 100%;
+          max-width: 100%;
+          min-width: 0;
           flex: 0 0 100vh;
           flex-basis: 100dvh;
           height: 100vh;
@@ -12644,13 +12691,23 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         }
 
         .rml-graph-root {
+          width: 100%;
+          max-width: 100%;
           height: 100%;
           min-height: 0;
         }
 
         .rml-graph-toolbar {
+          width: 100%;
+          max-width: 100%;
           overflow-x: auto;
+          overflow-y: hidden;
           scrollbar-width: none;
+        }
+
+        .rml-graph-viewport {
+          width: 100%;
+          max-width: 100%;
         }
 
         .rml-graph-toolbar::-webkit-scrollbar {
@@ -13143,6 +13200,11 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
   }
 
   function loadGraphPanelLayout() {
+    if (graphPanelsAreStacked()) {
+      graphLeftPanelCollapsed = false;
+      graphRightPanelCollapsed = false;
+      return;
+    }
     try {
       const stored = JSON.parse(
         localStorage.getItem(
@@ -13157,6 +13219,10 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       graphLeftPanelCollapsed = false;
       graphRightPanelCollapsed = false;
     }
+  }
+
+  function graphPanelsAreStacked() {
+    return window.matchMedia?.("(max-width: 780px)")?.matches === true;
   }
 
   function persistGraphPanelLayout() {
@@ -13347,6 +13413,11 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
   }
 
   function applyGraphPanelLayout() {
+    const stacked = graphPanelsAreStacked();
+    if (stacked) {
+      graphLeftPanelCollapsed = false;
+      graphRightPanelCollapsed = false;
+    }
     document.body.classList.toggle(
       "rml-graph-left-collapsed",
       graphLeftPanelCollapsed
@@ -13357,6 +13428,12 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     );
 
     if (dom.leftPanelToggle) {
+      dom.leftPanelToggle.hidden = stacked;
+      dom.leftPanelToggle.disabled = stacked;
+      dom.leftPanelToggle.setAttribute(
+        "aria-hidden",
+        String(stacked)
+      );
       dom.leftPanelToggle.textContent =
         graphLeftPanelCollapsed
           ? "▶"
@@ -13376,6 +13453,12 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     }
 
     if (dom.rightPanelToggle) {
+      dom.rightPanelToggle.hidden = stacked;
+      dom.rightPanelToggle.disabled = stacked;
+      dom.rightPanelToggle.setAttribute(
+        "aria-hidden",
+        String(stacked)
+      );
       dom.rightPanelToggle.textContent =
         graphRightPanelCollapsed
           ? "◀"
@@ -13416,6 +13499,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       left.className =
         "rml-graph-panel-toggle rml-graph-panel-toggle-left";
       left.addEventListener("click", () => {
+        if (graphPanelsAreStacked()) return;
         graphLeftPanelCollapsed =
           !graphLeftPanelCollapsed;
         persistGraphPanelLayout();
@@ -13433,6 +13517,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       right.className =
         "rml-graph-panel-toggle rml-graph-panel-toggle-right";
       right.addEventListener("click", () => {
+        if (graphPanelsAreStacked()) return;
         graphRightPanelCollapsed =
           !graphRightPanelCollapsed;
         persistGraphPanelLayout();
@@ -24779,7 +24864,8 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
   function finishConnectionDrag(
     commit,
     clientX,
-    clientY
+    clientY,
+    forcedWireTarget = null
   ) {
     const interaction =
       activeInteraction;
@@ -24830,6 +24916,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         }
       } else {
         const wireTarget =
+          forcedWireTarget ||
           wireTargetAtPoint(
             clientX,
             clientY
@@ -25843,6 +25930,12 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         persistGraphPaletteUiState(true);
       },
       { capture: true }
+    );
+
+    window.addEventListener(
+      "resize",
+      applyGraphPanelLayout,
+      { passive: true }
     );
 
     synchronizeRuntimeBridgeSubscription();
@@ -28376,7 +28469,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
   Object.defineProperty(window, "RMLDynamicGraphHost", {
     value: Object.freeze({
-      version: 20,
+      version: 25,
       getState() { return graph; },
       graphPointToClient(x, y) {
         return graphToClient(
@@ -28472,6 +28565,311 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
             : null
         };
       },
+      refreshGuidedWires() {
+        renderGraphWires();
+        const wireCount = dom.wires?.querySelectorAll(
+          ".rml-graph-wire"
+        ).length || 0;
+        const hitCount = dom.wires?.querySelectorAll(
+          ".rml-graph-wire-hit"
+        ).length || 0;
+        return {
+          ok: Boolean(dom.wires),
+          wireCount,
+          hitCount,
+          connectionCount: graph.connections.length
+        };
+      },
+      materializeGuidedConnection(connectionId) {
+        const connection = graphConnectionById(connectionId);
+        if (!connection || !dom.nodesHost || !dom.wires) {
+          return {
+            ok: false,
+            reason: connection
+              ? "The graph render hosts are unavailable."
+              : "The requested graph connection does not exist."
+          };
+        }
+
+        let output = socketElement(
+          connection.fromNode,
+          connection.fromPort,
+          "output"
+        );
+        let input = socketElement(
+          connection.toNode,
+          connection.toPort,
+          "input"
+        );
+
+        // WebKit can defer the RAF wire pass after the node DOM was replaced.
+        // Rebuild missing real sockets synchronously, then paint the wire from
+        // those sockets in the same task. This is a render repair only; it does
+        // not alter the graph model or fabricate a tour-only cable.
+        if (!output || !input) {
+          renderGraphNodes();
+          output = socketElement(
+            connection.fromNode,
+            connection.fromPort,
+            "output"
+          );
+          input = socketElement(
+            connection.toNode,
+            connection.toPort,
+            "input"
+          );
+        }
+
+        refreshRenderedNodeResizeLimits();
+        renderGraphWires();
+
+        const geometry = connectionGeometry(connection);
+        const selector =
+          `[data-connection-id="${CSS.escape(connection.id)}"]`;
+        const wireCount = dom.wires.querySelectorAll(
+          `.rml-graph-wire${selector}`
+        ).length;
+        const hitCount = dom.wires.querySelectorAll(
+          `.rml-graph-wire-hit${selector}`
+        ).length;
+
+        return {
+          ok: Boolean(
+            output &&
+            input &&
+            geometry?.segments?.length &&
+            wireCount > 0 &&
+            hitCount > 0
+          ),
+          connectionId: connection.id,
+          outputRendered: Boolean(output),
+          inputRendered: Boolean(input),
+          geometryAvailable: Boolean(geometry),
+          segmentCount: geometry?.segments?.length || 0,
+          wireCount,
+          hitCount
+        };
+      },
+      beginGuidedConnectionDrag(
+        endpoint,
+        pointerId,
+        clientX,
+        clientY
+      ) {
+        if (activeInteraction) {
+          return {
+            ok: false,
+            reason: `Another graph interaction is active: ${activeInteraction.kind || "unknown"}`
+          };
+        }
+        const nodeId = String(endpoint?.nodeId || "");
+        const portId = String(endpoint?.portId || "");
+        const direction = String(endpoint?.direction || "");
+        const socket = dom.nodesHost?.querySelector(
+          `.rml-graph-socket[data-node-id="${CSS.escape(nodeId)}"]` +
+          `[data-port-id="${CSS.escape(portId)}"]` +
+          `[data-direction="${CSS.escape(direction)}"]`
+        );
+        if (!(socket instanceof HTMLElement)) {
+          return {
+            ok: false,
+            reason: "The requested guided graph socket is not rendered."
+          };
+        }
+        beginConnectionDrag({
+          button: 0,
+          pointerId,
+          clientX: finiteNumber(clientX, 0),
+          clientY: finiteNumber(clientY, 0),
+          currentTarget: socket,
+          preventDefault() {},
+          stopPropagation() {}
+        });
+        const preview = dom.wires?.querySelector(
+          ".rml-graph-wire-preview"
+        ) || null;
+        return {
+          ok: Boolean(
+            activeInteraction?.kind === "connection" &&
+            activeInteraction.pointerId === pointerId
+          ),
+          pointerId,
+          previewVisible: Boolean(preview),
+          interaction: activeInteraction?.kind === "connection"
+            ? {
+                kind: activeInteraction.kind,
+                pointerId: activeInteraction.pointerId,
+                start: { ...activeInteraction.start }
+              }
+            : null
+        };
+      },
+      moveGuidedConnectionDrag(
+        pointerId,
+        clientX,
+        clientY
+      ) {
+        if (
+          activeInteraction?.kind !== "connection" ||
+          activeInteraction.pointerId !== pointerId
+        ) {
+          return {
+            ok: false,
+            reason: "The guided connection interaction is not active."
+          };
+        }
+        activeInteraction.clientX = finiteNumber(
+          clientX,
+          activeInteraction.clientX
+        );
+        activeInteraction.clientY = finiteNumber(
+          clientY,
+          activeInteraction.clientY
+        );
+        updateAutoPanPointer(
+          activeInteraction.clientX,
+          activeInteraction.clientY
+        );
+        renderGraphWires();
+        const preview = dom.wires?.querySelector(
+          ".rml-graph-wire-preview"
+        ) || null;
+        let previewLength = 0;
+        try {
+          previewLength = Number(preview?.getTotalLength?.()) || 0;
+        } catch {
+        }
+        return {
+          ok: true,
+          pointerId,
+          clientX: activeInteraction.clientX,
+          clientY: activeInteraction.clientY,
+          previewVisible: Boolean(
+            preview instanceof SVGElement &&
+            preview.isConnected &&
+            previewLength > 1
+          ),
+          previewLength
+        };
+      },
+      finishGuidedConnectionDrag(
+        pointerId,
+        clientX,
+        clientY,
+        preferredConnectionId = null,
+        preferredSegmentIndex = null
+      ) {
+        if (
+          activeInteraction?.kind !== "connection" ||
+          activeInteraction.pointerId !== pointerId
+        ) {
+          return {
+            ok: false,
+            reason: "The guided connection interaction is not active."
+          };
+        }
+        const beforeIds = new Set(
+          graph.connections.map(connection => connection.id)
+        );
+        const normalizedSegmentIndex = Number.isInteger(
+          preferredSegmentIndex
+        )
+          ? Math.max(0, preferredSegmentIndex)
+          : null;
+        const forcedPath = preferredConnectionId
+          ? [
+              ...dom.wires?.querySelectorAll(
+                `.rml-graph-wire-hit[data-connection-id="${CSS.escape(preferredConnectionId)}"]`
+              ) || []
+            ].find(path =>
+              normalizedSegmentIndex === null ||
+              Number(path.dataset.segmentIndex || 0) === normalizedSegmentIndex
+            ) || null
+          : null;
+        const finishClientX = finiteNumber(
+          clientX,
+          activeInteraction.clientX
+        );
+        const finishClientY = finiteNumber(
+          clientY,
+          activeInteraction.clientY
+        );
+        const viewportRectangle = dom.viewport?.getBoundingClientRect();
+        const targetInsideViewport = Boolean(
+          viewportRectangle &&
+          finishClientX >= viewportRectangle.left &&
+          finishClientX <= viewportRectangle.right &&
+          finishClientY >= viewportRectangle.top &&
+          finishClientY <= viewportRectangle.bottom
+        );
+        const nearest = forcedPath
+          ? nearestGraphPointOnSvgPath(
+              forcedPath,
+              finishClientX,
+              finishClientY
+            )
+          : null;
+        const targetGraphPoint = clientToGraph(
+          finishClientX,
+          finishClientY
+        );
+        const forcedDistanceClient = nearest
+          ? Math.hypot(
+              nearest.x - targetGraphPoint.x,
+              nearest.y - targetGraphPoint.y
+            ) * Math.max(.001, finiteNumber(graph.viewport.scale, 1))
+          : Infinity;
+        const forcedWireTarget =
+          forcedPath?.isConnected &&
+          targetInsideViewport &&
+          forcedDistanceClient <= 14
+            ? {
+                connectionId: preferredConnectionId,
+                segmentIndex: Number(forcedPath.dataset.segmentIndex || 0),
+                path: forcedPath
+              }
+            : null;
+        finishConnectionDrag(
+          true,
+          finishClientX,
+          finishClientY,
+          forcedWireTarget
+        );
+        const created = graph.connections.find(
+          connection => !beforeIds.has(connection.id)
+        ) || null;
+        return {
+          ok: activeInteraction === null,
+          pointerId,
+          committed: Boolean(created),
+          connectionId: created?.id || "",
+          forcedWireTargetUsed: Boolean(forcedWireTarget),
+          preferredConnectionId: preferredConnectionId || "",
+          preferredSegmentIndex: normalizedSegmentIndex,
+          targetInsideViewport,
+          forcedDistanceClient,
+          connectionCountBefore: beforeIds.size,
+          connectionCountAfter: graph.connections.length
+        };
+      },
+      cancelGuidedConnectionDrag(pointerId) {
+        if (
+          activeInteraction?.kind !== "connection" ||
+          activeInteraction.pointerId !== pointerId
+        ) {
+          return {
+            ok: false,
+            reason: "The guided connection interaction is not active."
+          };
+        }
+        const clientX = activeInteraction.clientX;
+        const clientY = activeInteraction.clientY;
+        finishConnectionDrag(false, clientX, clientY);
+        return {
+          ok: activeInteraction === null,
+          pointerId
+        };
+      },
       getGuidedPaletteDropState() {
         return lastGuidedPaletteDropState
           ? { ...lastGuidedPaletteDropState }
@@ -28481,7 +28879,9 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         startEndpoint,
         clientX,
         clientY,
-        excludedConnectionId = null
+        excludedConnectionId = null,
+        preferredConnectionId = null,
+        preferredSegmentIndex = null
       ) {
         const snapshot = connectionPointSnapshot(
           finiteNumber(clientX, 0),
@@ -28489,6 +28889,59 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           startEndpoint,
           excludedConnectionId
         );
+        if (
+          !snapshot.socket &&
+          preferredConnectionId &&
+          snapshot.wire?.connectionId !== preferredConnectionId
+        ) {
+          const normalizedSegmentIndex = Number.isInteger(
+            preferredSegmentIndex
+          )
+            ? Math.max(0, preferredSegmentIndex)
+            : null;
+          const preferredPath = [
+            ...dom.wires?.querySelectorAll(
+              `.rml-graph-wire-hit[data-connection-id="${CSS.escape(preferredConnectionId)}"]`
+            ) || []
+          ].find(path =>
+            normalizedSegmentIndex === null ||
+            Number(path.dataset.segmentIndex || 0) === normalizedSegmentIndex
+          ) || null;
+          const viewportRectangle = dom.viewport?.getBoundingClientRect();
+          const insideViewport = Boolean(
+            viewportRectangle &&
+            clientX >= viewportRectangle.left &&
+            clientX <= viewportRectangle.right &&
+            clientY >= viewportRectangle.top &&
+            clientY <= viewportRectangle.bottom
+          );
+          if (preferredPath?.isConnected && insideViewport) {
+            const nearest = nearestGraphPointOnSvgPath(
+              preferredPath,
+              finiteNumber(clientX, 0),
+              finiteNumber(clientY, 0)
+            );
+            const target = clientToGraph(
+              finiteNumber(clientX, 0),
+              finiteNumber(clientY, 0)
+            );
+            const distanceClient = Math.hypot(
+              nearest.x - target.x,
+              nearest.y - target.y
+            ) * Math.max(.001, finiteNumber(graph.viewport.scale, 1));
+            if (distanceClient <= 14) {
+              snapshot.wire = {
+                connectionId: preferredConnectionId,
+                segmentIndex: Number(
+                  preferredPath.dataset.segmentIndex || 0
+                ),
+                connected: true,
+                explicitGuidedTarget: true,
+                distanceClient
+              };
+            }
+          }
+        }
         let proposal = null;
         if (snapshot.socket && startEndpoint) {
           const tested = connectionProposal(

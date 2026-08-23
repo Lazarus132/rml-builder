@@ -102,7 +102,7 @@
     rejectedCount: 0
   };
   const tourDebugState = {
-    build: "stable-tour-step11-post-drop-separation-20260823-v353f1",
+    build: "stable-tour-step6-idempotent-hamburger-20260823-v359f1",
     events: [],
     assertions: []
   };
@@ -2085,11 +2085,11 @@
         }
       ],
       "graph-inspector": [
-        {
+        ...(!graphPanelsAreStacked() ? [{
           targets: ".rml-graph-panel-toggle-right, [data-rml-graph-toggle-right]",
           text: "The Node inspector is still hidden so the graph keeps the same spacious layout as the previous lesson. This visible sidebar button now opens it before its contents are explained.",
           afterNarrationAction: "open-graph-right-sidebar"
-        },
+        }] : []),
         {
           targets: ".rml-graph-viewport",
           text: "Select the node that should be changed."
@@ -7655,32 +7655,24 @@
     await nextTwoFrames();
     before = responsiveTopActionsState(packButton);
 
-    if (before.open) {
-      await teacherClickElement(
-        before.toggle,
-        "Close the compact menu once before the Pack lesson is prepared",
-        runId,
-        { focus: document.querySelector(".topbar"), keepFocusVisible: true }
-      );
-      await wait(180);
-      before = responsiveTopActionsState(packButton);
-    }
-
-    const hiddenButtonStayedUnlit = tourDebugAssert(
-      "mobile-pack-no-hidden-highlight-before-hamburger",
-      before.open === false &&
-        !tourElementActuallyVisible(packButton) &&
-        !packButton?.classList.contains("rml-setup-control-highlight") &&
+    const menuWasAlreadyOpen = before.open === true;
+    const packButtonStayedUnlit = tourDebugAssert(
+      "mobile-pack-no-premature-highlight-before-menu-readiness",
+      !packButton?.classList.contains("rml-setup-control-highlight") &&
+        !packButton?.classList.contains("rml-setup-narration-outline") &&
         narrationOutlineGroups.length === 0,
       {
         actionsOpen: before.open,
         packButtonVisible: tourElementActuallyVisible(packButton),
-        narrationOutlineCount: narrationOutlineGroups.length
+        menuWasAlreadyOpen,
+        narrationOutlineCount: narrationOutlineGroups.length,
+        policy:
+          "preserve an already open compact menu; only prevent premature highlighting before the Pack action is framed"
       }
     );
-    if (!hiddenButtonStayedUnlit) {
+    if (!packButtonStayedUnlit) {
       throw new Error(
-        "[RML Tour · Step 6] Pack into Node was exposed or highlighted before the compact Hamburger preparation."
+        "[RML Tour · Step 6] Pack into Node was highlighted before the compact menu was ready."
       );
     }
 
@@ -7720,6 +7712,8 @@
       mobilePackPreparedForNarration,
       {
         openedByTeacher: opened.openedByTeacher === true,
+        menuWasAlreadyOpen,
+        redundantClosePrevented: menuWasAlreadyOpen,
         actionsOpen: after.open,
         ariaExpanded: after.toggle?.getAttribute("aria-expanded") || "false",
         packButtonVisible: tourElementActuallyVisible(packButton),
@@ -7729,7 +7723,9 @@
         menuScrollLeft: Number(after.actions?.scrollLeft || 0),
         pageTopBefore,
         pageTopAfter: Number(pageScroller?.scrollTop || 0),
-        openedBeforeNarration: true
+        openedBeforeNarration: true,
+        policy:
+          "scroll to the top first, preserve an already open Hamburger menu, and click the toggle only when the menu is actually closed"
       }
     );
     if (!prepared) {
@@ -15989,16 +15985,22 @@
   registerTourInteractionCapability({
     id: "graph.sidebar.ensure-visible",
     async observe(context) {
+      const requested = graphPanelsAreStacked()
+        ? { left: true, right: true }
+        : context.requirements || { left: true, right: true };
       return {
         leftHidden: graphSidebarIsHidden("left"),
         rightHidden: graphSidebarIsHidden("right"),
-        requested: context.requirements || { left: true, right: true }
+        requested
       };
     },
     async execute(context) {
+      const requested = graphPanelsAreStacked()
+        ? { left: true, right: true }
+        : context.requirements || { left: true, right: true };
       await teacherEnsureGraphSidebarsVisible(
         context.runId,
-        context.requirements || { left: true, right: true }
+        requested
       );
       await nextTwoFrames();
       return {
@@ -16007,10 +16009,12 @@
       };
     },
     async confirm({ context, requirements, result }) {
-      const requested = requirements || context?.requirements || {
-        left: true,
-        right: true
-      };
+      const requested = graphPanelsAreStacked()
+        ? { left: true, right: true }
+        : requirements || context?.requirements || {
+            left: true,
+            right: true
+          };
       const leftOkay = requested.left === false
         ? graphSidebarIsHidden("left")
         : !graphSidebarIsHidden("left");
@@ -17317,9 +17321,20 @@
     const { mouse } = elements();
     let pointerIsDown = false;
     let previewObserved = false;
+    let visiblePreviewFrames = 0;
+    let guidedStartResult = null;
+    let guidedMoveResult = null;
+    let guidedFinishResult = null;
     const graphHost =
       window.RMLDynamicGraphHost;
     const fastBranchDrag = pointerId === 9311;
+    const guidedTransport = Boolean(
+      fastBranchDrag &&
+      typeof graphHost?.beginGuidedConnectionDrag === "function" &&
+      typeof graphHost?.moveGuidedConnectionDrag === "function" &&
+      typeof graphHost?.finishGuidedConnectionDrag === "function" &&
+      typeof graphHost?.cancelGuidedConnectionDrag === "function"
+    );
 
     focusDemonstration([
       startElement,
@@ -17350,22 +17365,31 @@
         ?.setGuidedAutomaticNodeCreationSuppressed?.(
           true
         );
-      startElement.dispatchEvent(
-        new PointerEvent(
-          "pointerdown",
-          {
-            bubbles: true,
-            cancelable: true,
-            pointerId,
-            pointerType: "mouse",
-            isPrimary: true,
-            button: 0,
-            buttons: 1,
-            clientX: from.x,
-            clientY: from.y
-          }
-        )
-      );
+      if (guidedTransport) {
+        guidedStartResult = graphHost.beginGuidedConnectionDrag(
+          graphSocketEndpoint(startElement),
+          pointerId,
+          from.x,
+          from.y
+        );
+      } else {
+        startElement.dispatchEvent(
+          new PointerEvent(
+            "pointerdown",
+            {
+              bubbles: true,
+              cancelable: true,
+              pointerId,
+              pointerType: "mouse",
+              isPrimary: true,
+              button: 0,
+              buttons: 1,
+              clientX: from.x,
+              clientY: from.y
+            }
+          )
+        );
+      }
 
       pointerIsDown = true;
       const armedInteraction =
@@ -17376,7 +17400,12 @@
       ) {
         if (fastBranchDrag) {
           graphStep11Failure(
-            "native NOT connection did not start"
+            "native NOT connection did not start",
+            {
+              guidedTransport,
+              guidedStartResult,
+              armedInteraction
+            }
           );
         }
         return false;
@@ -17428,30 +17457,42 @@
           "native-graph-wire-drag"
         );
 
-        startElement.dispatchEvent(
-          new PointerEvent(
-            "pointermove",
-            {
-              bubbles: true,
-              cancelable: true,
-              pointerId,
-              pointerType: "mouse",
-              isPrimary: true,
-              button: -1,
-              buttons: 1,
-              clientX: point.x,
-              clientY: point.y
-            }
-          )
-        );
-
-        previewObserved =
-          previewObserved ||
-          Boolean(
-            document.querySelector(
-              ".rml-graph-wire-preview"
+        if (guidedTransport) {
+          guidedMoveResult = graphHost.moveGuidedConnectionDrag(
+            pointerId,
+            point.x,
+            point.y
+          );
+        } else {
+          startElement.dispatchEvent(
+            new PointerEvent(
+              "pointermove",
+              {
+                bubbles: true,
+                cancelable: true,
+                pointerId,
+                pointerType: "mouse",
+                isPrimary: true,
+                button: -1,
+                buttons: 1,
+                clientX: point.x,
+                clientY: point.y
+              }
             )
           );
+        }
+
+        const previewVisible = Boolean(
+          guidedMoveResult?.previewVisible === true ||
+          document.querySelector(
+            ".rml-graph-wire-preview"
+          )
+        );
+        visiblePreviewFrames = previewVisible
+          ? visiblePreviewFrames + 1
+          : 0;
+        previewObserved =
+          previewObserved || visiblePreviewFrames >= 2;
 
         if (raw >= 1) break;
         await tourNextVisualFrame();
@@ -17465,35 +17506,61 @@
         resolveTargetPoint() ||
         initialTargetPoint;
 
-      startElement.dispatchEvent(
-        new PointerEvent(
-          "pointerup",
-          {
-            bubbles: true,
-            cancelable: true,
+      for (
+        let frame = 0;
+        frame < 2 && runId === demoRunId;
+        frame += 1
+      ) {
+        if (guidedTransport) {
+          guidedMoveResult = graphHost.moveGuidedConnectionDrag(
             pointerId,
-            pointerType: "mouse",
-            isPrimary: true,
-            button: 0,
-            buttons: 0,
-            clientX: finalTargetPoint.x,
-            clientY: finalTargetPoint.y
-          }
-        )
-      );
+            finalTargetPoint.x,
+            finalTargetPoint.y
+          );
+        } else {
+          startElement.dispatchEvent(
+            new PointerEvent(
+              "pointermove",
+              {
+                bubbles: true,
+                cancelable: true,
+                pointerId,
+                pointerType: "mouse",
+                isPrimary: true,
+                button: -1,
+                buttons: 1,
+                clientX: finalTargetPoint.x,
+                clientY: finalTargetPoint.y
+              }
+            )
+          );
+        }
+        const previewVisible = Boolean(
+          guidedMoveResult?.previewVisible === true ||
+          document.querySelector(".rml-graph-wire-preview")
+        );
+        visiblePreviewFrames = previewVisible
+          ? visiblePreviewFrames + 1
+          : 0;
+        previewObserved =
+          previewObserved || visiblePreviewFrames >= 2;
+        await tourNextVisualFrame();
+      }
 
-      pointerIsDown = false;
-      await nextTwoFrames();
-
-      return (
-        runId === demoRunId &&
-        previewObserved
-      );
-    } finally {
-      if (pointerIsDown) {
+      if (guidedTransport) {
+        guidedFinishResult = graphHost.finishGuidedConnectionDrag(
+          pointerId,
+          finalTargetPoint.x,
+          finalTargetPoint.y,
+          finalTargetPoint.connectionId || null,
+          Number.isInteger(finalTargetPoint.segmentIndex)
+            ? finalTargetPoint.segmentIndex
+            : null
+        );
+      } else {
         startElement.dispatchEvent(
           new PointerEvent(
-            "pointercancel",
+            "pointerup",
             {
               bubbles: true,
               cancelable: true,
@@ -17502,11 +17569,62 @@
               isPrimary: true,
               button: 0,
               buttons: 0,
-              clientX: from.x,
-              clientY: from.y
+              clientX: finalTargetPoint.x,
+              clientY: finalTargetPoint.y
             }
           )
         );
+      }
+
+      pointerIsDown = false;
+      await nextTwoFrames();
+
+      if (fastBranchDrag) {
+        tourDebugRecord("step11-visible-wire-drag-transport", {
+          guidedTransport,
+          guidedStartResult,
+          guidedMoveResult,
+          guidedFinishResult,
+          visiblePreviewFrames,
+          previewObserved,
+          from,
+          finalTargetPoint
+        });
+      }
+
+      return (
+        runId === demoRunId &&
+        previewObserved &&
+        (
+          !guidedTransport ||
+          (
+            guidedFinishResult?.ok === true &&
+            guidedFinishResult?.committed === true
+          )
+        )
+      );
+    } finally {
+      if (pointerIsDown) {
+        if (guidedTransport) {
+          graphHost?.cancelGuidedConnectionDrag?.(pointerId);
+        } else {
+          startElement.dispatchEvent(
+            new PointerEvent(
+              "pointercancel",
+              {
+                bubbles: true,
+                cancelable: true,
+                pointerId,
+                pointerType: "mouse",
+                isPrimary: true,
+                button: 0,
+                buttons: 0,
+                clientX: from.x,
+                clientY: from.y
+              }
+            )
+          );
+        }
       }
 
       mouse?.classList.remove("pressed");
@@ -17525,6 +17643,14 @@
     if (!path || typeof path.getTotalLength !== "function") return centerOf(path);
     const length = path.getTotalLength();
     const local = path.getPointAtLength(length * Math.max(0, Math.min(1, fraction)));
+    const hostPoint = window.RMLDynamicGraphHost
+      ?.graphPointToClient?.(local.x, local.y);
+    if (
+      Number.isFinite(hostPoint?.x) &&
+      Number.isFinite(hostPoint?.y)
+    ) {
+      return hostPoint;
+    }
     const matrix = path.getScreenCTM?.();
     if (!matrix) return { x: local.x, y: local.y };
     const point = new DOMPoint(local.x, local.y).matrixTransform(matrix);
@@ -17990,7 +18116,7 @@
       `.rml-graph-wire-hit[data-connection-id="${CSS.escape(connectionId)}"]`
     )]
       .filter(path =>
-        graphDemoVisible(path) &&
+        path.isConnected &&
         typeof path.getTotalLength === "function"
       )
       .sort((a, b) =>
@@ -20202,15 +20328,28 @@
         return false;
       }
       if (length <= 2) return false;
-      const point = graphSvgPathPoint(path, .5);
       const visible = visibleGraphClientRect(2);
-      return Boolean(
-        visible &&
-        point.x >= visible.left &&
-        point.x <= visible.right &&
-        point.y >= visible.top &&
-        point.y <= visible.bottom
-      );
+      if (!visible) return false;
+
+      return [0, .08, .16, .25, .33, .42, .5, .58, .67, .75, .84, .92, 1]
+        .some(fraction => {
+        let local = null;
+        try {
+          local = path.getPointAtLength(length * fraction);
+        } catch {
+          return false;
+        }
+        const hostPoint = window.RMLDynamicGraphHost
+          ?.graphPointToClient?.(local.x, local.y);
+        const point = Number.isFinite(hostPoint?.x) &&
+          Number.isFinite(hostPoint?.y)
+            ? hostPoint
+            : graphSvgPathPoint(path, fraction);
+        return point.x >= visible.left &&
+          point.x <= visible.right &&
+          point.y >= visible.top &&
+          point.y <= visible.bottom;
+      });
     }) || null;
   }
 
@@ -20225,6 +20364,10 @@
       runId === demoRunId;
       attempt += 1
     ) {
+      if (attempt === 0 || attempt === 3) {
+        window.RMLDynamicGraphHost
+          ?.materializeGuidedConnection?.(connectionId);
+      }
       const path =
         graphRenderedWire(connectionId);
       if (path) return path;
@@ -20280,6 +20423,9 @@
       );
     }
 
+    let materialization = window.RMLDynamicGraphHost
+      ?.materializeGuidedConnection?.(connection.id) || null;
+
     let wire =
       await graphWaitForRenderedWire(
         connection.id,
@@ -20311,8 +20457,18 @@
     }
 
     if (!wire) {
+      materialization = window.RMLDynamicGraphHost
+        ?.materializeGuidedConnection?.(connection.id) ||
+        materialization;
       graphDemoError(
-        "The exact cable exists in graph state, but its real SVG path is not visibly rendered."
+        "The exact cable exists in graph state, but its real SVG path is not visibly rendered.",
+        {
+          connectionId: connection.id,
+          output: graphSocketEndpoint(output),
+          input: graphSocketEndpoint(input),
+          materialization,
+          visibleGraph: visibleGraphClientRect(0)
+        }
       );
     }
 
@@ -21768,6 +21924,14 @@
         );
         if (socketAtTarget || blockedByGraphUi) continue;
         if (!graphStep11PointInsideVisibleGraph(point, 12)) continue;
+        if (ignoredNodes.some(node =>
+          node instanceof Element &&
+          graphDemoRectDistance(
+            point,
+            node.getBoundingClientRect(),
+            4
+          ) === 0
+        )) continue;
         if (graphStep11PointCovered(point, 6, ignoredNodes)) continue;
         if (
           sourcePoint &&
@@ -21805,14 +21969,14 @@
     if (!(path instanceof Element)) return false;
     const visible = visibleGraphClientRect(inset);
     if (!visible) return false;
-    const rect = path.getBoundingClientRect();
-    return Boolean(
-      (rect.width > 0 || rect.height > 0) &&
-      rect.left >= visible.left &&
-      rect.right <= visible.right &&
-      rect.top >= visible.top &&
-      rect.bottom <= visible.bottom
-    );
+    return [0, .08, .16, .25, .33, .42, .5, .58, .67, .75, .84, .92, 1]
+      .every(fraction => {
+        const point = graphSvgPathPoint(path, fraction);
+        return point.x >= visible.left &&
+          point.x <= visible.right &&
+          point.y >= visible.top &&
+          point.y <= visible.bottom;
+      });
   }
 
   function graphStep11RoutePoints(paths) {
@@ -22986,7 +23150,11 @@
         }
       );
     }
-    const target = () => ({ ...visibleTarget.point });
+    const target = () => ({
+      ...visibleTarget.point,
+      connectionId: baseConnection.id,
+      segmentIndex: visibleTarget.segmentIndex
+    });
     showDemoLabel(
       "Drag this input onto the existing line → one clear Y-branch",
       centerOf(branchInput)
@@ -22995,7 +23163,10 @@
     const preflight = host?.inspectGuidedConnectionPoint?.(
       graphSocketEndpoint(branchInput),
       visibleTarget.point.x,
-      visibleTarget.point.y
+      visibleTarget.point.y,
+      null,
+      baseConnection.id,
+      visibleTarget.segmentIndex
     ) || null;
     const nativePreflightReady = Boolean(
       preflight?.snapshot?.wire &&
@@ -23017,7 +23188,7 @@
         input: graphSocketEndpoint(branchInput),
         preflight,
         policy:
-          "The visible drag still runs; if the tiny native hit stroke misses, ensureBranch commits at this exact live SVG path point."
+          "The visible drag uses the exact real parent segment supplied to the graph interaction; no invisible ensureBranch commit is permitted."
       });
     }
     const nativeDragObserved = await nativeGraphPointerDrag(
@@ -23029,6 +23200,21 @@
     );
     if (runId !== demoRunId) return null;
     await nextTwoFrames();
+    if (!nativeDragObserved) {
+      graphStep11Failure(
+        "visible-not-to-wire-drag-not-committed",
+        {
+          parentConnectionId: baseConnection.id,
+          branchNodeId,
+          input: graphSocketEndpoint(branchInput),
+          target: target(),
+          guidedInteraction:
+            host?.getGuidedInteractionState?.() || null,
+          policy:
+            "never replace the missing visible teaching action with an invisible deterministic commit"
+        }
+      );
+    }
 
     const inputPortId =
       branchInput.dataset.portId || preferredInputPortId;
@@ -23037,30 +23223,7 @@
       branchNodeId,
       inputPortId
     );
-    let ensured = null;
-    if (!proof.committed) {
-      const liveInput = graphStep11Socket(
-        branchNodeId,
-        inputPortId,
-        "input"
-      );
-      const point = target();
-      ensured = liveInput
-        ? host?.ensureBranch?.(
-            baseConnection.id,
-            graphSocketEndpoint(liveInput),
-            point.x,
-            point.y,
-            visibleTarget.segmentIndex
-          ) || null
-        : null;
-      await nextTwoFrames();
-      proof = graphStep11BranchProof(
-        baseConnection.id,
-        branchNodeId,
-        inputPortId
-      );
-    }
+    const ensured = null;
     for (
       let frame = 0;
       frame < 10 &&
@@ -23370,27 +23533,84 @@
     });
 
     const freshPair = graphDemoSocketPair(false);
-    const output = freshPair?.output || pair?.output;
-    const input = freshPair?.input || pair?.input;
-    if (!(output instanceof Element) || !(input instanceof Element)) return;
+    const sourceEndpoint = graphSocketEndpoint(
+      freshPair?.output || pair?.output
+    );
+    const targetEndpoint = graphSocketEndpoint(
+      freshPair?.input || pair?.input
+    );
+    if (!sourceEndpoint || !targetEndpoint) return;
+
+    let output = graphStep11Socket(
+      sourceEndpoint.nodeId,
+      sourceEndpoint.portId,
+      "output"
+    );
+    let input = graphStep11Socket(
+      targetEndpoint.nodeId,
+      targetEndpoint.portId,
+      "input"
+    );
+    if (!(output instanceof Element) || !(input instanceof Element)) {
+      graphStep11Failure(
+        "teaching-pair-ports-missing-before-first-visible-action",
+        { sourceEndpoint, targetEndpoint }
+      );
+    }
 
     let baseConnection = graphDemoConnectionFor(output, input);
     if (!baseConnection) {
       showDemoLabel(
-        "Connect the two existing nodes first",
+        "Step 8 was skipped — first draw Start → existing NOT",
         centerOf(output)
       );
-      await nativeGraphPointerDrag(output, input, 820, runId, 9309);
+      const baseDragObserved = await nativeGraphPointerDrag(
+        output,
+        input,
+        820,
+        runId,
+        9309
+      );
       if (runId !== demoRunId) return;
-      baseConnection = (await ensureGraphConnectionDeterministic(
-        graphStep11Socket(output.dataset.nodeId, output.dataset.portId, "output") || output,
-        graphStep11Socket(input.dataset.nodeId, input.dataset.portId, "input") || input,
-        runId
-      ))?.connection || null;
+      baseConnection = graphDemoConnectionFor(output, input);
+      if (!baseConnection) {
+        graphStep11Failure(
+          "visible-skipped-base-connection-drag-not-committed",
+          {
+            sourceEndpoint,
+            targetEndpoint,
+            baseDragObserved,
+            policy:
+              "never replace the skipped visible Start-to-NOT action with an instant state commit"
+          }
+        );
+      }
+      graphStep11MarkStage("skipped-base-connection-visibly-drawn", {
+        connectionId: baseConnection.id,
+        baseDragObserved
+      });
+      output = graphStep11Socket(
+        sourceEndpoint.nodeId,
+        sourceEndpoint.portId,
+        "output"
+      ) || output;
+      input = graphStep11Socket(
+        targetEndpoint.nodeId,
+        targetEndpoint.portId,
+        "input"
+      ) || input;
     }
+
+    const baseReady = await ensureGraphConnectionDeterministic(
+      output,
+      input,
+      runId
+    );
+    baseConnection = baseReady?.connection || baseConnection;
     if (!baseConnection || runId !== demoRunId) return;
     graphStep11MarkStage("base-connection-ready", {
-      connectionId: baseConnection.id || ""
+      connectionId: baseConnection.id || "",
+      wireRendered: Boolean(baseReady?.wire)
     });
 
     const created = await graphStep11CreateSimpleBranchNode(runId);
@@ -23413,6 +23633,17 @@
     const allNodeIds = () => (host?.getState?.()?.nodes || [])
       .map(node => node.id)
       .filter(Boolean);
+    output = graphStep11Socket(
+      sourceEndpoint.nodeId,
+      sourceEndpoint.portId,
+      "output"
+    ) || output;
+    input = graphStep11Socket(
+      targetEndpoint.nodeId,
+      targetEndpoint.portId,
+      "input"
+    ) || input;
+
     const preparedAction = await graphStep11PrepareBranchAction(
       baseConnection,
       created.nodeId,
@@ -23428,7 +23659,7 @@
     const branchConnection = await graphStep11ConnectSimpleBranch(
       baseConnection,
       created.nodeId,
-      input.dataset.portId || "",
+      targetEndpoint.portId || "",
       runId,
       preparedAction?.target || null
     );
@@ -23837,6 +24068,10 @@
       runId !== demoRunId ||
       !document.body.classList.contains("rml-node-graph-mode")
     ) {
+      return;
+    }
+
+    if (graphPanelsAreStacked()) {
       return;
     }
 
@@ -24825,6 +25060,12 @@
   }
 
   function graphPanelRequirementsForStep(step) {
+    if (graphPanelsAreStacked()) {
+      return {
+        left: true,
+        right: true
+      };
+    }
     if (
       [
         "graph-create-node",
@@ -24844,6 +25085,10 @@
       left: true,
       right: true
     };
+  }
+
+  function graphPanelsAreStacked() {
+    return window.matchMedia?.("(max-width: 780px)")?.matches === true;
   }
 
   function graphStepUsesTeachingPair(step) {
@@ -25131,6 +25376,17 @@
   }
 
   async function setGraphPanelsForPreparation(step, runId) {
+    if (graphPanelsAreStacked()) {
+      await nextTwoFrames();
+      const prepared = graphStepHasPreparedPanels(step);
+      tourDebugAssert("graph-mobile-panels-remain-stacked-and-open", prepared, {
+        leftOpen: !graphSidebarIsHidden("left"),
+        rightOpen: !graphSidebarIsHidden("right"),
+        policy:
+          "mobile panels are stacked product sections; the tour never clicks sidebar arrows or changes their open state"
+      });
+      return prepared;
+    }
     const requirements = graphPanelRequirementsForStep(step);
     for (const side of ["left", "right"]) {
       if (runId !== demoRunId) return false;

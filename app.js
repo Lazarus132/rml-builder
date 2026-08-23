@@ -28,7 +28,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "stable-tour-step11-post-drop-separation-20260823-v353f1";
+  "stable-tour-step6-idempotent-hamburger-20260823-v359f1";
 
 function exposeRmlBuilderBuildId() {
   document.documentElement.dataset
@@ -21912,7 +21912,7 @@ function ensureSetupAssistantLoaded(firstRun = false) {
 
   setupAssistantLoadPromise = new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = new URL("setup_assistant.js?v=163-step11-post-drop-separation-v353f1", APP_SCRIPT_BASE_URL).href;
+    script.src = new URL("setup_assistant.js?v=169-step6-idempotent-hamburger-v359f1", APP_SCRIPT_BASE_URL).href;
     script.async = true;
     script.dataset.rmlSetupAssistant = "true";
     script.addEventListener("load", () => resolve(true), { once: true });
