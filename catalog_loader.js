@@ -1,13 +1,17 @@
 (() => {
   "use strict";
 
-  const LOADER_VERSION = 20;
+  const LOADER_VERSION = 21;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
   const CATALOG_PATH = "/resonite_api_catalog.json";
   const HEALTH_PATH = "/health";
+  const BUILDER_SCANNER_STATUS_PATH =
+    "/rml-scanner-status";
+  const BUILDER_SCANNER_CATALOG_PATH =
+    "/rml-scanner-catalog";
   const POLL_INTERVAL_MS = 30000;
-  const PROBE_TIMEOUT_MS = 900;
+  const BUILDER_PROBE_TIMEOUT_MS = 6000;
   const CATALOG_FETCH_TIMEOUT_MS = 45000;
   const CACHE_DATABASE_NAME =
     "rml-resonite-api-catalog";
@@ -441,43 +445,19 @@
     ).trim();
   }
 
-  function scannerUrls() {
-    const configured =
-      configuredCatalogUrl();
-
-    if (configured) {
-      return [configured];
-    }
-
-    if (activeScannerCatalogUrl) {
-      return [activeScannerCatalogUrl];
-    }
-
-    const urls = [];
-
-    for (
-      let port = DEFAULT_PORT_FIRST;
-      port <= DEFAULT_PORT_LAST;
-      port += 1
-    ) {
-      urls.push(
-        `http://127.0.0.1:${port}${CATALOG_PATH}`
-      );
-    }
-
-    return urls;
-  }
-
-  function healthUrlFor(catalogUrl) {
+  function builderBridgeUrl(path) {
     try {
-      const url = new URL(
-        catalogUrl,
-        window.location.href
-      );
-      url.pathname = HEALTH_PATH;
-      url.search = "";
-      url.hash = "";
-      return url.href;
+      if (
+        window.location.protocol !== "http:" &&
+        window.location.protocol !== "https:"
+      ) {
+        return "";
+      }
+
+      return new URL(
+        path,
+        window.location.origin
+      ).href;
     } catch {
       return "";
     }
@@ -541,37 +521,9 @@
     );
   }
 
-  async function probeScannerUrl(
+  async function probeConfiguredScannerUrl(
     catalogUrl
   ) {
-    const configured =
-      Boolean(configuredCatalogUrl());
-
-    if (!configured) {
-      const healthUrl =
-        healthUrlFor(catalogUrl);
-
-      if (!healthUrl) {
-        throw new Error(
-          "Invalid scanner URL."
-        );
-      }
-
-      const health = await fetchJson(
-        healthUrl,
-        PROBE_TIMEOUT_MS
-      );
-
-      if (
-        health.ok !== true ||
-        health.catalogReady !== true
-      ) {
-        throw new Error(
-          "Scanner is running but its current-process catalog scan is not ready yet."
-        );
-      }
-    }
-
     const raw = await fetchJson(
       catalogUrl,
       CATALOG_FETCH_TIMEOUT_MS
@@ -583,35 +535,83 @@
     };
   }
 
+  async function probeBuilderScannerBridge() {
+    const statusUrl = builderBridgeUrl(
+      BUILDER_SCANNER_STATUS_PATH
+    );
+
+    if (!statusUrl) {
+      return null;
+    }
+
+    const status = await fetchJson(
+      statusUrl,
+      BUILDER_PROBE_TIMEOUT_MS
+    );
+    const scannerPort = Number(
+      status.port
+    );
+
+    if (
+      status.rmlScannerBridge !== 1 ||
+      status.available !== true ||
+      !Number.isInteger(scannerPort) ||
+      scannerPort < DEFAULT_PORT_FIRST ||
+      scannerPort > DEFAULT_PORT_LAST
+    ) {
+      return null;
+    }
+
+    const catalogBridgeUrl =
+      builderBridgeUrl(
+        `${BUILDER_SCANNER_CATALOG_PATH}?port=${scannerPort}`
+      );
+
+    if (!catalogBridgeUrl) {
+      return null;
+    }
+
+    const raw = await fetchJson(
+      catalogBridgeUrl,
+      CATALOG_FETCH_TIMEOUT_MS
+    );
+
+    if (
+      raw.rmlScannerBridge === 1 &&
+      raw.available === false
+    ) {
+      return null;
+    }
+
+    return {
+      raw,
+      url:
+        `http://127.0.0.1:${scannerPort}${CATALOG_PATH}`
+    };
+  }
+
   async function tryScannerCatalog(
     retryDelays = [0]
   ) {
-    const urls = scannerUrls();
+    const configured =
+      configuredCatalogUrl();
 
     for (const retryDelay of retryDelays) {
       if (retryDelay > 0) {
         await delay(retryDelay);
       }
 
-      const candidates =
-        await Promise.all(
-          urls.map(async url => {
-            try {
-              return await probeScannerUrl(
-                url
-              );
-            } catch {
-              return null;
-            }
-          })
-        );
+      try {
+        const live = configured
+          ? await probeConfiguredScannerUrl(
+              configured
+            )
+          : await probeBuilderScannerBridge();
 
-      const live = candidates.find(
-        Boolean
-      );
-
-      if (live) {
-        return live;
+        if (live) {
+          return live;
+        }
+      } catch {
       }
     }
 
@@ -1190,7 +1190,11 @@
         first: DEFAULT_PORT_FIRST,
         last: DEFAULT_PORT_LAST,
         healthPath: HEALTH_PATH,
-        catalogPath: CATALOG_PATH
+        catalogPath: CATALOG_PATH,
+        builderStatusPath:
+          BUILDER_SCANNER_STATUS_PATH,
+        builderCatalogPath:
+          BUILDER_SCANNER_CATALOG_PATH
       }),
       writable: false,
       enumerable: true,

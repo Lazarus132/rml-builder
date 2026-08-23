@@ -102,7 +102,7 @@
     rejectedCount: 0
   };
   const tourDebugState = {
-    build: "stable-api-status-checking-feedback-20260823-v363f1",
+    build: "stable-server-side-scanner-probe-20260823-v364f1",
     events: [],
     assertions: []
   };
