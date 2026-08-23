@@ -6677,7 +6677,7 @@ body:has(.node-pointer-ghost) .builder-canvas {
 }
 
 .api-catalog-state {
-  max-width: min(30vw, 340px);
+  max-width: min(38vw, 300px);
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -6789,7 +6789,7 @@ body:has(.node-pointer-ghost) .builder-canvas {
   }
 
   .api-catalog-state {
-    max-width: 190px;
+    max-width: 245px;
   }
 }
 
@@ -6799,7 +6799,8 @@ body:has(.node-pointer-ghost) .builder-canvas {
   }
 
   .api-catalog-state {
-    max-width: 155px;
+    max-width: 225px;
+    font-size: 8px;
   }
 }
 
@@ -6808,7 +6809,7 @@ body:has(.node-pointer-ghost) .builder-canvas {
     position: sticky;
     top: 0;
     min-height: 58px;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     padding: 8px 10px;
   }
 
@@ -6846,14 +6847,24 @@ body:has(.node-pointer-ghost) .builder-canvas {
     font-size: clamp(13px, 4.2vw, 17px);
   }
 
-  .local-state,
-  .api-catalog-state {
+  .local-state {
     display: none;
+  }
+
+  .api-catalog-state {
+    display: flex;
+    width: 100%;
+    max-width: none;
+    flex: 1 0 100%;
+    order: 2;
+    padding: 5px 7px;
+    font-size: clamp(7px, 2.2vw, 9px);
   }
 
   .top-menu-toggle {
     display: block;
     margin-left: auto;
+    order: 1;
   }
 
   .top-actions {
@@ -6883,6 +6894,7 @@ body:has(.node-pointer-ghost) .builder-canvas {
     transition:
       opacity 120ms ease,
       transform 120ms ease;
+    order: 3;
   }
 
   .top-actions.mobile-menu-open {
@@ -6916,6 +6928,11 @@ body:has(.node-pointer-ghost) .builder-canvas {
 
   .brand-copy h1 {
     margin: 0;
+  }
+
+  .api-catalog-state {
+    padding: 4px 6px;
+    font-size: clamp(6.5px, 2.55vw, 8px);
   }
 
   .top-actions {

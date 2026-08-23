@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const LOADER_VERSION = 18;
+  const LOADER_VERSION = 20;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
   const CATALOG_PATH = "/resonite_api_catalog.json";
@@ -264,6 +264,67 @@
     );
   }
 
+  function formatStatusCount(value) {
+    return Math.max(
+      0,
+      Number(value) || 0
+    ).toLocaleString("de-DE");
+  }
+
+  function catalogStatisticsTooltip(
+    catalog
+  ) {
+    const report =
+      window.RMLApiNodeFactoryReport;
+
+    if (
+      !catalog ||
+      !report ||
+      String(report.engineVersion || "") !==
+        String(catalog.engineVersion || "") ||
+      !Number.isFinite(
+        Number(report.totalGeneratedNodes)
+      )
+    ) {
+      return "";
+    }
+
+    return `${formatStatusCount(
+      catalog.components?.length
+    )} attachable components · ${formatStatusCount(
+      catalog.types?.length
+    )} API types · ${formatStatusCount(
+      report.totalGeneratedNodes
+    )} generated nodes`;
+  }
+
+  function setCatalogStatusContent(
+    element,
+    text,
+    catalog = null
+  ) {
+    element.textContent = text;
+
+    const tooltip =
+      catalogStatisticsTooltip(
+        catalog
+      );
+
+    if (tooltip) {
+      element.title = tooltip;
+      element.setAttribute(
+        "aria-label",
+        `${text}. ${tooltip}`
+      );
+    } else {
+      element.removeAttribute("title");
+      element.setAttribute(
+        "aria-label",
+        text
+      );
+    }
+  }
+
   function updateStatus(
     catalog = statusCatalog(),
     options = {}
@@ -287,8 +348,6 @@
         scannerOnline === true
       );
 
-    const count =
-      catalog?.components?.length || 0;
     const version =
       String(
         catalog?.engineVersion ||
@@ -297,40 +356,43 @@
 
     if (checking) {
       element.dataset.source = "updating";
-      element.textContent =
+      setCatalogStatusContent(
+        element,
         catalog
-          ? `Resonite API ${version} · checking… · ${count} components`
-          : "Resonite API · checking…";
-      element.title =
-        "Checking the local Resonite scanner. The cached catalog remains in use unless a newer catalog is found.";
+          ? `Resonite API ${version} · checking…`
+          : "Resonite API · checking…",
+        catalog
+      );
       return;
     }
 
     if (online) {
       element.dataset.source = "scanner";
-      element.textContent =
+      setCatalogStatusContent(
+        element,
         catalog
-          ? `Resonite API ${version} · live · ${count} components`
-          : "Resonite API · live";
-      element.title =
-        "The local Resonite scanner is online. The builder continues using the cached catalog when it already matches the live catalog. Click to check and synchronize now.";
+          ? `Resonite API ${version} · Live`
+          : "Resonite API · Live",
+        catalog
+      );
       return;
     }
 
     if (catalog) {
       element.dataset.source = "cache";
-      element.textContent =
-        `Resonite API ${version} · cached · ${count} components`;
-      element.title =
-        "The local Resonite scanner is offline. The last synchronized catalog is being used from this browser's IndexedDB cache. Click to reconnect and synchronize.";
+      setCatalogStatusContent(
+        element,
+        `Resonite API ${version} · cached`,
+        catalog
+      );
       return;
     }
 
     element.dataset.source = "unavailable";
-    element.textContent =
-      "Resonite API · unavailable";
-    element.title =
-      "No live scanner connection or cached Resonite API catalog is available. Click to reconnect.";
+    setCatalogStatusContent(
+      element,
+      "Resonite API · unavailable"
+    );
   }
 
   function updateUnavailableStatus(
@@ -349,9 +411,10 @@
     }
 
     element.dataset.source = "unavailable";
-    element.textContent =
-      "Resonite API · unavailable";
-    element.title = message;
+    setCatalogStatusContent(
+      element,
+      "Resonite API · unavailable"
+    );
   }
 
   function safeLocalStorageValue(key) {
@@ -1030,6 +1093,31 @@
         event.preventDefault();
         run();
       }
+    });
+  }
+
+  window.addEventListener(
+    "rml-api-node-factory-ready",
+    () => {
+      updateStatus(
+        statusCatalog(),
+        {
+          checking: scannerChecking,
+          online: scannerOnline
+        }
+      );
+    }
+  );
+
+  if (window.RMLApiNodeFactoryReport) {
+    queueMicrotask(() => {
+      updateStatus(
+        statusCatalog(),
+        {
+          checking: scannerChecking,
+          online: scannerOnline
+        }
+      );
     });
   }
 

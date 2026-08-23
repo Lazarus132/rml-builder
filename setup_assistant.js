@@ -102,7 +102,7 @@
     rejectedCount: 0
   };
   const tourDebugState = {
-    build: "stable-api-catalog-collapsed-groups-20260823-v361f1",
+    build: "stable-api-status-checking-feedback-20260823-v363f1",
     events: [],
     assertions: []
   };
