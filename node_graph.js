@@ -8062,25 +8062,71 @@
           ]
         )
       );
-    const configurationFields =
-      configurationEntries
-        .filter(entry =>
+
+    const configurationValueEntries =
+      configurationEntries.filter(entry => {
+        const node = entry?.node;
+
+        return Boolean(
+          node &&
+          (
+            node.kind === "setting" ||
+            node.kind === "controller"
+          ) &&
           ![
             "runtimeDisplay",
             "button"
-          ].includes(
-            entry?.node?.valueType
+          ].includes(node.valueType)
+        );
+      });
+    const usedConfigurationRuntimeFields =
+      new Set();
+    const allocateConfigurationRuntimeField =
+      node => {
+        const baseField =
+          graphCsIdentifier(
+            node.fieldName ||
+              node.keyName,
+            "Setting"
+          );
+        let candidate = baseField;
+
+        if (
+          usedConfigurationRuntimeFields.has(
+            candidate
           )
-        )
+        ) {
+          const stableSuffix =
+            graphCsMethodToken(node.id);
+          candidate =
+            `${baseField}_${stableSuffix}`;
+          let disambiguator = 2;
+
+          while (
+            usedConfigurationRuntimeFields.has(
+              candidate
+            )
+          ) {
+            candidate =
+              `${baseField}_${stableSuffix}_${disambiguator}`;
+            disambiguator += 1;
+          }
+        }
+
+        usedConfigurationRuntimeFields.add(
+          candidate
+        );
+        return candidate;
+      };
+    const configurationFields =
+      configurationValueEntries
         .map(entry => {
         const node = entry.node;
         const type =
           configurationValueType(node);
         const field =
-          graphCsIdentifier(
-            node.fieldName ||
-              node.keyName,
-            "Setting"
+          allocateConfigurationRuntimeField(
+            node
           );
         const dynamicChoiceSourceId =
           node.dynamicSettingKind === "choice"
