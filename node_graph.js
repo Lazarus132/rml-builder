@@ -10386,36 +10386,49 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
     private static T GraphAdd<T>(T left, T right)
     {
-        dynamic a = left!;
-        dynamic b = right!;
-        return (T)(a + b);
+        return (T)GraphBinaryOperator(
+            "op_Addition",
+            left!,
+            right!);
     }
 
     private static T GraphSubtract<T>(T left, T right)
     {
-        dynamic a = left!;
-        dynamic b = right!;
-        return (T)(a - b);
+        return (T)GraphBinaryOperator(
+            "op_Subtraction",
+            left!,
+            right!);
     }
 
     private static T GraphMultiply<T>(T left, T right)
     {
-        dynamic a = left!;
-        dynamic b = right!;
-        return (T)(a * b);
+        return (T)GraphBinaryOperator(
+            "op_Multiply",
+            left!,
+            right!);
     }
 
     private static T GraphDivide<T>(T left, T right)
     {
-        dynamic a = left!;
-        dynamic b = right!;
-        return (T)(a / b);
+        return (T)GraphBinaryOperator(
+            "op_Division",
+            left!,
+            right!);
     }
 
     private static T GraphNegate<T>(T value)
     {
-        dynamic current = value!;
-        return (T)(-current);
+        object result = value switch
+        {
+            int current => -current,
+            float current => -current,
+            double current => -current,
+            _ => GraphUnaryOperator(
+                "op_UnaryNegation",
+                value!)
+        };
+
+        return (T)result;
     }
 
     private static T GraphMinimum<T>(T left, T right)
@@ -10453,15 +10466,181 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
     private static T GraphLerp<T>(T left, T right, float factor)
     {
-        dynamic a = left!;
-        dynamic b = right!;
-        dynamic t =
-            typeof(T) == typeof(double) ||
-            typeof(T).Name.StartsWith("double", StringComparison.Ordinal)
+        if (left is int integerLeft && right is int integerRight)
+        {
+            return (T)(object)(int)(
+                integerLeft +
+                (integerRight - integerLeft) * factor);
+        }
+
+        if (left is float floatLeft && right is float floatRight)
+        {
+            return (T)(object)(
+                floatLeft +
+                (floatRight - floatLeft) * factor);
+        }
+
+        if (left is double doubleLeft && right is double doubleRight)
+        {
+            return (T)(object)(
+                doubleLeft +
+                (doubleRight - doubleLeft) * (double)factor);
+        }
+
+        object delta = GraphBinaryOperator(
+            "op_Subtraction",
+            right!,
+            left!);
+        object interpolationFactor =
+            typeof(T).Name.StartsWith(
+                "double",
+                StringComparison.Ordinal)
                 ? (double)factor
                 : factor;
+        object scaled = GraphBinaryOperator(
+            "op_Multiply",
+            delta,
+            interpolationFactor);
 
-        return (T)(a + (b - a) * t);
+        return (T)GraphBinaryOperator(
+            "op_Addition",
+            left!,
+            scaled);
+    }
+
+    private static object GraphBinaryOperator(
+        string operatorName,
+        object left,
+        object right)
+    {
+        if (left is int integerLeft && right is int integerRight)
+        {
+            return operatorName switch
+            {
+                "op_Addition" => integerLeft + integerRight,
+                "op_Subtraction" => integerLeft - integerRight,
+                "op_Multiply" => integerLeft * integerRight,
+                "op_Division" => integerLeft / integerRight,
+                _ => throw new InvalidOperationException(
+                    "Unsupported Int32 operator " + operatorName + ".")
+            };
+        }
+
+        if (left is float floatLeft && right is float floatRight)
+        {
+            return operatorName switch
+            {
+                "op_Addition" => floatLeft + floatRight,
+                "op_Subtraction" => floatLeft - floatRight,
+                "op_Multiply" => floatLeft * floatRight,
+                "op_Division" => floatLeft / floatRight,
+                _ => throw new InvalidOperationException(
+                    "Unsupported Single operator " + operatorName + ".")
+            };
+        }
+
+        if (left is double doubleLeft && right is double doubleRight)
+        {
+            return operatorName switch
+            {
+                "op_Addition" => doubleLeft + doubleRight,
+                "op_Subtraction" => doubleLeft - doubleRight,
+                "op_Multiply" => doubleLeft * doubleRight,
+                "op_Division" => doubleLeft / doubleRight,
+                _ => throw new InvalidOperationException(
+                    "Unsupported Double operator " + operatorName + ".")
+            };
+        }
+
+        MethodInfo? method = GraphOperatorMethod(
+            operatorName,
+            left,
+            right);
+        if (method is null)
+        {
+            throw new InvalidOperationException(
+                operatorName + " is not supported for " +
+                left.GetType().FullName + " and " +
+                right.GetType().FullName + ".");
+        }
+
+        return method.Invoke(
+                   null,
+                   new object?[] { left, right }) ??
+               throw new InvalidOperationException(
+                   operatorName + " returned null.");
+    }
+
+    private static object GraphUnaryOperator(
+        string operatorName,
+        object value)
+    {
+        Type type = value.GetType();
+        MethodInfo? method = type.GetMethod(
+            operatorName,
+            BindingFlags.Public |
+            BindingFlags.Static,
+            binder: null,
+            types: new[] { type },
+            modifiers: null);
+
+        if (method is null)
+        {
+            throw new InvalidOperationException(
+                operatorName + " is not supported for " +
+                type.FullName + ".");
+        }
+
+        return method.Invoke(
+                   null,
+                   new[] { value }) ??
+               throw new InvalidOperationException(
+                   operatorName + " returned null.");
+    }
+
+    private static MethodInfo? GraphOperatorMethod(
+        string operatorName,
+        object left,
+        object right)
+    {
+        Type leftType = left.GetType();
+        Type rightType = right.GetType();
+        Type? candidateType = leftType;
+
+        for (int pass = 0; pass < 2; pass++)
+        {
+            if (candidateType is not null)
+            {
+                foreach (MethodInfo method in candidateType.GetMethods(
+                             BindingFlags.Public |
+                             BindingFlags.Static))
+                {
+                    if (!string.Equals(
+                            method.Name,
+                            operatorName,
+                            StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    ParameterInfo[] parameters =
+                        method.GetParameters();
+                    if (parameters.Length == 2 &&
+                        parameters[0].ParameterType.IsInstanceOfType(left) &&
+                        parameters[1].ParameterType.IsInstanceOfType(right))
+                    {
+                        return method;
+                    }
+                }
+            }
+
+            candidateType =
+                rightType == leftType
+                    ? null
+                    : rightType;
+        }
+
+        return null;
     }
 
     private static float ReadFloatComponent(object? value, string memberName)
@@ -10509,7 +10688,10 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         _ = System.Threading.Tasks.Task.Run(
             async () =>
             {
-                while (FrooxEngine.Engine.Current is not null)
+                while (
+                    Volatile.Read(
+                        ref _runtimeDisplayPumpStarted) != 0 &&
+                    FrooxEngine.Engine.Current is not null)
                 {
                     try
                     {
@@ -10525,6 +10707,10 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
                         .Delay(200)
                         .ConfigureAwait(false);
                 }
+
+                Interlocked.Exchange(
+                    ref _runtimeDisplayPumpStarted,
+                    0);
             });
     }
 

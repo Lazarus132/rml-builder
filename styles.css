@@ -1393,12 +1393,85 @@ footer strong {
 }
 
 .rml-preview-header {
+  position: relative;
+  z-index: 4;
   display: flex;
   min-width: 0;
   align-items: center;
   justify-content: space-between;
   gap: 18px;
   padding: 12px 22px 10px 26px;
+}
+
+.rml-preview-header-tools,
+.rml-preview-runtime-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.rml-preview-header-tools {
+  flex: 0 0 auto;
+  gap: 12px;
+}
+
+.rml-preview-runtime-actions {
+  gap: 6px;
+}
+
+.rml-preview-runtime-action {
+  position: relative;
+  display: grid;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid rgba(153, 170, 184, 0.2);
+  border-radius: 9px;
+  background: #222932;
+  color: #f1f4f7;
+  font: inherit;
+  font-size: 21px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.18);
+}
+
+.rml-preview-runtime-action:hover {
+  border-color: rgba(143, 220, 255, 0.64);
+  background: #2c3541;
+}
+
+.rml-preview-runtime-action::after {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 8px);
+  right: 0;
+  width: max-content;
+  max-width: min(280px, calc(100vw - 24px));
+  padding: 7px 9px;
+  border: 1px solid rgba(143, 220, 255, 0.28);
+  border-radius: 7px;
+  background: rgba(8, 13, 19, 0.98);
+  color: #eaf7ff;
+  content: attr(data-tooltip);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.25;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-3px);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+  white-space: normal;
+}
+
+.rml-preview-runtime-action:hover::after,
+.rml-preview-runtime-action:focus-visible::after {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .rml-preview-header h2 {
@@ -1437,6 +1510,7 @@ footer strong {
 }
 
 .rml-preview-close:focus-visible,
+.rml-preview-runtime-action:focus-visible,
 .rml-preview-control:focus-visible,
 .rml-preview-save:focus-visible,
 .rml-preview-text-field:focus-visible,
@@ -4487,7 +4561,7 @@ footer strong {
   }
 
   .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-header > div {
+  .rml-preview-header > .rml-preview-warning {
     min-width: 0 !important;
     max-width: 31% !important;
     padding-left: 0 !important;
@@ -4827,7 +4901,7 @@ footer strong {
   }
 
   .settings-preview-dialog.rml-preview-color-open
-  .rml-preview-header > div {
+  .rml-preview-header > .rml-preview-warning {
     font-size:
       max(
         7px,
@@ -5047,7 +5121,7 @@ footer strong {
   }
 
   .settings-preview-dialog:not(.rml-preview-color-open)
-  .rml-preview-header > div {
+  .rml-preview-header > .rml-preview-warning {
     max-width: 31%;
     padding-left: 0 !important;
     overflow: hidden;
@@ -5352,7 +5426,7 @@ footer strong {
   }
 
   .settings-preview-dialog:not(.rml-preview-color-open)
-  .rml-preview-header > div {
+  .rml-preview-header > .rml-preview-warning {
     font-size: 9px !important;
   }
 
@@ -10477,5 +10551,78 @@ dialog.builder-message-dialog::backdrop {
 
   body:not(.rml-node-graph-mode) .controller-options {
     grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+@media (max-width: 980px), (max-height: 720px) {
+  .rml-preview-header-tools {
+    gap: 7px;
+  }
+
+  .rml-preview-runtime-actions {
+    gap: 4px;
+  }
+
+  .rml-preview-runtime-action {
+    width: 32px;
+    min-width: 32px;
+    height: 32px;
+    border-radius: 7px;
+    font-size: 18px;
+  }
+
+  .rml-preview-runtime-action::after {
+    position: fixed;
+    top: max(58px, calc(env(safe-area-inset-top) + 48px));
+    right: max(8px, env(safe-area-inset-right));
+    max-width: calc(100vw - 16px);
+  }
+}
+
+@media (max-width: 540px) {
+  .rml-preview-header {
+    gap: 7px !important;
+  }
+
+  .rml-preview-warning {
+    display: none !important;
+  }
+
+  .rml-preview-header h2 {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    margin-inline: 0 auto !important;
+    text-align: left !important;
+  }
+
+  .rml-preview-header-tools {
+    gap: 6px;
+  }
+}
+
+@media (max-width: 380px) {
+  .rml-preview-runtime-action {
+    width: 29px;
+    min-width: 29px;
+    height: 29px;
+    font-size: 16px;
+  }
+
+  .rml-preview-runtime-actions {
+    gap: 3px;
+  }
+
+  .rml-preview-header-tools {
+    gap: 4px;
+  }
+}
+
+@supports (-webkit-touch-callout: none) {
+  @media (max-width: 980px), (max-height: 720px) {
+    input:not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+    select,
+    textarea {
+      font-size: 16px !important;
+    }
   }
 }

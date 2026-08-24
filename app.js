@@ -28,7 +28,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "stable-edit-mode-root-scroll-20260823-v371f1";
+  "stable-preview-runtime-actions-ios-focus-20260824-v373f1";
 
 function exposeRmlBuilderBuildId() {
   document.documentElement.dataset
@@ -21912,7 +21912,7 @@ function ensureSetupAssistantLoaded(firstRun = false) {
 
   setupAssistantLoadPromise = new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = new URL("setup_assistant.js?v=181-edit-mode-root-scroll-v371f1", APP_SCRIPT_BASE_URL).href;
+    script.src = new URL("setup_assistant.js?v=182-generated-hot-reload-lifecycle-v372f1", APP_SCRIPT_BASE_URL).href;
     script.async = true;
     script.dataset.rmlSetupAssistant = "true";
     script.addEventListener("load", () => resolve(true), { once: true });
@@ -22716,6 +22716,9 @@ function cacheElements() {
     ),
     settingsPreviewClose: document.getElementById(
       "settings-preview-close"
+    ),
+    settingsPreviewRuntimeActions: document.getElementById(
+      "settings-preview-runtime-actions"
     ),
     settingsPreviewContent: document.getElementById(
       "settings-preview-content"
@@ -26591,6 +26594,37 @@ async function initialize() {
     "click",
     () => closeSettingsPreview()
   );
+  elements.settingsPreviewRuntimeActions?.addEventListener(
+    "click",
+    event => {
+      const actionButton =
+        event.target instanceof Element
+          ? event.target.closest(
+              "[data-preview-runtime-action]"
+            )
+          : null;
+
+      if (!actionButton) {
+        return;
+      }
+
+      const messages = {
+        deactivate:
+          "Preview only: Deactivate stops a compatible generated mod at runtime.",
+        reload:
+          "Preview only: Reload loads the updated generated mod DLL.",
+        quarantine:
+          "Preview only: Quarantine removes the mod from the list and moves its DLL safely."
+      };
+      const action =
+        actionButton.dataset.previewRuntimeAction;
+
+      setSettingsPreviewStatus(
+        messages[action] ||
+          "This runtime action is shown for layout preview only."
+      );
+    }
+  );
   elements.settingsPreviewContent.addEventListener(
     "click",
     handleSettingsPreviewClick
@@ -28230,7 +28264,10 @@ ${providerMembers}
             _ = System.Threading.Tasks.Task.Run(
                 async () =>
                 {
-                    while (FrooxEngine.Engine.Current is not null)
+                    while (
+                        System.Threading.Volatile.Read(
+                            ref _runtimeDisplayBridgeStarted) != 0 &&
+                        FrooxEngine.Engine.Current is not null)
                     {
                         try
                         {
@@ -28259,6 +28296,10 @@ ${providerMembers}
                             .Delay(750)
                             .ConfigureAwait(false);
                     }
+
+                    System.Threading.Interlocked.Exchange(
+                        ref _runtimeDisplayBridgeStarted,
+                        0);
                 });
         }
     }

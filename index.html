@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta
       name="rml-builder-build"
-      content="stable-edit-mode-root-scroll-20260823-v371f1">
+      content="stable-preview-runtime-actions-ios-focus-20260824-v373f1">
     <meta
       name="description"
       content="Build complete typed ResoniteModLoader projects visually with automatic dependencies; optional Raw C# tools remain an expert fallback.">
@@ -16,7 +16,7 @@
         "RMLBuilderBuildId",
         {
           value:
-            "stable-edit-mode-root-scroll-20260823-v371f1",
+            "stable-preview-runtime-actions-ios-focus-20260824-v373f1",
           writable: false,
           enumerable: true,
           configurable: true
@@ -26,7 +26,7 @@
         .rmlBuilderBuild =
           window.RMLBuilderBuildId;
     </script>
-    <link rel="stylesheet" href="styles.css?v=237-responsive-api-status-tooltip-v362f1">
+    <link rel="stylesheet" href="styles.css?v=238-preview-runtime-actions-ios-focus-v373f1">
     <link rel="shortcut icon" href="./favicon.svg">
     <link rel="icon" href="./favicon.svg">
   </head>
@@ -243,13 +243,48 @@
             ⚠ Requires Lazarus132 custom RML version
           </div>
           <h2 id="settings-preview-title">Mod Settings</h2>
-          <button
-            id="settings-preview-close"
-            class="rml-preview-close"
-            type="button"
-            aria-label="Close settings preview">
-            ×
-          </button>
+          <div class="rml-preview-header-tools">
+            <div
+              id="settings-preview-runtime-actions"
+              class="rml-preview-runtime-actions"
+              role="group"
+              aria-label="Runtime mod actions">
+              <button
+                class="rml-preview-runtime-action"
+                type="button"
+                data-preview-runtime-action="deactivate"
+                data-tooltip="Deactivate mod"
+                title="Deactivate mod"
+                aria-label="Deactivate mod">
+                <span aria-hidden="true">⏸</span>
+              </button>
+              <button
+                class="rml-preview-runtime-action"
+                type="button"
+                data-preview-runtime-action="reload"
+                data-tooltip="Reload or update DLL"
+                title="Reload or update DLL"
+                aria-label="Reload or update DLL">
+                <span aria-hidden="true">↻</span>
+              </button>
+              <button
+                class="rml-preview-runtime-action"
+                type="button"
+                data-preview-runtime-action="quarantine"
+                data-tooltip="Move DLL to quarantine"
+                title="Move DLL to quarantine"
+                aria-label="Move DLL to quarantine">
+                <span aria-hidden="true">⌫</span>
+              </button>
+            </div>
+            <button
+              id="settings-preview-close"
+              class="rml-preview-close"
+              type="button"
+              aria-label="Close settings preview">
+              ×
+            </button>
+          </div>
         </header>
 
         <div class="rml-preview-content">
@@ -500,10 +535,10 @@
     </dialog>
     <script src="scroll_manager.js?v=31-hint-route-visibility-v258"></script>
     <script src="scroll_hierarchy.js?v=8"></script>
-    <script src="app.js?v=352-edit-mode-root-scroll-v371f1"></script>
+    <script src="app.js?v=354-preview-runtime-actions-ios-focus-v373f1"></script>
     <script src="catalog_loader.js?v=34-sequential-static-scanner-probe-v366f1"></script>
     <script src="runtime_bridge.js?v=2"></script>
-    <script src="node_graph.js?v=219-edit-mode-root-scroll-v371f1"></script>
+    <script src="node_graph.js?v=220-generated-hot-reload-lifecycle-v372f1"></script>
     <script src="dynamic_settings.js?v=24-inline-row-runtime-visibility-v178"></script>
 </body>
 </html>
