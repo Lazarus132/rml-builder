@@ -28,7 +28,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "stable-preview-runtime-actions-ios-focus-20260824-v373f1";
+  "stable-enum-field-shadowing-safe-20260825-v374f1";
 
 function exposeRmlBuilderBuildId() {
   document.documentElement.dataset
@@ -3067,6 +3067,31 @@ function sliderNumber(value) {
   return `${normalized}f`;
 }
 
+function enumValueExpression(
+  enumName,
+  enumFallback,
+  options,
+  selectedValue,
+  optionFallback
+) {
+  const normalizedSelected = toPascalCase(
+    selectedValue,
+    optionFallback
+  );
+  const optionIndex = Math.max(
+    (options || []).findIndex(option =>
+      toPascalCase(
+        typeof option === "string"
+          ? option
+          : option?.name,
+        optionFallback
+      ) === normalizedSelected
+    ),
+    0
+  );
+  return `(${toPascalCase(enumName, enumFallback)})${optionIndex}`;
+}
+
 function defaultExpression(setting) {
   const value = setting.defaultValue.trim();
   switch (setting.valueType) {
@@ -3109,10 +3134,13 @@ function defaultExpression(setting) {
       );
     case "enum": {
       const fallback = setting.enumOptions[0] || "Value";
-      return `${toPascalCase(setting.enumName, "SettingOption")}.${toPascalCase(
+      return enumValueExpression(
+        setting.enumName,
+        "SettingOption",
+        setting.enumOptions,
         value,
         fallback
-      )}`;
+      );
     }
     default:
       return "default";
@@ -3225,7 +3253,10 @@ function settingDeclaration(setting, path) {
 function controllerDeclaration(controller, path) {
   const field = toPascalCase(controller.fieldName, "ActivePage");
   const enumName = toPascalCase(controller.enumName, "SettingsPage");
-  const defaultOption = toPascalCase(
+  const defaultOption = enumValueExpression(
+    controller.enumName,
+    "SettingsPage",
+    controller.options,
     controller.defaultOption,
     controller.options[0]?.name || "General"
   );
@@ -3239,7 +3270,7 @@ function controllerDeclaration(controller, path) {
             new(
                 "${escapeCSharp(controller.keyName)}",
                 "${escapeCSharp(controller.description)}",
-                () => ${enumName}.${defaultOption});
+                () => ${defaultOption});
 `;
 }
 
@@ -3268,9 +3299,14 @@ function conditionExpression(conditions) {
   return conditions
     .map(({ controller, option }) => {
       const local = toCamelCase(controller.fieldName);
-      const enumName = toPascalCase(controller.enumName, "SettingsPage");
-      const optionName = toPascalCase(option.name, "Page");
-      return `${local} ==\n                ${enumName}.${optionName}`;
+      const optionValue = enumValueExpression(
+        controller.enumName,
+        "SettingsPage",
+        controller.options,
+        option.name,
+        controller.options[0]?.name || "Page"
+      );
+      return `${local} ==\n                ${optionValue}`;
     })
     .join(" &&\n            ");
 }
@@ -4221,7 +4257,10 @@ ${orderBranches}
         const local = toCamelCase(
           controller.fieldName
         );
-        const fallback = toPascalCase(
+        const fallback = enumValueExpression(
+          controller.enumName,
+          "SettingsPage",
+          controller.options,
           controller.defaultOption,
           controller.options[0]
             ?.name ||
@@ -4232,7 +4271,7 @@ ${orderBranches}
                 ${field})
             is ${enumName} current${field}
                 ? current${field}
-                : ${enumName}.${fallback};`;
+                : ${fallback};`;
       })
       .join("\n\n");
     const keyBranches = entries
