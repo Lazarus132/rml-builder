@@ -28,7 +28,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "stable-enum-field-shadowing-safe-20260825-v374f1";
+  "stable-configuration-codegen-import-sync-20260825-v375f1";
 
 function exposeRmlBuilderBuildId() {
   document.documentElement.dataset

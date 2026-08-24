@@ -7912,9 +7912,64 @@
       : nodeToken;
   }
 
+  function synchronizeGraphForCodegen(
+    request = {}
+  ) {
+    if (activeInteraction) {
+      return;
+    }
+
+    const requestedGraph =
+      request.state?.extensions?.[
+        EXTENSION_NAME
+      ];
+    const incoming =
+      requestedGraph &&
+      typeof requestedGraph === "object"
+        ? requestedGraph
+        : bridge?.getExtensionState?.(
+            EXTENSION_NAME
+          );
+
+    if (
+      !incoming ||
+      typeof incoming !== "object"
+    ) {
+      return;
+    }
+
+    const incomingGraph =
+      sanitizeGraphState(incoming);
+    const incomingJson =
+      JSON.stringify(
+        graphSerializableFrom(
+          incomingGraph
+        )
+      );
+
+    if (
+      graph &&
+      incomingJson ===
+        lastPersistedGraphJson
+    ) {
+      return;
+    }
+
+    graph = incomingGraph;
+    lastPersistedGraphJson =
+      incomingJson;
+    typedGraphCodegenCacheKey = "";
+    typedGraphCodegenCache = null;
+    pruneConnections();
+  }
+
   function buildTypedNodeGraphCSharpContribution(
     request = {}
   ) {
+    synchronizeGraphForCodegen(
+      request
+    );
+
     if (
       !graph?.configSnapshot
     ) {
