@@ -22,6 +22,16 @@
   const GRAPH_AUTOPAN_EDGE = 54;
   const GRAPH_AUTOPAN_MAX_SPEED = 24;
   const GRAPH_COORDINATE_LIMIT = 100000;
+  const GRAPH_NATIVE_PAN_ORIGIN =
+    GRAPH_COORDINATE_LIMIT + 4096;
+  const GRAPH_NATIVE_PAN_SURFACE_WIDTH =
+    GRAPH_NATIVE_PAN_ORIGIN * 2 +
+    GRAPH_STAGE_WIDTH * GRAPH_MAX_ZOOM +
+    4096;
+  const GRAPH_NATIVE_PAN_SURFACE_HEIGHT =
+    GRAPH_NATIVE_PAN_ORIGIN * 2 +
+    GRAPH_STAGE_HEIGHT * GRAPH_MAX_ZOOM +
+    4096;
   const GRAPH_NODE_MIN_WIDTH = 120;
   const GRAPH_NODE_MIN_HEIGHT = 96;
   const GRAPH_NODE_MIN_BODY_HEIGHT = 48;
@@ -979,6 +989,7 @@
   let runtimeBridgeChannel = "";
   let runtimeBridgeRefreshFrame = 0;
   let lastPersistedGraphJson = "";
+  let lastPersistedCodegenJson = "";
   let persistTimer = 0;
   let graphMessageTimer = 0;
   let graphNodeSearchQuery = "";
@@ -1006,6 +1017,11 @@
   };
   let autoPanFrame = 0;
   let autoPanState = null;
+  let viewportPanFrame = 0;
+  let nodeDragFrame = 0;
+  let nodeResizeFrame = 0;
+  let wireDragFrame = 0;
+  let connectionPreviewFrame = 0;
   let guidedInteractionAutoPanSuppressed = false;
   let guidedAutomaticNodeCreationSuppressed = false;
   let lastGuidedPaletteDropState = null;
@@ -1019,6 +1035,9 @@
     new Map();
   let nodeBodyWireRefreshFrame = 0;
   let nodeResizeLimitRefreshFrame = 0;
+  let nodeBodyOverflowSyncFrame = 0;
+  const pendingNodeBodyOverflowArticles =
+    new Set();
   let lastNodeResizePress = null;
   const NODE_RESIZE_DOUBLE_CLICK_MS = 450;
   const NODE_RESIZE_DOUBLE_CLICK_DISTANCE = 8;
@@ -1142,6 +1161,7 @@
     root: null,
     toolbar: null,
     viewport: null,
+    panSurface: null,
     stage: null,
     wires: null,
     nodesHost: null,
@@ -3040,6 +3060,71 @@
     };
   }
 
+  function graphCodegenSerializableFrom(
+    value = graph
+  ) {
+    return {
+      version: GRAPH_SCHEMA_VERSION,
+      active: value?.active === true,
+      configSnapshot:
+        value?.configSnapshot
+          ? clone(value.configSnapshot)
+          : null,
+      nodes: (value?.nodes || []).map(
+        node => ({
+          id: node.id,
+          kind: node.kind,
+          ...(node.kind === "operator"
+            ? {
+                operatorId:
+                  node.operatorId
+              }
+            : {}),
+          label: node.label || "",
+          parameters:
+            serializableNodeParameters(
+              node
+            )
+        })
+      ),
+      connections:
+        (value?.connections || []).map(
+          connection => ({
+            id: connection.id,
+            fromNode:
+              connection.fromNode,
+            fromPort:
+              connection.fromPort,
+            toNode:
+              connection.toNode,
+            toPort:
+              connection.toPort,
+            branchFrom:
+              connection.branchFrom
+                ? {
+                    connectionId:
+                      connection.branchFrom
+                        .connectionId,
+                    pointId:
+                      connection.branchFrom
+                        .pointId
+                  }
+                : null
+          })
+        )
+    };
+  }
+
+  function graphCodegenJson(
+    value = graph
+  ) {
+    return JSON.stringify(
+      graphCodegenSerializableFrom(
+        value
+      )
+    );
+  }
+
   function persistGraph(
     immediate = false
   ) {
@@ -3047,23 +3132,36 @@
 
     const commit = () => {
       persistTimer = 0;
-      typedGraphCodegenCacheKey = "";
-      typedGraphCodegenCache = null;
 
       const value =
         graphSerializableState();
+      const nextCodegenJson =
+        graphCodegenJson(graph);
+      const codegenChanged =
+        nextCodegenJson !==
+        lastPersistedCodegenJson;
 
       lastPersistedGraphJson =
         JSON.stringify(value);
+      lastPersistedCodegenJson =
+        nextCodegenJson;
+
+      if (codegenChanged) {
+        currentAnalysis = null;
+        typedGraphCodegenCacheKey = "";
+        typedGraphCodegenCache = null;
+      }
 
       bridge.setExtensionState(
         EXTENSION_NAME,
         value
       );
 
-      bridge
-        .requestGeneratedOutputRefresh
-        ?.();
+      if (codegenChanged) {
+        bridge
+          .requestGeneratedOutputRefresh
+          ?.();
+      }
     };
 
     if (immediate) {
@@ -3100,7 +3198,10 @@
 
   function snapshotFromBuilder() {
     const state =
-      bridge.getStateSnapshot();
+      bridge?.getStateSnapshot?.() || {
+        metadata: {},
+        nodes: []
+      };
 
     return {
       metadata:
@@ -3198,7 +3299,7 @@
 
   function configurationDefinition() {
     const snapshot =
-      graph.configSnapshot ||
+      graph?.configSnapshot ||
       snapshotFromBuilder();
 
     const metadata =
@@ -3289,7 +3390,7 @@
         "configuration.menuInstance"
       ] || {};
     const snapshot =
-      graph.configSnapshot ||
+      graph?.configSnapshot ||
       snapshotFromBuilder();
     const outputs = [
       ...(Array.isArray(
@@ -3581,6 +3682,54 @@
       code = `${helperName}<${csType}>(${code}, ${input(ids[index]).code})`;
     }
     return code;
+  }
+
+  function graphInfixCode(
+    left,
+    operator,
+    right
+  ) {
+    return `((${left}) ${operator} (${right}))`;
+  }
+
+  function variadicInfixCode(
+    node,
+    input,
+    operator
+  ) {
+    const ids = variadicInputIds(node);
+    if (ids.length === 0) {
+      return graphCsDefault("float");
+    }
+
+    let code = input(ids[0]).code;
+    for (let index = 1; index < ids.length; index += 1) {
+      code = graphInfixCode(
+        code,
+        operator,
+        input(ids[index]).code
+      );
+    }
+    return code;
+  }
+
+  function graphDivideCode(
+    graphType,
+    left,
+    right
+  ) {
+    if (
+      graphType === "int" ||
+      /^int[234]$/.test(graphType)
+    ) {
+      return `GraphSafeIntDivide(${left}, ${right})`;
+    }
+
+    return graphInfixCode(
+      left,
+      "/",
+      right
+    );
   }
 
   function definitionHasSockets(
@@ -5529,6 +5678,87 @@
     );
   }
 
+  function connectionPassesFastImportCheck(
+    connection
+  ) {
+    const fromRef = findPortSpec(
+      connection.fromNode,
+      connection.fromPort,
+      "output"
+    );
+    const toRef = findPortSpec(
+      connection.toNode,
+      connection.toPort,
+      "input"
+    );
+
+    if (!fromRef || !toRef) {
+      return false;
+    }
+
+    const reactiveConfigurationEdge =
+      isConfigurationReactionConnection(
+        fromRef,
+        toRef
+      );
+
+    if (
+      fromRef.node?.kind ===
+        "configuration" &&
+      toRef.spec?.type === "impulse" &&
+      !reactiveConfigurationEdge
+    ) {
+      return false;
+    }
+
+    const fromType =
+      reactiveConfigurationEdge
+        ? "impulse"
+        : fromRef.spec?.type;
+    const toType = toRef.spec?.type;
+
+    return !(
+      fromType &&
+      toType &&
+      !connectionTypesCompatible(
+        fromType,
+        toType
+      )
+    );
+  }
+
+  function fastNormalizeImportedConnections(
+    connections
+  ) {
+    const seenInputs = new Set();
+    const acceptedReverse = [];
+
+    for (
+      let index = connections.length - 1;
+      index >= 0;
+      index -= 1
+    ) {
+      const connection =
+        connections[index];
+      const inputKey =
+        `${connection.toNode}\u0000${connection.toPort}`;
+
+      if (
+        seenInputs.has(inputKey) ||
+        !connectionPassesFastImportCheck(
+          connection
+        )
+      ) {
+        continue;
+      }
+
+      seenInputs.add(inputKey);
+      acceptedReverse.push(connection);
+    }
+
+    return acceptedReverse.reverse();
+  }
+
   function pruneConnections() {
     if (hasMissingOperatorDefinitions()) {
       return;
@@ -5541,6 +5771,21 @@
           currentAnalysis
         );
 
+      return;
+    }
+
+    graph.connections =
+      fastNormalizeImportedConnections(
+        graph.connections
+      );
+
+    if (graph.connections.length === 0) {
+      currentAnalysis =
+        synchronizeAutoVectorTypes(
+          graph.connections,
+          currentAnalysis
+        );
+      normalizeSelectedWirePoint();
       return;
     }
 
@@ -5592,41 +5837,42 @@
         return;
     }
     const accepted = [];
-
-    for (const connection of graph.connections) {
-      const proposal =
-        connectionProposal(
-          {
-            nodeId:
-              connection.fromNode,
-            portId:
-              connection.fromPort,
-            direction: "output"
-          },
-          {
-            nodeId:
-              connection.toNode,
-            portId:
-              connection.toPort,
-            direction: "input"
-          },
-          accepted
-        );
-
-      if (proposal.valid) {
-        accepted.splice(
-          0,
-          accepted.length,
-          ...proposal.nextConnections.map(
-            candidate =>
-              candidate.id ===
-                proposal.candidate.id
-                ? { ...connection }
-                : candidate
-          )
-        );
+    const acceptBatch = batch => {
+      if (batch.length === 0) {
+        return;
       }
-    }
+
+      const candidate = [
+        ...accepted,
+        ...batch
+      ];
+      const inferred =
+        analyzeWithAutoVectors(
+          candidate,
+          currentAnalysis
+        );
+
+      if (inferred.analysis.valid) {
+        accepted.push(...batch);
+        return;
+      }
+
+      if (batch.length === 1) {
+        return;
+      }
+
+      const middle = Math.floor(
+        batch.length / 2
+      );
+      acceptBatch(
+        batch.slice(0, middle)
+      );
+      acceptBatch(
+        batch.slice(middle)
+      );
+    };
+
+    acceptBatch(graph.connections);
 
     graph.connections = accepted;
     normalizeConnectionRouting(
@@ -7782,7 +8028,10 @@
         "string" &&
       information.defaultCs.trim()
     ) {
-      return information.defaultCs.trim();
+      return graphCsTypedDefault(
+        type,
+        information.defaultCs.trim()
+      );
     }
 
     switch (type) {
@@ -7801,6 +8050,24 @@
       default:
         return `default(${graphCsType(type)})`;
     }
+  }
+
+  function graphCsTypedDefault(
+    type,
+    expression
+  ) {
+    const code = String(
+      expression || ""
+    ).trim();
+
+    if (
+      /^(?:null|default)!?$/.test(code)
+    ) {
+      return `default(${graphCsType(type || "object")})!`;
+    }
+
+    return code ||
+      `default(${graphCsType(type || "object")})`;
   }
 
   function graphCsNumberLiteral(
@@ -7946,6 +8213,10 @@
           incomingGraph
         )
       );
+    const incomingCodegenJson =
+      graphCodegenJson(
+        incomingGraph
+      );
 
     if (
       graph &&
@@ -7955,12 +8226,28 @@
       return;
     }
 
+    if (
+      graph &&
+      incomingCodegenJson ===
+        graphCodegenJson(graph)
+    ) {
+      lastPersistedGraphJson =
+        incomingJson;
+      lastPersistedCodegenJson =
+        incomingCodegenJson;
+      return;
+    }
+
     graph = incomingGraph;
-    lastPersistedGraphJson =
-      incomingJson;
     typedGraphCodegenCacheKey = "";
     typedGraphCodegenCache = null;
     pruneConnections();
+    lastPersistedGraphJson =
+      JSON.stringify(
+        graphSerializableState()
+      );
+    lastPersistedCodegenJson =
+      graphCodegenJson(graph);
   }
 
   function buildTypedNodeGraphCSharpContribution(
@@ -7999,7 +8286,9 @@
       JSON.stringify({
         metadata,
         graph:
-          graphSerializableState(),
+          graphCodegenSerializableFrom(
+            graph
+          ),
         nodeDefinitionRevision:
           Number(
             window.__RMLNodeDefinitionRevision
@@ -8293,19 +8582,25 @@
 
         return {
           type,
-          code:
+          code: graphCsTypedDefault(
+            type,
             explicitDefault ||
-            graphCsDefault(type),
+              graphCsDefault(type)
+          ),
           connected: false,
           connection: null
         };
       }
 
-      return {
-        ...outputExpression(
+      const sourceExpression =
+        outputExpression(
           connection.fromNode,
           connection.fromPort
-        ),
+        );
+
+      return {
+        ...sourceExpression,
+        code: `(${sourceExpression.code})`,
         connected: true,
         connection
       };
@@ -8717,21 +9012,27 @@
             break;
 
           case "math.add":
-            code = variadicReduceCode(node, input, "GraphAdd", csType);
+            code = variadicInfixCode(node, input, "+");
             break;
 
           case "math.subtract":
-            code =
-              `GraphSubtract<${csType}>(${input("a").code}, ${input("b").code})`;
+            code = graphInfixCode(
+              input("a").code,
+              "-",
+              input("b").code
+            );
             break;
 
           case "math.multiply":
-            code = variadicReduceCode(node, input, "GraphMultiply", csType);
+            code = variadicInfixCode(node, input, "*");
             break;
 
           case "math.divide":
-            code =
-              `GraphDivide<${csType}>(${input("a").code}, ${input("b").code})`;
+            code = graphDivideCode(
+              type,
+              input("a").code,
+              input("b").code
+            );
             break;
 
           case "math.minimum":
@@ -8748,8 +9049,7 @@
             break;
 
           case "math.negate":
-            code =
-              `GraphNegate<${csType}>(${input("value").code})`;
+            code = `(-(${input("value").code}))`;
             break;
 
           case "math.absolute":
@@ -8759,7 +9059,7 @@
 
           case "math.lerp":
             code =
-              `GraphLerp<${csType}>(${input("a").code}, ${input("b").code}, ${input("t").code})`;
+              `Elements.Core.MathX.Lerp(${input("a").code}, ${input("b").code}, ${input("t").code})`;
             break;
 
           case "logic.and": {
@@ -8848,7 +9148,7 @@
 
           case "resonite.unpackColorX":
             code =
-              `ReadFloatComponent(${input("value").code}, "${portId}")`;
+              `((${input("value").code}).${portId})`;
             break;
 
           default: {
@@ -9530,18 +9830,32 @@
               )
               .filter(Boolean);
 
+        const failureSource =
+          graphCsEscapeString(
+            `Impulse ${item.node.operatorId}:${item.spec.id}`
+          );
+
         return `    private static void ${item.method}()
     {
+        try
+        {
 ${actions.length > 0
   ? actions
       .map(action =>
         action
           .split("\n")
-          .map(line => `        ${line}`)
+          .map(line => `            ${line}`)
           .join("\n")
       )
       .join("\n")
-  : "        // No connected impulse targets."}
+  : "            // No connected impulse targets."}
+        }
+        catch (Exception exception)
+        {
+            ReportGraphRuntimeFailure(
+                "${failureSource}",
+                exception);
+        }
     }`;
       }).join("\n\n");
 
@@ -9653,6 +9967,21 @@ ${configurationButtonCases.length > 0
           nodeDefinition(node)
             ?.displaysValue === true
       );
+    const guardedRuntimeStatement = (
+      sourceName,
+      statement
+    ) =>
+`        try
+        {
+            ${statement}
+        }
+        catch (Exception exception)
+        {
+            ReportGraphRuntimeFailure(
+                "${graphCsEscapeString(sourceName)}",
+                exception);
+        }`;
+
     const displayStatements =
       displayNodes.map((node, index) => {
         const connection =
@@ -9669,7 +9998,10 @@ ${configurationButtonCases.length > 0
           );
 
         if (!connection) {
-          return `        PublishDisplay("${monitorId}", "${graphCsEscapeString(label)}", "unknown", "<not connected>");`;
+          return guardedRuntimeStatement(
+            `Display ${node.id}`,
+            `PublishDisplay("${monitorId}", "${graphCsEscapeString(label)}", "unknown", "<not connected>");`
+          );
         }
 
         const expression =
@@ -9683,7 +10015,10 @@ ${configurationButtonCases.length > 0
             "object"
           );
 
-        return `        PublishDisplay("${monitorId}", "${graphCsEscapeString(label)}", "${graphType}", ${expression.code});`;
+        return guardedRuntimeStatement(
+          `Display ${node.id}`,
+          `PublishDisplay("${monitorId}", "${graphCsEscapeString(label)}", "${graphType}", ${expression.code});`
+        );
       });
 
     const impulseDisplayNodes =
@@ -9711,7 +10046,10 @@ ${configurationButtonCases.length > 0
         `Display Impulse ${index + 1}`;
 
       displayStatements.push(
-        `        PublishDisplay("${graphCsEscapeString(node.id)}", "${graphCsEscapeString(label)}", "impulse", System.Threading.Interlocked.Read(ref _impulseCount${token}));`
+        guardedRuntimeStatement(
+          `Display impulse ${node.id}`,
+          `PublishDisplay("${graphCsEscapeString(node.id)}", "${graphCsEscapeString(label)}", "impulse", System.Threading.Interlocked.Read(ref _impulseCount${token}));`
+        )
       );
     }
 
@@ -9786,7 +10124,10 @@ ${configurationButtonCases.length > 0
               "Dynamic Choice"
             );
 
-          return `        PublishDynamicCollectionSource("${graphCsEscapeString(node.id)}", "${graphCsEscapeString(label)}", ${field});`;
+          return guardedRuntimeStatement(
+            `Dynamic collection ${node.id}`,
+            `PublishDynamicCollectionSource("${graphCsEscapeString(node.id)}", "${graphCsEscapeString(label)}", ${field});`
+          );
         }
       );
 
@@ -10055,7 +10396,42 @@ ${dynamicChoiceRefreshCases.join("\n")}
           .toLowerCase()
       );
 
+    const elementsValueTypes = new Set([
+      "int2",
+      "int3",
+      "int4",
+      "float2",
+      "float3",
+      "float4",
+      "double2",
+      "double3",
+      "double4",
+      "colorX",
+      "floatQ"
+    ]);
+    const graphUsesElementsValue =
+      graph.nodes.some(node => {
+        const definition =
+          nodeDefinition(node);
+
+        return [
+          ...(definition?.inputs || []),
+          ...(definition?.outputs || [])
+        ].some(spec =>
+          elementsValueTypes.has(
+            typeBase(
+              resolvedType(node, spec)
+            )
+          )
+        );
+      }) ||
+      configurationFields.some(item =>
+        elementsValueTypes.has(
+          typeBase(item.type)
+        )
+      );
     const usesElements =
+      graphUsesElementsValue ||
       hasAssemblyReference("Elements.Core") ||
       extensionRequirements.usesElements ===
         true;
@@ -10231,18 +10607,18 @@ ${dynamicChoiceRefreshCases.join("\n")}
             .join("\n")
         )
         .join("\n\n");
-    const formatExtensionStatements =
-      statements =>
-        statements
-          .flatMap(statement =>
-            statement.split("\n")
+    const formatExtensionStatements = (
+      statements,
+      sourceName
+    ) =>
+      statements
+        .map((statement, index) =>
+          guardedRuntimeStatement(
+            `${sourceName} ${index + 1}`,
+            statement
           )
-          .map(line =>
-            line.length > 0
-              ? `        ${line}`
-              : ""
-          )
-          .join("\n");
+        )
+        .join("\n");
     const warningsComment =
       warnings.length > 0
         ? `\n/*\n${warnings
@@ -10257,7 +10633,9 @@ ${dynamicChoiceRefreshCases.join("\n")}
         ? `// RML typed runtime graph\n\n/*\n * Generated by the RML Configuration Builder.\n *\n * STEP 1 - Configuration values\n * The main mod source forwards the current RML configuration values into\n * this generated runtime class through the Set... methods below.\n *\n * STEP 2 - Runtime reactions\n * React... methods are entry points for Configuration sockets configured to\n * react when settings are saved. Startup-capable sockets are emitted from\n * OnEngineInit(). Stored-only sockets remain typed value sources.\n *\n * STEP 3 - Typed graph execution\n * Emit... methods are the generated impulse paths. Value inputs are resolved\n * from their connected typed sources when an impulse path executes.\n *\n * STEP 4 - Runtime state and outputs\n * Generated fields retain node state and action outputs. Display Value and\n * Display Impulse nodes publish through DisplayValues/DisplayValueChanged and\n * stream to the local scanner runtime bridge when that scanner is installed.\n *\n * This file is generated from the visual graph. Edit the graph rather than\n * editing this generated file manually.\n */\n\n`
         : "";
 
-    const source = `${guideComment}${usingLines}
+    const source = `#nullable enable
+
+${guideComment}${usingLines}
 
 namespace ${namespaceName};
 ${warningsComment}
@@ -10278,6 +10656,8 @@ internal static partial class ${graphClassName}
     private static readonly Dictionary<string, string> _displayTextByMonitorId =
         new(StringComparer.Ordinal);
     private static readonly Dictionary<string, string> _displayFingerprints =
+        new(StringComparer.Ordinal);
+    private static readonly HashSet<string> _reportedRuntimeFailures =
         new(StringComparer.Ordinal);
     private const string RuntimeBridgeChannel =
         "${graphCsEscapeString(runtimeBridgeChannel)}";
@@ -10314,9 +10694,14 @@ ${storeFieldsCode ? `\n${storeFieldsCode}` : ""}${extensionFieldsCode ? `\n\n${e
 
     public static void Initialize(Action<string>? display)
     {
-        _display = display ?? (static _ => { });${extensionInitializeStatements.length > 0
+        _display = display ?? (static _ => { });
+        lock (_displayStateLock)
+        {
+            _reportedRuntimeFailures.Clear();
+        }${extensionInitializeStatements.length > 0
   ? `\n${formatExtensionStatements(
-      extensionInitializeStatements
+      extensionInitializeStatements,
+      "Initialize extension"
     )}`
   : ""}
     }
@@ -10333,7 +10718,8 @@ ${startupEmitters.length > 0
   ? "        BeginStartupWhenWorldReady();"
   : "        // No connected startup impulse paths."}${extensionEngineInitStatements.length > 0
   ? `\n${formatExtensionStatements(
-      extensionEngineInitStatements
+      extensionEngineInitStatements,
+      "Engine initialization extension"
     )}`
   : ""}
 
@@ -10370,10 +10756,22 @@ ${startupEmitters.length > 0
             return false;
         }
 
-        world!.RunSynchronously(
-            action,
-            immediatellyIfPossible: true);
-        return true;
+        try
+        {
+            world!.RunSynchronously(
+                () => ExecuteGraphSafely(
+                    "World dispatch",
+                    action),
+                immediatellyIfPossible: true);
+            return true;
+        }
+        catch (Exception exception)
+        {
+            ReportGraphRuntimeFailure(
+                "World dispatch infrastructure",
+                exception);
+            return false;
+        }
     }
 
     private static void DispatchGraphToWorld(Action action)
@@ -10388,8 +10786,11 @@ ${startupEmitters.length > 0
 
         if (manager is null)
         {
-            throw new System.InvalidOperationException(
-                "The Resonite GlobalCoroutineManager is not available while waiting for a world-safe graph execution context.");
+            ReportGraphRuntimeFailure(
+                "World dispatch scheduling",
+                new InvalidOperationException(
+                    "The Resonite GlobalCoroutineManager is not available while waiting for a world-safe graph execution context."));
+            return;
         }
 
         _ = manager.StartTask(
@@ -10402,6 +10803,51 @@ ${startupEmitters.length > 0
                     await new FrooxEngine.Updates(1);
                 }
             });
+    }
+
+    private static void ExecuteGraphSafely(
+        string source,
+        Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch (Exception exception)
+        {
+            ReportGraphRuntimeFailure(
+                source,
+                exception);
+        }
+    }
+
+    private static void ReportGraphRuntimeFailure(
+        string source,
+        Exception exception)
+    {
+        bool firstFailure;
+        lock (_displayStateLock)
+        {
+            firstFailure =
+                _reportedRuntimeFailures.Add(
+                    source);
+        }
+
+        if (!firstFailure)
+        {
+            return;
+        }
+
+        try
+        {
+            _display(
+                $"Typed graph runtime error in {source}: " +
+                $"{exception.GetType().Name}: {exception.Message}");
+        }
+        catch
+        {
+            // Logging must never escape back into Resonite's host callback.
+        }
     }
 ${startupEmitters.length > 0 ? `
     private static int _startupWorldReadyState;
@@ -10485,53 +10931,6 @@ ${directDynamicChoiceFields.length > 0
 
 ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersCode ? `\n\n${extensionMembersCode}` : ""}
 
-    private static T GraphAdd<T>(T left, T right)
-    {
-        return (T)GraphBinaryOperator(
-            "op_Addition",
-            left!,
-            right!);
-    }
-
-    private static T GraphSubtract<T>(T left, T right)
-    {
-        return (T)GraphBinaryOperator(
-            "op_Subtraction",
-            left!,
-            right!);
-    }
-
-    private static T GraphMultiply<T>(T left, T right)
-    {
-        return (T)GraphBinaryOperator(
-            "op_Multiply",
-            left!,
-            right!);
-    }
-
-    private static T GraphDivide<T>(T left, T right)
-    {
-        return (T)GraphBinaryOperator(
-            "op_Division",
-            left!,
-            right!);
-    }
-
-    private static T GraphNegate<T>(T value)
-    {
-        object result = value switch
-        {
-            int current => -current,
-            float current => -current,
-            double current => -current,
-            _ => GraphUnaryOperator(
-                "op_UnaryNegation",
-                value!)
-        };
-
-        return (T)result;
-    }
-
     private static T GraphMinimum<T>(T left, T right)
     {
         return Comparer<T>.Default.Compare(left, right) <= 0
@@ -10555,7 +10954,9 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     {
         object result = value switch
         {
-            int current => Math.Abs(current),
+            int current => current == int.MinValue
+                ? int.MaxValue
+                : Math.Abs(current),
             float current => MathF.Abs(current),
             double current => Math.Abs(current),
             _ => throw new InvalidOperationException(
@@ -10565,184 +10966,54 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         return (T)result;
     }
 
-    private static T GraphLerp<T>(T left, T right, float factor)
+    private static int GraphSafeIntDivide(
+        int left,
+        int right)
     {
-        if (left is int integerLeft && right is int integerRight)
+        if (right == 0)
         {
-            return (T)(object)(int)(
-                integerLeft +
-                (integerRight - integerLeft) * factor);
+            return 0;
         }
 
-        if (left is float floatLeft && right is float floatRight)
+        if (left == int.MinValue && right == -1)
         {
-            return (T)(object)(
-                floatLeft +
-                (floatRight - floatLeft) * factor);
+            return int.MaxValue;
         }
 
-        if (left is double doubleLeft && right is double doubleRight)
-        {
-            return (T)(object)(
-                doubleLeft +
-                (doubleRight - doubleLeft) * (double)factor);
-        }
-
-        object delta = GraphBinaryOperator(
-            "op_Subtraction",
-            right!,
-            left!);
-        object interpolationFactor =
-            typeof(T).Name.StartsWith(
-                "double",
-                StringComparison.Ordinal)
-                ? (double)factor
-                : factor;
-        object scaled = GraphBinaryOperator(
-            "op_Multiply",
-            delta,
-            interpolationFactor);
-
-        return (T)GraphBinaryOperator(
-            "op_Addition",
-            left!,
-            scaled);
+        return left / right;
     }
 
-    private static object GraphBinaryOperator(
-        string operatorName,
-        object left,
-        object right)
+${usesElements ? `    private static int2 GraphSafeIntDivide(
+        int2 left,
+        int2 right)
     {
-        if (left is int integerLeft && right is int integerRight)
-        {
-            return operatorName switch
-            {
-                "op_Addition" => integerLeft + integerRight,
-                "op_Subtraction" => integerLeft - integerRight,
-                "op_Multiply" => integerLeft * integerRight,
-                "op_Division" => integerLeft / integerRight,
-                _ => throw new InvalidOperationException(
-                    "Unsupported Int32 operator " + operatorName + ".")
-            };
-        }
-
-        if (left is float floatLeft && right is float floatRight)
-        {
-            return operatorName switch
-            {
-                "op_Addition" => floatLeft + floatRight,
-                "op_Subtraction" => floatLeft - floatRight,
-                "op_Multiply" => floatLeft * floatRight,
-                "op_Division" => floatLeft / floatRight,
-                _ => throw new InvalidOperationException(
-                    "Unsupported Single operator " + operatorName + ".")
-            };
-        }
-
-        if (left is double doubleLeft && right is double doubleRight)
-        {
-            return operatorName switch
-            {
-                "op_Addition" => doubleLeft + doubleRight,
-                "op_Subtraction" => doubleLeft - doubleRight,
-                "op_Multiply" => doubleLeft * doubleRight,
-                "op_Division" => doubleLeft / doubleRight,
-                _ => throw new InvalidOperationException(
-                    "Unsupported Double operator " + operatorName + ".")
-            };
-        }
-
-        MethodInfo? method = GraphOperatorMethod(
-            operatorName,
-            left,
-            right);
-        if (method is null)
-        {
-            throw new InvalidOperationException(
-                operatorName + " is not supported for " +
-                left.GetType().FullName + " and " +
-                right.GetType().FullName + ".");
-        }
-
-        return method.Invoke(
-                   null,
-                   new object?[] { left, right }) ??
-               throw new InvalidOperationException(
-                   operatorName + " returned null.");
+        return new int2(
+            GraphSafeIntDivide(left.x, right.x),
+            GraphSafeIntDivide(left.y, right.y));
     }
 
-    private static object GraphUnaryOperator(
-        string operatorName,
-        object value)
+    private static int3 GraphSafeIntDivide(
+        int3 left,
+        int3 right)
     {
-        Type type = value.GetType();
-        MethodInfo? method = type.GetMethod(
-            operatorName,
-            BindingFlags.Public |
-            BindingFlags.Static,
-            binder: null,
-            types: new[] { type },
-            modifiers: null);
-
-        if (method is null)
-        {
-            throw new InvalidOperationException(
-                operatorName + " is not supported for " +
-                type.FullName + ".");
-        }
-
-        return method.Invoke(
-                   null,
-                   new[] { value }) ??
-               throw new InvalidOperationException(
-                   operatorName + " returned null.");
+        return new int3(
+            GraphSafeIntDivide(left.x, right.x),
+            GraphSafeIntDivide(left.y, right.y),
+            GraphSafeIntDivide(left.z, right.z));
     }
 
-    private static MethodInfo? GraphOperatorMethod(
-        string operatorName,
-        object left,
-        object right)
+    private static int4 GraphSafeIntDivide(
+        int4 left,
+        int4 right)
     {
-        Type leftType = left.GetType();
-        Type rightType = right.GetType();
-        Type? candidateType = leftType;
-
-        for (int pass = 0; pass < 2; pass++)
-        {
-            if (candidateType is not null)
-            {
-                foreach (MethodInfo method in candidateType.GetMethods(
-                             BindingFlags.Public |
-                             BindingFlags.Static))
-                {
-                    if (!string.Equals(
-                            method.Name,
-                            operatorName,
-                            StringComparison.Ordinal))
-                    {
-                        continue;
-                    }
-
-                    ParameterInfo[] parameters =
-                        method.GetParameters();
-                    if (parameters.Length == 2 &&
-                        parameters[0].ParameterType.IsInstanceOfType(left) &&
-                        parameters[1].ParameterType.IsInstanceOfType(right))
-                    {
-                        return method;
-                    }
-                }
-            }
-
-            candidateType =
-                rightType == leftType
-                    ? null
-                    : rightType;
-        }
-
-        return null;
+        return new int4(
+            GraphSafeIntDivide(left.x, right.x),
+            GraphSafeIntDivide(left.y, right.y),
+            GraphSafeIntDivide(left.z, right.z),
+            GraphSafeIntDivide(left.w, right.w));
     }
+
+` : ""}
 
     private static float ReadFloatComponent(object? value, string memberName)
     {
@@ -11852,21 +12123,33 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         background-size: 18px 18px, 18px 18px, 90px 90px, 90px 90px;
         cursor: grab;
         touch-action: none;
+        overflow-anchor: none;
       }
 
       .rml-graph-viewport.panning {
         cursor: grabbing;
       }
 
+      .rml-graph-root.viewport-pan-active .rml-graph-node {
+        pointer-events: none;
+      }
+
+      .rml-graph-pan-surface {
+        position: relative;
+        width: ${GRAPH_NATIVE_PAN_SURFACE_WIDTH}px;
+        height: ${GRAPH_NATIVE_PAN_SURFACE_HEIGHT}px;
+        overflow: visible;
+        pointer-events: auto;
+      }
+
       .rml-graph-stage {
         position: absolute;
         overflow: visible;
-        top: 0;
-        left: 0;
+        top: ${GRAPH_NATIVE_PAN_ORIGIN}px;
+        left: ${GRAPH_NATIVE_PAN_ORIGIN}px;
         width: ${GRAPH_STAGE_WIDTH}px;
         height: ${GRAPH_STAGE_HEIGHT}px;
         transform-origin: 0 0;
-        will-change: transform;
       }
 
       .rml-graph-wires,
@@ -11903,6 +12186,11 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         stroke-linecap: round;
         filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.7));
         pointer-events: none;
+      }
+
+      .rml-graph-root.large-graph .rml-graph-wire,
+      .rml-graph-root.graph-interaction-active .rml-graph-wire {
+        filter: none;
       }
 
       .rml-graph-wire.impulse {
@@ -12006,6 +12294,35 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         background: rgba(19, 23, 31, 0.98);
         box-shadow: 0 15px 42px rgba(0, 0, 0, 0.48);
         pointer-events: auto;
+      }
+
+      .rml-graph-root.large-graph .rml-graph-node,
+      .rml-graph-root.node-drag-active .rml-graph-node {
+        box-shadow: none;
+      }
+
+      .rml-graph-root.large-graph .rml-graph-node.selected,
+      .rml-graph-root.node-drag-active .rml-graph-node.selected {
+        box-shadow:
+          0 0 0 2px rgba(88, 191, 255, 0.22);
+      }
+
+      .rml-graph-root.semantic-overview .rml-graph-node-body,
+      .rml-graph-root.semantic-overview .rml-graph-node-flip,
+      .rml-graph-root.semantic-overview .rml-graph-node-delete,
+      .rml-graph-root.semantic-overview .rml-graph-node-resize-handle,
+      .rml-graph-root.semantic-overview .rml-graph-wire-hit,
+      .rml-graph-root.semantic-overview .rml-graph-wire-point {
+        visibility: hidden !important;
+        pointer-events: none !important;
+      }
+
+      .rml-graph-root.semantic-overview .rml-graph-node {
+        box-shadow: none;
+      }
+
+      .rml-graph-root.semantic-overview-minimal .rml-graph-node-header > * {
+        visibility: hidden !important;
       }
 
       .rml-graph-node.configuration {
@@ -16892,6 +17209,11 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     viewport.className =
       "rml-graph-viewport";
 
+    const panSurface =
+      document.createElement("div");
+    panSurface.className =
+      "rml-graph-pan-surface";
+
     const stage =
       document.createElement("div");
     stage.className =
@@ -16924,7 +17246,8 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       "rml-graph-nodes";
 
     stage.append(svg, nodesHost);
-    viewport.appendChild(stage);
+    panSurface.appendChild(stage);
+    viewport.appendChild(panSurface);
 
     const toast =
       ensureGraphViewportToast();
@@ -16938,6 +17261,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     dom.root = root;
     dom.toolbar = toolbar;
     dom.viewport = viewport;
+    dom.panSurface = panSurface;
     dom.stage = stage;
     dom.wires = svg;
     dom.nodesHost = nodesHost;
@@ -16991,14 +17315,135 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
   }
 
   function applyViewportTransform() {
-    if (!dom.stage) {
+    if (!dom.stage || !dom.viewport) {
       return;
     }
 
     dom.stage.style.transform =
-      `translate3d(${graph.viewport.x}px, ${graph.viewport.y}px, 0) ` +
       `scale(${graph.viewport.scale})`;
 
+    const scrollLeft =
+      GRAPH_NATIVE_PAN_ORIGIN -
+      graph.viewport.x;
+    const scrollTop =
+      GRAPH_NATIVE_PAN_ORIGIN -
+      graph.viewport.y;
+
+    if (
+      Math.abs(
+        dom.viewport.scrollLeft -
+        scrollLeft
+      ) > 0.01
+    ) {
+      dom.viewport.scrollLeft =
+        scrollLeft;
+    }
+
+    if (
+      Math.abs(
+        dom.viewport.scrollTop -
+        scrollTop
+      ) > 0.01
+    ) {
+      dom.viewport.scrollTop =
+        scrollTop;
+    }
+
+    dom.root?.classList.toggle(
+      "semantic-overview",
+      graph.viewport.scale < 0.22
+    );
+    dom.root?.classList.toggle(
+      "semantic-overview-minimal",
+      graph.viewport.scale < 0.075
+    );
+
+    if (
+      ![
+        "pan",
+        "node",
+        "node-resize",
+        "wire-segment",
+        "wire-point"
+      ].includes(
+        activeInteraction?.kind
+      )
+    ) {
+      scheduleGraphScrollLayerVisualRefresh();
+    }
+  }
+
+  function cancelViewportPanFrames() {
+    if (viewportPanFrame) {
+      cancelAnimationFrame(
+        viewportPanFrame
+      );
+      viewportPanFrame = 0;
+    }
+  }
+
+  function updateViewportPanPosition(
+    interaction,
+    clientX,
+    clientY
+  ) {
+    graph.viewport.x =
+      interaction.originalX +
+      clientX -
+      interaction.startX;
+    graph.viewport.y =
+      interaction.originalY +
+      clientY -
+      interaction.startY;
+    applyViewportTransform();
+  }
+
+  function queueViewportPanPosition(
+    interaction,
+    clientX,
+    clientY
+  ) {
+    interaction.pendingClientX =
+      clientX;
+    interaction.pendingClientY =
+      clientY;
+
+    if (viewportPanFrame) {
+      return;
+    }
+
+    viewportPanFrame =
+      requestAnimationFrame(() => {
+        viewportPanFrame = 0;
+
+        if (
+          activeInteraction !==
+            interaction ||
+          interaction.kind !== "pan"
+        ) {
+          return;
+        }
+
+        updateViewportPanPosition(
+          interaction,
+          interaction.pendingClientX,
+          interaction.pendingClientY
+        );
+      });
+  }
+
+  function finishNativeViewportPan() {
+    if (viewportPanFrame) {
+      cancelAnimationFrame(
+        viewportPanFrame
+      );
+      viewportPanFrame = 0;
+    }
+
+    dom.root?.classList.remove(
+      "viewport-pan-active"
+    );
+    applyViewportTransform();
     scheduleGraphScrollLayerVisualRefresh();
   }
 
@@ -19812,6 +20257,16 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     return keys;
   }
 
+  function largeGraphActive() {
+    return Boolean(
+      graph &&
+      (
+        graph.nodes.length >= 180 ||
+        graph.connections.length >= 320
+      )
+    );
+  }
+
   function scheduleNodeBodyWireRefresh() {
     if (nodeBodyWireRefreshFrame) {
       return;
@@ -19889,31 +20344,86 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     body.scrollLeft = saved.left;
   }
 
-  function syncNodeBodyOverflow(article) {
-    const body = article?.querySelector(
-      ".rml-graph-node-body"
-    );
-    if (!body) return;
+  function flushNodeBodyOverflowSync() {
+    nodeBodyOverflowSyncFrame = 0;
 
-    const hasY = body.scrollHeight > body.clientHeight + 1;
-    const hasX = body.scrollWidth > body.clientWidth + 1;
+    const measurements = [
+      ...pendingNodeBodyOverflowArticles
+    ]
+      .filter(article =>
+        article?.isConnected
+      )
+      .map(article => {
+        const body = article.querySelector(
+          ".rml-graph-node-body"
+        );
 
-    body.style.overflowY = hasY ? "auto" : "hidden";
-    body.style.overflowX = hasX ? "auto" : "hidden";
+        return body
+          ? {
+              body,
+              hasY:
+                body.scrollHeight >
+                body.clientHeight + 1,
+              hasX:
+                body.scrollWidth >
+                body.clientWidth + 1
+            }
+          : null;
+      })
+      .filter(Boolean);
 
-    if (!hasY) body.scrollTop = 0;
-    if (!hasX) body.scrollLeft = 0;
+    pendingNodeBodyOverflowArticles.clear();
 
-    scheduleNodeBodyWireRefresh();
+    for (const measurement of measurements) {
+      const { body, hasX, hasY } =
+        measurement;
+      body.style.overflowY =
+        hasY ? "auto" : "hidden";
+      body.style.overflowX =
+        hasX ? "auto" : "hidden";
+
+      if (!hasY) body.scrollTop = 0;
+      if (!hasX) body.scrollLeft = 0;
+    }
+
+    if (measurements.length > 0) {
+      scheduleNodeBodyWireRefresh();
+    }
   }
 
   function scheduleNodeBodyOverflowSync(article) {
-    requestAnimationFrame(() => {
-      syncNodeBodyOverflow(article);
-      requestAnimationFrame(() =>
-        syncNodeBodyOverflow(article)
+    if (article) {
+      pendingNodeBodyOverflowArticles.add(
+        article
       );
-    });
+    }
+
+    if (nodeBodyOverflowSyncFrame) {
+      return;
+    }
+
+    nodeBodyOverflowSyncFrame =
+      requestAnimationFrame(
+        flushNodeBodyOverflowSync
+      );
+  }
+
+  function scheduleAllNodeBodyOverflowSync() {
+    for (const article of
+      dom.nodesHost?.querySelectorAll(
+        ".rml-graph-node"
+      ) || []) {
+      pendingNodeBodyOverflowArticles.add(
+        article
+      );
+    }
+
+    if (!nodeBodyOverflowSyncFrame) {
+      nodeBodyOverflowSyncFrame =
+        requestAnimationFrame(
+          flushNodeBodyOverflowSync
+        );
+    }
   }
 
 
@@ -19927,10 +20437,6 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
     pruneConnections();
     renderGraphNodes();
-
-    requestAnimationFrame(() => {
-      renderGraphWires();
-    });
 
     if (dom.itemCount) {
       dom.itemCount.textContent =
@@ -20731,9 +21237,14 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       maximumHeight:
         limits.maximumHeight,
       article,
+      incidentConnectionIds:
+        incidentConnectionIds(nodeId),
       content:
         limits.content
     };
+    dom.root?.classList.add(
+      "graph-interaction-active"
+    );
 
     if (axis === "width" || axis === "both") {
       node.width = clamp(
@@ -20843,7 +21354,57 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         ".rml-graph-node-body"
       )
     );
-    renderGraphWires();
+    renderGraphWires(
+      interaction.incidentConnectionIds
+    );
+  }
+
+  function queueNodeResize(
+    clientX,
+    clientY
+  ) {
+    const interaction =
+      activeInteraction;
+
+    if (
+      interaction?.kind !==
+      "node-resize"
+    ) {
+      return;
+    }
+
+    interaction.clientX = clientX;
+    interaction.clientY = clientY;
+
+    if (nodeResizeFrame) {
+      return;
+    }
+
+    nodeResizeFrame =
+      requestAnimationFrame(() => {
+        nodeResizeFrame = 0;
+
+        if (
+          activeInteraction ===
+            interaction &&
+          interaction.kind ===
+            "node-resize"
+        ) {
+          updateNodeResize(
+            interaction.clientX,
+            interaction.clientY
+          );
+        }
+      });
+  }
+
+  function cancelNodeResizeFrame() {
+    if (nodeResizeFrame) {
+      cancelAnimationFrame(
+        nodeResizeFrame
+      );
+      nodeResizeFrame = 0;
+    }
   }
 
   function finishNodeResize(
@@ -20858,6 +21419,8 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     ) {
       return;
     }
+
+    cancelNodeResizeFrame();
 
     const node = findGraphNode(
       interaction.nodeId
@@ -20894,9 +21457,22 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     interaction.article?.classList.remove(
       "resizing"
     );
+    if (node && interaction.article) {
+      applyNodeSizeStyles(
+        node,
+        interaction.article
+      );
+      scheduleNodeBodyOverflowSync(
+        interaction.article
+      );
+    }
+    const affectedConnections =
+      interaction.incidentConnectionIds;
     activeInteraction = null;
     persistGraph(true);
-    renderGraphNodesAndWires();
+    renderGraphWires(
+      affectedConnections
+    );
     renderGraphInspector();
   }
 
@@ -21294,14 +21870,20 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     captureRenderedNodeBodyScrolls();
     dom.nodesHost.replaceChildren();
     currentAnalysis =
-      analyzeConnections(
-        graph.connections
-      );
+      currentAnalysis?.valid
+        ? currentAnalysis
+        : analyzeConnections(
+            graph.connections
+          );
 
     const bindings =
       currentAnalysis.bindings;
     const connectedKeys =
       connectedPortKeys();
+
+    const fragment =
+      document.createDocumentFragment();
+    const renderedElements = [];
 
     for (const node of graph.nodes) {
       const element =
@@ -21311,37 +21893,35 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           connectedKeys
         );
 
-      dom.nodesHost.appendChild(
+      renderedElements.push({
+        node,
         element
-      );
-
-      restoreNodeBodyScroll(
-        node.id,
-        element.querySelector(
-          ".rml-graph-node-body"
-        )
-      );
-      scheduleNodeBodyOverflowSync(element);
+      });
+      fragment.appendChild(element);
     }
 
-    requestAnimationFrame(() => {
-      for (const node of graph.nodes) {
-        const body =
-          dom.nodesHost?.querySelector(
-            `.rml-graph-node[data-graph-node-id="${CSS.escape(node.id)}"] ` +
-            ".rml-graph-node-body"
-          );
+    dom.nodesHost.appendChild(fragment);
+    dom.root?.classList.toggle(
+      "large-graph",
+      largeGraphActive()
+    );
 
+    requestAnimationFrame(() => {
+      for (const { node, element } of
+        renderedElements) {
         restoreNodeBodyScroll(
           node.id,
-          body
-        );
-        scheduleNodeBodyOverflowSync(
-          body?.closest(".rml-graph-node")
+          element.querySelector(
+            ".rml-graph-node-body"
+          )
         );
       }
 
-      refreshRenderedNodeResizeLimits();
+      if (!largeGraphActive()) {
+        refreshRenderedNodeResizeLimits();
+      } else {
+        scheduleAllNodeBodyOverflowSync();
+      }
       renderGraphWires();
     });
   }
@@ -22062,21 +22642,90 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     return handle;
   }
 
-  function renderGraphWires() {
+  function incidentConnectionIds(
+    nodeId
+  ) {
+    return new Set(
+      graph.connections
+        .filter(connection =>
+          connection.fromNode === nodeId ||
+          connection.toNode === nodeId
+        )
+        .map(connection =>
+          connection.id
+        )
+    );
+  }
+
+  function routedConnectionFamilyIds(
+    connectionId
+  ) {
+    const result = new Set([
+      connectionId
+    ]);
+    let changed = true;
+
+    while (changed) {
+      changed = false;
+
+      for (const connection of
+        graph.connections) {
+        const parentId =
+          connection.branchFrom
+            ?.connectionId;
+
+        if (
+          parentId &&
+          result.has(parentId) &&
+          !result.has(connection.id)
+        ) {
+          result.add(connection.id);
+          changed = true;
+        }
+      }
+    }
+
+    return result;
+  }
+
+  function renderGraphWires(
+    connectionIds = null
+  ) {
     if (!dom.wires) {
       return;
     }
 
-    dom.wires.replaceChildren();
+    const partial =
+      connectionIds instanceof Set;
 
-    currentAnalysis =
-      analyzeConnections(
-        graph.connections
-      );
+    if (partial) {
+      if (connectionIds.size === 0) {
+        return;
+      }
+
+      for (const connectionId of
+        connectionIds) {
+        for (const element of
+          dom.wires.querySelectorAll(
+            `[data-connection-id="${CSS.escape(connectionId)}"]`
+          )) {
+          element.remove();
+        }
+      }
+    } else {
+      dom.wires.replaceChildren();
+      currentAnalysis =
+        currentAnalysis?.valid
+          ? currentAnalysis
+          : analyzeConnections(
+              graph.connections
+            );
+    }
 
     const branchUsage =
       branchPointUsageMap();
-    const handles = [];
+    const fragment =
+      document.createDocumentFragment();
     const inputBranchStart =
       activeInteraction?.kind ===
         "connection" &&
@@ -22085,7 +22734,18 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         ? activeInteraction.start
         : null;
 
-    for (const connection of graph.connections) {
+    const connections = partial
+      ? graph.connections.filter(
+          connection =>
+            connectionIds.has(
+              connection.id
+            )
+        )
+      : graph.connections;
+    const simplifyDecoration =
+      largeGraphActive() || partial;
+
+    for (const connection of connections) {
       const geometry =
         connectionGeometry(
           connection
@@ -22128,11 +22788,18 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           : null;
 
       for (const segment of geometry.segments) {
-        const shadow =
-          svgPath(
-            "rml-graph-wire-shadow",
-            segment.d
-          );
+        if (!simplifyDecoration) {
+          const shadow =
+            svgPath(
+              "rml-graph-wire-shadow",
+              segment.d
+            );
+          shadow.dataset.connectionId =
+            connection.id;
+          shadow.dataset.segmentIndex =
+            String(segment.index);
+          fragment.appendChild(shadow);
+        }
         const visible =
           svgPath(
             `rml-graph-wire${
@@ -22183,8 +22850,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
             )
         );
 
-        dom.wires.append(
-          shadow,
+        fragment.append(
           visible,
           hit
         );
@@ -22208,7 +22874,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
             .pointId === point.id
         );
 
-        handles.push(
+        fragment.appendChild(
           createWirePointHandle(
             connection,
             point,
@@ -22221,9 +22887,10 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       }
     }
 
-    dom.wires.append(...handles);
+    dom.wires.appendChild(fragment);
 
     if (
+      !partial &&
       activeInteraction?.kind ===
       "connection"
     ) {
@@ -22237,7 +22904,15 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     clearSelectedWirePoint();
     persistGraph();
     updateSelectionClasses();
-    renderGraphWires();
+    dom.wires
+      ?.querySelectorAll(
+        ".rml-graph-wire.selected"
+      )
+      .forEach(path =>
+        path.classList.remove(
+          "selected"
+        )
+      );
     renderGraphInspector();
   }
 
@@ -24572,7 +25247,11 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       graph.connections
     );
     persistGraph(true);
-    renderGraphWires();
+    renderGraphWires(
+      routedConnectionFamilyIds(
+        connection.id
+      )
+    );
     renderGraphInspector();
 
     showGraphMessage(
@@ -24782,6 +25461,9 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       dragging: false,
       pointId: null
     };
+    dom.root?.classList.add(
+      "graph-interaction-active"
+    );
 
     try {
       dom.viewport?.setPointerCapture(
@@ -24799,7 +25481,8 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
             "wire-segment" &&
           activeInteraction.dragging
         ) {
-          updateWireSegmentDrag(
+          queueWireDragPosition(
+            "wire-segment",
             activeInteraction.clientX,
             activeInteraction.clientY
           );
@@ -24821,6 +25504,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     ) {
       return;
     }
+    cancelWireDragFrame();
 
     interaction.clientX = clientX;
     interaction.clientY = clientY;
@@ -24897,7 +25581,11 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       clientX,
       clientY
     );
-    renderGraphWires();
+    renderGraphWires(
+      routedConnectionFamilyIds(
+        connection.id
+      )
+    );
   }
 
   function finishWireSegmentDrag(
@@ -24913,6 +25601,8 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     ) {
       return;
     }
+
+    cancelWireDragFrame();
 
     const connection =
       graphConnectionById(
@@ -25043,6 +25733,9 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       originalX: point.x,
       originalY: point.y
     };
+    dom.root?.classList.add(
+      "graph-interaction-active"
+    );
 
     try {
       dom.viewport?.setPointerCapture(
@@ -25059,7 +25752,8 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           activeInteraction?.kind ===
             "wire-point"
         ) {
-          updateWirePointDrag(
+          queueWireDragPosition(
+            "wire-point",
             activeInteraction.clientX,
             activeInteraction.clientY
           );
@@ -25081,6 +25775,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     ) {
       return;
     }
+    cancelWireDragFrame();
 
     interaction.clientX = clientX;
     interaction.clientY = clientY;
@@ -25119,7 +25814,71 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       clientX,
       clientY
     );
-    renderGraphWires();
+    renderGraphWires(
+      routedConnectionFamilyIds(
+        connection.id
+      )
+    );
+  }
+
+  function queueWireDragPosition(
+    kind,
+    clientX,
+    clientY
+  ) {
+    const interaction =
+      activeInteraction;
+
+    if (
+      interaction?.kind !== kind ||
+      ![
+        "wire-segment",
+        "wire-point"
+      ].includes(kind)
+    ) {
+      return;
+    }
+
+    interaction.clientX = clientX;
+    interaction.clientY = clientY;
+
+    if (wireDragFrame) {
+      return;
+    }
+
+    wireDragFrame =
+      requestAnimationFrame(() => {
+        wireDragFrame = 0;
+
+        if (
+          activeInteraction !==
+            interaction ||
+          interaction.kind !== kind
+        ) {
+          return;
+        }
+
+        if (kind === "wire-segment") {
+          updateWireSegmentDrag(
+            interaction.clientX,
+            interaction.clientY
+          );
+        } else {
+          updateWirePointDrag(
+            interaction.clientX,
+            interaction.clientY
+          );
+        }
+      });
+  }
+
+  function cancelWireDragFrame() {
+    if (wireDragFrame) {
+      cancelAnimationFrame(
+        wireDragFrame
+      );
+      wireDragFrame = 0;
+    }
   }
 
   function finishWirePointDrag(
@@ -25135,6 +25894,8 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     ) {
       return;
     }
+
+    cancelWireDragFrame();
 
     const connection =
       graphConnectionById(
@@ -25503,24 +26264,43 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     event.preventDefault();
     event.stopPropagation();
 
+    cancelViewportPanFrames();
+
+    const selectionChanged = Boolean(
+      graph.selectedNodeId ||
+      graph.selectedConnectionId ||
+      graph.selectedWirePoint
+    );
+
     graph.selectedNodeId = null;
     graph.selectedConnectionId = null;
     clearSelectedWirePoint();
     updateSelectionClasses();
-    renderGraphWires();
+    if (selectionChanged) {
+      renderGraphWires();
+    }
     renderGraphInspector();
 
-    activeInteraction = {
+    const interaction = {
       kind: "pan",
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
       originalX: graph.viewport.x,
-      originalY: graph.viewport.y
+      originalY: graph.viewport.y,
+      pendingClientX: event.clientX,
+      pendingClientY: event.clientY
     };
+    activeInteraction = interaction;
 
     dom.viewport.classList.add(
       "panning"
+    );
+    dom.root?.classList.add(
+      "viewport-pan-active"
+    );
+    dom.root?.classList.add(
+      "graph-interaction-active"
     );
 
     try {
@@ -25559,6 +26339,10 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         event.clientX,
         event.clientY
       );
+    const element =
+      event.currentTarget.closest(
+        ".rml-graph-node"
+      );
 
     activeInteraction = {
       kind: "node",
@@ -25569,8 +26353,17 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       originalX: node.x,
       originalY: node.y,
       clientX: event.clientX,
-      clientY: event.clientY
+      clientY: event.clientY,
+      element,
+      incidentConnectionIds:
+        incidentConnectionIds(nodeId)
     };
+    dom.root?.classList.add(
+      "node-drag-active"
+    );
+    dom.root?.classList.add(
+      "graph-interaction-active"
+    );
 
     try {
       event.currentTarget
@@ -25588,7 +26381,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           activeInteraction?.kind ===
           "node"
         ) {
-          updateNodeDragPosition(
+          queueNodeDragPosition(
             activeInteraction.clientX,
             activeInteraction.clientY
           );
@@ -25640,22 +26433,55 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     );
 
     const element =
-      dom.nodesHost?.querySelector(
-        `[data-graph-node-id="${CSS.escape(node.id)}"]`
-      );
+      interaction.element;
 
     if (element) {
-      element.style.left =
-        `${node.x}px`;
-      element.style.top =
-        `${node.y}px`;
+      element.style.transform =
+        `translate3d(${node.x - interaction.originalX}px, ${node.y - interaction.originalY}px, 0)`;
     }
 
-    renderGraphWires();
+    renderGraphWires(
+      interaction.incidentConnectionIds
+    );
     updateAutoPanPointer(
       clientX,
       clientY
     );
+  }
+
+  function queueNodeDragPosition(
+    clientX,
+    clientY
+  ) {
+    const interaction =
+      activeInteraction;
+
+    if (interaction?.kind !== "node") {
+      return;
+    }
+
+    interaction.clientX = clientX;
+    interaction.clientY = clientY;
+
+    if (nodeDragFrame) {
+      return;
+    }
+
+    nodeDragFrame =
+      requestAnimationFrame(() => {
+        nodeDragFrame = 0;
+
+        if (
+          activeInteraction ===
+            interaction &&
+          interaction.kind === "node"
+        ) {
+          updateNodeDragPosition(
+            interaction.clientX,
+            interaction.clientY
+          );
+        }
+      });
   }
 
   function beginConnectionDrag(event) {
@@ -25740,6 +26566,9 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       clientX: event.clientX,
       clientY: event.clientY
     };
+    dom.root?.classList.add(
+      "graph-interaction-active"
+    );
 
     graph.selectedConnectionId = null;
     clearSelectedWirePoint();
@@ -25766,7 +26595,10 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           activeInteraction?.kind ===
           "connection"
         ) {
-          renderGraphWires();
+          queueConnectionPreview(
+            activeInteraction.clientX,
+            activeInteraction.clientY
+          );
         }
       }
     );
@@ -25860,6 +26692,62 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     path.style.stroke =
       typeInfo(type).color;
     dom.wires.appendChild(path);
+  }
+
+  function refreshConnectionPreview() {
+    dom.wires
+      ?.querySelectorAll(
+        ".rml-graph-wire-preview"
+      )
+      .forEach(element =>
+        element.remove()
+      );
+    renderConnectionPreview();
+  }
+
+  function queueConnectionPreview(
+    clientX,
+    clientY
+  ) {
+    const interaction =
+      activeInteraction;
+
+    if (
+      interaction?.kind !==
+      "connection"
+    ) {
+      return;
+    }
+
+    interaction.clientX = clientX;
+    interaction.clientY = clientY;
+
+    if (connectionPreviewFrame) {
+      return;
+    }
+
+    connectionPreviewFrame =
+      requestAnimationFrame(() => {
+        connectionPreviewFrame = 0;
+
+        if (
+          activeInteraction ===
+            interaction &&
+          interaction.kind ===
+            "connection"
+        ) {
+          refreshConnectionPreview();
+        }
+      });
+  }
+
+  function cancelConnectionPreviewFrame() {
+    if (connectionPreviewFrame) {
+      cancelAnimationFrame(
+        connectionPreviewFrame
+      );
+      connectionPreviewFrame = 0;
+    }
   }
 
   function socketRefFromElement(element) {
@@ -26110,6 +26998,8 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     ) {
       return;
     }
+
+    cancelConnectionPreviewFrame();
 
     let connected = false;
     let failureReason = "";
@@ -26740,20 +27630,16 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       activeInteraction.kind ===
       "pan"
     ) {
-      graph.viewport.x =
-        activeInteraction.originalX +
-        event.clientX -
-        activeInteraction.startX;
-      graph.viewport.y =
-        activeInteraction.originalY +
-        event.clientY -
-        activeInteraction.startY;
-      applyViewportTransform();
+      queueViewportPanPosition(
+        activeInteraction,
+        event.clientX,
+        event.clientY
+      );
     } else if (
       activeInteraction.kind ===
       "node"
     ) {
-      updateNodeDragPosition(
+      queueNodeDragPosition(
         event.clientX,
         event.clientY
       );
@@ -26761,7 +27647,7 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       activeInteraction.kind ===
       "node-resize"
     ) {
-      updateNodeResize(
+      queueNodeResize(
         event.clientX,
         event.clientY
       );
@@ -26769,7 +27655,8 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       activeInteraction.kind ===
       "wire-segment"
     ) {
-      updateWireSegmentDrag(
+      queueWireDragPosition(
+        "wire-segment",
         event.clientX,
         event.clientY
       );
@@ -26777,7 +27664,8 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       activeInteraction.kind ===
       "wire-point"
     ) {
-      updateWirePointDrag(
+      queueWireDragPosition(
+        "wire-point",
         event.clientX,
         event.clientY
       );
@@ -26785,15 +27673,14 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       activeInteraction.kind ===
       "connection"
     ) {
-      activeInteraction.clientX =
-        event.clientX;
-      activeInteraction.clientY =
-        event.clientY;
       updateAutoPanPointer(
         event.clientX,
         event.clientY
       );
-      renderGraphWires();
+      queueConnectionPreview(
+        event.clientX,
+        event.clientY
+      );
     } else if (
       activeInteraction.kind ===
       "palette"
@@ -26802,6 +27689,13 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         event.clientX,
         event.clientY
       );
+    }
+
+    if (!activeInteraction) {
+      dom.root?.classList.remove(
+        "graph-interaction-active"
+      );
+      scheduleGraphScrollLayerVisualRefresh();
     }
   }
 
@@ -26830,18 +27724,44 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       activeInteraction.kind ===
       "pan"
     ) {
+      const interaction =
+        activeInteraction;
+      updateViewportPanPosition(
+        interaction,
+        event.clientX,
+        event.clientY
+      );
       dom.viewport?.classList.remove(
         "panning"
+      );
+      finishNativeViewportPan();
+      dom.root?.classList.remove(
+        "graph-interaction-active"
       );
       activeInteraction = null;
       persistGraph(true);
     } else if (
       activeInteraction.kind ===
-      "node"
+        "node"
     ) {
+      if (nodeDragFrame) {
+        cancelAnimationFrame(
+          nodeDragFrame
+        );
+        nodeDragFrame = 0;
+      }
+      updateNodeDragPosition(
+        event.clientX,
+        event.clientY
+      );
+      const nodeId =
+        activeInteraction.nodeId;
+      const affectedConnections =
+        activeInteraction
+          .incidentConnectionIds;
       const node =
         findGraphNode(
-          activeInteraction.nodeId
+          nodeId
         );
 
       if (node) {
@@ -26853,27 +27773,59 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
           Math.round(
             node.y / GRAPH_GRID
           ) * GRAPH_GRID;
+
+        const element =
+          activeInteraction.element;
+        if (element) {
+          element.style.left =
+            `${node.x}px`;
+          element.style.top =
+            `${node.y}px`;
+          element.style.removeProperty(
+            "transform"
+          );
+        }
       }
 
       activeInteraction = null;
+      dom.root?.classList.remove(
+        "node-drag-active"
+      );
       stopAutoPan();
       persistGraph(true);
-      renderGraphNodesAndWires();
+      renderGraphWires(
+        affectedConnections
+      );
       renderGraphInspector();
     } else if (
       activeInteraction.kind ===
-      "node-resize"
+        "node-resize"
     ) {
+      cancelNodeResizeFrame();
+      updateNodeResize(
+        event.clientX,
+        event.clientY
+      );
       finishNodeResize(true);
     } else if (
       activeInteraction.kind ===
       "wire-segment"
     ) {
+      cancelWireDragFrame();
+      updateWireSegmentDrag(
+        event.clientX,
+        event.clientY
+      );
       finishWireSegmentDrag(true);
     } else if (
       activeInteraction.kind ===
       "wire-point"
     ) {
+      cancelWireDragFrame();
+      updateWirePointDrag(
+        event.clientX,
+        event.clientY
+      );
       finishWirePointDrag(true);
     } else if (
       activeInteraction.kind ===
@@ -26915,19 +27867,37 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         graph.viewport.y =
           interaction.originalY;
         applyViewportTransform();
+      } else {
+        updateViewportPanPosition(
+          interaction,
+          interaction.pendingClientX,
+          interaction.pendingClientY
+        );
       }
       dom.viewport?.classList.remove(
         "panning"
+      );
+      finishNativeViewportPan();
+      dom.root?.classList.remove(
+        "graph-interaction-active"
       );
       activeInteraction = null;
     } else if (
       interaction.kind === "node"
     ) {
+      if (nodeDragFrame) {
+        cancelAnimationFrame(
+          nodeDragFrame
+        );
+        nodeDragFrame = 0;
+      }
+      const nodeId =
+        interaction.nodeId;
+      const affectedConnections =
+        interaction.incidentConnectionIds;
+      const node =
+        findGraphNode(nodeId);
       if (restoreOriginal) {
-        const node =
-          findGraphNode(
-            interaction.nodeId
-          );
         if (node) {
           node.x =
             interaction.originalX;
@@ -26935,8 +27905,25 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
             interaction.originalY;
         }
       }
+
+      const element =
+        interaction.element;
+      if (element && node) {
+        element.style.left =
+          `${node.x}px`;
+        element.style.top =
+          `${node.y}px`;
+        element.style.removeProperty(
+          "transform"
+        );
+      }
       activeInteraction = null;
-      renderGraphNodesAndWires();
+      dom.root?.classList.remove(
+        "node-drag-active"
+      );
+      renderGraphWires(
+        affectedConnections
+      );
     } else if (
       interaction.kind ===
       "node-resize"
@@ -26980,6 +27967,10 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 
     stopAutoPan();
     clearConnectionTargetStates();
+    dom.root?.classList.remove(
+      "graph-interaction-active"
+    );
+    scheduleGraphScrollLayerVisualRefresh();
     persistGraph();
     return true;
   }
@@ -27092,6 +28083,8 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       pruneConnections();
       if (incoming === null) {
         lastPersistedGraphJson = incomingJson;
+        lastPersistedCodegenJson =
+          graphCodegenJson(graph);
         typedGraphCodegenCacheKey = "";
         typedGraphCodegenCache = null;
       } else {
@@ -27279,6 +28272,8 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
       lastPersistedGraphJson = JSON.stringify(
         graphSerializableState()
       );
+      lastPersistedCodegenJson =
+        graphCodegenJson(graph);
       typedGraphCodegenCacheKey = "";
       typedGraphCodegenCache = null;
     } else {

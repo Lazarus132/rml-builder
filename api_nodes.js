@@ -786,7 +786,7 @@
 
     const eventTemplate = findDefinitionByTitle(
       definitions,
-      title => /subscribe\s+event/i.test(title)
+      title => /subscribe\b.*\bevent/i.test(title)
     );
 
     for (const owner of typeRows) {
@@ -1247,7 +1247,7 @@
         codegenExpression(api) {
           const host = field.isStatic
             ? ownerCs
-            : `(${api.input("target").code})`;
+            : `((${ownerCs})(${api.input("target").code}))`;
           return `${host}.${escapeCSharpIdentifier(field.name)}`;
         }
       };
@@ -1285,7 +1285,7 @@
           const fields = actionFieldNames(api);
           const host = field.isStatic
             ? ownerCs
-            : `(${api.input("target").code})`;
+            : `((${ownerCs})(${api.input("target").code}))`;
           const action = `try\n{\n    ${host}.${escapeCSharpIdentifier(field.name)} = ${api.input("value").code};\n    ${fields.success} = true;\n    ${fields.exception} = null;\n}\ncatch (System.Exception exception)\n{\n    ${fields.success} = false;\n    ${fields.exception} = exception;\n}`;
           return actionWithDoneImpulse(api, action);
         },
@@ -1411,7 +1411,7 @@
       const argumentState = buildDirectArguments(api, parameters);
       const host = method.isStatic
         ? ownerCs
-        : `(${api.input("target").code})`;
+        : `((${ownerCs})(${api.input("target").code}))`;
       const call = `${host}.${escapeCSharpIdentifier(method.name)}(${argumentState.arguments.join(", ")})`;
       const invocation = isVoid
         ? `${call};`
@@ -1477,7 +1477,7 @@
     function propertyAccessExpression(api, ownerCs, property, indexes) {
       const host = property.isStatic
         ? ownerCs
-        : `(${api.input("target").code})`;
+        : `((${ownerCs})(${api.input("target").code}))`;
       if (indexes.length > 0) {
         const indexValues = indexes.map(parameter =>
           api.input(`arg${parameter.position}`).code

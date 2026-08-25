@@ -5917,8 +5917,21 @@ private static T GraphCollectionItemAt<T>(
         ? ",\n        Result = __result"
         : "";
       const resultCommit = captureResult
-        ? `\n    __result = ${field}.Result;`
+        ? `\n        __result = ${field}.Result;`
         : "";
+      const emitStatement = emit
+        ? `\n        ${emit}();`
+        : "";
+      const failureSource =
+        api.escapeString(
+          `Harmony ${kind} ${String(
+            api.node.parameters.targetType ||
+              "<unknown type>"
+          )}.${String(
+            api.node.parameters.targetMethod ||
+              "<unknown method>"
+          )}`
+        );
 
       api.addField(
         `${api.node.id}.context`,
@@ -5928,11 +5941,11 @@ private static T GraphCollectionItemAt<T>(
       let callbackCode;
 
       if (kind === "finalizer") {
-        callbackCode = `private static Exception? ${callback}(\n    object? __instance,\n    object?[] __args,\n    MethodBase __originalMethod,\n    Exception? __exception${resultParameter})\n{\n    ${field} = new PatchContext\n    {\n        Instance = __instance,\n        Arguments = __args,\n        OriginalMethod = __originalMethod,\n        Exception = __exception${resultInitializer}\n    };${emit ? `\n    ${emit}();` : ""}${resultCommit}\n    return ${field}.Exception;\n}`;
+        callbackCode = `private static Exception? ${callback}(\n    object? __instance,\n    object?[] __args,\n    MethodBase __originalMethod,\n    Exception? __exception${resultParameter})\n{\n    try\n    {\n        ${field} = new PatchContext\n        {\n            Instance = __instance,\n            Arguments = __args,\n            OriginalMethod = __originalMethod,\n            Exception = __exception${resultInitializer}\n        };${emitStatement}${resultCommit}\n        return ${field}.Exception;\n    }\n    catch (Exception exception)\n    {\n        ReportGraphRuntimeFailure(\n            "${failureSource}",\n            exception);\n        return __exception;\n    }\n}`;
       } else if (kind === "postfix") {
-        callbackCode = `private static void ${callback}(\n    object? __instance,\n    object?[] __args,\n    MethodBase __originalMethod${resultParameter})\n{\n    ${field} = new PatchContext\n    {\n        Instance = __instance,\n        Arguments = __args,\n        OriginalMethod = __originalMethod${resultInitializer}\n    };${emit ? `\n    ${emit}();` : ""}${resultCommit}\n}`;
+        callbackCode = `private static void ${callback}(\n    object? __instance,\n    object?[] __args,\n    MethodBase __originalMethod${resultParameter})\n{\n    try\n    {\n        ${field} = new PatchContext\n        {\n            Instance = __instance,\n            Arguments = __args,\n            OriginalMethod = __originalMethod${resultInitializer}\n        };${emitStatement}${resultCommit}\n    }\n    catch (Exception exception)\n    {\n        ReportGraphRuntimeFailure(\n            "${failureSource}",\n            exception);\n    }\n}`;
       } else {
-        callbackCode = `private static bool ${callback}(\n    object? __instance,\n    object?[] __args,\n    MethodBase __originalMethod${resultParameter})\n{\n    ${field} = new PatchContext\n    {\n        Instance = __instance,\n        Arguments = __args,\n        OriginalMethod = __originalMethod${resultInitializer}\n    };${emit ? `\n    ${emit}();` : ""}${resultCommit}\n    return !${field}.SkipOriginal;\n}`;
+        callbackCode = `private static bool ${callback}(\n    object? __instance,\n    object?[] __args,\n    MethodBase __originalMethod${resultParameter})\n{\n    try\n    {\n        ${field} = new PatchContext\n        {\n            Instance = __instance,\n            Arguments = __args,\n            OriginalMethod = __originalMethod${resultInitializer}\n        };${emitStatement}${resultCommit}\n        return !${field}.SkipOriginal;\n    }\n    catch (Exception exception)\n    {\n        ReportGraphRuntimeFailure(\n            "${failureSource}",\n            exception);\n        return true;\n    }\n}`;
       }
 
       api.addMember(
