@@ -256,6 +256,14 @@
 
   const FROOX_COMPONENT_TYPE_SET =
     new Set(FROOX_COMPONENT_TYPES);
+  const FROOX_COMPONENT_TYPE_NORMALIZED_SET =
+    new Set(
+      FROOX_COMPONENT_TYPES.map(value =>
+        String(value || "")
+          .replace(/^global::/, "")
+          .replace(/\s+/g, "")
+      )
+    );
   const FROOX_MATERIAL_TYPE_SET =
     new Set(FROOX_MATERIAL_TYPES);
   const FROOX_COMMON_MATERIAL_TYPE_SET =
@@ -271,6 +279,16 @@
           "scanner-cache"
         ? "cached live scanner catalog"
         : "currently unavailable API catalog";
+
+  const CATALOG_VERIFICATION_AVAILABLE =
+    Boolean(
+      componentCatalog.engineVersion &&
+      componentCatalog.engineVersion !== "unknown" &&
+      (
+        CATALOG_TYPES.length > 0 ||
+        FROOX_COMPONENT_TYPES.length > 0
+      )
+    );
 
   const RAW_CSHARP_GROUP =
     "Advanced / Raw C#";
@@ -3127,6 +3145,495 @@ private static void CreateGeneratedReversePatch(
     ) || "mesh";
   }
 
+  function splitCatalogGenericArguments(value) {
+    const source = String(value || "");
+    const result = [];
+    let depth = 0;
+    let start = 0;
+
+    for (
+      let index = 0;
+      index < source.length;
+      index += 1
+    ) {
+      const character = source[index];
+
+      if (character === "<" || character === "[") {
+        depth += 1;
+      } else if (
+        character === ">" ||
+        character === "]"
+      ) {
+        depth = Math.max(0, depth - 1);
+      } else if (
+        character === "," &&
+        depth === 0
+      ) {
+        result.push(
+          source.slice(start, index)
+        );
+        start = index + 1;
+      }
+    }
+
+    const tail = source.slice(start);
+
+    if (tail) {
+      result.push(tail);
+    }
+
+    return result
+      .map(argument =>
+        normalizedCatalogTypeName(argument)
+      )
+      .filter(Boolean);
+  }
+
+  function catalogGenericTypeParts(value) {
+    const source =
+      normalizedCatalogTypeName(value);
+    const open = source.indexOf("<");
+
+    if (open < 1) {
+      return null;
+    }
+
+    let depth = 0;
+    let close = -1;
+
+    for (
+      let index = open;
+      index < source.length;
+      index += 1
+    ) {
+      if (source[index] === "<") {
+        depth += 1;
+      } else if (source[index] === ">") {
+        depth -= 1;
+
+        if (depth === 0) {
+          close = index;
+          break;
+        }
+      }
+    }
+
+    if (close < 0) {
+      return null;
+    }
+
+    return {
+      head: source.slice(0, open),
+      arguments:
+        splitCatalogGenericArguments(
+          source.slice(open + 1, close)
+        ),
+      suffix: source.slice(close + 1)
+    };
+  }
+
+  function catalogGenericShape(
+    value,
+    genericArity = 0
+  ) {
+    const normalized =
+      normalizedCatalogTypeName(value);
+    const parsed =
+      catalogGenericTypeParts(normalized);
+
+    if (parsed) {
+      const arity =
+        Number(genericArity) ||
+        parsed.arguments.length;
+
+      return arity > 0
+        ? `${parsed.head}${parsed.suffix}|${arity}`
+        : "";
+    }
+
+    const reflectionStyle =
+      normalized.match(/^(.*)`([1-9][0-9]*)$/);
+
+    if (reflectionStyle) {
+      return `${reflectionStyle[1]}|${Number(reflectionStyle[2])}`;
+    }
+
+    return Number(genericArity) > 0
+      ? `${normalized}|${Number(genericArity)}`
+      : "";
+  }
+
+  let catalogGenericRowsByShapeCache = null;
+
+  function catalogGenericRowsByShape() {
+    if (catalogGenericRowsByShapeCache) {
+      return catalogGenericRowsByShapeCache;
+    }
+
+    const result = new Map();
+
+    for (const row of CATALOG_TYPES) {
+      const genericParameters =
+        Array.isArray(row?.genericParameters)
+          ? row.genericParameters
+          : [];
+      const shape = catalogGenericShape(
+        row?.fullName,
+        genericParameters.length
+      );
+
+      if (!shape) {
+        continue;
+      }
+
+      if (!result.has(shape)) {
+        result.set(shape, []);
+      }
+
+      result.get(shape).push(row);
+    }
+
+    catalogGenericRowsByShapeCache = result;
+    return result;
+  }
+
+  function catalogTypeInformation(value) {
+    return CATALOG_TYPE_BY_NAME.get(
+      normalizedCatalogTypeName(value)
+    ) || null;
+  }
+
+  function catalogTypeIsValueType(value) {
+    const normalized =
+      normalizedCatalogTypeName(value);
+    const aliases = new Set([
+      "bool", "byte", "sbyte", "short", "ushort",
+      "int", "uint", "long", "ulong", "nint", "nuint",
+      "char", "float", "double", "decimal",
+      "System.Boolean", "System.Byte", "System.SByte",
+      "System.Int16", "System.UInt16", "System.Int32",
+      "System.UInt32", "System.Int64", "System.UInt64",
+      "System.IntPtr", "System.UIntPtr", "System.Char",
+      "System.Single", "System.Double", "System.Decimal"
+    ]);
+
+    if (aliases.has(normalized)) {
+      return true;
+    }
+
+    const information =
+      catalogTypeInformation(normalized);
+
+    return Boolean(
+      information &&
+      ["struct", "enum"].includes(
+        String(information.kind || "")
+          .toLowerCase()
+      )
+    );
+  }
+
+  function substituteCatalogTypeParameters(
+    value,
+    substitutions
+  ) {
+    let result = String(value || "");
+
+    for (const [name, replacement] of
+      substitutions) {
+      const escaped = name.replace(
+        /[.*+?^${}()|[\]\\]/g,
+        "\\$&"
+      );
+
+      result = result.replace(
+        new RegExp(
+          `(^|[^A-Za-z0-9_])${escaped}(?=$|[^A-Za-z0-9_])`,
+          "g"
+        ),
+        (_match, prefix) =>
+          `${prefix}${replacement}`
+      );
+    }
+
+    return normalizedCatalogTypeName(result);
+  }
+
+  function catalogGenericArgumentIsKnown(value) {
+    const normalized =
+      normalizedCatalogTypeName(value);
+
+    if (!normalized) {
+      return false;
+    }
+
+    if (normalized.endsWith("[]")) {
+      return catalogGenericArgumentIsKnown(
+        normalized.slice(0, -2)
+      );
+    }
+
+    if (
+      catalogTypeInformation(normalized) ||
+      catalogTypeIsValueType(normalized) ||
+      [
+        "object", "string", "System.Object",
+        "System.String", "System.Type"
+      ].includes(normalized)
+    ) {
+      return true;
+    }
+
+    const parsed =
+      catalogGenericTypeParts(normalized);
+
+    if (!parsed) {
+      return false;
+    }
+
+    const rows =
+      catalogGenericRowsByShape().get(
+        catalogGenericShape(normalized)
+      ) || [];
+
+    return Boolean(
+      rows.length > 0 &&
+      parsed.arguments.every(
+        catalogGenericArgumentIsKnown
+      )
+    );
+  }
+
+  function catalogGenericConstraintsAreSatisfied(
+    definition,
+    argumentsList
+  ) {
+    const parameters =
+      Array.isArray(definition?.genericParameters)
+        ? [...definition.genericParameters]
+            .sort(
+              (left, right) =>
+                Number(left?.position) -
+                Number(right?.position)
+            )
+        : [];
+
+    if (
+      parameters.length > 0 &&
+      parameters.length !== argumentsList.length
+    ) {
+      return false;
+    }
+
+    const substitutions = new Map();
+
+    parameters.forEach((parameter, index) => {
+      substitutions.set(
+        String(
+          parameter?.name || `T${index}`
+        ),
+        argumentsList[index]
+      );
+    });
+
+    return parameters.every(
+      (parameter, index) => {
+        const argument = argumentsList[index];
+        const information =
+          catalogTypeInformation(argument);
+        const isValueType =
+          catalogTypeIsValueType(argument);
+
+        if (
+          parameter?.valueTypeConstraint === true &&
+          !isValueType
+        ) {
+          return false;
+        }
+
+        if (
+          parameter?.referenceTypeConstraint === true &&
+          isValueType
+        ) {
+          return false;
+        }
+
+        if (
+          parameter?.defaultConstructorConstraint === true &&
+          !isValueType &&
+          information &&
+          Array.isArray(information.constructors) &&
+          information.constructors.length > 0 &&
+          !information.constructors.some(
+            constructor =>
+              constructor?.isPublic !== false &&
+              Array.isArray(
+                constructor?.parameters
+              ) &&
+              constructor.parameters.length === 0
+          )
+        ) {
+          return false;
+        }
+
+        const constraints =
+          Array.isArray(parameter?.constraints)
+            ? parameter.constraints
+            : [];
+
+        return constraints.every(value => {
+          const constraint =
+            substituteCatalogTypeParameters(
+              value,
+              substitutions
+            );
+
+          if (
+            constraint === "System.ValueType"
+          ) {
+            return isValueType;
+          }
+
+          if (constraint === "System.Enum") {
+            return String(
+              information?.kind || ""
+            ).toLowerCase() === "enum";
+          }
+
+          return catalogTypeSatisfiesConstraint(
+            argument,
+            constraint
+          );
+        });
+      }
+    );
+  }
+
+  function resolveCatalogComponentType(value) {
+    const original = String(value || "").trim();
+
+    if (!isSafeCSharpTypeExpression(original)) {
+      return {
+        valid: false,
+        type: "__RML_INVALID_COMPONENT_TYPE__",
+        reason: "it is not a safe C# type expression"
+      };
+    }
+
+    const normalized =
+      normalizedCatalogTypeName(original);
+
+    if (!CATALOG_VERIFICATION_AVAILABLE) {
+      return {
+        valid: true,
+        verified: false,
+        type: normalized,
+        reason: ""
+      };
+    }
+
+    if (
+      FROOX_COMPONENT_TYPE_NORMALIZED_SET.has(
+        normalized
+      )
+    ) {
+      return {
+        valid: true,
+        verified: true,
+        type: normalized,
+        reason: ""
+      };
+    }
+
+    const parsed =
+      catalogGenericTypeParts(normalized);
+
+    if (!parsed) {
+      return {
+        valid: false,
+        type: normalized,
+        reason:
+          `it is not a concrete component in the ${CATALOG_SOURCE_DESCRIPTION}`
+      };
+    }
+
+    if (
+      parsed.suffix ||
+      parsed.arguments.length === 0 ||
+      !parsed.arguments.every(
+        catalogGenericArgumentIsKnown
+      )
+    ) {
+      return {
+        valid: false,
+        type: normalized,
+        reason:
+          "one or more generic arguments are open, unknown or malformed"
+      };
+    }
+
+    const definitions =
+      catalogGenericRowsByShape().get(
+        catalogGenericShape(normalized)
+      ) || [];
+    const componentDefinition =
+      definitions.find(row =>
+        row?.isComponent === true ||
+        row?.isAttachableComponent === true ||
+        catalogTypeSatisfiesConstraint(
+          row?.fullName,
+          "FrooxEngine.Component"
+        )
+      );
+
+    if (!componentDefinition) {
+      return {
+        valid: false,
+        type: normalized,
+        reason:
+          `its open generic component definition is not present in the ${CATALOG_SOURCE_DESCRIPTION}`
+      };
+    }
+
+    if (
+      componentDefinition.isAbstract === true ||
+      componentDefinition.isStatic === true ||
+      ["interface", "static"].includes(
+        String(
+          componentDefinition.kind || ""
+        ).toLowerCase()
+      )
+    ) {
+      return {
+        valid: false,
+        type: normalized,
+        reason:
+          "its generic component definition is not concrete"
+      };
+    }
+
+    if (
+      !catalogGenericConstraintsAreSatisfied(
+        componentDefinition,
+        parsed.arguments
+      )
+    ) {
+      return {
+        valid: false,
+        type: normalized,
+        reason:
+          "its generic arguments do not satisfy the scanner catalog constraints"
+      };
+    }
+
+    return {
+      valid: true,
+      verified: true,
+      type: normalized,
+      reason: ""
+    };
+  }
+
   function catalogQualifiedTypeName(
     api,
     value,
@@ -3145,6 +3652,13 @@ private static void CreateGeneratedReversePatch(
       candidate.startsWith("global::")
         ? candidate.slice(8)
         : candidate;
+
+    if (!CATALOG_VERIFICATION_AVAILABLE) {
+      api?.warning?.(
+        "The Resonite API catalog is not available yet. Safe configured C# types were preserved without substitution; reconnect the scanner to verify them."
+      );
+      return normalized;
+    }
 
     if (allowedTypes.has(normalized)) {
       return normalized;
@@ -3231,13 +3745,31 @@ private static void CreateGeneratedReversePatch(
   }
 
   function verifiedComponentType(api) {
-    return catalogQualifiedTypeName(
-      api,
-      api.node.parameters?.componentType,
-      FROOX_COMPONENT_TYPE_SET,
-      "FrooxEngine.Grabbable",
-      "Component type"
+    const requested =
+      api.node.parameters?.componentType;
+    const resolved =
+      resolveCatalogComponentType(requested);
+
+    if (resolved.valid) {
+      if (resolved.verified === false) {
+        api?.warning?.(
+          "The Resonite API catalog is not available yet. Safe configured C# types were preserved without substitution; reconnect the scanner to verify them."
+        );
+      }
+      return resolved.type;
+    }
+
+    const nodeName = String(
+      api.node.label ||
+      api.node.id ||
+      "<unknown node>"
+    ).trim();
+
+    api?.diagnostic?.(
+      `Component type '${String(requested || "<empty>").trim()}' on node '${nodeName}' could not be verified for FrooxEngine ${componentCatalog.engineVersion}: ${resolved.reason}. Code generation was blocked for this type; no fallback component was substituted.`
     );
+
+    return resolved.type;
   }
 
   function directFieldName(api, suffix) {
@@ -3360,7 +3892,9 @@ private static void CreateGeneratedReversePatch(
           typeof type.fullName === "string"
         )
         .map(type => [
-          type.fullName,
+          normalizedCatalogTypeName(
+            type.fullName
+          ),
           type
         ])
     );
@@ -3369,6 +3903,7 @@ private static void CreateGeneratedReversePatch(
     return String(value || "")
       .trim()
       .replace(/^global::/, "")
+      .replace(/\s+/g, "")
       .replace(/&$/, "");
   }
 

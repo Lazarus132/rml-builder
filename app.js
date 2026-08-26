@@ -21,14 +21,20 @@ const ACTIVE_PREVIEW_STORAGE_KEY = RML_VISUAL_TOUR_TEST
   : PREVIEW_STORAGE_KEY;
 const PROJECT_FORMAT = "rml-configuration-builder-project";
 const PROJECT_FORMAT_VERSION = 1;
-const PROJECT_FILE_MAX_BYTES = 5 * 1024 * 1024;
+const PROJECT_FILE_MAX_BYTES = 512 * 1024 * 1024;
 const PROJECT_TREE_MAX_DEPTH = 32;
-const PROJECT_TREE_MAX_ITEMS = 10000;
+const PROJECT_TREE_MAX_ITEMS = 1000000;
+const PROJECT_LOCAL_STORAGE_MAX_BYTES =
+  2 * 1024 * 1024;
+const PROJECT_DRAFT_DATABASE_NAME =
+  "rml-builder-project-drafts";
+const PROJECT_DRAFT_DATABASE_VERSION = 1;
+const PROJECT_DRAFT_STORE_NAME = "drafts";
 const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "stable-configuration-codegen-import-sync-20260825-v375f1";
+  "stable-large-graph-workers-live-catalog-20260826-v380f1";
 
 function exposeRmlBuilderBuildId() {
   document.documentElement.dataset
@@ -444,6 +450,477 @@ const APP_SCRIPT_BASE_URL =
   document.currentScript?.src ||
   window.location.href;
 
+let projectIoWorker = null;
+let projectIoRequestSequence = 1;
+const projectIoPendingRequests = new Map();
+
+function projectIoWorkerInstance() {
+  if (projectIoWorker) {
+    return projectIoWorker;
+  }
+
+  if (typeof Worker !== "function") {
+    return null;
+  }
+
+  try {
+    const worker = new Worker(
+      new URL(
+        "project_io_worker.js?v=2-file-io-v380f1",
+        APP_SCRIPT_BASE_URL
+      ),
+      {
+        name: "rml-project-io"
+      }
+    );
+
+    worker.addEventListener(
+      "message",
+      event => {
+        const response = event.data || {};
+        const pending =
+          projectIoPendingRequests.get(
+            response.id
+          );
+
+        if (!pending) {
+          return;
+        }
+
+        projectIoPendingRequests.delete(
+          response.id
+        );
+
+        if (response.ok === true) {
+          pending.resolve(response);
+        } else {
+          const error = new Error(
+            response.error?.message ||
+            "Project I/O worker failed."
+          );
+          error.name =
+            response.error?.name ||
+            "Error";
+          pending.reject(error);
+        }
+      }
+    );
+
+    worker.addEventListener(
+      "error",
+      event => {
+        const error = new Error(
+          event.message ||
+          "Project I/O worker failed."
+        );
+
+        for (const pending of
+          projectIoPendingRequests.values()) {
+          pending.reject(error);
+        }
+
+        projectIoPendingRequests.clear();
+        worker.terminate();
+        projectIoWorker = null;
+      }
+    );
+
+    projectIoWorker = worker;
+    return projectIoWorker;
+  } catch (error) {
+    console.warn(
+      "Project I/O worker is unavailable; using the compatible main-thread fallback.",
+      error
+    );
+    return null;
+  }
+}
+
+function projectIoRequest(
+  operation,
+  payload
+) {
+  const worker =
+    projectIoWorkerInstance();
+
+  if (!worker) {
+    return new Promise(
+      (resolve, reject) => {
+        window.setTimeout(() => {
+          try {
+            if (operation === "parse") {
+              resolve({
+                ok: true,
+                value: JSON.parse(
+                  String(payload.text ?? "")
+                )
+              });
+              return;
+            }
+
+            if (operation === "parseFile") {
+              if (
+                !payload.file ||
+                typeof payload.file.text !== "function"
+              ) {
+                throw new TypeError(
+                  "The project file is not a readable Blob."
+                );
+              }
+
+              void payload.file.text()
+                .then(text => {
+                  try {
+                    resolve({
+                      ok: true,
+                      value: JSON.parse(text)
+                    });
+                  } catch (error) {
+                    reject(error);
+                  }
+                }, reject);
+              return;
+            }
+
+            if (operation === "stringify") {
+              resolve({
+                ok: true,
+                text: JSON.stringify(
+                  payload.value,
+                  null,
+                  Number(payload.space) || 0
+                )
+              });
+              return;
+            }
+
+            throw new Error(
+              `Unsupported project I/O operation '${operation}'.`
+            );
+          } catch (error) {
+            reject(error);
+          }
+        }, 0);
+      }
+    );
+  }
+
+  const id =
+    projectIoRequestSequence++;
+
+  return new Promise(
+    (resolve, reject) => {
+      projectIoPendingRequests.set(
+        id,
+        { resolve, reject }
+      );
+      worker.postMessage({
+        id,
+        operation,
+        ...payload
+      });
+    }
+  );
+}
+
+function formatProjectByteLimit(value) {
+  const mebibytes =
+    Number(value) /
+    (1024 * 1024);
+
+  return `${mebibytes.toLocaleString("de-DE", {
+    maximumFractionDigits: 0
+  })} MiB`;
+}
+
+const LARGE_GRAPH_BACKGROUND_CODEGEN_NODE_THRESHOLD =
+  10000;
+const LARGE_GRAPH_BACKGROUND_CODEGEN_CONNECTION_THRESHOLD =
+  20000;
+let graphCodegenWorker = null;
+let graphCodegenWorkerCatalogKey = "";
+let graphCodegenWorkerNeedsCatalog = false;
+let graphCodegenWorkerSequence = 1;
+let graphCodegenWorkerRunning = false;
+let graphCodegenWorkerQueuedBuild = null;
+let graphCodegenWorkerActiveBuild = null;
+let graphCodegenWorkerCachedKey = "";
+let graphCodegenWorkerCachedResult = null;
+let graphCodegenWorkerLastError = null;
+
+function largeGraphUsesBackgroundCodegen(
+  extensionState
+) {
+  return Boolean(
+    extensionState &&
+    (
+      (
+        Array.isArray(extensionState.nodes) &&
+        extensionState.nodes.length >
+          LARGE_GRAPH_BACKGROUND_CODEGEN_NODE_THRESHOLD
+      ) ||
+      (
+        Array.isArray(
+          extensionState.connections
+        ) &&
+        extensionState.connections.length >
+          LARGE_GRAPH_BACKGROUND_CODEGEN_CONNECTION_THRESHOLD
+      )
+    )
+  );
+}
+
+function graphCodegenCatalogKey(catalog) {
+  return String(
+    catalog?.catalogFingerprint ||
+    catalog?.assemblyFingerprint ||
+    catalog?.engineVersion ||
+    "unknown"
+  );
+}
+
+function largeGraphCodegenKey(
+  extensionState
+) {
+  const metadata = state.metadata || {};
+  const catalog =
+    window.RMLResoniteApiCatalog ||
+    window.RMLFrooxComponentCatalog ||
+    null;
+
+  return JSON.stringify({
+    revision:
+      Number(extensionState?.revision) || 0,
+    nodes:
+      extensionState?.nodes?.length || 0,
+    connections:
+      extensionState?.connections?.length || 0,
+    namespaceName:
+      metadata.namespaceName || "",
+    className:
+      metadata.className || "",
+    version:
+      metadata.version || "",
+    catalog:
+      graphCodegenCatalogKey(catalog),
+    definitions:
+      Number(
+        window.__RMLNodeDefinitionRevision
+      ) || 0,
+    apiFactory:
+      Number(
+        window.__RMLApiNodeFactoryVersion
+      ) || 0
+  });
+}
+
+function terminateGraphCodegenWorker() {
+  graphCodegenWorker?.terminate?.();
+  graphCodegenWorker = null;
+  graphCodegenWorkerCatalogKey = "";
+  graphCodegenWorkerNeedsCatalog = false;
+}
+
+function ensureGraphCodegenWorker(catalog) {
+  const catalogKey =
+    graphCodegenCatalogKey(catalog);
+
+  if (
+    graphCodegenWorker &&
+    graphCodegenWorkerCatalogKey ===
+      catalogKey
+  ) {
+    return graphCodegenWorker;
+  }
+
+  terminateGraphCodegenWorker();
+
+  if (typeof Worker !== "function") {
+    throw new Error(
+      "Background graph code generation requires Web Worker support."
+    );
+  }
+
+  const worker = new Worker(
+    new URL(
+      "graph_codegen_worker.js?v=1-background-codegen-v380f1",
+      APP_SCRIPT_BASE_URL
+    ),
+    {
+      name: "rml-graph-codegen"
+    }
+  );
+
+  worker.addEventListener(
+    "message",
+    event => {
+      const response = event.data || {};
+      const active =
+        graphCodegenWorkerActiveBuild;
+
+      if (
+        !active ||
+        response.id !== active.id
+      ) {
+        return;
+      }
+
+      graphCodegenWorkerActiveBuild = null;
+
+      if (response.ok === true) {
+        graphCodegenWorkerCachedKey =
+          active.key;
+        graphCodegenWorkerCachedResult =
+          response.result;
+        graphCodegenWorkerLastError = null;
+      } else {
+        graphCodegenWorkerLastError =
+          new Error(
+            response.error?.message ||
+            "Background graph code generation failed."
+          );
+      }
+
+      graphCodegenWorkerRunning = false;
+
+      window.setTimeout(() => {
+        try {
+          updateGeneratedOutput();
+        } catch (error) {
+          console.error(
+            "Generated output refresh after background graph code generation failed.",
+            error
+          );
+        }
+      }, 0);
+
+      void pumpGraphCodegenWorkerQueue();
+    }
+  );
+
+  worker.addEventListener(
+    "error",
+    event => {
+      graphCodegenWorkerLastError =
+        new Error(
+          event.message ||
+          "Background graph code generation worker failed."
+        );
+      graphCodegenWorkerActiveBuild = null;
+      graphCodegenWorkerRunning = false;
+      terminateGraphCodegenWorker();
+      void pumpGraphCodegenWorkerQueue();
+    }
+  );
+
+  graphCodegenWorker = worker;
+  graphCodegenWorkerCatalogKey =
+    catalogKey;
+  graphCodegenWorkerNeedsCatalog = true;
+  return worker;
+}
+
+async function pumpGraphCodegenWorkerQueue() {
+  if (
+    graphCodegenWorkerRunning ||
+    !graphCodegenWorkerQueuedBuild
+  ) {
+    return;
+  }
+
+  const build =
+    graphCodegenWorkerQueuedBuild;
+  graphCodegenWorkerQueuedBuild = null;
+  graphCodegenWorkerRunning = true;
+  graphCodegenWorkerActiveBuild =
+    build;
+
+  try {
+    const worker =
+      ensureGraphCodegenWorker(
+        build.catalog
+      );
+
+    const catalog =
+      graphCodegenWorkerNeedsCatalog
+        ? build.catalog
+        : null;
+    graphCodegenWorkerNeedsCatalog = false;
+
+    worker.postMessage({
+      id: build.id,
+      operation: "build",
+      catalog,
+      state: build.state,
+      entries: build.entries
+    });
+  } catch (error) {
+    graphCodegenWorkerLastError =
+      error instanceof Error
+        ? error
+        : new Error(String(error));
+    graphCodegenWorkerActiveBuild = null;
+    graphCodegenWorkerRunning = false;
+  }
+}
+
+function requestLargeGraphCodegen(
+  extensionState,
+  key
+) {
+  if (
+    graphCodegenWorkerActiveBuild?.key ===
+      key ||
+    graphCodegenWorkerQueuedBuild?.key ===
+      key
+  ) {
+    return;
+  }
+
+  const catalog =
+    window.RMLResoniteApiCatalog ||
+    window.RMLFrooxComponentCatalog ||
+    null;
+
+  graphCodegenWorkerQueuedBuild = {
+    id: graphCodegenWorkerSequence++,
+    key,
+    catalog,
+    state:
+      builderCodegenStateSnapshot(),
+    entries:
+      currentFlattenedNodes()
+  };
+  graphCodegenWorkerLastError = null;
+  void pumpGraphCodegenWorkerQueue();
+}
+
+function pendingLargeGraphContribution() {
+  const message =
+    graphCodegenWorkerLastError
+      ? `Background graph code generation failed: ${graphCodegenWorkerLastError.message}`
+      : "Large graph code generation is running in a background worker. Export becomes available automatically when it finishes.";
+
+  return {
+    active: true,
+    pending: !graphCodegenWorkerLastError,
+    diagnostics: [message],
+    warnings: [],
+    files: [],
+    projects: [],
+    applyStatements: {},
+    syncStatements: {},
+    reactionStatements: {},
+    initializeStatement: "",
+    onEngineInitializedStatement: "",
+    onConfigurationSynchronizedStatement: "",
+    requirements: {
+      usesElements: false,
+      usesRenderiteShared: false
+    }
+  };
+}
+
 let colorPickerAdaptiveFitLoadPromise = null;
 let informationTemplateLoadPromise = null;
 let setupAssistantLoadPromise = null;
@@ -742,6 +1219,10 @@ function movePreviewFocusAwayFromCloseButton() {
 }
 
 function clone(value) {
+  if (typeof structuredClone === "function") {
+    return structuredClone(value);
+  }
+
   return JSON.parse(JSON.stringify(value));
 }
 
@@ -3365,6 +3846,30 @@ function getTypedNodeGraphContribution() {
     };
   }
 
+  if (
+    largeGraphUsesBackgroundCodegen(
+      extensionState
+    )
+  ) {
+    const key =
+      largeGraphCodegenKey(
+        extensionState
+      );
+
+    if (
+      graphCodegenWorkerCachedResult &&
+      graphCodegenWorkerCachedKey === key
+    ) {
+      return graphCodegenWorkerCachedResult;
+    }
+
+    requestLargeGraphCodegen(
+      extensionState,
+      key
+    );
+    return pendingLargeGraphContribution();
+  }
+
   const generator =
     window.RMLTypedNodeGraphGenerator;
 
@@ -3397,7 +3902,7 @@ function getTypedNodeGraphContribution() {
     const contribution =
       generator.build({
         state:
-          builderStateSnapshot(),
+          builderCodegenStateSnapshot(),
         entries:
           clone(
             currentFlattenedNodes()
@@ -5431,8 +5936,14 @@ function projectString(
 }
 
 function createProjectDocument(
-  includeSavedAt = false
+  includeSavedAt = false,
+  detached = true
 ) {
+  const snapshot = value =>
+    detached
+      ? clone(value)
+      : value;
+
   return {
     format: PROJECT_FORMAT,
     formatVersion:
@@ -5443,16 +5954,16 @@ function createProjectDocument(
             new Date().toISOString()
         }
       : {}),
-    metadata: clone(
+    metadata: snapshot(
       state.metadata
     ),
-    exportOptions: clone(
+    exportOptions: snapshot(
       state.exportOptions
     ),
-    nodes: clone(
+    nodes: snapshot(
       state.nodes
     ),
-    extensions: clone(
+    extensions: snapshot(
       isPlainObject(state.extensions)
         ? state.extensions
         : {}
@@ -6022,7 +6533,7 @@ function parseProjectDocument(
         source.nodes
       ),
     extensions:
-      clone(extensionsSource),
+      extensionsSource,
     workspace: {
       selectedId:
         projectString(
@@ -6061,7 +6572,7 @@ function applyProjectDocument(
     project.nodes;
   state.extensions =
     isPlainObject(project.extensions)
-      ? clone(project.extensions)
+      ? project.extensions
       : {};
   state.selectedId =
     project.workspace.selectedId &&
@@ -6087,18 +6598,322 @@ function applyProjectDocument(
     )];
 }
 
-function persist() {
+let projectDraftPersistTimer = 0;
+let projectDraftPersistRevision = 0;
+let pendingProjectDraftWrite = null;
+let projectDraftWriteRunning = false;
+
+function openProjectDraftDatabase() {
+  return new Promise((resolve, reject) => {
+    if (!window.indexedDB) {
+      reject(
+        new Error(
+          "IndexedDB is unavailable."
+        )
+      );
+      return;
+    }
+
+    const request =
+      window.indexedDB.open(
+        PROJECT_DRAFT_DATABASE_NAME,
+        PROJECT_DRAFT_DATABASE_VERSION
+      );
+
+    request.onupgradeneeded = () => {
+      const database = request.result;
+
+      if (
+        !database.objectStoreNames.contains(
+          PROJECT_DRAFT_STORE_NAME
+        )
+      ) {
+        database.createObjectStore(
+          PROJECT_DRAFT_STORE_NAME,
+          { keyPath: "id" }
+        );
+      }
+    };
+    request.onsuccess = () =>
+      resolve(request.result);
+    request.onerror = () =>
+      reject(
+        request.error ||
+        new Error(
+          "Project draft database could not be opened."
+        )
+      );
+    request.onblocked = () =>
+      reject(
+        new Error(
+          "Project draft database upgrade is blocked."
+        )
+      );
+  });
+}
+
+async function writeProjectDraftRecord(
+  project,
+  revision
+) {
+  let database;
+
   try {
-    localStorage.setItem(
-      ACTIVE_STORAGE_KEY,
-      JSON.stringify(
-        createProjectDocument()
-      )
-    );
-  } catch (error) {
-    console.warn("Could not save the local builder draft.", error);
+    database =
+      await openProjectDraftDatabase();
+
+    await new Promise((resolve, reject) => {
+      const transaction =
+        database.transaction(
+          PROJECT_DRAFT_STORE_NAME,
+          "readwrite"
+        );
+
+      transaction
+        .objectStore(
+          PROJECT_DRAFT_STORE_NAME
+        )
+        .put({
+          id: ACTIVE_STORAGE_KEY,
+          revision,
+          savedAtUtc:
+            new Date().toISOString(),
+          project
+        });
+
+      transaction.oncomplete = () =>
+        resolve(true);
+      transaction.onerror = () =>
+        reject(
+          transaction.error ||
+          new Error(
+            "Project draft could not be written."
+          )
+        );
+      transaction.onabort = () =>
+        reject(
+          transaction.error ||
+          new Error(
+            "Project draft write was aborted."
+          )
+        );
+    });
+  } finally {
+    database?.close?.();
   }
 }
+
+async function readProjectDraftRecord() {
+  let database;
+
+  try {
+    database =
+      await openProjectDraftDatabase();
+
+    return await new Promise(
+      (resolve, reject) => {
+        const transaction =
+          database.transaction(
+            PROJECT_DRAFT_STORE_NAME,
+            "readonly"
+          );
+        const request =
+          transaction
+            .objectStore(
+              PROJECT_DRAFT_STORE_NAME
+            )
+            .get(ACTIVE_STORAGE_KEY);
+
+        request.onsuccess = () =>
+          resolve(
+            isPlainObject(
+              request.result?.project
+            )
+              ? request.result
+              : null
+          );
+        request.onerror = () =>
+          reject(
+            request.error ||
+            new Error(
+              "Project draft could not be read."
+            )
+          );
+      }
+    );
+  } catch (error) {
+    console.debug(
+      "No IndexedDB project draft is available.",
+      error
+    );
+    return null;
+  } finally {
+    database?.close?.();
+  }
+}
+
+function graphNodeCountInProject(project) {
+  const nodes =
+    project?.extensions
+      ?.typedNodeGraph
+      ?.nodes;
+
+  return Array.isArray(nodes)
+    ? nodes.length
+    : 0;
+}
+
+async function updateLegacyLocalDraft(
+  project
+) {
+  const graphNodeCount =
+    graphNodeCountInProject(project);
+
+  if (graphNodeCount > 2000) {
+    try {
+      localStorage.removeItem(
+        ACTIVE_STORAGE_KEY
+      );
+    } catch {
+    }
+    return;
+  }
+
+  try {
+    const response =
+      await projectIoRequest(
+        "stringify",
+        {
+          value: project,
+          space: 0
+        }
+      );
+    const text = String(
+      response.text || ""
+    );
+
+    if (
+      new TextEncoder().encode(text)
+        .byteLength <=
+      PROJECT_LOCAL_STORAGE_MAX_BYTES
+    ) {
+      localStorage.setItem(
+        ACTIVE_STORAGE_KEY,
+        text
+      );
+    } else {
+      localStorage.removeItem(
+        ACTIVE_STORAGE_KEY
+      );
+    }
+  } catch (error) {
+    console.debug(
+      "The compatibility localStorage draft was skipped.",
+      error
+    );
+  }
+}
+
+async function flushProjectDraftWrites() {
+  if (projectDraftWriteRunning) {
+    return;
+  }
+
+  projectDraftWriteRunning = true;
+
+  try {
+    while (pendingProjectDraftWrite) {
+      const current =
+        pendingProjectDraftWrite;
+      pendingProjectDraftWrite = null;
+
+      try {
+        await writeProjectDraftRecord(
+          current.project,
+          current.revision
+        );
+
+        if (
+          current.revision ===
+          projectDraftPersistRevision
+        ) {
+          await updateLegacyLocalDraft(
+            current.project
+          );
+        }
+      } catch (error) {
+        console.warn(
+          "Could not save the IndexedDB builder draft.",
+          error
+        );
+      }
+    }
+  } finally {
+    projectDraftWriteRunning = false;
+  }
+}
+
+function persist(immediate = false) {
+  projectDraftPersistRevision += 1;
+  const revision =
+    projectDraftPersistRevision;
+  const graphNodeCount =
+    graphNodeCountInProject(state);
+  const delay = immediate
+    ? 0
+    : graphNodeCount > 10000
+      ? 750
+      : 120;
+
+  window.clearTimeout(
+    projectDraftPersistTimer
+  );
+
+  projectDraftPersistTimer =
+    window.setTimeout(() => {
+      projectDraftPersistTimer = 0;
+
+      const enqueue = () => {
+        pendingProjectDraftWrite = {
+          revision,
+          project:
+            createProjectDocument(
+              false,
+              false
+            )
+        };
+        void flushProjectDraftWrites();
+      };
+
+      if (
+        !immediate &&
+        typeof requestIdleCallback ===
+          "function"
+      ) {
+        requestIdleCallback(
+          enqueue,
+          { timeout: 1500 }
+        );
+      } else {
+        enqueue();
+      }
+    }, delay);
+}
+
+window.addEventListener(
+  "pagehide",
+  () => persist(true),
+  { capture: true }
+);
+
+document.addEventListener(
+  "visibilitychange",
+  () => {
+    if (document.visibilityState === "hidden") {
+      persist(true);
+    }
+  }
+);
 
 function resetProjectState() {
   state.metadata = { ...DEFAULT_METADATA };
@@ -6119,27 +6934,75 @@ function exampleProjectUrl() {
   );
 }
 
-function parseProjectJsonText(
+async function parseProjectJsonText(
   sourceText,
   displayName = "JSON project"
 ) {
   const text = String(sourceText ?? "");
 
-  if (
-    new TextEncoder().encode(text).byteLength >
-    PROJECT_FILE_MAX_BYTES
-  ) {
+  const definitelyWithinLimit =
+    text.length <=
+    Math.floor(
+      PROJECT_FILE_MAX_BYTES / 3
+    );
+  const exceedsLimit =
+    text.length > PROJECT_FILE_MAX_BYTES ||
+    (
+      !definitelyWithinLimit &&
+      new TextEncoder().encode(text)
+        .byteLength >
+        PROJECT_FILE_MAX_BYTES
+    );
+
+  if (exceedsLimit) {
     throw new Error(
-      `${displayName} is larger than the 5 MB project limit.`
+      `${displayName} is larger than the ${formatProjectByteLimit(PROJECT_FILE_MAX_BYTES)} project limit.`
     );
   }
 
   try {
+    const response =
+      await projectIoRequest(
+        "parse",
+        { text }
+      );
+
     return parseProjectDocument(
-      JSON.parse(text)
+      response.value
     );
   } catch (error) {
-    if (error instanceof SyntaxError) {
+    if (
+      error instanceof SyntaxError ||
+      error?.name === "SyntaxError"
+    ) {
+      throw new Error(
+        `${displayName} does not contain valid JSON.`
+      );
+    }
+
+    throw error;
+  }
+}
+
+async function parseProjectJsonFile(
+  file,
+  displayName = "JSON project"
+) {
+  try {
+    const response =
+      await projectIoRequest(
+        "parseFile",
+        { file }
+      );
+
+    return parseProjectDocument(
+      response.value
+    );
+  } catch (error) {
+    if (
+      error instanceof SyntaxError ||
+      error?.name === "SyntaxError"
+    ) {
       throw new Error(
         `${displayName} does not contain valid JSON.`
       );
@@ -6172,7 +7035,7 @@ async function readExampleProjectDocument() {
     );
   }
 
-  return parseProjectJsonText(
+  return await parseProjectJsonText(
     await response.text(),
     EXAMPLE_PROJECT_FILE_NAME
   );
@@ -6196,14 +7059,37 @@ function applyLoadedProject(
 let initialExampleProjectLoadError = null;
 
 async function restore() {
+  const indexedDraft =
+    await readProjectDraftRecord();
+
+  if (indexedDraft?.project) {
+    try {
+      applyProjectDocument(
+        parseProjectDocument(
+          indexedDraft.project
+        )
+      );
+      if (RML_VISUAL_TOUR_TEST && state.extensions) {
+        delete state.extensions.typedNodeGraph;
+      }
+      return;
+    } catch (error) {
+      console.warn(
+        "Could not restore the IndexedDB builder draft.",
+        error
+      );
+    }
+  }
+
   const saved =
     localStorage.getItem(ACTIVE_STORAGE_KEY);
 
   if (saved) {
     try {
       applyProjectDocument(
-        parseProjectDocument(
-          JSON.parse(saved)
+        await parseProjectJsonText(
+          saved,
+          "Local builder draft"
         )
       );
       if (RML_VISUAL_TOUR_TEST && state.extensions) {
@@ -19459,32 +20345,53 @@ function builderHasActiveProject() {
   );
 }
 
-function saveProjectJson() {
-  const projectJson =
-    `${JSON.stringify(
-      createProjectDocument(true),
-      null,
-      2
-  )}\n`;
-  const filename =
-    `${projectFileBaseName()}` +
-    ".json";
+async function saveProjectJson() {
+  try {
+    setProjectFileStatus(
+      "Preparing project JSON…"
+    );
 
-  downloadBlob(
-    new Blob(
-      [projectJson],
-      {
-        type:
-          "application/json;charset=utf-8"
-      }
-    ),
-    filename
-  );
+    const response =
+      await projectIoRequest(
+        "stringify",
+        {
+          value:
+            createProjectDocument(
+              true,
+              false
+            ),
+          space: 2
+        }
+      );
+    const projectJson =
+      `${response.text}\n`;
+    const filename =
+      `${projectFileBaseName()}` +
+      ".json";
 
-  setProjectFileStatus(
-    `Saved ${filename}.`,
-    "success"
-  );
+    downloadBlob(
+      new Blob(
+        [projectJson],
+        {
+          type:
+            "application/json;charset=utf-8"
+        }
+      ),
+      filename
+    );
+
+    setProjectFileStatus(
+      `Saved ${filename}.`,
+      "success"
+    );
+  } catch (error) {
+    setProjectFileStatus(
+      error instanceof Error
+        ? error.message
+        : String(error),
+      "error"
+    );
+  }
 }
 
 async function loadProjectJsonFile(
@@ -19504,13 +20411,13 @@ async function loadProjectJsonFile(
       PROJECT_FILE_MAX_BYTES
     ) {
       throw new Error(
-        "The selected file is larger than the 5 MB project limit."
+        `The selected file is larger than the ${formatProjectByteLimit(PROJECT_FILE_MAX_BYTES)} project limit.`
       );
     }
 
     const project =
-      parseProjectJsonText(
-        await file.text(),
+      await parseProjectJsonFile(
+        file,
         file.name
       );
 
@@ -23273,6 +24180,36 @@ function builderStateSnapshot() {
   });
 }
 
+function builderCodegenStateSnapshot() {
+  const typedNodeGraph =
+    isPlainObject(state.extensions)
+      ? state.extensions.typedNodeGraph
+      : null;
+
+  return {
+    metadata: {
+      ...state.metadata
+    },
+    exportOptions: {
+      ...state.exportOptions
+    },
+    nodes: state.nodes,
+    extensions: typedNodeGraph
+      ? {
+          typedNodeGraph
+        }
+      : {},
+    workspace: {
+      selectedId:
+        state.selectedId,
+      activeContainerId:
+        state.activeContainerId,
+      collapsedPaletteGroups:
+        state.collapsedPaletteGroups
+    }
+  };
+}
+
 function exposeBuilderBridge() {
   const bridge = {
     version: 4,
@@ -23377,9 +24314,28 @@ function exposeBuilderBridge() {
         : clone(value);
     },
 
+    getExtensionStateReference(name) {
+      if (
+        typeof name !== "string" ||
+        !name.trim()
+      ) {
+        return null;
+      }
+
+      const value =
+        isPlainObject(state.extensions)
+          ? state.extensions[name]
+          : undefined;
+
+      return value === undefined
+        ? null
+        : value;
+    },
+
     setExtensionState(
       name,
-      value
+      value,
+      options = {}
     ) {
       if (
         typeof name !== "string" ||
@@ -23401,7 +24357,9 @@ function exposeBuilderBridge() {
         delete state.extensions[name];
       } else {
         state.extensions[name] =
-          clone(value);
+          options.assumeDetached === true
+            ? value
+            : clone(value);
       }
 
       persist();

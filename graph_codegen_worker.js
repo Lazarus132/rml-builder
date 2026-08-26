@@ -1,0 +1,249 @@
+"use strict";
+
+self.window = self;
+self.requestAnimationFrame =
+  self.requestAnimationFrame ||
+  (callback =>
+    self.setTimeout(
+      () => callback(performance.now()),
+      0
+    ));
+self.cancelAnimationFrame =
+  self.cancelAnimationFrame ||
+  (handle => self.clearTimeout(handle));
+self.requestIdleCallback =
+  self.requestIdleCallback ||
+  (callback =>
+    self.setTimeout(
+      () => callback({
+        didTimeout: false,
+        timeRemaining: () => 50
+      }),
+      0
+    ));
+self.cancelIdleCallback =
+  self.cancelIdleCallback ||
+  (handle => self.clearTimeout(handle));
+self.matchMedia =
+  self.matchMedia ||
+  (() => ({
+    matches: false,
+    addEventListener() {},
+    removeEventListener() {}
+  }));
+self.getComputedStyle =
+  self.getComputedStyle ||
+  (() => ({
+    getPropertyValue: () => "",
+    transform: "none"
+  }));
+self.localStorage = {
+  getItem() {
+    return null;
+  },
+  setItem() {},
+  removeItem() {}
+};
+self.CSS = self.CSS || {
+  escape(value) {
+    return String(value || "")
+      .replace(/[^A-Za-z0-9_-]/g, "\\$&");
+  }
+};
+self.CustomEvent =
+  self.CustomEvent ||
+  class CustomEvent extends Event {
+    constructor(type, options = {}) {
+      super(type, options);
+      this.detail = options.detail;
+    }
+  };
+self.MutationObserver =
+  self.MutationObserver ||
+  class MutationObserver {
+    observe() {}
+    disconnect() {}
+    takeRecords() {
+      return [];
+    }
+  };
+self.ResizeObserver =
+  self.ResizeObserver ||
+  class ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+self.Element = self.Element || class Element {};
+self.HTMLElement =
+  self.HTMLElement || class HTMLElement extends self.Element {};
+
+const emptyClassList = {
+  add() {},
+  remove() {},
+  toggle() {
+    return false;
+  },
+  contains() {
+    return false;
+  }
+};
+const emptyElement = {
+  dataset: {},
+  style: {
+    setProperty() {},
+    removeProperty() {}
+  },
+  classList: emptyClassList,
+  appendChild() {},
+  removeChild() {},
+  replaceChildren() {},
+  addEventListener() {},
+  removeEventListener() {},
+  setAttribute() {},
+  removeAttribute() {},
+  querySelector() {
+    return null;
+  },
+  querySelectorAll() {
+    return [];
+  }
+};
+
+self.document = {
+  readyState: "loading",
+  currentScript: null,
+  documentElement: emptyElement,
+  body: emptyElement,
+  addEventListener() {},
+  removeEventListener() {},
+  dispatchEvent() {
+    return true;
+  },
+  getElementById() {
+    return null;
+  },
+  querySelector() {
+    return null;
+  },
+  querySelectorAll() {
+    return [];
+  },
+  createElement() {
+    return {
+      ...emptyElement,
+      dataset: {},
+      style: {
+        setProperty() {},
+        removeProperty() {}
+      },
+      classList: {
+        ...emptyClassList
+      }
+    };
+  }
+};
+
+let runtimeReady = null;
+
+async function ensureRuntime(catalog) {
+  if (runtimeReady) {
+    return runtimeReady;
+  }
+
+  runtimeReady = (async () => {
+    self.RMLResoniteApiCatalog =
+      catalog || {
+        schemaVersion: 4,
+        catalogSource: "unavailable",
+        engineVersion: "unknown",
+        components: [],
+        materials: [],
+        commonMaterials: [],
+        meshes: [],
+        slotAttachOverloads: [],
+        types: [],
+        enums: [],
+        assemblies: []
+      };
+    self.RMLFrooxComponentCatalog =
+      self.RMLResoniteApiCatalog;
+
+    importScripts(
+      "node_graph.js?v=226-worker-codegen-v380f1"
+    );
+    importScripts(
+      "mod_nodes.js?v=35-catalog-startup-v380f1"
+    );
+    importScripts(
+      "api_nodes.js?v=11-worker-codegen-v380f1"
+    );
+
+    if (
+      self.RMLApiNodeFactoryReady &&
+      typeof self.RMLApiNodeFactoryReady.then ===
+        "function"
+    ) {
+      await self.RMLApiNodeFactoryReady;
+    }
+
+    if (
+      !self.RMLTypedNodeGraphGenerator ||
+      typeof self.RMLTypedNodeGraphGenerator.build !==
+        "function"
+    ) {
+      throw new Error(
+        "Typed graph code generator was not initialized in the worker."
+      );
+    }
+  })();
+
+  return runtimeReady;
+}
+
+self.addEventListener("message", event => {
+  const request = event.data || {};
+
+  if (request.operation !== "build") {
+    return;
+  }
+
+  void (async () => {
+    try {
+      await ensureRuntime(request.catalog);
+
+      const result =
+        self.RMLTypedNodeGraphGenerator.build({
+          state: request.state || {},
+          entries: Array.isArray(request.entries)
+            ? request.entries
+            : []
+        });
+
+      self.postMessage({
+        id: request.id,
+        ok: true,
+        result
+      });
+    } catch (error) {
+      self.postMessage({
+        id: request.id,
+        ok: false,
+        error: {
+          name:
+            error instanceof Error
+              ? error.name
+              : "Error",
+          message:
+            error instanceof Error
+              ? error.message
+              : String(error),
+          stack:
+            error instanceof Error
+              ? error.stack || ""
+              : ""
+        }
+      });
+    }
+  })();
+});

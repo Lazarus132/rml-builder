@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const LOADER_VERSION = 24;
+  const LOADER_VERSION = 25;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
   const CATALOG_PATH = "/resonite_api_catalog.json";
@@ -11,6 +11,7 @@
   const BUILDER_SCANNER_CATALOG_PATH =
     "/rml-scanner-catalog";
   const POLL_INTERVAL_MS = 30000;
+  const OFFLINE_DISCOVERY_INTERVAL_MS = 5000;
   const BUILDER_PROBE_TIMEOUT_MS = 6000;
   const CATALOG_FETCH_TIMEOUT_MS = 45000;
   const CACHE_DATABASE_NAME =
@@ -23,11 +24,11 @@
     document.currentScript?.src ||
     window.location.href;
   const modNodesUrl = new URL(
-    "mod_nodes.js?v=33-full-node-runtime-safety-v379f1",
+    "mod_nodes.js?v=35-catalog-startup-v380f1",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=10-typed-target-events-v379f1",
+    "api_nodes.js?v=11-worker-codegen-v380f1",
     scriptUrl
   ).href;
 
@@ -970,10 +971,47 @@
   }
 
   async function loadCatalog() {
+    scannerChecking = true;
+    updateStatus(null, {
+      checking: true,
+      online: false
+    });
+
+    const live =
+      await tryScannerCatalog([
+        0,
+        250,
+        1000
+      ]);
+
+    scannerChecking = false;
+
+    if (live) {
+      scannerOnline = true;
+      activeScannerCatalogUrl =
+        live.url;
+
+      await writeCachedLiveCatalog(
+        live.raw,
+        live.url
+      );
+
+      const normalized =
+        normalizeCatalog(
+          live.raw,
+          "scanner",
+          live.url
+        );
+
+      scheduleScannerStatusCheck();
+      return installCatalog(normalized);
+    }
+
     const cached =
       await readCachedLiveCatalog();
 
     if (cached) {
+      scannerOnline = false;
       activeScannerCatalogUrl =
         loopbackScannerCatalogUrl(
           cached.sourceUrl
@@ -1098,7 +1136,9 @@
   }
 
   function scheduleScannerStatusCheck(
-    delayMs = POLL_INTERVAL_MS
+    delayMs = scannerOnline
+      ? POLL_INTERVAL_MS
+      : OFFLINE_DISCOVERY_INTERVAL_MS
   ) {
     window.clearTimeout(
       scannerPollTimer
@@ -1106,23 +1146,20 @@
 
     scannerPollTimer = 0;
 
-    if (!scannerOnline) {
-      return;
-    }
-
     scannerPollTimer =
       window.setTimeout(
         () => {
           void synchronizeScannerStatus({
-            showChecking:
-              !scannerOnline,
+            showChecking: false,
             reloadOnChange: true
           });
         },
         Math.max(
           1000,
           Number(delayMs) ||
-            POLL_INTERVAL_MS
+            (scannerOnline
+              ? POLL_INTERVAL_MS
+              : OFFLINE_DISCOVERY_INTERVAL_MS)
         )
       );
   }
@@ -1202,14 +1239,22 @@
         if (!current) {
           await modNodesReady;
           await ensureApiNodesLoaded();
+
+          if (
+            reloadOnChange
+          ) {
+            window.setTimeout(
+              () =>
+                window.location.reload(),
+              250
+            );
+          }
         }
 
         if (
           current &&
           catalogChanged &&
-          reloadOnChange &&
-          window.location.protocol !==
-            "file:"
+          reloadOnChange
         ) {
           window.setTimeout(
             () =>
@@ -1243,9 +1288,7 @@
         .finally(() => {
           scannerCheckPromise = null;
 
-          if (scannerOnline) {
-            scheduleScannerStatusCheck();
-          }
+          scheduleScannerStatusCheck();
         });
 
     return scannerCheckPromise;
@@ -1366,8 +1409,14 @@
   );
 
   catalogReady
-    .then(() => {
+    .then(catalog => {
       installManualScannerRefresh();
+
+      if (!scannerOnline) {
+        scheduleScannerStatusCheck(
+          OFFLINE_DISCOVERY_INTERVAL_MS
+        );
+      }
     })
     .catch(() => {});
 
