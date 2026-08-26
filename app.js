@@ -34,7 +34,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "stable-universal-execution-frame-store-20260826-v388f1";
+  "stable-universal-packed-config-integrity-20260826-v395f1";
 
 function exposeRmlBuilderBuildId() {
   document.documentElement.dataset
@@ -320,6 +320,89 @@ let typedNodeGraphModulesTrackingStarted = false;
 let generatedOutlineArtifactKey = "";
 let generatedGraphArtifactKey = "";
 let exportCopyArtifactKey = "";
+let generatedOutputDeferredTimer = 0;
+let generatedOutputDeferredIdleHandle = 0;
+
+function currentTypedRuntimeGraphIsLarge() {
+  const graph =
+    state?.extensions?.typedNodeGraph;
+
+  return Boolean(
+    graph?.active &&
+    (
+      (Array.isArray(graph.nodes)
+        ? graph.nodes.length
+        : 0) > 1000 ||
+      (Array.isArray(graph.connections)
+        ? graph.connections.length
+        : 0) > 2000
+    )
+  );
+}
+
+function requestGeneratedOutputUpdate() {
+  const run = () => {
+    generatedOutputDeferredTimer = 0;
+    generatedOutputDeferredIdleHandle = 0;
+    updateGeneratedOutput();
+  };
+
+  window.clearTimeout(
+    generatedOutputDeferredTimer
+  );
+  generatedOutputDeferredTimer = 0;
+
+  if (
+    generatedOutputDeferredIdleHandle &&
+    typeof cancelIdleCallback ===
+      "function"
+  ) {
+    cancelIdleCallback(
+      generatedOutputDeferredIdleHandle
+    );
+    generatedOutputDeferredIdleHandle = 0;
+  }
+
+  if (!currentTypedRuntimeGraphIsLarge()) {
+    run();
+    return;
+  }
+
+  if (elements.generatedCode) {
+    elements.generatedCode.textContent =
+      "// Generating the large runtime graph in an idle browser turn…\n";
+  }
+  if (elements.codeSummary) {
+    elements.codeSummary.textContent =
+      "Large runtime graph loaded · generated files are being refreshed";
+  }
+  [
+    elements.copyCodeBottom,
+    elements.downloadCode
+  ].forEach(button => {
+    if (button) {
+      button.disabled = true;
+    }
+  });
+
+  generatedOutputDeferredTimer =
+    window.setTimeout(() => {
+      generatedOutputDeferredTimer = 0;
+
+      if (
+        typeof requestIdleCallback ===
+          "function"
+      ) {
+        generatedOutputDeferredIdleHandle =
+          requestIdleCallback(
+            run,
+            { timeout: 4000 }
+          );
+      } else {
+        run();
+      }
+    }, 250);
+}
 
 function scheduleTypedNodeGraphOutputRefresh() {
   requestAnimationFrame(() => {
@@ -634,9 +717,9 @@ function formatProjectByteLimit(value) {
 }
 
 const LARGE_GRAPH_BACKGROUND_CODEGEN_NODE_THRESHOLD =
-  10000;
+  1000;
 const LARGE_GRAPH_BACKGROUND_CODEGEN_CONNECTION_THRESHOLD =
-  20000;
+  2000;
 let graphCodegenWorker = null;
 let graphCodegenWorkerCatalogKey = "";
 let graphCodegenWorkerNeedsCatalog = false;
@@ -647,6 +730,12 @@ let graphCodegenWorkerActiveBuild = null;
 let graphCodegenWorkerCachedKey = "";
 let graphCodegenWorkerCachedResult = null;
 let graphCodegenWorkerLastError = null;
+let graphCodegenProjectEpoch = 1;
+let graphCodegenFingerprintSource = null;
+let graphCodegenFingerprintRevision = -1;
+let graphCodegenFingerprintNodeCount = -1;
+let graphCodegenFingerprintConnectionCount = -1;
+let graphCodegenFingerprintValue = "";
 
 function largeGraphUsesBackgroundCodegen(
   extensionState
@@ -680,6 +769,114 @@ function graphCodegenCatalogKey(catalog) {
   ].join("|");
 }
 
+function largeGraphCodegenContentFingerprint(
+  extensionState
+) {
+  const revision =
+    Number(extensionState?.revision) || 0;
+  const nodes =
+    Array.isArray(extensionState?.nodes)
+      ? extensionState.nodes
+      : [];
+  const connections =
+    Array.isArray(extensionState?.connections)
+      ? extensionState.connections
+      : [];
+
+  if (
+    graphCodegenFingerprintSource ===
+      extensionState &&
+    graphCodegenFingerprintRevision ===
+      revision &&
+    graphCodegenFingerprintNodeCount ===
+      nodes.length &&
+    graphCodegenFingerprintConnectionCount ===
+      connections.length
+  ) {
+    return graphCodegenFingerprintValue;
+  }
+
+  let first = 0x811c9dc5;
+  let second = 0x9e3779b9;
+  let position = 0;
+
+  const append = value => {
+    const text = String(value ?? "");
+
+    for (
+      let index = 0;
+      index < text.length;
+      index += 1
+    ) {
+      const code = text.charCodeAt(index);
+      first ^= code;
+      first = Math.imul(
+        first,
+        0x01000193
+      ) >>> 0;
+      second ^= code + position;
+      second = Math.imul(
+        second,
+        0x85ebca6b
+      ) >>> 0;
+      position += 1;
+    }
+
+    first ^= 0xff;
+    first = Math.imul(
+      first,
+      0x01000193
+    ) >>> 0;
+    second ^= position + 0x9e37;
+    second = Math.imul(
+      second,
+      0x85ebca6b
+    ) >>> 0;
+  };
+
+  append(extensionState?.sourceSignature);
+  append(
+    JSON.stringify(
+      extensionState?.configSnapshot ||
+        null
+    )
+  );
+
+  for (const node of nodes) {
+    append(node?.id);
+    append(node?.kind);
+    append(node?.operatorId);
+    append(node?.label);
+    append(
+      JSON.stringify(
+        node?.parameters || {}
+      )
+    );
+  }
+
+  for (const connection of connections) {
+    append(connection?.id);
+    append(connection?.fromNode);
+    append(connection?.fromPort);
+    append(connection?.toNode);
+    append(connection?.toPort);
+  }
+
+  graphCodegenFingerprintSource =
+    extensionState;
+  graphCodegenFingerprintRevision =
+    revision;
+  graphCodegenFingerprintNodeCount =
+    nodes.length;
+  graphCodegenFingerprintConnectionCount =
+    connections.length;
+  graphCodegenFingerprintValue =
+    first.toString(16).padStart(8, "0") +
+    second.toString(16).padStart(8, "0");
+
+  return graphCodegenFingerprintValue;
+}
+
 function largeGraphCodegenKey(
   extensionState
 ) {
@@ -696,6 +893,10 @@ function largeGraphCodegenKey(
       extensionState?.nodes?.length || 0,
     connections:
       extensionState?.connections?.length || 0,
+    content:
+      largeGraphCodegenContentFingerprint(
+        extensionState
+      ),
     namespaceName:
       metadata.namespaceName || "",
     className:
@@ -722,6 +923,22 @@ function terminateGraphCodegenWorker() {
   graphCodegenWorkerNeedsCatalog = false;
 }
 
+function resetGraphCodegenForProjectReplacement() {
+  graphCodegenProjectEpoch += 1;
+  terminateGraphCodegenWorker();
+  graphCodegenWorkerRunning = false;
+  graphCodegenWorkerQueuedBuild = null;
+  graphCodegenWorkerActiveBuild = null;
+  graphCodegenWorkerCachedKey = "";
+  graphCodegenWorkerCachedResult = null;
+  graphCodegenWorkerLastError = null;
+  graphCodegenFingerprintSource = null;
+  graphCodegenFingerprintRevision = -1;
+  graphCodegenFingerprintNodeCount = -1;
+  graphCodegenFingerprintConnectionCount = -1;
+  graphCodegenFingerprintValue = "";
+}
+
 function ensureGraphCodegenWorker(catalog) {
   const catalogKey =
     graphCodegenCatalogKey(catalog);
@@ -744,7 +961,7 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "graph_codegen_worker.js?v=6-execution-frame-store-v388f1",
+      "graph_codegen_worker.js?v=13-packed-config-integrity-v395f1",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -761,7 +978,9 @@ function ensureGraphCodegenWorker(catalog) {
 
       if (
         !active ||
-        response.id !== active.id
+        response.id !== active.id ||
+        active.projectEpoch !==
+          graphCodegenProjectEpoch
       ) {
         return;
       }
@@ -886,6 +1105,8 @@ function requestLargeGraphCodegen(
   graphCodegenWorkerQueuedBuild = {
     id: graphCodegenWorkerSequence++,
     key,
+    projectEpoch:
+      graphCodegenProjectEpoch,
     catalog,
     state:
       builderCodegenStateSnapshot(),
@@ -1266,6 +1487,13 @@ function escapeCSharp(value) {
     .replace(/\t/g, "\\t")
     .replace(/\0/g, "\\0")
     .replace(/"/g, '\\"');
+}
+
+function csharpSingleLineCommentText(value) {
+  return String(value || "")
+    .replace(/[\r\n\u0085\u2028\u2029]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function escapeHtml(value) {
@@ -3722,7 +3950,9 @@ function settingDeclaration(setting, path) {
   }
   const pathComment =
     path.length > 0
-      ? `    // ${path.join(" / ")}\n`
+      ? `    // ${csharpSingleLineCommentText(
+          path.join(" / ")
+        )}\n`
       : "    // Always visible\n";
   return `${pathComment}    [AutoRegisterConfigKey]
     public static readonly ModConfigurationKey<${type}>
@@ -3744,7 +3974,9 @@ function controllerDeclaration(controller, path) {
   );
   const pathComment =
     path.length > 0
-      ? `    // Nested navigation: ${path.join(" / ")}\n`
+      ? `    // Nested navigation: ${csharpSingleLineCommentText(
+          path.join(" / ")
+        )}\n`
       : "    // Top-level navigation\n";
   return `${pathComment}    [AutoRegisterConfigKey]
     public static readonly ModConfigurationKey<${enumName}>
@@ -5196,9 +5428,8 @@ ${runtimeLayoutHelper}`;
 namespace ${namespaceName};
 
 ${enums ? `${enums}\n\n` : ""}/// <summary>
-/// ${metadata.description.replace(
-  /\r\n|\r|\n/g,
-  " "
+/// ${csharpSingleLineCommentText(
+  metadata.description
 )}
 /// </summary>
 public sealed partial class ${className}
@@ -6466,6 +6697,486 @@ function sanitizeProjectNodes(
   );
 }
 
+function packedConfigurationSnapshotHash(
+  metadata,
+  nodes
+) {
+  const value = JSON.stringify({
+    metadata: metadata || {},
+    nodes: nodes || []
+  });
+  let hash = 2166136261;
+
+  for (
+    let index = 0;
+    index < value.length;
+    index += 1
+  ) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(
+      hash,
+      16777619
+    );
+  }
+
+  return (
+    hash >>> 0
+  )
+    .toString(16)
+    .padStart(8, "0");
+}
+
+function mergePackedConfigurationNodes(
+  outlineNodes,
+  snapshotNodes
+) {
+  const merged = clone(
+    Array.isArray(outlineNodes)
+      ? outlineNodes
+      : []
+  );
+  const nodeById = new Map();
+  const optionById = new Map();
+  const identityById = new Map();
+  const addedNodeIds = [];
+
+  const registerNode = node => {
+    if (!node || typeof node !== "object") {
+      return;
+    }
+
+    const existingIdentity =
+      identityById.get(node.id);
+    if (
+      existingIdentity &&
+      existingIdentity.type !== "node"
+    ) {
+      throw new Error(
+        `Packed configuration ID '${node.id}' is used by both a node and a section option.`
+      );
+    }
+
+    identityById.set(
+      node.id,
+      { type: "node", value: node }
+    );
+    nodeById.set(node.id, node);
+
+    if (node.kind === "controller") {
+      for (const option of
+        Array.isArray(node.options)
+          ? node.options
+          : []) {
+        const optionIdentity =
+          identityById.get(option.id);
+        if (
+          optionIdentity &&
+          optionIdentity.type !== "option"
+        ) {
+          throw new Error(
+            `Packed configuration ID '${option.id}' is used by both a section option and a node.`
+          );
+        }
+        identityById.set(
+          option.id,
+          { type: "option", value: option }
+        );
+        optionById.set(option.id, option);
+        for (const child of
+          Array.isArray(option.children)
+            ? option.children
+            : []) {
+          registerNode(child);
+        }
+      }
+    } else if (node.kind === LAYOUT_ROW_KIND) {
+      for (const child of
+        Array.isArray(node.children)
+          ? node.children
+          : []) {
+        registerNode(child);
+      }
+    }
+  };
+
+  const recordAddedTree = node => {
+    if (!node || typeof node !== "object") {
+      return;
+    }
+
+    addedNodeIds.push(node.id);
+
+    if (node.kind === "controller") {
+      for (const option of node.options || []) {
+        for (const child of option.children || []) {
+          recordAddedTree(child);
+        }
+      }
+    } else if (node.kind === LAYOUT_ROW_KIND) {
+      for (const child of node.children || []) {
+        recordAddedTree(child);
+      }
+    }
+  };
+
+  const insertionIndex = (
+    target,
+    fallback,
+    fallbackIndex
+  ) => {
+    for (
+      let index = fallbackIndex + 1;
+      index < fallback.length;
+      index += 1
+    ) {
+      const nextIndex =
+        target.findIndex(
+          item =>
+            item?.id ===
+              fallback[index]?.id
+        );
+
+      if (nextIndex >= 0) {
+        return nextIndex;
+      }
+    }
+
+    for (
+      let index = fallbackIndex - 1;
+      index >= 0;
+      index -= 1
+    ) {
+      const previousIndex =
+        target.findIndex(
+          item =>
+            item?.id ===
+              fallback[index]?.id
+        );
+
+      if (previousIndex >= 0) {
+        return previousIndex + 1;
+      }
+    }
+
+    return target.length;
+  };
+
+  const mergeLists = (
+    target,
+    fallback
+  ) => {
+    for (
+      let index = 0;
+      index < fallback.length;
+      index += 1
+    ) {
+      const fallbackNode =
+        fallback[index];
+      let current =
+        nodeById.get(
+          fallbackNode.id
+        );
+
+      if (!current) {
+        if (
+          identityById.has(
+            fallbackNode.id
+          )
+        ) {
+          throw new Error(
+            `Packed configuration ID '${fallbackNode.id}' changes between a node and a section option.`
+          );
+        }
+        current = clone(fallbackNode);
+        target.splice(
+          insertionIndex(
+            target,
+            fallback,
+            index
+          ),
+          0,
+          current
+        );
+        recordAddedTree(current);
+        registerNode(current);
+        continue;
+      }
+
+      if (
+        current.kind !==
+          fallbackNode.kind
+      ) {
+        throw new Error(
+          `Packed configuration node '${fallbackNode.id}' changes kind from '${current.kind}' to '${fallbackNode.kind}'.`
+        );
+      }
+
+      if (
+        current.kind === "controller" &&
+        fallbackNode.kind === "controller"
+      ) {
+        const currentOptions =
+          Array.isArray(current.options)
+            ? current.options
+            : (current.options = []);
+        const fallbackOptions =
+          Array.isArray(fallbackNode.options)
+            ? fallbackNode.options
+            : [];
+
+        for (
+          let optionIndex = 0;
+          optionIndex < fallbackOptions.length;
+          optionIndex += 1
+        ) {
+          const fallbackOption =
+            fallbackOptions[optionIndex];
+          let currentOption =
+            optionById.get(
+              fallbackOption.id
+            );
+
+          if (!currentOption) {
+            if (
+              identityById.has(
+                fallbackOption.id
+              )
+            ) {
+              throw new Error(
+                `Packed configuration ID '${fallbackOption.id}' changes between a section option and a node.`
+              );
+            }
+            currentOption =
+              clone(fallbackOption);
+            currentOptions.splice(
+              insertionIndex(
+                currentOptions,
+                fallbackOptions,
+                optionIndex
+              ),
+              0,
+              currentOption
+            );
+            optionById.set(
+              currentOption.id,
+              currentOption
+            );
+            identityById.set(
+              currentOption.id,
+              {
+                type: "option",
+                value: currentOption
+              }
+            );
+            for (const child of
+              currentOption.children || []) {
+              recordAddedTree(child);
+              registerNode(child);
+            }
+            continue;
+          }
+
+          const currentChildren =
+            Array.isArray(
+              currentOption.children
+            )
+              ? currentOption.children
+              : (currentOption.children = []);
+          mergeLists(
+            currentChildren,
+            Array.isArray(
+              fallbackOption.children
+            )
+              ? fallbackOption.children
+              : []
+          );
+        }
+      } else if (
+        current.kind === LAYOUT_ROW_KIND &&
+        fallbackNode.kind ===
+          LAYOUT_ROW_KIND
+      ) {
+        const currentChildren =
+          Array.isArray(current.children)
+            ? current.children
+            : (current.children = []);
+        mergeLists(
+          currentChildren,
+          Array.isArray(
+            fallbackNode.children
+          )
+            ? fallbackNode.children
+            : []
+        );
+      }
+    }
+  };
+
+  for (const node of merged) {
+    registerNode(node);
+  }
+
+  mergeLists(
+    merged,
+    Array.isArray(snapshotNodes)
+      ? snapshotNodes
+      : []
+  );
+
+  return {
+    nodes: normalizeNodes(merged),
+    addedNodeIds
+  };
+}
+
+function packedConfigurationItemIds(
+  nodes,
+  result = new Set()
+) {
+  for (const node of
+    Array.isArray(nodes) ? nodes : []) {
+    if (node.kind !== LAYOUT_ROW_KIND) {
+      result.add(node.id);
+    }
+
+    if (node.kind === "controller") {
+      for (const option of node.options || []) {
+        packedConfigurationItemIds(
+          option.children,
+          result
+        );
+      }
+    } else if (node.kind === LAYOUT_ROW_KIND) {
+      packedConfigurationItemIds(
+        node.children,
+        result
+      );
+    }
+  }
+
+  return result;
+}
+
+function reconcilePackedGraphConfiguration(
+  project
+) {
+  const graph =
+    project?.extensions?.typedNodeGraph;
+  const snapshot =
+    graph?.configSnapshot;
+
+  if (
+    !graph ||
+    !snapshot ||
+    !Array.isArray(snapshot.nodes)
+  ) {
+    return project;
+  }
+
+  const sanitizedSnapshotNodes =
+    sanitizeProjectNodes(
+      snapshot.nodes
+    );
+  const outlineIdsBefore =
+    packedConfigurationItemIds(
+      project.nodes
+    );
+  const snapshotIdsBefore =
+    packedConfigurationItemIds(
+      sanitizedSnapshotNodes
+    );
+  const restoredFromSnapshot =
+    [...snapshotIdsBefore].filter(
+      id =>
+        !outlineIdsBefore.has(id)
+    );
+  const preservedFromOutline =
+    [...outlineIdsBefore].filter(
+      id =>
+        !snapshotIdsBefore.has(id)
+    );
+  const merged =
+    mergePackedConfigurationNodes(
+      graph.active === true
+        ? sanitizedSnapshotNodes
+        : project.nodes,
+      graph.active === true
+        ? project.nodes
+        : sanitizedSnapshotNodes
+    );
+
+  project.nodes = merged.nodes;
+  graph.configSnapshot = {
+    metadata: clone(
+      project.metadata
+    ),
+    nodes: clone(project.nodes)
+  };
+  graph.sourceSignature =
+    packedConfigurationSnapshotHash(
+      graph.configSnapshot.metadata,
+      graph.configSnapshot.nodes
+    );
+
+  const configurationNodeIds =
+    new Set(
+      (Array.isArray(graph.nodes)
+        ? graph.nodes
+        : [])
+        .filter(
+          node =>
+            node?.kind ===
+              "configuration"
+        )
+        .map(node => node.id)
+    );
+  const itemIds =
+    packedConfigurationItemIds(
+      graph.configSnapshot.nodes
+    );
+  const invalidConnections =
+    (Array.isArray(graph.connections)
+      ? graph.connections
+      : [])
+      .filter(connection =>
+        configurationNodeIds.has(
+          connection?.fromNode
+        ) &&
+        String(
+          connection?.fromPort || ""
+        ).startsWith("config-") &&
+        !itemIds.has(
+          String(connection.fromPort)
+            .slice("config-".length)
+        )
+      );
+
+  if (invalidConnections.length > 0) {
+    const connection =
+      invalidConnections[0];
+    throw new Error(
+      `Packed Runtime Graph connection '${connection.id || "unnamed"}' references configuration port '${connection.fromPort}' which exists neither in the Configuration Outline nor in the packed snapshot.`
+    );
+  }
+
+  if (
+    restoredFromSnapshot.length > 0 ||
+    preservedFromOutline.length > 0
+  ) {
+    console.info(
+      "Reconciled the packed configuration snapshot with the project outline without dropping either side's unique items.",
+      {
+        restoredFromSnapshot,
+        preservedFromOutline,
+        activePackedSnapshotAuthoritative:
+          graph.active === true
+      }
+    );
+  }
+
+  return project;
+}
+
 function parseProjectDocument(
   source
 ) {
@@ -6531,7 +7242,7 @@ function parseProjectDocument(
       )
     );
 
-  return {
+  const project = {
     metadata: {
       namespaceName:
         projectString(
@@ -6623,11 +7334,22 @@ function parseProjectDocument(
           : []
     }
   };
+
+  return reconcilePackedGraphConfiguration(
+    project
+  );
 }
 
 function applyProjectDocument(
   project
 ) {
+  document.dispatchEvent(
+    new CustomEvent(
+      "rml-builder:project-replacement"
+    )
+  );
+  resetGraphCodegenForProjectReplacement();
+
   state.metadata =
     project.metadata;
   state.exportOptions =
@@ -6925,7 +7647,7 @@ function persist(immediate = false) {
     graphNodeCountInProject(state);
   const delay = immediate
     ? 0
-    : graphNodeCount > 10000
+    : graphNodeCount > 1000
       ? 750
       : 120;
 
@@ -16985,7 +17707,7 @@ function renderAll() {
   }
   renderCanvas();
   renderInspector();
-  updateGeneratedOutput();
+  requestGeneratedOutputUpdate();
   persist();
 
   document.dispatchEvent(
@@ -19898,78 +20620,97 @@ function onSettingsPreviewTransitionFinished(
   return finish;
 }
 
-function openSettingsPreview() {
-  let savedDraft = null;
+let settingsPreviewOpenSequence = 0;
 
-  try {
-    const saved =
-      localStorage.getItem(
-        ACTIVE_PREVIEW_STORAGE_KEY
-      );
-
-    if (saved) {
-      savedDraft =
-        JSON.parse(saved);
-    }
-  } catch (error) {
-    console.warn(
-      "Could not restore preview values.",
-      error
-    );
-  }
-
-  settingsPreviewDraft =
-    mergeSettingsPreviewDraft(
-      savedDraft
-    );
-
-  settingsPreviewRuntimeMenu =
-    createSettingsPreviewRuntimeMenu();
-  settingsPreviewPulseCounts = {};
-  settingsPreviewColorSession = null;
-
-  elements.settingsPreviewStatus.textContent =
-    "";
-
-  renderSettingsPreview();
-
+async function openSettingsPreview() {
   const dialog =
     elements.settingsPreviewDialog;
 
+  if (dialog.open) {
+    return;
+  }
+
+  const sequence =
+    ++settingsPreviewOpenSequence;
+
   dialog.classList.remove(
-    "rml-overlay-opened",
     "rml-overlay-closing",
     "rml-overlay-animating"
   );
+  elements.settingsPreviewStatus.textContent =
+    "Preparing preview…";
+  elements.settingsPreviewContent.innerHTML = `
+    <div class="rml-inline-dialog-loading">
+      <div>
+        <div class="builder-work-spinner" aria-hidden="true"></div>
+        <p>Preparing the runtime preview…</p>
+      </div>
+    </div>`;
 
   dialog.showModal();
-
-  runSettingsPreviewRuntimePhase(
-    "startup"
-  );
-
-  movePreviewFocusAwayFromCloseButton();
-
-  void dialog.offsetWidth;
-
-  dialog.classList.add(
-    "rml-overlay-animating"
-  );
-
-  onSettingsPreviewTransitionFinished(
-    dialog,
-    () => {
-      dialog.classList.remove(
-        "rml-overlay-animating"
-      );
-
-      movePreviewFocusAwayFromCloseButton();
-    }
-  );
-
   dialog.classList.add(
     "rml-overlay-opened"
   );
+  movePreviewFocusAwayFromCloseButton();
+
+  await paintBuilderUi();
+
+  if (
+    sequence !==
+      settingsPreviewOpenSequence ||
+    !dialog.open
+  ) {
+    return;
+  }
+
+  try {
+    let savedDraft = null;
+
+    try {
+      const saved =
+        localStorage.getItem(
+          ACTIVE_PREVIEW_STORAGE_KEY
+        );
+
+      if (saved) {
+        savedDraft =
+          JSON.parse(saved);
+      }
+    } catch (error) {
+      console.warn(
+        "Could not restore preview values.",
+        error
+      );
+    }
+
+    settingsPreviewDraft =
+      mergeSettingsPreviewDraft(
+        savedDraft
+      );
+
+    settingsPreviewRuntimeMenu =
+      createSettingsPreviewRuntimeMenu();
+    settingsPreviewPulseCounts = {};
+    settingsPreviewColorSession = null;
+
+    elements.settingsPreviewStatus.textContent =
+      "";
+    renderSettingsPreview();
+
+    runSettingsPreviewRuntimePhase(
+      "startup"
+    );
+    movePreviewFocusAwayFromCloseButton();
+  } catch (error) {
+    console.error(
+      "Settings preview preparation failed.",
+      error
+    );
+    elements.settingsPreviewContent.innerHTML =
+      '<div class="rml-inline-dialog-loading">The preview could not be prepared. Close this dialog and review Diagnostics.</div>';
+    elements.settingsPreviewStatus.textContent =
+      "Preview preparation failed.";
+  }
 }
 
 function closeSettingsPreview(
@@ -19977,6 +20718,7 @@ function closeSettingsPreview(
     elements.settingsPreviewDialog,
   returnValue = ""
 ) {
+  settingsPreviewOpenSequence += 1;
   if (
     !dialog ||
     !dialog.open ||
@@ -20204,6 +20946,371 @@ function setProjectFileStatus(
     "error",
     tone === "error"
   );
+}
+
+let activeProjectLoadSession = 0;
+let activeBuilderWorkSession = 0;
+let builderWorkWatchdog = 0;
+
+function nextBuilderVisualFrame() {
+  return new Promise(resolve => {
+    let settled = false;
+    let frame = 0;
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      if (frame) {
+        window.cancelAnimationFrame(frame);
+      }
+      resolve();
+    };
+
+    const timer = window.setTimeout(
+      finish,
+      250
+    );
+    frame = window.requestAnimationFrame(
+      finish
+    );
+  });
+}
+
+async function paintBuilderUi() {
+  await nextBuilderVisualFrame();
+  await nextBuilderVisualFrame();
+  await new Promise(resolve =>
+    window.setTimeout(resolve, 0)
+  );
+}
+
+function setProjectLoadProgress(
+  active,
+  {
+    progress = 0,
+    stage = "Preparing project…"
+  } = {}
+) {
+  const host =
+    elements.projectLoadProgress;
+
+  if (!host) {
+    return;
+  }
+
+  host.hidden = !active;
+  elements.projectDialog?.setAttribute(
+    "aria-busy",
+    active ? "true" : "false"
+  );
+
+  if (!active) {
+    return;
+  }
+
+  const normalized = clamp(
+    Number(progress) || 0,
+    0,
+    100
+  );
+  host.style.setProperty(
+    "--rml-load-progress",
+    `${normalized}%`
+  );
+  if (elements.projectLoadProgressStage) {
+    elements.projectLoadProgressStage.textContent =
+      stage;
+  }
+}
+
+function cancelActiveProjectLoad() {
+  activeProjectLoadSession += 1;
+  setProjectLoadProgress(false);
+}
+
+function updateBuilderWork(
+  session,
+  {
+    kicker,
+    title,
+    message,
+    detail,
+    progress
+  } = {}
+) {
+  if (
+    session !== activeBuilderWorkSession ||
+    !elements.builderWorkOverlay
+  ) {
+    return false;
+  }
+
+  if (kicker !== undefined) {
+    elements.builderWorkKicker.textContent =
+      String(kicker);
+  }
+  if (title !== undefined) {
+    elements.builderWorkTitle.textContent =
+      String(title);
+  }
+  if (message !== undefined) {
+    elements.builderWorkMessage.textContent =
+      String(message);
+  }
+  if (detail !== undefined) {
+    elements.builderWorkDetail.textContent =
+      String(detail);
+  }
+
+  if (progress !== undefined) {
+    const normalized = clamp(
+      Number(progress) || 0,
+      0,
+      100
+    );
+    elements.builderWorkProgress.style.setProperty(
+      "--rml-load-progress",
+      `${normalized}%`
+    );
+    elements.builderWorkProgress.setAttribute(
+      "aria-valuenow",
+      String(Math.round(normalized))
+    );
+  }
+
+  return true;
+}
+
+function beginBuilderWork(options = {}) {
+  activeBuilderWorkSession += 1;
+  const session =
+    activeBuilderWorkSession;
+
+  window.clearTimeout(
+    builderWorkWatchdog
+  );
+
+  elements.builderWorkOverlay.hidden = false;
+  document.body.classList.add(
+    "rml-builder-work-active"
+  );
+  updateBuilderWork(session, options);
+
+  const timeout = clamp(
+    Number(options.timeout) || 30000,
+    1000,
+    120000
+  );
+  builderWorkWatchdog =
+    window.setTimeout(() => {
+      if (
+        session ===
+          activeBuilderWorkSession
+      ) {
+        elements.builderWorkOverlay.hidden =
+          true;
+        document.body.classList.remove(
+          "rml-builder-work-active"
+        );
+      }
+    }, timeout);
+  return session;
+}
+
+function finishBuilderWork(session) {
+  if (
+    session !== activeBuilderWorkSession ||
+    !elements.builderWorkOverlay
+  ) {
+    return false;
+  }
+
+  window.clearTimeout(
+    builderWorkWatchdog
+  );
+  builderWorkWatchdog = 0;
+  elements.builderWorkOverlay.hidden = true;
+  document.body.classList.remove(
+    "rml-builder-work-active"
+  );
+  return true;
+}
+
+function waitForImportedGraphUi(
+  expectedNodes,
+  expectedConnections,
+  timeout = 30000
+) {
+  const graph =
+    state.extensions?.typedNodeGraph;
+
+  if (
+    graph?.active !== true ||
+    !window.RMLDynamicGraphHost
+  ) {
+    return Promise.resolve({
+      ready: true,
+      timedOut: false
+    });
+  }
+
+  return new Promise(resolve => {
+    let settled = false;
+
+    const finish = timedOut => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      document.removeEventListener(
+        "rml-graph:render-complete",
+        handleComplete
+      );
+      resolve({
+        ready: !timedOut,
+        timedOut
+      });
+    };
+
+    const handleComplete = event => {
+      const detail = event.detail || {};
+      if (
+        Number.isFinite(
+          Number(detail.nodes)
+        ) &&
+        Number(detail.nodes) <=
+          Number(expectedNodes) + 1 &&
+        Number.isFinite(
+          Number(detail.connections)
+        ) &&
+        Number(detail.connections) <=
+          Number(expectedConnections)
+      ) {
+        finish(false);
+      }
+    };
+
+    const timer = window.setTimeout(
+      () => finish(true),
+      timeout
+    );
+
+    document.addEventListener(
+      "rml-graph:render-complete",
+      handleComplete
+    );
+  });
+}
+
+async function applyLoadedProjectWithFeedback(
+  project,
+  {
+    displayName = "project",
+    workSession = 0
+  } = {}
+) {
+  const session =
+    workSession ||
+    beginBuilderWork({
+      kicker: "Project loading",
+      title: "Applying project data…",
+      message:
+        "The validated project is being installed without blocking any confirmation dialog.",
+      detail:
+        "Configuration Outline and project metadata are prepared first.",
+      progress: 38
+    });
+
+  try {
+    updateBuilderWork(
+      session,
+      {
+        kicker: "Project loading",
+        title: "Applying project data…",
+        message:
+          "The validated project is being installed without blocking any confirmation dialog.",
+        detail:
+          "Configuration Outline and project metadata are prepared first.",
+        progress: 38
+      }
+    );
+    await paintBuilderUi();
+
+    applyLoadedProject(
+      project,
+      { render: false }
+    );
+
+    updateBuilderWork(
+      session,
+      {
+        title: "Preparing the interface…",
+        message:
+          "Metadata and the universal node palette are being synchronized.",
+        detail:
+          "The full Runtime Graph remains intact in the project.",
+        progress: 54
+      }
+    );
+    renderMetadata();
+    renderPalette();
+
+    await paintBuilderUi();
+
+    const typedGraph =
+      project.extensions?.typedNodeGraph;
+    const expectedNodes =
+      Array.isArray(typedGraph?.nodes)
+        ? typedGraph.nodes.length
+        : 0;
+    const expectedConnections =
+      Array.isArray(typedGraph?.connections)
+        ? typedGraph.connections.length
+        : 0;
+    const graphUiReady =
+      waitForImportedGraphUi(
+        expectedNodes,
+        expectedConnections
+      );
+
+    updateBuilderWork(
+      session,
+      {
+        title: "Preparing the Runtime Graph…",
+        message:
+          expectedNodes > 1000 ||
+          expectedConnections > 2000
+            ? `Validating ${expectedNodes.toLocaleString()} nodes and ${expectedConnections.toLocaleString()} connections, then materializing only the visible graph area.`
+            : "Validating graph types and connections, then rendering the first usable frame.",
+        detail:
+          "Large generated C# output continues independently in the background worker.",
+        progress: 72
+      }
+    );
+
+    renderAll();
+
+    const graphResult =
+      await graphUiReady;
+
+    updateBuilderWork(
+      session,
+      {
+        title: "Project ready",
+        message:
+          `Loaded ${displayName} successfully.`,
+        detail:
+          graphResult.timedOut
+            ? "The project is usable; remaining graph drawing continues in bounded browser frames."
+            : "Dialogs, controls and the first graph frame are ready.",
+        progress: 100
+      }
+    );
+    await paintBuilderUi();
+    return graphResult;
+  } finally {
+    finishBuilderWork(session);
+  }
 }
 
 function openProjectDialog() {
@@ -20477,8 +21584,19 @@ async function loadProjectJsonFile(
     return;
   }
 
+  const loadSession =
+    ++activeProjectLoadSession;
+
   setProjectFileStatus(
-    `Reading ${file.name}…`
+    `Reading and validating ${file.name}…`
+  );
+  setProjectLoadProgress(
+    true,
+    {
+      progress: 8,
+      stage:
+        "Reading the file in a background worker…"
+    }
   );
 
   try {
@@ -20491,6 +21609,8 @@ async function loadProjectJsonFile(
       );
     }
 
+    await paintBuilderUi();
+
     const project =
       await parseProjectJsonFile(
         file,
@@ -20498,35 +21618,77 @@ async function loadProjectJsonFile(
       );
 
     if (
-      builderHasActiveProject() &&
-      !(await confirmBuilderAction({
-        tone: "warning",
-        kicker: "Project replacement",
-        title: "Replace the current project?",
-        message:
-          "Loading the selected JSON project replaces the open Configuration Outline, Typed Runtime Graph and project metadata.",
-        details:
-          "Save the current project as JSON first if you want to keep a portable backup.",
-        confirmLabel: "Load JSON"
-      }))
+      loadSession !==
+        activeProjectLoadSession
     ) {
-      setProjectFileStatus(
-        "Loading was cancelled."
-      );
       return;
     }
 
-    applyLoadedProject(project);
+    setProjectLoadProgress(
+      true,
+      {
+        progress: 28,
+        stage:
+          "JSON structure validated successfully."
+      }
+    );
 
-    setProjectFileStatus(
-      `Loaded ${file.name}.`,
-      "success"
+    if (
+      builderHasActiveProject()
+    ) {
+      closeProjectDialog();
+      setProjectLoadProgress(false);
+      await paintBuilderUi();
+
+      const confirmed =
+        await confirmBuilderAction({
+          tone: "warning",
+          kicker: "Project replacement",
+          title: "Replace the current project?",
+          message:
+            "Loading the selected JSON project replaces the open Configuration Outline, Typed Runtime Graph and project metadata.",
+          details:
+            "Save the current project as JSON first if you want to keep a portable backup.",
+          confirmLabel: "Load JSON"
+        });
+
+      if (
+        loadSession !==
+          activeProjectLoadSession
+      ) {
+        return;
+      }
+
+      if (!confirmed) {
+        openProjectDialog();
+        setProjectFileStatus(
+          "Loading was cancelled."
+        );
+        return;
+      }
+    } else {
+      closeProjectDialog();
+    }
+
+    await applyLoadedProjectWithFeedback(
+      project,
+      { displayName: file.name }
     );
   } catch (error) {
+    if (
+      loadSession !==
+        activeProjectLoadSession
+    ) {
+      return;
+    }
+
     console.warn(
       "Could not load the builder project.",
       error
     );
+    if (!elements.projectDialog.open) {
+      openProjectDialog();
+    }
     setProjectFileStatus(
       `Could not load this project: ${
         error instanceof Error
@@ -20536,6 +21698,12 @@ async function loadProjectJsonFile(
       "error"
     );
   } finally {
+    if (
+      loadSession ===
+        activeProjectLoadSession
+    ) {
+      setProjectLoadProgress(false);
+    }
     elements.projectFileInput.value =
       "";
   }
@@ -21769,7 +22937,11 @@ function syncEditedResonitePath() {
   syncExportOptions();
 }
 
-function openExportDialog() {
+let exportDialogOpenSequence = 0;
+
+async function openExportDialog() {
+  const sequence =
+    ++exportDialogOpenSequence;
   elements.exportPlatform.value =
     state.exportOptions.platform ||
     inferExportPlatform(
@@ -21781,13 +22953,18 @@ function openExportDialog() {
     Boolean(state.exportOptions.includeCs);
   elements.exportIncludeCsproj.checked =
     Boolean(state.exportOptions.includeCsproj);
-  updateExportDialog();
-
-  const exportSelectUi =
-    ensureUniversalCustomSelect(
-      elements.exportPlatform
-    );
-  exportSelectUi?.refresh?.();
+  elements.exportDialog.classList.add(
+    "rml-dialog-loading"
+  );
+  elements.exportPackageSummary.textContent =
+    "Preparing generated files…";
+  elements.exportPackageMode.textContent =
+    "Please wait";
+  elements.exportProjectSummary.replaceChildren();
+  elements.exportGeneratedFiles.innerHTML =
+    '<div class="rml-inline-dialog-loading">Preparing the exact generated package…</div>';
+  elements.exportCopySelectedFile.disabled = true;
+  elements.exportDownloadSelected.disabled = true;
 
   if (typeof elements.exportDialog.showModal === "function") {
     elements.exportDialog.showModal();
@@ -21799,6 +22976,39 @@ function openExportDialog() {
     elements.exportDialog
   );
 
+  await paintBuilderUi();
+
+  if (
+    sequence !==
+      exportDialogOpenSequence ||
+    !elements.exportDialog.open
+  ) {
+    return;
+  }
+
+  try {
+    updateExportDialog();
+
+    const exportSelectUi =
+      ensureUniversalCustomSelect(
+        elements.exportPlatform
+      );
+    exportSelectUi?.refresh?.();
+  } catch (error) {
+    console.error(
+      "Export dialog preparation failed.",
+      error
+    );
+    elements.exportGeneratedFiles.innerHTML =
+      '<div class="rml-inline-dialog-loading">The export summary could not be prepared. Close this dialog and review Diagnostics.</div>';
+    elements.exportCopySelectedFile.disabled = true;
+    elements.exportDownloadSelected.disabled = true;
+  } finally {
+    elements.exportDialog.classList.remove(
+      "rml-dialog-loading"
+    );
+  }
+
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       updateAdaptiveUtilityDialog(
@@ -21809,8 +23019,10 @@ function openExportDialog() {
 }
 
 function closeExportDialog() {
+  exportDialogOpenSequence += 1;
   elements.exportDialog.classList.remove(
-    "mobile-full-modal"
+    "mobile-full-modal",
+    "rml-dialog-loading"
   );
 
   if (typeof elements.exportDialog.close === "function") {
@@ -21871,60 +23083,136 @@ function downloadSelectedExport() {
 }
 
 async function loadExampleProject() {
-  setProjectFileStatus(
-    `Reading ${EXAMPLE_PROJECT_FILE_NAME}…`
-  );
+  closeProjectDialog();
+  const workSession = beginBuilderWork({
+    kicker: "Example project",
+    title: "Reading the example…",
+    message:
+      `${EXAMPLE_PROJECT_FILE_NAME} is being read and validated in the background worker.`,
+    detail:
+      "The current project remains intact until validation succeeds.",
+    progress: 10
+  });
 
-  const project =
-    await readExampleProjectDocument();
+  try {
+    await paintBuilderUi();
+    const project =
+      await readExampleProjectDocument();
 
-  applyLoadedProject(project);
-  setProjectFileStatus(
-    `Loaded ${EXAMPLE_PROJECT_FILE_NAME}.`,
-    "success"
-  );
+    updateBuilderWork(
+      workSession,
+      {
+        title: "Example validated",
+        message:
+          "The complete example is ready to be installed.",
+        progress: 30
+      }
+    );
+
+    await applyLoadedProjectWithFeedback(
+      project,
+      {
+        displayName:
+          EXAMPLE_PROJECT_FILE_NAME,
+        workSession
+      }
+    );
+  } catch (error) {
+    finishBuilderWork(workSession);
+    throw error;
+  }
 }
 
 async function newBlank() {
-  if (
-    builderHasActiveProject() &&
-    !(await confirmBuilderAction({
-      tone: "danger",
-      kicker: "Project reset",
-      title: "Start with a blank project?",
-      message:
-        "This clears the open Configuration Outline, Typed Runtime Graph and project metadata.",
-      details:
-        "Save the current project as JSON first if you may need it again.",
-      confirmLabel: "Start Blank"
-    }))
-  ) {
-    return;
-  }
+  if (builderHasActiveProject()) {
+    closeProjectDialog();
+    await paintBuilderUi();
 
-  if (
-    document.body.classList.contains(
-      "rml-node-graph-mode"
-    )
-  ) {
-    const packButton =
-      document.getElementById(
-        "pack-into-node"
-      ) ||
-      document.querySelector(
-        ".rml-pack-button"
+    const confirmed =
+      await confirmBuilderAction({
+        tone: "danger",
+        kicker: "Project reset",
+        title: "Start with a blank project?",
+        message:
+          "This clears the open Configuration Outline, Typed Runtime Graph and project metadata.",
+        details:
+          "Save the current project as JSON first if you may need it again.",
+        confirmLabel: "Start Blank"
+      });
+
+    if (!confirmed) {
+      openProjectDialog();
+      setProjectFileStatus(
+        "Starting a blank project was cancelled."
       );
-
-    packButton?.click();
+      return;
+    }
+  } else {
+    closeProjectDialog();
   }
 
-  state.metadata = { ...DEFAULT_METADATA };
-  state.extensions = {};
-  state.nodes = [];
-  state.selectedId = null;
-  state.activeContainerId = ROOT_CONTAINER;
-  renderMetadata();
-  renderAll();
+  const workSession = beginBuilderWork({
+    kicker: "Project reset",
+    title: "Starting a blank project…",
+    message:
+      "The current interface and Runtime Graph are being reset safely.",
+    detail:
+      "The blank project will be usable as soon as its first frame is ready.",
+    progress: 35
+  });
+
+  try {
+    await paintBuilderUi();
+
+    if (
+      document.body.classList.contains(
+        "rml-node-graph-mode"
+      )
+    ) {
+      const packButton =
+        document.getElementById(
+          "pack-into-node"
+        ) ||
+        document.querySelector(
+          ".rml-pack-button"
+        );
+
+      packButton?.click();
+    }
+
+    state.metadata = { ...DEFAULT_METADATA };
+    state.extensions = {};
+    state.nodes = [];
+    state.selectedId = null;
+    state.activeContainerId = ROOT_CONTAINER;
+    renderMetadata();
+    renderPalette();
+
+    updateBuilderWork(
+      workSession,
+      {
+        title: "Preparing the blank interface…",
+        message:
+          "Controls and dialogs are being synchronized.",
+        progress: 75
+      }
+    );
+    await paintBuilderUi();
+    renderAll();
+
+    updateBuilderWork(
+      workSession,
+      {
+        title: "Blank project ready",
+        message:
+          "The builder is ready for a new project.",
+        progress: 100
+      }
+    );
+    await paintBuilderUi();
+  } finally {
+    finishBuilderWork(workSession);
+  }
 }
 
 function setTopMenuOpen(open) {
@@ -22892,17 +24180,61 @@ function bindInformationDialogEvents() {
 }
 
 async function openInformationDialog() {
-  const dialog = await ensureInformationDialogLoaded();
-  setInformationPage("general");
-
-  if (!dialog?.open) {
-    dialog.showModal();
-  }
+  const workSession = beginBuilderWork({
+    kicker: "Help",
+    title: "Preparing documentation…",
+    message:
+      "The help template and node references are being loaded before the dialog opens.",
+    detail:
+      "The dialog will open automatically when its content is ready.",
+    progress: 35
+  });
 
   try {
-    dialog.focus({ preventScroll: true });
-  } catch {
-    dialog.focus();
+    await paintBuilderUi();
+    const dialog =
+      await ensureInformationDialogLoaded();
+    setInformationPage("general");
+
+    updateBuilderWork(
+      workSession,
+      {
+        title: "Documentation ready",
+        message:
+          "Opening the complete Help dialog…",
+        progress: 100
+      }
+    );
+    await paintBuilderUi();
+    finishBuilderWork(workSession);
+
+    if (!dialog?.open) {
+      dialog.showModal();
+    }
+
+    try {
+      dialog.focus({ preventScroll: true });
+    } catch {
+      dialog.focus();
+    }
+  } catch (error) {
+    finishBuilderWork(workSession);
+    console.error(
+      "Information dialog preparation failed.",
+      error
+    );
+    void showBuilderNotice({
+      tone: "warning",
+      kicker: "Help unavailable",
+      title: "The Help dialog could not be opened",
+      message:
+        error instanceof Error
+          ? error.message
+          : String(error),
+      details:
+        "The builder itself remains available.",
+      confirmLabel: "OK"
+    });
   }
 }
 
@@ -22939,7 +24271,7 @@ function ensureSetupAssistantLoaded(firstRun = false) {
 
   setupAssistantLoadPromise = new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = new URL("setup_assistant.js?v=182-generated-hot-reload-lifecycle-v372f1", APP_SCRIPT_BASE_URL).href;
+    script.src = new URL("setup_assistant.js?v=186-packed-config-integrity-v395f1", APP_SCRIPT_BASE_URL).href;
     script.async = true;
     script.dataset.rmlSetupAssistant = "true";
     script.addEventListener("load", () => resolve(true), { once: true });
@@ -23764,6 +25096,39 @@ function cacheElements() {
     projectLoadJson: document.getElementById("project-load-json"),
     projectFileInput: document.getElementById("project-file-input"),
     projectFileStatus: document.getElementById("project-file-status"),
+    projectLoadProgress: document.getElementById(
+      "project-load-progress"
+    ),
+    projectLoadProgressFill: document.getElementById(
+      "project-load-progress-fill"
+    ),
+    projectLoadProgressStage: document.getElementById(
+      "project-load-progress-stage"
+    ),
+    builderWorkOverlay: document.getElementById(
+      "builder-work-overlay"
+    ),
+    builderWorkKicker: document.getElementById(
+      "builder-work-kicker"
+    ),
+    builderWorkTitle: document.getElementById(
+      "builder-work-title"
+    ),
+    builderWorkMessage: document.getElementById(
+      "builder-work-message"
+    ),
+    builderWorkProgress: document.getElementById(
+      "builder-work-progress"
+    ),
+    builderWorkProgressFill: document.getElementById(
+      "builder-work-progress-fill"
+    ),
+    builderWorkDetail: document.getElementById(
+      "builder-work-detail"
+    ),
+    builderWorkDismiss: document.getElementById(
+      "builder-work-dismiss"
+    ),
     builderMessageDialog: document.getElementById(
       "builder-message-dialog"
     ),
@@ -24466,7 +25831,7 @@ function exposeBuilderBridge() {
     },
 
     requestGeneratedOutputRefresh() {
-      updateGeneratedOutput();
+      requestGeneratedOutputUpdate();
 
       if (
         elements.exportDialog?.open
@@ -26953,8 +28318,29 @@ async function initialize() {
   cacheElements();
   exposeBuilderDialogBridge();
 
+  const startupWorkSession =
+    beginBuilderWork({
+      kicker: "Builder startup",
+      title: "Restoring the workspace…",
+      message:
+        "The saved project is being read before the first usable interface frame is rendered.",
+      detail:
+        "Large Runtime Graphs are validated without materializing every off-screen element.",
+      progress: 12
+    });
+  await paintBuilderUi();
+
   preventGlobalDoubleSelection();
   await restore();
+  updateBuilderWork(
+    startupWorkSession,
+    {
+      title: "Preparing controls and dialogs…",
+      message:
+        "Project metadata, palettes and interaction handlers are being synchronized.",
+      progress: 46
+    }
+  );
   renderMetadata();
   renderPalette();
   installSetupAssistantBridge();
@@ -27543,28 +28929,33 @@ async function initialize() {
     .addEventListener(
       "click",
       async () => {
-        if (
-          builderHasActiveProject() &&
-          !(await confirmBuilderAction({
-            tone: "warning",
-            kicker: "Project replacement",
-            title: "Replace the current project with the complete example?",
-            message:
-              "The complete example replaces the open Configuration Outline, Typed Runtime Graph and project metadata.",
-            details:
-              "This action is intentionally blocked until you confirm it. Save the current project as JSON first if you want to keep a portable backup.",
-            confirmLabel: "Load Complete Example"
-          }))
-        ) {
-          setProjectFileStatus(
-            "Example loading was cancelled."
-          );
-          return;
+        if (builderHasActiveProject()) {
+          closeProjectDialog();
+          await paintBuilderUi();
+
+          const confirmed =
+            await confirmBuilderAction({
+              tone: "warning",
+              kicker: "Project replacement",
+              title: "Replace the current project with the complete example?",
+              message:
+                "The complete example replaces the open Configuration Outline, Typed Runtime Graph and project metadata.",
+              details:
+                "This action is intentionally blocked until you confirm it. Save the current project as JSON first if you want to keep a portable backup.",
+              confirmLabel: "Load Complete Example"
+            });
+
+          if (!confirmed) {
+            openProjectDialog();
+            setProjectFileStatus(
+              "Example loading was cancelled."
+            );
+            return;
+          }
         }
 
         try {
           await loadExampleProject();
-          closeProjectDialog();
         } catch (error) {
           console.warn(
             "Could not load the external example project.",
@@ -27770,11 +29161,24 @@ async function initialize() {
   );
   elements.projectClose.addEventListener(
     "click",
-    closeProjectDialog
+    () => {
+      cancelActiveProjectLoad();
+      closeProjectDialog();
+    }
   );
   elements.projectDone.addEventListener(
     "click",
-    closeProjectDialog
+    () => {
+      cancelActiveProjectLoad();
+      closeProjectDialog();
+    }
+  );
+  elements.builderWorkDismiss?.addEventListener(
+    "click",
+    () =>
+      finishBuilderWork(
+        activeBuilderWorkSession
+      )
   );
   elements.projectSaveJson.addEventListener(
     "click",
@@ -27799,9 +29203,14 @@ async function initialize() {
         event.target ===
         elements.projectDialog
       ) {
+        cancelActiveProjectLoad();
         closeProjectDialog();
       }
     }
+  );
+  elements.projectDialog.addEventListener(
+    "cancel",
+    cancelActiveProjectLoad
   );
   elements.builderMessageCancel.addEventListener(
     "click",
@@ -27916,7 +29325,56 @@ async function initialize() {
 
   exposeBuilderBridge();
   beginTypedNodeGraphModulesTracking();
+
+  const startupGraph =
+    state.extensions?.typedNodeGraph;
+  const startupExpectedNodes =
+    Array.isArray(startupGraph?.nodes)
+      ? startupGraph.nodes.length
+      : 0;
+  const startupExpectedConnections =
+    Array.isArray(startupGraph?.connections)
+      ? startupGraph.connections.length
+      : 0;
+  const startupGraphReady =
+    waitForImportedGraphUi(
+      startupExpectedNodes,
+      startupExpectedConnections
+    );
+  updateBuilderWork(
+    startupWorkSession,
+    {
+      title: "Rendering the first usable frame…",
+      message:
+        startupExpectedNodes > 1000 ||
+        startupExpectedConnections > 2000
+          ? `Preparing ${startupExpectedNodes.toLocaleString()} nodes and ${startupExpectedConnections.toLocaleString()} connections in bounded rendering batches.`
+          : "The restored project and all utility dialogs are ready to enter the interface.",
+      progress: 76
+    }
+  );
+  await paintBuilderUi();
   renderAll();
+
+  const startupGraphResult =
+    await startupGraphReady;
+  updateBuilderWork(
+    startupWorkSession,
+    {
+      title: "Builder ready",
+      message:
+        "The first interface frame and all dialog handlers are ready.",
+      detail:
+        startupGraphResult.timedOut
+          ? "The interface is available while remaining graph drawing continues in bounded browser frames."
+          : "Workspace restoration completed successfully.",
+      progress: 100
+    }
+  );
+  await paintBuilderUi();
+  finishBuilderWork(
+    startupWorkSession
+  );
 
   document.dispatchEvent(
     new CustomEvent(

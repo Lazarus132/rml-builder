@@ -37,6 +37,7 @@
   let stableTourViewport = null;
   let outlineNestedPreparationHelperIds = [];
   let startPromise = null;
+  let projectReplacementEpoch = 0;
   let mobileTopbarPreparedForNarration = false;
   let mobilePackPreparedForNarration = false;
   let outlineNestedTransactionSerial = 0;
@@ -29162,6 +29163,34 @@
     }
   }
 
+  function discardForProjectReplacement() {
+    projectReplacementEpoch += 1;
+    cancelDemo();
+    clearTarget();
+
+    const ui = elements();
+    document.documentElement.classList.remove(
+      "rml-setup-tour-active",
+      "rml-setup-demonstration-active"
+    );
+    if (ui.root) ui.root.hidden = true;
+    if (ui.liveControls) ui.liveControls.hidden = true;
+    if (ui.liveSkipDemo) ui.liveSkipDemo.disabled = true;
+    if (ui.liveSkipTour) ui.liveSkipTour.disabled = true;
+
+    snapshot = null;
+    snapshotFingerprint = "";
+    stepSnapshots.clear();
+    stepEnvironmentSnapshots.clear();
+    stepReadySnapshots.clear();
+    stepReadyEnvironmentSnapshots.clear();
+    originalTourUiState = null;
+    firstRunSession = false;
+    demoInFlight = false;
+    repeatPreviousInFlight = false;
+    tourResizeObserver?.disconnect?.();
+  }
+
   function bindEvents() {
     const ui = elements();
     if (!ui.root || ui.root.dataset.bound === "true") return;
@@ -29372,8 +29401,16 @@
 
   function start(options = {}) {
     if (startPromise) return startPromise;
+    const startProjectReplacementEpoch =
+      projectReplacementEpoch;
     startPromise = (async () => {
       await ensureTemplate();
+      if (
+        startProjectReplacementEpoch !==
+        projectReplacementEpoch
+      ) {
+        return false;
+      }
       const ui = elements();
       if (!ui.root || !window.RMLBuilderSetupBridge) return false;
       if (!ui.root.hidden) return true;
@@ -29398,11 +29435,23 @@
       window.RMLBuilderSetupBridge.prepareTourDemo?.();
 
       await new Promise(resolve => window.setTimeout(resolve, 0));
+      if (
+        startProjectReplacementEpoch !==
+        projectReplacementEpoch
+      ) {
+        return false;
+      }
 
       window.RMLTypedNodeGraphScrollLayers?.clear?.();
       window.RMLUniversalScrollLayers?.clear?.();
 
       await new Promise(resolve => window.setTimeout(resolve, 0));
+      if (
+        startProjectReplacementEpoch !==
+        projectReplacementEpoch
+      ) {
+        return false;
+      }
 
       ui.root.classList.add("rml-setup-layout-pending");
       ui.root.hidden = false;
@@ -29467,7 +29516,15 @@
   }
 
   Object.defineProperty(window, "RMLBuilderSetupAssistant", {
-    value: Object.freeze({ start }),
+    value: Object.freeze({
+      start,
+      discardForProjectReplacement
+    }),
     configurable: true
   });
+
+  document.addEventListener(
+    "rml-builder:project-replacement",
+    discardForProjectReplacement
+  );
 })();

@@ -34,6 +34,11 @@
   const GRAPH_WIRE_POINT_REUSE_DISTANCE = 18;
   const GRAPH_WIRE_PATH_SAMPLES = 36;
   const GRAPH_SVG_COMPATIBILITY_LIMIT = 700;
+  const GRAPH_DOM_VIRTUALIZATION_THRESHOLD = 240;
+  const GRAPH_FALLBACK_MAX_DETAILED_NODES = 220;
+  const GRAPH_FALLBACK_MAX_SVG_CONNECTIONS = 600;
+  const GRAPH_GPU_WIRE_CONNECTION_CHUNK = 240;
+  const GRAPH_INCREMENTAL_PRUNE_CONNECTION_LIMIT = 800;
   const GRAPH_GPU_OVERVIEW_ENTER_ZOOM = 0.20;
   const GRAPH_GPU_OVERVIEW_EXIT_ZOOM = 0.24;
   const GRAPH_NODE_VIRTUAL_OVERSCAN_PIXELS = 260;
@@ -1097,6 +1102,8 @@
     new Map();
   let nodeBodyWireRefreshFrame = 0;
   let graphWireRenderFrame = 0;
+  let graphWireChunkFrame = 0;
+  let graphWireChunkGeneration = 0;
   let graphWireFullRenderPending = false;
   const graphWirePartialConnectionIds =
     new Set();
@@ -1180,6 +1187,7 @@
   let graphPendingInteractionMotion = null;
 
   function resetGraphRenderCaches() {
+    currentAnalysis = null;
     graphNodeGeometryCache.clear();
     graphForcedNodeIds.clear();
     graphSocketElementCache.clear();
@@ -3203,8 +3211,8 @@
     }
 
     const largeGraph =
-      graph.nodes.length > 10000 ||
-      graph.connections.length > 20000;
+      graph.nodes.length > 1000 ||
+      graph.connections.length > 2000;
 
     if (!largeGraph) {
       run();
@@ -3287,7 +3295,7 @@
     } else {
       persistTimer = window.setTimeout(
         commit,
-        graph.nodes.length > 10000
+        graph.nodes.length > 1000
           ? 180
           : 80
       );
@@ -4364,10 +4372,36 @@
       );
 
       if (!fromRef || !toRef) {
+        const missing = [];
+        const sourceNode =
+          findGraphNode(
+            connection.fromNode
+          );
+        const targetNode =
+          findGraphNode(
+            connection.toNode
+          );
+
+        if (!fromRef) {
+          missing.push(
+            sourceNode
+              ? `source port '${connection.fromPort}' on node '${sourceNode.operatorId || sourceNode.label || sourceNode.id}'`
+              : `source node '${connection.fromNode}'`
+          );
+        }
+
+        if (!toRef) {
+          missing.push(
+            targetNode
+              ? `target port '${connection.toPort}' on node '${targetNode.operatorId || targetNode.label || targetNode.id}'`
+              : `target node '${connection.toNode}'`
+          );
+        }
+
         return {
           valid: false,
           reason:
-            "A connection references a missing node or port.",
+            `Connection '${connection.id || "unnamed"}' references a missing ${missing.join(" and ")}: '${connection.fromNode}.${connection.fromPort}' → '${connection.toNode}.${connection.toPort}'.`,
           bindings: new Map()
         };
       }
@@ -5843,6 +5877,32 @@
 
         return;
     }
+
+    if (
+      graph.connections.length >
+        GRAPH_INCREMENTAL_PRUNE_CONNECTION_LIMIT
+    ) {
+      currentAnalysis =
+        wholeGraph.analysis;
+      normalizeConnectionRouting(
+        graph.connections
+      );
+
+      if (
+        graph.selectedConnectionId &&
+        !graph.connections.some(
+          connection =>
+            connection.id ===
+              graph.selectedConnectionId
+        )
+      ) {
+        graph.selectedConnectionId = null;
+      }
+
+      normalizeSelectedWirePoint();
+      return;
+    }
+
     const accepted = [];
 
     for (const connection of graph.connections) {
@@ -8302,14 +8362,158 @@
   }
 
   function sanitizeGeneratedCSharp(source) {
-    return String(source || "")
-      .replace(/\/\*[\s\S]*?\*\//g, " ")
-      .replace(/\/\/.*$/gm, " ")
-      .replace(
-        /@?\$?"(?:""|\\.|[^"\\])*"/g,
-        '""'
-      )
-      .replace(/'(?:\\.|[^'\\])'/g, "''");
+    const input = String(source || "");
+    let result = "";
+    let index = 0;
+    let state = "code";
+    let rawQuoteCount = 0;
+
+    const blank = character =>
+      character === "\r" || character === "\n"
+        ? character
+        : " ";
+
+    const blankRange = (start, end) => {
+      for (let cursor = start; cursor < end; cursor += 1) {
+        result += blank(input[cursor]);
+      }
+    };
+
+    while (index < input.length) {
+      const character = input[index];
+      const next = input[index + 1] || "";
+
+      if (state === "line-comment") {
+        result += blank(character);
+        index += 1;
+        if (character === "\r" || character === "\n") {
+          state = "code";
+        }
+        continue;
+      }
+
+      if (state === "block-comment") {
+        if (character === "*" && next === "/") {
+          blankRange(index, index + 2);
+          index += 2;
+          state = "code";
+        } else {
+          result += blank(character);
+          index += 1;
+        }
+        continue;
+      }
+
+      if (state === "character") {
+        result += blank(character);
+        index += 1;
+        if (character === "\\" && index < input.length) {
+          result += blank(input[index]);
+          index += 1;
+        } else if (character === "'") {
+          state = "code";
+        }
+        continue;
+      }
+
+      if (state === "string") {
+        result += blank(character);
+        index += 1;
+        if (character === "\\" && index < input.length) {
+          result += blank(input[index]);
+          index += 1;
+        } else if (character === '"') {
+          state = "code";
+        }
+        continue;
+      }
+
+      if (state === "verbatim-string") {
+        if (character === '"' && next === '"') {
+          blankRange(index, index + 2);
+          index += 2;
+        } else {
+          result += blank(character);
+          index += 1;
+          if (character === '"') {
+            state = "code";
+          }
+        }
+        continue;
+      }
+
+      if (state === "raw-string") {
+        if (character === '"') {
+          let quotes = 1;
+          while (input[index + quotes] === '"') {
+            quotes += 1;
+          }
+          blankRange(index, index + quotes);
+          index += quotes;
+          if (quotes >= rawQuoteCount) {
+            state = "code";
+            rawQuoteCount = 0;
+          }
+        } else {
+          result += blank(character);
+          index += 1;
+        }
+        continue;
+      }
+
+      if (character === "/" && next === "/") {
+        blankRange(index, index + 2);
+        index += 2;
+        state = "line-comment";
+        continue;
+      }
+
+      if (character === "/" && next === "*") {
+        blankRange(index, index + 2);
+        index += 2;
+        state = "block-comment";
+        continue;
+      }
+
+      if (character === "'") {
+        result += " ";
+        index += 1;
+        state = "character";
+        continue;
+      }
+
+      if (character === '"') {
+        let quotes = 1;
+        while (input[index + quotes] === '"') {
+          quotes += 1;
+        }
+
+        if (quotes >= 3) {
+          blankRange(index, index + quotes);
+          index += quotes;
+          rawQuoteCount = quotes;
+          state = "raw-string";
+          continue;
+        }
+
+        result += " ";
+        index += 1;
+        state =
+          input[index - 2] === "@" ||
+          (
+            input[index - 2] === "$" &&
+            input[index - 3] === "@"
+          )
+            ? "verbatim-string"
+            : "string";
+        continue;
+      }
+
+      result += character;
+      index += 1;
+    }
+
+    return result;
   }
 
   function unresolvedGeneratedMethodCalls(
@@ -8648,7 +8852,10 @@
           ]
         )
       );
-
+    // Only real value-bearing Configuration Outline nodes may contribute
+    // runtime fields. Structural containers such as Inline Rows are present
+    // in flattenConfiguration() for menu/layout purposes, but they do not
+    // expose configuration values and must never generate C# members.
     const configurationValueEntries =
       configurationEntries.filter(entry => {
         const node = entry?.node;
@@ -8847,6 +9054,8 @@
 
     let impulseMethodByPort =
       new Map();
+    let entryMethodByPort =
+      new Map();
 
     const registerReference =
       reference => {
@@ -8962,6 +9171,13 @@
         portId
       ) =>
         impulseMethodByPort.get(
+          `${nodeId}:${portId}`
+        ) || "",
+      entryMethod: (
+        nodeId,
+        portId
+      ) =>
+        entryMethodByPort.get(
           `${nodeId}:${portId}`
         ) || "",
       token: graphCsMethodToken,
@@ -9588,6 +9804,11 @@
               `QueueEmit${graphCsMethodToken(
                 node.id,
                 spec.id
+              )}`,
+            entryMethod:
+              `Enter${graphCsMethodToken(
+                node.id,
+                spec.id
               )}`
           });
         }
@@ -9600,6 +9821,16 @@
           item => [
             `${item.node.id}:${item.spec.id}`,
             item.queuedMethod
+          ]
+        )
+      );
+
+    entryMethodByPort =
+      new Map(
+        impulseOutputs.map(
+          item => [
+            `${item.node.id}:${item.spec.id}`,
+            item.entryMethod
           ]
         )
       );
@@ -10169,6 +10400,14 @@ ${actions.length > 0
     }`
       ).join("\n\n");
 
+    const entryImpulseMethods =
+      impulseOutputs.map(item =>
+`    private static void ${item.entryMethod}()
+    {
+        BeginGraphEntry(${item.queuedMethod});
+    }`
+      ).join("\n\n");
+
     const configurationNode =
       graph.nodes.find(
         node =>
@@ -10188,7 +10427,7 @@ ${actions.length > 0
         ? configurationButtons
             .map(entry => {
               const method =
-                impulseMethodByPort.get(
+                entryMethodByPort.get(
                   `${configurationNode.id}:config-${entry.node.id}`
                 );
 
@@ -10235,7 +10474,7 @@ ${configurationButtonCases.length > 0
         }
 
         const method =
-          impulseMethodByPort.get(
+          entryMethodByPort.get(
             `${configurationNode.id}:${item.portId}`
           );
 
@@ -10259,7 +10498,7 @@ ${configurationButtonCases.length > 0
         "resonite.onStart"
       ) {
         const method =
-          impulseMethodByPort.get(
+          entryMethodByPort.get(
             `${node.id}:impulse`
           );
         if (method) {
@@ -10832,7 +11071,7 @@ ${dynamicChoiceRefreshCases.join("\n")}
         )
         .map(item => {
           const emitter =
-            impulseMethodByPort.get(
+            entryMethodByPort.get(
               `${configurationNode.id}:${item.portId}`
             );
 
@@ -10943,12 +11182,6 @@ internal static partial class ${graphClassName}
         new(StringComparer.Ordinal);
     private static readonly AsyncLocal<GraphExecutionFrame?> _graphExecutionFrame =
         new();
-    [ThreadStatic]
-    private static Queue<Action>? _graphImpulseQueue;
-    [ThreadStatic]
-    private static bool _graphImpulseQueueDraining;
-    [ThreadStatic]
-    private static int _graphExecutionDepth;
 
     /// <summary>
     /// Latest values published by Display Value and Display Impulse nodes, keyed by node label.
@@ -11102,8 +11335,49 @@ ${startupEmitters.length > 0
 
     private sealed class GraphExecutionFrame
     {
+        internal readonly object Gate = new();
         internal readonly Dictionary<string, object?> Values =
             new(StringComparer.Ordinal);
+        internal readonly Queue<Action> Impulses =
+            new();
+        internal bool IsDraining;
+    }
+
+    private sealed class GraphExecutionScope : IDisposable
+    {
+        private readonly GraphExecutionFrame? _previous;
+        private bool _disposed;
+
+        internal GraphExecutionScope()
+        {
+            _previous = _graphExecutionFrame.Value;
+            _graphExecutionFrame.Value =
+                new GraphExecutionFrame();
+        }
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            _graphExecutionFrame.Value =
+                _previous;
+        }
+    }
+
+    private static GraphExecutionScope OpenGraphEntry()
+    {
+        return new GraphExecutionScope();
+    }
+
+    private static void BeginGraphEntry(Action action)
+    {
+        using GraphExecutionScope scope =
+            OpenGraphEntry();
+        action();
     }
 
     private static T ReadGraphExecutionValue<T>(
@@ -11111,13 +11385,19 @@ ${startupEmitters.length > 0
         T fallback)
     {
         GraphExecutionFrame? frame = _graphExecutionFrame.Value;
-        if (
-            frame is not null &&
-            frame.Values.TryGetValue(key, out object? value))
+        if (frame is not null)
         {
-            return value is null
-                ? default!
-                : (T)value;
+            lock (frame.Gate)
+            {
+                if (frame.Values.TryGetValue(
+                        key,
+                        out object? value))
+                {
+                    return value is null
+                        ? default!
+                        : (T)value;
+                }
+            }
         }
 
         return fallback;
@@ -11134,7 +11414,10 @@ ${startupEmitters.length > 0
             _graphExecutionFrame.Value = frame;
         }
 
-        frame.Values[key] = value;
+        lock (frame.Gate)
+        {
+            frame.Values[key] = value;
+        }
     }
 
     private static T ReadGraphRuntimeValue<T>(
@@ -11142,13 +11425,24 @@ ${startupEmitters.length > 0
         T fallback)
     {
         GraphExecutionFrame? frame = _graphExecutionFrame.Value;
-        if (
-            frame is not null &&
-            frame.Values.TryGetValue(key, out object? framedValue))
+        if (frame is not null)
         {
-            return framedValue is null
-                ? default!
-                : (T)framedValue;
+            lock (frame.Gate)
+            {
+                if (frame.Values.TryGetValue(
+                        key,
+                        out object? framedValue))
+                {
+                    return framedValue is null
+                        ? default!
+                        : (T)framedValue;
+                }
+            }
+
+            // A new execution entry must never inherit another entry's
+            // transient output. The last-value snapshot below exists only
+            // for displays and diagnostics outside an active execution.
+            return fallback;
         }
 
         lock (_graphRuntimeLastValuesLock)
@@ -11177,7 +11471,10 @@ ${startupEmitters.length > 0
             _graphExecutionFrame.Value = frame;
         }
 
-        frame.Values[key] = value;
+        lock (frame.Gate)
+        {
+            frame.Values[key] = value;
+        }
         lock (_graphRuntimeLastValuesLock)
         {
             _graphRuntimeLastValues[key] = value;
@@ -11203,56 +11500,41 @@ ${startupEmitters.length > 0
     }
 
     // Every generated graph uses the same stack-safe execution kernel.
-    // Continuations are FIFO-drained instead of recursively called. A global
-    // execution lock serializes overlapping entries, while AsyncLocal frames
-    // keep transient node outputs isolated across asynchronous continuations.
+    // Each root event owns a frame with its own FIFO queue. Continuations are
+    // drained iteratively instead of recursively. The global lock serializes
+    // actual execution without ever merging the values of different roots.
     private static void EnqueueGraphImpulse(Action action)
     {
         GraphExecutionFrame? frame = _graphExecutionFrame.Value;
-        bool ownsFrame = _graphExecutionDepth == 0;
         if (frame is null)
         {
-            frame = new GraphExecutionFrame();
-            _graphExecutionFrame.Value = frame;
+            BeginGraphEntry(
+                () => EnqueueGraphImpulse(action));
+            return;
         }
 
-        _graphExecutionDepth++;
-
-        try
+        lock (_graphImpulseExecutionLock)
         {
-            lock (_graphImpulseExecutionLock)
+            frame.Impulses.Enqueue(action);
+
+            if (frame.IsDraining)
             {
-                Queue<Action> queue =
-                    _graphImpulseQueue ??= new Queue<Action>();
-                queue.Enqueue(action);
+                return;
+            }
 
-                if (_graphImpulseQueueDraining)
+            frame.IsDraining = true;
+            try
+            {
+                while (frame.Impulses.Count > 0)
                 {
-                    return;
-                }
-
-                _graphImpulseQueueDraining = true;
-                try
-                {
-                    while (queue.Count > 0)
-                    {
-                        queue.Dequeue()();
-                    }
-                }
-                finally
-                {
-                    queue.Clear();
-                    _graphImpulseQueueDraining = false;
+                    frame.Impulses.Dequeue()();
                 }
             }
-        }
-        finally
-        {
-            if (ownsFrame)
+            finally
             {
-                _graphExecutionFrame.Value = null;
+                frame.Impulses.Clear();
+                frame.IsDraining = false;
             }
-            _graphExecutionDepth--;
         }
     }
 
@@ -11364,7 +11646,7 @@ ${directDynamicChoiceFields.length > 0
             value);
     }
 
-${queuedImpulseMethods ? `${queuedImpulseMethods}\n\n` : ""}${impulseMethods || "    // No impulse outputs are present."}${extensionMembersCode ? `\n\n${extensionMembersCode}` : ""}
+${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods ? `${queuedImpulseMethods}\n\n` : ""}${impulseMethods || "    // No impulse outputs are present."}${extensionMembersCode ? `\n\n${extensionMembersCode}` : ""}
 
     private static T GraphAdd<T>(T left, T right)
     {
@@ -14713,6 +14995,88 @@ ${queuedImpulseMethods ? `${queuedImpulseMethods}\n\n` : ""}${impulseMethods || 
     }
   }
 
+  function pruneConnectionsForConfigurationSnapshot(
+    snapshot
+  ) {
+    const validPorts =
+      new Set(
+        flattenConfiguration(
+          snapshot?.nodes || []
+        )
+          .filter(
+            entry =>
+              entry.node?.kind !==
+                "layoutRow"
+          )
+          .map(
+            entry =>
+              `config-${entry.node.id}`
+          )
+      );
+    const configurationNodeIds =
+      new Set(
+        graph.nodes
+          .filter(
+            node =>
+              node.kind ===
+                "configuration"
+          )
+          .map(node => node.id)
+      );
+    const removed = [];
+
+    graph.connections =
+      graph.connections.filter(
+        connection => {
+          const configurationPort =
+            configurationNodeIds.has(
+              connection.fromNode
+            ) &&
+            String(
+              connection.fromPort || ""
+            ).startsWith("config-");
+          const keep =
+            !configurationPort ||
+            validPorts.has(
+              connection.fromPort
+            );
+
+          if (!keep) {
+            removed.push({
+              id: connection.id,
+              fromNode:
+                connection.fromNode,
+              fromPort:
+                connection.fromPort,
+              toNode:
+                connection.toNode,
+              toPort:
+                connection.toPort
+            });
+          }
+
+          return keep;
+        }
+      );
+
+    if (removed.length > 0) {
+      normalizeConnectionRouting(
+        graph.connections
+      );
+      graph.selectedConnectionId =
+        graph.connections.some(
+          connection =>
+            connection.id ===
+              graph.selectedConnectionId
+        )
+          ? graph.selectedConnectionId
+          : null;
+      normalizeSelectedWirePoint();
+    }
+
+    return removed;
+  }
+
   function synchronizePackedSnapshot(
     render = true
   ) {
@@ -14733,8 +15097,11 @@ ${queuedImpulseMethods ? `${queuedImpulseMethods}\n\n` : ""}${impulseMethods || 
       return false;
     }
 
-    graph.configSnapshot =
-      snapshot;
+    const removedConnections =
+      pruneConnectionsForConfigurationSnapshot(
+        snapshot
+      );
+    graph.configSnapshot = snapshot;
     graph.sourceSignature =
       signature;
     ensureConfigurationNode();
@@ -14748,6 +15115,18 @@ ${queuedImpulseMethods ? `${queuedImpulseMethods}\n\n` : ""}${impulseMethods || 
     }
 
     updateSourceBadge();
+
+    if (removedConnections.length > 0) {
+      showGraphMessage(
+        `${removedConnections.length} connection${removedConnections.length === 1 ? "" : "s"} from removed Configuration Outline items were detached safely.`,
+        "warning"
+      );
+      console.info(
+        "Detached connections whose Configuration Outline ports were removed.",
+        removedConnections
+      );
+    }
+
     return true;
   }
 
@@ -15596,6 +15975,7 @@ ${queuedImpulseMethods ? `${queuedImpulseMethods}\n\n` : ""}${impulseMethods || 
       );
       graphWireRenderFrame = 0;
     }
+    cancelGraphWireChunkBuild();
     graphWireFullRenderPending = false;
     graphWirePartialConnectionIds.clear();
     graphHybridRenderer?.dispose?.();
@@ -17702,7 +18082,9 @@ ${queuedImpulseMethods ? `${queuedImpulseMethods}\n\n` : ""}${impulseMethods || 
     }
 
     cancelInteraction(false);
-    pruneConnections();
+    if (!currentAnalysis) {
+      pruneConnections();
+    }
 
     graphHybridRenderer?.dispose?.();
     graphHybridRenderer = null;
@@ -18090,7 +18472,15 @@ ${queuedImpulseMethods ? `${queuedImpulseMethods}\n\n` : ""}${impulseMethods || 
         event.preventDefault()
     );
 
-    applyViewportTransform();
+    if (
+      graph.nodes.length >
+        GRAPH_DOM_VIRTUALIZATION_THRESHOLD &&
+      !graphViewportHasVisibleNode()
+    ) {
+      centerGraph();
+    } else {
+      applyViewportTransform();
+    }
     renderGraphNodesAndWires();
     updateSourceBadge();
 
@@ -18122,6 +18512,10 @@ ${queuedImpulseMethods ? `${queuedImpulseMethods}\n\n` : ""}${impulseMethods || 
       overview !== previousOverview
     ) {
       scheduleGraphNodeVirtualization();
+    }
+
+    if (fallbackGraphVirtualizationActive()) {
+      scheduleGraphWireRender();
     }
 
     scheduleGraphScrollLayerVisualRefresh();
@@ -21107,7 +21501,9 @@ ${queuedImpulseMethods ? `${queuedImpulseMethods}\n\n` : ""}${impulseMethods || 
       return;
     }
 
-    pruneConnections();
+    if (!currentAnalysis) {
+      pruneConnections();
+    }
     renderGraphNodes();
 
     requestAnimationFrame(() => {
@@ -22501,6 +22897,18 @@ ${queuedImpulseMethods ? `${queuedImpulseMethods}\n\n` : ""}${impulseMethods || 
     );
   }
 
+  function fallbackGraphVirtualizationActive() {
+    return Boolean(
+      !graphHybridActive() &&
+      (
+        graph.nodes.length >
+          GRAPH_DOM_VIRTUALIZATION_THRESHOLD ||
+        graph.connections.length >
+          GRAPH_SVG_COMPATIBILITY_LIMIT
+      )
+    );
+  }
+
   function graphGpuOverviewActive() {
     if (!graphHybridActive()) {
       graphGpuOverviewMode = false;
@@ -22589,7 +22997,10 @@ ${queuedImpulseMethods ? `${queuedImpulseMethods}\n\n` : ""}${impulseMethods || 
     };
   }
 
-  function visibleGraphBounds() {
+  function visibleGraphBounds(
+    overscanPixels =
+      GRAPH_NODE_VIRTUAL_OVERSCAN_PIXELS
+  ) {
     const rectangle =
       dom.viewport
         ?.getBoundingClientRect();
@@ -22608,7 +23019,7 @@ ${queuedImpulseMethods ? `${queuedImpulseMethods}\n\n` : ""}${impulseMethods || 
     }
 
     const overscan =
-      GRAPH_NODE_VIRTUAL_OVERSCAN_PIXELS /
+      Math.max(0, overscanPixels) /
       scale;
     return {
       left:
@@ -22630,6 +23041,40 @@ ${queuedImpulseMethods ? `${queuedImpulseMethods}\n\n` : ""}${impulseMethods || 
     };
   }
 
+  function graphViewportHasVisibleNode() {
+    const rectangle =
+      dom.viewport
+        ?.getBoundingClientRect();
+    if (
+      !rectangle ||
+      rectangle.width <= 0 ||
+      rectangle.height <= 0
+    ) {
+      return true;
+    }
+
+    const bounds =
+      visibleGraphBounds(0);
+
+    return graph.nodes.some(node => {
+      if (
+        node?.parameters
+          ?._rmlInternalDynamicMonitor ===
+            true
+      ) {
+        return false;
+      }
+      const geometry =
+        estimatedGraphNodeGeometry(node);
+      return !(
+        geometry.right < bounds.left ||
+        geometry.x > bounds.right ||
+        geometry.bottom < bounds.top ||
+        geometry.y > bounds.bottom
+      );
+    });
+  }
+
   function nodeRequiredForInteraction(node) {
     return Boolean(
       graph.selectedNodeId === node.id ||
@@ -22645,7 +23090,13 @@ ${queuedImpulseMethods ? `${queuedImpulseMethods}\n\n` : ""}${impulseMethods || 
   }
 
   function desiredRenderedGraphNodes() {
-    if (!graphHybridActive()) {
+    const fallbackVirtualized =
+      fallbackGraphVirtualizationActive();
+
+    if (
+      !graphHybridActive() &&
+      !fallbackVirtualized
+    ) {
       return graph.nodes.filter(node =>
         node?.parameters
           ?._rmlInternalDynamicMonitor !==
@@ -22658,7 +23109,8 @@ ${queuedImpulseMethods ? `${queuedImpulseMethods}\n\n` : ""}${impulseMethods || 
     const bounds =
       visibleGraphBounds();
 
-    return graph.nodes.filter(node => {
+    const candidates =
+      graph.nodes.filter(node => {
       if (
         node?.parameters
           ?._rmlInternalDynamicMonitor ===
@@ -22681,6 +23133,35 @@ ${queuedImpulseMethods ? `${queuedImpulseMethods}\n\n` : ""}${impulseMethods || 
         geometry.y > bounds.bottom
       );
     });
+
+    if (
+      !fallbackVirtualized ||
+      candidates.length <=
+        GRAPH_FALLBACK_MAX_DETAILED_NODES
+    ) {
+      return candidates;
+    }
+
+    const required = candidates.filter(
+      nodeRequiredForInteraction
+    );
+    const requiredIds = new Set(
+      required.map(node => node.id)
+    );
+    const remaining = Math.max(
+      0,
+      GRAPH_FALLBACK_MAX_DETAILED_NODES -
+        required.length
+    );
+
+    return [
+      ...required,
+      ...candidates
+        .filter(node =>
+          !requiredIds.has(node.id)
+        )
+        .slice(0, remaining)
+    ];
   }
 
   function cacheGraphNodeGeometry(
@@ -22865,6 +23346,8 @@ ${queuedImpulseMethods ? `${queuedImpulseMethods}\n\n` : ""}${impulseMethods || 
     graphNodeVirtualizationSignature =
       renderedGraphNodeSignature(nodes);
 
+    // Update only GPU node surfaces here. Wire buffers remain untouched until
+    // actual endpoint geometry changed, avoiding a full 5k+ wire rebuild.
     synchronizeGpuOverviewNodes();
 
     requestAnimationFrame(() => {
@@ -23894,8 +24377,11 @@ ${queuedImpulseMethods ? `${queuedImpulseMethods}\n\n` : ""}${impulseMethods || 
     margin = 28
   ) {
     if (
-      !graphHybridActive() ||
-      materializeSvgWireCompatibility()
+      !fallbackGraphVirtualizationActive() &&
+      (
+        !graphHybridActive() ||
+        materializeSvgWireCompatibility()
+      )
     ) {
       return true;
     }
@@ -23914,6 +24400,44 @@ ${queuedImpulseMethods ? `${queuedImpulseMethods}\n\n` : ""}${impulseMethods || 
       client.x <= rectangle.right + margin &&
       client.y >= rectangle.top - margin &&
       client.y <= rectangle.bottom + margin
+    );
+  }
+
+  function graphSegmentInsideViewport(
+    segment,
+    margin = 90
+  ) {
+    if (
+      !fallbackGraphVirtualizationActive()
+    ) {
+      return true;
+    }
+
+    const rectangle =
+      dom.viewport
+        ?.getBoundingClientRect();
+    if (!rectangle) {
+      return true;
+    }
+
+    const from = graphToClient(
+      segment.from.x,
+      segment.from.y
+    );
+    const to = graphToClient(
+      segment.to.x,
+      segment.to.y
+    );
+    const left = Math.min(from.x, to.x);
+    const right = Math.max(from.x, to.x);
+    const top = Math.min(from.y, to.y);
+    const bottom = Math.max(from.y, to.y);
+
+    return Boolean(
+      right >= rectangle.left - margin &&
+      left <= rectangle.right + margin &&
+      bottom >= rectangle.top - margin &&
+      top <= rectangle.bottom + margin
     );
   }
 
@@ -24067,6 +24591,7 @@ ${queuedImpulseMethods ? `${queuedImpulseMethods}\n\n` : ""}${impulseMethods || 
     connectionIds
   ) {
     if (
+      graphWireChunkFrame ||
       !graphHybridActive() ||
       forceSvgWireVisuals() ||
       materializeSvgWireCompatibility() ||
@@ -24135,6 +24660,160 @@ ${queuedImpulseMethods ? `${queuedImpulseMethods}\n\n` : ""}${impulseMethods || 
     return true;
   }
 
+  function cancelGraphWireChunkBuild() {
+    graphWireChunkGeneration += 1;
+    if (graphWireChunkFrame) {
+      cancelAnimationFrame(
+        graphWireChunkFrame
+      );
+      graphWireChunkFrame = 0;
+    }
+  }
+
+  function notifyGraphRenderComplete() {
+    document.dispatchEvent(
+      new CustomEvent(
+        "rml-graph:render-complete",
+        {
+          detail: {
+            nodes:
+              graph?.nodes?.length || 0,
+            connections:
+              graph?.connections?.length || 0
+          }
+        }
+      )
+    );
+  }
+
+  function renderLargeHybridGraphWires({
+    branchUsage,
+    inputBranchStart
+  }) {
+    cancelGraphWireChunkBuild();
+    const generation =
+      graphWireChunkGeneration;
+    const connections =
+      [...graph.connections];
+    const gpuSegments = [];
+    const handles = [];
+    let index = 0;
+
+    graphHybridRenderer?.setScene?.({
+      segments: [],
+      nodes: gpuOverviewNodeRecords()
+    });
+    graphHybridRenderer?.setCamera?.(
+      graph.viewport
+    );
+    graphHybridRenderer?.drawNow?.();
+
+    const processChunk = () => {
+      graphWireChunkFrame = 0;
+      if (
+        generation !==
+          graphWireChunkGeneration ||
+        !dom.wires ||
+        !graphHybridActive()
+      ) {
+        return;
+      }
+
+      const end = Math.min(
+        connections.length,
+        index +
+          GRAPH_GPU_WIRE_CONNECTION_CHUNK
+      );
+
+      for (; index < end; index += 1) {
+        const connection =
+          connections[index];
+        const records =
+          gpuSegmentsForConnection(
+            connection,
+            inputBranchStart
+          );
+        gpuSegments.push(...records);
+
+        const color =
+          records[0]?.color ||
+          typeInfo("generic").color;
+        for (const point of
+          connection.points || []) {
+          const branchCount =
+            branchPointUsageCount(
+              connection.id,
+              point.id,
+              branchUsage
+            );
+          const junction =
+            branchCount > 0;
+          const selected = Boolean(
+            graph.selectedWirePoint &&
+            graph.selectedWirePoint
+              .connectionId ===
+                connection.id &&
+            graph.selectedWirePoint
+              .pointId === point.id
+          );
+
+          if (
+            selected ||
+            graphPointInsideViewport(
+              point
+            )
+          ) {
+            handles.push(
+              createWirePointHandle(
+                connection,
+                point,
+                color,
+                junction,
+                branchCount,
+                selected
+              )
+            );
+          }
+        }
+      }
+
+      if (index < connections.length) {
+        graphWireChunkFrame =
+          requestAnimationFrame(
+            processChunk
+          );
+        return;
+      }
+
+      if (
+        generation !==
+          graphWireChunkGeneration ||
+        !dom.wires ||
+        !graphHybridActive()
+      ) {
+        return;
+      }
+
+      graphHybridRenderer?.setScene?.({
+        segments: gpuSegments,
+        nodes: gpuOverviewNodeRecords()
+      });
+      graphHybridRenderer?.setCamera?.(
+        graph.viewport
+      );
+      graphHybridRenderer?.drawNow?.();
+      dom.wires.replaceChildren(
+        ...handles
+      );
+      notifyGraphRenderComplete();
+    };
+
+    graphWireChunkFrame =
+      requestAnimationFrame(
+        processChunk
+      );
+  }
+
   function renderGraphWires() {
     if (!dom.wires) {
       return;
@@ -24146,6 +24825,7 @@ ${queuedImpulseMethods ? `${queuedImpulseMethods}\n\n` : ""}${impulseMethods || 
       );
       graphWireRenderFrame = 0;
     }
+    cancelGraphWireChunkBuild();
     graphWireFullRenderPending = false;
     graphWirePartialConnectionIds.clear();
 
@@ -24174,8 +24854,37 @@ ${queuedImpulseMethods ? `${queuedImpulseMethods}\n\n` : ""}${impulseMethods || 
         ?.direction === "input"
         ? activeInteraction.start
         : null;
+    const fallbackVirtualized =
+      fallbackGraphVirtualizationActive();
+    let fallbackSvgConnectionCount = 0;
+
+    if (
+      gpuVisual &&
+      !svgCompatibility &&
+      !activeInteraction &&
+      graph.connections.length >
+        GRAPH_GPU_WIRE_CONNECTION_CHUNK
+    ) {
+      renderLargeHybridGraphWires({
+        branchUsage,
+        inputBranchStart
+      });
+      return;
+    }
 
     for (const connection of graph.connections) {
+      const selectedConnection =
+        graph.selectedConnectionId ===
+          connection.id;
+      if (
+        fallbackVirtualized &&
+        !selectedConnection &&
+        fallbackSvgConnectionCount >=
+          GRAPH_FALLBACK_MAX_SVG_CONNECTIONS
+      ) {
+        continue;
+      }
+
       const geometry =
         connectionGeometry(
           connection
@@ -24183,6 +24892,29 @@ ${queuedImpulseMethods ? `${queuedImpulseMethods}\n\n` : ""}${impulseMethods || 
 
       if (!geometry) {
         continue;
+      }
+
+      if (
+        fallbackVirtualized &&
+        !selectedConnection
+      ) {
+        const visible =
+          geometry.segments.some(
+            segment =>
+              graphSegmentInsideViewport(
+                segment
+              )
+          );
+        if (
+          !visible ||
+          fallbackSvgConnectionCount >=
+            GRAPH_FALLBACK_MAX_SVG_CONNECTIONS
+        ) {
+          continue;
+        }
+      }
+      if (fallbackVirtualized) {
+        fallbackSvgConnectionCount += 1;
       }
 
       const fromRef =
@@ -24226,16 +24958,18 @@ ${queuedImpulseMethods ? `${queuedImpulseMethods}\n\n` : ""}${impulseMethods || 
           graph.selectedConnectionId ===
           connection.id;
 
-        gpuSegments.push({
-          connectionId: connection.id,
-          segmentIndex: segment.index,
-          from: segment.from,
-          to: segment.to,
-          color,
-          impulse,
-          selected,
-          targetState
-        });
+        if (gpuVisual) {
+          gpuSegments.push({
+            connectionId: connection.id,
+            segmentIndex: segment.index,
+            from: segment.from,
+            to: segment.to,
+            color,
+            impulse,
+            selected,
+            targetState
+          });
+        }
 
         if (!gpuVisual) {
           const shadow = svgPath(
@@ -24385,6 +25119,8 @@ ${queuedImpulseMethods ? `${queuedImpulseMethods}\n\n` : ""}${impulseMethods || 
     ) {
       renderConnectionPreview();
     }
+
+    notifyGraphRenderComplete();
   }
 
   function refreshGraphSelectionWires(

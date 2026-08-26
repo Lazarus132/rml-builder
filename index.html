@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta
       name="rml-builder-build"
-      content="stable-stack-safe-impulse-runtime-20260826-v387f1">
+      content="stable-universal-packed-config-integrity-20260826-v395f1">
     <meta
       name="description"
       content="Build complete typed ResoniteModLoader projects visually with automatic dependencies; optional Raw C# tools remain an expert fallback.">
@@ -16,7 +16,7 @@
         "RMLBuilderBuildId",
         {
           value:
-            "stable-stack-safe-impulse-runtime-20260826-v387f1",
+            "stable-universal-packed-config-integrity-20260826-v395f1",
           writable: false,
           enumerable: true,
           configurable: true
@@ -26,7 +26,7 @@
         .rmlBuilderBuild =
           window.RMLBuilderBuildId;
     </script>
-    <link rel="stylesheet" href="styles.css?v=238-preview-runtime-actions-ios-focus-v373f1">
+    <link rel="stylesheet" href="styles.css?v=241-packed-config-integrity-v395f1">
     <link rel="shortcut icon" href="./favicon.svg">
     <link rel="icon" href="./favicon.svg">
   </head>
@@ -367,6 +367,18 @@
           id="project-file-status"
           class="project-file-status"
           aria-live="polite"></p>
+
+        <div
+          id="project-load-progress"
+          class="project-load-progress"
+          role="status"
+          aria-live="polite"
+          hidden>
+          <div class="project-load-progress-track" aria-hidden="true">
+            <span id="project-load-progress-fill"></span>
+          </div>
+          <small id="project-load-progress-stage">Preparing project…</small>
+        </div>
       </div>
 
       <div class="export-dialog-actions">
@@ -533,13 +545,53 @@
         </button>
       </div>
     </dialog>
+
+    <div
+      id="builder-work-overlay"
+      class="builder-work-overlay"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      hidden>
+      <section class="builder-work-card">
+        <div class="builder-work-spinner" aria-hidden="true"></div>
+        <div class="builder-work-copy">
+          <small id="builder-work-kicker">Project loading</small>
+          <h2 id="builder-work-title">Preparing the project…</h2>
+          <p id="builder-work-message">
+            The builder remains on this screen until the first usable frame is ready.
+          </p>
+        </div>
+        <div
+          id="builder-work-progress"
+          class="builder-work-progress"
+          role="progressbar"
+          aria-label="Project loading progress"
+          aria-valuemin="0"
+          aria-valuemax="100">
+          <span id="builder-work-progress-fill"></span>
+        </div>
+        <small id="builder-work-detail" class="builder-work-detail">
+          No project data is discarded while this is running.
+        </small>
+        <div class="builder-work-actions">
+          <button
+            id="builder-work-dismiss"
+            class="button secondary"
+            type="button">
+            Continue in background
+          </button>
+        </div>
+      </section>
+    </div>
+
     <script src="scroll_manager.js?v=31-hint-route-visibility-v258"></script>
     <script src="scroll_hierarchy.js?v=8"></script>
-    <script src="app.js?v=369-execution-frame-store-v388f1"></script>
-    <script src="catalog_loader.js?v=44-stack-safe-impulse-runtime-v387f1"></script>
+    <script src="app.js?v=376-packed-config-integrity-v395f1"></script>
+    <script src="catalog_loader.js?v=45-manual-scanner-sync-v389f1"></script>
     <script src="runtime_bridge.js?v=2"></script>
     <script src="graph_gpu_renderer.js?v=3-singlepass-webgl-v377f1"></script>
-    <script src="node_graph.js?v=232-execution-frame-store-v388f1"></script>
+    <script src="node_graph.js?v=239-packed-config-integrity-v395f1"></script>
     <script src="dynamic_settings.js?v=24-inline-row-runtime-visibility-v178"></script>
 </body>
 </html>

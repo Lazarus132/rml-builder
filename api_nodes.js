@@ -2042,19 +2042,25 @@
 
     function collectActionFields(api, descriptor) {
       const fields = actionFieldNames(api);
-      api.addField(
+      api.addRuntimeField(
         `${api.node.id}.apiSuccess`,
-        `private static bool ${fields.success};`
+        fields.success,
+        "bool",
+        "false"
       );
-      api.addField(
+      api.addRuntimeField(
         `${api.node.id}.apiException`,
-        `private static System.Exception? ${fields.exception};`
+        fields.exception,
+        "System.Exception?",
+        "null"
       );
 
       if (!descriptor.isVoid) {
-        api.addField(
+        api.addRuntimeField(
           `${api.node.id}.apiResult`,
-          `private static ${descriptor.resultCs || "object"} ${fields.result} = default!;`
+          fields.result,
+          descriptor.resultCs || "object",
+          "default!"
         );
       }
 
@@ -2062,9 +2068,11 @@
         const csType = descriptor.direct
           ? normalizeCsType(parameter.elementType || parameter.type || "System.Object")
           : "object";
-        api.addField(
+        api.addRuntimeField(
           `${api.node.id}.apiOut.${parameter.position}`,
-          `private static ${csType} ${fields.out(parameter.position)} = default!;`
+          fields.out(parameter.position),
+          csType,
+          "default!"
         );
       }
     }

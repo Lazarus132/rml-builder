@@ -6495,7 +6495,7 @@ private static T GraphCollectionItemAt<T>(
       "Fires when the .NET process is shutting down.",
     outputs: [port("event", "Event", "impulse")],
     codegenCollect(api) {
-      const emit = api.emitMethod(
+      const emit = api.entryMethod(
         api.node.id,
         "event"
       );
@@ -6514,7 +6514,7 @@ private static T GraphCollectionItemAt<T>(
       "Fires synchronously while a builder-generated mod is being deactivated or reloaded, before its AssemblyLoadContext is released. Use it to destroy world objects and other resources created by the graph.",
     outputs: [port("event", "Unload", "impulse")],
     codegenCollect(api) {
-      const emit = api.emitMethod(
+      const emit = api.entryMethod(
         api.node.id,
         "event"
       );
@@ -6617,7 +6617,7 @@ private static T GraphCollectionItemAt<T>(
       );
       if (emit) {
         api.addInitialize(
-          `AppDomain.CurrentDomain.UnhandledException += (_, args) =>\n        {\n            ${field} = args.ExceptionObject as Exception ?? new Exception(FormatValue(args.ExceptionObject));\n            ${emit}();\n        };`
+          `AppDomain.CurrentDomain.UnhandledException += (_, args) =>\n        {\n            using GraphExecutionScope scope = OpenGraphEntry();\n            ${field} = args.ExceptionObject as Exception ?? new Exception(FormatValue(args.ExceptionObject));\n            ${emit}();\n        };`
         );
       }
     },
@@ -6657,7 +6657,7 @@ private static T GraphCollectionItemAt<T>(
       );
       api.addMember(
         `${api.node.id}.callback`,
-        `private static void ${callback}(object?[] arguments)\n{\n    ${field} = arguments;${emit ? `\n    ${emit}();` : ""}\n}`
+        `private static void ${callback}(object?[] arguments)\n{\n    using GraphExecutionScope scope = OpenGraphEntry();\n    ${field} = arguments;${emit ? `\n    ${emit}();` : ""}\n}`
       );
       api.addEngineInit(
         `SubscribeGraphEvent(${api.input("target").code}, ${api.input("eventName").code}, ${callback});`
@@ -6684,7 +6684,7 @@ private static T GraphCollectionItemAt<T>(
       api.addUsing("System.Threading");
       const token = nodeToken(api);
       const field = `_timer${token}`;
-      const emit = api.emitMethod(
+      const emit = api.entryMethod(
         api.node.id,
         "tick"
       );
@@ -6806,11 +6806,11 @@ private static T GraphCollectionItemAt<T>(
       let callbackCode;
 
       if (kind === "finalizer") {
-        callbackCode = `private static Exception? ${callback}(\n    object? __instance,\n    object?[] __args,\n    MethodBase __originalMethod,\n    Exception? __exception${resultParameter})\n{\n    try\n    {\n        ${field} = new PatchContext\n        {\n            Instance = __instance,\n            Arguments = __args,\n            OriginalMethod = __originalMethod,\n            Exception = __exception${resultInitializer}\n        };${emitStatement}${resultCommit}\n        return ${field}.Exception;\n    }\n    catch (Exception exception)\n    {\n        ReportGraphRuntimeFailure(\n            "${failureSource}",\n            exception);\n        return __exception;\n    }\n}`;
+        callbackCode = `private static Exception? ${callback}(\n    object? __instance,\n    object?[] __args,\n    MethodBase __originalMethod,\n    Exception? __exception${resultParameter})\n{\n    try\n    {\n        using GraphExecutionScope scope = OpenGraphEntry();\n        ${field} = new PatchContext\n        {\n            Instance = __instance,\n            Arguments = __args,\n            OriginalMethod = __originalMethod,\n            Exception = __exception${resultInitializer}\n        };${emitStatement}${resultCommit}\n        return ${field}.Exception;\n    }\n    catch (Exception exception)\n    {\n        ReportGraphRuntimeFailure(\n            "${failureSource}",\n            exception);\n        return __exception;\n    }\n}`;
       } else if (kind === "postfix") {
-        callbackCode = `private static void ${callback}(\n    object? __instance,\n    object?[] __args,\n    MethodBase __originalMethod${resultParameter})\n{\n    try\n    {\n        ${field} = new PatchContext\n        {\n            Instance = __instance,\n            Arguments = __args,\n            OriginalMethod = __originalMethod${resultInitializer}\n        };${emitStatement}${resultCommit}\n    }\n    catch (Exception exception)\n    {\n        ReportGraphRuntimeFailure(\n            "${failureSource}",\n            exception);\n    }\n}`;
+        callbackCode = `private static void ${callback}(\n    object? __instance,\n    object?[] __args,\n    MethodBase __originalMethod${resultParameter})\n{\n    try\n    {\n        using GraphExecutionScope scope = OpenGraphEntry();\n        ${field} = new PatchContext\n        {\n            Instance = __instance,\n            Arguments = __args,\n            OriginalMethod = __originalMethod${resultInitializer}\n        };${emitStatement}${resultCommit}\n    }\n    catch (Exception exception)\n    {\n        ReportGraphRuntimeFailure(\n            "${failureSource}",\n            exception);\n    }\n}`;
       } else {
-        callbackCode = `private static bool ${callback}(\n    object? __instance,\n    object?[] __args,\n    MethodBase __originalMethod${resultParameter})\n{\n    try\n    {\n        ${field} = new PatchContext\n        {\n            Instance = __instance,\n            Arguments = __args,\n            OriginalMethod = __originalMethod${resultInitializer}\n        };${emitStatement}${resultCommit}\n        return !${field}.SkipOriginal;\n    }\n    catch (Exception exception)\n    {\n        ReportGraphRuntimeFailure(\n            "${failureSource}",\n            exception);\n        return true;\n    }\n}`;
+        callbackCode = `private static bool ${callback}(\n    object? __instance,\n    object?[] __args,\n    MethodBase __originalMethod${resultParameter})\n{\n    try\n    {\n        using GraphExecutionScope scope = OpenGraphEntry();\n        ${field} = new PatchContext\n        {\n            Instance = __instance,\n            Arguments = __args,\n            OriginalMethod = __originalMethod${resultInitializer}\n        };${emitStatement}${resultCommit}\n        return !${field}.SkipOriginal;\n    }\n    catch (Exception exception)\n    {\n        ReportGraphRuntimeFailure(\n            "${failureSource}",\n            exception);\n        return true;\n    }\n}`;
       }
 
       api.addMember(
@@ -10480,47 +10480,37 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
       ensureNetworkRuntime(api);
       api.addUsing("System.IO");
       const token = nodeToken(api);
-      const connected = api.emitMethod(
+      const connected = api.entryMethod(
         api.node.id,
         "connected"
       );
-      const message = api.emitMethod(
+      const message = api.entryMethod(
         api.node.id,
         "message"
       );
-      const closed = api.emitMethod(
+      const closed = api.entryMethod(
         api.node.id,
         "closed"
       );
-      api.addRuntimeField(
+      api.addField(
         `${api.node.id}.socket`,
-        `_webSocket${token}`,
-        "ClientWebSocket",
-        "null!"
+        `private static ClientWebSocket? _webSocket${token};`
       );
-      api.addRuntimeField(
+      api.addField(
         `${api.node.id}.text`,
-        `_webSocketText${token}`,
-        "string",
-        "string.Empty"
+        `private static string _webSocketText${token} = string.Empty;`
       );
-      api.addRuntimeField(
+      api.addField(
         `${api.node.id}.bytes`,
-        `_webSocketBytes${token}`,
-        "byte[]",
-        "Array.Empty<byte>()"
+        `private static byte[] _webSocketBytes${token} = Array.Empty<byte>();`
       );
-      api.addRuntimeField(
+      api.addField(
         `${api.node.id}.connected`,
-        `_webSocketConnected${token}`,
-        "bool",
-        "false"
+        `private static bool _webSocketConnected${token};`
       );
-      api.addRuntimeField(
+      api.addField(
         `${api.node.id}.error`,
-        `_webSocketError${token}`,
-        "string",
-        "string.Empty"
+        `private static string _webSocketError${token} = string.Empty;`
       );
       api.addMember(
         `${api.node.id}.connect`,

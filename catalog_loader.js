@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const LOADER_VERSION = 28;
+  const LOADER_VERSION = 29;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
   const CATALOG_PATH = "/resonite_api_catalog.json";
@@ -22,11 +22,11 @@
     document.currentScript?.src ||
     window.location.href;
   const modNodesUrl = new URL(
-    "mod_nodes.js?v=39-typed-destroy-target-v386f1",
+    "mod_nodes.js?v=40-universal-state-semantics-v389f1",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=15-mod-unload-v384f1",
+    "api_nodes.js?v=16-frame-local-api-results-v389f1",
     scriptUrl
   ).href;
 
@@ -1500,14 +1500,12 @@
     .then(() => {
       installManualScannerRefresh();
 
-      // Exactly one automatic startup synchronization. It is deliberately
-      // fire-and-forget: all catalog/node readiness promises already depend
-      // only on the local cache. Every later check is manual via the status
-      // button; there is no online or offline polling timer.
-      void synchronizeScannerStatus({
-        showChecking: false,
-        reloadOnChange: true
-      });
+      // Network discovery is deliberately user-driven. Startup installs the
+      // most recent verified catalog from IndexedDB and never probes the
+      // loopback port range. Clicking the catalog status button performs one
+      // bounded synchronization; there is no polling timer and no hidden
+      // retry loop. This keeps an unavailable scanner completely off the
+      // builder's critical path and out of the browser console.
     })
     .catch(() => {});
 

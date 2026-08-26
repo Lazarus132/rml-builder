@@ -10626,3 +10626,173 @@ dialog.builder-message-dialog::backdrop {
     }
   }
 }
+
+/* Universal, deterministic feedback for long project and dialog work. */
+.project-load-progress {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(105, 188, 255, 0.34);
+  border-radius: 12px;
+  background: rgba(19, 36, 58, 0.72);
+  color: #dcefff;
+}
+
+.project-load-progress[hidden] {
+  display: none !important;
+}
+
+.project-load-progress-track,
+.builder-work-progress {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+.project-load-progress-track > span,
+.builder-work-progress > span {
+  display: block;
+  width: var(--rml-load-progress, 8%);
+  min-width: 8px;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #39a7ff, #68e4ff, #8b7dff);
+  box-shadow: 0 0 16px rgba(66, 190, 255, 0.65);
+  transition: width 180ms ease;
+}
+
+.builder-work-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  display: grid;
+  place-items: center;
+  padding:
+    max(18px, env(safe-area-inset-top))
+    max(18px, env(safe-area-inset-right))
+    max(18px, env(safe-area-inset-bottom))
+    max(18px, env(safe-area-inset-left));
+  background:
+    radial-gradient(circle at 50% 38%, rgba(41, 132, 213, 0.2), transparent 38%),
+    rgba(4, 9, 17, 0.88);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  overscroll-behavior: contain;
+  touch-action: none;
+}
+
+.builder-work-overlay[hidden] {
+  display: none !important;
+}
+
+.builder-work-card {
+  width: min(520px, 100%);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 18px 16px;
+  padding: clamp(22px, 5vw, 34px);
+  border: 1px solid rgba(118, 198, 255, 0.36);
+  border-radius: 22px;
+  background: linear-gradient(145deg, rgba(17, 31, 50, 0.98), rgba(8, 17, 30, 0.98));
+  box-shadow:
+    0 24px 80px rgba(0, 0, 0, 0.55),
+    0 0 42px rgba(50, 156, 255, 0.12);
+}
+
+.builder-work-spinner {
+  width: 42px;
+  height: 42px;
+  border: 4px solid rgba(125, 203, 255, 0.18);
+  border-top-color: #69d8ff;
+  border-right-color: #8d82ff;
+  border-radius: 50%;
+  animation: rml-builder-work-spin 800ms linear infinite;
+}
+
+.builder-work-copy {
+  min-width: 0;
+}
+
+.builder-work-copy small {
+  display: block;
+  margin-bottom: 4px;
+  color: #75d8ff;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.builder-work-copy h2 {
+  margin: 0;
+  color: #f5fbff;
+  font-size: clamp(1.16rem, 3.2vw, 1.55rem);
+  line-height: 1.2;
+}
+
+.builder-work-copy p {
+  margin: 9px 0 0;
+  color: #bfd1e4;
+  line-height: 1.5;
+}
+
+.builder-work-progress,
+.builder-work-detail,
+.builder-work-actions {
+  grid-column: 1 / -1;
+}
+
+.builder-work-detail {
+  color: #91a8bf;
+  line-height: 1.4;
+}
+
+.builder-work-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+body.rml-builder-work-active {
+  overflow: hidden !important;
+}
+
+.rml-inline-dialog-loading {
+  display: grid;
+  place-items: center;
+  min-height: 180px;
+  padding: 28px;
+  color: #c8def2;
+  text-align: center;
+}
+
+@keyframes rml-builder-work-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 520px) {
+  .builder-work-card {
+    grid-template-columns: 1fr;
+  }
+
+  .builder-work-spinner {
+    width: 36px;
+    height: 36px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .builder-work-spinner {
+    animation-duration: 1600ms;
+  }
+
+  .project-load-progress-track > span,
+  .builder-work-progress > span {
+    transition: none;
+  }
+}
