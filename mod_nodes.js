@@ -3,9 +3,9 @@
 
   const registry = window.RMLModNodeRegistry;
 
-  if (!registry || registry.version !== 3) {
+  if (!registry || registry.version !== 6) {
     console.error(
-      "RML universal mod nodes require the matching node_graph.js registry version 3."
+      "RML universal mod nodes require the matching node_graph.js registry version 5."
     );
     return;
   }
@@ -474,7 +474,8 @@
       short: "QUAT",
       color: "#61d3ff",
       csType: "Elements.Core.floatQ",
-      defaultCs: "Elements.Core.floatQ.Identity"
+      defaultCs: "Elements.Core.floatQ.Identity",
+      assembly: "Elements.Core"
     },
     primitive: {
       label: "Primitive",
@@ -495,7 +496,8 @@
       short: "WRAP",
       color: "#ffb86a",
       csType: "Renderite.Shared.TextureWrapMode",
-      defaultCs: "Renderite.Shared.TextureWrapMode.Repeat"
+      defaultCs: "Renderite.Shared.TextureWrapMode.Repeat",
+      assembly: "Renderite.Shared"
     },
     engine: {
       label: "Resonite Engine",
@@ -1922,6 +1924,175 @@ private const BindingFlags GraphAllMembers =
     BindingFlags.Static |
     BindingFlags.FlattenHierarchy;
 
+private static IEnumerable<Type> GraphTypeHierarchy(Type type)
+{
+    for (Type? current = type; current is not null; current = current.BaseType)
+    {
+        yield return current;
+    }
+}
+
+private static bool GraphAccessorMatchesTarget(
+    MethodInfo? accessor,
+    bool? staticTarget)
+{
+    return accessor is not null &&
+           (!staticTarget.HasValue || accessor.IsStatic == staticTarget.Value);
+}
+
+private static PropertyInfo? FindGraphProperty(
+    Type? type,
+    string? propertyName,
+    bool? staticTarget = null,
+    bool requireReadable = false,
+    bool requireWritable = false)
+{
+    if (type is null || string.IsNullOrWhiteSpace(propertyName))
+    {
+        return null;
+    }
+
+    foreach (Type current in GraphTypeHierarchy(type))
+    {
+        PropertyInfo? property = current
+            .GetProperties(GraphAllMembers | BindingFlags.DeclaredOnly)
+            .Where(candidate =>
+                string.Equals(candidate.Name, propertyName, StringComparison.Ordinal) &&
+                candidate.GetIndexParameters().Length == 0 &&
+                (!requireReadable || candidate.GetGetMethod(nonPublic: true) is not null) &&
+                (!requireWritable || candidate.GetSetMethod(nonPublic: true) is not null))
+            .Where(candidate =>
+                GraphAccessorMatchesTarget(
+                    candidate.GetGetMethod(nonPublic: true) ??
+                    candidate.GetSetMethod(nonPublic: true),
+                    staticTarget))
+            .OrderByDescending(candidate =>
+                candidate.GetGetMethod(nonPublic: true)?.IsPublic == true ||
+                candidate.GetSetMethod(nonPublic: true)?.IsPublic == true)
+            .ThenBy(candidate => candidate.MetadataToken)
+            .FirstOrDefault();
+
+        if (property is not null)
+        {
+            return property;
+        }
+    }
+
+    foreach (Type interfaceType in type
+        .GetInterfaces()
+        .OrderBy(candidate => candidate.FullName, StringComparer.Ordinal))
+    {
+        PropertyInfo? property = interfaceType
+            .GetProperties(GraphAllMembers | BindingFlags.DeclaredOnly)
+            .Where(candidate =>
+                string.Equals(candidate.Name, propertyName, StringComparison.Ordinal) &&
+                candidate.GetIndexParameters().Length == 0 &&
+                (!requireReadable || candidate.GetGetMethod(nonPublic: true) is not null) &&
+                (!requireWritable || candidate.GetSetMethod(nonPublic: true) is not null))
+            .Where(candidate =>
+                GraphAccessorMatchesTarget(
+                    candidate.GetGetMethod(nonPublic: true) ??
+                    candidate.GetSetMethod(nonPublic: true),
+                    staticTarget))
+            .OrderBy(candidate => candidate.MetadataToken)
+            .FirstOrDefault();
+
+        if (property is not null)
+        {
+            return property;
+        }
+    }
+
+    return null;
+}
+
+private static FieldInfo? FindGraphField(
+    Type? type,
+    string? fieldName,
+    bool? staticTarget = null,
+    bool requireWritable = false)
+{
+    if (type is null || string.IsNullOrWhiteSpace(fieldName))
+    {
+        return null;
+    }
+
+    foreach (Type current in GraphTypeHierarchy(type))
+    {
+        FieldInfo? field = current
+            .GetFields(GraphAllMembers | BindingFlags.DeclaredOnly)
+            .Where(candidate =>
+                string.Equals(candidate.Name, fieldName, StringComparison.Ordinal) &&
+                (!staticTarget.HasValue || candidate.IsStatic == staticTarget.Value) &&
+                (!requireWritable || (!candidate.IsInitOnly && !candidate.IsLiteral)))
+            .OrderByDescending(candidate => candidate.IsPublic)
+            .ThenBy(candidate => candidate.MetadataToken)
+            .FirstOrDefault();
+
+        if (field is not null)
+        {
+            return field;
+        }
+    }
+
+    return null;
+}
+
+private static EventInfo? FindGraphEvent(
+    Type? type,
+    string? eventName,
+    bool? staticTarget = null)
+{
+    if (type is null || string.IsNullOrWhiteSpace(eventName))
+    {
+        return null;
+    }
+
+    foreach (Type current in GraphTypeHierarchy(type))
+    {
+        EventInfo? eventInfo = current
+            .GetEvents(GraphAllMembers | BindingFlags.DeclaredOnly)
+            .Where(candidate =>
+                string.Equals(candidate.Name, eventName, StringComparison.Ordinal))
+            .Where(candidate =>
+                GraphAccessorMatchesTarget(
+                    candidate.GetAddMethod(nonPublic: true) ??
+                    candidate.GetRemoveMethod(nonPublic: true),
+                    staticTarget))
+            .OrderBy(candidate => candidate.MetadataToken)
+            .FirstOrDefault();
+
+        if (eventInfo is not null)
+        {
+            return eventInfo;
+        }
+    }
+
+    foreach (Type interfaceType in type
+        .GetInterfaces()
+        .OrderBy(candidate => candidate.FullName, StringComparer.Ordinal))
+    {
+        EventInfo? eventInfo = interfaceType
+            .GetEvents(GraphAllMembers | BindingFlags.DeclaredOnly)
+            .Where(candidate =>
+                string.Equals(candidate.Name, eventName, StringComparison.Ordinal))
+            .Where(candidate =>
+                GraphAccessorMatchesTarget(
+                    candidate.GetAddMethod(nonPublic: true) ??
+                    candidate.GetRemoveMethod(nonPublic: true),
+                    staticTarget))
+            .OrderBy(candidate => candidate.MetadataToken)
+            .FirstOrDefault();
+
+        if (eventInfo is not null)
+        {
+            return eventInfo;
+        }
+    }
+
+    return null;
+}
+
 private static Type? FindType(string? typeName)
 {
     if (string.IsNullOrWhiteSpace(typeName))
@@ -2006,13 +2177,18 @@ private static object? ReadMember(object? target, string? memberName)
         : target.GetType();
     object? instance = target is Type ? null : target;
 
-    PropertyInfo? property = type.GetProperty(memberName, GraphAllMembers);
-    if (property is not null && property.GetIndexParameters().Length == 0)
+    bool staticTarget = target is Type;
+    PropertyInfo? property = FindGraphProperty(
+        type,
+        memberName,
+        staticTarget,
+        requireReadable: true);
+    if (property is not null)
     {
         return property.GetValue(instance);
     }
 
-    FieldInfo? field = type.GetField(memberName, GraphAllMembers);
+    FieldInfo? field = FindGraphField(type, memberName, staticTarget);
     if (field is not null)
     {
         return field.GetValue(instance);
@@ -2050,14 +2226,23 @@ private static bool WriteMember(object? target, string? memberName, object? valu
         : target.GetType();
     object? instance = target is Type ? null : target;
 
-    PropertyInfo? property = type.GetProperty(memberName, GraphAllMembers);
-    if (property?.CanWrite == true)
+    bool staticTarget = target is Type;
+    PropertyInfo? property = FindGraphProperty(
+        type,
+        memberName,
+        staticTarget,
+        requireWritable: true);
+    if (property is not null)
     {
         property.SetValue(instance, ConvertGraphValue(value, property.PropertyType));
         return true;
     }
 
-    FieldInfo? field = type.GetField(memberName, GraphAllMembers);
+    FieldInfo? field = FindGraphField(
+        type,
+        memberName,
+        staticTarget,
+        requireWritable: true);
     if (field is not null)
     {
         field.SetValue(instance, ConvertGraphValue(value, field.FieldType));
@@ -2157,20 +2342,61 @@ private static MethodInfo? FindMethod(
         return null;
     }
 
-    if (parameterTypes is { Length: > 0 })
+    foreach (Type current in GraphTypeHierarchy(type))
     {
-        return type.GetMethod(
-            methodName,
-            GraphAllMembers,
-            binder: null,
-            types: parameterTypes,
-            modifiers: null);
+        IEnumerable<MethodInfo> candidates = current
+            .GetMethods(GraphAllMembers | BindingFlags.DeclaredOnly)
+            .Where(method =>
+                string.Equals(method.Name, methodName, StringComparison.Ordinal));
+
+        if (parameterTypes is { Length: > 0 })
+        {
+            candidates = candidates.Where(method =>
+                method.GetParameters()
+                    .Select(parameter => parameter.ParameterType)
+                    .SequenceEqual(parameterTypes));
+        }
+
+        MethodInfo? match = candidates
+            .OrderBy(method => method.GetParameters().Length)
+            .ThenBy(method => method.MetadataToken)
+            .FirstOrDefault();
+
+        if (match is not null)
+        {
+            return match;
+        }
     }
 
-    return type
-        .GetMethods(GraphAllMembers)
-        .FirstOrDefault(method =>
-            string.Equals(method.Name, methodName, StringComparison.Ordinal));
+    foreach (Type interfaceType in type
+        .GetInterfaces()
+        .OrderBy(candidate => candidate.FullName, StringComparer.Ordinal))
+    {
+        IEnumerable<MethodInfo> candidates = interfaceType
+            .GetMethods(GraphAllMembers | BindingFlags.DeclaredOnly)
+            .Where(method =>
+                string.Equals(method.Name, methodName, StringComparison.Ordinal));
+
+        if (parameterTypes is { Length: > 0 })
+        {
+            candidates = candidates.Where(method =>
+                method.GetParameters()
+                    .Select(parameter => parameter.ParameterType)
+                    .SequenceEqual(parameterTypes));
+        }
+
+        MethodInfo? match = candidates
+            .OrderBy(method => method.GetParameters().Length)
+            .ThenBy(method => method.MetadataToken)
+            .FirstOrDefault();
+
+        if (match is not null)
+        {
+            return match;
+        }
+    }
+
+    return null;
 }
 
 private static object? InvokeBest(
@@ -2292,11 +2518,12 @@ private static Delegate? SubscribeGraphEvent(
         return null;
     }
 
-    EventInfo? eventInfo = target
-        .GetType()
-        .GetEvent(eventName, GraphAllMembers);
+    EventInfo? eventInfo = FindGraphEvent(
+        target.GetType(),
+        eventName,
+        staticTarget: false);
     Type? handlerType = eventInfo?.EventHandlerType;
-    MethodInfo? invoke = handlerType?.GetMethod("Invoke");
+    MethodInfo? invoke = FindMethod(handlerType, "Invoke");
 
     if (eventInfo is null || handlerType is null || invoke is null)
     {
@@ -2838,10 +3065,10 @@ private static MethodBase? ResolveHarmonyTarget(
         return targetType.TypeInitializer;
     }
 
-    return argumentTypes.Length > 0
-        ? targetType.GetMethod(methodName, GraphAllMembers, null, argumentTypes, null)
-        : targetType.GetMethods(GraphAllMembers)
-            .FirstOrDefault(method => method.Name == methodName);
+    return FindMethod(
+        targetType,
+        methodName,
+        argumentTypes.Length > 0 ? argumentTypes : null);
 }
 
 private static bool RegisterGeneratedHarmonyPatch(
@@ -2855,8 +3082,9 @@ private static bool RegisterGeneratedHarmonyPatch(
     try
     {
         MethodBase? target = ResolveHarmonyTarget(typeName, methodName, argumentTypeNames);
-        MethodInfo? callback = typeof(__GRAPH_CLASS__)
-            .GetMethod(callbackMethod, GraphAllMembers);
+            MethodInfo? callback = FindMethod(
+                typeof(__GRAPH_CLASS__),
+                callbackMethod);
 
         if (target is null || callback is null)
         {
@@ -2926,7 +3154,7 @@ private static void CreateGeneratedReversePatch(
         targetMethodName,
         targetArgumentTypeNames);
     Type? standInType = FindType(standInTypeName);
-    MethodInfo? standIn = standInType?.GetMethod(standInMethodName, GraphAllMembers);
+    MethodInfo? standIn = FindMethod(standInType, standInMethodName);
 
     if (target is null || standIn is null)
     {
@@ -5213,6 +5441,7 @@ private static void CreateGeneratedReversePatch(
   function ensureNumericVectorRuntime(
     api
   ) {
+    ensureReflectionRuntime(api);
     api.addMember(
       "universal.vector.components",
       String.raw`
@@ -5225,16 +5454,7 @@ private static T ReadNumericComponent<T>(
         return default!;
     }
 
-    const BindingFlags flags =
-        BindingFlags.Instance |
-        BindingFlags.Public |
-        BindingFlags.NonPublic |
-        BindingFlags.IgnoreCase;
-
-    Type sourceType = value.GetType();
-    object? component =
-        sourceType.GetField(memberName, flags)?.GetValue(value) ??
-        sourceType.GetProperty(memberName, flags)?.GetValue(value);
+    object? component = ReadMember(value, memberName);
 
     if (component is null)
     {
@@ -6431,6 +6651,9 @@ private static T GraphCollectionItemAt<T>(
     ],
     codegenCollect(api) {
       ensureHarmonyRuntime(api);
+      api.requireRuntimeHelper(
+        "ReportGraphRuntimeFailure"
+      );
       const token = nodeToken(api);
       const field = `_patchContext${token}`;
       const callback = `HarmonyCallback${token}`;
@@ -6926,7 +7149,7 @@ private static T GraphCollectionItemAt<T>(
     outputs: [port("field", "Field", "fieldInfo")],
     codegenExpression(api) {
       ensureReflectionRuntime(api);
-      return `${api.input("type").code}.GetField(${api.input("name").code}, GraphAllMembers)!`;
+      return `FindGraphField(${api.input("type").code}, ${api.input("name").code})!`;
     }
   });
 
@@ -6943,7 +7166,7 @@ private static T GraphCollectionItemAt<T>(
     outputs: [port("property", "Property", "propertyInfo")],
     codegenExpression(api) {
       ensureReflectionRuntime(api);
-      return `${api.input("type").code}.GetProperty(${api.input("name").code}, GraphAllMembers)!`;
+      return `FindGraphProperty(${api.input("type").code}, ${api.input("name").code})!`;
     }
   });
 

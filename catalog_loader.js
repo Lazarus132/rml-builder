@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const LOADER_VERSION = 25;
+  const LOADER_VERSION = 27;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
   const CATALOG_PATH = "/resonite_api_catalog.json";
@@ -24,11 +24,11 @@
     document.currentScript?.src ||
     window.location.href;
   const modNodesUrl = new URL(
-    "mod_nodes.js?v=35-catalog-startup-v380f1",
+    "mod_nodes.js?v=37-reflection-resolution-v383f1",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=11-worker-codegen-v380f1",
+    "api_nodes.js?v=14-api-contract-v383f1",
     scriptUrl
   ).href;
 
@@ -101,6 +101,55 @@
     )].sort((left, right) =>
       left.localeCompare(right)
     );
+  }
+
+  function stableCatalogHash(value) {
+    const text = String(value || "");
+    let first = 0x811c9dc5;
+    let second = 0x9e3779b9;
+
+    for (let index = 0; index < text.length; index += 1) {
+      const code = text.charCodeAt(index);
+      first ^= code;
+      first = Math.imul(first, 0x01000193) >>> 0;
+      second ^= code + index;
+      second = Math.imul(second, 0x85ebca6b) >>> 0;
+    }
+
+    return (
+      first.toString(16).padStart(8, "0") +
+      second.toString(16).padStart(8, "0")
+    );
+  }
+
+  function catalogFingerprint(raw) {
+    const supplied = String(
+      raw?.catalogFingerprint ||
+      raw?.assemblyFingerprint ||
+      ""
+    ).trim();
+
+    const content = stableCatalogHash(
+      JSON.stringify({
+        schemaVersion: raw?.schemaVersion || 0,
+        engineVersion: raw?.engineVersion || "unknown",
+        sourceAssembly: raw?.sourceAssembly || "FrooxEngine.dll",
+        declaredFingerprint: supplied,
+        assemblies: raw?.assemblies || [],
+        types: raw?.types || [],
+        enums: raw?.enums || [],
+        components: raw?.components || [],
+        materials: raw?.materials || [],
+        commonMaterials: raw?.commonMaterials || [],
+        meshes: raw?.meshes || [],
+        slotAttachOverloads:
+          raw?.slotAttachOverloads || []
+      })
+    );
+
+    return supplied
+      ? `${supplied}:${content}`
+      : content;
   }
 
   function catalogTypes(raw) {
@@ -186,6 +235,8 @@
       loaderVersion: LOADER_VERSION,
       catalogSource: source,
       catalogSourceUrl: sourceUrl,
+      catalogFingerprint:
+        catalogFingerprint(value),
       engineVersion:
         String(
           value.engineVersion ||
@@ -1108,12 +1159,13 @@
   }
 
   function catalogIdentity(catalog) {
-    return String(
+    return [
       catalog?.catalogFingerprint ||
-      catalog?.assemblyFingerprint ||
-      catalog?.engineVersion ||
-      "unknown"
-    );
+        catalog?.assemblyFingerprint ||
+        "unknown",
+      catalog?.engineVersion || "unknown",
+      catalog?.catalogSource || "unknown"
+    ].join("|");
   }
 
   async function ensureApiNodesLoaded() {

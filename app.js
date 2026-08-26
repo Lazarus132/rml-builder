@@ -34,7 +34,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "stable-large-graph-workers-live-catalog-20260826-v380f1";
+  "stable-api-contract-export-gate-20260826-v383f1";
 
 function exposeRmlBuilderBuildId() {
   document.documentElement.dataset
@@ -466,7 +466,7 @@ function projectIoWorkerInstance() {
   try {
     const worker = new Worker(
       new URL(
-        "project_io_worker.js?v=2-file-io-v380f1",
+        "project_io_worker.js?v=3-file-io-v383f1",
         APP_SCRIPT_BASE_URL
       ),
       {
@@ -671,12 +671,13 @@ function largeGraphUsesBackgroundCodegen(
 }
 
 function graphCodegenCatalogKey(catalog) {
-  return String(
+  return [
     catalog?.catalogFingerprint ||
-    catalog?.assemblyFingerprint ||
-    catalog?.engineVersion ||
-    "unknown"
-  );
+      catalog?.assemblyFingerprint ||
+      catalog?.engineVersion ||
+      "unknown",
+    catalog?.catalogSource || "unknown"
+  ].join("|");
 }
 
 function largeGraphCodegenKey(
@@ -743,7 +744,7 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "graph_codegen_worker.js?v=1-background-codegen-v380f1",
+      "graph_codegen_worker.js?v=4-api-contract-v383f1",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -5913,6 +5914,27 @@ function getDiagnostics() {
     errors.push(
       `Node graph: ${diagnostic}`
     );
+  }
+
+  const sourceVerifier =
+    window.RMLTypedNodeGraphGenerator
+      ?.verifyGeneratedSource;
+  if (
+    typeof sourceVerifier === "function" &&
+    graphContribution?.pending !== true
+  ) {
+    const mainFileName =
+      `${generatedBaseName()}.cs`;
+    for (const diagnostic of
+      sourceVerifier(
+        generateCode(),
+        mainFileName,
+        { checkUnresolved: false }
+      )) {
+      errors.push(
+        `Generated source: ${diagnostic}`
+      );
+    }
   }
 
   return errors;
@@ -20055,6 +20077,9 @@ async function copyText(text, button) {
 }
 
 function copyGeneratedCode(button) {
+  if (getDiagnostics().length > 0) {
+    return Promise.resolve();
+  }
   return copyText(
     generateCode(),
     button
@@ -20064,6 +20089,9 @@ function copyGeneratedCode(button) {
 function copyGeneratedCodeForCurrentView(
   button
 ) {
+  if (getDiagnostics().length > 0) {
+    return Promise.resolve();
+  }
   return copyText(
     generatedCodeForCurrentView().code,
     button
@@ -20071,6 +20099,9 @@ function copyGeneratedCodeForCurrentView(
 }
 
 function copyGeneratedProjectFile(button) {
+  if (getDiagnostics().length > 0) {
+    return Promise.resolve();
+  }
   return copyText(
     generateProjectFile(),
     button
@@ -20080,6 +20111,9 @@ function copyGeneratedProjectFile(button) {
 function copyGeneratedNodeGraphCode(
   button
 ) {
+  if (getDiagnostics().length > 0) {
+    return Promise.resolve();
+  }
   const files =
     getAdditionalGeneratedSourceFiles();
 
@@ -21455,7 +21489,11 @@ function copySelectedExportArtifact(
   const { artifact } =
     currentExportCopyArtifact();
 
-  if (!artifact || button.disabled) {
+  if (
+    !artifact ||
+    button.disabled ||
+    getDiagnostics().length > 0
+  ) {
     return Promise.resolve();
   }
 
@@ -21745,7 +21783,8 @@ function downloadSelectedExport() {
 
   if (
     elements.exportDownloadSelected
-      .disabled
+      .disabled ||
+    getDiagnostics().length > 0
   ) {
     return;
   }

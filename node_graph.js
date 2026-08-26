@@ -37,6 +37,7 @@
   const GRAPH_GPU_OVERVIEW_ENTER_ZOOM = 0.20;
   const GRAPH_GPU_OVERVIEW_EXIT_ZOOM = 0.24;
   const GRAPH_NODE_VIRTUAL_OVERSCAN_PIXELS = 260;
+  const API_EXPORT_VERIFICATION_SCHEMA_VERSION = 1;
 
   const VALUE_TYPES = [
     "bool",
@@ -101,52 +102,72 @@
     int2: {
       label: "Integer 2",
       short: "I2",
-      color: "#ffae70"
+      color: "#ffae70",
+      csType: "Elements.Core.int2",
+      assembly: "Elements.Core"
     },
     int3: {
       label: "Integer 3",
       short: "I3",
-      color: "#ffae70"
+      color: "#ffae70",
+      csType: "Elements.Core.int3",
+      assembly: "Elements.Core"
     },
     int4: {
       label: "Integer 4",
       short: "I4",
-      color: "#ffae70"
+      color: "#ffae70",
+      csType: "Elements.Core.int4",
+      assembly: "Elements.Core"
     },
     float2: {
       label: "Float 2",
       short: "F2",
-      color: "#58d2ff"
+      color: "#58d2ff",
+      csType: "Elements.Core.float2",
+      assembly: "Elements.Core"
     },
     float3: {
       label: "Float 3",
       short: "F3",
-      color: "#58d2ff"
+      color: "#58d2ff",
+      csType: "Elements.Core.float3",
+      assembly: "Elements.Core"
     },
     float4: {
       label: "Float 4",
       short: "F4",
-      color: "#58d2ff"
+      color: "#58d2ff",
+      csType: "Elements.Core.float4",
+      assembly: "Elements.Core"
     },
     double2: {
       label: "Double 2",
       short: "D2",
-      color: "#c5a2ff"
+      color: "#c5a2ff",
+      csType: "Elements.Core.double2",
+      assembly: "Elements.Core"
     },
     double3: {
       label: "Double 3",
       short: "D3",
-      color: "#c5a2ff"
+      color: "#c5a2ff",
+      csType: "Elements.Core.double3",
+      assembly: "Elements.Core"
     },
     double4: {
       label: "Double 4",
       short: "D4",
-      color: "#c5a2ff"
+      color: "#c5a2ff",
+      csType: "Elements.Core.double4",
+      assembly: "Elements.Core"
     },
     colorX: {
       label: "HDR color",
       short: "CLR",
-      color: "#ff67dc"
+      color: "#ff67dc",
+      csType: "Elements.Core.colorX",
+      assembly: "Elements.Core"
     },
     generic: {
       label: "Generic",
@@ -898,6 +919,34 @@
       );
     }
 
+    if (definition.catalogGenerated === true) {
+      const contract =
+        definition.apiVerification;
+      const validContract = Boolean(
+        contract &&
+        typeof contract === "object" &&
+        Number(contract.schemaVersion) ===
+          API_EXPORT_VERIFICATION_SCHEMA_VERSION &&
+        String(contract.nodeId || "") === id &&
+        String(contract.catalogFingerprint || "").trim() &&
+        String(contract.contractFingerprint || "").trim()
+      );
+
+      if (!validContract) {
+        console.error(
+          `Catalog API node '${id}' was not registered because its verification contract is missing or invalid.`
+        );
+        return false;
+      }
+
+      if (
+        contract.catalogSource !== "scanner"
+      ) {
+        definition.hiddenFromPalette = true;
+        definition.catalogVerificationUnavailable = true;
+      }
+    }
+
     OPERATOR_DEFINITIONS[id] =
       definition;
 
@@ -910,6 +959,8 @@
     ) {
       registerGraphGroup(group);
     }
+
+    return true;
   }
 
   function registerGraphCodegenPlugin(
@@ -933,7 +984,7 @@
     "RMLModNodeRegistry",
     {
       value: Object.freeze({
-        version: 3,
+        version: 6,
         port,
         genericPort,
         registerType:
@@ -8139,6 +8190,248 @@
     pruneConnections();
   }
 
+  function catalogApiExportDiagnostics(
+    nodes
+  ) {
+    const used = [];
+
+    for (const node of Array.isArray(nodes)
+      ? nodes
+      : []) {
+      const definition =
+        nodeDefinition(node);
+      if (definition?.catalogGenerated) {
+        used.push({ node, definition });
+      }
+    }
+
+    if (used.length === 0) {
+      return [];
+    }
+
+    const report =
+      window.RMLApiNodeFactoryReport;
+    const errors = [];
+
+    if (!report || typeof report !== "object") {
+      return [
+        "API export blocked: the catalog-generated nodes have no active API factory verification report. Reconnect the live scanner and wait for the catalog to finish loading."
+      ];
+    }
+
+    if (
+      report.liveCatalogVerified !== true ||
+      report.catalogSource !== "scanner"
+    ) {
+      errors.push(
+        "API export blocked: catalog-generated nodes require the current live scanner catalog. Cached or unverifiable API metadata is display-only."
+      );
+    }
+    if (report.verificationPassed !== true) {
+      errors.push(
+        `API export blocked: the API node factory failed its structural verification${
+          Array.isArray(report.verificationErrors) &&
+          report.verificationErrors.length > 0
+            ? ` (${report.verificationErrors.slice(0, 3).join(" | ")})`
+            : ""
+        }.`
+      );
+    }
+
+    for (const { node, definition } of used) {
+      const contract =
+        definition.apiVerification;
+      const label =
+        node.label ||
+        definition.title ||
+        node.operatorId;
+
+      if (!contract || typeof contract !== "object") {
+        errors.push(
+          `API export blocked: '${label}' has no immutable API verification contract.`
+        );
+        continue;
+      }
+
+      const mismatch =
+        Number(contract.schemaVersion) !==
+          API_EXPORT_VERIFICATION_SCHEMA_VERSION ||
+        Number(contract.factoryVersion) !==
+          Number(report.factoryVersion) ||
+        Number(contract.catalogSchemaVersion) !==
+          Number(report.catalogSchemaVersion) ||
+        String(contract.engineVersion) !==
+          String(report.engineVersion) ||
+        String(contract.catalogFingerprint) !==
+          String(report.catalogFingerprint) ||
+        String(contract.nodeId) !==
+          String(node.operatorId) ||
+        !String(contract.contractFingerprint || "").trim();
+
+      if (mismatch) {
+        errors.push(
+          `API export blocked: '${label}' was generated from a different or incomplete API contract. Recreate or reload the node after the live catalog refresh.`
+        );
+      }
+    }
+
+    return [...new Set(errors)];
+  }
+
+  function sanitizeGeneratedCSharp(source) {
+    return String(source || "")
+      .replace(/\/\*[\s\S]*?\*\//g, " ")
+      .replace(/\/\/.*$/gm, " ")
+      .replace(
+        /@?\$?"(?:""|\\.|[^"\\])*"/g,
+        '""'
+      )
+      .replace(/'(?:\\.|[^'\\])'/g, "''");
+  }
+
+  function unresolvedGeneratedMethodCalls(
+    source
+  ) {
+    const sanitized =
+      sanitizeGeneratedCSharp(source);
+    const declarations = new Set();
+    const declaredTypes = new Set();
+
+    for (const match of sanitized.matchAll(
+      /\b(?:public|private|protected|internal)\s+(?:static\s+)?(?:async\s+)?(?:[\w?.<>\[\],]+\s+)+(?<name>[A-Za-z_]\w*)\s*(?:<[^>{};()]+>)?\s*\(/g
+    )) {
+      declarations.add(match.groups.name);
+    }
+
+    for (const match of sanitized.matchAll(
+      /\b(?:class|struct|record)\s+(?<name>[A-Za-z_]\w*)/g
+    )) {
+      declaredTypes.add(match.groups.name);
+    }
+
+    const knownExternal = new Set([
+      "ReferenceEquals"
+    ]);
+    const missing = new Set();
+
+    for (const match of sanitized.matchAll(
+      /\b(?<name>[A-Za-z_]\w*)\s*(?:<[^>{};()]+>)?\s*\(/g
+    )) {
+      const name = match.groups.name;
+      const before = sanitized.slice(
+        Math.max(0, match.index - 32),
+        match.index
+      );
+
+      if (
+        !/^[A-Z]/.test(name) ||
+        /\.\s*$/.test(before) ||
+        /\bnew\s*$/.test(before) ||
+        declarations.has(name) ||
+        declaredTypes.has(name) ||
+        knownExternal.has(name)
+      ) {
+        continue;
+      }
+
+      missing.add(name);
+    }
+
+    return [...missing].sort();
+  }
+
+  function duplicateGeneratedMembers(source) {
+    const seen = new Set();
+    const duplicates = new Set();
+    const pattern =
+      /^ {4}(?:public|private|protected|internal)\s+(?:static\s+)?(?:readonly\s+|volatile\s+|partial\s+|sealed\s+|async\s+)*(?!class\b|struct\b|record\b|event\b)(?:[\w?.<>\[\],]+\s+)+(?<name>[A-Za-z_]\w*)\s*(?<tail>\([^)]*\)|(?:=|;|=>))/gm;
+
+    for (const match of
+      String(source || "").matchAll(pattern)) {
+      const name = match.groups.name;
+      const tail = match.groups.tail;
+      let signature = `F:${name}`;
+
+      if (tail.startsWith("(")) {
+        const parameters = tail
+          .slice(1, -1)
+          .split(",")
+          .map(value => value
+            .trim()
+            .replace(/\s*=.*$/, "")
+            .replace(/\s+[A-Za-z_]\w*$/, "")
+            .replace(
+              /\b(?:ref|out|in|params|this)\s+/g,
+              ""
+            ))
+          .join(",");
+        signature =
+          `M:${name}(${parameters})`;
+      }
+
+      if (seen.has(signature)) {
+        duplicates.add(signature);
+      }
+      seen.add(signature);
+    }
+
+    return [...duplicates].sort();
+  }
+
+  function generatedSourceDiagnostics(
+    source,
+    fileName,
+    options = {}
+  ) {
+    const errors = [];
+    if (!String(source || "").trim()) {
+      return [
+        `Internal code-generation error: ${fileName} is empty.`
+      ];
+    }
+    const sanitized =
+      sanitizeGeneratedCSharp(source);
+    const pairs = [
+      ["{", "}"],
+      ["(", ")"],
+      ["[", "]"]
+    ];
+
+    for (const [open, close] of pairs) {
+      let depth = 0;
+      for (const character of sanitized) {
+        if (character === open) depth += 1;
+        if (character === close) depth -= 1;
+        if (depth < 0) break;
+      }
+      if (depth !== 0) {
+        errors.push(
+          `Internal code-generation error: unbalanced '${open}${close}' delimiters in ${fileName}.`
+        );
+      }
+    }
+
+    if (options.checkUnresolved !== false) {
+      const unresolved =
+        unresolvedGeneratedMethodCalls(source);
+      if (unresolved.length > 0) {
+        errors.push(
+          `Internal code-generation error: unresolved generated method call(s) in ${fileName}: ${unresolved.join(", ")}.`
+        );
+      }
+    }
+
+    const duplicates =
+      duplicateGeneratedMembers(source);
+    if (duplicates.length > 0) {
+      errors.push(
+        `Internal code-generation error: duplicate generated member(s) in ${fileName}: ${duplicates.join(", ")}.`
+      );
+    }
+
+    return errors;
+  }
+
   function buildTypedNodeGraphCSharpContribution(
     request = {}
   ) {
@@ -8186,7 +8479,20 @@
         apiFactoryVersion:
           Number(
             window.__RMLApiNodeFactoryVersion
-          ) || 0
+          ) || 0,
+        apiCatalogFingerprint:
+          String(
+            window.RMLApiNodeFactoryReport
+              ?.catalogFingerprint || ""
+          ),
+        apiCatalogSource:
+          String(
+            window.RMLApiNodeFactoryReport
+              ?.catalogSource || ""
+          ),
+        apiFactoryVerificationPassed:
+          window.RMLApiNodeFactoryReport
+            ?.verificationPassed === true
       });
 
     if (
@@ -8199,6 +8505,26 @@
 
     const diagnostics = [];
     const warnings = [];
+
+    diagnostics.push(
+      ...catalogApiExportDiagnostics(
+        graph.nodes
+      )
+    );
+    for (const node of graph.nodes) {
+      if (
+        node?.kind !== "configuration" &&
+        node?.operatorId !==
+          "configuration.menuInstance" &&
+        !OPERATOR_DEFINITIONS[
+          node?.operatorId
+        ]
+      ) {
+        diagnostics.push(
+          `Node '${node?.label || node?.id || "<unnamed>"}' uses unavailable operator '${node?.operatorId || "<missing>"}'. It cannot be exported until that verified node definition is available.`
+        );
+      }
+    }
     const extensionUsingLines =
       new Set();
     const extensionFields =
@@ -8216,6 +8542,8 @@
     const extensionPackageReferences =
       new Map();
     const extensionFrameworkReferences =
+      new Set();
+    const extensionRuntimeHelpers =
       new Set();
     const extensionRequirements = {
       usesElements: false,
@@ -8758,6 +9086,24 @@
             normalized
           );
         }
+      },
+      requireRuntimeHelper(value) {
+        const normalized =
+          String(value || "").trim();
+
+        if (
+          !/^[A-Za-z_][A-Za-z0-9_]*$/.test(
+            normalized
+          )
+        ) {
+          throw new TypeError(
+            "A runtime helper dependency must be a valid C# identifier."
+          );
+        }
+
+        extensionRuntimeHelpers.add(
+          normalized
+        );
       },
       require(name, value = true) {
         if (
@@ -9715,18 +10061,32 @@
               )
               .filter(Boolean);
 
+        const failureSource =
+          graphCsEscapeString(
+            `Impulse ${item.node.operatorId}:${item.spec.id}`
+          );
+
         return `    private static void ${item.method}()
     {
+        try
+        {
 ${actions.length > 0
   ? actions
       .map(action =>
         action
           .split("\n")
-          .map(line => `        ${line}`)
+          .map(line => `            ${line}`)
           .join("\n")
       )
       .join("\n")
-  : "        // No connected impulse targets."}
+  : "            // No connected impulse targets."}
+        }
+        catch (Exception exception)
+        {
+            ReportGraphRuntimeFailure(
+                "${failureSource}",
+                exception);
+        }
     }`;
       }).join("\n\n");
 
@@ -9838,6 +10198,20 @@ ${configurationButtonCases.length > 0
           nodeDefinition(node)
             ?.displaysValue === true
       );
+    const guardedRuntimeStatement = (
+      sourceName,
+      statement
+    ) =>
+`        try
+        {
+            ${statement}
+        }
+        catch (Exception exception)
+        {
+            ReportGraphRuntimeFailure(
+                "${graphCsEscapeString(sourceName)}",
+                exception);
+        }`;
     const displayStatements =
       displayNodes.map((node, index) => {
         const connection =
@@ -9854,7 +10228,10 @@ ${configurationButtonCases.length > 0
           );
 
         if (!connection) {
-          return `        PublishDisplay("${monitorId}", "${graphCsEscapeString(label)}", "unknown", "<not connected>");`;
+          return guardedRuntimeStatement(
+            `Display ${node.id}`,
+            `PublishDisplay("${monitorId}", "${graphCsEscapeString(label)}", "unknown", "<not connected>");`
+          );
         }
 
         const expression =
@@ -9868,7 +10245,10 @@ ${configurationButtonCases.length > 0
             "object"
           );
 
-        return `        PublishDisplay("${monitorId}", "${graphCsEscapeString(label)}", "${graphType}", ${expression.code});`;
+        return guardedRuntimeStatement(
+          `Display ${node.id}`,
+          `PublishDisplay("${monitorId}", "${graphCsEscapeString(label)}", "${graphType}", ${expression.code});`
+        );
       });
 
     const impulseDisplayNodes =
@@ -9896,7 +10276,10 @@ ${configurationButtonCases.length > 0
         `Display Impulse ${index + 1}`;
 
       displayStatements.push(
-        `        PublishDisplay("${graphCsEscapeString(node.id)}", "${graphCsEscapeString(label)}", "impulse", System.Threading.Interlocked.Read(ref _impulseCount${token}));`
+        guardedRuntimeStatement(
+          `Impulse display ${node.id}`,
+          `PublishDisplay("${graphCsEscapeString(node.id)}", "${graphCsEscapeString(label)}", "impulse", System.Threading.Interlocked.Read(ref _impulseCount${token}));`
+        )
       );
     }
 
@@ -10417,15 +10800,13 @@ ${dynamicChoiceRefreshCases.join("\n")}
         )
         .join("\n\n");
     const formatExtensionStatements =
-      statements =>
+      (statements, sourceName) =>
         statements
-          .flatMap(statement =>
-            statement.split("\n")
-          )
-          .map(line =>
-            line.length > 0
-              ? `        ${line}`
-              : ""
+          .map((statement, index) =>
+            guardedRuntimeStatement(
+              `${sourceName} ${index + 1}`,
+              statement
+            )
           )
           .join("\n");
     const warningsComment =
@@ -10464,6 +10845,8 @@ internal static partial class ${graphClassName}
         new(StringComparer.Ordinal);
     private static readonly Dictionary<string, string> _displayFingerprints =
         new(StringComparer.Ordinal);
+    private static readonly HashSet<string> _reportedRuntimeFailures =
+        new(StringComparer.Ordinal);
     private const string RuntimeBridgeChannel =
         "${graphCsEscapeString(runtimeBridgeChannel)}";
     private static readonly string _runtimeBridgeSessionId =
@@ -10499,9 +10882,14 @@ ${storeFieldsCode ? `\n${storeFieldsCode}` : ""}${extensionFieldsCode ? `\n\n${e
 
     public static void Initialize(Action<string>? display)
     {
-        _display = display ?? (static _ => { });${extensionInitializeStatements.length > 0
+        _display = display ?? (static _ => { });
+        lock (_displayStateLock)
+        {
+            _reportedRuntimeFailures.Clear();
+        }${extensionInitializeStatements.length > 0
   ? `\n${formatExtensionStatements(
-      extensionInitializeStatements
+      extensionInitializeStatements,
+      "Initialize extension"
     )}`
   : ""}
     }
@@ -10518,7 +10906,8 @@ ${startupEmitters.length > 0
   ? "        BeginStartupWhenWorldReady();"
   : "        // No connected startup impulse paths."}${extensionEngineInitStatements.length > 0
   ? `\n${formatExtensionStatements(
-      extensionEngineInitStatements
+      extensionEngineInitStatements,
+      "Engine initialization extension"
     )}`
   : ""}
 
@@ -10555,10 +10944,22 @@ ${startupEmitters.length > 0
             return false;
         }
 
-        world!.RunSynchronously(
-            action,
-            immediatellyIfPossible: true);
-        return true;
+        try
+        {
+            world!.RunSynchronously(
+                () => ExecuteGraphSafely(
+                    "World dispatch",
+                    action),
+                immediatellyIfPossible: true);
+            return true;
+        }
+        catch (Exception exception)
+        {
+            ReportGraphRuntimeFailure(
+                "World dispatch infrastructure",
+                exception);
+            return false;
+        }
     }
 
     private static void DispatchGraphToWorld(Action action)
@@ -10573,8 +10974,11 @@ ${startupEmitters.length > 0
 
         if (manager is null)
         {
-            throw new System.InvalidOperationException(
-                "The Resonite GlobalCoroutineManager is not available while waiting for a world-safe graph execution context.");
+            ReportGraphRuntimeFailure(
+                "World dispatch scheduling",
+                new InvalidOperationException(
+                    "The Resonite GlobalCoroutineManager is not available while waiting for a world-safe graph execution context."));
+            return;
         }
 
         _ = manager.StartTask(
@@ -10587,6 +10991,51 @@ ${startupEmitters.length > 0
                     await new FrooxEngine.Updates(1);
                 }
             });
+    }
+
+    private static void ExecuteGraphSafely(
+        string source,
+        Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch (Exception exception)
+        {
+            ReportGraphRuntimeFailure(
+                source,
+                exception);
+        }
+    }
+
+    private static void ReportGraphRuntimeFailure(
+        string source,
+        Exception exception)
+    {
+        bool firstFailure;
+        lock (_displayStateLock)
+        {
+            firstFailure =
+                _reportedRuntimeFailures.Add(
+                    source);
+        }
+
+        if (!firstFailure)
+        {
+            return;
+        }
+
+        try
+        {
+            _display(
+                $"Typed graph runtime error in {source}: " +
+                exception);
+        }
+        catch
+        {
+            // Logging must never escape back into Resonite's host callback.
+        }
     }
 ${startupEmitters.length > 0 ? `
     private static int _startupWorldReadyState;
@@ -10862,13 +11311,24 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         object value)
     {
         Type type = value.GetType();
-        MethodInfo? method = type.GetMethod(
-            operatorName,
-            BindingFlags.Public |
-            BindingFlags.Static,
-            binder: null,
-            types: new[] { type },
-            modifiers: null);
+        MethodInfo? method = type
+            .GetMethods(
+                BindingFlags.Public |
+                BindingFlags.Static)
+            .Where(candidate =>
+                string.Equals(
+                    candidate.Name,
+                    operatorName,
+                    StringComparison.Ordinal))
+            .Where(candidate =>
+            {
+                ParameterInfo[] parameters = candidate.GetParameters();
+                return parameters.Length == 1 &&
+                       parameters[0].ParameterType == type;
+            })
+            .OrderByDescending(candidate => candidate.DeclaringType == type)
+            .ThenBy(candidate => candidate.MetadataToken)
+            .FirstOrDefault();
 
         if (method is null)
         {
@@ -10943,7 +11403,16 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
             BindingFlags.NonPublic |
             BindingFlags.IgnoreCase;
 
-        FieldInfo? field = type.GetField(memberName, flags);
+        FieldInfo? field = type
+            .GetFields(flags)
+            .Where(candidate =>
+                string.Equals(
+                    candidate.Name,
+                    memberName,
+                    StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(candidate => candidate.DeclaringType == type)
+            .ThenBy(candidate => candidate.MetadataToken)
+            .FirstOrDefault();
         if (field is not null)
         {
             return Convert.ToSingle(
@@ -10951,7 +11420,17 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
                 CultureInfo.InvariantCulture);
         }
 
-        PropertyInfo? property = type.GetProperty(memberName, flags);
+        PropertyInfo? property = type
+            .GetProperties(flags)
+            .Where(candidate =>
+                string.Equals(
+                    candidate.Name,
+                    memberName,
+                    StringComparison.OrdinalIgnoreCase) &&
+                candidate.GetIndexParameters().Length == 0)
+            .OrderByDescending(candidate => candidate.DeclaringType == type)
+            .ThenBy(candidate => candidate.MetadataToken)
+            .FirstOrDefault();
         if (property is not null)
         {
             return Convert.ToSingle(
@@ -11029,22 +11508,29 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
                         throwOnError: false,
                         ignoreCase: false);
 
-                MethodInfo? publisher =
-                    scannerType?.GetMethod(
-                        "PublishRuntimeDisplay",
+                MethodInfo? publisher = scannerType?
+                    .GetMethods(
                         BindingFlags.Public |
-                        BindingFlags.Static,
-                        binder: null,
-                        types:
-                        [
-                            typeof(string),
-                            typeof(string),
-                            typeof(string),
-                            typeof(string),
-                            typeof(string),
-                            typeof(object)
-                        ],
-                        modifiers: null);
+                        BindingFlags.Static)
+                    .Where(candidate =>
+                        string.Equals(
+                            candidate.Name,
+                            "PublishRuntimeDisplay",
+                            StringComparison.Ordinal))
+                    .Where(candidate =>
+                        candidate.GetParameters()
+                            .Select(parameter => parameter.ParameterType)
+                            .SequenceEqual(
+                            [
+                                typeof(string),
+                                typeof(string),
+                                typeof(string),
+                                typeof(string),
+                                typeof(string),
+                                typeof(object)
+                            ]))
+                    .OrderBy(candidate => candidate.MetadataToken)
+                    .FirstOrDefault();
 
                 if (publisher is not null)
                 {
@@ -11403,10 +11889,73 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
 }
 `;
 
+    for (const helper of
+      extensionRuntimeHelpers) {
+      const escaped =
+        helper.replace(
+          /[.*+?^${}()|[\]\\]/g,
+          "\\$&"
+        );
+      const declaration =
+        new RegExp(
+          `\\b(?:public|private|protected|internal)\\s+` +
+          `(?:static\\s+)?(?:async\\s+)?` +
+          `[A-Za-z_][A-Za-z0-9_.,?<>\\[\\]]*\\s+` +
+          `${escaped}\\s*(?:<[^>{};()]+>)?\\s*\\(`
+        );
+
+      if (!declaration.test(source)) {
+        diagnostics.push(
+          `Internal code-generation error: required runtime helper '${helper}' is not declared in ${fileName}.`
+        );
+      }
+    }
+
+    diagnostics.push(
+      ...generatedSourceDiagnostics(
+        source,
+        fileName
+      )
+    );
+    for (const file of extensionFiles) {
+      if (
+        String(file?.name || "")
+          .toLowerCase()
+          .endsWith(".cs")
+      ) {
+        diagnostics.push(
+          ...generatedSourceDiagnostics(
+            file.content,
+            file.name,
+            { checkUnresolved: false }
+          )
+        );
+      }
+    }
+
     const result = {
       active: true,
       className:
         graphClassName,
+      verification: {
+        schemaVersion:
+          API_EXPORT_VERIFICATION_SCHEMA_VERSION,
+        catalogFingerprint:
+          String(
+            window.RMLApiNodeFactoryReport
+              ?.catalogFingerprint || ""
+          ),
+        engineVersion:
+          String(
+            window.RMLApiNodeFactoryReport
+              ?.engineVersion || ""
+          ),
+        catalogSource:
+          String(
+            window.RMLApiNodeFactoryReport
+              ?.catalogSource || ""
+          )
+      },
       diagnostics,
       warnings,
       files: (() => {
@@ -28792,7 +29341,18 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
     {
       value: Object.freeze({
         build:
-          buildTypedNodeGraphCSharpContribution
+          buildTypedNodeGraphCSharpContribution,
+        verifyGeneratedSource(
+          source,
+          fileName = "Generated.cs",
+          options = {}
+        ) {
+          return generatedSourceDiagnostics(
+            source,
+            fileName,
+            options
+          );
+        }
       }),
       writable: false,
       enumerable: true,
