@@ -2896,14 +2896,19 @@ private static void DispatchToResonite(Action action)
     if (world is null || world.IsDisposed)
     {
         throw new InvalidOperationException(
-            "No usable Resonite world is available for synchronous execution.");
+            "No usable Resonite world is available for graph dispatch.");
     }
 
-    // World.RunSynchronously is FrooxEngine's supported bridge for code that
-    // needs to mutate the world's data model from another/background thread.
-    world.RunSynchronously(
-        action,
-        immediatellyIfPossible: true);
+    // Schedule the continuation without holding the universal graph execution
+    // lock across a blocking cross-thread handoff. The captured execution frame
+    // keeps this branch's transient node values isolated until it resumes.
+    Action captured = CaptureGraphExecutionFrame(action);
+    world.Coroutines.StartTask(
+        async delegate
+        {
+            await default(FrooxEngine.ToWorld);
+            captured();
+        });
 }
 `);
   }
@@ -3233,9 +3238,11 @@ private static void CreateGeneratedReversePatch(
   ) {
     const token = nodeToken(api);
     const field = `_${suffix}${token}`;
-    api.addField(
+    api.addRuntimeField(
       `${api.node.id}.${suffix}`,
-      `private static ${csType} ${field} = ${defaultCode};`
+      field,
+      csType,
+      defaultCode
     );
     return field;
   }
@@ -4852,9 +4859,11 @@ private static void CreateGeneratedReversePatch(
           returnType !== "System.Void" &&
           returnType !== "void"
         ) {
-          api.addField(
+          api.addRuntimeField(
             `${api.node.id}.catalogResult`,
-            `private static ${returnType} ${catalogMethodFieldName(api, "Result")} = default!;`
+            catalogMethodFieldName(api, "Result"),
+            returnType,
+            "default!"
           );
         }
 
@@ -4876,19 +4885,25 @@ private static void CreateGeneratedReversePatch(
                 parameter.type,
               genericTypes
             );
-          api.addField(
+          api.addRuntimeField(
             `${api.node.id}.catalogOut.${parameter.position}`,
-            `private static ${type} ${catalogMethodFieldName(api, `Out${parameter.position}`)} = default!;`
+            catalogMethodFieldName(api, `Out${parameter.position}`),
+            type,
+            "default!"
           );
         }
 
-        api.addField(
+        api.addRuntimeField(
           `${api.node.id}.catalogSuccess`,
-          `private static bool ${catalogMethodFieldName(api, "Success")};`
+          catalogMethodFieldName(api, "Success"),
+          "bool",
+          "false"
         );
-        api.addField(
+        api.addRuntimeField(
           `${api.node.id}.catalogException`,
-          `private static System.Exception? ${catalogMethodFieldName(api, "Exception")};`
+          catalogMethodFieldName(api, "Exception"),
+          "System.Exception?",
+          "null"
         );
       },
       codegenExpression(api) {
@@ -6491,6 +6506,92 @@ private static T GraphCollectionItemAt<T>(
     }
   });
 
+  registerNode("lifecycle.modUnload", {
+    title: "On Mod Unload",
+    group: "Lifecycle",
+    symbol: "MOD−",
+    description:
+      "Fires synchronously while a builder-generated mod is being deactivated or reloaded, before its AssemblyLoadContext is released. Use it to destroy world objects and other resources created by the graph.",
+    outputs: [port("event", "Unload", "impulse")],
+    codegenCollect(api) {
+      const emit = api.emitMethod(
+        api.node.id,
+        "event"
+      );
+      if (!emit) return;
+
+      api.require(
+        "usesModUnloadLifecycle",
+        true
+      );
+      ensureEventRuntime(api);
+      ensureHarmonyRuntime(api);
+      api.addUsing("System.Threading");
+      api.addField(
+        "universal.lifecycle.shutdownState",
+        "private static int _graphShutdownStarted;"
+      );
+      api.addMember(
+        "universal.lifecycle.shutdown",
+        `public static void Shutdown()
+{
+    Volatile.Write(
+        ref _runtimeDisplayPumpStarted,
+        0);
+
+    if (Interlocked.Exchange(
+            ref _graphShutdownStarted,
+            1) != 0)
+    {
+        return;
+    }
+
+    try
+    {
+        bool dispatched =
+            TryDispatchGraphToWorld(
+                () =>
+                {
+                    ${emit}();
+                    RefreshDisplays();
+                });
+
+        if (!dispatched)
+        {
+            _display(
+                "Typed graph unload cleanup could not run because no usable Resonite world was available.");
+        }
+    }
+    catch (Exception exception)
+    {
+        ReportGraphRuntimeFailure(
+            "Mod unload cleanup",
+            exception);
+    }
+    finally
+    {
+        try
+        {
+            UnsubscribeGraphEvents();
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            _graphHarmony.UnpatchAll(
+                _graphHarmony.Id);
+        }
+        catch
+        {
+        }
+    }
+}`
+      );
+    }
+  });
+
   registerNode("lifecycle.unhandledException", {
     title: "On Unhandled Exception",
     group: "Lifecycle",
@@ -6508,9 +6609,11 @@ private static T GraphCollectionItemAt<T>(
         api.node.id,
         "event"
       );
-      api.addField(
+      api.addRuntimeField(
         `${api.node.id}.exception`,
-        `private static Exception ${field} = null!;`
+        field,
+        "Exception",
+        "null!"
       );
       if (emit) {
         api.addInitialize(
@@ -6546,9 +6649,11 @@ private static T GraphCollectionItemAt<T>(
         api.node.id,
         "event"
       );
-      api.addField(
+      api.addRuntimeField(
         `${api.node.id}.args`,
-        `private static object?[] ${field} = Array.Empty<object?>();`
+        field,
+        "object?[]",
+        "Array.Empty<object?>()"
       );
       api.addMember(
         `${api.node.id}.callback`,
@@ -6691,9 +6796,11 @@ private static T GraphCollectionItemAt<T>(
           )}`
         );
 
-      api.addField(
+      api.addRuntimeField(
         `${api.node.id}.context`,
-        `private static PatchContext ${field} = new();`
+        field,
+        "PatchContext",
+        "new PatchContext()"
       );
 
       let callbackCode;
@@ -7275,13 +7382,17 @@ private static T GraphCollectionItemAt<T>(
     codegenCollect(api) {
       ensureReflectionRuntime(api);
       const token = nodeToken(api);
-      api.addField(
+      api.addRuntimeField(
         `${api.node.id}.result`,
-        `private static object? _invokeResult${token};`
+        `_invokeResult${token}`,
+        "object?",
+        "null"
       );
-      api.addField(
+      api.addRuntimeField(
         `${api.node.id}.error`,
-        `private static Exception _invokeException${token} = null!;`
+        `_invokeException${token}`,
+        "Exception",
+        "null!"
       );
     },
     codegenExpression(api) {
@@ -7457,7 +7568,7 @@ private static T GraphCollectionItemAt<T>(
     outputs: [port("slot", "Slot", "slot")],
     codegenExpression(api) {
       ensureResoniteRuntime(api);
-      return `(FrooxEngine.Slot)FindSlotRecursive(${api.input("root").code}, ${api.input("name").code})!`;
+      return `((FrooxEngine.Slot)FindSlotRecursive(${api.input("root").code}, ${api.input("name").code})!)`;
     }
   });
 
@@ -8194,8 +8305,9 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
     },
     codegenAction(api) {
       const done = api.emit("done");
-      const slot = api.input("slot").code;
-      return `if (${slot} is not null && !${slot}.IsDestroyed)\n        {\n            ${slot}.Destroy();\n        }${done ? `\n        ${done}();` : ""}`;
+      const slot =
+        `_destroySlot${nodeToken(api)}`;
+      return `FrooxEngine.Slot? ${slot} = ${api.input("slot").code};\n        if (${slot} is not null && !${slot}.IsDestroyed)\n        {\n            ${slot}.Destroy();\n        }${done ? `\n        ${done}();` : ""}`;
     }
   });
 
@@ -8215,8 +8327,9 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
     },
     codegenAction(api) {
       const done = api.emit("done");
-      const component = api.input("component").code;
-      return `if (${component} is not null && !${component}.IsDestroyed)\n        {\n            ${component}.Destroy();\n        }${done ? `\n        ${done}();` : ""}`;
+      const component =
+        `_destroyComponent${nodeToken(api)}`;
+      return `FrooxEngine.Component? ${component} = ${api.input("component").code};\n        if (${component} is not null && !${component}.IsDestroyed)\n        {\n            ${component}.Destroy();\n        }${done ? `\n        ${done}();` : ""}`;
     }
   });
 
@@ -9406,7 +9519,7 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
     ],
     codegenExpression(api) {
       ensureResoniteRuntime(api);
-      return `(FrooxEngine.DynamicVariableSpace)FindComponentReflective(${api.input("slot").code}, typeof(FrooxEngine.DynamicVariableSpace))!`;
+      return `((FrooxEngine.DynamicVariableSpace)FindComponentReflective(${api.input("slot").code}, typeof(FrooxEngine.DynamicVariableSpace))!)`;
     }
   });
 
@@ -9537,7 +9650,7 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
     ],
     codegenExpression(api) {
       ensureResoniteRuntime(api);
-      return `(FrooxEngine.RadiantDash)CurrentRadiantDash()!`;
+      return `((FrooxEngine.RadiantDash)CurrentRadiantDash()!)`;
     }
   });
 
@@ -9620,7 +9733,7 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
     outputs: [port("builder", "UIBuilder", "uiBuilder")],
     codegenExpression(api) {
       ensureResoniteRuntime(api);
-      return `(FrooxEngine.UIX.UIBuilder)CreateUiBuilderReflective(${api.input("slot").code})!`;
+      return `((FrooxEngine.UIX.UIBuilder)CreateUiBuilderReflective(${api.input("slot").code})!)`;
     }
   });
 
@@ -9933,13 +10046,17 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
     codegenCollect(api) {
       api.addUsing("System.IO");
       const token = nodeToken(api);
-      api.addField(
+      api.addRuntimeField(
         `${api.node.id}.text`,
-        `private static string _readText${token} = string.Empty;`
+        `_readText${token}`,
+        "string",
+        "string.Empty"
       );
-      api.addField(
+      api.addRuntimeField(
         `${api.node.id}.exception`,
-        `private static Exception _readTextException${token} = null!;`
+        `_readTextException${token}`,
+        "Exception",
+        "null!"
       );
     },
     codegenExpression(api) {
@@ -10011,9 +10128,11 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
       ],
       codegenCollect(api) {
         api.addUsing("System.IO");
-        api.addField(
+        api.addRuntimeField(
           `${api.node.id}.exception`,
-          `private static Exception _fileWriteException${nodeToken(api)} = null!;`
+          `_fileWriteException${nodeToken(api)}`,
+          "Exception",
+          "null!"
         );
       },
       codegenExpression(api) {
@@ -10284,9 +10403,11 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
         api.node.id,
         "done"
       );
-      api.addField(
+      api.addRuntimeField(
         `${api.node.id}.response`,
-        `private static GraphHttpResponse _httpResponse${token} = GraphHttpResponse.Empty;`
+        `_httpResponse${token}`,
+        "GraphHttpResponse",
+        "GraphHttpResponse.Empty"
       );
       api.addMember(
         `${api.node.id}.send`,
@@ -10371,25 +10492,35 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
         api.node.id,
         "closed"
       );
-      api.addField(
+      api.addRuntimeField(
         `${api.node.id}.socket`,
-        `private static ClientWebSocket _webSocket${token} = null!;`
+        `_webSocket${token}`,
+        "ClientWebSocket",
+        "null!"
       );
-      api.addField(
+      api.addRuntimeField(
         `${api.node.id}.text`,
-        `private static string _webSocketText${token} = string.Empty;`
+        `_webSocketText${token}`,
+        "string",
+        "string.Empty"
       );
-      api.addField(
+      api.addRuntimeField(
         `${api.node.id}.bytes`,
-        `private static byte[] _webSocketBytes${token} = Array.Empty<byte>();`
+        `_webSocketBytes${token}`,
+        "byte[]",
+        "Array.Empty<byte>()"
       );
-      api.addField(
+      api.addRuntimeField(
         `${api.node.id}.connected`,
-        `private static bool _webSocketConnected${token};`
+        `_webSocketConnected${token}`,
+        "bool",
+        "false"
       );
-      api.addField(
+      api.addRuntimeField(
         `${api.node.id}.error`,
-        `private static string _webSocketError${token} = string.Empty;`
+        `_webSocketError${token}`,
+        "string",
+        "string.Empty"
       );
       api.addMember(
         `${api.node.id}.connect`,
@@ -10443,9 +10574,11 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
         api.node.id,
         "done"
       );
-      api.addField(
+      api.addRuntimeField(
         `${api.node.id}.error`,
-        `private static string _webSocketSendError${token} = string.Empty;`
+        `_webSocketSendError${token}`,
+        "string",
+        "string.Empty"
       );
       api.addMember(
         `${api.node.id}.send`,
@@ -10483,9 +10616,11 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
         api.node.id,
         "done"
       );
-      api.addField(
+      api.addRuntimeField(
         `${api.node.id}.error`,
-        `private static string _tcpError${token} = string.Empty;`
+        `_tcpError${token}`,
+        "string",
+        "string.Empty"
       );
       api.addMember(
         `${api.node.id}.send`,
@@ -10523,9 +10658,11 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
         api.node.id,
         "done"
       );
-      api.addField(
+      api.addRuntimeField(
         `${api.node.id}.error`,
-        `private static string _udpError${token} = string.Empty;`
+        `_udpError${token}`,
+        "string",
+        "string.Empty"
       );
       api.addMember(
         `${api.node.id}.send`,
@@ -10646,9 +10783,11 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
         api.node.id,
         "faulted"
       );
-      api.addField(
+      api.addRuntimeField(
         `${api.node.id}.exception`,
-        `private static Exception _awaitException${token} = null!;`
+        `_awaitException${token}`,
+        "Exception",
+        "null!"
       );
       api.addMember(
         `${api.node.id}.await`,

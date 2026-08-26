@@ -34,7 +34,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "stable-api-contract-export-gate-20260826-v383f1";
+  "stable-stack-safe-impulse-runtime-20260826-v387f1";
 
 function exposeRmlBuilderBuildId() {
   document.documentElement.dataset
@@ -466,7 +466,7 @@ function projectIoWorkerInstance() {
   try {
     const worker = new Worker(
       new URL(
-        "project_io_worker.js?v=3-file-io-v383f1",
+        "project_io_worker.js?v=4-file-io-v384f1",
         APP_SCRIPT_BASE_URL
       ),
       {
@@ -744,7 +744,7 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "graph_codegen_worker.js?v=4-api-contract-v383f1",
+      "graph_codegen_worker.js?v=5-mod-unload-v384f1",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -4077,6 +4077,10 @@ function generateCode() {
     graphContribution?.requirements
       ?.usesRuntimeConfigurationMenu ===
     true;
+  const usesModUnloadLifecycle =
+    graphContribution?.requirements
+      ?.usesModUnloadLifecycle ===
+    true;
   const controllers = entries.filter(
     entry =>
       entry.node.kind ===
@@ -4270,6 +4274,9 @@ ${usesColorX
       ? [
           "IModConfigurationLayoutProvider"
         ]
+      : []),
+    ...(usesModUnloadLifecycle
+      ? ["IRuntimeReloadableMod"]
       : [])
   ];
   const interfaceSuffix =
@@ -4277,6 +4284,41 @@ ${usesColorX
       ? `,\n      ${implementedInterfaces.join(
           ",\n      "
         )}`
+      : "";
+
+  const runtimeUnloadLifecycleBlock =
+    usesModUnloadLifecycle
+      ? `
+    public bool CanUnload(
+        out string reason)
+    {
+        reason = string.Empty;
+        return true;
+    }
+
+    public System.Threading.Tasks.ValueTask StartAsync(
+        System.Threading.CancellationToken cancellationToken)
+    {
+        _ = cancellationToken;
+        return System.Threading.Tasks.ValueTask.CompletedTask;
+    }
+
+    public System.Threading.Tasks.ValueTask StopAsync(
+        System.Threading.CancellationToken cancellationToken)
+    {
+        _ = cancellationToken;
+${observedEntries.length > 0
+    ? `        if (_configuration is not null)
+        {
+            _configuration.OnThisConfigurationChanged -=
+                OnConfigurationChanged;
+        }
+
+`
+    : ""}        ${graphContribution.className}.Shutdown();
+        return System.Threading.Tasks.ValueTask.CompletedTask;
+    }
+`
       : "";
 
   const runtimeValueDeclarations =
@@ -5178,7 +5220,7 @@ public sealed partial class ${className}
         )}";
 
 ${declarations}
-${runtimeBlock}${orderBlock}${visibilityBlock}${runtimeMenuProviderBlock}${layoutProviderBlock}}
+${runtimeBlock}${runtimeUnloadLifecycleBlock}${orderBlock}${visibilityBlock}${runtimeMenuProviderBlock}${layoutProviderBlock}}
 `;
 }
 

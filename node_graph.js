@@ -8550,7 +8550,8 @@
       usesRenderiteShared: false,
       allowUnsafeBlocks: false,
       useWindowsForms: false,
-      usesRuntimeConfigurationMenu: false
+      usesRuntimeConfigurationMenu: false,
+      usesModUnloadLifecycle: false
     };
 
     const addNamedBlock = (
@@ -8964,6 +8965,26 @@
           extensionFields,
           key,
           code
+        );
+      },
+      addRuntimeField(
+        key,
+        fieldName,
+        csType,
+        defaultCode
+      ) {
+        const runtimeKey =
+          graphCsEscapeString(
+            `${node?.id || "graph"}:${key}`
+          );
+        addNamedBlock(
+          extensionFields,
+          key,
+`private static ${csType} ${fieldName}
+{
+    get => ReadGraphRuntimeValue<${csType}>("${runtimeKey}", ${defaultCode});
+    set => WriteGraphRuntimeValue("${runtimeKey}", value);
+}`
         );
       },
       addMember(key, code) {
@@ -9534,6 +9555,11 @@
               `Emit${graphCsMethodToken(
                 node.id,
                 spec.id
+              )}`,
+            queuedMethod:
+              `QueueEmit${graphCsMethodToken(
+                node.id,
+                spec.id
               )}`
           });
         }
@@ -9545,7 +9571,7 @@
         impulseOutputs.map(
           item => [
             `${item.node.id}:${item.spec.id}`,
-            item.method
+            item.queuedMethod
           ]
         )
       );
@@ -10089,6 +10115,14 @@ ${actions.length > 0
         }
     }`;
       }).join("\n\n");
+
+    const queuedImpulseMethods =
+      impulseOutputs.map(item =>
+`    private static void ${item.queuedMethod}()
+    {
+        EnqueueGraphImpulse(${item.method});
+    }`
+      ).join("\n\n");
 
     const configurationNode =
       graph.nodes.find(
@@ -10858,6 +10892,18 @@ internal static partial class ${graphClassName}
     private static MethodInfo? _runtimeBridgePublisher;
     private static long _runtimeBridgeResolveAfter;
     private static int _runtimeDisplayPumpStarted;
+    private static readonly object _graphImpulseExecutionLock = new();
+    private static readonly object _graphRuntimeLastValuesLock = new();
+    private static readonly Dictionary<string, object?> _graphRuntimeLastValues =
+        new(StringComparer.Ordinal);
+    private static readonly AsyncLocal<GraphExecutionFrame?> _graphExecutionFrame =
+        new();
+    [ThreadStatic]
+    private static Queue<Action>? _graphImpulseQueue;
+    [ThreadStatic]
+    private static bool _graphImpulseQueueDraining;
+    [ThreadStatic]
+    private static int _graphExecutionDepth;
 
     /// <summary>
     /// Latest values published by Display Value and Display Impulse nodes, keyed by node label.
@@ -11009,6 +11055,131 @@ ${startupEmitters.length > 0
         }
     }
 
+    private sealed class GraphExecutionFrame
+    {
+        internal readonly Dictionary<string, object?> Values =
+            new(StringComparer.Ordinal);
+    }
+
+    private static T ReadGraphRuntimeValue<T>(
+        string key,
+        T fallback)
+    {
+        GraphExecutionFrame? frame = _graphExecutionFrame.Value;
+        if (
+            frame is not null &&
+            frame.Values.TryGetValue(key, out object? framedValue))
+        {
+            return framedValue is null
+                ? default!
+                : (T)framedValue;
+        }
+
+        lock (_graphRuntimeLastValuesLock)
+        {
+            if (_graphRuntimeLastValues.TryGetValue(
+                    key,
+                    out object? lastValue))
+            {
+                return lastValue is null
+                    ? default!
+                    : (T)lastValue;
+            }
+        }
+
+        return fallback;
+    }
+
+    private static void WriteGraphRuntimeValue<T>(
+        string key,
+        T value)
+    {
+        GraphExecutionFrame? frame = _graphExecutionFrame.Value;
+        if (frame is null)
+        {
+            frame = new GraphExecutionFrame();
+            _graphExecutionFrame.Value = frame;
+        }
+
+        frame.Values[key] = value;
+        lock (_graphRuntimeLastValuesLock)
+        {
+            _graphRuntimeLastValues[key] = value;
+        }
+    }
+
+    private static Action CaptureGraphExecutionFrame(Action action)
+    {
+        GraphExecutionFrame? captured = _graphExecutionFrame.Value;
+        return () =>
+        {
+            GraphExecutionFrame? previous = _graphExecutionFrame.Value;
+            _graphExecutionFrame.Value = captured;
+            try
+            {
+                action();
+            }
+            finally
+            {
+                _graphExecutionFrame.Value = previous;
+            }
+        };
+    }
+
+    // Every generated graph uses the same stack-safe execution kernel.
+    // Continuations are FIFO-drained instead of recursively called. A global
+    // execution lock serializes overlapping entries, while AsyncLocal frames
+    // keep transient node outputs isolated across asynchronous continuations.
+    private static void EnqueueGraphImpulse(Action action)
+    {
+        GraphExecutionFrame? frame = _graphExecutionFrame.Value;
+        bool ownsFrame = _graphExecutionDepth == 0;
+        if (frame is null)
+        {
+            frame = new GraphExecutionFrame();
+            _graphExecutionFrame.Value = frame;
+        }
+
+        _graphExecutionDepth++;
+
+        try
+        {
+            lock (_graphImpulseExecutionLock)
+            {
+                Queue<Action> queue =
+                    _graphImpulseQueue ??= new Queue<Action>();
+                queue.Enqueue(action);
+
+                if (_graphImpulseQueueDraining)
+                {
+                    return;
+                }
+
+                _graphImpulseQueueDraining = true;
+                try
+                {
+                    while (queue.Count > 0)
+                    {
+                        queue.Dequeue()();
+                    }
+                }
+                finally
+                {
+                    queue.Clear();
+                    _graphImpulseQueueDraining = false;
+                }
+            }
+        }
+        finally
+        {
+            if (ownsFrame)
+            {
+                _graphExecutionFrame.Value = null;
+            }
+            _graphExecutionDepth--;
+        }
+    }
+
     private static void ReportGraphRuntimeFailure(
         string source,
         Exception exception)
@@ -11117,7 +11288,7 @@ ${directDynamicChoiceFields.length > 0
             value);
     }
 
-${impulseMethods || "    // No impulse outputs are present."}${extensionMembersCode ? `\n\n${extensionMembersCode}` : ""}
+${queuedImpulseMethods ? `${queuedImpulseMethods}\n\n` : ""}${impulseMethods || "    // No impulse outputs are present."}${extensionMembersCode ? `\n\n${extensionMembersCode}` : ""}
 
     private static T GraphAdd<T>(T left, T right)
     {
@@ -12052,6 +12223,9 @@ ${impulseMethods || "    // No impulse outputs are present."}${extensionMembersC
         usesRuntimeConfigurationMenu:
           extensionRequirements
             .usesRuntimeConfigurationMenu,
+        usesModUnloadLifecycle:
+          extensionRequirements
+            .usesModUnloadLifecycle,
         references:
           [...extensionReferences.values()],
         packageReferences:

@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const LOADER_VERSION = 27;
+  const LOADER_VERSION = 28;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
   const CATALOG_PATH = "/resonite_api_catalog.json";
@@ -10,8 +10,6 @@
     "/rml-scanner-status";
   const BUILDER_SCANNER_CATALOG_PATH =
     "/rml-scanner-catalog";
-  const POLL_INTERVAL_MS = 30000;
-  const OFFLINE_DISCOVERY_INTERVAL_MS = 5000;
   const BUILDER_PROBE_TIMEOUT_MS = 6000;
   const CATALOG_FETCH_TIMEOUT_MS = 45000;
   const CACHE_DATABASE_NAME =
@@ -24,11 +22,11 @@
     document.currentScript?.src ||
     window.location.href;
   const modNodesUrl = new URL(
-    "mod_nodes.js?v=37-reflection-resolution-v383f1",
+    "mod_nodes.js?v=39-typed-destroy-target-v386f1",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=14-api-contract-v383f1",
+    "api_nodes.js?v=15-mod-unload-v384f1",
     scriptUrl
   ).href;
 
@@ -308,7 +306,6 @@
 
   let scannerOnline = false;
   let scannerChecking = false;
-  let scannerPollTimer = 0;
   let scannerCheckPromise = null;
   let activeScannerCatalogUrl = "";
 
@@ -744,22 +741,19 @@
 
   async function probeDirectScannerRange() {
     const urls = directScannerUrls();
-
-    for (const url of urls) {
-      try {
-        const live =
-          await probeDirectScannerUrl(
+    const results = await Promise.all(
+      urls.map(async url => {
+        try {
+          return await probeDirectScannerUrl(
             url
           );
-
-        if (live) {
-          return live;
+        } catch {
+          return null;
         }
-      } catch {
-      }
-    }
+      })
+    );
 
-    return null;
+    return results.find(Boolean) || null;
   }
 
   async function probeBuilderScannerBridge() {
@@ -1022,42 +1016,9 @@
   }
 
   async function loadCatalog() {
-    scannerChecking = true;
-    updateStatus(null, {
-      checking: true,
-      online: false
-    });
-
-    const live =
-      await tryScannerCatalog([
-        0,
-        250,
-        1000
-      ]);
-
-    scannerChecking = false;
-
-    if (live) {
-      scannerOnline = true;
-      activeScannerCatalogUrl =
-        live.url;
-
-      await writeCachedLiveCatalog(
-        live.raw,
-        live.url
-      );
-
-      const normalized =
-        normalizeCatalog(
-          live.raw,
-          "scanner",
-          live.url
-        );
-
-      scheduleScannerStatusCheck();
-      return installCatalog(normalized);
-    }
-
+    // Startup readiness is intentionally cache-only. Scanner discovery runs
+    // separately after the node/runtime promises have been released, so an
+    // offline or slow health endpoint can never hold the builder hostage.
     const cached =
       await readCachedLiveCatalog();
 
@@ -1163,9 +1124,106 @@
       catalog?.catalogFingerprint ||
         catalog?.assemblyFingerprint ||
         "unknown",
-      catalog?.engineVersion || "unknown",
-      catalog?.catalogSource || "unknown"
+      catalog?.engineVersion || "unknown"
     ].join("|");
+  }
+
+  function promoteCachedApiNodesToLive(
+    catalog
+  ) {
+    const report =
+      window.RMLApiNodeFactoryReport;
+    const definitions =
+      window.RMLModNodeRegistry
+        ?.getNodeDefinitions?.();
+
+    if (
+      !report ||
+      typeof report !== "object" ||
+      !definitions ||
+      typeof definitions !== "object" ||
+      report.verificationPassed !== true ||
+      String(report.catalogFingerprint || "") !==
+        String(catalog?.catalogFingerprint || "") ||
+      String(report.engineVersion || "") !==
+        String(catalog?.engineVersion || "")
+    ) {
+      return false;
+    }
+
+    if (
+      report.catalogSource === "scanner" &&
+      report.liveCatalogVerified === true
+    ) {
+      return true;
+    }
+
+    let promotedCount = 0;
+
+    for (const definition of
+      Object.values(definitions)) {
+      const contract =
+        definition?.apiVerification;
+
+      if (
+        definition?.catalogGenerated !== true ||
+        !contract ||
+        typeof contract !== "object" ||
+        String(contract.catalogFingerprint || "") !==
+          String(catalog.catalogFingerprint || "") ||
+        String(contract.engineVersion || "") !==
+          String(catalog.engineVersion || "")
+      ) {
+        continue;
+      }
+
+      const {
+        contractFingerprint:
+          _cachedContractFingerprint,
+        ...cachedCore
+      } = contract;
+      const liveCore = {
+        ...cachedCore,
+        catalogSource: "scanner"
+      };
+
+      definition.apiVerification =
+        Object.freeze({
+          ...liveCore,
+          contractFingerprint:
+            stableCatalogHash(
+              JSON.stringify(liveCore)
+            )
+        });
+      delete definition.hiddenFromPalette;
+      delete definition.catalogVerificationUnavailable;
+      promotedCount += 1;
+    }
+
+    const liveReport = Object.freeze({
+      ...report,
+      catalogSource: "scanner",
+      liveCatalogVerified: true
+    });
+
+    window.RMLApiNodeFactoryReport =
+      liveReport;
+    window.__RMLNodeDefinitionRevision =
+      (Number(
+        window.__RMLNodeDefinitionRevision
+      ) || 0) + 1;
+
+    window.dispatchEvent(
+      new CustomEvent(
+        "rml-api-node-factory-ready",
+        {
+          detail: liveReport
+        }
+      )
+    );
+
+    return promotedCount > 0 ||
+      Number(report.totalGeneratedNodes) === 0;
   }
 
   async function ensureApiNodesLoaded() {
@@ -1185,35 +1243,6 @@
     ) {
       await factoryReady;
     }
-  }
-
-  function scheduleScannerStatusCheck(
-    delayMs = scannerOnline
-      ? POLL_INTERVAL_MS
-      : OFFLINE_DISCOVERY_INTERVAL_MS
-  ) {
-    window.clearTimeout(
-      scannerPollTimer
-    );
-
-    scannerPollTimer = 0;
-
-    scannerPollTimer =
-      window.setTimeout(
-        () => {
-          void synchronizeScannerStatus({
-            showChecking: false,
-            reloadOnChange: true
-          });
-        },
-        Math.max(
-          1000,
-          Number(delayMs) ||
-            (scannerOnline
-              ? POLL_INTERVAL_MS
-              : OFFLINE_DISCOVERY_INTERVAL_MS)
-        )
-      );
   }
 
   async function synchronizeScannerStatus(
@@ -1292,15 +1321,24 @@
           await modNodesReady;
           await ensureApiNodesLoaded();
 
-          if (
-            reloadOnChange
-          ) {
+          if (reloadOnChange) {
             window.setTimeout(
               () =>
                 window.location.reload(),
               250
             );
           }
+        }
+
+        if (
+          current &&
+          !catalogChanged
+        ) {
+          await modNodesReady;
+          await ensureApiNodesLoaded();
+          promoteCachedApiNodesToLive(
+            normalized
+          );
         }
 
         if (
@@ -1339,8 +1377,6 @@
         })
         .finally(() => {
           scannerCheckPromise = null;
-
-          scheduleScannerStatusCheck();
         });
 
     return scannerCheckPromise;
@@ -1461,14 +1497,17 @@
   );
 
   catalogReady
-    .then(catalog => {
+    .then(() => {
       installManualScannerRefresh();
 
-      if (!scannerOnline) {
-        scheduleScannerStatusCheck(
-          OFFLINE_DISCOVERY_INTERVAL_MS
-        );
-      }
+      // Exactly one automatic startup synchronization. It is deliberately
+      // fire-and-forget: all catalog/node readiness promises already depend
+      // only on the local cache. Every later check is manual via the status
+      // button; there is no online or offline polling timer.
+      void synchronizeScannerStatus({
+        showChecking: false,
+        reloadOnChange: true
+      });
     })
     .catch(() => {});
 
