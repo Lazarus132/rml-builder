@@ -756,6 +756,24 @@
         genericPort("current", "Current", "T", "value")
       ]
     },
+    "resonite.executionStore": {
+      title: "Execution Frame Store",
+      group: "Flow",
+      symbol: "Sƒ",
+      description:
+        "Stores a value only inside the current graph execution frame. Concurrent or nested entries cannot overwrite each other's transient value, and the value is discarded when that execution finishes.",
+      configurableTypeVar: "T",
+      configurableTypes: VALUE_TYPES,
+      defaultType: "float",
+      inputs: [
+        port("write", "Write", "impulse"),
+        genericPort("value", "Value", "T", "value")
+      ],
+      outputs: [
+        port("written", "On Written", "impulse"),
+        genericPort("current", "Current", "T", "value")
+      ]
+    },
     "resonite.packColorX": {
       title: "Pack ColorX",
       group: "Values",
@@ -5577,8 +5595,12 @@
 
       if (
         sourceNode?.kind === "operator" &&
-        sourceNode.operatorId ===
-          "resonite.store" &&
+        (
+          sourceNode.operatorId ===
+            "resonite.store" ||
+          sourceNode.operatorId ===
+            "resonite.executionStore"
+        ) &&
         connection.fromPort === "current"
       ) {
         continue;
@@ -6685,6 +6707,7 @@
           break;
 
         case "resonite.store":
+        case "resonite.executionStore":
           result = input("value");
           break;
 
@@ -9393,6 +9416,11 @@
             code = storeFieldName(node);
             break;
 
+          case "resonite.executionStore":
+            code =
+              `ReadGraphExecutionValue<${csType}>("execution-store:${graphCsEscapeString(node.id)}", ${graphCsDefault(type)})`;
+            break;
+
           case "resonite.packColorX":
             code =
               `(colorX)new color(${input("r").code}, ${input("g").code}, ${input("b").code}, ${input("a").code})`;
@@ -9951,6 +9979,23 @@
             emit("written");
 
           generatedAction = `${field} = ${value};${written
+            ? `\n        ${written}();`
+            : ""}`;
+          break;
+        }
+
+        case "resonite.executionStore": {
+          const value =
+            inputExpression(
+              targetNode,
+              "value"
+            ).code;
+          const written =
+            emit("written");
+          const key =
+            `execution-store:${targetNode.id}`;
+
+          generatedAction = `WriteGraphExecutionValue("${graphCsEscapeString(key)}", ${value});${written
             ? `\n        ${written}();`
             : ""}`;
           break;
@@ -11059,6 +11104,37 @@ ${startupEmitters.length > 0
     {
         internal readonly Dictionary<string, object?> Values =
             new(StringComparer.Ordinal);
+    }
+
+    private static T ReadGraphExecutionValue<T>(
+        string key,
+        T fallback)
+    {
+        GraphExecutionFrame? frame = _graphExecutionFrame.Value;
+        if (
+            frame is not null &&
+            frame.Values.TryGetValue(key, out object? value))
+        {
+            return value is null
+                ? default!
+                : (T)value;
+        }
+
+        return fallback;
+    }
+
+    private static void WriteGraphExecutionValue<T>(
+        string key,
+        T value)
+    {
+        GraphExecutionFrame? frame = _graphExecutionFrame.Value;
+        if (frame is null)
+        {
+            frame = new GraphExecutionFrame();
+            _graphExecutionFrame.Value = frame;
+        }
+
+        frame.Values[key] = value;
     }
 
     private static T ReadGraphRuntimeValue<T>(

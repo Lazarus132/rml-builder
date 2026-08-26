@@ -170,10 +170,10 @@ async function ensureRuntime(catalog) {
       self.RMLResoniteApiCatalog;
 
     importScripts(
-      "node_graph.js?v=230-mod-unload-v384f1"
+      "node_graph.js?v=232-execution-frame-store-v388f1"
     );
     importScripts(
-      "mod_nodes.js?v=38-mod-unload-v384f1"
+      "mod_nodes.js?v=39-typed-destroy-target-v386f1"
     );
     importScripts(
       "api_nodes.js?v=15-mod-unload-v384f1"

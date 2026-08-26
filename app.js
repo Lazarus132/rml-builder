@@ -34,7 +34,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "stable-stack-safe-impulse-runtime-20260826-v387f1";
+  "stable-universal-execution-frame-store-20260826-v388f1";
 
 function exposeRmlBuilderBuildId() {
   document.documentElement.dataset
@@ -744,7 +744,7 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "graph_codegen_worker.js?v=5-mod-unload-v384f1",
+      "graph_codegen_worker.js?v=6-execution-frame-store-v388f1",
       APP_SCRIPT_BASE_URL
     ),
     {
