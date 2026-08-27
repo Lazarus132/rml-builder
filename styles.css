@@ -10656,7 +10656,6 @@ dialog.builder-message-dialog::backdrop {
   }
 }
 
-/* Universal, deterministic feedback for long project and dialog work. */
 .project-load-progress {
   display: grid;
   gap: 8px;
