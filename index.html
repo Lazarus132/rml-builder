@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta
       name="rml-builder-build"
-      content="stable-universal-packed-config-integrity-20260826-v395f1">
+      content="stable-universal-eager-import-atomic-wire-scene-20260827-v407f1">
     <meta
       name="description"
       content="Build complete typed ResoniteModLoader projects visually with automatic dependencies; optional Raw C# tools remain an expert fallback.">
@@ -16,7 +16,7 @@
         "RMLBuilderBuildId",
         {
           value:
-            "stable-universal-packed-config-integrity-20260826-v395f1",
+            "stable-universal-eager-import-atomic-wire-scene-20260827-v407f1",
           writable: false,
           enumerable: true,
           configurable: true
@@ -26,7 +26,7 @@
         .rmlBuilderBuild =
           window.RMLBuilderBuildId;
     </script>
-    <link rel="stylesheet" href="styles.css?v=241-packed-config-integrity-v395f1">
+    <link rel="stylesheet" href="styles.css?v=251-eager-import-atomic-wire-scene-v407f1">
     <link rel="shortcut icon" href="./favicon.svg">
     <link rel="icon" href="./favicon.svg">
   </head>
@@ -39,9 +39,9 @@
         <small>Resonite Mod Loader</small>
         <h1>Universal Mod Builder</h1>
       </div>
-      <div class="local-state">
-        <span></span>
-        Draft saved locally
+      <div class="local-state" data-state="ready">
+        <span class="local-state-dot" aria-hidden="true"></span>
+        <span id="workspace-restore-state">Draft saved locally</span>
       </div>
       <div
         id="api-catalog-state"
@@ -468,6 +468,15 @@
           runtime and current RML releases.
         </p>
 
+        <aside
+          id="export-api-compatibility-warning"
+          class="export-api-compatibility-warning"
+          role="note"
+          hidden>
+          <strong>API compatibility is not Live-verified</strong>
+          <p id="export-api-compatibility-warning-message"></p>
+        </aside>
+
         <label class="export-path-field">
           Resonite installation path
           <input
@@ -574,24 +583,16 @@
         <small id="builder-work-detail" class="builder-work-detail">
           No project data is discarded while this is running.
         </small>
-        <div class="builder-work-actions">
-          <button
-            id="builder-work-dismiss"
-            class="button secondary"
-            type="button">
-            Continue in background
-          </button>
-        </div>
       </section>
     </div>
 
     <script src="scroll_manager.js?v=31-hint-route-visibility-v258"></script>
     <script src="scroll_hierarchy.js?v=8"></script>
-    <script src="app.js?v=376-packed-config-integrity-v395f1"></script>
-    <script src="catalog_loader.js?v=45-manual-scanner-sync-v389f1"></script>
+    <script src="app.js?v=388-eager-import-atomic-wire-scene-v407f1"></script>
+    <script src="catalog_loader.js?v=52-mandatory-live-fallback-v403f1"></script>
     <script src="runtime_bridge.js?v=2"></script>
-    <script src="graph_gpu_renderer.js?v=3-singlepass-webgl-v377f1"></script>
-    <script src="node_graph.js?v=239-packed-config-integrity-v395f1"></script>
+    <script src="graph_gpu_renderer.js?v=6-complete-legacy-api-reconciliation-v401f1"></script>
+    <script src="node_graph.js?v=248-eager-import-atomic-wire-scene-v407f1"></script>
     <script src="dynamic_settings.js?v=24-inline-row-runtime-visibility-v178"></script>
 </body>
 </html>

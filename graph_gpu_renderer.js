@@ -1,9 +1,10 @@
 (() => {
   "use strict";
 
-  const VERSION = 3;
+  const VERSION = 4;
   const WIRE_CELL_SIZE = 240;
   const NODE_CELL_SIZE = 360;
+  const WIRE_LINEAR_PICK_LIMIT = 512;
   const GPU_CURVE_STEPS = 32;
   const FLOATS_PER_WIRE_INSTANCE = 15;
   const WIRE_LAYERS_PER_SEGMENT = 1;
@@ -325,6 +326,8 @@
       this.wireLayerCache = new Map();
       this.wireRecordIndexByKey = new Map();
       this.wireInstanceData = new Float32Array(0);
+      this.previewSegment = null;
+      this.previewInstanceCount = 0;
       this.nodeRecords = [];
       this.nodeSpatialIndex = new Map();
       this.wireSpatialIndexDirty = true;
@@ -349,6 +352,7 @@
         nodeIndexMilliseconds: 0,
         lastWirePickMilliseconds: 0,
         lastWirePickCandidates: 0,
+        previewInstances: 0,
         lastNodePickMilliseconds: 0
       };
       this.drawSamples = 0;
@@ -367,6 +371,9 @@
           this.contextLost = false;
           this.initialize();
           this.setScene(this.scene);
+          this.setPreview(
+            this.previewSegment
+          );
         }
       );
 
@@ -773,6 +780,30 @@
           1
         );
       }
+      this.previewVertexArray = gl.createVertexArray();
+      this.previewVertexBuffer = gl.createBuffer();
+      gl.bindVertexArray(this.previewVertexArray);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.previewVertexBuffer);
+      for (const [location, size, offset] of wireAttributes) {
+        gl.enableVertexAttribArray(location);
+        gl.vertexAttribPointer(
+          location,
+          size,
+          gl.FLOAT,
+          false,
+          wireStride,
+          offset * 4
+        );
+        gl.vertexAttribDivisor(
+          location,
+          1
+        );
+      }
+      gl.bufferData(
+        gl.ARRAY_BUFFER,
+        FLOATS_PER_WIRE_INSTANCE * 4,
+        gl.DYNAMIC_DRAW
+      );
 
       this.nodeVertexArray = gl.createVertexArray();
       this.nodeVertexBuffer = gl.createBuffer();
@@ -873,6 +904,50 @@
         this.rebuildNodeBuffers();
       }
       this.scheduleDraw();
+    }
+
+    setPreview(segment = null) {
+      this.previewSegment =
+        segment && typeof segment === "object"
+          ? { ...segment }
+          : null;
+      this.previewInstanceCount = 0;
+      this.stats.previewInstances = 0;
+
+      if (
+        !this.available ||
+        !this.gl ||
+        !this.previewSegment
+      ) {
+        this.scheduleDraw();
+        return this.previewSegment === null;
+      }
+
+      const record = this.prepareWireRecord({
+        ...this.previewSegment,
+        connectionId:
+          this.previewSegment.connectionId ||
+          "__rml-wire-preview__",
+        segmentIndex: 0,
+        selected: true
+      });
+      const data = new Float32Array(
+        this.createWireLayerData(record)
+      );
+
+      this.gl.bindBuffer(
+        this.gl.ARRAY_BUFFER,
+        this.previewVertexBuffer
+      );
+      this.gl.bufferSubData(
+        this.gl.ARRAY_BUFFER,
+        0,
+        data
+      );
+      this.previewInstanceCount = 1;
+      this.stats.previewInstances = 1;
+      this.scheduleDraw();
+      return true;
     }
 
     prepareSceneRecords() {
@@ -1301,6 +1376,34 @@
         drawCalls += 1;
       }
 
+      if (this.previewInstanceCount > 0) {
+        gl.useProgram(this.wireProgram);
+        gl.uniform2f(
+          this.uniforms.wire.resolution,
+          this.cssWidth,
+          this.cssHeight
+        );
+        gl.uniform2f(
+          this.uniforms.wire.pan,
+          this.camera.x,
+          this.camera.y
+        );
+        gl.uniform1f(
+          this.uniforms.wire.scale,
+          this.camera.scale
+        );
+        gl.bindVertexArray(
+          this.previewVertexArray
+        );
+        gl.drawArraysInstanced(
+          gl.TRIANGLE_STRIP,
+          0,
+          (GPU_CURVE_STEPS + 1) * 2,
+          this.previewInstanceCount
+        );
+        drawCalls += 1;
+      }
+
       if (this.nodeIndexCount > 0) {
         gl.useProgram(this.nodeProgram);
         gl.uniform2f(
@@ -1406,7 +1509,10 @@
         bottom: target.y + radius
       };
       const candidates = new Set();
-      if (this.wireRecords.length <= 12000) {
+      if (
+        this.wireRecords.length <=
+          WIRE_LINEAR_PICK_LIMIT
+      ) {
         for (const record of this.wireRecords) {
           if (
             record.bounds.right >= bounds.left &&
@@ -1534,6 +1640,14 @@
       }
       this.resizeObserver?.disconnect();
       this.resizeObserver = null;
+      if (this.gl) {
+        this.gl.deleteBuffer?.(
+          this.previewVertexBuffer
+        );
+        this.gl.deleteVertexArray?.(
+          this.previewVertexArray
+        );
+      }
       this.canvas.remove();
       this.setAvailability(false);
       this.gl = null;

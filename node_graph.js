@@ -38,6 +38,8 @@
   const GRAPH_FALLBACK_MAX_DETAILED_NODES = 220;
   const GRAPH_FALLBACK_MAX_SVG_CONNECTIONS = 600;
   const GRAPH_GPU_WIRE_CONNECTION_CHUNK = 240;
+  const GRAPH_EAGER_CONNECTION_TARGET_NODE_LIMIT = 180;
+  const GRAPH_EAGER_CONNECTION_TARGET_WIRE_LIMIT = 400;
   const GRAPH_INCREMENTAL_PRUNE_CONNECTION_LIMIT = 800;
   const GRAPH_GPU_OVERVIEW_ENTER_ZOOM = 0.20;
   const GRAPH_GPU_OVERVIEW_EXIT_ZOOM = 0.24;
@@ -965,7 +967,6 @@
       if (
         contract.catalogSource !== "scanner"
       ) {
-        definition.hiddenFromPalette = true;
         definition.catalogVerificationUnavailable = true;
       }
     }
@@ -1052,6 +1053,10 @@
 
   let bridge = null;
   let graph = null;
+  // `graph.active` is persistent product state: when true, the packed Runtime
+  // Graph contributes to every export.  The visible editor page is transient
+  // UI state and must never enable or disable generated output.
+  let runtimeGraphViewActive = false;
   let currentAnalysis = null;
   let runtimeBridgeSubscription = null;
   let runtimeBridgeChannel = "";
@@ -1185,6 +1190,12 @@
   let graphConnectionLookupLength = -1;
   let graphInteractionMotionFrame = 0;
   let graphPendingInteractionMotion = null;
+  let graphConnectionPreviewPath = null;
+  let graphConnectionDragTelemetry = {
+    eagerTargets: 0,
+    hoveredTargets: 0,
+    previewBackend: "none"
+  };
 
   function resetGraphRenderCaches() {
     currentAnalysis = null;
@@ -5621,10 +5632,8 @@
       }
 
       const sourceNode =
-        graph?.nodes?.find(
-          node =>
-            node.id ===
-            connection.fromNode
+        findGraphNode(
+          connection.fromNode
         );
 
       if (
@@ -5753,6 +5762,14 @@
         endpoints.to.portId
     };
 
+    const replacedInputConnection =
+      baseConnections.find(
+        connection =>
+          connection.toNode ===
+            candidate.toNode &&
+          connection.toPort ===
+            candidate.toPort
+      ) || null;
     const withoutCurrentInput =
       baseConnections.filter(
         connection =>
@@ -5781,6 +5798,112 @@
       ...withoutCurrentInput,
       candidate
     ];
+
+    const sourcePort = findPortSpec(
+      candidate.fromNode,
+      candidate.fromPort,
+      "output"
+    );
+    const targetPort = findPortSpec(
+      candidate.toNode,
+      candidate.toPort,
+      "input"
+    );
+    const genericSensitivePort = port =>
+      Boolean(
+        port?.spec?.typeVar ||
+        port?.definition
+          ?.configurableTypeVar ||
+        (
+          Array.isArray(
+            port?.definition
+              ?.genericRelations
+          ) &&
+          port.definition
+            .genericRelations.length > 0
+        ) ||
+        isAutoVectorOperator(
+          port?.node
+        )
+      );
+    const connectionTouchesGeneric =
+      connection =>
+        Boolean(
+          connection &&
+          (
+            genericSensitivePort(
+              findPortSpec(
+                connection.fromNode,
+                connection.fromPort,
+                "output"
+              )
+            ) ||
+            genericSensitivePort(
+              findPortSpec(
+                connection.toNode,
+                connection.toPort,
+                "input"
+              )
+            )
+          )
+        );
+    const bindings =
+      currentAnalysis?.bindings;
+    const sourceType =
+      resolvePortType(
+        sourcePort,
+        bindings || new Map()
+      ) ||
+      fallbackConcreteTypeForPort(
+        sourcePort
+      );
+    const targetType =
+      resolvePortType(
+        targetPort,
+        bindings || new Map()
+      ) ||
+      fallbackConcreteTypeForPort(
+        targetPort
+      );
+    const fixedTypeFastPath = Boolean(
+      currentAnalysis &&
+      currentAnalysis.valid !== false &&
+      bindings &&
+      typeof bindings.get === "function" &&
+      sourcePort &&
+      targetPort &&
+      sourceType &&
+      targetType &&
+      !genericSensitivePort(sourcePort) &&
+      !genericSensitivePort(targetPort) &&
+      !connectionTouchesGeneric(
+        replacedInputConnection
+      )
+    );
+
+    if (fixedTypeFastPath) {
+      const compatible =
+        isConfigurationReactionConnection(
+          sourcePort,
+          targetPort
+        ) ||
+        connectionTypesCompatible(
+          sourceType,
+          targetType
+        );
+      return {
+        valid: compatible,
+        reason: compatible
+          ? ""
+          : `Cannot connect ${typeLabel(sourceType)} to ${typeLabel(targetType)}.`,
+        candidate,
+        nextConnections,
+        analysis: currentAnalysis,
+        autoVectorUpdates:
+          new Map(),
+        incremental: true
+      };
+    }
 
     const inferred =
       analyzeWithAutoVectors(
@@ -8273,94 +8396,6 @@
     pruneConnections();
   }
 
-  function catalogApiExportDiagnostics(
-    nodes
-  ) {
-    const used = [];
-
-    for (const node of Array.isArray(nodes)
-      ? nodes
-      : []) {
-      const definition =
-        nodeDefinition(node);
-      if (definition?.catalogGenerated) {
-        used.push({ node, definition });
-      }
-    }
-
-    if (used.length === 0) {
-      return [];
-    }
-
-    const report =
-      window.RMLApiNodeFactoryReport;
-    const errors = [];
-
-    if (!report || typeof report !== "object") {
-      return [
-        "API export blocked: the catalog-generated nodes have no active API factory verification report. Reconnect the live scanner and wait for the catalog to finish loading."
-      ];
-    }
-
-    if (
-      report.liveCatalogVerified !== true ||
-      report.catalogSource !== "scanner"
-    ) {
-      errors.push(
-        "API export blocked: catalog-generated nodes require the current live scanner catalog. Cached or unverifiable API metadata is display-only."
-      );
-    }
-    if (report.verificationPassed !== true) {
-      errors.push(
-        `API export blocked: the API node factory failed its structural verification${
-          Array.isArray(report.verificationErrors) &&
-          report.verificationErrors.length > 0
-            ? ` (${report.verificationErrors.slice(0, 3).join(" | ")})`
-            : ""
-        }.`
-      );
-    }
-
-    for (const { node, definition } of used) {
-      const contract =
-        definition.apiVerification;
-      const label =
-        node.label ||
-        definition.title ||
-        node.operatorId;
-
-      if (!contract || typeof contract !== "object") {
-        errors.push(
-          `API export blocked: '${label}' has no immutable API verification contract.`
-        );
-        continue;
-      }
-
-      const mismatch =
-        Number(contract.schemaVersion) !==
-          API_EXPORT_VERIFICATION_SCHEMA_VERSION ||
-        Number(contract.factoryVersion) !==
-          Number(report.factoryVersion) ||
-        Number(contract.catalogSchemaVersion) !==
-          Number(report.catalogSchemaVersion) ||
-        String(contract.engineVersion) !==
-          String(report.engineVersion) ||
-        String(contract.catalogFingerprint) !==
-          String(report.catalogFingerprint) ||
-        String(contract.nodeId) !==
-          String(node.operatorId) ||
-        !String(contract.contractFingerprint || "").trim();
-
-      if (mismatch) {
-        errors.push(
-          `API export blocked: '${label}' was generated from a different or incomplete API contract. Recreate or reload the node after the live catalog refresh.`
-        );
-      }
-    }
-
-    return [...new Set(errors)];
-  }
-
   function sanitizeGeneratedCSharp(source) {
     const input = String(source || "");
     let result = "";
@@ -8733,11 +8768,6 @@
     const diagnostics = [];
     const warnings = [];
 
-    diagnostics.push(
-      ...catalogApiExportDiagnostics(
-        graph.nodes
-      )
-    );
     for (const node of graph.nodes) {
       if (
         node?.kind !== "configuration" &&
@@ -12624,6 +12654,116 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     return result;
   }
 
+  function validateTypedNodeGraphDocument(
+    request = {}
+  ) {
+    const requestedGraph =
+      request.state?.extensions?.[
+        EXTENSION_NAME
+      ];
+
+    if (
+      !requestedGraph ||
+      typeof requestedGraph !== "object" ||
+      Array.isArray(requestedGraph)
+    ) {
+      return Object.freeze({
+        valid: true,
+        diagnostics: Object.freeze([])
+      });
+    }
+
+    const rawNodes =
+      Array.isArray(requestedGraph.nodes)
+        ? requestedGraph.nodes
+        : [];
+    const rawConnections =
+      Array.isArray(
+        requestedGraph.connections
+      )
+        ? requestedGraph.connections
+        : [];
+    const candidate =
+      sanitizeGraphState(
+        requestedGraph
+      );
+    const diagnostics = [];
+
+    if (
+      candidate.nodes.length !==
+        rawNodes.length
+    ) {
+      diagnostics.push(
+        `The stored graph contains ${rawNodes.length - candidate.nodes.length} invalid or duplicate node record(s).`
+      );
+    }
+
+    if (
+      candidate.connections.length !==
+        rawConnections.length
+    ) {
+      diagnostics.push(
+        `The stored graph contains ${rawConnections.length - candidate.connections.length} invalid, duplicate or orphaned connection record(s).`
+      );
+    }
+
+    for (const node of candidate.nodes) {
+      if (
+        node.kind === "operator" &&
+        !OPERATOR_DEFINITIONS[
+          node.operatorId
+        ]
+      ) {
+        diagnostics.push(
+          `Node '${node.label || node.id || "<unnamed>"}' uses unavailable operator '${node.operatorId || "<missing>"}'.`
+        );
+      }
+    }
+
+    if (diagnostics.length === 0) {
+      const previousGraph = graph;
+
+      try {
+        // analyzeConnections() deliberately works against the module-local
+        // graph.  Temporarily substitute the sanitized candidate so this is
+        // a pure pre-install validation and the currently open project is
+        // never replaced when validation fails.
+        graph = candidate;
+        const analysis =
+          analyzeConnections(
+            candidate.connections
+          );
+
+        if (!analysis.valid) {
+          diagnostics.push(
+            analysis.reason ||
+              "The graph contains an invalid typed connection."
+          );
+        }
+      } finally {
+        graph = previousGraph;
+      }
+    }
+
+    const uniqueDiagnostics =
+      Object.freeze(
+        [...new Set(
+          diagnostics
+            .map(value =>
+              String(value || "").trim()
+            )
+            .filter(Boolean)
+        )]
+      );
+
+    return Object.freeze({
+      valid:
+        uniqueDiagnostics.length === 0,
+      diagnostics:
+        uniqueDiagnostics
+    });
+  }
+
 
   function injectStyles() {
     if (
@@ -14795,15 +14935,24 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       return;
     }
 
-    const active = Boolean(graph?.active);
+    const active = Boolean(
+      graph?.active &&
+      runtimeGraphViewActive
+    );
 
     dom.packButton.innerHTML = active
       ? `<svg class="rml-pack-back-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5 M10 7l-5 5 5 5"></path></svg><span class="top-action-label">Back to Outline</span>`
-      : `<span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">Pack into Node</span>`;
+      : graph?.active
+        ? `<span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">Open Runtime Graph</span>`
+        : `<span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">Pack into Node</span>`;
 
     dom.packButton.setAttribute(
       "aria-label",
-      active ? "Back to Configuration Outline" : "Pack into Node"
+      active
+        ? "Back to Configuration Outline"
+        : graph?.active
+          ? "Open Runtime Graph"
+          : "Pack into Node"
     );
 
     dom.packButton.dataset.helpTone =
@@ -14826,9 +14975,11 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     dom.packButton.dataset.help =
       sourceNodes.length === 0
         ? "Add at least one Configuration Outline item before opening the Typed Runtime Graph."
-        : graph?.active
+        : active
           ? "Return to the Configuration Outline. The packed graph is preserved."
-          : "Open the automatically synchronized Typed Runtime Graph. The Configuration Outline remains preserved.";
+          : graph?.active
+            ? "Open the preserved Typed Runtime Graph. Its export remains enabled while the Configuration Outline is visible."
+            : "Open the automatically synchronized Typed Runtime Graph. The Configuration Outline remains preserved.";
     dom.packButton.removeAttribute("title");
   }
 
@@ -14898,7 +15049,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       graphMessageTimer
     );
 
-    if (!graph?.active) {
+    if (
+      !graph?.active ||
+      !runtimeGraphViewActive
+    ) {
       if (
         typeof window.RMLBuilderDialog
           ?.notice === "function"
@@ -14988,8 +15142,15 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
   }
 
   function togglePackedNodeMode() {
-    if (graph?.active) {
+    if (
+      graph?.active &&
+      runtimeGraphViewActive
+    ) {
       unpackToOutline();
+    } else if (graph?.active) {
+      runtimeGraphViewActive = true;
+      synchronizePackedSnapshot(false);
+      activateGraphMode();
     } else {
       packIntoNode();
     }
@@ -15162,6 +15323,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     }
 
     graph.active = true;
+    runtimeGraphViewActive = true;
     graph.configSnapshot =
       snapshot;
     graph.sourceSignature =
@@ -15192,7 +15354,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
   function unpackToOutline() {
     cancelInteraction(true);
-    graph.active = false;
+    // Returning to the Configuration Outline changes only the visible page.
+    // The packed Runtime Graph remains enabled and continues to contribute the
+    // exact same files, diagnostics and API compatibility state to Export.
+    runtimeGraphViewActive = false;
     graph.selectedNodeId = null;
     graph.selectedConnectionId = null;
     if (graphGpuOverviewActive()) {
@@ -15822,7 +15987,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
   ) {
     const next =
       active === true &&
-      graph?.active === true;
+      graph?.active === true &&
+      runtimeGraphViewActive === true;
     const current =
       graphEditModeActive();
 
@@ -15891,6 +16057,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
   function activateGraphMode() {
     cacheDom();
 
+    runtimeGraphViewActive = true;
+
     document.body.classList.add(
       "rml-node-graph-mode"
     );
@@ -15928,10 +16096,13 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
   }
 
   function deactivateGraphMode() {
+    runtimeGraphViewActive = false;
     setGraphEditMode(false);
     captureGraphPaletteUiState();
     persistGraphPaletteUiState();
-    clearRuntimeBridgeSubscription();
+    if (!graph?.active) {
+      clearRuntimeBridgeSubscription();
+    }
     clearGraphScrollLayerSelection();
     graphScrollLayerOutline?.remove();
     graphScrollLayerIndicator?.remove();
@@ -16109,6 +16280,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
   function renderGraphPalette() {
     if (
       !graph.active ||
+      !runtimeGraphViewActive ||
       !dom.paletteContent
     ) {
       return;
@@ -16585,6 +16757,17 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         new Map();
       const catalogGroups =
         new Map();
+      const catalogDefinitionCount =
+        allEntries.reduce(
+          (count, [, definition]) =>
+            count +
+            (definition.catalogGenerated ===
+              true
+              ? 1
+              : 0),
+          0
+        );
+      let visibleCatalogEntries = 0;
 
       for (
         const group of
@@ -16618,6 +16801,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         if (
           definition.catalogGenerated === true
         ) {
+          visibleCatalogEntries += 1;
           if (!catalogGroups.has(group)) {
             catalogGroups.set(group, []);
           }
@@ -16690,6 +16874,24 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         appendCatalogGroup(
           group,
           entries
+        );
+      }
+
+      if (catalogDefinitionCount === 0) {
+        const catalog =
+          window.RMLResoniteApiCatalog ||
+          window.RMLFrooxComponentCatalog;
+        appendMessage(
+          catalog
+            ? "The Resonite API catalog is loaded, but its typed API node factory produced no usable nodes. Check the API status for the exact factory error."
+            : "API nodes are unavailable because no cached or live Resonite API catalog is loaded. Click the Resonite API status in the top bar to load one."
+        );
+      } else if (
+        visibleCatalogEntries === 0 &&
+        !showAdvanced
+      ) {
+        appendMessage(
+          "API nodes are loaded, but the current filter hides all of them. Enable Show Advanced / Raw C# or search for a concrete API member."
         );
       }
 
@@ -18076,6 +18278,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
   function renderGraphCanvas() {
     if (
       !graph.active ||
+      !runtimeGraphViewActive ||
       !dom.builderCanvas
     ) {
       return;
@@ -18537,6 +18740,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       (element, context = {}) => {
         if (
           !graph?.active ||
+          !runtimeGraphViewActive ||
           !dom.viewport?.isConnected ||
           !(element instanceof HTMLElement) ||
           !dom.viewport.contains(element) ||
@@ -19695,6 +19899,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     if (descriptor.kind === "root") {
       return Boolean(
         graph?.active &&
+        runtimeGraphViewActive &&
         dom.viewport
       );
     }
@@ -20900,6 +21105,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
   function handleGraphWheel(event) {
     if (
       !graph.active ||
+      !runtimeGraphViewActive ||
       !dom.viewport
     ) {
       return;
@@ -21143,6 +21349,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
     if (
       !graph?.active ||
+      !runtimeGraphViewActive ||
       !previous
     ) {
       return false;
@@ -21173,6 +21380,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
   ) {
     if (
       !graph?.active ||
+      !runtimeGraphViewActive ||
       (
         !graphScrollLayerSelection &&
         !graphScrollLayerSession
@@ -21205,6 +21413,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
   ) {
     if (
       !graph?.active ||
+      !runtimeGraphViewActive ||
       !graphScrollLayerSession
     ) {
       return;
@@ -21407,7 +21616,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       requestAnimationFrame(() => {
         nodeResizeLimitRefreshFrame = 0;
         refreshRenderedNodeResizeLimits();
-        renderGraphWires();
+        scheduleGraphWireRender();
       });
   }
 
@@ -21505,10 +21714,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       pruneConnections();
     }
     renderGraphNodes();
-
-    requestAnimationFrame(() => {
-      renderGraphWires();
-    });
+    scheduleGraphWireRender();
 
     if (dom.itemCount) {
       dom.itemCount.textContent =
@@ -23394,6 +23600,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     if (
       graphNodeVirtualizationFrame ||
       !graph?.active ||
+      !runtimeGraphViewActive ||
       !dom.nodesHost
     ) {
       return;
@@ -24699,14 +24906,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     const handles = [];
     let index = 0;
 
-    graphHybridRenderer?.setScene?.({
-      segments: [],
-      nodes: gpuOverviewNodeRecords()
-    });
-    graphHybridRenderer?.setCamera?.(
-      graph.viewport
-    );
-    graphHybridRenderer?.drawNow?.();
+    // Keep the last complete GPU and SVG scene visible while the next
+    // large scene is assembled over several frames. Only a complete,
+    // still-current generation is allowed to replace it below.
 
     const processChunk = () => {
       graphWireChunkFrame = 0;
@@ -24829,8 +25031,6 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     graphWireFullRenderPending = false;
     graphWirePartialConnectionIds.clear();
 
-    dom.wires.replaceChildren();
-
     currentAnalysis =
       currentAnalysis ||
       analyzeConnections(
@@ -24839,6 +25039,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
     const branchUsage =
       branchPointUsageMap();
+    const svgItems = [];
     const handles = [];
     const gpuSegments = [];
     const hybrid =
@@ -25016,7 +25217,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
                 hit
               )
           );
-          dom.wires.append(
+          svgItems.push(
             shadow,
             visible,
             hit
@@ -25052,7 +25253,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
                 hit
               )
           );
-          dom.wires.append(
+          svgItems.push(
             proxy,
             hit
           );
@@ -25111,7 +25312,13 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       graph.viewport
     );
     graphHybridRenderer?.drawNow?.();
-    dom.wires.append(...handles);
+    // Commit the fully prepared wire DOM in one operation. Until this
+    // point the previous complete scene remains visible, so parameter
+    // edits and topology changes cannot expose a blank wire frame.
+    dom.wires.replaceChildren(
+      ...svgItems,
+      ...handles
+    );
 
     if (
       activeInteraction?.kind ===
@@ -25349,6 +25556,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
   function renderGraphInspector() {
     if (
       !graph.active ||
+      !runtimeGraphViewActive ||
       !dom.inspectorContent
     ) {
       return;
@@ -28745,19 +28953,28 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       originalStart: startRef,
       startType,
       detachedConnection,
+      hoveredTargetElement: null,
+      hoveredTargetKey: "",
       clientX: event.clientX,
       clientY: event.clientY
     };
 
     graph.selectedConnectionId = null;
     clearSelectedWirePoint();
-    currentAnalysis =
-      analyzeConnections(
-        graph.connections
-      );
+    currentAnalysis = analysisBeforeDetach;
+    graphConnectionDragTelemetry = {
+      eagerTargets: 0,
+      hoveredTargets: 0,
+      previewBackend: "none"
+    };
 
-    updateConnectionTargets();
-    renderGraphWires();
+    const eagerTargets =
+      updateConnectionTargets();
+    if (eagerTargets) {
+      renderGraphWires();
+    } else {
+      renderConnectionPreview();
+    }
 
     try {
       socket.setPointerCapture(
@@ -28774,20 +28991,27 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           activeInteraction?.kind ===
           "connection"
         ) {
-          renderGraphWires();
+          updateHoveredConnectionTarget(
+            activeInteraction.clientX,
+            activeInteraction.clientY
+          );
+          renderConnectionPreview();
         }
       }
     );
   }
 
+  function clearConnectionPreview() {
+    graphConnectionPreviewPath?.remove();
+    graphConnectionPreviewPath = null;
+    graphHybridRenderer?.setPreview?.(
+      null
+    );
+    graphConnectionDragTelemetry
+      .previewBackend = "none";
+  }
+
   function renderConnectionPreview() {
-    dom.wires
-      ?.querySelectorAll(
-        ".rml-graph-wire-preview"
-      )
-      .forEach(path =>
-        path.remove()
-      );
     const interaction =
       activeInteraction;
 
@@ -28822,7 +29046,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       const wireTarget =
         wireTargetAtPoint(
           interaction.clientX,
-          interaction.clientY
+          interaction.clientY,
+          interaction.detachedConnection
+            ?.id || null
         );
 
       if (wireTarget) {
@@ -28867,14 +29093,57 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         currentAnalysis?.bindings ||
           new Map()
       ) || "generic";
-    const path =
-      svgPath(
-        "rml-graph-wire-preview",
-        wirePath(from, to)
+    const color = typeInfo(type).color;
+    const impulse =
+      type === "impulse";
+
+    if (
+      graphHybridActive() &&
+      !forceSvgWireVisuals() &&
+      graphHybridRenderer?.setPreview
+    ) {
+      graphConnectionPreviewPath?.remove();
+      graphConnectionPreviewPath = null;
+      graphHybridRenderer.setPreview({
+        connectionId:
+          "__rml-wire-preview__",
+        segmentIndex: 0,
+        from,
+        to,
+        color,
+        impulse,
+        selected: true
+      });
+      graphConnectionDragTelemetry
+        .previewBackend = "webgl2";
+      return;
+    }
+
+    graphHybridRenderer?.setPreview?.(
+      null
+    );
+    if (
+      !graphConnectionPreviewPath ||
+      !graphConnectionPreviewPath
+        .isConnected
+    ) {
+      graphConnectionPreviewPath =
+        svgPath(
+          "rml-graph-wire-preview",
+          ""
+        );
+      dom.wires?.appendChild(
+        graphConnectionPreviewPath
       );
-    path.style.stroke =
-      typeInfo(type).color;
-    dom.wires.appendChild(path);
+    }
+    graphConnectionPreviewPath.setAttribute(
+      "d",
+      wirePath(from, to)
+    );
+    graphConnectionPreviewPath.style.stroke =
+      color;
+    graphConnectionDragTelemetry
+      .previewBackend = "svg-single-path";
   }
 
   function socketRefFromElement(element) {
@@ -28903,6 +29172,204 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     };
   }
 
+  function quickConnectionTargetState(
+    first,
+    second
+  ) {
+    const endpoints =
+      normalizedEndpoints(
+        first,
+        second
+      );
+
+    if (!endpoints) {
+      return "invalid";
+    }
+    if (
+      endpoints.from.nodeId ===
+        endpoints.to.nodeId
+    ) {
+      return "invalid";
+    }
+
+    const sourcePort = findPortSpec(
+      endpoints.from.nodeId,
+      endpoints.from.portId,
+      "output"
+    );
+    const targetPort = findPortSpec(
+      endpoints.to.nodeId,
+      endpoints.to.portId,
+      "input"
+    );
+    if (!sourcePort || !targetPort) {
+      return "invalid";
+    }
+
+    const bindings =
+      currentAnalysis?.bindings ||
+      new Map();
+    const sourceType =
+      (
+        activeInteraction?.kind ===
+          "connection" &&
+        activeInteraction.start
+          .direction === "output" &&
+        activeInteraction.start.nodeId ===
+          endpoints.from.nodeId &&
+        activeInteraction.start.portId ===
+          endpoints.from.portId
+      )
+        ? activeInteraction.startType
+        : resolvePortType(
+            sourcePort,
+            bindings
+          ) ||
+          fallbackConcreteTypeForPort(
+            sourcePort
+          );
+    const targetType =
+      (
+        activeInteraction?.kind ===
+          "connection" &&
+        activeInteraction.start
+          .direction === "input" &&
+        activeInteraction.start.nodeId ===
+          endpoints.to.nodeId &&
+        activeInteraction.start.portId ===
+          endpoints.to.portId
+      )
+        ? activeInteraction.startType
+        : resolvePortType(
+            targetPort,
+            bindings
+          ) ||
+          fallbackConcreteTypeForPort(
+            targetPort
+          );
+
+    if (
+      !isConfigurationReactionConnection(
+        sourcePort,
+        targetPort
+      ) &&
+      sourceType &&
+      targetType &&
+      !connectionTypesCompatible(
+        sourceType,
+        targetType
+      )
+    ) {
+      return "invalid";
+    }
+
+    return "valid";
+  }
+
+  function connectionSocketElementAtPoint(
+    clientX,
+    clientY
+  ) {
+    const elements =
+      typeof document.elementsFromPoint ===
+        "function"
+        ? document.elementsFromPoint(
+            clientX,
+            clientY
+          )
+        : [
+            document.elementFromPoint(
+              clientX,
+              clientY
+            )
+          ];
+
+    for (const element of elements) {
+      const socket =
+        element?.closest?.(
+          ".rml-graph-socket"
+        );
+      if (socket) {
+        return socket;
+      }
+    }
+
+    return null;
+  }
+
+  function updateHoveredConnectionTarget(
+    clientX,
+    clientY
+  ) {
+    const interaction =
+      activeInteraction;
+    if (
+      interaction?.kind !==
+        "connection" ||
+      interaction.eagerTargetClassification ===
+        true
+    ) {
+      return;
+    }
+
+    const socket =
+      connectionSocketElementAtPoint(
+        clientX,
+        clientY
+      );
+    const target =
+      socketRefFromElement(socket);
+    const key = target
+      ? `${target.nodeId}\u0000${target.portId}\u0000${target.direction}`
+      : "";
+
+    if (
+      interaction.hoveredTargetKey ===
+        key
+    ) {
+      return;
+    }
+
+    interaction.hoveredTargetElement
+      ?.classList.remove(
+        "valid-target",
+        "invalid-target"
+      );
+    interaction.hoveredTargetElement =
+      null;
+    interaction.hoveredTargetKey = key;
+
+    if (
+      !socket ||
+      !target ||
+      target.direction ===
+        interaction.start.direction ||
+      (
+        target.nodeId ===
+          interaction.start.nodeId &&
+        target.portId ===
+          interaction.start.portId
+      )
+    ) {
+      return;
+    }
+
+    const state =
+      quickConnectionTargetState(
+        interaction.start,
+        target
+      );
+    socket.classList.add(
+      state === "valid"
+        ? "valid-target"
+        : "invalid-target"
+    );
+    interaction.hoveredTargetElement =
+      socket;
+    graphConnectionDragTelemetry
+      .hoveredTargets += 1;
+  }
+
   function updateConnectionTargets() {
     const interaction =
       activeInteraction;
@@ -28914,16 +29381,32 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       return;
     }
 
-    dom.nodesHost
-      ?.querySelectorAll(
-        ".rml-graph-socket"
-      )
-      .forEach(socket => {
-        socket.classList.remove(
-          "valid-target",
-          "invalid-target"
-        );
+    const sockets = [
+      ...dom.nodesHost
+        ?.querySelectorAll(
+          ".rml-graph-socket"
+        ) || []
+    ];
+    for (const socket of sockets) {
+      socket.classList.remove(
+        "valid-target",
+        "invalid-target"
+      );
+    }
 
+    const eager = Boolean(
+      graph.nodes.length <=
+        GRAPH_EAGER_CONNECTION_TARGET_NODE_LIMIT &&
+      graph.connections.length <=
+        GRAPH_EAGER_CONNECTION_TARGET_WIRE_LIMIT
+    );
+    interaction.eagerTargetClassification =
+      eager;
+    if (!eager) {
+      return false;
+    }
+
+    for (const socket of sockets) {
         const target =
           socketRefFromElement(socket);
 
@@ -28938,7 +29421,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
               interaction.start.portId
           )
         ) {
-          return;
+          continue;
         }
 
         const proposal =
@@ -28953,10 +29436,23 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
             ? "valid-target"
             : "invalid-target"
         );
-      });
+        graphConnectionDragTelemetry
+          .eagerTargets += 1;
+    }
+
+    return true;
   }
 
   function clearConnectionTargetStates() {
+    if (
+      activeInteraction?.kind ===
+        "connection"
+    ) {
+      activeInteraction.hoveredTargetElement =
+        null;
+      activeInteraction.hoveredTargetKey =
+        "";
+    }
     dom.nodesHost
       ?.querySelectorAll(
         ".rml-graph-socket"
@@ -29168,7 +29664,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           forcedWireTarget ||
           wireTargetAtPoint(
             clientX,
-            clientY
+            clientY,
+            interaction.detachedConnection
+              ?.id || null
           );
 
         if (
@@ -29234,9 +29732,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       );
     }
 
-    activeInteraction = null;
     stopAutoPan();
+    clearConnectionPreview();
     clearConnectionTargetStates();
+    activeInteraction = null;
     pruneConnections();
     persistGraph(true);
     renderGraphNodesAndWires();
@@ -29758,6 +30257,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         clientX,
         clientY
       );
+      updateHoveredConnectionTarget(
+        clientX,
+        clientY
+      );
       renderConnectionPreview();
     }
   }
@@ -30095,7 +30598,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
   }
 
   function handleGraphKeyDown(event) {
-    if (!graph?.active) {
+    if (
+      !graph?.active ||
+      !runtimeGraphViewActive
+    ) {
       return;
     }
 
@@ -30216,7 +30722,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       synchronizePackedSnapshot(false);
     }
 
-    if (graph.active) {
+    if (
+      graph.active &&
+      runtimeGraphViewActive
+    ) {
       activateGraphMode();
     } else {
       deactivateGraphMode();
@@ -30328,6 +30837,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       value: Object.freeze({
         build:
           buildTypedNodeGraphCSharpContribution,
+        validateDocument:
+          validateTypedNodeGraphDocument,
         verifyGeneratedSource(
           source,
           fileName = "Generated.cs",
@@ -30368,6 +30879,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     graph = sanitizeGraphState(
       initialExtensionState
     );
+    runtimeGraphViewActive =
+      graph.active === true;
     resetGraphRenderCaches();
 
     loadGraphPaletteUiState();
@@ -30641,7 +31154,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       synchronizePackedSnapshot(false);
     }
 
-    if (graph.active) {
+    if (
+      graph.active &&
+      runtimeGraphViewActive
+    ) {
       activateGraphMode();
     }
 
@@ -30670,7 +31186,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     pruneConnections();
     persistGraph(true);
 
-    if (graph.active) {
+    if (
+      graph.active &&
+      runtimeGraphViewActive
+    ) {
       renderGraphPalette();
       renderGraphNodesAndWires();
       renderGraphInspector();
@@ -32945,7 +33464,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
   Object.defineProperty(window, "RMLDynamicGraphHost", {
     value: Object.freeze({
-      version: 27,
+      version: 30,
       getState() { return graph; },
       getRendererStats() {
         return {
@@ -32972,7 +33491,13 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
                 ".rml-graph-wire-hit"
               ).length || 0,
           overview:
-            graphGpuOverviewActive()
+            graphGpuOverviewActive(),
+          connectionDrag: {
+            ...graphConnectionDragTelemetry,
+            active:
+              activeInteraction?.kind ===
+              "connection"
+          }
         };
       },
       graphPointToClient(x, y) {
@@ -33519,8 +34044,38 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           ok: document.body.classList.contains(
             "rml-node-graph-mode"
           ),
-          graphActive: graph.active === true
+          graphActive: graph.active === true,
+          graphViewActive:
+            runtimeGraphViewActive === true
         };
+      },
+      showConfigurationOutline() {
+        if (graph?.active !== true) {
+          return {
+            ok: false,
+            reason: "The Runtime Graph product state is not active."
+          };
+        }
+        unpackToOutline();
+        return {
+          ok: true,
+          graphActive:
+            graph.active === true,
+          graphViewActive:
+            runtimeGraphViewActive === true
+        };
+      },
+      getPresentationState() {
+        return Object.freeze({
+          graphExportActive:
+            graph?.active === true,
+          graphViewActive:
+            runtimeGraphViewActive === true,
+          page:
+            runtimeGraphViewActive
+              ? "runtime-graph"
+              : "configuration-outline"
+        });
       },
       getOperatorPlacementMetrics(operatorId) {
         const definition =

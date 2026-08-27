@@ -119,12 +119,18 @@ button {
   font-size: 11px;
 }
 
-.local-state span {
+.local-state-dot {
   width: 7px;
   height: 7px;
+  flex: 0 0 7px;
   border-radius: 50%;
   background: var(--green);
   box-shadow: 0 0 13px rgba(108, 232, 155, 0.7);
+}
+
+.local-state[data-state="loading"] .local-state-dot {
+  background: var(--gold);
+  box-shadow: 0 0 13px rgba(247, 198, 95, 0.7);
 }
 
 .api-catalog-state {
@@ -2100,6 +2106,29 @@ footer strong {
 
 .export-dialog [hidden] {
   display: none !important;
+}
+
+.export-api-compatibility-warning {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 13px 14px;
+  border: 1px solid rgba(255, 187, 84, 0.5);
+  border-radius: 9px;
+  background: rgba(255, 168, 54, 0.09);
+  color: #ffd28b;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.export-api-compatibility-warning strong {
+  color: #ffe0a8;
+  font-size: 11px;
+}
+
+.export-api-compatibility-warning p {
+  margin: 0;
+  color: #e8cfa6;
 }
 
 .project-dialog {
@@ -10741,19 +10770,13 @@ dialog.builder-message-dialog::backdrop {
 }
 
 .builder-work-progress,
-.builder-work-detail,
-.builder-work-actions {
+.builder-work-detail {
   grid-column: 1 / -1;
 }
 
 .builder-work-detail {
   color: #91a8bf;
   line-height: 1.4;
-}
-
-.builder-work-actions {
-  display: flex;
-  justify-content: flex-end;
 }
 
 body.rml-builder-work-active {

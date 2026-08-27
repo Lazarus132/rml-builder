@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const LOADER_VERSION = 29;
+  const LOADER_VERSION = 31;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
   const CATALOG_PATH = "/resonite_api_catalog.json";
@@ -26,7 +26,7 @@
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=16-frame-local-api-results-v389f1",
+    "api_nodes.js?v=22-complete-legacy-api-reconciliation-v401f1",
     scriptUrl
   ).href;
 
@@ -639,10 +639,26 @@
     };
   }
 
-  function directScannerUrls() {
+  function directScannerUrls(
+    excludedUrls = []
+  ) {
     const urls = [];
+    const excluded = new Set(
+      (Array.isArray(excludedUrls)
+        ? excludedUrls
+        : [])
+        .map(value =>
+          String(value || "").trim()
+        )
+        .filter(Boolean)
+    );
 
-    if (activeScannerCatalogUrl) {
+    if (
+      activeScannerCatalogUrl &&
+      !excluded.has(
+        activeScannerCatalogUrl
+      )
+    ) {
       urls.push(activeScannerCatalogUrl);
     }
 
@@ -654,7 +670,10 @@
       const url =
         `http://127.0.0.1:${port}${CATALOG_PATH}`;
 
-      if (!urls.includes(url)) {
+      if (
+        !excluded.has(url) &&
+        !urls.includes(url)
+      ) {
         urls.push(url);
       }
     }
@@ -739,8 +758,12 @@
     );
   }
 
-  async function probeDirectScannerRange() {
-    const urls = directScannerUrls();
+  async function probeDirectScannerRange(
+    excludedUrls = []
+  ) {
+    const urls = directScannerUrls(
+      excludedUrls
+    );
     const results = await Promise.all(
       urls.map(async url => {
         try {
@@ -816,32 +839,60 @@
   ) {
     const configured =
       configuredCatalogUrl();
+    const configuredLoopback =
+      loopbackScannerCatalogUrl(
+        configured
+      );
 
     for (const retryDelay of retryDelays) {
       if (retryDelay > 0) {
         await delay(retryDelay);
       }
 
-      try {
-        let live = null;
+      let live = null;
 
-        if (configured) {
+      if (configured) {
+        try {
           live =
-            await probeConfiguredScannerUrl(
-              configured
-            );
-        } else if (isLocalBuilderOrigin()) {
-          live =
-            await probeBuilderScannerBridge();
-        } else {
-          live =
-            await probeDirectScannerRange();
+            configuredLoopback
+              ? await probeDirectScannerUrl(
+                  configuredLoopback
+                )
+              : await probeConfiguredScannerUrl(
+                  configured
+                );
+        } catch {
         }
 
         if (live) {
           return live;
         }
+      }
+
+      if (isLocalBuilderOrigin()) {
+        try {
+          live =
+            await probeBuilderScannerBridge();
+        } catch {
+        }
+
+        if (live) {
+          return live;
+        }
+      }
+
+      try {
+        live =
+          await probeDirectScannerRange(
+            configuredLoopback
+              ? [configuredLoopback]
+              : []
+          );
       } catch {
+      }
+
+      if (live) {
+        return live;
       }
     }
 
@@ -1016,9 +1067,6 @@
   }
 
   async function loadCatalog() {
-    // Startup readiness is intentionally cache-only. Scanner discovery runs
-    // separately after the node/runtime promises have been released, so an
-    // offline or slow health endpoint can never hold the builder hostage.
     const cached =
       await readCachedLiveCatalog();
 
@@ -1256,6 +1304,8 @@
       options.showChecking === true;
     const reloadOnChange =
       options.reloadOnChange !== false;
+    const throwOnFailure =
+      options.throwOnFailure === true;
 
     scannerCheckPromise =
       (async () => {
@@ -1310,48 +1360,104 @@
           nextIdentity !==
             currentIdentity;
 
-        await writeCachedLiveCatalog(
-          live.raw,
-          live.url
-        );
-
         installCatalog(normalized);
+        try {
+          if (!current) {
+            await modNodesReady;
+            await ensureApiNodesLoaded();
 
-        if (!current) {
-          await modNodesReady;
-          await ensureApiNodesLoaded();
+            if (reloadOnChange) {
+              window.setTimeout(
+                () =>
+                  window.location.reload(),
+                250
+              );
+            }
+          }
 
-          if (reloadOnChange) {
+          if (
+            current &&
+            !catalogChanged
+          ) {
+            await modNodesReady;
+            await ensureApiNodesLoaded();
+            const promoted =
+              promoteCachedApiNodesToLive(
+                normalized
+              );
+
+            if (!promoted) {
+              const controller =
+                window.RMLApiNodeFactoryController;
+
+              if (
+                !controller ||
+                typeof controller.rebuild !==
+                  "function"
+              ) {
+                throw new Error(
+                  "The live API node factory cannot rebuild an unavailable or unverifiable cached catalog."
+                );
+              }
+
+              await controller.rebuild(
+                normalized
+              );
+            }
+          }
+
+          if (
+            current &&
+            catalogChanged &&
+            !reloadOnChange
+          ) {
+            await modNodesReady;
+            await ensureApiNodesLoaded();
+
+            const controller =
+              window.RMLApiNodeFactoryController;
+
+            if (
+              !controller ||
+              typeof controller.rebuild !==
+                "function"
+            ) {
+              throw new Error(
+                "The live API node factory cannot rebuild for the updated catalog."
+              );
+            }
+
+            await controller.rebuild(
+              normalized
+            );
+          }
+
+          if (
+            current &&
+            catalogChanged &&
+            reloadOnChange
+          ) {
             window.setTimeout(
               () =>
                 window.location.reload(),
               250
             );
           }
+        } catch (error) {
+          if (
+            current &&
+            catalogChanged &&
+            !reloadOnChange
+          ) {
+            installCatalog(current);
+          }
+          throw error;
         }
 
-        if (
-          current &&
-          !catalogChanged
-        ) {
-          await modNodesReady;
-          await ensureApiNodesLoaded();
-          promoteCachedApiNodesToLive(
-            normalized
-          );
-        }
-
-        if (
-          current &&
-          catalogChanged &&
-          reloadOnChange
-        ) {
-          window.setTimeout(
-            () =>
-              window.location.reload(),
-            250
-          );
-        }
+        await writeCachedLiveCatalog(
+          live.raw,
+          live.url
+        );
 
         return true;
       })()
@@ -1373,6 +1479,10 @@
             error
           );
 
+          if (throwOnFailure) {
+            throw error;
+          }
+
           return false;
         })
         .finally(() => {
@@ -1385,7 +1495,498 @@
   async function refreshLiveCatalogManually() {
     return synchronizeScannerStatus({
       showChecking: true,
-      reloadOnChange: true
+      reloadOnChange: false
+    });
+  }
+
+  function normalizedRequiredApiNodes(
+    options
+  ) {
+    const requirements = new Map();
+    const add = (
+      operatorId,
+      inputPorts = [],
+      outputPorts = []
+    ) => {
+      const id = String(
+        operatorId || ""
+      ).trim();
+
+      if (!id.startsWith("api.")) {
+        return;
+      }
+
+      if (!requirements.has(id)) {
+        requirements.set(id, {
+          operatorId: id,
+          inputPorts: new Set(),
+          outputPorts: new Set()
+        });
+      }
+
+      const requirement =
+        requirements.get(id);
+
+      for (const portId of
+        Array.isArray(inputPorts)
+          ? inputPorts
+          : []) {
+        const port =
+          String(portId || "").trim();
+        if (port) {
+          requirement.inputPorts.add(
+            port
+          );
+        }
+      }
+
+      for (const portId of
+        Array.isArray(outputPorts)
+          ? outputPorts
+          : []) {
+        const port =
+          String(portId || "").trim();
+        if (port) {
+          requirement.outputPorts.add(
+            port
+          );
+        }
+      }
+    };
+
+    for (const value of
+      Array.isArray(
+        options?.requiredNodeIds
+      )
+        ? options.requiredNodeIds
+        : []) {
+      add(value);
+    }
+
+    for (const value of
+      Array.isArray(
+        options?.requiredNodes
+      )
+        ? options.requiredNodes
+        : []) {
+      add(
+        value?.operatorId,
+        value?.inputPorts,
+        value?.outputPorts
+      );
+    }
+
+    return [...requirements.values()]
+      .map(requirement => ({
+        operatorId:
+          requirement.operatorId,
+        inputPorts:
+          [...requirement.inputPorts]
+            .sort((left, right) =>
+              left.localeCompare(right)
+            ),
+        outputPorts:
+          [...requirement.outputPorts]
+            .sort((left, right) =>
+              left.localeCompare(right)
+            )
+      }))
+      .sort((left, right) =>
+        left.operatorId.localeCompare(
+          right.operatorId
+        )
+      );
+  }
+
+  function factoryMatchesCatalog(
+    catalog,
+    report
+  ) {
+    return Boolean(
+      catalog &&
+      report &&
+      report.verificationPassed === true &&
+      String(
+        report.catalogSource || ""
+      ) ===
+        String(
+          catalog.catalogSource || ""
+        ) &&
+      String(
+        report.catalogFingerprint || ""
+      ) ===
+        String(
+          catalog.catalogFingerprint || ""
+        ) &&
+      String(report.engineVersion || "") ===
+        String(catalog.engineVersion || "")
+    );
+  }
+
+  function missingRequiredApiNodes(
+    requiredNodes,
+    catalog,
+    report
+  ) {
+    const definitions =
+      window.RMLModNodeRegistry
+        ?.getNodeDefinitions?.() || {};
+
+    return requiredNodes
+      .map(requirement => {
+      const id =
+        requirement.operatorId;
+      const definition =
+        definitions[id];
+      const contract =
+        definition?.apiVerification;
+
+      const contractValid = Boolean(
+        definition?.catalogGenerated ===
+          true &&
+        contract &&
+        String(
+          contract.catalogSource || ""
+        ) ===
+          String(
+            report?.catalogSource || ""
+          ) &&
+        String(contract.nodeId || "") ===
+          id &&
+        String(
+          contract.catalogFingerprint || ""
+        ) ===
+          String(
+            catalog?.catalogFingerprint ||
+            ""
+          ) &&
+        String(contract.engineVersion || "") ===
+          String(
+            report?.engineVersion || ""
+          )
+      );
+
+      if (!contractValid) {
+        return {
+          operatorId: id,
+          missingInputs: [],
+          missingOutputs: [],
+          reason:
+            "verified operator contract is unavailable"
+        };
+      }
+
+      const inputs = new Set(
+        (Array.isArray(definition.inputs)
+          ? definition.inputs
+          : [])
+          .map(port =>
+            String(port?.id || "")
+          )
+      );
+      const outputs = new Set(
+        (Array.isArray(definition.outputs)
+          ? definition.outputs
+          : [])
+          .map(port =>
+            String(port?.id || "")
+          )
+      );
+      const missingInputs =
+        requirement.inputPorts
+          .filter(portId =>
+            !inputs.has(portId)
+          );
+      const missingOutputs =
+        requirement.outputPorts
+          .filter(portId =>
+            !outputs.has(portId)
+          );
+
+      return missingInputs.length > 0 ||
+        missingOutputs.length > 0
+        ? {
+            operatorId: id,
+            missingInputs,
+            missingOutputs,
+            reason:
+              "referenced port is unavailable"
+          }
+        : null;
+    })
+      .filter(Boolean);
+  }
+
+  function unresolvedRequiredApiNodes(
+    requiredNodes,
+    reason =
+      "verified operator contract is unavailable"
+  ) {
+    return requiredNodes.map(
+      requirement => ({
+        operatorId:
+          requirement.operatorId,
+        missingInputs: [
+          ...requirement.inputPorts
+        ],
+        missingOutputs: [
+          ...requirement.outputPorts
+        ],
+        reason
+      })
+    );
+  }
+
+  async function reconcileLegacyRequiredApiNodes(
+    requiredNodes,
+    catalog
+  ) {
+    const controller =
+      window.RMLApiNodeFactoryController;
+
+    if (
+      !catalog ||
+      !controller ||
+      typeof controller
+        .resolveRequiredOperators !==
+        "function"
+    ) {
+      return null;
+    }
+
+    return controller
+      .resolveRequiredOperators(
+        requiredNodes,
+        catalog
+      );
+  }
+
+  function requiredApiNodeFailureLabel(
+    failure
+  ) {
+    const ports = [
+      ...failure.missingInputs.map(
+        portId =>
+          `input '${portId}'`
+      ),
+      ...failure.missingOutputs.map(
+        portId =>
+          `output '${portId}'`
+      )
+    ];
+
+    return ports.length > 0
+      ? `${failure.operatorId} (${ports.join(", ")})`
+      : `${failure.operatorId} (${failure.reason})`;
+  }
+
+  async function ensureCatalogForImport(
+    options = {}
+  ) {
+    const requiredNodes =
+      normalizedRequiredApiNodes(
+        options
+      );
+    const requiredNodeIds =
+      requiredNodes.map(
+        requirement =>
+          requirement.operatorId
+      );
+
+    if (requiredNodeIds.length === 0) {
+      await modNodesReady;
+      return Object.freeze({
+        required: false,
+        verified: true,
+        requiredNodeIds:
+          Object.freeze([]),
+        catalogFingerprint: "",
+        engineVersion: ""
+      });
+    }
+
+    await modNodesReady;
+
+    let catalog = statusCatalog();
+    let report =
+      window.RMLApiNodeFactoryReport;
+    let missing =
+      factoryMatchesCatalog(
+        catalog,
+        report
+      )
+        ? missingRequiredApiNodes(
+            requiredNodes,
+            catalog,
+            report
+          )
+        : unresolvedRequiredApiNodes(
+            requiredNodes
+          );
+
+    if (missing.length > 0) {
+      await reconcileLegacyRequiredApiNodes(
+        requiredNodes,
+        catalog
+      );
+      report =
+        window.RMLApiNodeFactoryReport;
+      missing =
+        factoryMatchesCatalog(
+          catalog,
+          report
+        )
+          ? missingRequiredApiNodes(
+              requiredNodes,
+              catalog,
+              report
+            )
+          : unresolvedRequiredApiNodes(
+              requiredNodes
+            );
+    }
+
+    if (missing.length === 0) {
+      return Object.freeze({
+        required: true,
+        verified: true,
+        live:
+          catalog.catalogSource ===
+            "scanner",
+        cacheSatisfied:
+          catalog.catalogSource ===
+            "scanner-cache",
+        requiredNodeIds:
+          Object.freeze([
+            ...requiredNodeIds
+          ]),
+        catalogFingerprint:
+          String(
+            catalog.catalogFingerprint ||
+            ""
+          ),
+        engineVersion:
+          String(
+            catalog.engineVersion || ""
+          ),
+        source:
+          String(
+            catalog.catalogSource || ""
+          ),
+        liveFallbackAttempted: false
+      });
+    }
+
+    if (
+      typeof options.onLiveFallback ===
+        "function"
+    ) {
+      try {
+        options.onLiveFallback(
+          Object.freeze({
+            missingCount:
+              missing.length,
+            missing:
+              Object.freeze(
+                missing.slice(0, 12)
+                  .map(failure =>
+                    requiredApiNodeFailureLabel(
+                      failure
+                    )
+                  )
+              )
+          })
+        );
+      } catch (error) {
+        console.debug(
+          "The import progress callback failed.",
+          error
+        );
+      }
+    }
+
+    const connected =
+      await synchronizeScannerStatus({
+        showChecking: true,
+        reloadOnChange: false,
+        throwOnFailure: true
+      });
+
+    if (!connected) {
+      const visible =
+        missing.slice(0, 8)
+          .map(
+            requiredApiNodeFailureLabel
+          );
+      throw new Error(
+        `The cached Resonite API catalog cannot resolve ${missing.length.toLocaleString("de-DE")} required operator or port contract${missing.length === 1 ? "" : "s"} (${visible.join(", ")}${missing.length > visible.length ? ` and ${(missing.length - visible.length).toLocaleString("de-DE")} more` : ""}), and the live scanner is unavailable. The JSON was not loaded.`
+      );
+    }
+
+    await ensureApiNodesLoaded();
+    catalog = statusCatalog();
+    report =
+      window.RMLApiNodeFactoryReport;
+
+    if (
+      !factoryMatchesCatalog(
+        catalog,
+        report
+      ) ||
+      catalog?.catalogSource !==
+        "scanner" ||
+      report?.liveCatalogVerified !==
+        true
+    ) {
+      throw new Error(
+        "The live Resonite API catalog was reached, but its verified node factory did not become ready. The JSON was not loaded."
+      );
+    }
+
+    await reconcileLegacyRequiredApiNodes(
+      requiredNodes,
+      catalog
+    );
+    report =
+      window.RMLApiNodeFactoryReport;
+    missing =
+      missingRequiredApiNodes(
+        requiredNodes,
+        catalog,
+        report
+      );
+
+    if (missing.length > 0) {
+      const visible =
+        missing.slice(0, 12);
+      const remainder =
+        missing.length - visible.length;
+
+      throw new Error(
+        `This JSON cannot be loaded because the current live Resonite API catalog does not provide ${missing.length.toLocaleString("de-DE")} required operator or port contract${missing.length === 1 ? "" : "s"}: ${visible.map(requiredApiNodeFailureLabel).join(", ")}${remainder > 0 ? ` and ${remainder.toLocaleString("de-DE")} more` : ""}.`
+      );
+    }
+
+    return Object.freeze({
+      required: true,
+      verified: true,
+      live: true,
+      cacheSatisfied: false,
+      requiredNodeIds:
+        Object.freeze([
+          ...requiredNodeIds
+        ]),
+      catalogFingerprint:
+        String(
+          catalog.catalogFingerprint ||
+          ""
+        ),
+      engineVersion:
+        String(
+          catalog.engineVersion || ""
+        ),
+      source: "scanner",
+      liveFallbackAttempted: true
     });
   }
 
@@ -1499,13 +2100,6 @@
   catalogReady
     .then(() => {
       installManualScannerRefresh();
-
-      // Network discovery is deliberately user-driven. Startup installs the
-      // most recent verified catalog from IndexedDB and never probes the
-      // loopback port range. Clicking the catalog status button performs one
-      // bounded synchronization; there is no polling timer and no hidden
-      // retry loop. This keeps an unavailable scanner completely off the
-      // builder's critical path and out of the browser console.
     })
     .catch(() => {});
 
@@ -1522,6 +2116,23 @@
           BUILDER_SCANNER_STATUS_PATH,
         builderCatalogPath:
           BUILDER_SCANNER_CATALOG_PATH
+      }),
+      writable: false,
+      enumerable: true,
+      configurable: true
+    }
+  );
+
+  Object.defineProperty(
+    window,
+    "RMLCatalogImportGate",
+    {
+      value: Object.freeze({
+        version: 1,
+        ensureForImport:
+          ensureCatalogForImport,
+        ensureLive:
+          ensureCatalogForImport
       }),
       writable: false,
       enumerable: true,

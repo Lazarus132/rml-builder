@@ -170,13 +170,13 @@ async function ensureRuntime(catalog) {
       self.RMLResoniteApiCatalog;
 
     importScripts(
-      "node_graph.js?v=239-packed-config-integrity-v395f1"
+      "node_graph.js?v=245-cache-export-warning-only-v404f1"
     );
     importScripts(
       "mod_nodes.js?v=40-universal-state-semantics-v389f1"
     );
     importScripts(
-      "api_nodes.js?v=16-frame-local-api-results-v389f1"
+      "api_nodes.js?v=22-complete-legacy-api-reconciliation-v401f1"
     );
 
     if (

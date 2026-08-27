@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const FACTORY_VERSION = 8;
+  const FACTORY_VERSION = 11;
   const API_VERIFICATION_SCHEMA_VERSION = 1;
   const ADVANCED_GROUP = "Advanced / Raw C#";
   const API_GROUPS = Object.freeze({
@@ -15,6 +15,7 @@
 
   let bootAttempts = 0;
   let factoryBuildPromise = null;
+  let legacyOperatorResolver = null;
   let factoryReadySettled = false;
   let resolveFactoryReady;
 
@@ -42,6 +43,209 @@
 
     return report || null;
   }
+
+  function apiCatalogIdentity(catalog) {
+    return [
+      String(
+        catalog?.catalogFingerprint ||
+        catalog?.assemblyFingerprint ||
+        ""
+      ),
+      String(
+        catalog?.engineVersion ||
+        ""
+      )
+    ].join("|");
+  }
+
+  async function rebuildFactoryForCatalog(
+    catalog
+  ) {
+    const registry =
+      window.RMLModNodeRegistry;
+
+    if (
+      !catalog ||
+      typeof catalog !== "object" ||
+      !registry ||
+      typeof registry.getNodeDefinitions !==
+        "function"
+    ) {
+      throw new Error(
+        "The live API node factory cannot be rebuilt because its catalog or registry is unavailable."
+      );
+    }
+
+    const definitions =
+      registry.getNodeDefinitions();
+    const typeDefinitions =
+      registry.getTypeDefinitions?.() ||
+      null;
+    const valueTypes =
+      registry.getValueTypes?.() ||
+      null;
+    const previousCatalogDefinitions =
+      Object.entries(definitions)
+        .filter(([, definition]) =>
+          definition?.catalogGenerated ===
+            true
+        );
+    const previousTypeDefinitions =
+      typeDefinitions
+        ? Object.entries(typeDefinitions)
+        : [];
+    const previousValueTypes =
+      Array.isArray(valueTypes)
+        ? [...valueTypes]
+        : [];
+    const previousReport =
+      window.RMLApiNodeFactoryReport ||
+      null;
+    const previousFactoryVersion =
+      Number(
+        window.__RMLApiNodeFactoryVersion
+      ) || 0;
+    const previousLegacyOperatorResolver =
+      legacyOperatorResolver;
+
+    for (const [id] of
+      previousCatalogDefinitions) {
+      delete definitions[id];
+    }
+
+    try {
+      window.__RMLApiNodeFactoryVersion =
+        FACTORY_VERSION;
+
+      const report = await buildFactory(
+        registry,
+        catalog
+      );
+
+      if (
+        !report ||
+        report.verificationPassed !== true ||
+        apiCatalogIdentity(report) !==
+          apiCatalogIdentity(catalog)
+      ) {
+        throw new Error(
+          "The live API node factory did not produce a complete verified contract for the current catalog."
+        );
+      }
+
+      completeFactoryReady(report);
+      return report;
+    } catch (error) {
+      for (const [id, definition] of
+        Object.entries(definitions)) {
+        if (
+          definition?.catalogGenerated ===
+            true
+        ) {
+          delete definitions[id];
+        }
+      }
+
+      for (const [id, definition] of
+        previousCatalogDefinitions) {
+        definitions[id] = definition;
+      }
+
+      if (typeDefinitions) {
+        for (const id of
+          Object.keys(typeDefinitions)) {
+          delete typeDefinitions[id];
+        }
+        for (const [id, definition] of
+          previousTypeDefinitions) {
+          typeDefinitions[id] = definition;
+        }
+      }
+
+      if (Array.isArray(valueTypes)) {
+        valueTypes.splice(
+          0,
+          valueTypes.length,
+          ...previousValueTypes
+        );
+      }
+
+      window.__RMLApiNodeFactoryVersion =
+        previousFactoryVersion;
+      window.RMLApiNodeFactoryReport =
+        previousReport;
+      legacyOperatorResolver =
+        previousLegacyOperatorResolver;
+      window.__RMLNodeDefinitionRevision =
+        (Number(
+          window.__RMLNodeDefinitionRevision
+        ) || 0) + 1;
+
+      throw error;
+    }
+  }
+
+  Object.defineProperty(
+    window,
+    "RMLApiNodeFactoryController",
+    {
+      value: Object.freeze({
+        version: 2,
+        rebuild(catalog) {
+          const previous =
+            factoryBuildPromise;
+          const run = () =>
+            rebuildFactoryForCatalog(
+              catalog
+            );
+
+          factoryBuildPromise = previous
+            ? Promise.resolve(previous)
+                .then(run, run)
+            : run();
+
+          return factoryBuildPromise;
+        },
+        async resolveRequiredOperators(
+          requiredNodes,
+          catalog
+        ) {
+          if (factoryBuildPromise) {
+            await factoryBuildPromise;
+          }
+
+          const report =
+            window.RMLApiNodeFactoryReport;
+
+          if (
+            !legacyOperatorResolver ||
+            !report ||
+            report.verificationPassed !==
+              true ||
+            apiCatalogIdentity(report) !==
+              apiCatalogIdentity(catalog)
+          ) {
+            return Object.freeze({
+              attempted: false,
+              resolved: 0,
+              unresolved:
+                Array.isArray(requiredNodes)
+                  ? requiredNodes.length
+                  : 0
+            });
+          }
+
+          return legacyOperatorResolver(
+            requiredNodes,
+            catalog
+          );
+        }
+      }),
+      writable: false,
+      enumerable: true,
+      configurable: true
+    }
+  );
 
   function yieldToBrowser() {
     return new Promise(resolve => {
@@ -151,6 +355,8 @@
     const graphTypeByCs = new Map();
     const graphTypeByNormalizedCs = new Map();
     const generatedNodeIds = new Set();
+    const legacyAliasIds = new Set();
+    const legacyAliasEntries = [];
     const rejectedGeneratedNodeIds = new Set();
     const verificationErrors = [];
     const catalogSchemaVersion =
@@ -868,7 +1074,6 @@
           skippedCount += 1;
           return;
         }
-        const id = `api.ctor.${stableHash(`${owner.fullName}|${constructor.signature}|${index}`)}`;
         const definition =
           createConstructorDefinition(
             owner,
@@ -878,8 +1083,22 @@
           skippedCount += 1;
           return;
         }
+        const prefix = "api.ctor.";
+        const legacyBase =
+          `${owner.fullName}|${constructor.signature}`;
+        const id = canonicalMemberNodeId(
+          prefix,
+          definition
+        );
         if (registerGeneratedNode(id, definition)) {
           constructorNodeCount += 1;
+          registerLegacyMember(
+            prefix,
+            legacyBase,
+            index,
+            constructors.length,
+            id
+          );
         }
       });
 
@@ -913,23 +1132,70 @@
           skippedCount += 1;
           return;
         }
-        const identity = `${owner.fullName}|${property.name}|${property.type}|${index}`;
+        const legacyBase =
+          `${owner.fullName}|${property.name}|${property.type}`;
         if (property.canRead) {
-          if (registerGeneratedNode(
-            `api.property.get.${stableHash(identity)}`,
-            createPropertyGetDefinition(owner, property)
-          )) {
+          const prefix =
+            "api.property.get.";
+          const definition =
+            createPropertyGetDefinition(
+              owner,
+              property
+            );
+          const id = definition
+            ? canonicalMemberNodeId(
+                prefix,
+                definition
+              )
+            : "";
+          if (
+            id &&
+            registerGeneratedNode(
+              id,
+              definition
+            )
+          ) {
             propertyNodeCount += 1;
+            registerLegacyMember(
+              prefix,
+              legacyBase,
+              index,
+              properties.length,
+              id
+            );
           } else {
             skippedCount += 1;
           }
         }
         if (property.canWrite) {
-          if (registerGeneratedNode(
-            `api.property.set.${stableHash(identity)}`,
-            createPropertySetDefinition(owner, property)
-          )) {
+          const prefix =
+            "api.property.set.";
+          const definition =
+            createPropertySetDefinition(
+              owner,
+              property
+            );
+          const id = definition
+            ? canonicalMemberNodeId(
+                prefix,
+                definition
+              )
+            : "";
+          if (
+            id &&
+            registerGeneratedNode(
+              id,
+              definition
+            )
+          ) {
             propertyNodeCount += 1;
+            registerLegacyMember(
+              prefix,
+              legacyBase,
+              index,
+              properties.length,
+              id
+            );
           } else {
             skippedCount += 1;
           }
@@ -944,22 +1210,68 @@
           skippedCount += 1;
           return;
         }
-        const identity = `${owner.fullName}|${field.name}|${field.type}|${index}`;
-        if (registerGeneratedNode(
-          `api.field.get.${stableHash(identity)}`,
-          createFieldGetDefinition(owner, field)
-        )) {
+        const legacyBase =
+          `${owner.fullName}|${field.name}|${field.type}`;
+        const getPrefix = "api.field.get.";
+        const getDefinition =
+          createFieldGetDefinition(
+            owner,
+            field
+          );
+        const getId = getDefinition
+          ? canonicalMemberNodeId(
+              getPrefix,
+              getDefinition
+            )
+          : "";
+        if (
+          getId &&
+          registerGeneratedNode(
+            getId,
+            getDefinition
+          )
+        ) {
           fieldNodeCount += 1;
+          registerLegacyMember(
+            getPrefix,
+            legacyBase,
+            index,
+            fields.length,
+            getId
+          );
         } else {
           skippedCount += 1;
         }
 
         if (!field.isReadOnly && !field.isConst) {
-          if (registerGeneratedNode(
-            `api.field.set.${stableHash(identity)}`,
-            createFieldSetDefinition(owner, field)
-          )) {
+          const setPrefix =
+            "api.field.set.";
+          const setDefinition =
+            createFieldSetDefinition(
+              owner,
+              field
+            );
+          const setId = setDefinition
+            ? canonicalMemberNodeId(
+                setPrefix,
+                setDefinition
+              )
+            : "";
+          if (
+            setId &&
+            registerGeneratedNode(
+              setId,
+              setDefinition
+            )
+          ) {
             fieldNodeCount += 1;
+            registerLegacyMember(
+              setPrefix,
+              legacyBase,
+              index,
+              fields.length,
+              setId
+            );
           } else {
             skippedCount += 1;
           }
@@ -986,6 +1298,133 @@
         eventNodeCount += 1;
       }
     }
+
+    legacyOperatorResolver =
+      async requiredNodes => {
+        const requiredIds = new Set(
+          (Array.isArray(requiredNodes)
+            ? requiredNodes
+            : [])
+            .map(value =>
+              String(
+                typeof value === "string"
+                  ? value
+                  : value?.operatorId || ""
+              ).trim()
+            )
+            .filter(id =>
+              id.startsWith("api.") &&
+              !definitions[id]
+            )
+        );
+        const requested =
+          requiredIds.size;
+        let resolved = 0;
+        let attempts = 0;
+
+        const scannedUntil = new Map();
+        const scanStages = [
+          256,
+          512,
+          1024,
+          2048
+        ];
+
+        for (const scanStage of
+          scanStages) {
+          if (requiredIds.size === 0) {
+            break;
+          }
+
+          for (const entry of
+            legacyAliasEntries) {
+            if (requiredIds.size === 0) {
+              break;
+            }
+
+            const relevant =
+              [...requiredIds].some(id =>
+                id.startsWith(entry.prefix)
+              );
+            if (!relevant) {
+              continue;
+            }
+
+            const start =
+              scannedUntil.get(entry) ||
+              0;
+            const limit = Math.min(
+              2048,
+              Math.max(
+                scanStage,
+                entry.groupSize + 128,
+                entry.currentIndex + 1
+              )
+            );
+
+            for (
+              let historicalIndex = start;
+              historicalIndex < limit;
+              historicalIndex += 1
+            ) {
+              const legacyId =
+                `${entry.prefix}${stableHash(`${entry.legacyBase}|${historicalIndex}`)}`;
+              attempts += 1;
+
+              if (
+                requiredIds.has(legacyId) &&
+                registerLegacyAlias(
+                  legacyId,
+                  entry
+                )
+              ) {
+                requiredIds.delete(
+                  legacyId
+                );
+                resolved += 1;
+              }
+
+              if (attempts % 4096 === 0) {
+                await yieldToBrowser();
+              }
+            }
+
+            scannedUntil.set(
+              entry,
+              limit
+            );
+          }
+
+          if (requiredIds.size > 0) {
+            await yieldToBrowser();
+          }
+        }
+
+        if (resolved > 0) {
+          window.__RMLNodeDefinitionRevision =
+            (Number(
+              window.__RMLNodeDefinitionRevision
+            ) || 0) + 1;
+          window.dispatchEvent(
+            new CustomEvent(
+              "rml-api-node-factory-ready",
+              {
+                detail:
+                  window.RMLApiNodeFactoryReport ||
+                  null
+              }
+            )
+          );
+        }
+
+        return Object.freeze({
+          attempted: requested > 0,
+          requested,
+          resolved,
+          unresolved: requiredIds.size,
+          attempts
+        });
+      };
 
     cleanupRedundantPaletteNodes(definitions);
 
@@ -1017,6 +1456,8 @@
       propertyNodes: propertyNodeCount,
       fieldNodes: fieldNodeCount,
       eventNodes: eventNodeCount,
+      legacyAliases:
+        legacyAliasIds.size,
       skippedMembers: skippedCount,
       totalGeneratedNodes: generatedNodeIds.size
     });
@@ -1035,6 +1476,121 @@
     console.info("RML API Node Factory ready.", report);
 
     return report;
+
+    function canonicalMemberNodeId(
+      prefix,
+      definition
+    ) {
+      const identity = {
+        kind: String(
+          definition?.apiMemberKind ||
+          ""
+        ),
+        ownerType: normalizeCsType(
+          definition?.catalogType || ""
+        ),
+        memberName: String(
+          definition?.catalogMember || ""
+        ),
+        signature: String(
+          definition?.apiSignature || ""
+        ),
+        isStatic:
+          definition?.apiIsStatic === true,
+        genericArity: Math.max(
+          0,
+          Number(
+            definition?.apiGenericArity
+          ) || 0
+        )
+      };
+
+      return `${prefix}${stableHash(
+        JSON.stringify(identity)
+      )}`;
+    }
+
+    function registerLegacyMember(
+      prefix,
+      legacyBase,
+      currentIndex,
+      groupSize,
+      canonicalId
+    ) {
+      const entry = Object.freeze({
+        prefix,
+        legacyBase,
+        currentIndex: Math.max(
+          0,
+          Number(currentIndex) || 0
+        ),
+        groupSize: Math.max(
+          0,
+          Number(groupSize) || 0
+        ),
+        canonicalId
+      });
+      legacyAliasEntries.push(entry);
+
+      return registerLegacyAlias(
+        `${prefix}${stableHash(`${legacyBase}|${currentIndex}`)}`,
+        entry
+      );
+    }
+
+    function registerLegacyAlias(
+      id,
+      entry
+    ) {
+      const existing = definitions[id];
+      if (existing) {
+        return (
+          id === entry.canonicalId ||
+          existing.canonicalOperatorId ===
+            entry.canonicalId
+        );
+      }
+
+      const canonical =
+        definitions[entry.canonicalId];
+      if (!canonical) {
+        return false;
+      }
+
+      const aliasDefinition = {
+        ...canonical,
+        hiddenFromPalette: true,
+        legacyCatalogAlias: true,
+        canonicalOperatorId:
+          entry.canonicalId
+      };
+      const verification =
+        createApiVerificationContract(
+          id,
+          aliasDefinition
+        );
+
+      if (!verification.ok) {
+        return false;
+      }
+
+      aliasDefinition.apiVerification =
+        Object.freeze(
+          verification.contract
+        );
+
+      const registered =
+        registerNode(
+          id,
+          aliasDefinition
+        );
+      if (registered === false) {
+        return false;
+      }
+
+      legacyAliasIds.add(id);
+      return true;
+    }
 
     function registerGeneratedNode(id, definition) {
       if (generatedNodeIds.has(id) || definitions[id]) {
@@ -2786,7 +3342,15 @@ private static string ApiCatalogTypeName(System.Type? type)
       firstGenericTypeParts(text);
     if (parsed) {
       return (
-        !parsed.suffix &&
+        (
+          !parsed.suffix ||
+          (
+            parsed.suffix.startsWith(".") &&
+            isSafeCSharpTypeExpression(
+              `Nested${parsed.suffix}`
+            )
+          )
+        ) &&
         isSafeCSharpTypeExpression(
           parsed.head
         ) &&

@@ -34,7 +34,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "stable-universal-packed-config-integrity-20260826-v395f1";
+  "stable-universal-eager-import-atomic-wire-scene-20260827-v407f1";
 
 function exposeRmlBuilderBuildId() {
   document.documentElement.dataset
@@ -961,7 +961,7 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "graph_codegen_worker.js?v=13-packed-config-integrity-v395f1",
+      "graph_codegen_worker.js?v=24-eager-import-atomic-wire-scene-v407f1",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -7172,6 +7172,16 @@ function reconcilePackedGraphConfiguration(
           graph.active === true
       }
     );
+  }
+
+  if (
+    Array.isArray(graph.nodes) &&
+    graph.nodes.some(node =>
+      node?.kind === "configuration"
+    ) &&
+    Array.isArray(graph.connections)
+  ) {
+    graph.active = true;
   }
 
   return project;
@@ -21108,10 +21118,16 @@ function beginBuilderWork(options = {}) {
         session ===
           activeBuilderWorkSession
       ) {
-        elements.builderWorkOverlay.hidden =
-          true;
-        document.body.classList.remove(
-          "rml-builder-work-active"
+        updateBuilderWork(
+          session,
+          {
+            title:
+              "Still completing the operation…",
+            message:
+              "The loading screen remains visible until every required step has completed or the operation reports an error.",
+            detail:
+              "No work has been moved into an invisible background state."
+          }
         );
       }
     }, timeout);
@@ -21137,10 +21153,633 @@ function finishBuilderWork(session) {
   return true;
 }
 
+function beginStartupStatus(
+  initialText =
+    "Restoring local workspace…"
+) {
+  const label =
+    elements.workspaceRestoreState;
+  const container =
+    label?.closest?.(".local-state") ||
+    label?.parentElement ||
+    null;
+  let finished = false;
+
+  const set = value => {
+    if (!label || finished) {
+      return false;
+    }
+    label.textContent = String(
+      value ||
+      "Restoring local workspace…"
+    );
+    if (container?.dataset) {
+      container.dataset.state =
+        "loading";
+    }
+    return true;
+  };
+
+  set(initialText);
+
+  return Object.freeze({
+    update(changes = {}) {
+      return set(
+        changes.title ||
+        changes.message ||
+        initialText
+      );
+    },
+    finish() {
+      if (finished) {
+        return false;
+      }
+      finished = true;
+      if (label) {
+        label.textContent =
+          "Draft saved locally";
+      }
+      if (container?.dataset) {
+        container.dataset.state =
+          "ready";
+      }
+      return true;
+    },
+    get visible() {
+      return false;
+    }
+  });
+}
+
+function projectTypedRuntimeGraph(
+  project
+) {
+  const graph =
+    project?.extensions
+      ?.typedNodeGraph;
+
+  return graph &&
+    typeof graph === "object" &&
+    !Array.isArray(graph)
+      ? graph
+      : null;
+}
+
+function projectRequiredCatalogNodes(
+  project
+) {
+  const graph =
+    projectTypedRuntimeGraph(
+      project
+    );
+
+  const nodes =
+    Array.isArray(graph?.nodes)
+      ? graph.nodes
+      : [];
+  const requirements = new Map();
+  const operatorByNodeId =
+    new Map();
+
+  for (const node of nodes) {
+    const operatorId = String(
+      node?.operatorId || ""
+    ).trim();
+
+    if (!operatorId.startsWith("api.")) {
+      continue;
+    }
+
+    operatorByNodeId.set(
+      String(node.id || ""),
+      operatorId
+    );
+
+    if (!requirements.has(operatorId)) {
+      requirements.set(operatorId, {
+        operatorId,
+        inputPorts: new Set(),
+        outputPorts: new Set()
+      });
+    }
+  }
+
+  for (const connection of
+    Array.isArray(graph?.connections)
+      ? graph.connections
+      : []) {
+    const sourceOperator =
+      operatorByNodeId.get(
+        String(
+          connection?.fromNode || ""
+        )
+      );
+    const targetOperator =
+      operatorByNodeId.get(
+        String(
+          connection?.toNode || ""
+        )
+      );
+
+    if (sourceOperator) {
+      requirements
+        .get(sourceOperator)
+        .outputPorts.add(
+          String(
+            connection?.fromPort || ""
+          )
+        );
+    }
+
+    if (targetOperator) {
+      requirements
+        .get(targetOperator)
+        .inputPorts.add(
+          String(
+            connection?.toPort || ""
+          )
+        );
+    }
+  }
+
+  return [...requirements.values()]
+    .map(requirement => ({
+      operatorId:
+        requirement.operatorId,
+      inputPorts:
+        [...requirement.inputPorts]
+          .filter(Boolean)
+          .sort((left, right) =>
+            left.localeCompare(right)
+          ),
+      outputPorts:
+        [...requirement.outputPorts]
+          .filter(Boolean)
+          .sort((left, right) =>
+            left.localeCompare(right)
+          )
+    }))
+    .sort((left, right) =>
+      left.operatorId.localeCompare(
+        right.operatorId
+      )
+    );
+}
+
+function promiseWithBuilderTimeout(
+  promise,
+  timeout,
+  message
+) {
+  return new Promise(
+    (resolve, reject) => {
+      let settled = false;
+      const finish = callback => value => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        callback(value);
+      };
+      const timer = window.setTimeout(
+        finish(reject),
+        timeout,
+        new Error(message)
+      );
+
+      Promise.resolve(promise).then(
+        finish(resolve),
+        finish(reject)
+      );
+    }
+  );
+}
+
+async function ensureProjectRuntimePrerequisites(
+  project,
+  workSession
+) {
+  const graph =
+    projectTypedRuntimeGraph(
+      project
+    );
+
+  if (!graph) {
+    return {
+      graph: null,
+      catalog: null,
+      runtimeActive: false
+    };
+  }
+
+  updateBuilderWork(
+    workSession,
+    {
+      title:
+        "Loading Runtime Graph modules…",
+      message:
+        "The node registry, runtime generator and graph host must be completely available before the project can be installed.",
+      detail:
+        "The current project is still unchanged.",
+      progress: 36
+    }
+  );
+  await paintBuilderUi();
+
+  const modulesReady =
+    window.RMLModNodesReady;
+
+  if (
+    !modulesReady ||
+    typeof modulesReady.then !==
+      "function"
+  ) {
+    throw new Error(
+      "The Runtime Graph module loader is unavailable. The JSON was not loaded."
+    );
+  }
+
+  await promiseWithBuilderTimeout(
+    modulesReady,
+    60000,
+    "The Runtime Graph modules did not become ready within 60 seconds. The JSON was not loaded."
+  );
+
+  const requiredCatalogNodes =
+    projectRequiredCatalogNodes(
+      project
+    );
+  let catalogResult = null;
+
+  if (requiredCatalogNodes.length > 0) {
+    updateBuilderWork(
+      workSession,
+      {
+        title:
+          "Checking the cached API catalog…",
+        message:
+          `This project uses ${requiredCatalogNodes.length.toLocaleString("de-DE")} catalog operator${requiredCatalogNodes.length === 1 ? "" : "s"}. Cached definitions, referenced ports and every required contract are being verified first.`,
+        detail:
+          "The live scanner is contacted only if the cache cannot resolve the complete project.",
+        progress: 44
+      }
+    );
+    await paintBuilderUi();
+
+    const gate =
+      window.RMLCatalogImportGate;
+
+    if (
+      !gate ||
+      typeof gate.ensureForImport !==
+        "function"
+    ) {
+      throw new Error(
+        "The live API catalog import gate is unavailable. The JSON was not loaded."
+      );
+    }
+
+    catalogResult =
+      await promiseWithBuilderTimeout(
+        gate.ensureForImport({
+          requiredNodes:
+            requiredCatalogNodes,
+          onLiveFallback({
+            missingCount = 0
+          } = {}) {
+            updateBuilderWork(
+              workSession,
+              {
+                title:
+                  "Cached catalog is insufficient · checking Live…",
+                message:
+                  `The cache cannot verify ${Number(missingCount).toLocaleString("de-DE")} required API operator or port contract${Number(missingCount) === 1 ? "" : "s"}. One bounded live scanner pass is now mandatory.`,
+                detail:
+                  "The current project remains unchanged until the Live catalog and rebuilt API node factory have been verified.",
+                progress: 48
+              }
+            );
+          }
+        }),
+        65000,
+        "The live Resonite API catalog did not become ready within 65 seconds. The JSON was not loaded."
+      );
+  }
+
+  if (
+    !window.RMLDynamicGraphHost ||
+    !window.RMLTypedNodeGraphGenerator ||
+    typeof window
+      .RMLTypedNodeGraphGenerator
+      .build !== "function"
+  ) {
+    throw new Error(
+      "The Runtime Graph host or C# generator is not fully initialized. The JSON was not loaded."
+    );
+  }
+
+  const definitions =
+    window.RMLModNodeRegistry
+      ?.getNodeDefinitions?.() || {};
+  const unavailable =
+    (Array.isArray(graph.nodes)
+      ? graph.nodes
+      : [])
+      .filter(node =>
+        node?.kind === "operator" &&
+        !definitions[
+          node.operatorId
+        ]
+      )
+      .map(node => ({
+        nodeId:
+          String(node.id || "<unnamed>"),
+        operatorId:
+          String(
+            node.operatorId ||
+            "<missing>"
+          )
+      }));
+
+  if (unavailable.length > 0) {
+    const visible =
+      unavailable.slice(0, 12);
+    const remainder =
+      unavailable.length - visible.length;
+
+    throw new Error(
+      `This JSON cannot be loaded because ${unavailable.length.toLocaleString("de-DE")} Runtime Graph node${unavailable.length === 1 ? "" : "s"} use unavailable operators: ${visible.map(item => `'${item.operatorId}' on '${item.nodeId}'`).join(", ")}${remainder > 0 ? ` and ${remainder.toLocaleString("de-DE")} more` : ""}.`
+    );
+  }
+
+  const graphValidation =
+    window.RMLTypedNodeGraphGenerator
+      .validateDocument?.({
+        state: project
+      });
+  const graphValidationDiagnostics =
+    Array.isArray(
+      graphValidation?.diagnostics
+    )
+      ? graphValidation.diagnostics
+          .filter(Boolean)
+      : [];
+
+  if (graphValidationDiagnostics.length > 0) {
+    throw new Error(
+      `Runtime Graph validation failed: ${graphValidationDiagnostics.slice(0, 8).join(" | ")}${graphValidationDiagnostics.length > 8 ? ` | and ${graphValidationDiagnostics.length - 8} more` : ""}. The JSON was not loaded.`
+    );
+  }
+
+  return {
+    graph,
+    catalog: catalogResult,
+    runtimeActive:
+      graph.active === true
+  };
+}
+
+function assertImportedGraphDocumentIdentity(
+  expectedGraph
+) {
+  const actualGraph =
+    projectTypedRuntimeGraph(state);
+  const expectedNodes =
+    Array.isArray(expectedGraph?.nodes)
+      ? expectedGraph.nodes
+      : [];
+  const expectedConnections =
+    Array.isArray(
+      expectedGraph?.connections
+    )
+      ? expectedGraph.connections
+      : [];
+  const actualNodes =
+    Array.isArray(actualGraph?.nodes)
+      ? actualGraph.nodes
+      : [];
+  const actualConnections =
+    Array.isArray(
+      actualGraph?.connections
+    )
+      ? actualGraph.connections
+      : [];
+  const actualNodeIds = new Set(
+    actualNodes.map(node =>
+      String(node?.id || "")
+    )
+  );
+  const actualConnectionIds = new Set(
+    actualConnections.map(connection =>
+      String(connection?.id || "")
+    )
+  );
+  const missingNodeIds =
+    expectedNodes
+      .map(node =>
+        String(node?.id || "")
+      )
+      .filter(id =>
+        !actualNodeIds.has(id)
+      );
+  const missingConnectionIds =
+    expectedConnections
+      .map(connection =>
+        String(
+          connection?.id || ""
+        )
+      )
+      .filter(id =>
+        !actualConnectionIds.has(id)
+      );
+
+  if (
+    actualNodes.length !==
+      expectedNodes.length ||
+    actualConnections.length !==
+      expectedConnections.length ||
+    missingNodeIds.length > 0 ||
+    missingConnectionIds.length > 0
+  ) {
+    throw new Error(
+      `The imported Runtime Graph document was not preserved exactly: expected ${expectedNodes.length.toLocaleString("de-DE")} nodes and ${expectedConnections.length.toLocaleString("de-DE")} connections, but stored ${actualNodes.length.toLocaleString("de-DE")} and ${actualConnections.length.toLocaleString("de-DE")}. Missing nodes: ${missingNodeIds.slice(0, 8).join(", ") || "none"}; missing connections: ${missingConnectionIds.slice(0, 8).join(", ") || "none"}. The JSON was not loaded.`
+    );
+  }
+}
+
+function assertImportedGraphIdentity(
+  expectedGraph
+) {
+  const actualGraph =
+    window.RMLDynamicGraphHost
+      ?.getState?.();
+  const expectedNodes =
+    Array.isArray(expectedGraph?.nodes)
+      ? expectedGraph.nodes
+      : [];
+  const expectedConnections =
+    Array.isArray(
+      expectedGraph?.connections
+    )
+      ? expectedGraph.connections
+      : [];
+  const actualNodes =
+    Array.isArray(actualGraph?.nodes)
+      ? actualGraph.nodes
+      : [];
+  const actualConnections =
+    Array.isArray(
+      actualGraph?.connections
+    )
+      ? actualGraph.connections
+      : [];
+
+  if (
+    actualNodes.length !==
+      expectedNodes.length ||
+    actualConnections.length !==
+      expectedConnections.length
+  ) {
+    throw new Error(
+      `The Runtime Graph did not preserve the imported project exactly: expected ${expectedNodes.length.toLocaleString("de-DE")} nodes and ${expectedConnections.length.toLocaleString("de-DE")} connections, but initialized ${actualNodes.length.toLocaleString("de-DE")} and ${actualConnections.length.toLocaleString("de-DE")}. The JSON was not loaded.`
+    );
+  }
+
+  const actualNodeIds =
+    new Set(
+      actualNodes.map(node =>
+        String(node?.id || "")
+      )
+    );
+  const actualConnectionIds =
+    new Set(
+      actualConnections.map(
+        connection =>
+          String(
+            connection?.id || ""
+          )
+      )
+    );
+  const missingNodeIds =
+    expectedNodes
+      .map(node =>
+        String(node?.id || "")
+      )
+      .filter(id =>
+        !actualNodeIds.has(id)
+      );
+  const missingConnectionIds =
+    expectedConnections
+      .map(connection =>
+        String(connection?.id || "")
+      )
+      .filter(id =>
+        !actualConnectionIds.has(id)
+      );
+
+  if (
+    missingNodeIds.length > 0 ||
+    missingConnectionIds.length > 0
+  ) {
+    throw new Error(
+      `The Runtime Graph changed imported identities during initialization. Missing nodes: ${missingNodeIds.slice(0, 8).join(", ") || "none"}; missing connections: ${missingConnectionIds.slice(0, 8).join(", ") || "none"}. The JSON was not loaded.`
+    );
+  }
+}
+
+async function waitForImportedCodegen(
+  expectedGraph,
+  workSession,
+  _catalogResult = null,
+  timeout = 120000
+) {
+  const started = performance.now();
+  let contribution = null;
+
+  while (true) {
+    contribution =
+      getTypedNodeGraphContribution();
+
+    if (
+      contribution?.pending !== true
+    ) {
+      break;
+    }
+
+    if (
+      performance.now() - started >=
+        timeout
+    ) {
+      throw new Error(
+        "Runtime Graph code generation did not complete within 120 seconds. The JSON was not loaded."
+      );
+    }
+
+    updateBuilderWork(
+      workSession,
+      {
+        title:
+          "Generating the complete Runtime Graph…",
+        message:
+          "The background generator is building and validating every generated project file.",
+        detail:
+          `${expectedGraph.nodes.length.toLocaleString("de-DE")} nodes · ${expectedGraph.connections.length.toLocaleString("de-DE")} connections`,
+        progress: 90
+      }
+    );
+
+    await new Promise(resolve =>
+      window.setTimeout(resolve, 40)
+    );
+  }
+
+  const graphDiagnostics =
+    Array.isArray(
+      contribution?.diagnostics
+    )
+      ? contribution.diagnostics
+          .filter(Boolean)
+      : [];
+
+  if (graphDiagnostics.length > 0) {
+    throw new Error(
+      `Runtime Graph validation failed: ${graphDiagnostics.slice(0, 8).join(" | ")}${graphDiagnostics.length > 8 ? ` | and ${graphDiagnostics.length - 8} more` : ""}. The JSON was not loaded.`
+    );
+  }
+
+  const diagnostics =
+    getDiagnostics();
+
+  if (diagnostics.length > 0) {
+    throw new Error(
+      `Project validation failed: ${diagnostics.slice(0, 8).join(" | ")}${diagnostics.length > 8 ? ` | and ${diagnostics.length - 8} more` : ""}. The JSON was not loaded.`
+    );
+  }
+
+  const packedGraph = Boolean(
+    expectedGraph?.configSnapshot &&
+    Array.isArray(
+      expectedGraph.configSnapshot.nodes
+    )
+  );
+
+  if (
+    packedGraph &&
+    getAdditionalGeneratedSourceFiles()
+      .length === 0
+  ) {
+    throw new Error(
+      "The Runtime Graph completed without producing its required generated source files. The JSON was not loaded."
+    );
+  }
+
+  return contribution;
+}
+
 function waitForImportedGraphUi(
   expectedNodes,
   expectedConnections,
-  timeout = 30000
+  timeout = 30000,
+  { strict = false } = {}
 ) {
   const graph =
     state.extensions?.typedNodeGraph;
@@ -21149,16 +21788,27 @@ function waitForImportedGraphUi(
     graph?.active !== true ||
     !window.RMLDynamicGraphHost
   ) {
+    if (strict && graph?.active === true) {
+      return Promise.reject(
+        new Error(
+          "The Runtime Graph host is unavailable. The JSON was not loaded."
+        )
+      );
+    }
+
     return Promise.resolve({
       ready: true,
       timedOut: false
     });
   }
 
-  return new Promise(resolve => {
+  return new Promise((resolve, reject) => {
     let settled = false;
 
-    const finish = timedOut => {
+    const finish = (
+      timedOut,
+      error = null
+    ) => {
       if (settled) return;
       settled = true;
       window.clearTimeout(timer);
@@ -21166,10 +21816,75 @@ function waitForImportedGraphUi(
         "rml-graph:render-complete",
         handleComplete
       );
+      document.removeEventListener(
+        "rml-builder:rendered",
+        handleBuilderRendered
+      );
+      if (error) {
+        reject(error);
+        return;
+      }
+
       resolve({
         ready: !timedOut,
         timedOut
       });
+    };
+
+    const hostStateMatches = () => {
+      const host =
+        window.RMLDynamicGraphHost;
+      const hostGraph =
+        host?.getState?.();
+      const nodeCount =
+        Array.isArray(hostGraph?.nodes)
+          ? hostGraph.nodes.length
+          : -1;
+      const connectionCount =
+        Array.isArray(
+          hostGraph?.connections
+        )
+          ? hostGraph.connections.length
+          : -1;
+
+      return {
+        matches:
+          nodeCount ===
+            Number(expectedNodes) &&
+          connectionCount ===
+            Number(expectedConnections),
+        nodeCount,
+        connectionCount,
+        graphViewActive:
+          host
+            ?.getPresentationState?.()
+            ?.graphViewActive === true ||
+          document.body.classList.contains(
+            "rml-node-graph-mode"
+          )
+      };
+    };
+
+    const handleBuilderRendered = () => {
+      const current =
+        hostStateMatches();
+
+      if (
+        current.matches &&
+        !current.graphViewActive
+      ) {
+        finish(false);
+      } else if (
+        strict &&
+        !current.matches
+      ) {
+        finish(
+          false,
+          new Error(
+            `The Runtime Graph initialized a different project state: expected ${Number(expectedNodes).toLocaleString("de-DE")} nodes and ${Number(expectedConnections).toLocaleString("de-DE")} connections, but received ${Number(current.nodeCount).toLocaleString("de-DE")} and ${Number(current.connectionCount).toLocaleString("de-DE")}. The JSON was not loaded.`
+          )
+        );
+      }
     };
 
     const handleComplete = event => {
@@ -21178,26 +21893,45 @@ function waitForImportedGraphUi(
         Number.isFinite(
           Number(detail.nodes)
         ) &&
-        Number(detail.nodes) <=
-          Number(expectedNodes) + 1 &&
+        Number(detail.nodes) ===
+          Number(expectedNodes) &&
         Number.isFinite(
           Number(detail.connections)
         ) &&
-        Number(detail.connections) <=
+        Number(detail.connections) ===
           Number(expectedConnections)
       ) {
         finish(false);
+      } else if (strict) {
+        finish(
+          false,
+          new Error(
+            `The Runtime Graph rendered a different project state: expected ${Number(expectedNodes).toLocaleString("de-DE")} nodes and ${Number(expectedConnections).toLocaleString("de-DE")} connections, but received ${Number(detail.nodes || 0).toLocaleString("de-DE")} and ${Number(detail.connections || 0).toLocaleString("de-DE")}. The JSON was not loaded.`
+          )
+        );
       }
     };
 
     const timer = window.setTimeout(
-      () => finish(true),
+      () =>
+        strict
+          ? finish(
+              true,
+              new Error(
+                `The Runtime Graph did not finish rendering within ${Math.round(timeout / 1000)} seconds. The JSON was not loaded.`
+              )
+            )
+          : finish(true),
       timeout
     );
 
     document.addEventListener(
       "rml-graph:render-complete",
       handleComplete
+    );
+    document.addEventListener(
+      "rml-builder:rendered",
+      handleBuilderRendered
     );
   });
 }
@@ -21213,33 +21947,70 @@ async function applyLoadedProjectWithFeedback(
     workSession ||
     beginBuilderWork({
       kicker: "Project loading",
-      title: "Applying project data…",
+      title: "Validating project requirements…",
       message:
-        "The validated project is being installed without blocking any confirmation dialog.",
+        "The current project remains unchanged until every required subsystem has passed its readiness check.",
       detail:
-        "Configuration Outline and project metadata are prepared first.",
-      progress: 38
+        "JSON structure, available catalog contracts and Runtime Graph modules are checked first.",
+      progress: 32,
+      timeout: 120000
     });
+  let previousProject = null;
+  let projectApplied = false;
 
   try {
     updateBuilderWork(
       session,
       {
         kicker: "Project loading",
-        title: "Applying project data…",
+        title:
+          "Validating project requirements…",
         message:
-          "The validated project is being installed without blocking any confirmation dialog.",
+          "The current project remains unchanged until every required subsystem has passed its readiness check.",
         detail:
-          "Configuration Outline and project metadata are prepared first.",
-        progress: 38
+          "JSON structure, available catalog contracts and Runtime Graph modules are checked first.",
+        progress: 32
       }
     );
     await paintBuilderUi();
+
+    const prerequisites =
+      await ensureProjectRuntimePrerequisites(
+        project,
+        session
+      );
+
+    updateBuilderWork(
+      session,
+      {
+        title:
+          "Installing the validated project…",
+        message:
+          "All required modules and catalog contracts are available. The project can now be installed atomically.",
+        detail:
+          "If any later Runtime Graph or generator check fails, the previous project is restored automatically.",
+        progress: 55
+      }
+    );
+    await paintBuilderUi();
+
+    previousProject =
+      createProjectDocument(
+        false,
+        true
+      );
 
     applyLoadedProject(
       project,
       { render: false }
     );
+    projectApplied = true;
+
+    if (prerequisites.graph) {
+      assertImportedGraphDocumentIdentity(
+        prerequisites.graph
+      );
+    }
 
     updateBuilderWork(
       session,
@@ -21249,7 +22020,7 @@ async function applyLoadedProjectWithFeedback(
           "Metadata and the universal node palette are being synchronized.",
         detail:
           "The full Runtime Graph remains intact in the project.",
-        progress: 54
+        progress: 64
       }
     );
     renderMetadata();
@@ -21270,7 +22041,9 @@ async function applyLoadedProjectWithFeedback(
     const graphUiReady =
       waitForImportedGraphUi(
         expectedNodes,
-        expectedConnections
+        expectedConnections,
+        45000,
+        { strict: true }
       );
 
     updateBuilderWork(
@@ -21280,11 +22053,11 @@ async function applyLoadedProjectWithFeedback(
         message:
           expectedNodes > 1000 ||
           expectedConnections > 2000
-            ? `Validating ${expectedNodes.toLocaleString()} nodes and ${expectedConnections.toLocaleString()} connections, then materializing only the visible graph area.`
-            : "Validating graph types and connections, then rendering the first usable frame.",
+            ? `Validating ${expectedNodes.toLocaleString()} nodes and ${expectedConnections.toLocaleString()} connections, then materializing only the visible graph area when the Runtime Graph page is open.`
+            : "Validating graph types and connections, initializing the complete graph model and rendering it only when its page is visible.",
         detail:
-          "Large generated C# output continues independently in the background worker.",
-        progress: 72
+          "Large generated C# output runs in the background worker, but the import remains open until it finishes.",
+        progress: 78
       }
     );
 
@@ -21293,6 +22066,56 @@ async function applyLoadedProjectWithFeedback(
     const graphResult =
       await graphUiReady;
 
+    if (prerequisites.graph) {
+      assertImportedGraphDocumentIdentity(
+        prerequisites.graph
+      );
+    }
+
+    if (
+      prerequisites.graph &&
+      prerequisites.runtimeActive
+    ) {
+      assertImportedGraphIdentity(
+        prerequisites.graph
+      );
+    }
+
+    updateBuilderWork(
+      session,
+      {
+        title:
+          "Validating generated output…",
+        message:
+          "The import remains locked until the complete Runtime Graph contribution and every generated source check have finished.",
+        detail:
+          "No background generator work is left behind after a successful import.",
+        progress: 88
+      }
+    );
+
+    if (
+      prerequisites.graph &&
+      prerequisites.runtimeActive
+    ) {
+      await waitForImportedCodegen(
+        prerequisites.graph,
+        session,
+        prerequisites.catalog
+      );
+    } else {
+      const diagnostics =
+        getDiagnostics();
+
+      if (diagnostics.length > 0) {
+        throw new Error(
+          `Project validation failed: ${diagnostics.slice(0, 8).join(" | ")}${diagnostics.length > 8 ? ` | and ${diagnostics.length - 8} more` : ""}. The JSON was not loaded.`
+        );
+      }
+    }
+
+    updateGeneratedOutput();
+
     updateBuilderWork(
       session,
       {
@@ -21300,14 +22123,84 @@ async function applyLoadedProjectWithFeedback(
         message:
           `Loaded ${displayName} successfully.`,
         detail:
-          graphResult.timedOut
-            ? "The project is usable; remaining graph drawing continues in bounded browser frames."
-            : "Dialogs, controls and the first graph frame are ready.",
+          prerequisites.catalog
+            ?.cacheSatisfied === true
+            ? "The cache resolved every required operator and port; no live scanner request was made. The complete Runtime Graph model and generated sources are ready without opening its page. Export remains available and shows its API compatibility notice until Live verification."
+            : prerequisites.graph
+              ? "Catalog contracts, the complete Runtime Graph model, generated sources, dialogs and controls are all ready without requiring a page switch."
+              : "Project data, dialogs and controls are all ready.",
         progress: 100
       }
     );
     await paintBuilderUi();
     return graphResult;
+  } catch (error) {
+    if (projectApplied) {
+      updateBuilderWork(
+        session,
+        {
+          title:
+            "Import failed · restoring the previous project…",
+          message:
+            error instanceof Error
+              ? error.message
+              : String(error),
+          detail:
+            "The incomplete imported state is being discarded.",
+          progress: 96
+        }
+      );
+
+      try {
+        applyLoadedProject(
+          previousProject,
+          { render: false }
+        );
+        renderMetadata();
+        renderPalette();
+        await paintBuilderUi();
+        const previousGraph =
+          projectTypedRuntimeGraph(
+            previousProject
+          );
+        const rollbackGraphReady =
+          previousGraph?.active
+            ? waitForImportedGraphUi(
+                previousGraph.nodes
+                  ?.length || 0,
+                previousGraph
+                  .connections?.length || 0,
+                45000,
+                { strict: true }
+              )
+            : Promise.resolve({
+                ready: true,
+                timedOut: false
+              });
+        renderAll();
+        await rollbackGraphReady;
+        if (previousGraph?.active) {
+          assertImportedGraphIdentity(
+            previousGraph
+          );
+        }
+        await paintBuilderUi();
+      } catch (restoreError) {
+        console.error(
+          "The previous project could not be restored after a failed import.",
+          restoreError
+        );
+        throw new Error(
+          `${error instanceof Error ? error.message : String(error)} The automatic rollback also failed: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`
+        );
+      }
+
+      throw new Error(
+        `${error instanceof Error ? error.message : String(error)} The previous project was restored unchanged.`
+      );
+    }
+
+    throw error;
   } finally {
     finishBuilderWork(session);
   }
@@ -22713,6 +23606,129 @@ function copySelectedExportArtifact(
   );
 }
 
+function currentApiExportCompatibilityWarning() {
+  const graph =
+    state.extensions
+      ?.typedNodeGraph;
+
+  if (
+    !graph ||
+    !graph.configSnapshot ||
+    !Array.isArray(
+      graph.configSnapshot.nodes
+    ) ||
+    !Array.isArray(graph.nodes)
+  ) {
+    return null;
+  }
+
+  const apiNodes =
+    graph.nodes.filter(node =>
+      node?.kind === "operator" &&
+      String(
+        node.operatorId || ""
+      ).startsWith("api.")
+    );
+
+  if (apiNodes.length === 0) {
+    return null;
+  }
+
+  const report =
+    window.RMLApiNodeFactoryReport;
+  const definitions =
+    window.RMLModNodeRegistry
+      ?.getNodeDefinitions?.() || {};
+  const liveFactoryVerified =
+    Boolean(
+      report &&
+      typeof report === "object" &&
+      report.liveCatalogVerified ===
+        true &&
+      report.catalogSource ===
+        "scanner" &&
+      report.verificationPassed ===
+        true
+    );
+  const contractsVerified =
+    liveFactoryVerified &&
+    apiNodes.every(node => {
+      const definition =
+        definitions[
+          node.operatorId
+        ];
+      const contract =
+        definition?.apiVerification;
+
+      return Boolean(
+        definition
+          ?.catalogGenerated === true &&
+        contract &&
+        typeof contract === "object" &&
+        contract.catalogSource ===
+          "scanner" &&
+        String(contract.nodeId || "") ===
+          String(node.operatorId) &&
+        String(
+          contract.catalogFingerprint ||
+          ""
+        ) ===
+          String(
+            report.catalogFingerprint ||
+            ""
+          ) &&
+        String(
+          contract.engineVersion || ""
+        ) ===
+          String(
+            report.engineVersion || ""
+          ) &&
+        String(
+          contract.contractFingerprint ||
+          ""
+        ).trim()
+      );
+    });
+
+  if (contractsVerified) {
+    return null;
+  }
+
+  return Object.freeze({
+    apiNodeCount:
+      apiNodes.length,
+    catalogSource:
+      String(
+        report?.catalogSource ||
+        "unavailable"
+      )
+  });
+}
+
+function renderExportApiCompatibilityWarning() {
+  const host =
+    elements.exportApiCompatibilityWarning;
+  const message =
+    elements.exportApiCompatibilityWarningMessage;
+
+  if (!host || !message) {
+    return;
+  }
+
+  const warning =
+    currentApiExportCompatibilityWarning();
+
+  host.hidden = !warning;
+
+  if (!warning) {
+    message.textContent = "";
+    return;
+  }
+
+  message.textContent =
+    `This export uses ${warning.apiNodeCount.toLocaleString()} catalog-generated API node${warning.apiNodeCount === 1 ? "" : "s"}. Export remains fully available, but the nodes are based on cached or otherwise not currently Live-verified API metadata. Compatibility with the installed Resonite and RML versions cannot be guaranteed; build and test the generated mod against the matching environment.`;
+}
+
 function updateExportDialog() {
   const platform =
     elements.exportPlatform.value;
@@ -22762,6 +23778,8 @@ function updateExportDialog() {
     activeProjectIds.size;
   const effectiveMultiProject =
     activeProjectCount > 1;
+
+  renderExportApiCompatibilityWarning();
 
   elements.exportCsFilename.textContent =
     `${sourceCount} generated source file${
@@ -24271,7 +25289,7 @@ function ensureSetupAssistantLoaded(firstRun = false) {
 
   setupAssistantLoadPromise = new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = new URL("setup_assistant.js?v=186-packed-config-integrity-v395f1", APP_SCRIPT_BASE_URL).href;
+    script.src = new URL("setup_assistant.js?v=192-complete-legacy-api-reconciliation-v401f1", APP_SCRIPT_BASE_URL).href;
     script.async = true;
     script.dataset.rmlSetupAssistant = "true";
     script.addEventListener("load", () => resolve(true), { once: true });
@@ -25036,6 +26054,9 @@ function installSetupAssistantBridge() {
 
 function cacheElements() {
   Object.assign(elements, {
+    workspaceRestoreState: document.getElementById(
+      "workspace-restore-state"
+    ),
     paletteContent: document.getElementById("palette-content"),
     itemCount: document.getElementById("item-count"),
     builderCanvas: document.getElementById("builder-canvas"),
@@ -25126,9 +26147,6 @@ function cacheElements() {
     builderWorkDetail: document.getElementById(
       "builder-work-detail"
     ),
-    builderWorkDismiss: document.getElementById(
-      "builder-work-dismiss"
-    ),
     builderMessageDialog: document.getElementById(
       "builder-message-dialog"
     ),
@@ -25159,6 +26177,12 @@ function cacheElements() {
     ),
     exportCompatibilityHint: document.getElementById(
       "export-compatibility-hint"
+    ),
+    exportApiCompatibilityWarning: document.getElementById(
+      "export-api-compatibility-warning"
+    ),
+    exportApiCompatibilityWarningMessage: document.getElementById(
+      "export-api-compatibility-warning-message"
     ),
     exportIncludeCs: document.getElementById("export-include-cs"),
     exportIncludeCsproj: document.getElementById(
@@ -28318,29 +29342,20 @@ async function initialize() {
   cacheElements();
   exposeBuilderDialogBridge();
 
-  const startupWorkSession =
-    beginBuilderWork({
-      kicker: "Builder startup",
-      title: "Restoring the workspace…",
-      message:
-        "The saved project is being read before the first usable interface frame is rendered.",
-      detail:
-        "Large Runtime Graphs are validated without materializing every off-screen element.",
-      progress: 12
-    });
+  const startupWork =
+    beginStartupStatus(
+      "Restoring local workspace…"
+    );
   await paintBuilderUi();
 
   preventGlobalDoubleSelection();
   await restore();
-  updateBuilderWork(
-    startupWorkSession,
-    {
+  startupWork.update({
       title: "Preparing controls and dialogs…",
       message:
         "Project metadata, palettes and interaction handlers are being synchronized.",
       progress: 46
-    }
-  );
+    });
   renderMetadata();
   renderPalette();
   installSetupAssistantBridge();
@@ -29173,13 +30188,6 @@ async function initialize() {
       closeProjectDialog();
     }
   );
-  elements.builderWorkDismiss?.addEventListener(
-    "click",
-    () =>
-      finishBuilderWork(
-        activeBuilderWorkSession
-      )
-  );
   elements.projectSaveJson.addEventListener(
     "click",
     saveProjectJson
@@ -29341,9 +30349,7 @@ async function initialize() {
       startupExpectedNodes,
       startupExpectedConnections
     );
-  updateBuilderWork(
-    startupWorkSession,
-    {
+  startupWork.update({
       title: "Rendering the first usable frame…",
       message:
         startupExpectedNodes > 1000 ||
@@ -29351,16 +30357,15 @@ async function initialize() {
           ? `Preparing ${startupExpectedNodes.toLocaleString()} nodes and ${startupExpectedConnections.toLocaleString()} connections in bounded rendering batches.`
           : "The restored project and all utility dialogs are ready to enter the interface.",
       progress: 76
-    }
-  );
-  await paintBuilderUi();
+    });
+  if (startupWork.visible) {
+    await paintBuilderUi();
+  }
   renderAll();
 
   const startupGraphResult =
     await startupGraphReady;
-  updateBuilderWork(
-    startupWorkSession,
-    {
+  startupWork.update({
       title: "Builder ready",
       message:
         "The first interface frame and all dialog handlers are ready.",
@@ -29369,12 +30374,11 @@ async function initialize() {
           ? "The interface is available while remaining graph drawing continues in bounded browser frames."
           : "Workspace restoration completed successfully.",
       progress: 100
-    }
-  );
-  await paintBuilderUi();
-  finishBuilderWork(
-    startupWorkSession
-  );
+    });
+  if (startupWork.visible) {
+    await paintBuilderUi();
+  }
+  startupWork.finish();
 
   document.dispatchEvent(
     new CustomEvent(
