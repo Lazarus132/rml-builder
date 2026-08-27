@@ -2,10 +2,27 @@
   "use strict";
 
   const registry = window.RMLModNodeRegistry;
+  const requiredRegistryCapabilities = [
+    "port",
+    "genericPort",
+    "registerType",
+    "registerGroup",
+    "registerNode",
+    "registerCodegenPlugin",
+    "getNodeDefinition",
+    "getTypeDefinitions"
+  ];
 
-  if (!registry || registry.version !== 6) {
+  if (
+    !registry ||
+    requiredRegistryCapabilities.some(
+      capability =>
+        typeof registry[capability] !==
+        "function"
+    )
+  ) {
     console.error(
-      "RML universal mod nodes require the matching node_graph.js registry version 5."
+      "RML universal mod nodes require a compatible node_graph.js registry with the documented registration and type-discovery capabilities."
     );
     return;
   }
@@ -1054,6 +1071,7 @@
 
   const groups = [
     ["Configuration Menu", { after: "Flow" }],
+    ["Visual C# Language", { after: "Flow" }],
     ["Transforms", { after: "Math" }],
     ["Collections", { after: "Flow" }],
     ["Harmony", { after: "Lifecycle" }],
@@ -1109,6 +1127,25 @@
       constraints: [
         "value",
         "reference"
+      ]
+    }
+  );
+
+  registerType(
+    "action",
+    {
+      label: "Action",
+      short: "ACT",
+      color: "#e4a7ff",
+      csType: "System.Action",
+      defaultCs: "delegate { }",
+      referenceType: true,
+      valueType: false,
+      globalGenericCandidate: false,
+      constraints: [
+        "value",
+        "reference",
+        "delegate"
       ]
     }
   );
@@ -2503,9 +2540,11 @@ private static object?[] ToObjectArray(object? value)
   function ensureEventRuntime(api) {
     ensureReflectionRuntime(api);
     api.addUsing("System.Linq.Expressions");
+    api.addUsing("System.Threading");
+    api.addUsing("System.Threading.Tasks");
     api.addField(
       "universal.event.subscriptions",
-      "private static readonly List<(object Target, EventInfo Event, Delegate Handler)> _graphEventSubscriptions = new();"
+      "private static readonly object _graphEventSubscriptionLock = new();\nprivate static readonly List<(object? Target, EventInfo Event, Delegate Handler)> _graphEventSubscriptions = new();\nprivate static readonly HashSet<string> _graphEventSubscriptionKeys = new(StringComparer.Ordinal);\nprivate static readonly CancellationTokenSource _graphEventSubscriptionCancellation = new();"
     );
     api.addMember("universal.event.helpers", String.raw`
 private static Delegate? SubscribeGraphEvent(
@@ -2518,10 +2557,18 @@ private static Delegate? SubscribeGraphEvent(
         return null;
     }
 
+    bool staticTarget = target is Type;
+    Type targetType = staticTarget
+        ? (Type)target
+        : target.GetType();
+    object? eventTarget = staticTarget
+        ? null
+        : target;
+
     EventInfo? eventInfo = FindGraphEvent(
-        target.GetType(),
+        targetType,
         eventName,
-        staticTarget: false);
+        staticTarget);
     Type? handlerType = eventInfo?.EventHandlerType;
     MethodInfo? invoke = FindMethod(handlerType, "Invoke");
 
@@ -2547,14 +2594,102 @@ private static Delegate? SubscribeGraphEvent(
         .Lambda(handlerType, body, parameters)
         .Compile();
 
-    eventInfo.AddEventHandler(target, handler);
-    _graphEventSubscriptions.Add((target, eventInfo, handler));
+    eventInfo.AddEventHandler(eventTarget, handler);
+    lock (_graphEventSubscriptionLock)
+    {
+        _graphEventSubscriptions.Add((eventTarget, eventInfo, handler));
+    }
     return handler;
+}
+
+private static void SubscribeGraphEventWhenAvailable(
+    string subscriptionKey,
+    Func<object?> targetProvider,
+    Func<string?> eventNameProvider,
+    Action<object?[]> callback)
+{
+    lock (_graphEventSubscriptionLock)
+    {
+        if (!_graphEventSubscriptionKeys.Add(subscriptionKey))
+        {
+            return;
+        }
+    }
+
+    if (TrySubscribeGraphEventProviders(
+        targetProvider,
+        eventNameProvider,
+        callback))
+    {
+        return;
+    }
+
+    CancellationToken cancellation =
+        _graphEventSubscriptionCancellation.Token;
+
+    _ = Task.Run(
+        async () =>
+        {
+            try
+            {
+                while (!cancellation.IsCancellationRequested)
+                {
+                    if (TrySubscribeGraphEventProviders(
+                        targetProvider,
+                        eventNameProvider,
+                        callback))
+                    {
+                        return;
+                    }
+
+                    await Task.Delay(50, cancellation)
+                        .ConfigureAwait(false);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        },
+        cancellation);
+}
+
+private static bool TrySubscribeGraphEventProviders(
+    Func<object?> targetProvider,
+    Func<string?> eventNameProvider,
+    Action<object?[]> callback)
+{
+    try
+    {
+        return SubscribeGraphEvent(
+            targetProvider(),
+            eventNameProvider(),
+            callback) is not null;
+    }
+    catch
+    {
+        return false;
+    }
 }
 
 private static void UnsubscribeGraphEvents()
 {
-    foreach ((object target, EventInfo eventInfo, Delegate handler) in _graphEventSubscriptions)
+    try
+    {
+        _graphEventSubscriptionCancellation.Cancel();
+    }
+    catch
+    {
+    }
+
+    List<(object? Target, EventInfo Event, Delegate Handler)> subscriptions;
+    lock (_graphEventSubscriptionLock)
+    {
+        subscriptions = new(_graphEventSubscriptions);
+        _graphEventSubscriptions.Clear();
+        _graphEventSubscriptionKeys.Clear();
+    }
+
+    foreach ((object? target, EventInfo eventInfo, Delegate handler) in subscriptions)
     {
         try
         {
@@ -2564,8 +2699,6 @@ private static void UnsubscribeGraphEvents()
         {
         }
     }
-
-    _graphEventSubscriptions.Clear();
 }
 `);
   }
@@ -5739,6 +5872,555 @@ private static T ReadNumericComponent<T>(
     }
   });
 
+  function ensureStructuredFlowRuntime(api) {
+    api.addMember(
+      "universal.flow.control-signals",
+      String.raw`
+private sealed class GraphBreakSignal : Exception
+{
+    public override string StackTrace => string.Empty;
+}
+
+private sealed class GraphContinueSignal : Exception
+{
+    public override string StackTrace => string.Empty;
+}
+
+private sealed class GraphReturnSignal : Exception
+{
+    public override string StackTrace => string.Empty;
+}
+`
+    );
+  }
+
+  registerNode("flow.tryCatchFinally", {
+    title: "Try / Catch / Finally",
+    group: "Flow",
+    symbol: "TRY",
+    description:
+      "Runs the Try branch inline, exposes the caught Exception, always runs Finally, and then continues through Completed.",
+    inputs: [
+      port("call", "Call", "impulse")
+    ],
+    outputs: [
+      port("try", "Try", "impulse"),
+      port("catch", "Catch", "impulse"),
+      port("finally", "Finally", "impulse"),
+      port("completed", "Completed", "impulse"),
+      port("exception", "Exception", "exception")
+    ],
+    codegenCollect(api) {
+      ensureStructuredFlowRuntime(api);
+      addStatefulField(
+        api,
+        "caughtException",
+        "Exception?",
+        "null"
+      );
+    },
+    codegenExpression(api) {
+      return `_caughtException${nodeToken(api)}!`;
+    },
+    codegenAction(api) {
+      const token = nodeToken(api);
+      const field = `_caughtException${token}`;
+      const tryBranch =
+        api.inlineMethod(api.node.id, "try");
+      const catchBranch =
+        api.inlineMethod(api.node.id, "catch");
+      const finallyBranch =
+        api.inlineMethod(api.node.id, "finally");
+      const completed =
+        api.emit("completed");
+
+      return `${field} = null;\n        try\n        {${tryBranch ? `\n            ${tryBranch}();` : ""}\n        }\n        catch (GraphBreakSignal)\n        {\n            throw;\n        }\n        catch (GraphContinueSignal)\n        {\n            throw;\n        }\n        catch (GraphReturnSignal)\n        {\n            throw;\n        }\n        catch (Exception exception)\n        {\n            ${field} = exception;${catchBranch ? `\n            ${catchBranch}();` : ""}\n        }\n        finally\n        {${finallyBranch ? `\n            ${finallyBranch}();` : ""}\n        }${completed ? `\n        ${completed}();` : ""}`;
+    }
+  });
+
+  registerNode("flow.whileLoop", {
+    title: "While Loop",
+    group: "Flow",
+    symbol: "WHILE",
+    description:
+      "Runs Body inline while Condition is true. Maximum Iterations prevents an accidental endless update-frame loop; zero means no explicit limit.",
+    inputs: [
+      port("call", "Call", "impulse"),
+      port("condition", "Condition", "bool"),
+      port("maximumIterations", "Maximum Iterations", "int", {
+        defaultCs: "1000000"
+      })
+    ],
+    outputs: [
+      port("body", "Body", "impulse"),
+      port("completed", "Completed", "impulse")
+    ],
+    codegenCollect(api) {
+      ensureStructuredFlowRuntime(api);
+    },
+    codegenAction(api) {
+      const body =
+        api.inlineMethod(api.node.id, "body");
+      const completed = api.emit("completed");
+      const token = nodeToken(api);
+      const count = `_whileCount${token}`;
+      const maximum = `_whileMaximum${token}`;
+      return `int ${count} = 0;\n        int ${maximum} = Math.Max(0, ${api.input("maximumIterations").code});\n        while (${api.input("condition").code})\n        {\n            if (${maximum} > 0 && ${count}++ >= ${maximum})\n            {\n                throw new InvalidOperationException("While Loop exceeded Maximum Iterations.");\n            }\n\n            try\n            {${body ? `\n                ${body}();` : ""}\n            }\n            catch (GraphContinueSignal)\n            {\n                continue;\n            }\n            catch (GraphBreakSignal)\n            {\n                break;\n            }\n        }${completed ? `\n        ${completed}();` : ""}`;
+    }
+  });
+
+  registerNode("flow.doWhileLoop", {
+    title: "Do / While Loop",
+    group: "Flow",
+    symbol: "DO",
+    description:
+      "Runs Body inline at least once and repeats while Condition is true.",
+    inputs: [
+      port("call", "Call", "impulse"),
+      port("condition", "Condition", "bool"),
+      port("maximumIterations", "Maximum Iterations", "int", {
+        defaultCs: "1000000"
+      })
+    ],
+    outputs: [
+      port("body", "Body", "impulse"),
+      port("completed", "Completed", "impulse")
+    ],
+    codegenCollect(api) {
+      ensureStructuredFlowRuntime(api);
+    },
+    codegenAction(api) {
+      const body =
+        api.inlineMethod(api.node.id, "body");
+      const completed = api.emit("completed");
+      const token = nodeToken(api);
+      const count = `_doCount${token}`;
+      const maximum = `_doMaximum${token}`;
+      return `int ${count} = 0;\n        int ${maximum} = Math.Max(0, ${api.input("maximumIterations").code});\n        do\n        {\n            if (${maximum} > 0 && ${count}++ >= ${maximum})\n            {\n                throw new InvalidOperationException("Do / While Loop exceeded Maximum Iterations.");\n            }\n\n            try\n            {${body ? `\n                ${body}();` : ""}\n            }\n            catch (GraphContinueSignal)\n            {\n            }\n            catch (GraphBreakSignal)\n            {\n                break;\n            }\n        }\n        while (${api.input("condition").code});${completed ? `\n        ${completed}();` : ""}`;
+    }
+  });
+
+  registerNode("flow.break", {
+    title: "Break",
+    group: "Flow",
+    symbol: "BREAK",
+    description:
+      "Breaks the nearest inline While, Do / While or future structured loop.",
+    inputs: [port("call", "Break", "impulse")],
+    codegenCollect(api) {
+      ensureStructuredFlowRuntime(api);
+    },
+    codegenAction() {
+      return "throw new GraphBreakSignal();";
+    }
+  });
+
+  registerNode("flow.continue", {
+    title: "Continue",
+    group: "Flow",
+    symbol: "CONT",
+    description:
+      "Continues the nearest inline While, Do / While or future structured loop.",
+    inputs: [port("call", "Continue", "impulse")],
+    codegenCollect(api) {
+      ensureStructuredFlowRuntime(api);
+    },
+    codegenAction() {
+      return "throw new GraphContinueSignal();";
+    }
+  });
+
+  registerNode("flow.lock", {
+    title: "Lock",
+    group: "Tasks & Threading",
+    symbol: "LOCK",
+    description:
+      "Runs Body inline inside a C# lock statement and then emits Completed.",
+    inputs: [
+      port("call", "Call", "impulse"),
+      port("syncRoot", "Sync Root", "object")
+    ],
+    outputs: [
+      port("body", "Body", "impulse"),
+      port("completed", "Completed", "impulse")
+    ],
+    codegenAction(api) {
+      const body =
+        api.inlineMethod(api.node.id, "body");
+      const completed = api.emit("completed");
+      return `lock (${api.input("syncRoot").code} ?? throw new ArgumentNullException("syncRoot"))\n        {${body ? `\n            ${body}();` : ""}\n        }${completed ? `\n        ${completed}();` : ""}`;
+    }
+  });
+
+  registerNode("flow.using", {
+    title: "Using / Dispose",
+    group: "Flow",
+    symbol: "USING",
+    description:
+      "Runs Body inline and disposes the supplied IDisposable in a finally block.",
+    inputs: [
+      port("call", "Call", "impulse"),
+      port("resource", "Resource", "object")
+    ],
+    outputs: [
+      port("body", "Body", "impulse"),
+      port("completed", "Completed", "impulse")
+    ],
+    codegenAction(api) {
+      const body =
+        api.inlineMethod(api.node.id, "body");
+      const completed = api.emit("completed");
+      const token = nodeToken(api);
+      const resource = `_usingResource${token}`;
+      return `IDisposable? ${resource} = ${api.input("resource").code} as IDisposable;\n        try\n        {${body ? `\n            ${body}();` : ""}\n        }\n        finally\n        {\n            ${resource}?.Dispose();\n        }${completed ? `\n        ${completed}();` : ""}`;
+    }
+  });
+
+  function graphUserMethodEntries(
+    api,
+    requestedName
+  ) {
+    const name = String(
+      requestedName || ""
+    ).trim();
+    return (api.graph?.nodes || []).filter(
+      node =>
+        node?.operatorId ===
+          "language.methodEntry" &&
+        String(
+          node?.parameters?.methodName || ""
+        ).trim() === name
+    );
+  }
+
+  function ensureGraphUserMethodRuntime(api) {
+    ensureReflectionRuntime(api);
+    ensureStructuredFlowRuntime(api);
+    api.addUsing("System.Threading");
+    api.addUsing("System.Collections.Generic");
+    api.addField(
+      "universal.language.method-context",
+      "private static readonly AsyncLocal<Stack<GraphUserMethodFrame>?> _graphUserMethodFrames = new();"
+    );
+    api.addMember(
+      "universal.language.method-runtime",
+      String.raw`
+private sealed class GraphUserMethodFrame
+{
+    public GraphUserMethodFrame(object?[] arguments)
+    {
+        Arguments = arguments;
+    }
+
+    public object?[] Arguments { get; }
+    public object? Result { get; set; }
+}
+
+private static GraphUserMethodFrame PushGraphUserMethodFrame(object?[]? arguments)
+{
+    Stack<GraphUserMethodFrame>? stack = _graphUserMethodFrames.Value;
+
+    if (stack is null)
+    {
+        stack = new Stack<GraphUserMethodFrame>();
+        _graphUserMethodFrames.Value = stack;
+    }
+
+    GraphUserMethodFrame frame = new(arguments ?? Array.Empty<object?>());
+    stack.Push(frame);
+    return frame;
+}
+
+private static void PopGraphUserMethodFrame(GraphUserMethodFrame expected)
+{
+    Stack<GraphUserMethodFrame>? stack = _graphUserMethodFrames.Value;
+
+    if (stack is null || stack.Count == 0 || !ReferenceEquals(stack.Peek(), expected))
+    {
+        throw new InvalidOperationException("Visual method context stack is inconsistent.");
+    }
+
+    stack.Pop();
+    if (stack.Count == 0)
+    {
+        _graphUserMethodFrames.Value = null;
+    }
+}
+
+private static GraphUserMethodFrame CurrentGraphUserMethodFrame()
+{
+    Stack<GraphUserMethodFrame>? stack = _graphUserMethodFrames.Value;
+    return stack is not null && stack.Count > 0
+        ? stack.Peek()
+        : throw new InvalidOperationException("This node requires an active visual method call.");
+}
+
+private static T GraphUserMethodArgument<T>(int index)
+{
+    object?[] arguments = CurrentGraphUserMethodFrame().Arguments;
+    return index >= 0 && index < arguments.Length
+        ? ConvertGraphValue<T>(arguments[index])
+        : default!;
+}
+`
+    );
+  }
+
+  registerNode("language.methodEntry", {
+    expertOnly: true,
+    title: "Visual Method",
+    group: "Visual C# Language",
+    symbol: "METHOD",
+    description:
+      "Declares a reusable visual method. Arguments are supplied as an object array and read with Method Argument nodes; Return exits the method with a typed value.",
+    parameters: [
+      pText(
+        "methodName",
+        "Method name",
+        "Method",
+        "Unique method name used by Call Visual Method."
+      )
+    ],
+    outputs: [
+      port("body", "Body", "impulse"),
+      port("arguments", "Arguments", "objectArray")
+    ],
+    codegenCollect(api) {
+      ensureGraphUserMethodRuntime(api);
+      const methodName = String(
+        api.node.parameters?.methodName ||
+        "Method"
+      ).trim();
+      const matches = graphUserMethodEntries(
+        api,
+        methodName
+      );
+
+      if (matches.length !== 1) {
+        api.diagnostic(
+          `Visual method '${methodName}' must be declared exactly once; found ${matches.length}.`
+        );
+        return;
+      }
+
+      const token = nodeToken(api);
+      const body =
+        api.inlineMethod(api.node.id, "body");
+      api.addMember(
+        `${api.node.id}.visual-method`,
+        `private static object? UserMethod${token}(object?[]? arguments)\n{\n    GraphUserMethodFrame frame = PushGraphUserMethodFrame(arguments);\n\n    try\n    {${body ? `\n        ${body}();` : ""}\n    }\n    catch (GraphReturnSignal)\n    {\n    }\n    finally\n    {\n        PopGraphUserMethodFrame(frame);\n    }\n\n    return frame.Result;\n}`
+      );
+    },
+    codegenExpression() {
+      return "CurrentGraphUserMethodFrame().Arguments";
+    }
+  });
+
+  registerNode("language.methodArgument", {
+    expertOnly: true,
+    title: "Method Argument",
+    group: "Visual C# Language",
+    symbol: "ARG",
+    description:
+      "Reads one zero-based argument from the active visual method and converts it to the selected graph type.",
+    configurableTypeVar: "T",
+    configurableTypes:
+      COMMON_VALUE_TYPES.filter(type =>
+        !["patchContext", "cancellationToken"].includes(type)
+      ),
+    defaultType: "object",
+    inputs: [
+      port("index", "Index", "int")
+    ],
+    outputs: [
+      genericPort("value", "Value", "T", "anyValue")
+    ],
+    codegenCollect(api) {
+      ensureGraphUserMethodRuntime(api);
+    },
+    codegenExpression(api) {
+      const type =
+        api.node.parameters?.valueType ||
+        "object";
+      return `GraphUserMethodArgument<${api.csType(type)}>(${api.input("index").code})`;
+    }
+  });
+
+  registerNode("language.methodReturn", {
+    expertOnly: true,
+    title: "Return From Method",
+    group: "Visual C# Language",
+    symbol: "RETURN",
+    description:
+      "Sets the visual method result and exits its inline body immediately.",
+    configurableTypeVar: "T",
+    configurableTypes:
+      COMMON_VALUE_TYPES.filter(type =>
+        !["patchContext", "cancellationToken"].includes(type)
+      ),
+    defaultType: "object",
+    inputs: [
+      port("call", "Return", "impulse"),
+      genericPort("value", "Value", "T", "anyValue")
+    ],
+    codegenCollect(api) {
+      ensureGraphUserMethodRuntime(api);
+    },
+    codegenAction(api) {
+      return `CurrentGraphUserMethodFrame().Result = ${api.input("value").code};\n        throw new GraphReturnSignal();`;
+    }
+  });
+
+  registerNode("language.methodReturnVoid", {
+    expertOnly: true,
+    title: "Return From Method (Void)",
+    group: "Visual C# Language",
+    symbol: "RETURN",
+    description:
+      "Exits the active visual method without assigning a result.",
+    inputs: [port("call", "Return", "impulse")],
+    codegenCollect(api) {
+      ensureGraphUserMethodRuntime(api);
+    },
+    codegenAction() {
+      return "throw new GraphReturnSignal();";
+    }
+  });
+
+  registerNode("language.callMethod", {
+    expertOnly: true,
+    title: "Call Visual Method",
+    group: "Visual C# Language",
+    symbol: "CALL",
+    description:
+      "Calls the unique Visual Method with the configured name. Recursion and nested calls use isolated method frames.",
+    configurableTypeVar: "T",
+    configurableTypes:
+      COMMON_VALUE_TYPES.filter(type =>
+        !["patchContext", "cancellationToken"].includes(type)
+      ),
+    defaultType: "object",
+    parameters: [
+      pText(
+        "methodName",
+        "Method name",
+        "Method",
+        "Must match exactly one Visual Method node."
+      )
+    ],
+    inputs: [
+      port("call", "Call", "impulse"),
+      port("arguments", "Arguments", "objectArray")
+    ],
+    outputs: [
+      port("done", "Done", "impulse"),
+      port("faulted", "Faulted", "impulse"),
+      genericPort("result", "Result", "T", "anyValue"),
+      port("success", "Success", "bool"),
+      port("exception", "Exception", "exception")
+    ],
+    codegenCollect(api) {
+      ensureGraphUserMethodRuntime(api);
+      const type =
+        api.node.parameters?.valueType ||
+        "object";
+      addStatefulField(
+        api,
+        "visualMethodResult",
+        api.csType(type),
+        api.csDefault(type)
+      );
+      addStatefulField(
+        api,
+        "visualMethodSuccess",
+        "bool",
+        "false"
+      );
+      addStatefulField(
+        api,
+        "visualMethodException",
+        "Exception?",
+        "null"
+      );
+    },
+    codegenExpression(api) {
+      const token = nodeToken(api);
+      if (api.portId === "success") {
+        return `_visualMethodSuccess${token}`;
+      }
+      if (api.portId === "exception") {
+        return `_visualMethodException${token}!`;
+      }
+      return `_visualMethodResult${token}`;
+    },
+    codegenAction(api) {
+      const methodName = String(
+        api.node.parameters?.methodName ||
+        "Method"
+      ).trim();
+      const matches = graphUserMethodEntries(
+        api,
+        methodName
+      );
+      if (matches.length !== 1) {
+        api.diagnostic(
+          `Call Visual Method '${methodName}' requires exactly one declaration; found ${matches.length}.`
+        );
+        return "";
+      }
+      const methodToken =
+        api.token(matches[0].id);
+      const token = nodeToken(api);
+      const result = `_visualMethodResult${token}`;
+      const success = `_visualMethodSuccess${token}`;
+      const exception = `_visualMethodException${token}`;
+      const type =
+        api.node.parameters?.valueType ||
+        "object";
+      const done = api.emit("done");
+      const faulted = api.emit("faulted");
+      return `try\n        {\n            ${exception} = null;\n            ${result} = ConvertGraphValue<${api.csType(type)}>(UserMethod${methodToken}(${api.input("arguments").code}));\n            ${success} = true;${done ? `\n            ${done}();` : ""}\n        }\n        catch (Exception caught)\n        {\n            ${exception} = caught;\n            ${success} = false;${faulted ? `\n            ${faulted}();` : ""}\n        }`;
+    }
+  });
+
+  registerNode("language.lambdaAction", {
+    expertOnly: true,
+    title: "Lambda Action",
+    group: "Visual C# Language",
+    symbol: "λ",
+    description:
+      "Creates a System.Action delegate whose body is the connected inline impulse path.",
+    outputs: [
+      port("body", "Body", "impulse"),
+      port("action", "Action", "action")
+    ],
+    codegenExpression(api) {
+      const body =
+        api.inlineMethod(api.node.id, "body");
+      return body
+        ? `new System.Action(${body})`
+        : "new System.Action(delegate { })";
+    }
+  });
+
+  registerNode("language.invokeAction", {
+    expertOnly: true,
+    title: "Invoke Action",
+    group: "Visual C# Language",
+    symbol: "λ()",
+    description:
+      "Invokes a visual or API-produced System.Action delegate.",
+    inputs: [
+      port("call", "Call", "impulse"),
+      port("action", "Action", "action")
+    ],
+    outputs: [port("done", "Done", "impulse")],
+    codegenAction(api) {
+      const done = api.emit("done");
+      return `${api.input("action").code}?.Invoke();${done ? `\n        ${done}();` : ""}`;
+    }
+  });
+
   registerNode("flow.gate", {
     title: "Gate",
     group: "Flow",
@@ -6660,7 +7342,7 @@ private static T GraphCollectionItemAt<T>(
         `private static void ${callback}(object?[] arguments)\n{\n    using GraphExecutionScope scope = OpenGraphEntry();\n    ${field} = arguments;${emit ? `\n    ${emit}();` : ""}\n}`
       );
       api.addEngineInit(
-        `SubscribeGraphEvent(${api.input("target").code}, ${api.input("eventName").code}, ${callback});`
+        `SubscribeGraphEventWhenAvailable(${quote(api, api.node.id)}, () => (object?)(${api.input("target").code}), () => (string?)(${api.input("eventName").code}), ${callback});`
       );
     },
     codegenExpression(api) {
@@ -7865,6 +8547,8 @@ private static T GraphCollectionItemAt<T>(
 
   function graphComponentType(value) {
     const normalized = String(value || "").trim();
+    const normalizedLookup =
+      normalizedCatalogTypeName(normalized);
     const exact = new Map([
       ...MATERIAL_GRAPH_TYPES,
       ...MESH_GRAPH_TYPES,
@@ -7902,7 +8586,31 @@ private static T GraphCollectionItemAt<T>(
       ["RadiantDash", "radiantDash"]
     ]);
 
-    return exact.get(normalized) || "component";
+    const registeredTypes =
+      typeof registry.getTypeDefinitions === "function"
+        ? registry.getTypeDefinitions()
+        : null;
+
+    for (const [graphType, definition] of Object.entries(
+      registeredTypes || {}
+    )) {
+      if (
+        normalizedCatalogTypeName(
+          definition?.csType
+        ) === normalizedLookup &&
+        (
+          graphType === "component" ||
+          (Array.isArray(definition?.assignableTo) &&
+            definition.assignableTo.includes("component"))
+        )
+      ) {
+        return graphType;
+      }
+    }
+
+    return exact.get(normalized) ||
+      exact.get(normalizedLookup) ||
+      "component";
   }
 
   function ensureRuntimeEnumHelpers(api) {
@@ -8658,7 +9366,7 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
       pText(
         "componentType",
         "Component type",
-        "FrooxEngine.PBS_Metallic",
+        FROOX_COMPONENT_TYPES[0] || "",
         "Verified fully-qualified FrooxEngine component type.",
         { suggestions: FROOX_COMPONENT_TYPES }
       )
@@ -8687,6 +9395,54 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
     }
   });
 
+  registerNode("resonite.castComponentTyped", {
+    expertOnly: true,
+    title: "Cast Component (Typed)",
+    group: "Slots & Components",
+    symbol: "CAST<T>",
+    description:
+      "Explicitly narrows a generic Component to a catalog-verified concrete FrooxEngine component type.",
+    parameters: [
+      pText(
+        "componentType",
+        "Component type",
+        FROOX_COMPONENT_TYPES[0] || "",
+        "Verified fully-qualified FrooxEngine component type.",
+        {
+          suggestions: FROOX_COMPONENT_TYPES,
+          affectsPorts: true
+        }
+      )
+    ],
+    resolveDefinition(node) {
+      return {
+        outputs: [
+          port(
+            "component",
+            "Component",
+            graphComponentType(
+              node.parameters?.componentType
+            )
+          )
+        ]
+      };
+    },
+    inputs: [
+      port("value", "Component", "component")
+    ],
+    outputs: [
+      port("component", "Component", "component")
+    ],
+    codegenCollect(api) {
+      ensureReflectionRuntime(api);
+    },
+    codegenExpression(api) {
+      const componentType =
+        verifiedComponentType(api);
+      return `ConvertGraphValue<${componentType}>(${api.input("value").code})`;
+    }
+  });
+
   registerNode("resonite.attachComponentTyped", {
     expertOnly: true,
     title: "Attach Component (Typed)",
@@ -8698,7 +9454,7 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
       pText(
         "componentType",
         "Component type",
-        "FrooxEngine.Grabbable",
+        FROOX_COMPONENT_TYPES[0] || "",
         "Verified fully-qualified FrooxEngine component type.",
         { suggestions: FROOX_COMPONENT_TYPES }
       )

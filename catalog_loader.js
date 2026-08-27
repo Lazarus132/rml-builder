@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const LOADER_VERSION = 33;
+  const LOADER_VERSION = 34;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
   const CATALOG_PATH = "/resonite_api_catalog.json";
@@ -22,11 +22,15 @@
     document.currentScript?.src ||
     window.location.href;
   const modNodesUrl = new URL(
-    "mod_nodes.js?v=40-universal-state-semantics-v389f1",
+    "mod_nodes.js?v=42-complete-visual-csharp-v600f1",
+    scriptUrl
+  ).href;
+  const visualCSharpUrl = new URL(
+    "visual_csharp.js?v=1-complete-visual-csharp-v600f1",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=23-event-driven-readiness-v412f1",
+    "api_nodes.js?v=25-complete-visual-csharp-v600f1",
     scriptUrl
   ).href;
 
@@ -273,7 +277,277 @@
     });
   }
 
+  function catalogContractType(value) {
+    return String(value || "")
+      .replace(/^global::/, "")
+      .replace(/\s+/g, "")
+      .replace(/&$/, "");
+  }
+
+  function catalogParameterShape(parameter, index) {
+    return {
+      position: Math.max(
+        0,
+        Number(parameter?.position) || index
+      ),
+      type: catalogContractType(
+        parameter?.elementType ||
+        parameter?.type ||
+        "System.Object"
+      ),
+      isByRef:
+        parameter?.isByRef === true ||
+        parameter?.isOut === true,
+      isOut:
+        parameter?.isOut === true,
+      isOptional:
+        parameter?.isOptional === true
+    };
+  }
+
+  function catalogSemanticMembers(catalog) {
+    const members = new Map();
+    const add = (
+      kind,
+      ownerType,
+      memberName,
+      parameters,
+      returnType,
+      isStatic,
+      genericArity = 0
+    ) => {
+      const parameterShape =
+        (Array.isArray(parameters)
+          ? parameters
+          : []).map(
+            catalogParameterShape
+          );
+      const identity = JSON.stringify({
+        kind,
+        ownerType:
+          catalogContractType(ownerType),
+        memberName:
+          String(memberName || ""),
+        parameterShape,
+        isStatic: isStatic === true,
+        genericArity: Math.max(
+          0,
+          Number(genericArity) || 0
+        )
+      });
+      const shape = JSON.stringify({
+        parameterShape,
+        returnType:
+          catalogContractType(
+            returnType || "System.Void"
+          )
+      });
+      members.set(identity, {
+        identity,
+        shape,
+        kind,
+        ownerType:
+          catalogContractType(ownerType),
+        memberName:
+          String(memberName || "")
+      });
+    };
+
+    for (const type of
+      Array.isArray(catalog?.types)
+        ? catalog.types
+        : []) {
+      const owner = type?.fullName;
+      if (!owner) continue;
+      add(
+        "type",
+        owner,
+        "",
+        [],
+        owner,
+        true,
+        0
+      );
+      for (const constructor of
+        type.constructors || []) {
+        add(
+          "constructor",
+          owner,
+          ".ctor",
+          constructor?.parameters,
+          owner,
+          false,
+          0
+        );
+      }
+      for (const method of
+        type.methods || []) {
+        add(
+          "method",
+          owner,
+          method?.name,
+          method?.parameters,
+          method?.returnType,
+          method?.isStatic,
+          (method?.genericParameters || []).length
+        );
+      }
+      for (const property of
+        type.properties || []) {
+        if (property?.canRead) {
+          add(
+            "property-get",
+            owner,
+            property.name,
+            property.indexParameters,
+            property.type,
+            property.isStatic,
+            0
+          );
+        }
+        if (property?.canWrite) {
+          add(
+            "property-set",
+            owner,
+            property.name,
+            [
+              ...(property.indexParameters || []),
+              {
+                position:
+                  (property.indexParameters || []).length,
+                type: property.type
+              }
+            ],
+            "System.Void",
+            property.isStatic,
+            0
+          );
+        }
+      }
+      for (const field of
+        type.fields || []) {
+        add(
+          "field-get",
+          owner,
+          field?.name,
+          [],
+          field?.type,
+          field?.isStatic,
+          0
+        );
+        if (!field?.isReadOnly && !field?.isConst) {
+          add(
+            "field-set",
+            owner,
+            field?.name,
+            [{ position: 0, type: field?.type }],
+            "System.Void",
+            field?.isStatic,
+            0
+          );
+        }
+      }
+      for (const eventInfo of
+        type.events || []) {
+        add(
+          "event",
+          owner,
+          eventInfo?.name,
+          [],
+          eventInfo?.handlerType ||
+            "System.Delegate",
+          eventInfo?.isStatic,
+          0
+        );
+      }
+    }
+
+    return members;
+  }
+
+  function compareApiCatalogs(
+    previous,
+    current
+  ) {
+    const before =
+      catalogSemanticMembers(previous);
+    const after =
+      catalogSemanticMembers(current);
+    const added = [];
+    const removed = [];
+    const changed = [];
+
+    for (const [identity, member] of before) {
+      const replacement = after.get(identity);
+      if (!replacement) {
+        removed.push(member);
+      } else if (replacement.shape !== member.shape) {
+        changed.push({
+          before: member,
+          after: replacement
+        });
+      }
+    }
+    for (const [identity, member] of after) {
+      if (!before.has(identity)) {
+        added.push(member);
+      }
+    }
+
+    return Object.freeze({
+      compatible:
+        removed.length === 0 &&
+        changed.length === 0,
+      previousEngineVersion: String(
+        previous?.engineVersion || "unknown"
+      ),
+      currentEngineVersion: String(
+        current?.engineVersion || "unknown"
+      ),
+      beforeCount: before.size,
+      afterCount: after.size,
+      added: Object.freeze(added),
+      removed: Object.freeze(removed),
+      changed: Object.freeze(changed)
+    });
+  }
+
+  Object.defineProperty(
+    window,
+    "RMLCatalogCompatibility",
+    {
+      value: Object.freeze({
+        version: 1,
+        compare: compareApiCatalogs
+      }),
+      writable: false,
+      enumerable: true,
+      configurable: true
+    }
+  );
+
   function installCatalog(catalog) {
+    const previous =
+      window.RMLResoniteApiCatalog ||
+      window.RMLFrooxComponentCatalog ||
+      null;
+    const compatibility = previous
+      ? compareApiCatalogs(
+          previous,
+          catalog
+        )
+      : null;
+
+    Object.defineProperty(
+      window,
+      "RMLCatalogDiffReport",
+      {
+        value: compatibility,
+        writable: false,
+        enumerable: true,
+        configurable: true
+      }
+    );
     for (const property of [
       "RMLResoniteApiCatalog",
       "RMLFrooxComponentCatalog"
@@ -300,6 +574,17 @@
         }
       )
     );
+
+    if (compatibility) {
+      document.dispatchEvent(
+        new CustomEvent(
+          "rml-catalog:compatibility",
+          {
+            detail: compatibility
+          }
+        )
+      );
+    }
 
     return catalog;
   }
@@ -1462,7 +1747,8 @@
     const add = (
       operatorId,
       inputPorts = [],
-      outputPorts = []
+      outputPorts = [],
+      apiContract = null
     ) => {
       const id = String(
         operatorId || ""
@@ -1475,6 +1761,12 @@
       if (!requirements.has(id)) {
         requirements.set(id, {
           operatorId: id,
+          apiContract:
+            apiContract &&
+            typeof apiContract === "object" &&
+            !Array.isArray(apiContract)
+              ? apiContract
+              : null,
           inputPorts: new Set(),
           outputPorts: new Set()
         });
@@ -1528,7 +1820,8 @@
       add(
         value?.operatorId,
         value?.inputPorts,
-        value?.outputPorts
+        value?.outputPorts,
+        value?.apiContract
       );
     }
 
@@ -1536,6 +1829,8 @@
       .map(requirement => ({
         operatorId:
           requirement.operatorId,
+        apiContract:
+          requirement.apiContract,
         inputPorts:
           [...requirement.inputPorts]
             .sort((left, right) =>
@@ -1748,6 +2043,28 @@
         requirement =>
           requirement.operatorId
       );
+    const migrations = {};
+    const collectMigrations = report => {
+      const values =
+        report?.migrations;
+
+      if (
+        !values ||
+        typeof values !== "object" ||
+        Array.isArray(values)
+      ) {
+        return;
+      }
+
+      for (const [from, to] of
+        Object.entries(values)) {
+        const source = String(from || "").trim();
+        const target = String(to || "").trim();
+        if (source && target) {
+          migrations[source] = target;
+        }
+      }
+    };
 
     if (requiredNodeIds.length === 0) {
       await modNodesReady;
@@ -1781,9 +2098,11 @@
           );
 
     if (missing.length > 0) {
-      await reconcileLegacyRequiredApiNodes(
+      collectMigrations(
+        await reconcileLegacyRequiredApiNodes(
         requiredNodes,
         catalog
+        )
       );
       report =
         window.RMLApiNodeFactoryReport;
@@ -1829,6 +2148,10 @@
           String(
             catalog.catalogSource || ""
           ),
+        migrations:
+          Object.freeze({
+            ...migrations
+          }),
         liveFallbackAttempted: false
       });
     }
@@ -1899,9 +2222,11 @@
       );
     }
 
-    await reconcileLegacyRequiredApiNodes(
+    collectMigrations(
+      await reconcileLegacyRequiredApiNodes(
       requiredNodes,
       catalog
+      )
     );
     report =
       window.RMLApiNodeFactoryReport;
@@ -1942,6 +2267,10 @@
           catalog.engineVersion || ""
         ),
       source: "scanner",
+      migrations:
+        Object.freeze({
+          ...migrations
+        }),
       liveFallbackAttempted: true
     });
   }
@@ -2008,6 +2337,11 @@
           modNodesUrl,
           "mod-nodes",
           "mod_nodes.js"
+        );
+        await loadScript(
+          visualCSharpUrl,
+          "visual-csharp-nodes",
+          "visual_csharp.js"
         );
 
         return true;

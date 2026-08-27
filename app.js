@@ -36,7 +36,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "stable-universal-animated-runtime-graph-icon-20260827-v417f1";
+  "complete-visual-csharp-surface-20260827-v600f1";
 
 function exposeRmlBuilderBuildId() {
   document.documentElement.dataset
@@ -356,6 +356,7 @@ function requestGeneratedOutputUpdate() {
     elements.codeSummary.textContent =
       "Large runtime graph loaded · generated files are being refreshed";
   }
+
   updateGeneratedOutput();
 }
 
@@ -511,7 +512,7 @@ function projectIoWorkerInstance() {
   try {
     const worker = new Worker(
       new URL(
-        "project_io_worker.js?v=7-animated-runtime-graph-icon-v417f1",
+        "project_io_worker.js?v=9-complete-visual-csharp-v600f1",
         APP_SCRIPT_BASE_URL
       ),
       {
@@ -951,7 +952,7 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "graph_codegen_worker.js?v=33-animated-runtime-graph-icon-v417f1",
+      "graph_codegen_worker.js?v=35-complete-visual-csharp-v600f1",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -6347,7 +6348,6 @@ function projectIdFromSource(source) {
   if (explicit) {
     return explicit;
   }
-
   return `legacy-${projectContentFingerprint(source)}`;
 }
 
@@ -21927,6 +21927,12 @@ function projectRequiredCatalogNodes(
     if (!requirements.has(operatorId)) {
       requirements.set(operatorId, {
         operatorId,
+        apiContract:
+          node?.apiContract &&
+          typeof node.apiContract === "object" &&
+          !Array.isArray(node.apiContract)
+            ? clone(node.apiContract)
+            : null,
         inputPorts: new Set(),
         outputPorts: new Set()
       });
@@ -21975,6 +21981,8 @@ function projectRequiredCatalogNodes(
     .map(requirement => ({
       operatorId:
         requirement.operatorId,
+      apiContract:
+        requirement.apiContract,
       inputPorts:
         [...requirement.inputPorts]
           .filter(Boolean)
@@ -22133,6 +22141,29 @@ async function ensureProjectRuntimePrerequisites(
         65000,
         "The live Resonite API catalog did not become ready within 65 seconds. The JSON was not loaded."
       );
+
+    const migrations =
+      catalogResult?.migrations &&
+      typeof catalogResult.migrations === "object" &&
+      !Array.isArray(catalogResult.migrations)
+        ? catalogResult.migrations
+        : {};
+
+    for (const node of
+      Array.isArray(graph.nodes)
+        ? graph.nodes
+        : []) {
+      const migratedOperatorId = String(
+        migrations[
+          String(node?.operatorId || "")
+        ] || ""
+      ).trim();
+
+      if (migratedOperatorId) {
+        node.operatorId =
+          migratedOperatorId;
+      }
+    }
   }
 
   if (

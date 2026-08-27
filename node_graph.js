@@ -13,7 +13,7 @@
     )
       ? RML_GRAPH_REQUESTED_TEST_STORAGE_SCOPE
       : "rml-configuration-builder-visual-test-default";
-  const GRAPH_SCHEMA_VERSION = 20;
+  const GRAPH_SCHEMA_VERSION = 22;
   const GRAPH_STAGE_WIDTH = 5200;
   const GRAPH_STAGE_HEIGHT = 3400;
   const GRAPH_MIN_ZOOM = 0.005;
@@ -2940,6 +2940,13 @@
           kind === "operator"
             ? operatorId
             : undefined,
+        apiContract:
+          kind === "operator" &&
+          source.apiContract &&
+          typeof source.apiContract === "object" &&
+          !Array.isArray(source.apiContract)
+            ? clone(source.apiContract)
+            : undefined,
         x: clamp(
           finiteNumber(source.x, 120),
           -GRAPH_COORDINATE_LIMIT,
@@ -3170,6 +3177,95 @@
     return result;
   }
 
+  function portableApiContract(
+    definition
+  ) {
+    const contract =
+      definition?.apiVerification;
+
+    if (
+      definition?.catalogGenerated !==
+        true ||
+      !contract ||
+      typeof contract !== "object" ||
+      !String(contract.ownerType || "").trim() ||
+      !String(contract.kind || "").trim()
+    ) {
+      return null;
+    }
+
+    const normalizePort = port => ({
+      id: String(port?.id || ""),
+      type: String(port?.type || ""),
+      typeVar: String(port?.typeVar || ""),
+      generic:
+        port?.generic === true,
+      optional:
+        port?.optional === true
+    });
+
+    return {
+      schemaVersion: 2,
+      kind: String(contract.kind || ""),
+      ownerType: String(
+        contract.ownerType || ""
+      ),
+      memberName: String(
+        contract.memberName || ""
+      ),
+      signature: String(
+        contract.signature || ""
+      ),
+      parameters:
+        Array.isArray(contract.parameters)
+          ? clone(contract.parameters)
+          : [],
+      returnType: String(
+        contract.returnType || "System.Void"
+      ),
+      isStatic:
+        contract.isStatic === true,
+      genericArity: Math.max(
+        0,
+        Number(contract.genericArity) || 0
+      ),
+      runtimeBound:
+        contract.runtimeBound === true,
+      canonicalOperatorId: String(
+        definition.canonicalOperatorId ||
+        contract.nodeId ||
+        ""
+      ),
+      inputPorts:
+        (Array.isArray(definition.inputs)
+          ? definition.inputs
+          : []).map(normalizePort),
+      outputPorts:
+        (Array.isArray(definition.outputs)
+          ? definition.outputs
+          : []).map(normalizePort)
+    };
+  }
+
+  function portableApiContractForNode(
+    node
+  ) {
+    const definition =
+      OPERATOR_DEFINITIONS[
+        node?.operatorId
+      ];
+
+    return portableApiContract(
+      definition
+    ) || (
+      node?.apiContract &&
+      typeof node.apiContract === "object" &&
+      !Array.isArray(node.apiContract)
+        ? clone(node.apiContract)
+        : null
+    );
+  }
+
   function graphSerializableState() {
     return {
       version: GRAPH_SCHEMA_VERSION,
@@ -3202,7 +3298,17 @@
         ...(node.kind === "operator"
           ? {
               operatorId:
-                node.operatorId
+                node.operatorId,
+              ...(portableApiContractForNode(
+                node
+              )
+                ? {
+                    apiContract:
+                      portableApiContractForNode(
+                        node
+                      )
+                  }
+                : {})
             }
           : {}),
         x: node.x,
@@ -9126,6 +9232,8 @@
 
     let impulseMethodByPort =
       new Map();
+    let inlineImpulseMethodByPort =
+      new Map();
     let entryMethodByPort =
       new Map();
 
@@ -9245,6 +9353,13 @@
         impulseMethodByPort.get(
           `${nodeId}:${portId}`
         ) || "",
+      inlineMethod: (
+        nodeId,
+        portId
+      ) =>
+        inlineImpulseMethodByPort.get(
+          `${nodeId}:${portId}`
+        ) || "",
       entryMethod: (
         nodeId,
         portId
@@ -9330,7 +9445,9 @@
             content: file.content,
             type:
               file.type ||
-              "text/plain;charset=utf-8"
+              "text/plain;charset=utf-8",
+            skipHeuristicDiagnostics:
+              file.skipHeuristicDiagnostics === true
           });
         }
       },
@@ -9872,6 +9989,11 @@
                 node.id,
                 spec.id
               )}`,
+            inlineMethod:
+              `Inline${graphCsMethodToken(
+                node.id,
+                spec.id
+              )}`,
             queuedMethod:
               `QueueEmit${graphCsMethodToken(
                 node.id,
@@ -9893,6 +10015,16 @@
           item => [
             `${item.node.id}:${item.spec.id}`,
             item.queuedMethod
+          ]
+        )
+      );
+
+    inlineImpulseMethodByPort =
+      new Map(
+        impulseOutputs.map(
+          item => [
+            `${item.node.id}:${item.spec.id}`,
+            item.inlineMethod
           ]
         )
       );
@@ -10209,7 +10341,8 @@
 
     const targetAction = (
       connection,
-      deferFanOutContinuations = false
+      deferFanOutContinuations = false,
+      inlineContinuations = false
     ) => {
       const targetNode =
         nodeById.get(
@@ -10232,7 +10365,9 @@
 
       const emit = portId => {
         const method =
-          impulseMethodByPort.get(
+          (inlineContinuations
+            ? inlineImpulseMethodByPort
+            : impulseMethodByPort).get(
             `${targetNode.id}:${portId}`
           );
 
@@ -10461,6 +10596,59 @@ ${actions.length > 0
                 "${failureSource}",
                 exception);
         }
+    }`;
+      }).join("\n\n");
+
+    const inlineImpulseMethods =
+      impulseOutputs.map(item => {
+        const sourceRef = {
+          node: item.node,
+          definition:
+            nodeDefinition(item.node),
+          spec: item.spec,
+          direction: "output"
+        };
+        const connections =
+          graph.connections
+            .filter(connection =>
+              connection.fromNode === item.node.id &&
+              connection.fromPort === item.spec.id
+            )
+            .filter(connection => {
+              if (!item.reactiveConfiguration) {
+                return true;
+              }
+              return isConfigurationReactionConnection(
+                sourceRef,
+                findPortSpec(
+                  connection.toNode,
+                  connection.toPort,
+                  "input"
+                )
+              );
+            });
+        const actions = connections
+          .map(connection =>
+            targetAction(
+              connection,
+              false,
+              true
+            ).immediate
+          )
+          .filter(Boolean);
+
+        return `    private static void ${item.inlineMethod}()
+    {
+${actions.length > 0
+  ? actions
+      .map(action =>
+        action
+          .split("\n")
+          .map(line => `        ${line}`)
+          .join("\n")
+      )
+      .join("\n")
+  : "        // No connected impulse targets."}
     }`;
       }).join("\n\n");
 
@@ -11718,7 +11906,7 @@ ${directDynamicChoiceFields.length > 0
             value);
     }
 
-${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods ? `${queuedImpulseMethods}\n\n` : ""}${impulseMethods || "    // No impulse outputs are present."}${extensionMembersCode ? `\n\n${extensionMembersCode}` : ""}
+${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods ? `${queuedImpulseMethods}\n\n` : ""}${inlineImpulseMethods ? `${inlineImpulseMethods}\n\n` : ""}${impulseMethods || "    // No impulse outputs are present."}${extensionMembersCode ? `\n\n${extensionMembersCode}` : ""}
 
     private static T GraphAdd<T>(T left, T right)
     {
@@ -12524,13 +12712,21 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           .toLowerCase()
           .endsWith(".cs")
       ) {
-        diagnostics.push(
-          ...generatedSourceDiagnostics(
-            file.content,
-            file.name,
-            { checkUnresolved: false }
-          )
-        );
+        if (file.skipHeuristicDiagnostics === true) {
+          if (!String(file.content || "").trim()) {
+            diagnostics.push(
+              `Visual C# source file '${file.name}' is empty.`
+            );
+          }
+        } else {
+          diagnostics.push(
+            ...generatedSourceDiagnostics(
+              file.content,
+              file.name,
+              { checkUnresolved: false }
+            )
+          );
+        }
       }
     }
 
@@ -15600,7 +15796,6 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
   function unpackToOutline() {
     cancelInteraction(true);
-
     commitPresentationPage(
       "configuration-outline",
       "runtime-graph-back"
@@ -17343,6 +17538,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       id: makeId("graph-node"),
       kind: "operator",
       operatorId,
+      apiContract:
+        portableApiContract(
+          definition
+        ),
       x: position.x,
       y: position.y,
       width: null,
@@ -25507,7 +25706,6 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       graph.viewport
     );
     graphHybridRenderer?.drawNow?.();
-
     dom.wires.replaceChildren(
       ...svgItems,
       ...handles
@@ -31048,7 +31246,6 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       graph = sanitizeGraphState(incoming);
       graph.lastOpenPage =
         savedPresentationPage();
-
       runtimeGraphViewActive = false;
       updateGraphCatalogReadiness();
       resetGraphRenderCaches();
@@ -31698,7 +31895,6 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         revision;
       refreshAfterNodeModulesReady();
     }
-
     restoreSavedPresentationIfReady();
   }
 

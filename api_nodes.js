@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const FACTORY_VERSION = 12;
+  const FACTORY_VERSION = 13;
   const API_VERIFICATION_SCHEMA_VERSION = 1;
   const ADVANCED_GROUP = "Advanced / Raw C#";
   const API_GROUPS = Object.freeze({
@@ -190,7 +190,7 @@
     "RMLApiNodeFactoryController",
     {
       value: Object.freeze({
-        version: 2,
+        version: 3,
         rebuild(catalog) {
           const previous =
             factoryBuildPromise;
@@ -1323,10 +1323,19 @@
 
     legacyOperatorResolver =
       async requiredNodes => {
-        const requiredIds = new Set(
+        const requirements =
           (Array.isArray(requiredNodes)
             ? requiredNodes
             : [])
+            .filter(value =>
+              String(
+                typeof value === "string"
+                  ? value
+                  : value?.operatorId || ""
+              ).trim().startsWith("api.")
+            );
+        const requiredIds = new Set(
+          requirements
             .map(value =>
               String(
                 typeof value === "string"
@@ -1343,6 +1352,170 @@
           requiredIds.size;
         let resolved = 0;
         let attempts = 0;
+        const migrations = {};
+        const unresolvedDetails = {};
+
+        const normalizedContractType = value =>
+          normalizeCsType(
+            String(value || "")
+              .replace(/&$/, "")
+          );
+        const semanticContractKey = contract => {
+          if (
+            !contract ||
+            typeof contract !== "object" ||
+            Array.isArray(contract)
+          ) {
+            return "";
+          }
+
+          const ownerType =
+            normalizedContractType(
+              contract.ownerType
+            );
+          const kind = String(
+            contract.kind || ""
+          ).trim();
+
+          if (!ownerType || !kind) {
+            return "";
+          }
+
+          return JSON.stringify({
+            kind,
+            ownerType,
+            memberName: String(
+              contract.memberName || ""
+            ),
+            parameters:
+              (Array.isArray(contract.parameters)
+                ? contract.parameters
+                : []).map((parameter, index) => ({
+                  position: Math.max(
+                    0,
+                    Number(parameter?.position) || index
+                  ),
+                  type: normalizedContractType(
+                    parameter?.type
+                  ),
+                  isByRef:
+                    parameter?.isByRef === true,
+                  isOut:
+                    parameter?.isOut === true,
+                  isOptional:
+                    parameter?.isOptional === true
+                })),
+            returnType:
+              normalizedContractType(
+                contract.returnType ||
+                "System.Void"
+              ),
+            isStatic:
+              contract.isStatic === true,
+            genericArity: Math.max(
+              0,
+              Number(contract.genericArity) || 0
+            ),
+            runtimeBound:
+              contract.runtimeBound === true
+          });
+        };
+        const semanticIndex = new Map();
+
+        for (const [id, definition] of
+          Object.entries(definitions)) {
+          if (
+            definition?.catalogGenerated !== true ||
+            definition?.legacyCatalogAlias === true
+          ) {
+            continue;
+          }
+
+          const key = semanticContractKey(
+            definition.apiVerification
+          );
+          if (!key) continue;
+          if (!semanticIndex.has(key)) {
+            semanticIndex.set(key, []);
+          }
+          semanticIndex.get(key).push(id);
+        }
+
+        for (const requirement of
+          requirements) {
+          const oldId = String(
+            typeof requirement === "string"
+              ? requirement
+              : requirement?.operatorId || ""
+          ).trim();
+
+          if (!requiredIds.has(oldId)) {
+            continue;
+          }
+
+          const key = semanticContractKey(
+            typeof requirement === "string"
+              ? null
+              : requirement?.apiContract
+          );
+          const candidates = key
+            ? semanticIndex.get(key) || []
+            : [];
+          const inputPorts = new Set(
+            Array.isArray(requirement?.inputPorts)
+              ? requirement.inputPorts.map(String)
+              : []
+          );
+          const outputPorts = new Set(
+            Array.isArray(requirement?.outputPorts)
+              ? requirement.outputPorts.map(String)
+              : []
+          );
+          const compatible = candidates.filter(
+            candidateId => {
+              const candidate =
+                definitions[candidateId];
+              const availableInputs = new Set(
+                (candidate?.inputs || []).map(port =>
+                  String(port?.id || "")
+                )
+              );
+              const availableOutputs = new Set(
+                (candidate?.outputs || []).map(port =>
+                  String(port?.id || "")
+                )
+              );
+              return [...inputPorts].every(id =>
+                availableInputs.has(id)
+              ) && [...outputPorts].every(id =>
+                availableOutputs.has(id)
+              );
+            }
+          );
+
+          if (
+            compatible.length === 1 &&
+            registerLegacyAlias(
+              oldId,
+              {
+                canonicalId: compatible[0]
+              }
+            )
+          ) {
+            requiredIds.delete(oldId);
+            resolved += 1;
+            migrations[oldId] =
+              compatible[0];
+          } else if (candidates.length > 0) {
+            unresolvedDetails[oldId] =
+              compatible.length > 1
+                ? `semantic contract is ambiguous (${compatible.length} candidates)`
+                : "semantic member exists but its referenced port contract changed";
+          } else if (key) {
+            unresolvedDetails[oldId] =
+              "no structurally identical API member exists in the current catalog";
+          }
+        }
 
         const scannedUntil = new Map();
         const scanStages = [
@@ -1404,6 +1577,10 @@
                   legacyId
                 );
                 resolved += 1;
+                migrations[legacyId] =
+                  definitions[legacyId]
+                    ?.canonicalOperatorId ||
+                  legacyId;
               }
 
               if (attempts % 4096 === 0) {
@@ -1444,7 +1621,15 @@
           requested,
           resolved,
           unresolved: requiredIds.size,
-          attempts
+          attempts,
+          migrations:
+            Object.freeze({
+              ...migrations
+            }),
+          unresolvedDetails:
+            Object.freeze({
+              ...unresolvedDetails
+            })
         });
       };
 
