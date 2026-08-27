@@ -25706,6 +25706,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       graph.viewport
     );
     graphHybridRenderer?.drawNow?.();
+
     dom.wires.replaceChildren(
       ...svgItems,
       ...handles
@@ -31246,6 +31247,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       graph = sanitizeGraphState(incoming);
       graph.lastOpenPage =
         savedPresentationPage();
+
       runtimeGraphViewActive = false;
       updateGraphCatalogReadiness();
       resetGraphRenderCaches();
@@ -31895,6 +31897,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         revision;
       refreshAfterNodeModulesReady();
     }
+
     restoreSavedPresentationIfReady();
   }
 

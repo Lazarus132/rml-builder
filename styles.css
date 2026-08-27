@@ -2166,6 +2166,137 @@ footer strong {
   grid-column: 1 / -1;
 }
 
+.project-csharp-import-expert {
+  overflow: hidden;
+  border: 1px solid rgba(239, 177, 87, 0.42);
+  border-radius: 9px;
+  background: rgba(239, 177, 87, 0.055);
+}
+
+.project-csharp-import-expert > summary {
+  position: relative;
+  padding: 12px 38px 12px 14px;
+  color: #efc684;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.035em;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.project-csharp-import-expert > summary::-webkit-details-marker {
+  display: none;
+}
+
+.project-csharp-import-expert > summary::after {
+  content: "+";
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  transform: translateY(-50%);
+  color: #efb157;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.project-csharp-import-expert[open] > summary::after {
+  content: "−";
+}
+
+.project-csharp-import-body {
+  display: grid;
+  gap: 11px;
+  padding: 0 13px 13px;
+  border-top: 1px solid rgba(239, 177, 87, 0.2);
+}
+
+.project-csharp-import-warning {
+  margin-top: 12px;
+  padding: 11px 12px;
+  border-left: 3px solid #efb157;
+  border-radius: 6px;
+  background: rgba(239, 177, 87, 0.09);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.project-csharp-import-warning strong {
+  color: #f4d197;
+}
+
+.project-csharp-import-acknowledgement {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+  cursor: pointer;
+}
+
+.project-csharp-import-acknowledgement input {
+  margin: 2px 0 0;
+}
+
+.project-csharp-import-button {
+  width: 100%;
+}
+
+.project-csharp-import-button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.project-csharp-import-pending {
+  display: grid;
+  gap: 9px;
+  padding: 11px;
+  border: 1px solid rgba(239, 177, 87, 0.32);
+  border-radius: 7px;
+  background: rgba(15, 12, 22, 0.54);
+}
+
+.project-csharp-import-pending[hidden] {
+  display: none;
+}
+
+.project-csharp-import-pending p,
+.project-csharp-import-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.project-csharp-import-pending-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.project-csharp-import-pending-actions .button {
+  width: 100%;
+}
+
+.project-csharp-import-status:empty {
+  display: none;
+}
+
+.project-csharp-import-status.success {
+  color: var(--green);
+}
+
+.project-csharp-import-status.error {
+  color: var(--red);
+}
+
+.export-hint.error {
+  color: var(--red);
+}
+
 .project-file-status {
   min-height: 17px;
   margin: 0;

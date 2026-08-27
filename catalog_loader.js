@@ -26,7 +26,7 @@
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "visual_csharp.js?v=1-complete-visual-csharp-v600f1",
+    "visual_csharp.js?v=5-csharp14-roslyn-wasm-v602f3",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(

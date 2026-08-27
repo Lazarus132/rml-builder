@@ -17,7 +17,7 @@
     getNodeDefinition
   } = registry;
 
-  const VERSION = 1;
+  const VERSION = 2;
   const SYNTAX_TYPE = "csharpSyntax";
   const GROUPS = {
     project: "Visual C# · Projects",
@@ -107,7 +107,7 @@
   };
 
   const KEYWORDS = new Set((
-    "abstract as base bool break byte case catch char checked class const continue decimal default delegate do double else enum event explicit extern false finally fixed float for foreach goto if implicit in int interface internal is lock long namespace new null object operator out override params private protected public readonly ref return sbyte sealed short sizeof stackalloc static string struct switch this throw true try typeof uint ulong unchecked unsafe ushort using virtual void volatile while add alias and ascending async await by descending dynamic equals file from get global group init into join let managed nameof nint not notnull nuint on or orderby partial record remove required scoped select set unmanaged value var when where with yield"
+    "abstract as base bool break byte case catch char checked class const continue decimal default delegate do double else enum event explicit extern false finally fixed float for foreach goto if implicit in int interface internal is lock long namespace new null object operator out override params private protected public readonly ref return sbyte sealed short sizeof stackalloc static string struct switch this throw true try typeof uint ulong unchecked unsafe ushort using virtual void volatile while add alias allows and args ascending async await by descending dynamic equals extension field file from get global group init into join let managed nameof nint not notnull nuint on or orderby partial record remove required scoped select set unmanaged value var when where with yield"
   ).split(/\s+/));
   const RESERVED_KEYWORDS = new Set((
     "abstract as base bool break byte case catch char checked class const continue decimal default delegate do double else enum event explicit extern false finally fixed float for foreach goto if implicit in int interface internal is lock long namespace new null object operator out override params private protected public readonly ref return sbyte sealed short sizeof stackalloc static string struct switch this throw true try typeof uint ulong unchecked unsafe ushort using virtual void volatile while"
@@ -174,7 +174,7 @@
     const candidate = String(value || "");
     if (!candidate.startsWith("'") || !candidate.endsWith("'") || candidate.length < 3) return false;
     const body = candidate.slice(1, -1);
-    if (/^\\(?:[0abfnrtv\\'"]|x[0-9a-fA-F]{1,4}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8})$/.test(body)) return true;
+    if (/^\\(?:[0abefnrtv\\'"]|x[0-9a-fA-F]{1,4}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8})$/.test(body)) return true;
     return !/[\\'\r\n]/.test(body) && Array.from(body).length === 1;
   }
 
@@ -185,6 +185,7 @@
     .replace(/\u0007/g, "\\a")
     .replace(/\u0008/g, "\\b")
     .replace(/\u000c/g, "\\f")
+    .replace(/\u001b/g, "\\e")
     .replace(/\n/g, "\\n")
     .replace(/\r/g, "\\r")
     .replace(/\t/g, "\\t")
@@ -445,8 +446,8 @@
         }
         case "directive": {
           const candidate = value.trim();
-          if (!/^#[A-Za-z]+(?:\s[^\r\n]*)?$/.test(candidate)) {
-            ctx.diagnostic(`${ctx.title}: preprocessor directive must be a single line beginning with '#'.`);
+          if (!/^(?:#[A-Za-z]+(?:[ \t]+[^\r\n]*)?|#![^\r\n]*|#:[^\r\n]*)$/.test(candidate)) {
+            ctx.diagnostic(`${ctx.title}: directive must be one valid C# 14 directive line beginning with '#', '#!' or '#:'.`);
             return "#error Invalid_directive";
           }
           return candidate;
@@ -455,6 +456,79 @@
           ctx.diagnostic(`${ctx.title}: unknown token kind '${kind}'.`);
           return "";
       }
+    }
+  });
+
+  registerSyntaxNode("csharp.roslynNode", {
+    title: "Roslyn C# 14 Syntax",
+    group: GROUPS.syntax,
+    symbol: "AST",
+    description: "One grammar node produced by the bundled .NET 10 Roslyn parser. Children preserve the exact C# 14 syntax order.",
+    parameters: [
+      text("syntaxKind", "Roslyn SyntaxKind", "CompilationUnit"),
+      text("languageVersion", "Language version", "14.0"),
+      number("variadicInputCount", "Child count", 2)
+    ],
+    inputs: [syntaxInput("a", "Child A"), syntaxInput("b", "Child B")],
+    variadicInputs: {
+      minimum: 2,
+      defaultCount: 2,
+      maximum: 512,
+      template: syntaxInput("a", "Child A")
+    },
+    syntaxRender(ctx) {
+      const kind = String(parameter(ctx.node, "syntaxKind", "")).trim();
+      if (parameter(ctx.node, "languageVersion", "") !== "14.0") {
+        ctx.diagnostic(`${ctx.title}: only the fixed C# 14 grammar contract is accepted.`);
+      }
+      if (!/^[A-Za-z][A-Za-z0-9]*$/.test(kind)) {
+        ctx.diagnostic(`${ctx.title}: '${kind}' is not a valid Roslyn SyntaxKind name.`);
+      }
+      return ctx.variadic().join("");
+    }
+  });
+
+  registerSyntaxNode("csharp.roslynToken", {
+    title: "Roslyn C# 14 Token",
+    group: GROUPS.syntax,
+    symbol: "RTOK",
+    description: "One exact token certified by the bundled Roslyn C# 14 parser.",
+    parameters: [
+      text("syntaxKind", "Roslyn SyntaxKind", "IdentifierToken"),
+      code("value", "Exact token", "value", "Exactly one Roslyn-validated token; not a source block.", 2),
+      text("signature", "Validation signature", "")
+    ],
+    syntaxRender(ctx) {
+      const kind = String(parameter(ctx.node, "syntaxKind", ""));
+      const value = String(parameter(ctx.node, "value", ""));
+      const signature = String(parameter(ctx.node, "signature", ""));
+      if (signature !== stableHash(`token\0${kind}\0${value}`)) {
+        ctx.diagnostic(`${ctx.title}: token text or SyntaxKind changed after Roslyn validation. Reimport or revalidate the C# 14 source.`);
+        return "";
+      }
+      return value;
+    }
+  });
+
+  registerSyntaxNode("csharp.roslynTrivia", {
+    title: "Roslyn C# 14 Trivia",
+    group: GROUPS.syntax,
+    symbol: "RTRIV",
+    description: "One exact whitespace, comment or directive trivia item certified by Roslyn.",
+    parameters: [
+      text("syntaxKind", "Roslyn SyntaxKind", "WhitespaceTrivia"),
+      code("value", "Exact trivia", " ", "Exactly one Roslyn-validated trivia item.", 2),
+      text("signature", "Validation signature", "")
+    ],
+    syntaxRender(ctx) {
+      const kind = String(parameter(ctx.node, "syntaxKind", ""));
+      const value = String(parameter(ctx.node, "value", ""));
+      const signature = String(parameter(ctx.node, "signature", ""));
+      if (signature !== stableHash(`trivia\0${kind}\0${value}`)) {
+        ctx.diagnostic(`${ctx.title}: trivia text or SyntaxKind changed after Roslyn validation. Reimport or revalidate the C# 14 source.`);
+        return "";
+      }
+      return value;
     }
   });
 
@@ -903,7 +977,7 @@
   }
 
   registerCodegenPlugin({
-    id: "visual-csharp-complete-syntax-v1",
+    id: "visual-csharp14-complete-syntax-v2",
     collect(api) {
       const nodes = Array.isArray(api.nodes) ? api.nodes : api.graph?.nodes || [];
       const incoming = api.incoming instanceof Map ? api.incoming : new Map();
@@ -1139,7 +1213,7 @@
       if (current === "'") {
         let end = cursor + 1;
         if (input[end] === "\\") {
-          const escape = /^(?:\\(?:x[0-9a-fA-F]{1,4}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|[0abfnrtv\\'"]))/u.exec(input.slice(end));
+          const escape = /^(?:\\(?:x[0-9a-fA-F]{1,4}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|[0abefnrtv\\'"]))/u.exec(input.slice(end));
           if (!escape) {
             diagnostics.push(`Invalid character escape at character ${cursor}.`);
             break;
@@ -1262,6 +1336,203 @@
     };
   }
 
+  function formatRoslynDiagnostics(diagnostics) {
+    return (Array.isArray(diagnostics) ? diagnostics : []).map(item => {
+      const location = item?.startLine > 0
+        ? `line ${item.startLine}, column ${item.startColumn || 1}`
+        : "unknown location";
+      return `${item?.id || "C#14"} at ${location}: ${item?.message || "Invalid C# 14 syntax."}`;
+    });
+  }
+
+  function roslynRootFullText(root) {
+    if (!root || !Array.isArray(root.children)) return null;
+    const parts = [];
+    const stack = [{ type: "node", node: root }];
+    while (stack.length > 0) {
+      const item = stack.pop();
+      if (item.type === "text") {
+        parts.push(item.value);
+        continue;
+      }
+      if (item.type === "node") {
+        if (!item.node || !Array.isArray(item.node.children)) return null;
+        for (let index = item.node.children.length - 1; index >= 0; index -= 1) {
+          const child = item.node.children[index];
+          if (child?.type === "node" && child.node) {
+            stack.push({ type: "node", node: child.node });
+          } else if (child?.type === "token" && child.token) {
+            stack.push({ type: "token", token: child.token });
+          } else {
+            return null;
+          }
+        }
+        continue;
+      }
+      if (item.type !== "token" || !item.token) return null;
+      const token = item.token;
+      const trailing = Array.isArray(token.trailing) ? token.trailing : [];
+      const leading = Array.isArray(token.leading) ? token.leading : [];
+      for (let index = trailing.length - 1; index >= 0; index -= 1) {
+        stack.push({ type: "text", value: String(trailing[index]?.text || "") });
+      }
+      if (token.isMissing !== true) {
+        stack.push({ type: "text", value: String(token.text || "") });
+      }
+      for (let index = leading.length - 1; index >= 0; index -= 1) {
+        stack.push({ type: "text", value: String(leading[index]?.text || "") });
+      }
+    }
+    return parts.join("");
+  }
+
+  function createRoslynImportFragment(source, parseResult, options = {}) {
+    const sourceText = String(source ?? "");
+    const normalizedSource = normalize(sourceText);
+    if (!parseResult || parseResult.ok !== true || parseResult.languageVersion !== "14.0" || !parseResult.root) {
+      return {
+        ok: false,
+        diagnostics: formatRoslynDiagnostics(parseResult?.diagnostics).length
+          ? formatRoslynDiagnostics(parseResult.diagnostics)
+          : ["The bundled Roslyn runtime did not certify this source as C# 14."],
+        nodes: [], connections: []
+      };
+    }
+    const certifiedSource = roslynRootFullText(parseResult.root);
+    if (certifiedSource === null || certifiedSource !== sourceText) {
+      return {
+        ok: false,
+        diagnostics: [
+          "The Roslyn AST does not reproduce the selected source exactly. Import is blocked instead of accepting an unrelated or incomplete syntax tree."
+        ],
+        nodes: [], connections: []
+      };
+    }
+
+    const fileName = String(options.fileName || "Imported.cs").trim();
+    const projectId = String(options.projectId || "main").trim() || "main";
+    const prefix = String(options.prefix || `csharp14-roslyn-${stableHash(`${fileName}\0${normalizedSource}`)}`)
+      .replace(/[^A-Za-z0-9_-]/g, "-");
+    const nodes = [];
+    const connections = [];
+    let nodeSequence = 0;
+    let edgeSequence = 0;
+    const nextNodeId = label => `${prefix}-${label}-${++nodeSequence}`;
+    const nextEdgeId = () => `${prefix}-edge-${++edgeSequence}`;
+    const portId = index => index < 26 ? String.fromCharCode(97 + index) : `input${index + 1}`;
+    const addNode = (operatorId, parameters, depth = 0, label = "") => {
+      const id = nextNodeId(operatorId.split(".").pop());
+      const index = nodes.length;
+      nodes.push({
+        id,
+        kind: "operator",
+        operatorId,
+        x: 180 + (depth % 10) * 350 + Math.floor(index / 256) * 70,
+        y: 180 + (index % 256) * 150,
+        width: null,
+        height: null,
+        label: String(label || "").replace(/\s+/g, " ").slice(0, 64),
+        parameters
+      });
+      return id;
+    };
+    const connect = (fromNode, toNode, toPort) => connections.push({
+      id: nextEdgeId(), fromNode, fromPort: "syntax", toNode, toPort,
+      points: [], branchFrom: null
+    });
+
+    const collapseChildren = (childIds, depth, label) => {
+      let current = childIds;
+      let generation = 0;
+      while (current.length > 512) {
+        const next = [];
+        for (let index = 0; index < current.length; index += 32) {
+          const chunk = current.slice(index, index + 32);
+          if (chunk.length === 1) { next.push(chunk[0]); continue; }
+          const sequenceId = addNode("csharp.sequence", {
+            separator: "none",
+            variadicInputCount: chunk.length
+          }, depth + generation + 1, `${label} · continuation`);
+          chunk.forEach((childId, childIndex) => connect(childId, sequenceId, portId(childIndex)));
+          next.push(sequenceId);
+        }
+        current = next;
+        generation += 1;
+      }
+      return current;
+    };
+
+    const addTrivia = (trivia, depth) => {
+      const value = String(trivia?.text || "");
+      if (!value) return null;
+      const kind = String(trivia?.kind || "WhitespaceTrivia");
+      return addNode("csharp.roslynTrivia", {
+        syntaxKind: kind,
+        value,
+        signature: stableHash(`trivia\0${kind}\0${value}`)
+      }, depth, kind);
+    };
+
+    const addTokenParts = (token, depth) => {
+      const ids = [];
+      for (const trivia of token?.leading || []) {
+        const id = addTrivia(trivia, depth);
+        if (id) ids.push(id);
+      }
+      if (token && token.isMissing !== true) {
+        const kind = String(token.kind || "IdentifierToken");
+        const value = String(token.text || "");
+        ids.push(addNode("csharp.roslynToken", {
+          syntaxKind: kind,
+          value,
+          signature: stableHash(`token\0${kind}\0${value}`)
+        }, depth, `${kind} ${value}`));
+      }
+      for (const trivia of token?.trailing || []) {
+        const id = addTrivia(trivia, depth);
+        if (id) ids.push(id);
+      }
+      return ids;
+    };
+
+    const addSyntaxNode = (syntaxNode, depth = 0) => {
+      let childIds = [];
+      for (const child of syntaxNode?.children || []) {
+        if (child?.type === "node" && child.node) childIds.push(addSyntaxNode(child.node, depth + 1));
+        else if (child?.type === "token" && child.token) childIds.push(...addTokenParts(child.token, depth + 1));
+      }
+      childIds = collapseChildren(childIds, depth, syntaxNode?.kind || "Syntax");
+      const syntaxKind = String(syntaxNode?.kind || "None");
+      const id = addNode("csharp.roslynNode", {
+        syntaxKind,
+        languageVersion: "14.0",
+        variadicInputCount: Math.max(2, childIds.length)
+      }, depth, syntaxKind);
+      childIds.forEach((childId, index) => connect(childId, id, portId(index)));
+      return id;
+    };
+
+    const rootSyntaxNodeId = addSyntaxNode(parseResult.root, 0);
+    const fileId = addNode("csharp.file", {
+      fileName,
+      projectId,
+      nullable: options.nullable || "inherit",
+      autoGeneratedHeader: options.autoGeneratedHeader === true
+    }, 0, fileName);
+    connect(rootSyntaxNodeId, fileId, "content");
+    return {
+      ok: true,
+      diagnostics: [],
+      nodes,
+      connections,
+      fileNodeId: fileId,
+      rootSyntaxNodeId,
+      normalizedSource,
+      parser: "Roslyn",
+      languageVersion: "14.0"
+    };
+  }
+
   function importIntoCurrentGraph(source, options = {}) {
     const host = window.RMLDynamicGraphHost;
     const state = host?.getState?.();
@@ -1288,50 +1559,191 @@
     return fragment;
   }
 
+  function importRoslynIntoCurrentGraph(source, parseResult, options = {}) {
+    const host = window.RMLDynamicGraphHost;
+    const state = host?.getState?.();
+    if (!state || !Array.isArray(state.nodes) || !Array.isArray(state.connections)) {
+      return { ok: false, diagnostics: ["The Runtime Graph is not ready."] };
+    }
+    let attempt = 0;
+    let fragment;
+    const usedIds = new Set([...state.nodes.map(node => node.id), ...state.connections.map(connection => connection.id)]);
+    do {
+      fragment = createRoslynImportFragment(source, parseResult, {
+        ...options,
+        prefix: `${options.prefix || "csharp14-roslyn-import"}-${stableHash(source)}-${attempt || 1}`
+      });
+      attempt += 1;
+    } while (fragment.ok && [...fragment.nodes, ...fragment.connections].some(item => usedIds.has(item.id)) && attempt < 100);
+    if (!fragment.ok) return fragment;
+    state.nodes.push(...fragment.nodes);
+    state.connections.push(...fragment.connections);
+    state.revision = Math.max(0, Number(state.revision) || 0) + 1;
+    state.nextSequence = Math.max(Number(state.nextSequence) || 1, state.nodes.length + state.connections.length + 1);
+    host.commit?.();
+    host.ensureActiveMode?.();
+    return fragment;
+  }
+
   function installCSharpImportControl() {
     const actions = document.querySelector?.(".project-file-actions");
     if (!actions || document.getElementById?.("project-import-csharp")) return;
+
+    const expertPanel = document.createElement("details");
+    expertPanel.className = "project-csharp-import-expert";
+
+    const summary = document.createElement("summary");
+    summary.textContent = "Expert tools · C# 14 / Roslyn conversion";
+    expertPanel.appendChild(summary);
+
+    const body = document.createElement("div");
+    body.className = "project-csharp-import-body";
+
+    const warning = document.createElement("div");
+    warning.className = "project-csharp-import-warning";
+    warning.innerHTML =
+      "<strong>Official C# 14 syntax parse—not verified program logic.</strong> " +
+      "The bundled .NET 10 Roslyn parser must accept the complete file before it is converted into AST, token and trivia nodes. " +
+      "This proves C# 14 grammar and preserves source text, but does not prove semantic compilation, compatible Resonite APIs or correct runtime behavior.";
+    body.appendChild(warning);
+
+    const acknowledgementLabel = document.createElement("label");
+    acknowledgementLabel.className = "project-csharp-import-acknowledgement";
+    const acknowledgement = document.createElement("input");
+    acknowledgement.type = "checkbox";
+    acknowledgement.id = "project-import-csharp-acknowledgement";
+    const acknowledgementText = document.createElement("span");
+    acknowledgementText.textContent =
+      "I understand that Roslyn validates C# 14 syntax only and that compile plus Resonite runtime validation are still required.";
+    acknowledgementLabel.append(acknowledgement, acknowledgementText);
+    body.appendChild(acknowledgementLabel);
+
     const button = document.createElement("button");
     button.id = "project-import-csharp";
-    button.className = "button secondary";
+    button.className = "button secondary project-csharp-import-button";
     button.type = "button";
-    button.textContent = "Import C#…";
+    button.textContent = "Choose C# 14 source…";
+    button.disabled = true;
+
     const input = document.createElement("input");
     input.type = "file";
     input.accept = ".cs,text/plain";
     input.hidden = true;
-    button.addEventListener("click", () => input.click());
+
+    const pending = document.createElement("div");
+    pending.className = "project-csharp-import-pending";
+    pending.hidden = true;
+    const pendingText = document.createElement("p");
+    const pendingActions = document.createElement("div");
+    pendingActions.className = "project-csharp-import-pending-actions";
+    const cancel = document.createElement("button");
+    cancel.className = "button secondary";
+    cancel.type = "button";
+    cancel.textContent = "Cancel";
+    const commit = document.createElement("button");
+    commit.className = "button primary";
+    commit.type = "button";
+    commit.textContent = "Import Roslyn AST graph";
+    pendingActions.append(cancel, commit);
+    pending.append(pendingText, pendingActions);
+
+    const localStatus = document.createElement("p");
+    localStatus.className = "project-csharp-import-status";
+    localStatus.setAttribute("aria-live", "polite");
+
+    let pendingImport = null;
+    const clearPending = () => {
+      pendingImport = null;
+      pending.hidden = true;
+      pendingText.textContent = "";
+      input.value = "";
+    };
+
+    acknowledgement.addEventListener("change", () => {
+      button.disabled = !acknowledgement.checked;
+      if (!acknowledgement.checked) clearPending();
+    });
+    button.addEventListener("click", () => {
+      if (acknowledgement.checked) input.click();
+    });
     input.addEventListener("change", async () => {
       const file = input.files?.[0];
       if (!file) return;
-      const status = document.getElementById?.("project-file-status");
       try {
-        const result = importIntoCurrentGraph(await file.text(), { fileName: file.name, projectId: "main" });
-        if (!result.ok) throw new Error(result.diagnostics.join("\n"));
-        if (status) {
-          status.textContent = `Imported ${file.name} as ${result.nodes.length.toLocaleString()} visual C# nodes.`;
-          status.classList.toggle("success", true);
-          status.classList.toggle("error", false);
+        const source = await file.text();
+        if (!window.RMLCSharp14Roslyn?.parse) {
+          throw new Error("The local Roslyn C# 14 runtime loader is unavailable. Reload the complete Builder package.");
         }
+        localStatus.textContent = "Loading the bundled .NET 10 Roslyn parser and validating C# 14 syntax…";
+        localStatus.classList.remove("success", "error");
+        const parseResult = await window.RMLCSharp14Roslyn.parse(source);
+        if (parseResult.ok !== true) {
+          throw new Error(formatRoslynDiagnostics(parseResult.diagnostics).join("\n"));
+        }
+        const preview = createRoslynImportFragment(source, parseResult, {
+          fileName: file.name,
+          projectId: "main",
+          prefix: `csharp14-roslyn-preview-${stableHash(source)}`
+        });
+        if (!preview.ok) throw new Error(preview.diagnostics.join("\n"));
+        pendingImport = { fileName: file.name, source, parseResult };
+        pendingText.textContent =
+          `${file.name} passed Roslyn C# 14 syntax validation and will add ${preview.nodes.length.toLocaleString()} AST, token and trivia nodes. Nothing has been imported yet.`;
+        pending.hidden = false;
+        localStatus.textContent = "Roslyn syntax validation passed. Review the conversion and confirm it explicitly.";
+        localStatus.classList.remove("success", "error");
       } catch (error) {
-        if (status) {
-          status.textContent = error instanceof Error ? error.message : String(error);
-          status.classList.toggle("success", false);
-          status.classList.toggle("error", true);
-        }
+        clearPending();
+        localStatus.textContent = error instanceof Error ? error.message : String(error);
+        localStatus.classList.toggle("success", false);
+        localStatus.classList.toggle("error", true);
       } finally {
         input.value = "";
       }
     });
-    actions.appendChild(button);
-    actions.appendChild(input);
+
+    cancel.addEventListener("click", () => {
+      clearPending();
+      localStatus.textContent = "C# conversion cancelled. The graph was not changed.";
+      localStatus.classList.remove("success", "error");
+    });
+
+    commit.addEventListener("click", () => {
+      if (!pendingImport || !acknowledgement.checked) return;
+      try {
+        const result = importRoslynIntoCurrentGraph(pendingImport.source, pendingImport.parseResult, {
+          fileName: pendingImport.fileName,
+          projectId: "main"
+        });
+        if (!result.ok) throw new Error(result.diagnostics.join("\n"));
+        const importedFileName = pendingImport.fileName;
+        clearPending();
+        acknowledgement.checked = false;
+        button.disabled = true;
+        localStatus.textContent =
+          `Imported ${importedFileName} as ${result.nodes.length.toLocaleString()} Roslyn C# 14 AST nodes. Semantic compile and Resonite runtime validation are still required.`;
+        localStatus.classList.toggle("success", true);
+        localStatus.classList.toggle("error", false);
+      } catch (error) {
+        localStatus.textContent = error instanceof Error ? error.message : String(error);
+        localStatus.classList.toggle("success", false);
+        localStatus.classList.toggle("error", true);
+      }
+    });
+
+    body.append(button, input, pending, localStatus);
+    expertPanel.appendChild(body);
+    actions.insertAdjacentElement("afterend", expertPanel);
   }
 
   const visualCSharpApi = Object.freeze({
     version: VERSION,
     lex: lexVisualCSharp,
     createImportFragment,
-    importIntoCurrentGraph
+    importIntoCurrentGraph,
+    createRoslynImportFragment,
+    importRoslynIntoCurrentGraph,
+    formatRoslynDiagnostics
   });
   Object.defineProperty(window, "RMLVisualCSharp", {
     value: visualCSharpApi,
@@ -1347,7 +1759,16 @@
   Object.defineProperty(window, "RMLVisualCSharpReport", {
     value: Object.freeze({
       version: VERSION,
-      representation: "validated-token-complete-plus-structured-nodes",
+      representation: "roslyn-csharp14-ast-token-trivia-plus-structured-nodes",
+      targetFramework: "net10.0",
+      languageVersion: "14.0",
+      grammarValidator: "bundled-dotnet10-roslyn-webassembly",
+      grammarImportFailClosed: true,
+      sourceBoundAst: true,
+      roslynAstNodes: true,
+      contextualKeywords: Object.freeze(["allows", "args", "extension", "field"]),
+      fileBasedDirectives: true,
+      escapeCharacterE: true,
       rawSourceNodes: 0,
       projectRoots: true,
       arbitraryCompilationUnits: true,

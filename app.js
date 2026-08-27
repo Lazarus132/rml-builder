@@ -36,7 +36,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "complete-visual-csharp-surface-20260827-v600f1";
+  "csharp14-roslyn-wasm-20260827-v602f3";
 
 function exposeRmlBuilderBuildId() {
   document.documentElement.dataset
@@ -356,7 +356,6 @@ function requestGeneratedOutputUpdate() {
     elements.codeSummary.textContent =
       "Large runtime graph loaded · generated files are being refreshed";
   }
-
   updateGeneratedOutput();
 }
 
@@ -5696,7 +5695,7 @@ function generateProjectFile() {
   -->
   <PropertyGroup>
     <TargetFramework>${targetFramework}</TargetFramework>
-    <LangVersion>latest</LangVersion>
+    <LangVersion>14.0</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>${allowUnsafeBlocks
@@ -5948,7 +5947,7 @@ function generateAuxiliaryProjectFile(
   return `<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>${targetFramework}</TargetFramework>
-    <LangVersion>latest</LangVersion>
+    <LangVersion>14.0</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>${requirements.allowUnsafeBlocks === true
@@ -6348,6 +6347,7 @@ function projectIdFromSource(source) {
   if (explicit) {
     return explicit;
   }
+
   return `legacy-${projectContentFingerprint(source)}`;
 }
 
@@ -24379,7 +24379,37 @@ function updateExportCopyButtonState(
   }
 }
 
-function copySelectedExportArtifact(
+async function validateGeneratedCSharp14Files(files) {
+  const sources = (Array.isArray(files) ? files : [])
+    .filter(file => /\.cs$/i.test(String(file?.name || "")));
+  if (sources.length === 0) return;
+  const parser = window.RMLCSharp14Roslyn;
+  if (!parser?.validate || parser.languageVersion !== "14.0") {
+    throw new Error("The bundled .NET 10 Roslyn C# 14 validator is unavailable. Export is blocked instead of emitting unchecked source.");
+  }
+  const failures = [];
+  for (const file of sources) {
+    const result = await parser.validate(String(file.content || ""));
+    if (result?.ok === true) continue;
+    const details = typeof window.RMLVisualCSharp?.formatRoslynDiagnostics === "function"
+      ? window.RMLVisualCSharp.formatRoslynDiagnostics(result?.diagnostics)
+      : (result?.diagnostics || []).map(diagnostic => `${diagnostic?.id || "C#14"}: ${diagnostic?.message || "Invalid syntax."}`);
+    failures.push(`${file.name}: ${details.slice(0, 8).join(" | ") || "Roslyn rejected the generated C# 14 source."}`);
+  }
+  if (failures.length > 0) {
+    throw new Error(`C# 14 export validation failed. ${failures.join(" | ")}`);
+  }
+}
+
+function setExportValidationFailure(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  elements.exportDownloadSelected.disabled = true;
+  elements.exportCopySelectedFile.disabled = true;
+  elements.exportDownloadHint.textContent = message;
+  elements.exportDownloadHint.classList.add("error");
+}
+
+async function copySelectedExportArtifact(
   button
 ) {
   const { artifact } =
@@ -24390,13 +24420,25 @@ function copySelectedExportArtifact(
     button.disabled ||
     getDiagnostics().length > 0
   ) {
-    return Promise.resolve();
+    return;
   }
 
-  return copyText(
-    artifact.content,
-    button
-  );
+  const originalLabel = button.textContent;
+  let failed = false;
+  try {
+    button.disabled = true;
+    button.textContent = "Validating C# 14…";
+    elements.exportDownloadHint.classList.remove("error");
+    const complete = buildSelectedExportFiles(true, false);
+    await validateGeneratedCSharp14Files(complete.files);
+    await copyText(artifact.content, button);
+  } catch (error) {
+    failed = true;
+    setExportValidationFailure(error);
+  } finally {
+    button.textContent = originalLabel;
+    if (!failed) updateExportDialog();
+  }
 }
 
 function currentApiExportCompatibilityWarning() {
@@ -24523,6 +24565,7 @@ function renderExportApiCompatibilityWarning() {
 }
 
 function updateExportDialog() {
+  elements.exportDownloadHint.classList.remove("error");
   const platform =
     elements.exportPlatform.value;
   const includeCs =
@@ -24843,7 +24886,7 @@ function closeExportDialog() {
   }
 }
 
-function downloadSelectedExport() {
+async function downloadSelectedExport() {
   syncExportOptions();
 
   if (
@@ -24856,14 +24899,28 @@ function downloadSelectedExport() {
 
   const baseName =
     generatedBaseName();
-  const result =
-    buildSelectedExportFiles(
+  const originalLabel = elements.exportDownloadSelected.textContent;
+  elements.exportDownloadSelected.disabled = true;
+  elements.exportDownloadSelected.textContent = "Validating C# 14…";
+  elements.exportDownloadHint.classList.remove("error");
+  let result;
+  try {
+    const complete = buildSelectedExportFiles(true, false);
+    await validateGeneratedCSharp14Files(complete.files);
+    result = buildSelectedExportFiles(
       state.exportOptions.includeCs,
       state.exportOptions.includeCsproj
     );
+  } catch (error) {
+    setExportValidationFailure(error);
+    elements.exportDownloadSelected.textContent = originalLabel;
+    return;
+  }
   const files = result.files;
 
   if (files.length === 0) {
+    elements.exportDownloadSelected.textContent = originalLabel;
+    updateExportDialog();
     return;
   }
 
@@ -24884,6 +24941,8 @@ function downloadSelectedExport() {
       ),
       file.name
     );
+    elements.exportDownloadSelected.textContent = originalLabel;
+    updateExportDialog();
     return;
   }
 
@@ -24891,6 +24950,8 @@ function downloadSelectedExport() {
     createZipBlob(files),
     `${baseName}-RML-Project.zip`
   );
+  elements.exportDownloadSelected.textContent = originalLabel;
+  updateExportDialog();
 }
 
 async function loadExampleProject() {

@@ -200,7 +200,7 @@ async function ensureRuntime(catalog) {
       "mod_nodes.js?v=42-complete-visual-csharp-v600f1"
     );
     importScripts(
-      "visual_csharp.js?v=1-complete-visual-csharp-v600f1"
+      "visual_csharp.js?v=5-csharp14-roslyn-wasm-v602f3"
     );
     importScripts(
       "api_nodes.js?v=25-complete-visual-csharp-v600f1"
