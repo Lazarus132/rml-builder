@@ -194,7 +194,7 @@ async function ensureRuntime(catalog) {
       self.RMLResoniteApiCatalog;
 
     importScripts(
-      "node_graph.js?v=256-ready-path-page-restore-v415f1"
+      "node_graph.js?v=258-animated-runtime-graph-icon-v417f1"
     );
     importScripts(
       "mod_nodes.js?v=40-universal-state-semantics-v389f1"

@@ -19,6 +19,8 @@ const ACTIVE_STORAGE_KEY = RML_VISUAL_TOUR_TEST
 const ACTIVE_PREVIEW_STORAGE_KEY = RML_VISUAL_TOUR_TEST
   ? `${ACTIVE_STORAGE_KEY}-preview`
   : PREVIEW_STORAGE_KEY;
+const ACTIVE_PAGE_STORAGE_KEY =
+  `${ACTIVE_STORAGE_KEY}-active-page-v1`;
 const PROJECT_FORMAT = "rml-configuration-builder-project";
 const PROJECT_FORMAT_VERSION = 1;
 const PROJECT_FILE_MAX_BYTES = 512 * 1024 * 1024;
@@ -34,7 +36,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "stable-universal-ready-path-page-restore-20260827-v415f1";
+  "stable-universal-animated-runtime-graph-icon-20260827-v417f1";
 
 function exposeRmlBuilderBuildId() {
   document.documentElement.dataset
@@ -205,10 +207,12 @@ const DEFAULT_EXPORT_OPTIONS = {
 };
 
 const state = {
+  projectId: createFreshProjectId(),
   metadata: { ...DEFAULT_METADATA },
   exportOptions: { ...DEFAULT_EXPORT_OPTIONS },
   nodes: [],
   extensions: {},
+  activePage: "configuration-outline",
   selectedId: null,
   activeContainerId: ROOT_CONTAINER,
   collapsedPaletteGroups: [],
@@ -507,7 +511,7 @@ function projectIoWorkerInstance() {
   try {
     const worker = new Worker(
       new URL(
-        "project_io_worker.js?v=4-file-io-v384f1",
+        "project_io_worker.js?v=7-animated-runtime-graph-icon-v417f1",
         APP_SCRIPT_BASE_URL
       ),
       {
@@ -590,11 +594,16 @@ function projectIoRequest(
         queueMicrotask(() => {
           try {
             if (operation === "parse") {
+              const text =
+                String(payload.text ?? "");
+              const value = JSON.parse(text);
               resolve({
                 ok: true,
-                value: JSON.parse(
-                  String(payload.text ?? "")
-                )
+                value,
+                fingerprint:
+                  projectIdentityFingerprint(
+                    projectIdFromSource(value)
+                  )
               });
               return;
             }
@@ -612,9 +621,15 @@ function projectIoRequest(
               void payload.file.text()
                 .then(text => {
                   try {
+                    const value =
+                      JSON.parse(text);
                     resolve({
                       ok: true,
-                      value: JSON.parse(text)
+                      value,
+                      fingerprint:
+                        projectIdentityFingerprint(
+                          projectIdFromSource(value)
+                        )
                     });
                   } catch (error) {
                     reject(error);
@@ -936,7 +951,7 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "graph_codegen_worker.js?v=31-ready-path-page-restore-v415f1",
+      "graph_codegen_worker.js?v=33-animated-runtime-graph-icon-v417f1",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -6221,19 +6236,486 @@ function projectString(
     : fallback;
 }
 
+function normalizeBuilderPage(value) {
+  return value === "runtime-graph"
+    ? "runtime-graph"
+    : "configuration-outline";
+}
+
+function canonicalProjectFingerprintValue(
+  value,
+  path = []
+) {
+  if (Array.isArray(value)) {
+    return value.map((entry, index) =>
+      canonicalProjectFingerprintValue(
+        entry,
+        [...path, String(index)]
+      )
+    );
+  }
+
+  if (
+    value &&
+    typeof value === "object"
+  ) {
+    const result = {};
+    for (const key of
+      Object.keys(value).sort()) {
+      const rootSavedAt =
+        path.length === 0 &&
+        key === "savedAt";
+      const workspacePage =
+        path.length === 1 &&
+        path[0] === "workspace" &&
+        key === "activePage";
+      const legacyGraphPage =
+        path.length === 2 &&
+        path[0] === "extensions" &&
+        path[1] === "typedNodeGraph" &&
+        key === "lastOpenPage";
+
+      if (
+        rootSavedAt ||
+        workspacePage ||
+        legacyGraphPage
+      ) {
+        continue;
+      }
+
+      result[key] =
+        canonicalProjectFingerprintValue(
+          value[key],
+          [...path, key]
+        );
+    }
+    return result;
+  }
+
+  return value;
+}
+
+function projectContentFingerprint(value) {
+  const text = JSON.stringify(
+    canonicalProjectFingerprintValue(
+      value
+    )
+  );
+  let first = 2166136261;
+  let second = 2246822507;
+
+  for (
+    let index = 0;
+    index < text.length;
+    index += 1
+  ) {
+    const code = text.charCodeAt(index);
+    first ^= code;
+    first = Math.imul(first, 16777619);
+    second ^= code + index;
+    second = Math.imul(second, 3266489909);
+  }
+
+  return `project-v1-${text.length.toString(36)}-${(first >>> 0).toString(16).padStart(8, "0")}${(second >>> 0).toString(16).padStart(8, "0")}`;
+}
+
+function normalizeProjectId(value) {
+  const candidate =
+    typeof value === "string"
+      ? value.trim()
+      : "";
+  return /^[a-z0-9][a-z0-9._:-]{7,159}$/i
+    .test(candidate)
+      ? candidate
+      : "";
+}
+
+function createFreshProjectId() {
+  const randomUuid =
+    globalThis.crypto?.randomUUID?.();
+  if (randomUuid) {
+    return `rml-${randomUuid}`;
+  }
+
+  return `rml-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+function projectIdFromSource(source) {
+  const explicit = normalizeProjectId(
+    source?.projectId
+  );
+  if (explicit) {
+    return explicit;
+  }
+
+  return `legacy-${projectContentFingerprint(source)}`;
+}
+
+function projectIdentityFingerprint(
+  projectId
+) {
+  const text = normalizeProjectId(
+    projectId
+  );
+  let first = 2166136261;
+  let second = 2246822507;
+
+  for (
+    let index = 0;
+    index < text.length;
+    index += 1
+  ) {
+    const code = text.charCodeAt(index);
+    first ^= code;
+    first = Math.imul(first, 16777619);
+    second ^= code + index;
+    second = Math.imul(second, 3266489909);
+  }
+
+  return `identity-v1-${text.length.toString(36)}-${(first >>> 0).toString(16).padStart(8, "0")}${(second >>> 0).toString(16).padStart(8, "0")}`;
+}
+
+const pageStateTrace = [];
+let pageStateTraceSequence = 0;
+
+function recordPageState(
+  stage,
+  detail = {}
+) {
+  const entry = Object.freeze({
+    sequence: ++pageStateTraceSequence,
+    stage: String(stage || "unknown"),
+    activePage:
+      normalizeBuilderPage(
+        state.activePage
+      ),
+    graphLastOpenPage:
+      state.extensions?.typedNodeGraph
+        ?.lastOpenPage || null,
+    graphActive:
+      state.extensions?.typedNodeGraph
+        ?.active === true,
+    visiblePage:
+      document.body?.classList?.contains(
+        "rml-node-graph-mode"
+      )
+        ? "runtime-graph"
+        : "configuration-outline",
+    detail: clone(detail || {})
+  });
+
+  pageStateTrace.push(entry);
+  if (pageStateTrace.length > 512) {
+    pageStateTrace.shift();
+  }
+  console.debug(
+    "[RML Page State]",
+    entry
+  );
+  return entry;
+}
+
+function readPageStateStore() {
+  try {
+    const raw = localStorage.getItem(
+      ACTIVE_PAGE_STORAGE_KEY
+    );
+    const parsed = raw
+      ? JSON.parse(raw)
+      : null;
+
+    if (
+      parsed &&
+      parsed.version === 2 &&
+      isPlainObject(parsed.jsonPages)
+    ) {
+      return {
+        version: 2,
+        activePage:
+          normalizeBuilderPage(
+            parsed.activePage
+          ),
+        jsonPages: {
+          ...parsed.jsonPages
+        }
+      };
+    }
+  } catch {
+  }
+
+  return {
+    version: 2,
+    activePage:
+      "configuration-outline",
+    jsonPages: {}
+  };
+}
+
+function writePageStateStore(
+  store,
+  stage,
+  detail = {}
+) {
+  try {
+    localStorage.setItem(
+      ACTIVE_PAGE_STORAGE_KEY,
+      JSON.stringify(store)
+    );
+    recordPageState(stage, detail);
+    return true;
+  } catch (error) {
+    recordPageState(
+      `${stage}-failed`,
+      {
+        ...detail,
+        message:
+          error instanceof Error
+            ? error.message
+            : String(error)
+      }
+    );
+    return false;
+  }
+}
+
+function writePageStateMarker(
+  page = state.activePage,
+  reason = "state-update"
+) {
+  const normalized =
+    normalizeBuilderPage(page);
+  const store = readPageStateStore();
+  store.activePage = normalized;
+  return writePageStateStore(
+    store,
+    "marker.write-active",
+    { page: normalized, reason }
+  );
+}
+
+function readPageStateMarker() {
+  const page = normalizeBuilderPage(
+    readPageStateStore().activePage
+  );
+  recordPageState(
+    "marker.read-active",
+    { page }
+  );
+  return page;
+}
+
+function rememberJsonPage(
+  fingerprint,
+  page,
+  reason = "json-save"
+) {
+  const key = String(fingerprint || "");
+  if (!key) {
+    return false;
+  }
+
+  const store = readPageStateStore();
+  const normalized =
+    normalizeBuilderPage(page);
+  store.activePage = normalized;
+  store.jsonPages[key] = {
+    page: normalized,
+    usedAt: Date.now()
+  };
+
+  const entries = Object.entries(
+    store.jsonPages
+  );
+  if (entries.length > 128) {
+    entries
+      .sort(
+        (left, right) =>
+          Number(right[1]?.usedAt || 0) -
+          Number(left[1]?.usedAt || 0)
+      )
+      .slice(128)
+      .forEach(([oldKey]) => {
+        delete store.jsonPages[oldKey];
+      });
+  }
+
+  return writePageStateStore(
+    store,
+    "marker.write-json",
+    {
+      fingerprint: key,
+      page: normalized,
+      reason
+    }
+  );
+}
+
+function pageForJsonFingerprint(
+  fingerprint
+) {
+  const key = String(fingerprint || "");
+  const entry = key
+    ? readPageStateStore()
+        .jsonPages[key]
+    : null;
+  const page =
+    entry &&
+    (
+      entry.page === "runtime-graph" ||
+      entry.page === "configuration-outline"
+    )
+      ? entry.page
+      : null;
+
+  recordPageState(
+    "marker.read-json",
+    {
+      fingerprint: key,
+      matched: Boolean(page),
+      page
+    }
+  );
+  return page;
+}
+
+function visibleBuilderPage() {
+  const hostPage =
+    window.RMLDynamicGraphHost
+      ?.getPresentationState?.()
+      ?.page;
+
+  if (
+    hostPage === "runtime-graph" ||
+    hostPage === "configuration-outline"
+  ) {
+    return hostPage;
+  }
+
+  return document.body?.classList?.contains(
+    "rml-node-graph-mode"
+  )
+    ? "runtime-graph"
+    : "configuration-outline";
+}
+
+function setBuilderActivePage(
+  page,
+  {
+    persistImmediately = false,
+    reason = "page-change",
+    writeMarker = true
+  } = {}
+) {
+  const normalized =
+    normalizeBuilderPage(page);
+  const changed =
+    state.activePage !== normalized;
+  state.activePage = normalized;
+
+  if (writeMarker) {
+    const projectFingerprint =
+      projectIdentityFingerprint(
+        state.projectId
+      );
+    if (projectFingerprint) {
+      rememberJsonPage(
+        projectFingerprint,
+        normalized,
+        reason
+      );
+    } else {
+      writePageStateMarker(
+        normalized,
+        reason
+      );
+    }
+  }
+
+  recordPageState(
+    "workspace.page-set",
+    {
+      page: normalized,
+      changed,
+      reason,
+      persistImmediately
+    }
+  );
+
+  if (changed) {
+    persist(persistImmediately);
+  }
+
+  return normalized;
+}
+
+function captureVisibleBuilderPage(
+  reason,
+  persistImmediately = true
+) {
+  return setBuilderActivePage(
+    visibleBuilderPage(),
+    {
+      persistImmediately,
+      reason
+    }
+  );
+}
+
+Object.defineProperty(
+  window,
+  "RMLPageStateDiagnostics",
+  {
+    value: Object.freeze({
+      record: recordPageState,
+      getSnapshot() {
+        return Object.freeze(
+          pageStateTrace.map(entry =>
+            Object.freeze({ ...entry })
+          )
+        );
+      },
+      getCurrent() {
+        return Object.freeze({
+          workspacePage:
+            normalizeBuilderPage(
+              state.activePage
+            ),
+          graphPage:
+            state.extensions
+              ?.typedNodeGraph
+              ?.lastOpenPage || null,
+          visiblePage:
+            visibleBuilderPage()
+        });
+      },
+      clear() {
+        pageStateTrace.length = 0;
+        return true;
+      }
+    }),
+    writable: false,
+    enumerable: true,
+    configurable: true
+  }
+);
+
 function createProjectDocument(
   includeSavedAt = false,
-  detached = true
+  detached = true,
+  {
+    includePresentationState = true
+  } = {}
 ) {
   const snapshot = value =>
     detached
       ? clone(value)
       : value;
 
-  return {
+  const projectDocument = {
     format: PROJECT_FORMAT,
     formatVersion:
       PROJECT_FORMAT_VERSION,
+    projectId: state.projectId,
     ...(includeSavedAt
       ? {
           savedAt:
@@ -6255,6 +6737,10 @@ function createProjectDocument(
         : {}
     ),
     workspace: {
+      activePage:
+        normalizeBuilderPage(
+          state.activePage
+        ),
       selectedId:
         state.selectedId,
       activeContainerId:
@@ -6263,6 +6749,32 @@ function createProjectDocument(
         [...state.collapsedPaletteGroups]
     }
   };
+
+  if (!includePresentationState) {
+    delete projectDocument.workspace
+      .activePage;
+
+    const graph =
+      projectDocument.extensions
+        ?.typedNodeGraph;
+    if (
+      graph &&
+      typeof graph === "object" &&
+      !Array.isArray(graph)
+    ) {
+      const portableGraph = {
+        ...graph
+      };
+      delete portableGraph.lastOpenPage;
+      projectDocument.extensions = {
+        ...projectDocument.extensions,
+        typedNodeGraph:
+          portableGraph
+      };
+    }
+  }
+
+  return projectDocument;
 }
 
 function sanitizeProjectNodes(
@@ -7244,6 +7756,8 @@ function parseProjectDocument(
     );
 
   const project = {
+    projectId:
+      projectIdFromSource(source),
     metadata: {
       namespaceName:
         projectString(
@@ -7311,6 +7825,17 @@ function parseProjectDocument(
     extensions:
       extensionsSource,
     workspace: {
+      activePage:
+        normalizeBuilderPage(
+          Object.hasOwn(
+            workspaceSource,
+            "activePage"
+          )
+            ? workspaceSource.activePage
+            : extensionsSource
+                ?.typedNodeGraph
+                ?.lastOpenPage
+        ),
       selectedId:
         projectString(
           workspaceSource.selectedId,
@@ -7342,8 +7867,22 @@ function parseProjectDocument(
 }
 
 function applyProjectDocument(
-  project
+  project,
+  {
+    restoredPage = null,
+    reason = "project-apply"
+  } = {}
 ) {
+  recordPageState(
+    "project.apply-before",
+    {
+      reason,
+      projectPage:
+        project?.workspace?.activePage ||
+        null,
+      restoredPage
+    }
+  );
   document.dispatchEvent(
     new CustomEvent(
       "rml-builder:project-replacement"
@@ -7353,6 +7892,8 @@ function applyProjectDocument(
 
   state.metadata =
     project.metadata;
+  state.projectId =
+    project.projectId;
   state.exportOptions =
     project.exportOptions;
   state.nodes =
@@ -7361,6 +7902,11 @@ function applyProjectDocument(
     isPlainObject(project.extensions)
       ? project.extensions
       : {};
+  state.activePage =
+    normalizeBuilderPage(
+      restoredPage ||
+      project.workspace.activePage
+    );
   state.selectedId =
     project.workspace.selectedId &&
     findNode(
@@ -7383,6 +7929,14 @@ function applyProjectDocument(
       project.workspace.collapsedPaletteGroups ||
         []
     )];
+  writePageStateMarker(
+    state.activePage,
+    reason
+  );
+  recordPageState(
+    "project.apply-after",
+    { reason }
+  );
 }
 
 let projectDraftPersistIdleHandle = 0;
@@ -7719,15 +8273,23 @@ document.addEventListener(
 );
 
 function resetProjectState() {
+  state.projectId =
+    createFreshProjectId();
   state.metadata = { ...DEFAULT_METADATA };
   state.exportOptions = {
     ...DEFAULT_EXPORT_OPTIONS
   };
   state.extensions = {};
+  state.activePage =
+    "configuration-outline";
   state.nodes = [];
   state.selectedId = null;
   state.activeContainerId = ROOT_CONTAINER;
   state.collapsedPaletteGroups = [];
+  writePageStateMarker(
+    state.activePage,
+    "project-reset"
+  );
 }
 
 function exampleProjectUrl() {
@@ -7769,10 +8331,24 @@ async function parseProjectJsonText(
         "parse",
         { text }
       );
-
-    return parseProjectDocument(
-      response.value
+    const project =
+      parseProjectDocument(
+        response.value
+      );
+    Object.defineProperty(
+      project,
+      "__rmlJsonFingerprint",
+      {
+        value:
+          projectIdentityFingerprint(
+            project.projectId
+          ),
+        writable: false,
+        enumerable: false,
+        configurable: true
+      }
     );
+    return project;
   } catch (error) {
     if (
       error instanceof SyntaxError ||
@@ -7797,10 +8373,24 @@ async function parseProjectJsonFile(
         "parseFile",
         { file }
       );
-
-    return parseProjectDocument(
-      response.value
+    const project =
+      parseProjectDocument(
+        response.value
+      );
+    Object.defineProperty(
+      project,
+      "__rmlJsonFingerprint",
+      {
+        value:
+          projectIdentityFingerprint(
+            project.projectId
+          ),
+        writable: false,
+        enumerable: false,
+        configurable: true
+      }
     );
+    return project;
   } catch (error) {
     if (
       error instanceof SyntaxError ||
@@ -7846,9 +8436,47 @@ async function readExampleProjectDocument() {
 
 function applyLoadedProject(
   project,
-  { render = true } = {}
+  {
+    render = true,
+    reason = "explicit-project-load",
+    useJsonPageAssociation = true
+  } = {}
 ) {
-  applyProjectDocument(project);
+  const fingerprint =
+    project?.__rmlJsonFingerprint ||
+    "";
+  const restoredPage =
+    useJsonPageAssociation
+      ? (
+          pageForJsonFingerprint(
+            fingerprint
+          ) ||
+          "configuration-outline"
+        )
+      : normalizeBuilderPage(
+          project?.workspace
+            ?.activePage
+        );
+
+  recordPageState(
+    "json.apply-page-resolution",
+    {
+      fingerprint,
+      matched:
+        useJsonPageAssociation &&
+        restoredPage !==
+          "configuration-outline",
+      restoredPage,
+      reason
+    }
+  );
+  applyProjectDocument(
+    project,
+    {
+      restoredPage,
+      reason
+    }
+  );
 
   if (!render) {
     return;
@@ -7867,10 +8495,19 @@ async function restore() {
 
   if (indexedDraft?.project) {
     try {
-      applyProjectDocument(
+      const project =
         parseProjectDocument(
           indexedDraft.project
-        )
+        );
+      const restoredPage =
+        readPageStateMarker(project);
+      applyProjectDocument(
+        project,
+        {
+          restoredPage,
+          reason:
+            "startup-indexeddb-restore"
+        }
       );
       if (RML_VISUAL_TOUR_TEST && state.extensions) {
         delete state.extensions.typedNodeGraph;
@@ -7889,11 +8526,20 @@ async function restore() {
 
   if (saved) {
     try {
-      applyProjectDocument(
+      const project =
         await parseProjectJsonText(
           saved,
           "Local builder draft"
-        )
+        );
+      const restoredPage =
+        readPageStateMarker(project);
+      applyProjectDocument(
+        project,
+        {
+          restoredPage,
+          reason:
+            "startup-localstorage-restore"
+        }
       );
       if (RML_VISUAL_TOUR_TEST && state.extensions) {
         delete state.extensions.typedNodeGraph;
@@ -7910,7 +8556,11 @@ async function restore() {
   try {
     applyLoadedProject(
       await readExampleProjectDocument(),
-      { render: false }
+      {
+        render: false,
+        reason:
+          "startup-example-load"
+      }
     );
     if (RML_VISUAL_TOUR_TEST && state.extensions) {
       delete state.extensions.typedNodeGraph;
@@ -22229,7 +22879,13 @@ async function applyLoadedProjectWithFeedback(
       try {
         applyLoadedProject(
           previousProject,
-          { render: false }
+          {
+            render: false,
+            reason:
+              "failed-import-rollback",
+            useJsonPageAssociation:
+              false
+          }
         );
         renderMetadata();
         renderPalette();
@@ -22502,15 +23158,46 @@ async function saveProjectJson() {
       "Preparing project JSON…"
     );
 
+    captureVisibleBuilderPage(
+      "save-json",
+      true
+    );
+    recordPageState(
+      "json.save-snapshot",
+      { page: state.activePage }
+    );
+
+    const portableProject =
+      createProjectDocument(
+        true,
+        false,
+        {
+          includePresentationState:
+            false
+        }
+      );
+    const fingerprint =
+      projectIdentityFingerprint(
+        state.projectId
+      );
+    rememberJsonPage(
+      fingerprint,
+      state.activePage,
+      "save-json"
+    );
+    recordPageState(
+      "json.save-fingerprint",
+      {
+        fingerprint,
+        page: state.activePage
+      }
+    );
+
     const response =
       await projectIoRequest(
         "stringify",
         {
-          value:
-            createProjectDocument(
-              true,
-              false
-            ),
+          value: portableProject,
           space: 2
         }
       );
@@ -24274,10 +24961,18 @@ async function newBlank() {
     }
 
     state.metadata = { ...DEFAULT_METADATA };
+    state.projectId =
+      createFreshProjectId();
     state.extensions = {};
+    state.activePage =
+      "configuration-outline";
     state.nodes = [];
     state.selectedId = null;
     state.activeContainerId = ROOT_CONTAINER;
+    writePageStateMarker(
+      state.activePage,
+      "new-blank"
+    );
     renderMetadata();
     renderPalette();
 
@@ -26715,6 +27410,10 @@ function builderStateSnapshot() {
         ? state.extensions
         : {},
     workspace: {
+      activePage:
+        normalizeBuilderPage(
+          state.activePage
+        ),
       selectedId:
         state.selectedId,
       activeContainerId:
@@ -26745,6 +27444,10 @@ function builderCodegenStateSnapshot() {
         }
       : {},
     workspace: {
+      activePage:
+        normalizeBuilderPage(
+          state.activePage
+        ),
       selectedId:
         state.selectedId,
       activeContainerId:
@@ -26757,7 +27460,7 @@ function builderCodegenStateSnapshot() {
 
 function exposeBuilderBridge() {
   const bridge = {
-    version: 4,
+    version: 5,
 
     getStorageContract() {
       return {
@@ -26877,6 +27580,40 @@ function exposeBuilderBridge() {
         : value;
     },
 
+    getActivePage() {
+      return normalizeBuilderPage(
+        state.activePage
+      );
+    },
+
+    setActivePage(
+      page,
+      options = {}
+    ) {
+      const normalized =
+        setBuilderActivePage(
+          page,
+          {
+            persistImmediately:
+              options.immediate === true,
+            reason:
+              projectString(
+                options.reason,
+                "graph-bridge"
+              )
+          }
+        );
+      recordPageState(
+        "bridge.page-committed",
+        {
+          page: normalized,
+          immediate:
+            options.immediate === true
+        }
+      );
+      return normalized;
+    },
+
     setExtensionState(
       name,
       value,
@@ -26907,7 +27644,20 @@ function exposeBuilderBridge() {
             : clone(value);
       }
 
-      persist();
+      recordPageState(
+        "bridge.extension-state",
+        {
+          name,
+          extensionPage:
+            value?.lastOpenPage || null,
+          workspacePage:
+            state.activePage
+        }
+      );
+      persist(
+        options.persistImmediately ===
+          true
+      );
 
       document.dispatchEvent(
         new CustomEvent(

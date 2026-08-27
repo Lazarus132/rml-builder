@@ -1312,6 +1312,60 @@
     );
   }
 
+  function normalizePresentationPage(value) {
+    return value === "runtime-graph"
+      ? "runtime-graph"
+      : "configuration-outline";
+  }
+
+  function savedPresentationPage() {
+    return normalizePresentationPage(
+      bridge?.getActivePage?.() ||
+      graph?.lastOpenPage
+    );
+  }
+
+  function tracePresentationPage(
+    stage,
+    detail = {}
+  ) {
+    window.RMLPageStateDiagnostics
+      ?.record?.(
+        `graph.${stage}`,
+        {
+          savedPage:
+            savedPresentationPage(),
+          graphPage:
+            graph?.lastOpenPage || null,
+          runtimeGraphViewActive,
+          ...detail
+        }
+      );
+  }
+
+  function commitPresentationPage(
+    page,
+    reason = "runtime-graph"
+  ) {
+    const normalized =
+      normalizePresentationPage(page);
+    if (graph) {
+      graph.lastOpenPage = normalized;
+    }
+    bridge?.setActivePage?.(
+      normalized,
+      {
+        immediate: true,
+        reason
+      }
+    );
+    tracePresentationPage(
+      "commit",
+      { page: normalized, reason }
+    );
+    return normalized;
+  }
+
   function clamp(
     value,
     minimum,
@@ -3286,7 +3340,9 @@
         EXTENSION_NAME,
         graph,
         {
-          assumeDetached: true
+          assumeDetached: true,
+          persistImmediately:
+            immediate
         }
       );
 
@@ -12780,23 +12836,87 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         border-color: rgba(255, 105, 135, 0.58);
       }
 
-      .rml-runtime-graph-spinner {
-        width: 15px;
-        height: 15px;
-        flex: 0 0 15px;
-        border: 2px solid rgba(205, 186, 255, 0.28);
-        border-top-color: #cdbaff;
-        border-radius: 50%;
-        animation: rml-runtime-graph-spin 0.72s linear infinite;
+      .rml-runtime-graph-loader > span {
+        will-change: transform, border-radius, filter;
       }
 
-      @keyframes rml-runtime-graph-spin {
-        to { transform: rotate(360deg); }
+      .rml-runtime-graph-loader > span:first-child {
+        top: 3px;
+        left: 4px;
+        right: auto;
+        bottom: auto;
+        border-color: #cdbaff;
+        animation: rml-runtime-graph-orbit-first 1.15s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+      }
+
+      .rml-runtime-graph-loader > span:last-child {
+        top: 7px;
+        left: 10px;
+        right: auto;
+        bottom: auto;
+        border-color: #68c4ff;
+        animation: rml-runtime-graph-orbit-second 1.15s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+      }
+
+      @keyframes rml-runtime-graph-orbit-first {
+        0% {
+          transform: translate(0, 0) rotate(0deg);
+          border-radius: 3px;
+          filter: drop-shadow(0 0 0 rgba(205, 186, 255, 0));
+        }
+        25% {
+          transform: translate(5px, -2px) rotate(90deg);
+          border-radius: 50%;
+          filter: drop-shadow(0 0 4px rgba(205, 186, 255, 0.72));
+        }
+        50% {
+          transform: translate(6px, 4px) rotate(180deg);
+          border-radius: 3px;
+          filter: drop-shadow(0 0 2px rgba(104, 196, 255, 0.42));
+        }
+        75% {
+          transform: translate(1px, 6px) rotate(270deg);
+          border-radius: 50%;
+          filter: drop-shadow(0 0 4px rgba(104, 196, 255, 0.72));
+        }
+        100% {
+          transform: translate(0, 0) rotate(360deg);
+          border-radius: 3px;
+          filter: drop-shadow(0 0 0 rgba(205, 186, 255, 0));
+        }
+      }
+
+      @keyframes rml-runtime-graph-orbit-second {
+        0% {
+          transform: translate(0, 0) rotate(0deg);
+          border-radius: 3px;
+          filter: drop-shadow(0 0 0 rgba(104, 196, 255, 0));
+        }
+        25% {
+          transform: translate(-5px, 2px) rotate(90deg);
+          border-radius: 50%;
+          filter: drop-shadow(0 0 4px rgba(104, 196, 255, 0.72));
+        }
+        50% {
+          transform: translate(-6px, -4px) rotate(180deg);
+          border-radius: 3px;
+          filter: drop-shadow(0 0 2px rgba(205, 186, 255, 0.42));
+        }
+        75% {
+          transform: translate(-1px, -6px) rotate(270deg);
+          border-radius: 50%;
+          filter: drop-shadow(0 0 4px rgba(205, 186, 255, 0.72));
+        }
+        100% {
+          transform: translate(0, 0) rotate(360deg);
+          border-radius: 3px;
+          filter: drop-shadow(0 0 0 rgba(104, 196, 255, 0));
+        }
       }
 
       @media (prefers-reduced-motion: reduce) {
-        .rml-runtime-graph-spinner {
-          animation-duration: 1.8s;
+        .rml-runtime-graph-loader > span {
+          animation-duration: 2.4s;
         }
       }
 
@@ -14980,7 +15100,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
     dom.packButton.innerHTML =
       catalogLoading
-        ? `<span class="rml-runtime-graph-spinner" aria-hidden="true"></span><span class="top-action-label">Loading Runtime Graph…</span>`
+        ? `<span class="brand-mark rml-pack-brand-mark rml-runtime-graph-loader rml-runtime-graph-spinner" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">Loading Runtime Graph…</span>`
         : catalogFailed
           ? `<span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">Runtime Graph unavailable</span>`
           : active
@@ -15265,7 +15385,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     ) {
       unpackToOutline();
     } else if (graph?.active) {
-      graph.lastOpenPage = "runtime-graph";
+      commitPresentationPage(
+        "runtime-graph",
+        "runtime-graph-open"
+      );
       runtimeGraphViewActive = true;
       synchronizePackedSnapshot(false);
       persistGraphView(true);
@@ -15442,7 +15565,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     }
 
     graph.active = true;
-    graph.lastOpenPage = "runtime-graph";
+    commitPresentationPage(
+      "runtime-graph",
+      "runtime-graph-pack"
+    );
     runtimeGraphViewActive = true;
     graph.configSnapshot =
       snapshot;
@@ -15474,7 +15600,11 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
   function unpackToOutline() {
     cancelInteraction(true);
-    graph.lastOpenPage = "configuration-outline";
+
+    commitPresentationPage(
+      "configuration-outline",
+      "runtime-graph-back"
+    );
     runtimeGraphViewActive = false;
     graph.selectedNodeId = null;
     graph.selectedConnectionId = null;
@@ -25377,6 +25507,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       graph.viewport
     );
     graphHybridRenderer?.drawNow?.();
+
     dom.wires.replaceChildren(
       ...svgItems,
       ...handles
@@ -30915,6 +31046,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       !activeInteraction
     ) {
       graph = sanitizeGraphState(incoming);
+      graph.lastOpenPage =
+        savedPresentationPage();
+
       runtimeGraphViewActive = false;
       updateGraphCatalogReadiness();
       resetGraphRenderCaches();
@@ -30939,7 +31073,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
     if (
       graph.active &&
-      graph.lastOpenPage === "runtime-graph" &&
+      savedPresentationPage() === "runtime-graph" &&
       graphCatalogReadiness === "ready"
     ) {
       activateGraphMode();
@@ -31105,10 +31239,12 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     graph = sanitizeGraphState(
       initialExtensionState
     );
+    graph.lastOpenPage =
+      savedPresentationPage();
     updateGraphCatalogReadiness();
     runtimeGraphViewActive =
       graph.active === true &&
-      graph.lastOpenPage === "runtime-graph" &&
+      savedPresentationPage() === "runtime-graph" &&
       graphCatalogReadiness === "ready";
     resetGraphRenderCaches();
 
@@ -31531,7 +31667,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       !bridge ||
       !graph ||
       graph.active !== true ||
-      graph.lastOpenPage !== "runtime-graph" ||
+      savedPresentationPage() !== "runtime-graph" ||
       graphCatalogReadiness !== "ready" ||
       runtimeGraphViewActive
     ) {
@@ -31562,6 +31698,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         revision;
       refreshAfterNodeModulesReady();
     }
+
     restoreSavedPresentationIfReady();
   }
 
@@ -34541,7 +34678,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
             reason: "The Runtime Graph product state is not active."
           };
         }
-        graph.lastOpenPage = "runtime-graph";
+        commitPresentationPage(
+          "runtime-graph",
+          "runtime-graph-api-open"
+        );
         persistGraphView(true);
         activateGraphMode();
         return {
@@ -34576,8 +34716,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           graphViewActive:
             runtimeGraphViewActive === true,
           savedPage:
-            graph?.lastOpenPage ||
-            "configuration-outline",
+            savedPresentationPage(),
           page:
             runtimeGraphViewActive
               ? "runtime-graph"
