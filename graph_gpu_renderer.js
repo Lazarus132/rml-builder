@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = 4;
+  const VERSION = 5;
   const WIRE_CELL_SIZE = 240;
   const NODE_CELL_SIZE = 360;
   const WIRE_LINEAR_PICK_LIMIT = 512;
@@ -352,6 +352,7 @@
         nodeIndexMilliseconds: 0,
         lastWirePickMilliseconds: 0,
         lastWirePickCandidates: 0,
+        hiddenConnections: 0,
         previewInstances: 0,
         lastNodePickMilliseconds: 0
       };
@@ -883,10 +884,10 @@
     setScene(scene = {}) {
       this.scene = {
         segments: Array.isArray(scene.segments)
-          ? scene.segments
+          ? scene.segments.slice()
           : [],
         nodes: Array.isArray(scene.nodes)
-          ? scene.nodes
+          ? scene.nodes.slice()
           : []
       };
       this.prepareSceneRecords();
@@ -974,6 +975,12 @@
       this.prepareNodeRecords();
       this.wireSpatialIndexDirty = true;
       this.stats.segments = this.wireRecords.length;
+      this.stats.hiddenConnections =
+        new Set(
+          this.wireRecords
+            .filter(record => record.hidden === true)
+            .map(record => record.connectionId)
+        ).size;
     }
 
     prepareNodeRecords() {
@@ -1028,11 +1035,25 @@
         record.impulse === true ? 1 : 0,
         record.selected === true ? 1 : 0,
         record.targetState === "valid" ? 1 : 0,
-        record.targetState === "invalid" ? 1 : 0
+        record.targetState === "invalid" ? 1 : 0,
+        record.hidden === true ? 1 : 0
       ].join("|");
     }
 
     createWireLayerData(record) {
+      if (record.hidden === true) {
+        // A structural deletion is painted before the full graph analysis
+        // finishes. Move this transient instance completely off-canvas so
+        // shadows and glows disappear with the core in one buffer update.
+        return [
+          -1000000, -1000000,
+          -1000000, -1000000,
+          -1000000, -1000000,
+          -1000000, -1000000,
+          0, 0, 0, 0,
+          0, 0, 0
+        ];
+      }
       const invalid =
         record.targetState === "invalid";
       const selected =
@@ -1251,6 +1272,104 @@
       this.wireSpatialIndexDirty = true;
       this.scheduleDraw();
       return true;
+    }
+
+    hideConnections(connectionIds = []) {
+      const ids = new Set(
+        Array.isArray(connectionIds) ||
+        connectionIds instanceof Set
+          ? connectionIds
+          : [connectionIds]
+      );
+      ids.delete("");
+      ids.delete(null);
+      ids.delete(undefined);
+      if (ids.size === 0) {
+        return 0;
+      }
+
+      const updates = [];
+      for (
+        let index = 0;
+        index < this.wireRecords.length;
+        index += 1
+      ) {
+        const previous = this.wireRecords[index];
+        if (
+          previous.hidden === true ||
+          !ids.has(previous.connectionId)
+        ) {
+          continue;
+        }
+        const record = {
+          ...previous,
+          hidden: true
+        };
+        const segment = {
+          ...(this.scene.segments[index] || {}),
+          hidden: true
+        };
+        const data = new Float32Array(
+          this.createWireLayerData(record)
+        );
+        this.wireRecords[index] = record;
+        this.scene.segments[index] = segment;
+        updates.push({ index, record, data });
+      }
+
+      if (updates.length === 0) {
+        return 0;
+      }
+
+      if (
+        this.available &&
+        this.gl &&
+        this.wireInstanceData.length > 0
+      ) {
+        this.gl.bindBuffer(
+          this.gl.ARRAY_BUFFER,
+          this.wireVertexBuffer
+        );
+        for (const update of updates) {
+          const floatOffset =
+            update.index *
+            WIRE_LAYERS_PER_SEGMENT *
+            FLOATS_PER_WIRE_INSTANCE;
+          this.wireInstanceData.set(
+            update.data,
+            floatOffset
+          );
+          this.gl.bufferSubData(
+            this.gl.ARRAY_BUFFER,
+            floatOffset * 4,
+            update.data
+          );
+          this.wireLayerCache.set(
+            this.wireRecordKey(update.record),
+            {
+              signature:
+                this.wireLayerSignature(
+                  update.record
+                ),
+              data: [...update.data]
+            }
+          );
+        }
+      }
+
+      this.wireSpatialIndexDirty = true;
+      this.stats.hiddenConnections =
+        new Set(
+          this.wireRecords
+            .filter(record => record.hidden === true)
+            .map(record => record.connectionId)
+        ).size;
+      this.scheduleDraw();
+      return new Set(
+        updates.map(
+          update => update.record.connectionId
+        )
+      ).size;
     }
 
     rebuildNodeBuffers() {
@@ -1538,6 +1657,9 @@
       this.stats.lastWirePickCandidates =
         candidates.size;
       for (const record of candidates) {
+        if (record.hidden === true) {
+          continue;
+        }
         if (
           excludedConnectionId &&
           record.connectionId === excludedConnectionId

@@ -34,7 +34,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "stable-universal-eager-import-atomic-wire-scene-20260827-v407f1";
+  "stable-universal-ready-path-page-restore-20260827-v415f1";
 
 function exposeRmlBuilderBuildId() {
   document.documentElement.dataset
@@ -320,9 +320,6 @@ let typedNodeGraphModulesTrackingStarted = false;
 let generatedOutlineArtifactKey = "";
 let generatedGraphArtifactKey = "";
 let exportCopyArtifactKey = "";
-let generatedOutputDeferredTimer = 0;
-let generatedOutputDeferredIdleHandle = 0;
-
 function currentTypedRuntimeGraphIsLarge() {
   const graph =
     state?.extensions?.typedNodeGraph;
@@ -341,67 +338,21 @@ function currentTypedRuntimeGraphIsLarge() {
 }
 
 function requestGeneratedOutputUpdate() {
-  const run = () => {
-    generatedOutputDeferredTimer = 0;
-    generatedOutputDeferredIdleHandle = 0;
-    updateGeneratedOutput();
-  };
-
-  window.clearTimeout(
-    generatedOutputDeferredTimer
-  );
-  generatedOutputDeferredTimer = 0;
-
   if (
-    generatedOutputDeferredIdleHandle &&
-    typeof cancelIdleCallback ===
-      "function"
+    currentTypedRuntimeGraphIsLarge() &&
+    elements.generatedCode
   ) {
-    cancelIdleCallback(
-      generatedOutputDeferredIdleHandle
-    );
-    generatedOutputDeferredIdleHandle = 0;
-  }
-
-  if (!currentTypedRuntimeGraphIsLarge()) {
-    run();
-    return;
-  }
-
-  if (elements.generatedCode) {
     elements.generatedCode.textContent =
-      "// Generating the large runtime graph in an idle browser turn…\n";
+      "// Generating the large runtime graph…\n";
   }
-  if (elements.codeSummary) {
+  if (
+    currentTypedRuntimeGraphIsLarge() &&
+    elements.codeSummary
+  ) {
     elements.codeSummary.textContent =
       "Large runtime graph loaded · generated files are being refreshed";
   }
-  [
-    elements.copyCodeBottom,
-    elements.downloadCode
-  ].forEach(button => {
-    if (button) {
-      button.disabled = true;
-    }
-  });
-
-  generatedOutputDeferredTimer =
-    window.setTimeout(() => {
-      generatedOutputDeferredTimer = 0;
-
-      if (
-        typeof requestIdleCallback ===
-          "function"
-      ) {
-        generatedOutputDeferredIdleHandle =
-          requestIdleCallback(
-            run,
-            { timeout: 4000 }
-          );
-      } else {
-        run();
-      }
-    }, 250);
+  updateGeneratedOutput();
 }
 
 function scheduleTypedNodeGraphOutputRefresh() {
@@ -419,7 +370,14 @@ function beginTypedNodeGraphModulesTracking() {
 
   typedNodeGraphModulesTrackingStarted = true;
 
-  const ready = window.RMLModNodesReady;
+  const requiresCatalogFactory =
+    projectRequiredCatalogNodes({
+      extensions: state.extensions
+    }).length > 0;
+  const ready = requiresCatalogFactory
+    ? window.RMLModNodesReady
+    : window.RMLBaseModNodesReady ||
+      window.RMLModNodesReady;
 
   if (!ready || typeof ready.then !== "function") {
     typedNodeGraphModulesState =
@@ -629,7 +587,7 @@ function projectIoRequest(
   if (!worker) {
     return new Promise(
       (resolve, reject) => {
-        window.setTimeout(() => {
+        queueMicrotask(() => {
           try {
             if (operation === "parse") {
               resolve({
@@ -683,7 +641,7 @@ function projectIoRequest(
           } catch (error) {
             reject(error);
           }
-        }, 0);
+        });
       }
     );
   }
@@ -923,6 +881,23 @@ function terminateGraphCodegenWorker() {
   graphCodegenWorkerNeedsCatalog = false;
 }
 
+function announceGraphCodegenSettlement(
+  detail = {}
+) {
+  document.dispatchEvent(
+    new CustomEvent(
+      "rml-builder:graph-codegen-settled",
+      {
+        detail: {
+          projectEpoch:
+            graphCodegenProjectEpoch,
+          ...detail
+        }
+      }
+    )
+  );
+}
+
 function resetGraphCodegenForProjectReplacement() {
   graphCodegenProjectEpoch += 1;
   terminateGraphCodegenWorker();
@@ -961,7 +936,7 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "graph_codegen_worker.js?v=24-eager-import-atomic-wire-scene-v407f1",
+      "graph_codegen_worker.js?v=31-ready-path-page-restore-v415f1",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -1003,7 +978,12 @@ function ensureGraphCodegenWorker(catalog) {
 
       graphCodegenWorkerRunning = false;
 
-      window.setTimeout(() => {
+      announceGraphCodegenSettlement({
+        key: active.key,
+        ok: response.ok === true
+      });
+
+      queueMicrotask(() => {
         try {
           updateGeneratedOutput();
         } catch (error) {
@@ -1012,7 +992,7 @@ function ensureGraphCodegenWorker(catalog) {
             error
           );
         }
-      }, 0);
+      });
 
       void pumpGraphCodegenWorkerQueue();
     }
@@ -1029,6 +1009,11 @@ function ensureGraphCodegenWorker(catalog) {
       graphCodegenWorkerActiveBuild = null;
       graphCodegenWorkerRunning = false;
       terminateGraphCodegenWorker();
+      announceGraphCodegenSettlement({
+        ok: false,
+        error:
+          graphCodegenWorkerLastError.message
+      });
       void pumpGraphCodegenWorkerQueue();
     }
   );
@@ -1081,6 +1066,12 @@ async function pumpGraphCodegenWorkerQueue() {
         : new Error(String(error));
     graphCodegenWorkerActiveBuild = null;
     graphCodegenWorkerRunning = false;
+    announceGraphCodegenSettlement({
+      key: build.key,
+      ok: false,
+      error:
+        graphCodegenWorkerLastError.message
+    });
   }
 }
 
@@ -7394,7 +7385,8 @@ function applyProjectDocument(
     )];
 }
 
-let projectDraftPersistTimer = 0;
+let projectDraftPersistIdleHandle = 0;
+let projectDraftPersistSchedule = 0;
 let projectDraftPersistRevision = 0;
 let pendingProjectDraftWrite = null;
 let projectDraftWriteRunning = false;
@@ -7653,47 +7645,62 @@ function persist(immediate = false) {
   projectDraftPersistRevision += 1;
   const revision =
     projectDraftPersistRevision;
-  const graphNodeCount =
-    graphNodeCountInProject(state);
-  const delay = immediate
-    ? 0
-    : graphNodeCount > 1000
-      ? 750
-      : 120;
+  const schedule =
+    ++projectDraftPersistSchedule;
+  if (
+    projectDraftPersistIdleHandle &&
+    typeof cancelIdleCallback ===
+      "function"
+  ) {
+    cancelIdleCallback(
+      projectDraftPersistIdleHandle
+    );
+    projectDraftPersistIdleHandle = 0;
+  }
+  const enqueue = () => {
+    projectDraftPersistIdleHandle = 0;
 
-  window.clearTimeout(
-    projectDraftPersistTimer
-  );
+    if (
+      schedule !==
+        projectDraftPersistSchedule ||
+      revision !==
+        projectDraftPersistRevision
+    ) {
+      return;
+    }
 
-  projectDraftPersistTimer =
-    window.setTimeout(() => {
-      projectDraftPersistTimer = 0;
+    pendingProjectDraftWrite = {
+      revision,
+      project:
+        createProjectDocument(
+          false,
+          false
+        )
+    };
+    void flushProjectDraftWrites();
+  };
 
-      const enqueue = () => {
-        pendingProjectDraftWrite = {
-          revision,
-          project:
-            createProjectDocument(
-              false,
-              false
-            )
-        };
-        void flushProjectDraftWrites();
-      };
-
+  if (immediate) {
+    enqueue();
+  } else if (
+    typeof requestIdleCallback ===
+      "function"
+  ) {
+    projectDraftPersistIdleHandle =
+      requestIdleCallback(
+        enqueue,
+        { timeout: 1500 }
+      );
+  } else {
+    queueMicrotask(() => {
       if (
-        !immediate &&
-        typeof requestIdleCallback ===
-          "function"
+        schedule ===
+          projectDraftPersistSchedule
       ) {
-        requestIdleCallback(
-          enqueue,
-          { timeout: 1500 }
-        );
-      } else {
         enqueue();
       }
-    }, delay);
+    });
+  }
 }
 
 window.addEventListener(
@@ -20963,36 +20970,48 @@ let activeBuilderWorkSession = 0;
 let builderWorkWatchdog = 0;
 
 function nextBuilderVisualFrame() {
-  return new Promise(resolve => {
-    let settled = false;
-    let frame = 0;
+  if (
+    document.visibilityState ===
+      "hidden"
+  ) {
+    return yieldBuilderTask();
+  }
 
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      window.clearTimeout(timer);
-      if (frame) {
-        window.cancelAnimationFrame(frame);
-      }
-      resolve();
-    };
+  return new Promise(resolve =>
+    window.requestAnimationFrame(
+      () => resolve()
+    )
+  );
+}
 
-    const timer = window.setTimeout(
-      finish,
-      250
-    );
-    frame = window.requestAnimationFrame(
-      finish
-    );
-  });
+function yieldBuilderTask() {
+  if (
+    typeof globalThis.scheduler?.yield ===
+      "function"
+  ) {
+    return globalThis.scheduler.yield();
+  }
+
+  if (typeof MessageChannel === "function") {
+    return new Promise(resolve => {
+      const channel =
+        new MessageChannel();
+      channel.port1.onmessage = () => {
+        channel.port1.close();
+        channel.port2.close();
+        resolve();
+      };
+      channel.port2.postMessage(0);
+    });
+  }
+
+  return Promise.resolve();
 }
 
 async function paintBuilderUi() {
   await nextBuilderVisualFrame();
   await nextBuilderVisualFrame();
-  await new Promise(resolve =>
-    window.setTimeout(resolve, 0)
-  );
+  await yieldBuilderTask();
 }
 
 function setProjectLoadProgress(
@@ -21386,6 +21405,7 @@ async function ensureProjectRuntimePrerequisites(
   await paintBuilderUi();
 
   const modulesReady =
+    window.RMLBaseModNodesReady ||
     window.RMLModNodesReady;
 
   if (
@@ -21686,6 +21706,59 @@ function assertImportedGraphIdentity(
   }
 }
 
+function waitForGraphCodegenSettlement(
+  timeout,
+  message
+) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+
+    const finish = (
+      callback,
+      value
+    ) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      document.removeEventListener(
+        "rml-builder:graph-codegen-settled",
+        handleSettled
+      );
+      document.removeEventListener(
+        "rml-builder:project-replacement",
+        handleReplacement
+      );
+      callback(value);
+    };
+    const handleSettled = event =>
+      finish(resolve, event.detail || {});
+    const handleReplacement = () =>
+      finish(
+        reject,
+        new Error(
+          "The project changed while Runtime Graph code generation was running."
+        )
+      );
+    const timer = window.setTimeout(
+      () =>
+        finish(
+          reject,
+          new Error(message)
+        ),
+      timeout
+    );
+
+    document.addEventListener(
+      "rml-builder:graph-codegen-settled",
+      handleSettled
+    );
+    document.addEventListener(
+      "rml-builder:project-replacement",
+      handleReplacement
+    );
+  });
+}
+
 async function waitForImportedCodegen(
   expectedGraph,
   workSession,
@@ -21705,10 +21778,11 @@ async function waitForImportedCodegen(
       break;
     }
 
-    if (
-      performance.now() - started >=
-        timeout
-    ) {
+    const remaining =
+      timeout -
+      (performance.now() - started);
+
+    if (remaining <= 0) {
       throw new Error(
         "Runtime Graph code generation did not complete within 120 seconds. The JSON was not loaded."
       );
@@ -21727,8 +21801,9 @@ async function waitForImportedCodegen(
       }
     );
 
-    await new Promise(resolve =>
-      window.setTimeout(resolve, 40)
+    await waitForGraphCodegenSettlement(
+      remaining,
+      "Runtime Graph code generation did not complete within 120 seconds. The JSON was not loaded."
     );
   }
 
@@ -26880,6 +26955,17 @@ function exposeBuilderBridge() {
       configurable: true
     }
   );
+
+  document.dispatchEvent(
+    new CustomEvent(
+      "rml-builder:bridge-ready",
+      {
+        detail: {
+          version: bridge.version
+        }
+      }
+    )
+  );
 }
 
 function installUniversalScrollLayerSelector() {
@@ -30354,7 +30440,7 @@ async function initialize() {
       message:
         startupExpectedNodes > 1000 ||
         startupExpectedConnections > 2000
-          ? `Preparing ${startupExpectedNodes.toLocaleString()} nodes and ${startupExpectedConnections.toLocaleString()} connections in bounded rendering batches.`
+          ? `Preparing the complete ${startupExpectedNodes.toLocaleString()}-node and ${startupExpectedConnections.toLocaleString()}-connection scene.`
           : "The restored project and all utility dialogs are ready to enter the interface.",
       progress: 76
     });
@@ -30371,7 +30457,7 @@ async function initialize() {
         "The first interface frame and all dialog handlers are ready.",
       detail:
         startupGraphResult.timedOut
-          ? "The interface is available while remaining graph drawing continues in bounded browser frames."
+          ? "The graph renderer did not confirm completion before its safety deadline; its persistent Runtime Graph control reports the current readiness state."
           : "Workspace restoration completed successfully.",
       progress: 100
     });
@@ -33061,11 +33147,6 @@ renderSettingsPreview =
       ? result.then(finish)
       : finish(result);
   };
-
-window.setInterval(
-  rmlRuntimeDisplayRenderPreviewRows,
-  750
-);
 
 Object.defineProperty(
   window,

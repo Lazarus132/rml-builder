@@ -1,16 +1,13 @@
 (() => {
   "use strict";
 
-  const BRIDGE_VERSION = 2;
+  const BRIDGE_VERSION = 3;
   const BRIDGE_PROTOCOL_VERSION = 1;
   const HEALTH_PATH = "/health";
   const SNAPSHOT_PATH = "/runtime/snapshot";
   const EVENTS_PATH = "/runtime/events";
   const PROBE_TIMEOUT_MS = 850;
   const SNAPSHOT_TIMEOUT_MS = 1600;
-  const STALE_CHECK_INTERVAL_MS = 1000;
-  const ACTIVE_TIMEOUT_MS = 6500;
-  const SNAPSHOT_RECONCILE_MS = 10000;
 
   if (
     window.RMLRuntimeBridge?.version >=
@@ -258,11 +255,7 @@
       scannerBaseUrl: "",
       sessionId: "",
       lastSeenUtc: "",
-      lastSeenAt: 0,
       eventSource: null,
-      retryTimer: 0,
-      staleTimer: 0,
-      reconcileTimer: 0,
       generation: 0,
       starting: false,
       disposed: false
@@ -493,13 +486,6 @@
       String(
         envelope.lastSeenUtc || ""
       );
-    state.lastSeenAt =
-      state.lastSeenUtc
-        ? Date.parse(
-            state.lastSeenUtc
-          ) || 0
-        : 0;
-
     notify(
       state,
       "snapshot"
@@ -551,12 +537,6 @@
         new Date()
           .toISOString()
       );
-    state.lastSeenAt =
-      Date.parse(
-        state.lastSeenUtc
-      ) ||
-      Date.now();
-
     notify(
       state,
       "display",
@@ -659,24 +639,6 @@
     }
   }
 
-  function clearTimers(
-    state
-  ) {
-    window.clearTimeout(
-      state.retryTimer
-    );
-    window.clearInterval(
-      state.staleTimer
-    );
-    window.clearInterval(
-      state.reconcileTimer
-    );
-
-    state.retryTimer = 0;
-    state.staleTimer = 0;
-    state.reconcileTimer = 0;
-  }
-
   function markRuntimeUnavailable(
     state,
     generation
@@ -692,7 +654,6 @@
       state.scannerBaseUrl;
 
     closeEventSource(state);
-    clearTimers(state);
     setConnectionState(state, false);
 
     if (
@@ -705,80 +666,6 @@
     discoveryEnabled = false;
   }
 
-  function installStaleCheck(
-    state
-  ) {
-    if (state.staleTimer) {
-      return;
-    }
-
-    state.staleTimer =
-      window.setInterval(
-        () => {
-          if (
-            !state.active ||
-            !state.lastSeenAt
-          ) {
-            return;
-          }
-
-          if (
-            Date.now() -
-              state.lastSeenAt >
-            ACTIVE_TIMEOUT_MS
-          ) {
-            state.active = false;
-            notify(
-              state,
-              "stale"
-            );
-          }
-        },
-        STALE_CHECK_INTERVAL_MS
-      );
-  }
-
-  function installReconcile(
-    state,
-    baseUrl,
-    generation,
-    intervalMs =
-      SNAPSHOT_RECONCILE_MS
-  ) {
-    window.clearInterval(
-      state.reconcileTimer
-    );
-
-    state.reconcileTimer =
-      window.setInterval(
-        () => {
-          if (
-            state.disposed ||
-            generation !==
-              state.generation
-          ) {
-            return;
-          }
-
-          void loadSnapshot(
-            state,
-            baseUrl,
-            generation
-          ).catch(() => {
-            markRuntimeUnavailable(
-              state,
-              generation
-            );
-          });
-        },
-        Math.max(
-          500,
-          Number(intervalMs) ||
-            SNAPSHOT_RECONCILE_MS
-        )
-      );
-  }
-
   function openEventStream(
     state,
     baseUrl,
@@ -788,13 +675,11 @@
       typeof EventSource !==
         "function"
     ) {
-      installReconcile(
+      notify(
         state,
-        baseUrl,
-        generation,
-        1000
+        "events-unavailable"
       );
-      return;
+      return false;
     }
 
     closeEventSource(
@@ -824,11 +709,6 @@
           state,
           true,
           baseUrl
-        );
-        installReconcile(
-          state,
-          baseUrl,
-          generation
         );
       };
 
@@ -873,11 +753,7 @@
         );
       };
 
-    installReconcile(
-      state,
-      baseUrl,
-      generation
-    );
+    return true;
   }
 
   async function startState(
@@ -949,9 +825,6 @@
         baseUrl,
         generation
       );
-      installStaleCheck(
-        state
-      );
     } catch {
       if (
         generation ===
@@ -979,9 +852,6 @@
     state.disposed = true;
     state.generation += 1;
     closeEventSource(
-      state
-    );
-    clearTimers(
       state
     );
     state.connected = false;
@@ -1106,9 +976,6 @@
     }
 
     closeEventSource(
-      state
-    );
-    clearTimers(
       state
     );
     state.connected = false;

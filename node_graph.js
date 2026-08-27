@@ -13,7 +13,7 @@
     )
       ? RML_GRAPH_REQUESTED_TEST_STORAGE_SCOPE
       : "rml-configuration-builder-visual-test-default";
-  const GRAPH_SCHEMA_VERSION = 19;
+  const GRAPH_SCHEMA_VERSION = 20;
   const GRAPH_STAGE_WIDTH = 5200;
   const GRAPH_STAGE_HEIGHT = 3400;
   const GRAPH_MIN_ZOOM = 0.005;
@@ -37,7 +37,6 @@
   const GRAPH_DOM_VIRTUALIZATION_THRESHOLD = 240;
   const GRAPH_FALLBACK_MAX_DETAILED_NODES = 220;
   const GRAPH_FALLBACK_MAX_SVG_CONNECTIONS = 600;
-  const GRAPH_GPU_WIRE_CONNECTION_CHUNK = 240;
   const GRAPH_EAGER_CONNECTION_TARGET_NODE_LIMIT = 180;
   const GRAPH_EAGER_CONNECTION_TARGET_WIRE_LIMIT = 400;
   const GRAPH_INCREMENTAL_PRUNE_CONNECTION_LIMIT = 800;
@@ -1053,10 +1052,15 @@
 
   let bridge = null;
   let graph = null;
-  // `graph.active` is persistent product state: when true, the packed Runtime
-  // Graph contributes to every export.  The visible editor page is transient
-  // UI state and must never enable or disable generated output.
   let runtimeGraphViewActive = false;
+  let graphCatalogReadiness = "ready";
+  let graphCatalogReadinessMessage = "";
+  let graphCatalogGateSettled = false;
+  let graphCatalogGateError = null;
+  let lastGraphCatalogRefreshRevision = -1;
+  let graphHostInitialized = false;
+  let graphBaseModulesReady = false;
+  let graphHostError = null;
   let currentAnalysis = null;
   let runtimeBridgeSubscription = null;
   let runtimeBridgeChannel = "";
@@ -1064,10 +1068,9 @@
   let lastPersistedGraphJson = "";
   let lastPersistedGraphReference = null;
   let graphCodegenRevision = 1;
-  let persistTimer = 0;
+  let persistSchedule = 0;
   let persistGeneratedOutputDirty = false;
-  let generatedOutputRefreshTimer = 0;
-  let generatedOutputRefreshIdleHandle = 0;
+  let generatedOutputRefreshQueued = false;
   let graphMessageTimer = 0;
   let graphNodeSearchQuery = "";
   let graphNodeSearchIndex = -1;
@@ -1087,7 +1090,7 @@
   let graphLeftPanelCollapsed = false;
   let graphRightPanelCollapsed = false;
   let graphPaletteUiLoaded = false;
-  let graphPaletteUiPersistTimer = 0;
+  let graphPaletteUiPersistScheduled = false;
   let graphPaletteUiState = {
     scrollTop: 0,
     groups: Object.create(null)
@@ -1102,16 +1105,16 @@
   let palettePointerTransactionSequence = 0;
   let paletteClickSuppression = null;
   const consumedPalettePointerSources = new WeakSet();
-  let packedSnapshotSyncTimer = 0;
+  let packedSnapshotSyncScheduled = false;
   const nodeBodyScrollPositions =
     new Map();
   let nodeBodyWireRefreshFrame = 0;
   let graphWireRenderFrame = 0;
-  let graphWireChunkFrame = 0;
-  let graphWireChunkGeneration = 0;
   let graphWireFullRenderPending = false;
   const graphWirePartialConnectionIds =
     new Set();
+  let graphStructuralPaintFrame = 0;
+  let graphStructuralCommitFrame = 0;
   let nodeResizeLimitRefreshFrame = 0;
   let lastNodeResizePress = null;
   const NODE_RESIZE_DOUBLE_CLICK_MS = 450;
@@ -1198,6 +1201,18 @@
   };
 
   function resetGraphRenderCaches() {
+    if (graphStructuralPaintFrame) {
+      cancelAnimationFrame(
+        graphStructuralPaintFrame
+      );
+      graphStructuralPaintFrame = 0;
+    }
+    if (graphStructuralCommitFrame) {
+      cancelAnimationFrame(
+        graphStructuralCommitFrame
+      );
+      graphStructuralCommitFrame = 0;
+    }
     currentAnalysis = null;
     graphNodeGeometryCache.clear();
     graphForcedNodeIds.clear();
@@ -2467,6 +2482,7 @@
       version: GRAPH_SCHEMA_VERSION,
       revision: 0,
       active: false,
+      lastOpenPage: "configuration-outline",
       sourceSignature: "",
       showAdvancedNodes: false,
       configSnapshot: null,
@@ -2748,6 +2764,11 @@
 
     result.active =
       raw.active === true;
+
+    result.lastOpenPage =
+      raw.lastOpenPage === "runtime-graph"
+        ? "runtime-graph"
+        : "configuration-outline";
 
     result.revision = Math.max(
       0,
@@ -3109,6 +3130,10 @@
           )
         ),
       active: graph.active,
+      lastOpenPage:
+        graph.lastOpenPage === "runtime-graph"
+          ? "runtime-graph"
+          : "configuration-outline",
       sourceSignature:
         graph.sourceSignature,
       showAdvancedNodes:
@@ -3198,68 +3223,37 @@
   }
 
   function scheduleGeneratedOutputRefresh() {
+    if (generatedOutputRefreshQueued) {
+      return;
+    }
+
+    generatedOutputRefreshQueued = true;
     const run = () => {
-      generatedOutputRefreshTimer = 0;
-      generatedOutputRefreshIdleHandle = 0;
+      generatedOutputRefreshQueued = false;
       bridge
         .requestGeneratedOutputRefresh
         ?.();
     };
 
-    window.clearTimeout(
-      generatedOutputRefreshTimer
-    );
-
-    if (
-      generatedOutputRefreshIdleHandle &&
-      typeof cancelIdleCallback ===
-        "function"
-    ) {
-      cancelIdleCallback(
-        generatedOutputRefreshIdleHandle
-      );
-      generatedOutputRefreshIdleHandle = 0;
-    }
-
-    const largeGraph =
-      graph.nodes.length > 1000 ||
-      graph.connections.length > 2000;
-
-    if (!largeGraph) {
-      run();
-      return;
-    }
-
-    generatedOutputRefreshTimer =
-      window.setTimeout(() => {
-        generatedOutputRefreshTimer = 0;
-
-        if (
-          typeof requestIdleCallback ===
-            "function"
-        ) {
-          generatedOutputRefreshIdleHandle =
-            requestIdleCallback(
-              run,
-              { timeout: 2500 }
-            );
-        } else {
-          run();
-        }
-      }, 500);
+    queueMicrotask(run);
   }
 
   function persistGraph(
     immediate = false,
     refreshGeneratedOutput = true
   ) {
-    clearTimeout(persistTimer);
+    const schedule =
+      ++persistSchedule;
     persistGeneratedOutputDirty =
       persistGeneratedOutputDirty ||
       refreshGeneratedOutput;
 
     const commit = () => {
-      persistTimer = 0;
+      if (
+        schedule !== persistSchedule
+      ) {
+        return;
+      }
       const refreshOutput =
         persistGeneratedOutputDirty;
       persistGeneratedOutputDirty = false;
@@ -3304,12 +3298,7 @@
     if (immediate) {
       commit();
     } else {
-      persistTimer = window.setTimeout(
-        commit,
-        graph.nodes.length > 1000
-          ? 180
-          : 80
-      );
+      queueMicrotask(commit);
     }
   }
 
@@ -8882,10 +8871,7 @@
           ]
         )
       );
-    // Only real value-bearing Configuration Outline nodes may contribute
-    // runtime fields. Structural containers such as Inline Rows are present
-    // in flattenConfiguration() for menu/layout purposes, but they do not
-    // expose configuration values and must never generate C# members.
+
     const configurationValueEntries =
       configurationEntries.filter(entry => {
         const node = entry?.node;
@@ -12724,10 +12710,6 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       const previousGraph = graph;
 
       try {
-        // analyzeConnections() deliberately works against the module-local
-        // graph.  Temporarily substitute the sanitized candidate so this is
-        // a pure pre-install validation and the currently open project is
-        // never replaced when validation fails.
         graph = candidate;
         const analysis =
           analyzeConnections(
@@ -12788,6 +12770,34 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         background: linear-gradient(145deg, #24445c, #1a3042);
         color: #cdeeff;
         box-shadow: 0 7px 22px rgba(52, 156, 218, 0.18);
+      }
+
+      #pack-into-node[data-runtime-readiness="loading"] {
+        border-color: rgba(164, 118, 255, 0.55);
+      }
+
+      #pack-into-node[data-runtime-readiness="failed"] {
+        border-color: rgba(255, 105, 135, 0.58);
+      }
+
+      .rml-runtime-graph-spinner {
+        width: 15px;
+        height: 15px;
+        flex: 0 0 15px;
+        border: 2px solid rgba(205, 186, 255, 0.28);
+        border-top-color: #cdbaff;
+        border-radius: 50%;
+        animation: rml-runtime-graph-spin 0.72s linear infinite;
+      }
+
+      @keyframes rml-runtime-graph-spin {
+        to { transform: rotate(360deg); }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .rml-runtime-graph-spinner {
+          animation-duration: 1.8s;
+        }
       }
 
       body.rml-node-graph-mode .palette > .help,
@@ -14939,21 +14949,76 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       graph?.active &&
       runtimeGraphViewActive
     );
+    const hostLoading =
+      !graphHostError &&
+      (
+        !graphHostInitialized ||
+        (
+          !bridge ||
+          !graph
+        )
+      );
+    const hostFailed =
+      Boolean(graphHostError);
+    const catalogDependent =
+      graphUsesCatalogOperators();
+    const catalogLoading =
+      hostLoading ||
+      (
+        catalogDependent &&
+        graphCatalogReadiness ===
+          "pending"
+      );
+    const catalogFailed =
+      hostFailed ||
+      (
+        !hostLoading &&
+        catalogDependent &&
+        graphCatalogReadiness ===
+          "failed"
+      );
 
-    dom.packButton.innerHTML = active
-      ? `<svg class="rml-pack-back-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5 M10 7l-5 5 5 5"></path></svg><span class="top-action-label">Back to Outline</span>`
-      : graph?.active
-        ? `<span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">Open Runtime Graph</span>`
-        : `<span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">Pack into Node</span>`;
+    dom.packButton.innerHTML =
+      catalogLoading
+        ? `<span class="rml-runtime-graph-spinner" aria-hidden="true"></span><span class="top-action-label">Loading Runtime Graph…</span>`
+        : catalogFailed
+          ? `<span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">Runtime Graph unavailable</span>`
+          : active
+            ? `<svg class="rml-pack-back-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5 M10 7l-5 5 5 5"></path></svg><span class="top-action-label">Back to Outline</span>`
+            : graph?.active
+              ? `<span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">Open Runtime Graph</span>`
+              : `<span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">Pack into Node</span>`;
 
     dom.packButton.setAttribute(
       "aria-label",
-      active
-        ? "Back to Configuration Outline"
-        : graph?.active
-          ? "Open Runtime Graph"
-          : "Pack into Node"
+      catalogLoading
+        ? "Runtime Graph is loading"
+        : catalogFailed
+          ? "Runtime Graph is unavailable"
+          : active
+            ? "Back to Configuration Outline"
+            : graph?.active
+              ? "Open Runtime Graph"
+              : "Pack into Node"
     );
+
+    if (catalogLoading) {
+      dom.packButton.setAttribute(
+        "aria-busy",
+        "true"
+      );
+    } else {
+      dom.packButton.removeAttribute(
+        "aria-busy"
+      );
+    }
+
+    dom.packButton.dataset.runtimeReadiness =
+      catalogLoading
+        ? "loading"
+        : catalogFailed
+          ? "failed"
+          : "ready";
 
     dom.packButton.dataset.helpTone =
       "runtime";
@@ -14970,10 +15035,27 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         ?.nodes || [];
 
     dom.packButton.disabled =
-      sourceNodes.length === 0;
+      !hostLoading &&
+      !hostFailed &&
+      sourceNodes.length === 0 &&
+      !graph?.active;
 
     dom.packButton.dataset.help =
-      sourceNodes.length === 0
+      catalogLoading
+        ? hostLoading
+          ? "The Runtime Graph control is ready. The locally restored project state is still being connected to it."
+          : graphCatalogReadinessMessage ||
+            "The saved graph is available. Its catalog-generated API definitions are still being restored."
+        : catalogFailed
+          ? hostFailed
+            ? `The Runtime Graph base modules failed: ${
+                graphHostError instanceof Error
+                  ? graphHostError.message
+                  : String(graphHostError)
+              }`
+            : graphCatalogReadinessMessage ||
+            "The Runtime Graph cannot be opened because required API node definitions are unavailable."
+        : sourceNodes.length === 0
         ? "Add at least one Configuration Outline item before opening the Typed Runtime Graph."
         : active
           ? "Return to the Configuration Outline. The packed graph is preserved."
@@ -15143,13 +15225,50 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
   function togglePackedNodeMode() {
     if (
+      graphHostError ||
+      !graphHostInitialized ||
+      !bridge ||
+      !graph
+    ) {
+      showGraphMessage(
+        graphHostError
+          ? `The Runtime Graph base modules failed: ${
+              graphHostError instanceof Error
+                ? graphHostError.message
+                : String(graphHostError)
+            }`
+          : "The Runtime Graph control is visible and the locally restored project state is still being connected. It will become available automatically when the builder bridge-ready event arrives.",
+        graphHostError ? "error" : ""
+      );
+      return;
+    }
+
+    if (
+      graphUsesCatalogOperators() &&
+      graphCatalogReadiness !== "ready"
+    ) {
+      showGraphMessage(
+        graphCatalogReadinessMessage ||
+          (graphCatalogReadiness === "pending"
+            ? "The Runtime Graph is still restoring its API node definitions. It will become available automatically when the factory-ready event arrives."
+            : "The Runtime Graph cannot be opened because one or more required API node definitions are unavailable."),
+        graphCatalogReadiness === "failed"
+          ? "error"
+          : ""
+      );
+      return;
+    }
+
+    if (
       graph?.active &&
       runtimeGraphViewActive
     ) {
       unpackToOutline();
     } else if (graph?.active) {
+      graph.lastOpenPage = "runtime-graph";
       runtimeGraphViewActive = true;
       synchronizePackedSnapshot(false);
+      persistGraphView(true);
       activateGraphMode();
     } else {
       packIntoNode();
@@ -15292,19 +15411,19 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
   }
 
   function schedulePackedSnapshotSync() {
-    clearTimeout(
-      packedSnapshotSyncTimer
-    );
-
     if (!hasPackedRuntimeProgram()) {
       return;
     }
 
-    packedSnapshotSyncTimer =
-      window.setTimeout(() => {
-        packedSnapshotSyncTimer = 0;
-        synchronizePackedSnapshot(true);
-      }, 60);
+    if (packedSnapshotSyncScheduled) {
+      return;
+    }
+
+    packedSnapshotSyncScheduled = true;
+    queueMicrotask(() => {
+      packedSnapshotSyncScheduled = false;
+      synchronizePackedSnapshot(true);
+    });
   }
 
   function packIntoNode() {
@@ -15323,6 +15442,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     }
 
     graph.active = true;
+    graph.lastOpenPage = "runtime-graph";
     runtimeGraphViewActive = true;
     graph.configSnapshot =
       snapshot;
@@ -15354,9 +15474,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
   function unpackToOutline() {
     cancelInteraction(true);
-    // Returning to the Configuration Outline changes only the visible page.
-    // The packed Runtime Graph remains enabled and continues to contribute the
-    // exact same files, diagnostics and API compatibility state to Export.
+    graph.lastOpenPage = "configuration-outline";
     runtimeGraphViewActive = false;
     graph.selectedNodeId = null;
     graph.selectedConnectionId = null;
@@ -15365,7 +15483,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       graphNodeVirtualizationSignature = "";
     }
     clearSelectedWirePoint();
-    persistGraph(true);
+    persistGraphView(true);
     deactivateGraphMode();
     bridge.requestPaletteRender();
     bridge.requestRender();
@@ -15517,12 +15635,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
   function persistGraphPaletteUiState(
     immediate = false
   ) {
-    clearTimeout(
-      graphPaletteUiPersistTimer
-    );
-
     const commit = () => {
-      graphPaletteUiPersistTimer = 0;
+      graphPaletteUiPersistScheduled =
+        false;
 
       try {
         localStorage.setItem(
@@ -15541,13 +15656,15 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     };
 
     if (immediate) {
+      graphPaletteUiPersistScheduled =
+        false;
       commit();
-    } else {
-      graphPaletteUiPersistTimer =
-        window.setTimeout(
-          commit,
-          80
-        );
+    } else if (
+      !graphPaletteUiPersistScheduled
+    ) {
+      graphPaletteUiPersistScheduled =
+        true;
+      queueMicrotask(commit);
     }
   }
 
@@ -16146,7 +16263,6 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       );
       graphWireRenderFrame = 0;
     }
-    cancelGraphWireChunkBuild();
     graphWireFullRenderPending = false;
     graphWirePartialConnectionIds.clear();
     graphHybridRenderer?.dispose?.();
@@ -16386,7 +16502,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       "API · Fields",
       "API · Events"
     ];
-    let searchTimer = 0;
+    let searchFrame = 0;
 
     const searchableText =
       (operatorId, definition) =>
@@ -16912,13 +17028,17 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     search.addEventListener(
       "input",
       () => {
-        clearTimeout(searchTimer);
-
-        searchTimer =
-          window.setTimeout(
-            renderEntries,
-            70
+        if (searchFrame) {
+          cancelAnimationFrame(
+            searchFrame
           );
+        }
+
+        searchFrame =
+          requestAnimationFrame(() => {
+            searchFrame = 0;
+            renderEntries();
+          });
       }
     );
 
@@ -21713,8 +21833,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     if (!currentAnalysis) {
       pruneConnections();
     }
-    renderGraphNodes();
     scheduleGraphWireRender();
+    renderGraphNodes();
 
     if (dom.itemCount) {
       dom.itemCount.textContent =
@@ -23465,6 +23585,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       connectedPortKeys();
     const existing = new Map();
     const geometryChangedNodeIds = new Set();
+    const appendTarget =
+      preserveExisting
+        ? dom.nodesHost
+        : document.createDocumentFragment();
 
     if (preserveExisting) {
       for (
@@ -23518,7 +23642,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           bindings,
           connectedKeys
         );
-        dom.nodesHost.appendChild(
+        appendTarget.appendChild(
           element
         );
         restoreNodeBodyScroll(
@@ -23534,6 +23658,12 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           node.id
         );
       }
+    }
+
+    if (!preserveExisting) {
+      dom.nodesHost.appendChild(
+        appendTarget
+      );
     }
 
     graphSocketElementCache.clear();
@@ -23552,9 +23682,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     graphNodeVirtualizationSignature =
       renderedGraphNodeSignature(nodes);
 
-    // Update only GPU node surfaces here. Wire buffers remain untouched until
-    // actual endpoint geometry changed, avoiding a full 5k+ wire rebuild.
-    synchronizeGpuOverviewNodes();
+    if (!graphWireFullRenderPending) {
+      synchronizeGpuOverviewNodes();
+    }
 
     requestAnimationFrame(() => {
       for (const node of nodes) {
@@ -24798,7 +24928,6 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     connectionIds
   ) {
     if (
-      graphWireChunkFrame ||
       !graphHybridActive() ||
       forceSvgWireVisuals() ||
       materializeSvgWireCompatibility() ||
@@ -24867,16 +24996,6 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     return true;
   }
 
-  function cancelGraphWireChunkBuild() {
-    graphWireChunkGeneration += 1;
-    if (graphWireChunkFrame) {
-      cancelAnimationFrame(
-        graphWireChunkFrame
-      );
-      graphWireChunkFrame = 0;
-    }
-  }
-
   function notifyGraphRenderComplete() {
     document.dispatchEvent(
       new CustomEvent(
@@ -24893,127 +25012,73 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     );
   }
 
-  function renderLargeHybridGraphWires({
-    branchUsage,
-    inputBranchStart
+  function renderCompleteHybridGraphWires({
+    branchUsage
   }) {
-    cancelGraphWireChunkBuild();
-    const generation =
-      graphWireChunkGeneration;
-    const connections =
-      [...graph.connections];
     const gpuSegments = [];
     const handles = [];
-    let index = 0;
 
-    // Keep the last complete GPU and SVG scene visible while the next
-    // large scene is assembled over several frames. Only a complete,
-    // still-current generation is allowed to replace it below.
+    for (const connection of graph.connections) {
+      const records =
+        gpuSegmentsForConnection(
+          connection
+        );
+      gpuSegments.push(...records);
 
-    const processChunk = () => {
-      graphWireChunkFrame = 0;
-      if (
-        generation !==
-          graphWireChunkGeneration ||
-        !dom.wires ||
-        !graphHybridActive()
-      ) {
-        return;
-      }
-
-      const end = Math.min(
-        connections.length,
-        index +
-          GRAPH_GPU_WIRE_CONNECTION_CHUNK
-      );
-
-      for (; index < end; index += 1) {
-        const connection =
-          connections[index];
-        const records =
-          gpuSegmentsForConnection(
-            connection,
-            inputBranchStart
+      const color =
+        records[0]?.color ||
+        typeInfo("generic").color;
+      for (const point of
+        connection.points || []) {
+        const branchCount =
+          branchPointUsageCount(
+            connection.id,
+            point.id,
+            branchUsage
           );
-        gpuSegments.push(...records);
+        const junction =
+          branchCount > 0;
+        const selected = Boolean(
+          graph.selectedWirePoint &&
+          graph.selectedWirePoint
+            .connectionId ===
+              connection.id &&
+          graph.selectedWirePoint
+            .pointId === point.id
+        );
 
-        const color =
-          records[0]?.color ||
-          typeInfo("generic").color;
-        for (const point of
-          connection.points || []) {
-          const branchCount =
-            branchPointUsageCount(
-              connection.id,
-              point.id,
-              branchUsage
-            );
-          const junction =
-            branchCount > 0;
-          const selected = Boolean(
-            graph.selectedWirePoint &&
-            graph.selectedWirePoint
-              .connectionId ===
-                connection.id &&
-            graph.selectedWirePoint
-              .pointId === point.id
-          );
-
-          if (
-            selected ||
-            graphPointInsideViewport(
-              point
+        if (
+          selected ||
+          graphPointInsideViewport(
+            point
+          )
+        ) {
+          handles.push(
+            createWirePointHandle(
+              connection,
+              point,
+              color,
+              junction,
+              branchCount,
+              selected
             )
-          ) {
-            handles.push(
-              createWirePointHandle(
-                connection,
-                point,
-                color,
-                junction,
-                branchCount,
-                selected
-              )
-            );
-          }
+          );
         }
       }
+    }
 
-      if (index < connections.length) {
-        graphWireChunkFrame =
-          requestAnimationFrame(
-            processChunk
-          );
-        return;
-      }
-
-      if (
-        generation !==
-          graphWireChunkGeneration ||
-        !dom.wires ||
-        !graphHybridActive()
-      ) {
-        return;
-      }
-
-      graphHybridRenderer?.setScene?.({
-        segments: gpuSegments,
-        nodes: gpuOverviewNodeRecords()
-      });
-      graphHybridRenderer?.setCamera?.(
-        graph.viewport
-      );
-      graphHybridRenderer?.drawNow?.();
-      dom.wires.replaceChildren(
-        ...handles
-      );
-      notifyGraphRenderComplete();
-    };
-
-    graphWireChunkFrame =
-      requestAnimationFrame(
-        processChunk
-      );
+    graphHybridRenderer?.setScene?.({
+      segments: gpuSegments,
+      nodes: gpuOverviewNodeRecords()
+    });
+    graphHybridRenderer?.setCamera?.(
+      graph.viewport
+    );
+    graphHybridRenderer?.drawNow?.();
+    dom.wires.replaceChildren(
+      ...handles
+    );
+    notifyGraphRenderComplete();
   }
 
   function renderGraphWires() {
@@ -25027,7 +25092,6 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       );
       graphWireRenderFrame = 0;
     }
-    cancelGraphWireChunkBuild();
     graphWireFullRenderPending = false;
     graphWirePartialConnectionIds.clear();
 
@@ -25039,15 +25103,26 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
     const branchUsage =
       branchPointUsageMap();
+    const gpuVisual =
+      graphHybridActive() &&
+      !forceSvgWireVisuals();
+    const svgCompatibility =
+      materializeSvgWireCompatibility();
+
+    if (
+      gpuVisual &&
+      !svgCompatibility &&
+      !activeInteraction
+    ) {
+      renderCompleteHybridGraphWires({
+        branchUsage
+      });
+      return;
+    }
+
     const svgItems = [];
     const handles = [];
     const gpuSegments = [];
-    const hybrid =
-      graphHybridActive();
-    const gpuVisual =
-      hybrid && !forceSvgWireVisuals();
-    const svgCompatibility =
-      materializeSvgWireCompatibility();
     const inputBranchStart =
       activeInteraction?.kind ===
         "connection" &&
@@ -25058,20 +25133,6 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     const fallbackVirtualized =
       fallbackGraphVirtualizationActive();
     let fallbackSvgConnectionCount = 0;
-
-    if (
-      gpuVisual &&
-      !svgCompatibility &&
-      !activeInteraction &&
-      graph.connections.length >
-        GRAPH_GPU_WIRE_CONNECTION_CHUNK
-    ) {
-      renderLargeHybridGraphWires({
-        branchUsage,
-        inputBranchStart
-      });
-      return;
-    }
 
     for (const connection of graph.connections) {
       const selectedConnection =
@@ -25191,6 +25252,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           );
           visible.style.stroke = color;
           visible.style.color = color;
+          shadow.dataset.connectionId =
+            connection.id;
+          shadow.dataset.segmentIndex =
+            String(segment.index);
           visible.dataset.connectionId =
             connection.id;
           visible.dataset.segmentIndex =
@@ -25312,9 +25377,6 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       graph.viewport
     );
     graphHybridRenderer?.drawNow?.();
-    // Commit the fully prepared wire DOM in one operation. Until this
-    // point the previous complete scene remains visible, so parameter
-    // edits and topology changes cannot expose a blank wire frame.
     dom.wires.replaceChildren(
       ...svgItems,
       ...handles
@@ -25470,6 +25532,146 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       });
   }
 
+  function expandedGraphConnectionRemovalIds(
+    connectionIds
+  ) {
+    const removed = new Set(
+      Array.isArray(connectionIds) ||
+      connectionIds instanceof Set
+        ? connectionIds
+        : [connectionIds]
+    );
+    removed.delete("");
+    removed.delete(null);
+    removed.delete(undefined);
+
+    const childrenByConnectionId =
+      new Map();
+    for (const connection of graph.connections) {
+      const parentId =
+        connection.branchFrom
+          ?.connectionId;
+      if (!parentId) {
+        continue;
+      }
+      const children =
+        childrenByConnectionId.get(
+          parentId
+        ) || [];
+      children.push(connection.id);
+      childrenByConnectionId.set(
+        parentId,
+        children
+      );
+    }
+
+    const queue = [...removed];
+    for (
+      let index = 0;
+      index < queue.length;
+      index += 1
+    ) {
+      for (
+        const childId of
+        childrenByConnectionId.get(
+          queue[index]
+        ) || []
+      ) {
+        if (removed.has(childId)) {
+          continue;
+        }
+        removed.add(childId);
+        queue.push(childId);
+      }
+    }
+    return removed;
+  }
+
+  function hideGraphConnectionsImmediately(
+    connectionIds
+  ) {
+    const ids = new Set(connectionIds);
+    if (ids.size === 0) {
+      return;
+    }
+
+    if (graphWireRenderFrame) {
+      cancelAnimationFrame(
+        graphWireRenderFrame
+      );
+      graphWireRenderFrame = 0;
+    }
+    graphWireFullRenderPending = false;
+    graphWirePartialConnectionIds.clear();
+
+    for (
+      const element of
+      dom.wires?.querySelectorAll(
+        "[data-connection-id]"
+      ) || []
+    ) {
+      if (
+        ids.has(
+          element.dataset.connectionId
+        )
+      ) {
+        element.remove();
+      }
+    }
+
+    graphHybridRenderer
+      ?.hideConnections?.(ids);
+    graphHybridRenderer?.drawNow?.();
+  }
+
+  function removeGraphConnectionsFromState(
+    connectionIds
+  ) {
+    const removed =
+      expandedGraphConnectionRemovalIds(
+        connectionIds
+      );
+    if (removed.size === 0) {
+      return removed;
+    }
+    graph.connections =
+      graph.connections.filter(
+        connection =>
+          !removed.has(connection.id)
+      );
+    hideGraphConnectionsImmediately(
+      removed
+    );
+    currentAnalysis = null;
+    graphConnectionLookupSource = null;
+    graphConnectionLookupLength = -1;
+    graphIncidentConnectionLookupCache.clear();
+    return removed;
+  }
+
+  function scheduleStructuralGraphCommit() {
+    if (
+      graphStructuralPaintFrame ||
+      graphStructuralCommitFrame
+    ) {
+      return;
+    }
+
+    graphStructuralPaintFrame =
+      requestAnimationFrame(() => {
+        graphStructuralPaintFrame = 0;
+        graphStructuralCommitFrame =
+          requestAnimationFrame(() => {
+            graphStructuralCommitFrame = 0;
+            pruneConnections();
+            persistGraph(true);
+            renderGraphNodesAndWires();
+            renderGraphPalette();
+            renderGraphInspector();
+          });
+      });
+  }
+
   function deleteGraphNode(nodeId) {
     const node =
       findGraphNode(nodeId);
@@ -25488,19 +25690,26 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       nodeId
     );
 
+    const incidentConnectionIds =
+      graph.connections
+        .filter(
+          connection =>
+            connection.fromNode ===
+              nodeId ||
+            connection.toNode ===
+              nodeId
+        )
+        .map(connection => connection.id);
+
     graph.nodes =
       graph.nodes.filter(
         candidate =>
           candidate.id !== nodeId
       );
-    graph.connections =
-      graph.connections.filter(
-        connection =>
-          connection.fromNode !==
-            nodeId &&
-          connection.toNode !==
-            nodeId
-      );
+    currentAnalysis = null;
+    removeGraphConnectionsFromState(
+      incidentConnectionIds
+    );
 
     if (
       graph.selectedNodeId ===
@@ -25511,11 +25720,19 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
     graph.selectedConnectionId = null;
     clearSelectedWirePoint();
-    pruneConnections();
-    persistGraph(true);
-    renderGraphNodesAndWires();
-    renderGraphPalette();
+    dom.nodesHost
+      ?.querySelector(
+        `[data-graph-node-id="${CSS.escape(nodeId)}"]`
+      )
+      ?.remove();
+    synchronizeGpuOverviewNodes();
+    if (dom.itemCount) {
+      dom.itemCount.textContent =
+        String(graph.nodes.length);
+    }
+    persistGraph(true, false);
     renderGraphInspector();
+    scheduleStructuralGraphCommit();
   }
 
   function deleteSelectedGraphItem() {
@@ -25538,18 +25755,14 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     }
 
     if (graph.selectedConnectionId) {
-      graph.connections =
-        graph.connections.filter(
-          connection =>
-            connection.id !==
-            graph.selectedConnectionId
-        );
+      removeGraphConnectionsFromState(
+        [graph.selectedConnectionId]
+      );
       graph.selectedConnectionId = null;
       clearSelectedWirePoint();
-      pruneConnections();
-      persistGraph(true);
-      renderGraphNodesAndWires();
+      persistGraph(true, false);
       renderGraphInspector();
+      scheduleStructuralGraphCommit();
     }
   }
 
@@ -30702,6 +30915,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       !activeInteraction
     ) {
       graph = sanitizeGraphState(incoming);
+      runtimeGraphViewActive = false;
+      updateGraphCatalogReadiness();
       resetGraphRenderCaches();
       pruneConnections();
       graphCodegenRevision += 1;
@@ -30724,7 +30939,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
     if (
       graph.active &&
-      runtimeGraphViewActive
+      graph.lastOpenPage === "runtime-graph" &&
+      graphCatalogReadiness === "ready"
     ) {
       activateGraphMode();
     } else {
@@ -30737,6 +30953,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     return {
       version: value.version,
       active: value.active,
+      lastOpenPage:
+        value.lastOpenPage === "runtime-graph"
+          ? "runtime-graph"
+          : "configuration-outline",
       sourceSignature:
         value.sourceSignature,
       showAdvancedNodes:
@@ -30858,12 +31078,18 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
   );
 
   function initialize() {
+    if (graphHostInitialized) {
+      return true;
+    }
+
     bridge =
       window.RMLBuilderBridge;
 
     if (!bridge) {
-      return;
+      return false;
     }
+
+    graphHostInitialized = true;
 
     injectStyles();
     cacheDom();
@@ -30879,8 +31105,11 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     graph = sanitizeGraphState(
       initialExtensionState
     );
+    updateGraphCatalogReadiness();
     runtimeGraphViewActive =
-      graph.active === true;
+      graph.active === true &&
+      graph.lastOpenPage === "runtime-graph" &&
+      graphCatalogReadiness === "ready";
     resetGraphRenderCaches();
 
     loadGraphPaletteUiState();
@@ -31164,10 +31393,217 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     bridge
       .requestGeneratedOutputRefresh
       ?.();
+
+    return true;
+  }
+
+  function graphUsesCatalogOperators(
+    value = graph
+  ) {
+    return Boolean(
+      value &&
+      Array.isArray(value.nodes) &&
+      value.nodes.some(node =>
+        node?.kind === "operator" &&
+        String(
+          node.operatorId || ""
+        ).startsWith("api.")
+      )
+    );
+  }
+
+  function missingGraphCatalogOperatorIds(
+    value = graph
+  ) {
+    if (
+      !value ||
+      !Array.isArray(value.nodes)
+    ) {
+      return [];
+    }
+
+    return [
+      ...new Set(
+        value.nodes
+          .filter(node =>
+            node?.kind === "operator" &&
+            String(
+              node.operatorId || ""
+            ).startsWith("api.") &&
+            !OPERATOR_DEFINITIONS[
+              node.operatorId
+            ]
+          )
+          .map(node =>
+            String(node.operatorId)
+          )
+      )
+    ].sort();
+  }
+
+  function graphCatalogDefinitionsReady(
+    value = graph
+  ) {
+    const catalog =
+      window.RMLResoniteApiCatalog ||
+      window.RMLFrooxComponentCatalog ||
+      null;
+    const report =
+      window.RMLApiNodeFactoryReport ||
+      null;
+    const catalogFingerprint = String(
+      catalog?.catalogFingerprint || ""
+    );
+    const reportFingerprint = String(
+      report?.catalogFingerprint || ""
+    );
+    const catalogSource = String(
+      catalog?.catalogSource || ""
+    );
+    const reportSource = String(
+      report?.catalogSource || ""
+    );
+    const factoryMatchesCatalog = Boolean(
+      report &&
+      (
+        !catalogFingerprint ||
+        catalogFingerprint ===
+          reportFingerprint
+      ) &&
+      (
+        !catalogSource ||
+        catalogSource === reportSource
+      )
+    );
+
+    return !graphUsesCatalogOperators(value) ||
+      (
+        factoryMatchesCatalog &&
+        missingGraphCatalogOperatorIds(
+          value
+        ).length === 0
+      );
+  }
+
+  function updateGraphCatalogReadiness(
+    error = graphCatalogGateError
+  ) {
+    if (!graphUsesCatalogOperators()) {
+      graphCatalogReadiness = "ready";
+      graphCatalogReadinessMessage = "";
+      updatePackButton();
+      return true;
+    }
+
+    const missing =
+      missingGraphCatalogOperatorIds();
+
+    if (graphCatalogDefinitionsReady()) {
+      graphCatalogReadiness = "ready";
+      graphCatalogReadinessMessage = "";
+      updatePackButton();
+      return true;
+    }
+
+    if (!graphCatalogGateSettled && !error) {
+      graphCatalogReadiness = "pending";
+      graphCatalogReadinessMessage =
+        "Restoring the catalog-generated API definitions required by this Runtime Graph…";
+      updatePackButton();
+      return false;
+    }
+
+    graphCatalogReadiness = "failed";
+    graphCatalogReadinessMessage = error
+      ? `The API node factory failed: ${
+          error instanceof Error
+            ? error.message
+            : String(error)
+        }`
+      : `The available API catalog does not provide ${missing.length} required Runtime Graph operator${missing.length === 1 ? "" : "s"}: ${missing.slice(0, 4).join(", ")}${missing.length > 4 ? ", …" : ""}`;
+    updatePackButton();
+    return false;
+  }
+
+  function restoreSavedPresentationIfReady() {
+    if (
+      !graphHostInitialized ||
+      !bridge ||
+      !graph ||
+      graph.active !== true ||
+      graph.lastOpenPage !== "runtime-graph" ||
+      graphCatalogReadiness !== "ready" ||
+      runtimeGraphViewActive
+    ) {
+      return false;
+    }
+
+    activateGraphMode();
+    return true;
+  }
+
+  function handleApiNodeFactoryReady() {
+    graphCatalogGateSettled = true;
+    graphCatalogGateError = null;
+
+    if (!updateGraphCatalogReadiness()) {
+      return;
+    }
+
+    const revision = Number(
+      window.__RMLNodeDefinitionRevision
+    ) || 0;
+
+    if (
+      revision !==
+        lastGraphCatalogRefreshRevision
+    ) {
+      lastGraphCatalogRefreshRevision =
+        revision;
+      refreshAfterNodeModulesReady();
+    }
+    restoreSavedPresentationIfReady();
+  }
+
+  function handleGraphCatalogLoaded() {
+    if (
+      !graphUsesCatalogOperators() ||
+      graphCatalogDefinitionsReady()
+    ) {
+      if (updateGraphCatalogReadiness()) {
+        restoreSavedPresentationIfReady();
+      }
+      return;
+    }
+
+    graphCatalogGateSettled = false;
+    graphCatalogGateError = null;
+    graphCatalogReadiness = "pending";
+    graphCatalogReadinessMessage =
+      "The API catalog changed. Rebuilding the required Runtime Graph node factory in this session…";
+
+    if (runtimeGraphViewActive) {
+      runtimeGraphViewActive = false;
+      deactivateGraphMode();
+      bridge?.requestPaletteRender?.();
+      bridge?.requestRender?.();
+    }
+
+    updatePackButton();
   }
 
   function refreshAfterNodeModulesReady() {
     if (!bridge || !graph) {
+      return;
+    }
+
+    if (!graphUsesCatalogOperators()) {
+      if (
+        graph.active &&
+        runtimeGraphViewActive
+      ) {
+        renderGraphPalette();
+      }
       return;
     }
 
@@ -31201,37 +31637,103 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
   }
 
   async function initializeImmediately() {
+    injectStyles();
+    cacheDom();
+    ensurePackButton();
+
+    const initializeFromBridgeEvent =
+      () => {
+        if (
+          !graphBaseModulesReady ||
+          graphHostError
+        ) {
+          updatePackButton();
+          return;
+        }
+
+        if (initialize()) {
+          document.removeEventListener(
+            "rml-builder:bridge-ready",
+            initializeFromBridgeEvent
+          );
+          document.removeEventListener(
+            "rml-builder:ready",
+            initializeFromBridgeEvent
+          );
+        } else {
+          updatePackButton();
+        }
+      };
+
+    document.addEventListener(
+      "rml-builder:bridge-ready",
+      initializeFromBridgeEvent
+    );
+    document.addEventListener(
+      "rml-builder:ready",
+      initializeFromBridgeEvent
+    );
+
     try {
       await Promise.resolve(
+        window.RMLBaseModNodesReady ||
         window.RMLModNodesReady
       );
 
-      if (
-        window.RMLApiNodeFactoryReady &&
-        typeof window.RMLApiNodeFactoryReady.then ===
-          "function"
-      ) {
-        await window.RMLApiNodeFactoryReady;
-      }
+      graphBaseModulesReady = true;
+
     } catch (error) {
+      graphHostError = error;
       console.error(
         "Typed mod-node initialization failed.",
         error
       );
     }
 
-    initialize();
+    initializeFromBridgeEvent();
 
     window.addEventListener(
       "rml-api-node-factory-ready",
-      refreshAfterNodeModulesReady
+      handleApiNodeFactoryReady
+    );
+    document.addEventListener(
+      "rml-catalog:loaded",
+      handleGraphCatalogLoaded
     );
 
-    if (window.RMLApiNodeFactoryReport) {
-      queueMicrotask(
-        refreshAfterNodeModulesReady
-      );
-    }
+    Promise.resolve(
+      window.RMLModNodesReady
+    )
+      .then(() => {
+        graphCatalogGateSettled = true;
+        graphCatalogGateError = null;
+        const catalogReady =
+          updateGraphCatalogReadiness();
+        if (
+          catalogReady &&
+          graphUsesCatalogOperators()
+        ) {
+          const revision = Number(
+            window.__RMLNodeDefinitionRevision
+          ) || 0;
+          if (
+            revision !==
+              lastGraphCatalogRefreshRevision
+          ) {
+            lastGraphCatalogRefreshRevision =
+              revision;
+            refreshAfterNodeModulesReady();
+          }
+        }
+        if (catalogReady) {
+          restoreSavedPresentationIfReady();
+        }
+      })
+      .catch(error => {
+        graphCatalogGateSettled = true;
+        graphCatalogGateError = error;
+        updateGraphCatalogReadiness(error);
+      });
   }
 
   if (
@@ -33464,7 +33966,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
   Object.defineProperty(window, "RMLDynamicGraphHost", {
     value: Object.freeze({
-      version: 30,
+      version: 32,
       getState() { return graph; },
       getRendererStats() {
         return {
@@ -34039,6 +34541,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
             reason: "The Runtime Graph product state is not active."
           };
         }
+        graph.lastOpenPage = "runtime-graph";
+        persistGraphView(true);
         activateGraphMode();
         return {
           ok: document.body.classList.contains(
@@ -34071,6 +34575,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
             graph?.active === true,
           graphViewActive:
             runtimeGraphViewActive === true,
+          savedPage:
+            graph?.lastOpenPage ||
+            "configuration-outline",
           page:
             runtimeGraphViewActive
               ? "runtime-graph"

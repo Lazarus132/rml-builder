@@ -16,12 +16,12 @@
   window.__RMLDynamicSettingsVersion = VERSION;
 
   const previewSelection = new Map();
-  let bootAttempts = 0;
+  let bootEventBound = false;
   let observer = null;
   let inspectorRendering = false;
   let runtimeBridgeUnsubscribe = null;
   let runtimeBridgeSubscribedChannel = "";
-  let runtimeUiRefreshTimer = 0;
+  let runtimeUiRefreshQueued = false;
   let runtimeUiSignature = "";
 
   function id(prefix = "dynamic") {
@@ -861,13 +861,15 @@
   }
 
   function scheduleRuntimeBoundDynamicUiRefresh() {
-    clearTimeout(runtimeUiRefreshTimer);
+    if (runtimeUiRefreshQueued) {
+      return;
+    }
 
-    runtimeUiRefreshTimer =
-      setTimeout(
-        refreshRuntimeBoundDynamicUi,
-        25
-      );
+    runtimeUiRefreshQueued = true;
+    queueMicrotask(() => {
+      runtimeUiRefreshQueued = false;
+      refreshRuntimeBoundDynamicUi();
+    });
   }
 
   function stopRuntimeBridgeSubscription() {
@@ -1890,7 +1892,19 @@
 
   function boot() {
     if (typeof state === "undefined" || !document.body) {
-      if (++bootAttempts < 600) setTimeout(boot, 25);
+      if (!bootEventBound) {
+        bootEventBound = true;
+        document.addEventListener(
+          "DOMContentLoaded",
+          boot,
+          { once: true }
+        );
+        document.addEventListener(
+          "rml-builder:ready",
+          boot,
+          { once: true }
+        );
+      }
       return;
     }
     normalizeAll();
@@ -1955,7 +1969,7 @@
   window.__RMLCollectionEditableBridgeVersion =
     VERSION;
 
-  let refreshTimer = 0;
+  let refreshFrame = 0;
 
   const EDITABLE_KINDS = Object.freeze({
     choice: "choice"
@@ -2425,15 +2439,20 @@
   }
 
   function scheduleEditableCollectionDirectBindingMigration() {
-    clearTimeout(
-      window.__rmlEditableCollectionBindTimer || 0
-    );
+    if (
+      window.__rmlEditableCollectionBindQueued ===
+        true
+    ) {
+      return;
+    }
 
-    window.__rmlEditableCollectionBindTimer =
-      setTimeout(
-        migrateEditableCollectionDirectBindings,
-        50
-      );
+    window.__rmlEditableCollectionBindQueued =
+      true;
+    queueMicrotask(() => {
+      window.__rmlEditableCollectionBindQueued =
+        false;
+      migrateEditableCollectionDirectBindings();
+    });
   }
 
   function createFromSource(
@@ -2713,12 +2732,16 @@
   }
 
   function schedulePaletteRefresh() {
-    clearTimeout(refreshTimer);
-    refreshTimer =
-      setTimeout(
-        installEditablePalette,
-        20
+    if (refreshFrame) {
+      cancelAnimationFrame(
+        refreshFrame
       );
+    }
+    refreshFrame =
+      requestAnimationFrame(() => {
+        refreshFrame = 0;
+        installEditablePalette();
+      });
   }
 
   const observer =
@@ -2786,10 +2809,7 @@
     }
   );
 
-  setTimeout(
-    () => {
-      installEditablePalette();
-    },
-    50
+  queueMicrotask(
+    installEditablePalette
   );
 })();

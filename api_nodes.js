@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const FACTORY_VERSION = 11;
+  const FACTORY_VERSION = 12;
   const API_VERIFICATION_SCHEMA_VERSION = 1;
   const ADVANCED_GROUP = "Advanced / Raw C#";
   const API_GROUPS = Object.freeze({
@@ -13,7 +13,7 @@
     events: "API · Events"
   });
 
-  let bootAttempts = 0;
+  let prerequisiteWaitInstalled = false;
   let factoryBuildPromise = null;
   let legacyOperatorResolver = null;
   let factoryReadySettled = false;
@@ -253,11 +253,11 @@
         typeof requestAnimationFrame ===
         "function"
       ) {
-        requestAnimationFrame(
-          () => setTimeout(resolve, 0)
+        requestAnimationFrame(() =>
+          resolve()
         );
       } else {
-        setTimeout(resolve, 0);
+        queueMicrotask(resolve);
       }
     });
   }
@@ -289,14 +289,36 @@
       typeof registry.registerNode !== "function" ||
       typeof registry.getNodeDefinitions !== "function"
     ) {
-      bootAttempts += 1;
-      if (bootAttempts < 600) {
-        setTimeout(boot, 25);
-      } else {
-        console.error(
-          "RML API Node Factory could not find the catalog/registry."
-        );
-        completeFactoryReady(null);
+      if (!prerequisiteWaitInstalled) {
+        prerequisiteWaitInstalled = true;
+        Promise.all([
+          Promise.resolve(
+            window.RMLNodeRegistryReady
+          ),
+          Promise.resolve(
+            window.RMLCatalogReady
+          )
+        ])
+          .then(() => {
+            prerequisiteWaitInstalled =
+              false;
+            if (
+              window.RMLModNodeRegistry &&
+              (
+                window.RMLResoniteApiCatalog ||
+                window.RMLFrooxComponentCatalog
+              )
+            ) {
+              boot();
+            }
+          })
+          .catch(error => {
+            console.error(
+              "RML API Node Factory prerequisites failed.",
+              error
+            );
+            completeFactoryReady(null);
+          });
       }
       return factoryReady;
     }

@@ -1,29 +1,53 @@
 "use strict";
 
 self.window = self;
+self.__rmlScheduledCallbackSequence = 0;
+self.__rmlCancelledScheduledCallbacks =
+  new Set();
+const scheduleWorkerCallback = (
+  callback,
+  argument
+) => {
+  const handle =
+    ++self.__rmlScheduledCallbackSequence;
+  queueMicrotask(() => {
+    if (
+      self.__rmlCancelledScheduledCallbacks
+        .delete(handle)
+    ) {
+      return;
+    }
+    callback(argument);
+  });
+  return handle;
+};
 self.requestAnimationFrame =
   self.requestAnimationFrame ||
   (callback =>
-    self.setTimeout(
-      () => callback(performance.now()),
-      0
+    scheduleWorkerCallback(
+      callback,
+      performance.now()
     ));
 self.cancelAnimationFrame =
   self.cancelAnimationFrame ||
-  (handle => self.clearTimeout(handle));
+  (handle =>
+    self.__rmlCancelledScheduledCallbacks
+      .add(handle));
 self.requestIdleCallback =
   self.requestIdleCallback ||
   (callback =>
-    self.setTimeout(
-      () => callback({
+    scheduleWorkerCallback(
+      callback,
+      {
         didTimeout: false,
         timeRemaining: () => 50
-      }),
-      0
+      }
     ));
 self.cancelIdleCallback =
   self.cancelIdleCallback ||
-  (handle => self.clearTimeout(handle));
+  (handle =>
+    self.__rmlCancelledScheduledCallbacks
+      .add(handle));
 self.matchMedia =
   self.matchMedia ||
   (() => ({
@@ -170,13 +194,13 @@ async function ensureRuntime(catalog) {
       self.RMLResoniteApiCatalog;
 
     importScripts(
-      "node_graph.js?v=245-cache-export-warning-only-v404f1"
+      "node_graph.js?v=256-ready-path-page-restore-v415f1"
     );
     importScripts(
       "mod_nodes.js?v=40-universal-state-semantics-v389f1"
     );
     importScripts(
-      "api_nodes.js?v=22-complete-legacy-api-reconciliation-v401f1"
+      "api_nodes.js?v=23-event-driven-readiness-v412f1"
     );
 
     if (

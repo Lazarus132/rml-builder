@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const LOADER_VERSION = 31;
+  const LOADER_VERSION = 33;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
   const CATALOG_PATH = "/resonite_api_catalog.json";
@@ -26,7 +26,7 @@
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=22-complete-legacy-api-reconciliation-v401f1",
+    "api_nodes.js?v=23-event-driven-readiness-v412f1",
     scriptUrl
   ).href;
 
@@ -616,15 +616,6 @@
     }
   }
 
-  function delay(milliseconds) {
-    return new Promise(resolve =>
-      window.setTimeout(
-        resolve,
-        milliseconds
-      )
-    );
-  }
-
   async function probeConfiguredScannerUrl(
     catalogUrl
   ) {
@@ -834,9 +825,7 @@
     };
   }
 
-  async function tryScannerCatalog(
-    retryDelays = [0]
-  ) {
+  async function tryScannerCatalog() {
     const configured =
       configuredCatalogUrl();
     const configuredLoopback =
@@ -844,50 +833,18 @@
         configured
       );
 
-    for (const retryDelay of retryDelays) {
-      if (retryDelay > 0) {
-        await delay(retryDelay);
-      }
+    let live = null;
 
-      let live = null;
-
-      if (configured) {
-        try {
-          live =
-            configuredLoopback
-              ? await probeDirectScannerUrl(
-                  configuredLoopback
-                )
-              : await probeConfiguredScannerUrl(
-                  configured
-                );
-        } catch {
-        }
-
-        if (live) {
-          return live;
-        }
-      }
-
-      if (isLocalBuilderOrigin()) {
-        try {
-          live =
-            await probeBuilderScannerBridge();
-        } catch {
-        }
-
-        if (live) {
-          return live;
-        }
-      }
-
+    if (configured) {
       try {
         live =
-          await probeDirectScannerRange(
-            configuredLoopback
-              ? [configuredLoopback]
-              : []
-          );
+          configuredLoopback
+            ? await probeDirectScannerUrl(
+                configuredLoopback
+              )
+            : await probeConfiguredScannerUrl(
+                configured
+              );
       } catch {
       }
 
@@ -896,7 +853,29 @@
       }
     }
 
-    return null;
+    if (isLocalBuilderOrigin()) {
+      try {
+        live =
+          await probeBuilderScannerBridge();
+      } catch {
+      }
+
+      if (live) {
+        return live;
+      }
+    }
+
+    try {
+      live =
+        await probeDirectScannerRange(
+          configuredLoopback
+            ? [configuredLoopback]
+            : []
+        );
+    } catch {
+    }
+
+    return live || null;
   }
 
   function openCatalogCache() {
@@ -1302,8 +1281,6 @@
 
     const showChecking =
       options.showChecking === true;
-    const reloadOnChange =
-      options.reloadOnChange !== false;
     const throwOnFailure =
       options.throwOnFailure === true;
 
@@ -1321,7 +1298,7 @@
         }
 
         const live =
-          await tryScannerCatalog([0]);
+          await tryScannerCatalog();
 
         scannerChecking = false;
 
@@ -1365,14 +1342,6 @@
           if (!current) {
             await modNodesReady;
             await ensureApiNodesLoaded();
-
-            if (reloadOnChange) {
-              window.setTimeout(
-                () =>
-                  window.location.reload(),
-                250
-              );
-            }
           }
 
           if (
@@ -1408,8 +1377,7 @@
 
           if (
             current &&
-            catalogChanged &&
-            !reloadOnChange
+            catalogChanged
           ) {
             await modNodesReady;
             await ensureApiNodesLoaded();
@@ -1432,22 +1400,10 @@
             );
           }
 
-          if (
-            current &&
-            catalogChanged &&
-            reloadOnChange
-          ) {
-            window.setTimeout(
-              () =>
-                window.location.reload(),
-              250
-            );
-          }
         } catch (error) {
           if (
             current &&
-            catalogChanged &&
-            !reloadOnChange
+            catalogChanged
           ) {
             installCatalog(current);
           }
@@ -2045,18 +2001,24 @@
   const catalogReady =
     loadCatalog();
 
-  const modNodesReady =
-    Promise.all([
-      catalogReady,
-      registryReady
-    ])
-      .then(async ([catalog]) => {
+  const baseModNodesReady =
+    Promise.resolve(registryReady)
+      .then(async () => {
         await loadScript(
           modNodesUrl,
           "mod-nodes",
           "mod_nodes.js"
         );
 
+        return true;
+      });
+
+  const modNodesReady =
+    Promise.all([
+      catalogReady,
+      baseModNodesReady
+    ])
+      .then(async ([catalog]) => {
         if (catalog) {
           await ensureApiNodesLoaded();
         } else {
@@ -2080,6 +2042,17 @@
     "RMLCatalogReady",
     {
       value: catalogReady,
+      writable: false,
+      enumerable: true,
+      configurable: true
+    }
+  );
+
+  Object.defineProperty(
+    window,
+    "RMLBaseModNodesReady",
+    {
+      value: baseModNodesReady,
       writable: false,
       enumerable: true,
       configurable: true
