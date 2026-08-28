@@ -9518,16 +9518,6 @@
       flattenConfiguration(
         graph.configSnapshot.nodes || []
       );
-    const configurationById =
-      new Map(
-        configurationEntries.map(
-          entry => [
-            entry.node.id,
-            entry
-          ]
-        )
-      );
-
     const configurationValueEntries =
       configurationEntries.filter(entry => {
         const node = entry?.node;
@@ -18439,6 +18429,56 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     };
   }
 
+  function scannerGeneratedConstantRecipe(
+    valueType,
+    memberKinds = null
+  ) {
+    const allowedKinds =
+      Array.isArray(memberKinds) &&
+      memberKinds.length > 0
+        ? new Set(memberKinds)
+        : null;
+
+    for (const [operatorId, definition]
+      of Object.entries(
+        OPERATOR_DEFINITIONS
+      )) {
+      if (
+        definition
+          ?.catalogGenerated !== true ||
+        definition
+          ?.legacyCatalogAlias === true ||
+        (definition.inputs?.length || 0) !== 0 ||
+        (
+          allowedKinds &&
+          !allowedKinds.has(
+            definition.apiMemberKind
+          )
+        )
+      ) {
+        continue;
+      }
+
+      const output =
+        definition.outputs?.find(
+          specification =>
+            specification.type ===
+              valueType &&
+            specification.type !==
+              "impulse"
+        );
+
+      if (output) {
+        return {
+          operatorId,
+          outputPort: output.id
+        };
+      }
+    }
+
+    return null;
+  }
+
   function automaticSourceRecipe(
     inputRef,
     valueType
@@ -18470,11 +18510,13 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         "apiEnum:"
       )
     ) {
-      return {
-        operatorId:
-          "catalog.enumConstant",
-        outputPort: "value"
-      };
+      return (
+        scannerGeneratedConstantRecipe(
+          valueType,
+          ["enum"]
+        ) ||
+        automaticTypedDefaultRecipe()
+      );
     }
 
     if (
@@ -18494,16 +18536,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       string: ["constant.string", "value"],
       Uri: ["constant.uri", "value"],
       colorX: ["constant.color", "value"],
-      floatQ: ["transform.quaternionIdentity", "rotation"],
-      primitive: ["resonite.primitiveConstant", "value"],
-      blendMode: ["material.blendModeConstant", "value"],
-      textureWrapMode: ["asset.textureWrapModeConstant", "value"],
       object: ["constant.nullObject", "value"],
       stringArray: ["constant.stringArray", "value"],
-      engine: ["resonite.currentEngine", "engine"],
-      world: ["resonite.focusedWorld", "world"],
-      task: ["task.completedTask", "task"],
-      radiantDash: ["resonite.radiantDash", "dash"]
+      task: ["task.completedTask", "task"]
     };
     const recipe =
       selfContainedRecipes[valueType];
@@ -18585,17 +18620,6 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
       case "constant.stringArray":
         node.parameters.items = "";
-        break;
-
-      case "catalog.enumConstant":
-        node.parameters.enumType =
-          valueType.startsWith(
-            "apiEnum:"
-          )
-            ? valueType.slice(
-                "apiEnum:".length
-              )
-            : node.parameters.enumType;
         break;
 
       case "constant.typedDefault":
@@ -26558,6 +26582,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     ) {
       return;
     }
+
     graphStructuralPaintFrame =
       requestAnimationFrame(() => {
         graphStructuralPaintFrame = 0;
@@ -32522,6 +32547,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         revision;
       refreshAfterNodeModulesReady();
     }
+
     restoreSavedPresentationIfReady();
   }
 

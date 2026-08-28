@@ -1653,8 +1653,6 @@
         });
       };
 
-    cleanupRedundantPaletteNodes(definitions);
-
     const report = Object.freeze({
       factoryVersion: FACTORY_VERSION,
       verificationSchemaVersion:
@@ -3191,33 +3189,6 @@ private static string ApiCatalogTypeName(System.Type? type)
         !isOpenTypeExpression(type) &&
         !isGenericParameterName(type)
       );
-    }
-
-    function cleanupRedundantPaletteNodes(allDefinitions) {
-      const fullyReplaced = new Set([
-        "Slot Attach API",
-        "API Enum Constant"
-      ]);
-      const advancedFallbacks = new Set([
-        "Find Type",
-        "Get MethodInfo",
-        "Invoke MethodInfo",
-        "Create Instance",
-        "Read Slot / Component Member",
-        "Write Slot / Component Member",
-        "Subscribe Event"
-      ]);
-
-      for (const [operatorId, definition] of Object.entries(allDefinitions)) {
-        if (!definition || typeof definition !== "object") continue;
-        const title = String(definition.title || "");
-        if (fullyReplaced.has(title)) {
-          delete allDefinitions[operatorId];
-        } else if (advancedFallbacks.has(title)) {
-          definition.group = ADVANCED_GROUP;
-          definition.catalogFallback = true;
-        }
-      }
     }
 
     function findDefinitionByTitle(allDefinitions, predicate) {
