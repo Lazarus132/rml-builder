@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const FACTORY_VERSION = 14;
+  const FACTORY_VERSION = 16;
   const API_VERIFICATION_SCHEMA_VERSION = 1;
   const ADVANCED_GROUP = "Advanced / Raw C#";
   const API_GROUPS = Object.freeze({
@@ -1421,9 +1421,7 @@
                   isByRef:
                     parameter?.isByRef === true,
                   isOut:
-                    parameter?.isOut === true,
-                  isOptional:
-                    parameter?.isOptional === true
+                    parameter?.isOut === true
                 })),
             returnType:
               normalizedContractType(
@@ -1435,12 +1433,123 @@
             genericArity: Math.max(
               0,
               Number(contract.genericArity) || 0
-            ),
-            runtimeBound:
-              contract.runtimeBound === true
+            )
           });
         };
+        const semanticMemberKey = contract => {
+          if (
+            !contract ||
+            typeof contract !== "object" ||
+            Array.isArray(contract)
+          ) {
+            return "";
+          }
+
+          const ownerType =
+            normalizedContractType(
+              contract.ownerType
+            );
+          const kind = String(
+            contract.kind || ""
+          ).trim();
+
+          if (!ownerType || !kind) {
+            return "";
+          }
+
+          return JSON.stringify({
+            kind,
+            ownerType,
+            memberName: String(
+              contract.memberName || ""
+            ),
+            returnType:
+              normalizedContractType(
+                contract.returnType ||
+                "System.Void"
+              ),
+            isStatic:
+              contract.isStatic === true,
+            genericArity: Math.max(
+              0,
+              Number(contract.genericArity) || 0
+            )
+          });
+        };
+        const semanticParameters = contract =>
+          (Array.isArray(contract?.parameters)
+            ? contract.parameters
+            : []).map((parameter, index) => ({
+              position: Math.max(
+                0,
+                Number(parameter?.position) || index
+              ),
+              type: normalizedContractType(
+                parameter?.type
+              ),
+              isByRef:
+                parameter?.isByRef === true,
+              isOut:
+                parameter?.isOut === true,
+              isOptional:
+                parameter?.isOptional === true
+            }));
+        const semanticContractsCompatible = (
+          required,
+          available
+        ) => {
+          if (
+            !semanticMemberKey(required) ||
+            semanticMemberKey(required) !==
+              semanticMemberKey(available)
+          ) {
+            return false;
+          }
+
+          const requiredParameters =
+            semanticParameters(required);
+          const availableParameters =
+            semanticParameters(available);
+
+          if (
+            requiredParameters.length >
+            availableParameters.length
+          ) {
+            return false;
+          }
+
+          for (
+            let index = 0;
+            index < requiredParameters.length;
+            index += 1
+          ) {
+            const requiredParameter =
+              requiredParameters[index];
+            const availableParameter =
+              availableParameters[index];
+
+            if (
+              requiredParameter.position !==
+                availableParameter.position ||
+              requiredParameter.type !==
+                availableParameter.type ||
+              requiredParameter.isByRef !==
+                availableParameter.isByRef ||
+              requiredParameter.isOut !==
+                availableParameter.isOut
+            ) {
+              return false;
+            }
+          }
+
+          return availableParameters
+            .slice(requiredParameters.length)
+            .every(parameter =>
+              parameter.isOptional === true
+            );
+        };
         const semanticIndex = new Map();
+        const semanticMemberIndex = new Map();
 
         for (const [id, definition] of
           Object.entries(definitions)) {
@@ -1459,6 +1568,16 @@
             semanticIndex.set(key, []);
           }
           semanticIndex.get(key).push(id);
+
+          const memberKey = semanticMemberKey(
+            definition.apiVerification
+          );
+          if (memberKey) {
+            if (!semanticMemberIndex.has(memberKey)) {
+              semanticMemberIndex.set(memberKey, []);
+            }
+            semanticMemberIndex.get(memberKey).push(id);
+          }
         }
 
         for (const requirement of
@@ -1478,9 +1597,30 @@
               ? null
               : requirement?.apiContract
           );
-          const candidates = key
+          const requiredContract =
+            typeof requirement === "string"
+              ? null
+              : requirement?.apiContract;
+          const exactCandidates = key
             ? semanticIndex.get(key) || []
             : [];
+          const memberKey = semanticMemberKey(
+            requiredContract
+          );
+          const candidates =
+            exactCandidates.length > 0
+              ? exactCandidates
+              : (memberKey
+                  ? semanticMemberIndex.get(
+                      memberKey
+                    ) || []
+                  : []).filter(candidateId =>
+                    semanticContractsCompatible(
+                      requiredContract,
+                      definitions[candidateId]
+                        ?.apiVerification
+                    )
+                  );
           const inputPorts = new Set(
             Array.isArray(requirement?.inputPorts)
               ? requirement.inputPorts.map(String)

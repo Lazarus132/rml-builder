@@ -1057,7 +1057,13 @@
   let graph = null;
   let customCSharpEditor = null;
   let customCSharpRootOperation = false;
+  
+  
+  
   let runtimeGraphViewActive = false;
+  
+  
+  
   let graphCatalogReadiness = "ready";
   let graphCatalogReadinessMessage = "";
   let graphCatalogGateSettled = false;
@@ -1355,6 +1361,8 @@
     const normalized =
       normalizePresentationPage(page);
     if (graph) {
+      
+      
       graph.lastOpenPage = normalized;
     }
     bridge?.setActivePage?.(
@@ -3094,6 +3102,10 @@
     result.active =
       raw.active === true;
 
+    
+    
+    
+    
     result.lastOpenPage =
       raw.lastOpenPage === "runtime-graph"
         ? "runtime-graph"
@@ -3558,6 +3570,9 @@
       };
     }
 
+    
+    
+    
     const migratedSyntaxIds = new Set();
     for (const owner of result.nodes.filter(node =>
       node.kind === "operator" &&
@@ -9518,6 +9533,19 @@
       flattenConfiguration(
         graph.configSnapshot.nodes || []
       );
+    const configurationById =
+      new Map(
+        configurationEntries.map(
+          entry => [
+            entry.node.id,
+            entry
+          ]
+        )
+      );
+    
+    
+    
+    
     const configurationValueEntries =
       configurationEntries.filter(entry => {
         const node = entry?.node;
@@ -13452,6 +13480,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       const previousGraph = graph;
 
       try {
+        
+        
+        
+        
         graph = candidate;
         const analysis =
           analyzeConnections(
@@ -16298,6 +16330,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       closeCustomCSharpFileGraph();
     }
     cancelInteraction(true);
+    
+    
+    
     commitPresentationPage(
       "configuration-outline",
       "runtime-graph-back"
@@ -16405,7 +16440,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         })
       );
     } catch {
-      // Layout persistence is optional.
+      
     }
   }
 
@@ -16478,7 +16513,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           })
         );
       } catch {
-        // Palette UI persistence is optional.
+        
       }
     };
 
@@ -24608,6 +24643,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     graphNodeVirtualizationSignature =
       renderedGraphNodeSignature(nodes);
 
+    
+    
+    
     if (!graphWireFullRenderPending) {
       synchronizeGpuOverviewNodes();
     }
@@ -25944,6 +25982,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     const gpuSegments = [];
     const handles = [];
 
+    
+    
+    
     for (const connection of graph.connections) {
       const records =
         gpuSegmentsForConnection(
@@ -26303,6 +26344,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       graph.viewport
     );
     graphHybridRenderer?.drawNow?.();
+    
+    
+    
     dom.wires.replaceChildren(
       ...svgItems,
       ...handles
@@ -26583,6 +26627,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       return;
     }
 
+    
+    
+    
     graphStructuralPaintFrame =
       requestAnimationFrame(() => {
         graphStructuralPaintFrame = 0;
@@ -31896,6 +31943,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       graph = sanitizeGraphState(incoming);
       graph.lastOpenPage =
         savedPresentationPage();
+      
+      
       runtimeGraphViewActive = false;
       updateGraphCatalogReadiness();
       resetGraphRenderCaches();
@@ -32535,6 +32584,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       return;
     }
 
+    
+    
+    
     const revision = Number(
       window.__RMLNodeDefinitionRevision
     ) || 0;
@@ -32548,6 +32600,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       refreshAfterNodeModulesReady();
     }
 
+    
+    
     restoreSavedPresentationIfReady();
   }
 
@@ -32598,6 +32652,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       return;
     }
 
+    
+    
+    
     if (!graphUsesCatalogOperators()) {
       if (
         graph.active &&
@@ -32638,6 +32695,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
   }
 
   async function initializeImmediately() {
+    
+    
+    
     injectStyles();
     cacheDom();
     ensurePackButton();
@@ -32706,6 +32766,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       handleGraphCatalogLoaded
     );
 
+    
     Promise.resolve(
       window.RMLModNodesReady
     )
@@ -32731,6 +32792,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           }
         }
         if (catalogReady) {
+          
+          
+          
           restoreSavedPresentationIfReady();
         }
       })

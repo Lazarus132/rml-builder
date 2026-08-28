@@ -1078,6 +1078,9 @@
 
     createWireLayerData(record) {
       if (record.hidden === true) {
+        
+        
+        
         return [
           -1000000, -1000000,
           -1000000, -1000000,

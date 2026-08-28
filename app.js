@@ -36,7 +36,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "scanner-only-api-surface-20260828-v603f18";
+  "optional-signature-extension-20260828-v603f22";
 
 function removeLegacyHelpHashFromAddress() {
   if (!/^#(?:info-|shortcut-)/i.test(window.location.hash)) {
@@ -370,6 +370,10 @@ function requestGeneratedOutputUpdate() {
     elements.codeSummary.textContent =
       "Large runtime graph loaded · generated files are being refreshed";
   }
+
+  
+  
+  
   updateGeneratedOutput();
 }
 
@@ -4069,6 +4073,9 @@ function getTypedNodeGraphContribution() {
       Array.isArray(extensionState.configSnapshot.nodes)
     );
 
+  
+  
+  
   if (!hasPackedRuntimeGraph) {
     return null;
   }
@@ -6363,6 +6370,11 @@ function projectIdFromSource(source) {
   if (explicit) {
     return explicit;
   }
+
+  
+  
+  
+  
   return `legacy-${projectContentFingerprint(source)}`;
 }
 
@@ -7692,6 +7704,11 @@ function reconcilePackedGraphConfiguration(
     );
   }
 
+  
+  
+  
+  
+  
   if (
     Array.isArray(graph.nodes) &&
     graph.nodes.some(node =>
@@ -11884,7 +11901,7 @@ function startPalettePointerDrag(
       event.pointerId
     );
   } catch {
-    // Dokumentweite Pointer-Handler übernehmen den Drag trotzdem.
+    
   }
 
   createPalettePointerGhost(
@@ -13158,7 +13175,7 @@ function startNodePointerDrag(
       event.pointerId
     );
   } catch {
-    // Dokumentweite Pointer-Handler übernehmen den Drag trotzdem.
+    
   }
 
   createNodePointerGhost(
@@ -14368,7 +14385,7 @@ function startOptionPointerDrag(
       event.pointerId
     );
   } catch {
-    // Dokumentweite Pointer-Handler übernehmen den Drag trotzdem.
+    
   }
 
   createOptionPointerGhost(
@@ -22644,6 +22661,9 @@ function waitForImportedGraphUi(
         current.matches &&
         !current.graphViewActive
       ) {
+        
+        
+        
         finish(false);
       } else if (
         strict &&
@@ -23204,6 +23224,8 @@ async function saveProjectJson() {
       "Preparing project JSON…"
     );
 
+    
+    
     captureVisibleBuilderPage(
       "save-json",
       true
@@ -27225,7 +27247,7 @@ function collapseEditableSelection(
         "none"
       );
     } catch {
-      // Einige spezielle Input-Typen unterstützen setSelectionRange nicht.
+      
     }
 
     return;
@@ -29974,6 +29996,10 @@ function installUniversalScrollLayerSelector() {
         return;
       }
 
+      
+
+
+
       if (
         insideInformationDialog &&
         !universalOwnsWheel
@@ -31440,6 +31466,10 @@ async function initialize() {
     });
   }
 
+  
+  
+  
+  
   await paintBuilderUi();
   const visualTourTest =
     new URLSearchParams(

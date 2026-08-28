@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const LOADER_VERSION = 37;
+  const LOADER_VERSION = 38;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
   const CATALOG_PATH = "/resonite_api_catalog.json";
@@ -22,15 +22,15 @@
     document.currentScript?.src ||
     window.location.href;
   const modNodesUrl = new URL(
-    "mod_nodes.js?v=45-no-redundant-api-wrappers-v603f18",
+    "mod_nodes.js?v=46-source-comment-cleanup-v603f20",
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "visual_csharp.js?v=13-large-coordinate-space-v603f16",
+    "visual_csharp.js?v=14-source-comment-cleanup-v603f20",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=27-no-redundant-cleanup-v603f18",
+    "api_nodes.js?v=30-optional-signature-extension-v603f22",
     scriptUrl
   ).href;
 
@@ -1149,6 +1149,10 @@
         return live;
       }
     }
+
+    
+    
+    
     try {
       live =
         await probeDirectScannerRange(
@@ -1330,6 +1334,9 @@
   }
 
   async function loadCatalog() {
+    
+    
+    
     const cached =
       await readCachedLiveCatalog();
 
@@ -1639,6 +1646,11 @@
                 normalized
               );
 
+            
+            
+            
+            
+            
             if (!promoted) {
               const controller =
                 window.RMLApiNodeFactoryController;
@@ -2329,6 +2341,10 @@
   const catalogReady =
     loadCatalog();
 
+  
+  
+  
+  
   const baseModNodesReady =
     Promise.resolve(registryReady)
       .then(async () => {
@@ -2406,6 +2422,13 @@
   catalogReady
     .then(() => {
       installManualScannerRefresh();
+
+      
+      
+      
+      
+      
+      
     })
     .catch(() => {});
 
