@@ -26,7 +26,7 @@
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "visual_csharp.js?v=9-custom-csharp-unique-v603f3",
+    "visual_csharp.js?v=10-tree-layout-empty-graph-v603f6",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(

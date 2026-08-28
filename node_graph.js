@@ -2651,8 +2651,11 @@
     graph.customCSharpFiles = graph.customCSharpFiles && typeof graph.customCSharpFiles === "object"
       ? graph.customCSharpFiles
       : {};
-    const customGraph = graph.customCSharpFiles[fileNodeId];
-    if (!customGraph) return false;
+    let customGraph = graph.customCSharpFiles[fileNodeId];
+    if (!customGraph) {
+      customGraph = createEmptyCustomCSharpFileGraph(fileNode);
+      graph.customCSharpFiles[fileNodeId] = customGraph;
+    }
     customCSharpEditor = {
       fileNodeId,
       fileName: String(fileNode.parameters?.fileName || "Custom C# File"),
@@ -2663,6 +2666,22 @@
     pruneConnections();
     persistGraph(true);
     activateGraphMode();
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (graph.nodes.length <= 40) {
+        centerGraph();
+        return;
+      }
+      const output = graph.nodes.find(node => node.id === customGraph.outputNodeId);
+      const rectangle = dom.viewport?.getBoundingClientRect();
+      if (!output || !rectangle) return;
+      const geometry = estimatedGraphNodeGeometry(output);
+      graph.viewport.scale = clamp(0.62, GRAPH_MIN_ZOOM, GRAPH_MAX_ZOOM);
+      graph.viewport.x = rectangle.width * 0.72 - (output.x + geometry.width / 2) * graph.viewport.scale;
+      graph.viewport.y = rectangle.height / 2 - (output.y + geometry.height / 2) * graph.viewport.scale;
+      applyViewportTransform();
+      persistGraphView();
+      renderGraphWires();
+    }));
     showGraphMessage(`Opened ${customCSharpEditor.fileName} in its separate C# graph.`, "success");
     return true;
   }
@@ -2690,8 +2709,17 @@
     const ownerId = owner.id;
     const source = String(owner.parameters?.source || "");
     if (!source.trim()) {
-      showGraphMessage("Enter or import C# source in this Custom C# File node before converting it.", "error");
-      return false;
+      graph.customCSharpFiles = graph.customCSharpFiles && typeof graph.customCSharpFiles === "object"
+        ? graph.customCSharpFiles
+        : {};
+      graph.customCSharpFiles[ownerId] = graph.customCSharpFiles[ownerId]
+        || createEmptyCustomCSharpFileGraph(owner);
+      persistGraph(true);
+      const opened = openCustomCSharpFileGraph(ownerId);
+      if (opened) {
+        showGraphMessage("Opened an empty visual C# 14 file graph. Build the complete source with syntax nodes and connect it to Output.", "success");
+      }
+      return opened;
     }
 
     const roslyn = window.RMLCSharp14Roslyn;
@@ -9424,6 +9452,7 @@
           ]
         )
       );
+
     const configurationValueEntries =
       configurationEntries.filter(entry => {
         const node = entry?.node;
@@ -27847,26 +27876,23 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         definition.customCSharpFile === true &&
         !customCSharpEditor
       ) {
-        actions.appendChild(
-          inspectorButton(
-            "Convert to Node Graph",
-            () => convertCustomCSharpFileToNodes(node.id),
-            "primary"
-          )
-        );
-      }
-      if (
-        definition.customCSharpFile === true &&
-        !customCSharpEditor &&
-        graph.customCSharpFiles?.[node.id]
-      ) {
+        const hasSource = Boolean(String(node.parameters?.source || "").trim());
         actions.appendChild(
           inspectorButton(
             "Open Node Graph",
             () => openCustomCSharpFileGraph(node.id),
-            "secondary"
+            "primary"
           )
         );
+        if (hasSource) {
+          actions.appendChild(
+            inspectorButton(
+              "Convert to Node Graph",
+              () => convertCustomCSharpFileToNodes(node.id),
+              "secondary"
+            )
+          );
+        }
       }
       actions.appendChild(
         inspectorButton(
@@ -31727,6 +31753,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       graph = sanitizeGraphState(incoming);
       graph.lastOpenPage =
         savedPresentationPage();
+
       runtimeGraphViewActive = false;
       updateGraphCatalogReadiness();
       resetGraphRenderCaches();

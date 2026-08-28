@@ -36,7 +36,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "complete-help-builtins-no-catalog-20260828-v603f5";
+  "custom-csharp-always-open-action-20260828-v603f7";
 
 function exposeRmlBuilderBuildId() {
   document.documentElement.dataset
@@ -952,7 +952,7 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "graph_codegen_worker.js?v=41-complete-help-v603f5",
+      "graph_codegen_worker.js?v=42-custom-csharp-layout-v603f6",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -6350,7 +6350,6 @@ function projectIdFromSource(source) {
   if (explicit) {
     return explicit;
   }
-
   return `legacy-${projectContentFingerprint(source)}`;
 }
 
@@ -25936,12 +25935,7 @@ function setInformationPage(pageName) {
   }
 
   if (targetName === "nodes") {
-    setInformationNodeScope(
-      dialog.dataset
-        .informationNodeScope ||
-        "outline",
-      true
-    );
+    setInformationNodeScope("runtime", true);
   }
 }
 
@@ -26016,8 +26010,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "help_template.html?v=60-complete-builtins-no-catalog-v603f5",
-    "help_template.js?v=60-complete-builtins-no-catalog-v603f5",
+    "help_template.html?v=61-custom-csharp-layout-v603f6",
+    "help_template.js?v=61-custom-csharp-layout-v603f6",
     "help-template",
     "RMLHelpTemplateMarkup"
   )
