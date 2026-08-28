@@ -10,6 +10,7 @@
     "registerNode",
     "registerCodegenPlugin",
     "getNodeDefinition",
+    "getNodeDefinitions",
     "getTypeDefinitions"
   ];
 
@@ -3108,6 +3109,50 @@ private static string GraphJsonAsString(JsonNode? node)
         return node.ToJsonString();
     }
 }
+
+private static JsonNode? CloneGraphJsonValue(object? value)
+{
+    return value is JsonNode json
+        ? json.DeepClone()
+        : JsonSerializer.SerializeToNode(value);
+}
+
+private static bool SetGraphJsonProperty(
+    JsonNode? node,
+    string? property,
+    object? value)
+{
+    if (node is not JsonObject jsonObject ||
+        string.IsNullOrWhiteSpace(property))
+    {
+        return false;
+    }
+
+    jsonObject[property.Trim()] = CloneGraphJsonValue(value);
+    return true;
+}
+
+private static bool RemoveGraphJsonProperty(
+    JsonNode? node,
+    string? property)
+{
+    return node is JsonObject jsonObject &&
+           !string.IsNullOrWhiteSpace(property) &&
+           jsonObject.Remove(property.Trim());
+}
+
+private static bool AddGraphJsonArrayItem(
+    JsonNode? node,
+    object? value)
+{
+    if (node is not JsonArray jsonArray)
+    {
+        return false;
+    }
+
+    jsonArray.Add(CloneGraphJsonValue(value));
+    return true;
+}
 `);
   }
 
@@ -3145,6 +3190,17 @@ internal sealed record GraphHttpResponse(
 private static void RunGraphBackground(Action action)
 {
     _ = Task.Run(action);
+}
+
+private static async Task WaitForAnyGraphTask(params Task[] tasks)
+{
+    if (tasks.Length == 0)
+    {
+        return;
+    }
+
+    Task first = await Task.WhenAny(tasks).ConfigureAwait(false);
+    await first.ConfigureAwait(false);
 }
 `);
   }
@@ -6384,12 +6440,11 @@ private static T GraphUserMethodArgument<T>(int index)
   });
 
   registerNode("language.lambdaAction", {
-    expertOnly: true,
-    title: "Lambda Action",
-    group: "Visual C# Language",
-    symbol: "λ",
+    title: "Create Callback",
+    group: "Flow",
+    symbol: "CALLBACK",
     description:
-      "Creates a System.Action delegate whose body is the connected inline impulse path.",
+      "Turns the connected Body impulse path into a reusable callback. Use it for scanner API inputs such as System.Action without writing C#.",
     outputs: [
       port("body", "Body", "impulse"),
       port("action", "Action", "action")
@@ -6404,12 +6459,11 @@ private static T GraphUserMethodArgument<T>(int index)
   });
 
   registerNode("language.invokeAction", {
-    expertOnly: true,
-    title: "Invoke Action",
-    group: "Visual C# Language",
-    symbol: "λ()",
+    title: "Run Callback",
+    group: "Flow",
+    symbol: "RUN CB",
     description:
-      "Invokes a visual or API-produced System.Action delegate.",
+      "Runs a callback created visually or returned by a scanner API node.",
     inputs: [
       port("call", "Call", "impulse"),
       port("action", "Action", "action")
@@ -8160,2564 +8214,6 @@ private static T GraphCollectionItemAt<T>(
   });
 
 
-  registerNode("resonite.currentEngine", {
-    title: "Current Engine",
-    group: "Slots & Components",
-    symbol: "ENG",
-    description:
-      "Reads the actual FrooxEngine.Engine.Current instance.",
-    outputs: [port("engine", "Engine", "engine")],
-    codegenCollect(api) {
-      ensureDirectResoniteCore(api);
-    },
-    codegenExpression() {
-      return "FrooxEngine.Engine.Current!";
-    }
-  });
-
-  registerNode("resonite.userspaceWorld", {
-    title: "Userspace World",
-    group: "Slots & Components",
-    symbol: "USR",
-    description:
-      "Gets the actual Userspace world from Engine.Current.WorldManager.",
-    outputs: [port("world", "World", "world")],
-    codegenCollect(api) {
-      ensureDirectResoniteCore(api);
-    },
-    codegenExpression() {
-      return "FrooxEngine.Userspace.UserspaceWorld!";
-    }
-  });
-
-  registerNode("resonite.focusedWorld", {
-    title: "Focused World",
-    group: "Slots & Components",
-    symbol: "WRLD",
-    description:
-      "Gets the actual focused world, with Userspace as a fallback.",
-    outputs: [port("world", "World", "world")],
-    codegenCollect(api) {
-      ensureDirectResoniteCore(api);
-    },
-    codegenExpression() {
-      return "(FrooxEngine.Engine.Current?.WorldManager?.FocusedWorld ?? FrooxEngine.Userspace.UserspaceWorld)!";
-    }
-  });
-
-  registerNode("resonite.worldRootSlot", {
-    title: "World Root Slot",
-    group: "Slots & Components",
-    symbol: "ROOT",
-    description:
-      "Gets World.RootSlot through the real FrooxEngine API.",
-    inputs: [port("world", "World", "world")],
-    outputs: [port("slot", "Root Slot", "slot")],
-    codegenCollect(api) {
-      ensureDirectResoniteCore(api);
-    },
-    codegenExpression(api) {
-      return `${api.input("world").code}.RootSlot`;
-    }
-  });
-
-  registerNode("resonite.localUser", {
-    title: "Local User",
-    group: "Slots & Components",
-    symbol: "ME",
-    description:
-      "Gets World.LocalUser through the real FrooxEngine API.",
-    inputs: [port("world", "World", "world")],
-    outputs: [port("user", "User", "user")],
-    codegenCollect(api) {
-      ensureDirectResoniteCore(api);
-    },
-    codegenExpression(api) {
-      return `${api.input("world").code}.LocalUser!`;
-    }
-  });
-
-  registerNode("resonite.findSlot", {
-    title: "Find Slot",
-    group: "Slots & Components",
-    symbol: "?S",
-    description:
-      "Finds a child slot recursively by name/path starting at Root.",
-    inputs: [
-      port("root", "Root", "slot"),
-      port("name", "Name / path", "string")
-    ],
-    outputs: [port("slot", "Slot", "slot")],
-    codegenExpression(api) {
-      ensureResoniteRuntime(api);
-      return `((FrooxEngine.Slot)FindSlotRecursive(${api.input("root").code}, ${api.input("name").code})!)`;
-    }
-  });
-
-  registerNode("resonite.addSlot", {
-    title: "Add Slot",
-    group: "Slots & Components",
-    symbol: "+S",
-    description:
-      "Creates a child Slot with Slot.AddSlot. With Parent unconnected it uses the focused World.RootSlot; connect a Slot explicitly to override the parent.",
-    inputs: [
-      port("call", "Call", "impulse"),
-      port("parent", "Parent", "slot", { defaultCs: DEFAULT_WORLD_ROOT_SLOT_CS }),
-      port("name", "Name", "string")
-    ],
-    outputs: [
-      port("done", "Done", "impulse"),
-      port("slot", "Created Slot", "slot")
-    ],
-    codegenCollect(api) {
-      ensureDirectResoniteCore(api);
-      addStatefulField(
-        api,
-        "createdSlot",
-        "FrooxEngine.Slot?",
-        "null"
-      );
-    },
-    codegenExpression(api) {
-      return `_createdSlot${nodeToken(api)}!`;
-    },
-    codegenAction(api) {
-      const field = `_createdSlot${nodeToken(api)}`;
-      const done = api.emit("done");
-      return `${field} = ${api.input("parent").code}.AddSlot(${api.input("name").code});${done ? `\n        ${done}();` : ""}`;
-    }
-  });
-
-  registerNode("resonite.destroyObject", {
-    expertOnly: true,
-    title: "Destroy Slot / Component",
-    group: "Slots & Components",
-    symbol: "DEL",
-    description:
-      "Calls Destroy, DestroyPersistent or Dispose on a reflected Resonite object.",
-    inputs: [
-      port("call", "Call", "impulse"),
-      port("target", "Target", "object")
-    ],
-    outputs: [
-      port("done", "Done", "impulse"),
-      port("success", "Success", "bool")
-    ],
-    codegenCollect(api) {
-      ensureResoniteRuntime(api);
-      addStatefulField(
-        api,
-        "destroySuccess",
-        "bool",
-        "false"
-      );
-    },
-    codegenExpression(api) {
-      return `_destroySuccess${nodeToken(api)}`;
-    },
-    codegenAction(api) {
-      const field = `_destroySuccess${nodeToken(api)}`;
-      const done = api.emit("done");
-      return `${field} = DestroyReflective(${api.input("target").code});${done ? `\n        ${done}();` : ""}`;
-    }
-  });
-
-  registerNode("resonite.componentTypeConstant", {
-    title: "Component Type Constant",
-    group: "Values",
-    symbol: "TYPE<C>",
-    description:
-      `Selects one of ${FROOX_COMPONENT_TYPES.length} concrete component types from the ${CATALOG_SOURCE_DESCRIPTION} for FrooxEngine ${componentCatalog.engineVersion} and emits its System.Type.`,
-    parameters: [
-      pText(
-        "componentType",
-        "Component type",
-        "FrooxEngine.Grabbable",
-        "Choose from the current live scanner catalog or its cached copy. No packaged static API fallback is used.",
-        {
-          suggestions: FROOX_COMPONENT_TYPES,
-          placeholder: "FrooxEngine.Grabbable"
-        }
-      )
-    ],
-    outputs: [port("type", "Component Type", "type")],
-    codegenCollect(api) {
-      ensureDirectResoniteCore(api);
-    },
-    codegenExpression(api) {
-      return `typeof(${verifiedComponentType(api)})`;
-    }
-  });
-
-  registerNode("resonite.getComponent", {
-    title: "Get Component",
-    group: "Slots & Components",
-    symbol: "GETC",
-    description:
-      "Calls Slot.GetComponent(Type, exactTypeOnly) directly. It works with every concrete component type without reflection fallback code.",
-    inputs: [
-      port("slot", "Slot", "slot"),
-      port("type", "Component Type", "type"),
-      port("exact", "Exact Type Only", "bool", { defaultCs: "false" })
-    ],
-    outputs: [port("component", "Component", "component")],
-    codegenCollect(api) {
-      ensureDirectResoniteCore(api);
-    },
-    codegenExpression(api) {
-      return `${api.input("slot").code}.GetComponent(${api.input("type").code}, ${api.input("exact").code})!`;
-    }
-  });
-
-  registerNode("resonite.getComponentInChildren", {
-    title: "Get Component In Children",
-    group: "Slots & Components",
-    symbol: "GETC↓",
-    description:
-      "Calls Slot.GetComponentInChildren(Type) directly.",
-    inputs: [
-      port("slot", "Root Slot", "slot"),
-      port("type", "Component Type", "type")
-    ],
-    outputs: [port("component", "Component", "component")],
-    codegenCollect(api) {
-      ensureDirectResoniteCore(api);
-    },
-    codegenExpression(api) {
-      return `${api.input("slot").code}.GetComponentInChildren(${api.input("type").code})!`;
-    }
-  });
-
-  registerNode("resonite.attachComponent", {
-    title: "Attach Component",
-    group: "Attach & Create",
-    symbol: "+C",
-    description:
-      "Calls Slot.AttachComponent(Type, runOnAttachBehavior) directly and therefore covers every valid concrete FrooxEngine Component type.",
-    inputs: [
-      port("call", "Call", "impulse"),
-      port("slot", "Slot", "slot", { defaultCs: DEFAULT_WORLD_ROOT_SLOT_CS }),
-      port("type", "Component Type", "type"),
-      port("runOnAttach", "Run OnAttach Behavior", "bool", { defaultCs: "true" })
-    ],
-    outputs: [
-      port("done", "Done", "impulse"),
-      port("component", "Component", "component"),
-      port("success", "Success", "bool"),
-      port("exception", "Exception", "exception")
-    ],
-    codegenCollect(api) {
-      ensureDirectResoniteCore(api);
-      addStatefulField(api, "attachedComponent", "FrooxEngine.Component?", "null");
-      addStatefulField(api, "attachedComponentSuccess", "bool", "false");
-      addStatefulField(api, "attachedComponentException", "System.Exception?", "null");
-    },
-    codegenExpression(api) {
-      const token = nodeToken(api);
-      return {
-        component: `_attachedComponent${token}!`,
-        success: `_attachedComponentSuccess${token}`,
-        exception: `_attachedComponentException${token}!`
-      }[api.portId] || "null!";
-    },
-    codegenAction(api) {
-      const token = nodeToken(api);
-      const component = `_attachedComponent${token}`;
-      const success = `_attachedComponentSuccess${token}`;
-      const exception = `_attachedComponentException${token}`;
-      const done = api.emit("done");
-      return `try\n        {\n            ${exception} = null;\n            ${component} = ${api.input("slot").code}.AttachComponent(${api.input("type").code}, ${api.input("runOnAttach").code});\n            ${success} = ${component} is not null;\n        }\n        catch (System.Exception caught)\n        {\n            ${exception} = caught;\n            ${component} = null;\n            ${success} = false;\n        }${done ? `\n        ${done}();` : ""}`;
-    }
-  });
-
-  registerNode("resonite.getOrAttachComponent", {
-    title: "Get Or Attach Component",
-    group: "Attach & Create",
-    symbol: "C?+",
-    description:
-      "Gets an existing component by Type or attaches it directly when missing.",
-    inputs: [
-      port("call", "Call", "impulse"),
-      port("slot", "Slot", "slot", { defaultCs: DEFAULT_WORLD_ROOT_SLOT_CS }),
-      port("type", "Component Type", "type"),
-      port("exact", "Exact Type Only", "bool", { defaultCs: "false" }),
-      port("runOnAttach", "Run OnAttach Behavior", "bool", { defaultCs: "true" })
-    ],
-    outputs: [
-      port("done", "Done", "impulse"),
-      port("component", "Component", "component"),
-      port("attached", "Was Attached", "bool"),
-      port("success", "Success", "bool"),
-      port("exception", "Exception", "exception")
-    ],
-    codegenCollect(api) {
-      ensureDirectResoniteCore(api);
-      addStatefulField(api, "getOrAttachComponent", "FrooxEngine.Component?", "null");
-      addStatefulField(api, "getOrAttachWasAttached", "bool", "false");
-      addStatefulField(api, "getOrAttachSuccess", "bool", "false");
-      addStatefulField(api, "getOrAttachException", "System.Exception?", "null");
-    },
-    codegenExpression(api) {
-      const token = nodeToken(api);
-      return {
-        component: `_getOrAttachComponent${token}!`,
-        attached: `_getOrAttachWasAttached${token}`,
-        success: `_getOrAttachSuccess${token}`,
-        exception: `_getOrAttachException${token}!`
-      }[api.portId] || "null!";
-    },
-    codegenAction(api) {
-      const token = nodeToken(api);
-      const component = `_getOrAttachComponent${token}`;
-      const attached = `_getOrAttachWasAttached${token}`;
-      const success = `_getOrAttachSuccess${token}`;
-      const exception = `_getOrAttachException${token}`;
-      const slot = api.input("slot").code;
-      const type = api.input("type").code;
-      const done = api.emit("done");
-      return `try\n        {\n            ${exception} = null;\n            ${component} = ${slot}.GetComponent(${type}, ${api.input("exact").code});\n            ${attached} = ${component} is null;\n            ${component} ??= ${slot}.AttachComponent(${type}, ${api.input("runOnAttach").code});\n            ${success} = ${component} is not null;\n        }\n        catch (System.Exception caught)\n        {\n            ${exception} = caught;\n            ${component} = null;\n            ${attached} = false;\n            ${success} = false;\n        }${done ? `\n        ${done}();` : ""}`;
-    }
-  });
-
-  function registerComponentTransferNode(
-    id,
-    title,
-    symbol,
-    methodName,
-    description
-  ) {
-    registerNode(id, {
-      title,
-      group: "Attach & Create",
-      symbol,
-      description,
-      inputs: [
-        port("call", "Call", "impulse"),
-        port("destination", "Destination Slot", "slot"),
-        port("source", "Source Component", "component")
-      ],
-      outputs: [
-        port("done", "Done", "impulse"),
-        port("component", "Result Component", "component"),
-        port("success", "Success", "bool"),
-        port("exception", "Exception", "exception")
-      ],
-      codegenCollect(api) {
-        ensureDirectResoniteCore(api);
-        addStatefulField(api, `${id.replace(/[^A-Za-z0-9]/g, "")}Result`, "FrooxEngine.Component?", "null");
-        addStatefulField(api, `${id.replace(/[^A-Za-z0-9]/g, "")}Success`, "bool", "false");
-        addStatefulField(api, `${id.replace(/[^A-Za-z0-9]/g, "")}Exception`, "System.Exception?", "null");
-      },
-      codegenExpression(api) {
-        const stem = id.replace(/[^A-Za-z0-9]/g, "");
-        const token = nodeToken(api);
-        return {
-          component: `_${stem}Result${token}!`,
-          success: `_${stem}Success${token}`,
-          exception: `_${stem}Exception${token}!`
-        }[api.portId] || "null!";
-      },
-      codegenAction(api) {
-        const stem = id.replace(/[^A-Za-z0-9]/g, "");
-        const token = nodeToken(api);
-        const result = `_${stem}Result${token}`;
-        const success = `_${stem}Success${token}`;
-        const exception = `_${stem}Exception${token}`;
-        const done = api.emit("done");
-        return `try\n        {\n            ${exception} = null;\n            ${result} = ${api.input("destination").code}.${methodName}(${api.input("source").code});\n            ${success} = ${result} is not null;\n        }\n        catch (System.Exception caught)\n        {\n            ${exception} = caught;\n            ${result} = null;\n            ${success} = false;\n        }${done ? `\n        ${done}();` : ""}`;
-      }
-    });
-  }
-
-  registerComponentTransferNode(
-    "resonite.copyComponent",
-    "Copy Component",
-    "COPY-C",
-    "CopyComponent",
-    "Copies a component to another Slot through Slot.CopyComponent(Component)."
-  );
-
-  registerComponentTransferNode(
-    "resonite.moveComponent",
-    "Move Component",
-    "MOVE-C",
-    "MoveComponent",
-    "Moves a component to another Slot through Slot.MoveComponent(Component), preserving compatible references."
-  );
-
-  function graphComponentType(value) {
-    const normalized = String(value || "").trim();
-    const normalizedLookup =
-      normalizedCatalogTypeName(normalized);
-    const exact = new Map([
-      ...MATERIAL_GRAPH_TYPES,
-      ...MESH_GRAPH_TYPES,
-      ["FrooxEngine.MeshRenderer", "meshRenderer"],
-      ["MeshRenderer", "meshRenderer"],
-      ["FrooxEngine.Collider", "collider"],
-      ["Collider", "collider"],
-      ["FrooxEngine.MeshCollider", "meshCollider"],
-      ["MeshCollider", "meshCollider"],
-      ["FrooxEngine.BoxCollider", "boxCollider"],
-      ["BoxCollider", "boxCollider"],
-      ["FrooxEngine.SphereCollider", "sphereCollider"],
-      ["SphereCollider", "sphereCollider"],
-      ["FrooxEngine.CylinderCollider", "cylinderCollider"],
-      ["CylinderCollider", "cylinderCollider"],
-      ["FrooxEngine.StaticTexture2D", "staticTexture2D"],
-      ["StaticTexture2D", "staticTexture2D"],
-      ["FrooxEngine.StaticCubemap", "staticCubemap"],
-      ["StaticCubemap", "staticCubemap"],
-      ["FrooxEngine.SpriteProvider", "spriteProvider"],
-      ["SpriteProvider", "spriteProvider"],
-      ["FrooxEngine.StaticAudioClip", "staticAudioClip"],
-      ["StaticAudioClip", "staticAudioClip"],
-      ["FrooxEngine.StaticFont", "staticFont"],
-      ["StaticFont", "staticFont"],
-      ["FrooxEngine.Skybox", "skybox"],
-      ["Skybox", "skybox"],
-      ["FrooxEngine.Grabbable", "grabbable"],
-      ["Grabbable", "grabbable"],
-      ["FrooxEngine.AudioOutput", "audioOutput"],
-      ["AudioOutput", "audioOutput"],
-      ["FrooxEngine.DynamicVariableSpace", "dynamicVariableSpace"],
-      ["DynamicVariableSpace", "dynamicVariableSpace"],
-      ["FrooxEngine.RadiantDash", "radiantDash"],
-      ["RadiantDash", "radiantDash"]
-    ]);
-
-    const registeredTypes =
-      typeof registry.getTypeDefinitions === "function"
-        ? registry.getTypeDefinitions()
-        : null;
-
-    for (const [graphType, definition] of Object.entries(
-      registeredTypes || {}
-    )) {
-      if (
-        normalizedCatalogTypeName(
-          definition?.csType
-        ) === normalizedLookup &&
-        (
-          graphType === "component" ||
-          (Array.isArray(definition?.assignableTo) &&
-            definition.assignableTo.includes("component"))
-        )
-      ) {
-        return graphType;
-      }
-    }
-
-    return exact.get(normalized) ||
-      exact.get(normalizedLookup) ||
-      "component";
-  }
-
-  function ensureRuntimeEnumHelpers(api) {
-    ensureDirectResoniteCore(api);
-    api.addMember(
-      "direct.runtime.enums",
-      String.raw`
-private static Primitive GraphPrimitiveFromValue(object? value)
-{
-    if (value is Primitive primitive)
-    {
-        return primitive;
-    }
-
-    return Enum.TryParse(
-        Convert.ToString(value, CultureInfo.InvariantCulture),
-        ignoreCase: true,
-        out Primitive parsed)
-            ? parsed
-            : Primitive.Cube;
-}
-
-private static BlendMode GraphBlendModeFromValue(object? value)
-{
-    if (value is BlendMode blendMode)
-    {
-        return blendMode;
-    }
-
-    return Enum.TryParse(
-        Convert.ToString(value, CultureInfo.InvariantCulture),
-        ignoreCase: true,
-        out BlendMode parsed)
-            ? parsed
-            : BlendMode.Opaque;
-}
-`
-    );
-  }
-
-  registerNode("resonite.primitiveConstant", {
-    title: "Primitive Constant",
-    group: "Values",
-    symbol: "PRIM",
-    description:
-      "A real FrooxEngine.Primitive value for Quad, Cube or Sphere.",
-    parameters: [
-      pSelect(
-        "value",
-        "Primitive",
-        ["Quad", "Cube", "Sphere"],
-        "Cube"
-      )
-    ],
-    outputs: [port("value", "Primitive", "primitive")],
-    codegenCollect(api) {
-      ensureDirectResoniteCore(api);
-    },
-    codegenExpression(api) {
-      const value = ["Quad", "Cube", "Sphere"].includes(
-        api.node.parameters?.value
-      )
-        ? api.node.parameters.value
-        : "Cube";
-      return `FrooxEngine.Primitive.${value}`;
-    },
-    previewEvaluate({ node, known }) {
-      return known(
-        "primitive",
-        String(node.parameters?.value || "Cube")
-      );
-    }
-  });
-
-  registerNode("resonite.primitiveFromValue", {
-    title: "Value To Primitive",
-    group: "Conversions",
-    symbol: "→PRIM",
-    description:
-      "Converts a configuration enum or text value named Quad, Cube or Sphere into the real FrooxEngine.Primitive enum.",
-    inputs: [
-      genericPort(
-        "value",
-        "Enum / text",
-        "T",
-        "enumOrString"
-      )
-    ],
-    outputs: [port("primitive", "Primitive", "primitive")],
-    codegenCollect(api) {
-      ensureRuntimeEnumHelpers(api);
-    },
-    codegenExpression(api) {
-      return `GraphPrimitiveFromValue(${api.input("value").code})`;
-    }
-  });
-
-  registerNode("material.blendModeConstant", {
-    title: "Blend Mode Constant",
-    group: "Values",
-    symbol: "BLEND",
-    description:
-      "A real FrooxEngine.BlendMode value.",
-    parameters: [
-      pSelect(
-        "value",
-        "Blend mode",
-        [
-          "Opaque",
-          "Cutout",
-          "Alpha",
-          "Transparent",
-          "Additive",
-          "Multiply"
-        ],
-        "Opaque"
-      )
-    ],
-    outputs: [port("value", "Blend Mode", "blendMode")],
-    codegenCollect(api) {
-      ensureDirectResoniteCore(api);
-    },
-    codegenExpression(api) {
-      const modes = [
-        "Opaque",
-        "Cutout",
-        "Alpha",
-        "Transparent",
-        "Additive",
-        "Multiply"
-      ];
-      const value = modes.includes(api.node.parameters?.value)
-        ? api.node.parameters.value
-        : "Opaque";
-      return `FrooxEngine.BlendMode.${value}`;
-    }
-  });
-
-  registerNode("material.blendModeFromValue", {
-    title: "Value To Blend Mode",
-    group: "Conversions",
-    symbol: "→BLEND",
-    description:
-      "Converts a configuration enum or text to FrooxEngine.BlendMode.",
-    inputs: [
-      genericPort(
-        "value",
-        "Enum / text",
-        "T",
-        "enumOrString"
-      )
-    ],
-    outputs: [port("blendMode", "Blend Mode", "blendMode")],
-    codegenCollect(api) {
-      ensureRuntimeEnumHelpers(api);
-    },
-    codegenExpression(api) {
-      return `GraphBlendModeFromValue(${api.input("value").code})`;
-    }
-  });
-
-  registerNode("asset.textureWrapModeConstant", {
-    title: "Texture Wrap Mode Constant",
-    group: "Values",
-    symbol: "WRAP",
-    description:
-      "A real Renderite.Shared.TextureWrapMode value.",
-    parameters: [
-      pSelect(
-        "value",
-        "Wrap mode",
-        ["Repeat", "Clamp"],
-        "Repeat"
-      )
-    ],
-    outputs: [
-      port("value", "Wrap Mode", "textureWrapMode")
-    ],
-    codegenCollect(api) {
-      api.addUsing("Renderite.Shared");
-      api.require("usesRenderiteShared", true);
-    },
-    codegenExpression(api) {
-      const values = ["Repeat", "Clamp"];
-      const value = values.includes(api.node.parameters?.value)
-        ? api.node.parameters.value
-        : "Repeat";
-      return `Renderite.Shared.TextureWrapMode.${value}`;
-    }
-  });
-
-  registerNode("transform.quaternionIdentity", {
-    title: "Quaternion Identity",
-    group: "Transforms",
-    symbol: "Q1",
-    description:
-      "Elements.Core.floatQ.Identity.",
-    outputs: [port("rotation", "Rotation", "floatQ")],
-    codegenCollect(api) {
-      ensureDirectResoniteMath(api);
-    },
-    codegenExpression() {
-      return "Elements.Core.floatQ.Identity";
-    },
-    previewEvaluate({ known }) {
-      return known("floatQ", "Identity");
-    }
-  });
-
-  registerNode("transform.rotateVector", {
-    title: "Rotate Vector",
-    group: "Transforms",
-    symbol: "Q×V",
-    description:
-      "Rotates a float3 by a floatQ using the real Elements.Core operator.",
-    inputs: [
-      port("rotation", "Rotation", "floatQ"),
-      port("vector", "Vector", "float3")
-    ],
-    outputs: [port("result", "Result", "float3")],
-    codegenCollect(api) {
-      ensureDirectResoniteMath(api);
-    },
-    codegenExpression(api) {
-      return `(${api.input("rotation").code} * ${api.input("vector").code})`;
-    }
-  });
-
-  registerNode("transform.multiplyQuaternion", {
-    title: "Multiply Quaternions",
-    group: "Transforms",
-    symbol: "Q×Q",
-    description:
-      "Combines two floatQ rotations.",
-    inputs: [
-      port("a", "A", "floatQ"),
-      port("b", "B", "floatQ")
-    ],
-    outputs: [port("result", "Result", "floatQ")],
-    codegenCollect(api) {
-      ensureDirectResoniteMath(api);
-    },
-    codegenExpression(api) {
-      return `(${api.input("a").code} * ${api.input("b").code})`;
-    }
-  });
-
-  registerNode("resonite.userRootSlot", {
-    title: "User Root Slot",
-    group: "Slots & Components",
-    symbol: "UROOT",
-    description:
-      "Returns User.Root.Slot from the actual Resonite User.",
-    inputs: [port("user", "User", "user")],
-    outputs: [port("slot", "Root Slot", "slot")],
-    codegenCollect(api) {
-      ensureDirectResoniteCore(api);
-    },
-    codegenExpression(api) {
-      return `(${api.input("user").code}.Root?.Slot ?? null!)`;
-    }
-  });
-
-  registerNode("resonite.slotWorld", {
-    title: "Slot World",
-    group: "Slots & Components",
-    symbol: "S→W",
-    description:
-      "Returns Slot.World.",
-    inputs: [port("slot", "Slot", "slot")],
-    outputs: [port("world", "World", "world")],
-    codegenCollect(api) {
-      ensureDirectResoniteCore(api);
-    },
-    codegenExpression(api) {
-      return `${api.input("slot").code}.World`;
-    }
-  });
-
-  registerNode("resonite.slotParent", {
-    title: "Slot Parent",
-    group: "Slots & Components",
-    symbol: "S↑",
-    description:
-      "Returns Slot.Parent.",
-    inputs: [port("slot", "Slot", "slot")],
-    outputs: [port("parent", "Parent", "slot")],
-    codegenCollect(api) {
-      ensureDirectResoniteCore(api);
-    },
-    codegenExpression(api) {
-      return `${api.input("slot").code}.Parent!`;
-    }
-  });
-
-  registerNode("resonite.isSlotValid", {
-    title: "Is Slot Valid",
-    group: "Slots & Components",
-    symbol: "S?",
-    description:
-      "True when the Slot exists, is not destroyed and still has a World.",
-    inputs: [port("slot", "Slot", "slot")],
-    outputs: [port("valid", "Valid", "bool")],
-    codegenCollect(api) {
-      ensureDirectResoniteCore(api);
-      api.addMember(
-        "typed.resonite.validity",
-        `private static bool IsGraphSlotValid(FrooxEngine.Slot? slot)
-{
-    return slot is not null && !slot.IsDestroyed && slot.World is not null;
-}
-
-private static bool IsGraphComponentValid(FrooxEngine.Component? component)
-{
-    return component is not null && !component.IsDestroyed;
-}`
-      );
-    },
-    codegenExpression(api) {
-      return `IsGraphSlotValid(${api.input("slot").code})`;
-    }
-  });
-
-  registerNode("resonite.isComponentValid", {
-    title: "Is Component Valid",
-    group: "Slots & Components",
-    symbol: "C?",
-    description:
-      "True when the Component exists and is not destroyed.",
-    inputs: [port("component", "Component", "component")],
-    outputs: [port("valid", "Valid", "bool")],
-    codegenCollect(api) {
-      ensureDirectResoniteCore(api);
-      api.addMember(
-        "typed.resonite.validity",
-        `private static bool IsGraphSlotValid(FrooxEngine.Slot? slot)
-{
-    return slot is not null && !slot.IsDestroyed && slot.World is not null;
-}
-
-private static bool IsGraphComponentValid(FrooxEngine.Component? component)
-{
-    return component is not null && !component.IsDestroyed;
-}`
-      );
-    },
-    codegenExpression(api) {
-      return `IsGraphComponentValid(${api.input("component").code})`;
-    }
-  });
-
-  registerNode("resonite.addLocalSlot", {
-    title: "Add Local Slot",
-    group: "Slots & Components",
-    symbol: "+LS",
-    description:
-      "Creates a local Slot with Slot.AddLocalSlot.",
-    inputs: [
-      port("call", "Call", "impulse"),
-      port("parent", "Parent", "slot"),
-      port("name", "Name", "string"),
-      port("persistent", "Persistent", "bool", { defaultCs: "false" })
-    ],
-    outputs: [
-      port("done", "Done", "impulse"),
-      port("slot", "Created Slot", "slot")
-    ],
-    codegenCollect(api) {
-      ensureDirectResoniteCore(api);
-      addStatefulField(
-        api,
-        "createdLocalSlot",
-        "FrooxEngine.Slot?",
-        "null"
-      );
-    },
-    codegenExpression(api) {
-      return `_createdLocalSlot${nodeToken(api)}!`;
-    },
-    codegenAction(api) {
-      const field = `_createdLocalSlot${nodeToken(api)}`;
-      const done = api.emit("done");
-      return `${field} = ${api.input("parent").code}.AddLocalSlot(${api.input("name").code}, ${api.input("persistent").code});${done ? `\n        ${done}();` : ""}`;
-    }
-  });
-
-  registerNode("resonite.destroySlot", {
-    title: "Destroy Slot",
-    group: "Slots & Components",
-    symbol: "DEL-S",
-    description:
-      "Destroys a typed FrooxEngine.Slot directly.",
-    inputs: [
-      port("call", "Call", "impulse"),
-      port("slot", "Slot", "slot")
-    ],
-    outputs: [port("done", "Done", "impulse")],
-    codegenCollect(api) {
-      ensureDirectResoniteCore(api);
-    },
-    codegenAction(api) {
-      const done = api.emit("done");
-      const slot =
-        `_destroySlot${nodeToken(api)}`;
-      return `FrooxEngine.Slot? ${slot} = ${api.input("slot").code};\n        if (${slot} is not null && !${slot}.IsDestroyed)\n        {\n            ${slot}.Destroy();\n        }${done ? `\n        ${done}();` : ""}`;
-    }
-  });
-
-  registerNode("resonite.destroyComponent", {
-    title: "Destroy Component",
-    group: "Slots & Components",
-    symbol: "DEL-C",
-    description:
-      "Destroys a typed FrooxEngine.Component directly.",
-    inputs: [
-      port("call", "Call", "impulse"),
-      port("component", "Component", "component")
-    ],
-    outputs: [port("done", "Done", "impulse")],
-    codegenCollect(api) {
-      ensureDirectResoniteCore(api);
-    },
-    codegenAction(api) {
-      const done = api.emit("done");
-      const component =
-        `_destroyComponent${nodeToken(api)}`;
-      return `FrooxEngine.Component? ${component} = ${api.input("component").code};\n        if (${component} is not null && !${component}.IsDestroyed)\n        {\n            ${component}.Destroy();\n        }${done ? `\n        ${done}();` : ""}`;
-    }
-  });
-
-  registerNode("resonite.setSlotName", {
-    title: "Set Slot Name",
-    group: "Slots & Components",
-    symbol: "NAME",
-    description:
-      "Sets Slot.Name directly.",
-    inputs: [
-      port("call", "Call", "impulse"),
-      port("slot", "Slot", "slot"),
-      port("name", "Name", "string")
-    ],
-    outputs: [port("done", "Done", "impulse")],
-    codegenCollect(api) {
-      ensureDirectResoniteCore(api);
-    },
-    codegenAction(api) {
-      const done = api.emit("done");
-      return `${api.input("slot").code}.Name = ${api.input("name").code};${done ? `\n        ${done}();` : ""}`;
-    }
-  });
-
-  registerNode("resonite.setSlotActive", {
-    title: "Set Slot Active",
-    group: "Slots & Components",
-    symbol: "ACTIVE",
-    description:
-      "Sets Slot.ActiveSelf directly.",
-    inputs: [
-      port("call", "Call", "impulse"),
-      port("slot", "Slot", "slot"),
-      port("active", "Active", "bool")
-    ],
-    outputs: [port("done", "Done", "impulse")],
-    codegenCollect(api) {
-      ensureDirectResoniteCore(api);
-    },
-    codegenAction(api) {
-      const done = api.emit("done");
-      return `${api.input("slot").code}.ActiveSelf = ${api.input("active").code};${done ? `\n        ${done}();` : ""}`;
-    }
-  });
-
-  registerNode("resonite.setSlotParent", {
-    title: "Set Slot Parent",
-    group: "Slots & Components",
-    symbol: "PARENT",
-    description:
-      "Calls Slot.SetParent with optional global-transform preservation.",
-    inputs: [
-      port("call", "Call", "impulse"),
-      port("slot", "Slot", "slot"),
-      port("parent", "New Parent", "slot"),
-      port("keepGlobal", "Keep Global Transform", "bool", { defaultCs: "true" })
-    ],
-    outputs: [port("done", "Done", "impulse")],
-    codegenCollect(api) {
-      ensureDirectResoniteCore(api);
-    },
-    codegenAction(api) {
-      const done = api.emit("done");
-      return `${api.input("slot").code}.SetParent(${api.input("parent").code}, ${api.input("keepGlobal").code});${done ? `\n        ${done}();` : ""}`;
-    }
-  });
-
-  function registerSlotTransformSetter(
-    id,
-    title,
-    symbol,
-    member,
-    valueType,
-    valueLabel
-  ) {
-    registerNode(id, {
-      title,
-      group: "Transforms",
-      symbol,
-      description:
-        `Sets Slot.${member} directly without changing the other transform channels.`,
-      inputs: [
-        port("call", "Call", "impulse"),
-        port("slot", "Slot", "slot"),
-        port("value", valueLabel, valueType)
-      ],
-      outputs: [port("done", "Done", "impulse")],
-      codegenCollect(api) {
-        ensureDirectResoniteCore(api);
-      },
-      codegenAction(api) {
-        const done = api.emit("done");
-        return `${api.input("slot").code}.${member} = ${api.input("value").code};${done ? `\n        ${done}();` : ""}`;
-      }
-    });
-  }
-
-  registerSlotTransformSetter(
-    "transform.setLocalPosition",
-    "Set Slot Local Position",
-    "LPOS=",
-    "LocalPosition",
-    "float3",
-    "Position"
-  );
-  registerSlotTransformSetter(
-    "transform.setLocalRotation",
-    "Set Slot Local Rotation",
-    "LROT=",
-    "LocalRotation",
-    "floatQ",
-    "Rotation"
-  );
-  registerSlotTransformSetter(
-    "transform.setLocalScale",
-    "Set Slot Local Scale",
-    "LSCL=",
-    "LocalScale",
-    "float3",
-    "Scale"
-  );
-  registerSlotTransformSetter(
-    "transform.setGlobalPosition",
-    "Set Slot Global Position",
-    "GPOS=",
-    "GlobalPosition",
-    "float3",
-    "Position"
-  );
-  registerSlotTransformSetter(
-    "transform.setGlobalRotation",
-    "Set Slot Global Rotation",
-    "GROT=",
-    "GlobalRotation",
-    "floatQ",
-    "Rotation"
-  );
-  registerSlotTransformSetter(
-    "transform.setGlobalScale",
-    "Set Slot Global Scale",
-    "GSCL=",
-    "GlobalScale",
-    "float3",
-    "Scale"
-  );
-
-  function registerSlotTransformReader(
-    id,
-    title,
-    symbol,
-    prefix
-  ) {
-    registerNode(id, {
-      title,
-      group: "Transforms",
-      symbol,
-      description:
-        `Reads Slot.${prefix}Position, ${prefix}Rotation and ${prefix}Scale.`,
-      inputs: [port("slot", "Slot", "slot")],
-      outputs: [
-        port("position", "Position", "float3", { defaultCs: "Elements.Core.float3.Zero" }),
-        port("rotation", "Rotation", "floatQ", { defaultCs: "Elements.Core.floatQ.Identity" }),
-        port("scale", "Scale", "float3", { defaultCs: "Elements.Core.float3.One" })
-      ],
-      codegenCollect(api) {
-        ensureDirectResoniteMath(api);
-      },
-      codegenExpression(api) {
-        const member = {
-          position: `${prefix}Position`,
-          rotation: `${prefix}Rotation`,
-          scale: `${prefix}Scale`
-        }[api.portId];
-        return `${api.input("slot").code}.${member}`;
-      }
-    });
-  }
-
-  registerSlotTransformReader(
-    "transform.readLocalSlot",
-    "Read Local Slot Transform",
-    "L-TRS",
-    "Local"
-  );
-
-  registerSlotTransformReader(
-    "transform.readGlobalSlot",
-    "Read Global Slot Transform",
-    "G-TRS",
-    "Global"
-  );
-
-  function registerSlotTransformWriter(
-    id,
-    title,
-    symbol,
-    prefix
-  ) {
-    registerNode(id, {
-      title,
-      group: "Transforms",
-      symbol,
-      description:
-        `Writes Slot.${prefix}Position, ${prefix}Rotation and ${prefix}Scale directly.`,
-      inputs: [
-        port("call", "Call", "impulse"),
-        port("slot", "Slot", "slot"),
-        port("position", "Position", "float3", { defaultCs: "Elements.Core.float3.Zero" }),
-        port("rotation", "Rotation", "floatQ", { defaultCs: "Elements.Core.floatQ.Identity" }),
-        port("scale", "Scale", "float3", { defaultCs: "Elements.Core.float3.One" })
-      ],
-      outputs: [port("done", "Done", "impulse")],
-      codegenCollect(api) {
-        ensureDirectResoniteMath(api);
-      },
-      codegenAction(api) {
-        const done = api.emit("done");
-        const slot = api.input("slot").code;
-        return `${slot}.${prefix}Position = ${api.input("position").code};\n        ${slot}.${prefix}Rotation = ${api.input("rotation").code};\n        ${slot}.${prefix}Scale = ${api.input("scale").code};${done ? `\n        ${done}();` : ""}`;
-      }
-    });
-  }
-
-  registerSlotTransformWriter(
-    "transform.writeLocalSlot",
-    "Set Local Slot Transform",
-    "→L-TRS",
-    "Local"
-  );
-
-  registerSlotTransformWriter(
-    "transform.writeGlobalSlot",
-    "Set Global Slot Transform",
-    "→G-TRS",
-    "Global"
-  );
-
-  registerNode("task.dispatchWorld", {
-    title: "Dispatch To World",
-    group: "Tasks & Threading",
-    symbol: "WORLD↯",
-    description:
-      "Schedules the connected impulse path on World.Coroutines and awaits ToWorld before mutating Resonite state.",
-    inputs: [
-      port("call", "Call", "impulse"),
-      port("world", "World", "world"),
-      port(
-        "requireFocused",
-        "Require Still Focused",
-        "bool",
-        { defaultCs: "false" }
-      )
-    ],
-    outputs: [port("done", "On World Thread", "impulse")],
-    codegenCollect(api) {
-      ensureDirectResoniteCore(api);
-    },
-    codegenAction(api) {
-      const done = api.emit("done");
-      const token = nodeToken(api);
-      const world = `world${token}`;
-      return `FrooxEngine.World ${world} = ${api.input("world").code};\n        if (${world} is not null && !${world}.IsDisposed)\n        {\n            ${world}.Coroutines.StartTask(\n                async delegate\n                {\n                    await default(FrooxEngine.ToWorld);\n\n                    if (\n                        !${world}.IsDisposed &&\n                        (\n                            !${api.input("requireFocused").code} ||\n                            ReferenceEquals(\n                                FrooxEngine.Engine.Current?.WorldManager?.FocusedWorld,\n                                ${world})\n                        )\n                    )\n                    {${done ? `\n                        ${done}();` : ""}\n                    }\n                });\n        }`;
-    }
-  });
-
-  registerNode("task.dispatchWorldLatest", {
-    title: "Dispatch Latest To World",
-    group: "Tasks & Threading",
-    symbol: "WORLD↯1",
-    description:
-      "Coalesces repeated calls, switches to the World thread with ToWorld and runs the newest requested state once more when calls arrived while an update was pending.",
-    inputs: [
-      port("call", "Call", "impulse"),
-      port("world", "World", "world"),
-      port(
-        "requireFocused",
-        "Require Still Focused",
-        "bool",
-        { defaultCs: "true" }
-      )
-    ],
-    outputs: [port("done", "On World Thread", "impulse")],
-    codegenCollect(api) {
-      ensureDirectResoniteCore(api);
-      api.addUsing("System.Threading");
-      const token = nodeToken(api);
-      const emit = api.emitMethod(
-        api.node.id,
-        "done"
-      );
-      api.addField(
-        `${api.node.id}.latestWorld`,
-        `private static FrooxEngine.World? _latestWorld${token};`
-      );
-      api.addField(
-        `${api.node.id}.latestRequireFocused`,
-        `private static bool _latestRequireFocused${token};`
-      );
-      api.addField(
-        `${api.node.id}.latestVersion`,
-        `private static int _latestWorldVersion${token};`
-      );
-      api.addField(
-        `${api.node.id}.latestPending`,
-        `private static int _latestWorldPending${token};`
-      );
-      api.addMember(
-        `${api.node.id}.latestDispatcher`,
-        `private static void RequestLatestWorld${token}(FrooxEngine.World world, bool requireFocused)\n{\n    _latestWorld${token} = world;\n    _latestRequireFocused${token} = requireFocused;\n    Interlocked.Increment(ref _latestWorldVersion${token});\n    ScheduleLatestWorld${token}();\n}\n\nprivate static void ScheduleLatestWorld${token}()\n{\n    FrooxEngine.World? world = _latestWorld${token};\n\n    if (world is null || world.IsDisposed)\n    {\n        return;\n    }\n\n    if (Interlocked.Exchange(ref _latestWorldPending${token}, 1) != 0)\n    {\n        return;\n    }\n\n    int scheduledVersion = Volatile.Read(ref _latestWorldVersion${token});\n\n    world.Coroutines.StartTask(\n        async delegate\n        {\n            await default(FrooxEngine.ToWorld);\n\n            try\n            {\n                if (\n                    !world.IsDisposed &&\n                    (\n                        !_latestRequireFocused${token} ||\n                        ReferenceEquals(\n                            FrooxEngine.Engine.Current?.WorldManager?.FocusedWorld,\n                            world)\n                    )\n                )\n                {${emit ? `\n                    ${emit}();` : ""}\n                }\n            }\n            finally\n            {\n                Volatile.Write(ref _latestWorldPending${token}, 0);\n\n                if (\n                    scheduledVersion !=\n                    Volatile.Read(ref _latestWorldVersion${token})\n                )\n                {\n                    ScheduleLatestWorld${token}();\n                }\n            }\n        });\n}`
-      );
-    },
-    codegenAction(api) {
-      const token = nodeToken(api);
-      return `RequestLatestWorld${token}(${api.input("world").code}, ${api.input("requireFocused").code});`;
-    }
-  });
-
-  registerNode("resonite.getComponentTyped", {
-    expertOnly: true,
-    title: "Get Component (Typed)",
-    group: "Slots & Components",
-    symbol: "GET<T>",
-    description:
-      "Generates Slot.GetComponent<T>() directly. The inspector type name is compile-time C#, not runtime reflection.",
-    parameters: [
-      pText(
-        "componentType",
-        "Component type",
-        FROOX_COMPONENT_TYPES[0] || "",
-        "Verified fully-qualified FrooxEngine component type.",
-        { suggestions: FROOX_COMPONENT_TYPES }
-      )
-    ],
-    resolveDefinition(node) {
-      return {
-        outputs: [
-          port(
-            "component",
-            "Component",
-            graphComponentType(
-              node.parameters?.componentType
-            )
-          )
-        ]
-      };
-    },
-    inputs: [port("slot", "Slot", "slot")],
-    outputs: [port("component", "Component", "component")],
-    codegenCollect(api) {
-      ensureDirectResoniteCore(api);
-    },
-    codegenExpression(api) {
-      const componentType = verifiedComponentType(api);
-      return `${api.input("slot").code}.GetComponent<${componentType}>()!`;
-    }
-  });
-
-  registerNode("resonite.castComponentTyped", {
-    expertOnly: true,
-    title: "Cast Component (Typed)",
-    group: "Slots & Components",
-    symbol: "CAST<T>",
-    description:
-      "Explicitly narrows a generic Component to a catalog-verified concrete FrooxEngine component type.",
-    parameters: [
-      pText(
-        "componentType",
-        "Component type",
-        FROOX_COMPONENT_TYPES[0] || "",
-        "Verified fully-qualified FrooxEngine component type.",
-        {
-          suggestions: FROOX_COMPONENT_TYPES,
-          affectsPorts: true
-        }
-      )
-    ],
-    resolveDefinition(node) {
-      return {
-        outputs: [
-          port(
-            "component",
-            "Component",
-            graphComponentType(
-              node.parameters?.componentType
-            )
-          )
-        ]
-      };
-    },
-    inputs: [
-      port("value", "Component", "component")
-    ],
-    outputs: [
-      port("component", "Component", "component")
-    ],
-    codegenCollect(api) {
-      ensureReflectionRuntime(api);
-    },
-    codegenExpression(api) {
-      const componentType =
-        verifiedComponentType(api);
-      return `ConvertGraphValue<${componentType}>(${api.input("value").code})`;
-    }
-  });
-
-  registerNode("resonite.attachComponentTyped", {
-    expertOnly: true,
-    title: "Attach Component (Typed)",
-    group: "Attach & Create",
-    symbol: "+C<T>",
-    description:
-      "Generates Slot.AttachComponent<T>() directly and covers every concrete FrooxEngine Component type with a public parameterless constructor.",
-    parameters: [
-      pText(
-        "componentType",
-        "Component type",
-        FROOX_COMPONENT_TYPES[0] || "",
-        "Verified fully-qualified FrooxEngine component type.",
-        { suggestions: FROOX_COMPONENT_TYPES }
-      )
-    ],
-    resolveDefinition(node) {
-      return {
-        outputs: [
-          port("done", "Done", "impulse"),
-          port(
-            "component",
-            "Component",
-            graphComponentType(
-              node.parameters?.componentType
-            )
-          )
-        ]
-      };
-    },
-    inputs: [
-      port("call", "Call", "impulse"),
-      port("slot", "Slot", "slot", { defaultCs: DEFAULT_WORLD_ROOT_SLOT_CS })
-    ],
-    outputs: [
-      port("done", "Done", "impulse"),
-      port("component", "Component", "component")
-    ],
-    codegenCollect(api) {
-      ensureDirectResoniteCore(api);
-      const componentType = verifiedComponentType(api);
-      addStatefulField(
-        api,
-        "typedComponent",
-        `${componentType}?`,
-        "null"
-      );
-    },
-    codegenExpression(api) {
-      return `_typedComponent${nodeToken(api)}!`;
-    },
-    codegenAction(api) {
-      const componentType = verifiedComponentType(api);
-      const field = `_typedComponent${nodeToken(api)}`;
-      const done = api.emit("done");
-      return `${field} = ${api.input("slot").code}.AttachComponent<${componentType}>();${done ? `\n        ${done}();` : ""}`;
-    }
-  });
-
-  registerNode("resonite.ensureGrabbable", {
-    title: "Ensure Grabbable",
-    group: "Attach & Create",
-    symbol: "GRAB",
-    description:
-      "Returns an existing Grabbable or attaches one directly.",
-    inputs: [
-      port("call", "Call", "impulse"),
-      port("slot", "Slot", "slot", { defaultCs: DEFAULT_WORLD_ROOT_SLOT_CS })
-    ],
-    outputs: [
-      port("done", "Done", "impulse"),
-      port("grabbable", "Grabbable", "grabbable")
-    ],
-    codegenCollect(api) {
-      ensureDirectResoniteCore(api);
-      addStatefulField(
-        api,
-        "grabbable",
-        "FrooxEngine.Grabbable?",
-        "null"
-      );
-    },
-    codegenExpression(api) {
-      return `_grabbable${nodeToken(api)}!`;
-    },
-    codegenAction(api) {
-      const field = `_grabbable${nodeToken(api)}`;
-      const slot = api.input("slot").code;
-      const done = api.emit("done");
-      return `${field} = ${slot}.GetComponent<FrooxEngine.Grabbable>() ?? ${slot}.AttachComponent<FrooxEngine.Grabbable>();${done ? `\n        ${done}();` : ""}`;
-    }
-  });
-
-  registerNode("material.setCommonColor", {
-    title: "Set Common Material Color",
-    group: "Materials & Rendering",
-    symbol: "MAT=C",
-    description:
-      "Sets ICommonMaterial.Color directly.",
-    inputs: [
-      port("call", "Call", "impulse"),
-      port("material", "Material", "commonMaterial"),
-      port("color", "Color", "colorX")
-    ],
-    outputs: [port("done", "Done", "impulse")],
-    codegenCollect(api) {
-      ensureDirectResoniteRendering(api);
-    },
-    codegenAction(api) {
-      const done = api.emit("done");
-      return `${api.input("material").code}.Color = ${api.input("color").code};${done ? `\n        ${done}();` : ""}`;
-    }
-  });
-
-  registerNode("material.setPbsMetallic", {
-    title: "Set PBS Metallic",
-    group: "Materials & Rendering",
-    symbol: "PBS=",
-    description:
-      "Sets AlbedoColor, Metallic, Smoothness and BlendMode on a real PBS_Metallic component.",
-    inputs: [
-      port("call", "Call", "impulse"),
-      port("material", "PBS Metallic", "pbsMetallic"),
-      port("albedo", "Albedo Color", "colorX", { defaultCs: "colorX.White" }),
-      port("metallic", "Metallic", "float", { defaultCs: "0.05f" }),
-      port("smoothness", "Smoothness", "float", { defaultCs: "0.65f" }),
-      port("blendMode", "Blend Mode", "blendMode", { defaultCs: "FrooxEngine.BlendMode.Opaque" })
-    ],
-    outputs: [port("done", "Done", "impulse")],
-    codegenCollect(api) {
-      ensureDirectResoniteRendering(api);
-    },
-    codegenAction(api) {
-      const done = api.emit("done");
-      const material = api.input("material").code;
-      return `${material}.AlbedoColor.Value = ${api.input("albedo").code};\n        ${material}.Metallic.Value = ${api.input("metallic").code};\n        ${material}.Smoothness.Value = ${api.input("smoothness").code};\n        ${material}.BlendMode.Value = ${api.input("blendMode").code};${done ? `\n        ${done}();` : ""}`;
-    }
-  });
-
-  registerNode("attach.primitive", {
-    title: "Attach Primitive",
-    group: "Attach & Create",
-    symbol: "+PRIM",
-    description:
-      "Calls Slot.AttachPrimitive<TMaterial>() directly. With Parent unconnected it creates under the focused World.RootSlot; connect a Slot explicitly to override the parent.",
-    parameters: [materialTypeParameter(DEFAULT_MATERIAL_TYPE, true)],
-    resolveDefinition(node) {
-      return {
-        outputs: [
-          port("done", "Done", "impulse"),
-          port("slot", "Created Slot", "slot"),
-          port(
-            "material",
-            "Material",
-            graphMaterialType(
-              node.parameters?.materialType
-            )
-          ),
-          port("mesh", "Mesh", "mesh"),
-          port("renderer", "Renderer", "meshRenderer"),
-          port("collider", "Collider", "collider"),
-          port("success", "Success", "bool"),
-          port("exception", "Exception", "exception")
-        ]
-      };
-    },
-    inputs: [
-      port("call", "Call", "impulse"),
-      port("parent", "Parent", "slot", { defaultCs: DEFAULT_WORLD_ROOT_SLOT_CS }),
-      port("primitive", "Primitive", "primitive", { defaultCs: "FrooxEngine.Primitive.Cube" }),
-      port("scale", "Scale", "float3", { defaultCs: "Elements.Core.float3.One" }),
-      port("color", "Color", "colorX", { defaultCs: "colorX.White" }),
-      port("collider", "Collider", "bool", { defaultCs: "true" })
-    ],
-    outputs: [
-      port("done", "Done", "impulse"),
-      port("slot", "Created Slot", "slot"),
-      port("material", "Material", "commonMaterial"),
-      port("mesh", "Mesh", "mesh"),
-      port("renderer", "Renderer", "meshRenderer"),
-      port("collider", "Collider", "collider"),
-      port("success", "Success", "bool"),
-      port("exception", "Exception", "exception")
-    ],
-    codegenCollect(api) {
-      const materialType = directCommonMaterialType(api);
-      attachResultFields(api, "attachPrimitive");
-      addStatefulField(
-        api,
-        "attachPrimitiveMaterialTyped",
-        `${materialType}?`,
-        "null"
-      );
-    },
-    codegenExpression(api) {
-      if (api.portId === "material") {
-        return `_attachPrimitiveMaterialTyped${nodeToken(api)}!`;
-      }
-      return attachOutputExpression(api, "attachPrimitive");
-    },
-    codegenAction(api) {
-      const materialType = directCommonMaterialType(api);
-      const token = nodeToken(api);
-      const slot = `_attachPrimitiveSlot${token}`;
-      const mesh = `_attachPrimitiveMesh${token}`;
-      const material = `_attachPrimitiveMaterial${token}`;
-      const materialTyped = `_attachPrimitiveMaterialTyped${token}`;
-      const renderer = `_attachPrimitiveRenderer${token}`;
-      const collider = `_attachPrimitiveCollider${token}`;
-      const success = `_attachPrimitiveSuccess${token}`;
-      const exception = `_attachPrimitiveException${token}`;
-      const parent = api.input("parent").code;
-      const primitive = api.input("primitive").code;
-      const wantsCollider = api.input("collider").code;
-      const done = api.emit("done");
-      return `try\n        {\n            ${exception} = null;\n            ${slot} = ${parent}.AttachPrimitive<${materialType}>(\n                ${primitive},\n                ${api.input("scale").code},\n                ${api.input("color").code},\n                collider: ${wantsCollider});\n            ${materialTyped} = ${slot}.GetComponent<${materialType}>();\n            ${material} = ${materialTyped};\n            ${renderer} = ${slot}.GetComponent<FrooxEngine.MeshRenderer>();\n            ${mesh} = ${primitive} switch\n            {\n                FrooxEngine.Primitive.Quad => ${slot}.GetComponent<FrooxEngine.QuadMesh>(),\n                FrooxEngine.Primitive.Cube => ${slot}.GetComponent<FrooxEngine.BoxMesh>(),\n                FrooxEngine.Primitive.Sphere => ${slot}.GetComponent<FrooxEngine.SphereMesh>(),\n                _ => null\n            };\n            ${collider} = ${primitive} switch\n            {\n                FrooxEngine.Primitive.Quad => ${slot}.GetComponent<FrooxEngine.BoxCollider>(),\n                FrooxEngine.Primitive.Cube => ${slot}.GetComponent<FrooxEngine.BoxCollider>(),\n                FrooxEngine.Primitive.Sphere => ${slot}.GetComponent<FrooxEngine.SphereCollider>(),\n                _ => null\n            };\n            ${success} = ${slot} is not null && ${materialTyped} is not null && ${mesh} is not null && ${renderer} is not null && (!${wantsCollider} || ${collider} is not null);\n        }\n        catch (System.Exception caught)\n        {\n            ${exception} = caught;\n            ${slot} = null;\n            ${mesh} = null;\n            ${material} = null;\n            ${materialTyped} = null;\n            ${renderer} = null;\n            ${collider} = null;\n            ${success} = false;\n        }${done ? `\n        ${done}();` : ""}`;
-    }
-  });
-
-  registerNode("attach.mesh", {
-    title: "Attach Mesh",
-    group: "Attach & Create",
-    symbol: "+MESH",
-    description:
-      "Covers every Slot.AttachMesh overload: existing mesh/material providers, generated mesh/material components, renderer, optional MeshCollider and sorting order.",
-    parameters: [
-      meshTypeParameter(),
-      materialTypeParameter(),
-      pBool(
-        "applyColor",
-        "Apply color when material supports ICommonMaterial",
-        false
-      )
-    ],
-    inputs: [
-      port("call", "Call", "impulse"),
-      port("slot", "Slot", "slot", { defaultCs: DEFAULT_WORLD_ROOT_SLOT_CS }),
-      port("existingMesh", "Existing Mesh (optional)", "mesh"),
-      port("existingMaterial", "Existing Material (optional)", "material"),
-      port("collider", "Mesh Collider", "bool", { defaultCs: "false" }),
-      port("sortingOrder", "Sorting Order", "int", { defaultCs: "0" }),
-      port("color", "Color", "colorX", { defaultCs: "colorX.White" })
-    ],
-    outputs: [
-      port("done", "Done", "impulse"),
-      port("slot", "Slot", "slot"),
-      port("mesh", "Mesh", "mesh"),
-      port("material", "Material", "material"),
-      port("renderer", "Renderer", "meshRenderer"),
-      port("collider", "Mesh Collider", "meshCollider"),
-      port("success", "Success", "bool"),
-      port("exception", "Exception", "exception")
-    ],
-    codegenCollect(api) {
-      attachResultFields(
-        api,
-        "attachMesh",
-        "FrooxEngine.IAssetProvider<FrooxEngine.Mesh>",
-        "FrooxEngine.MeshCollider"
-      );
-    },
-    codegenExpression(api) {
-      return attachOutputExpression(api, "attachMesh");
-    },
-    codegenAction(api) {
-      const meshType = directMeshType(api);
-      const materialType = directMaterialType(api);
-      const token = nodeToken(api);
-      const slotField = `_attachMeshSlot${token}`;
-      const meshField = `_attachMeshMesh${token}`;
-      const materialField = `_attachMeshMaterial${token}`;
-      const rendererField = `_attachMeshRenderer${token}`;
-      const colliderField = `_attachMeshCollider${token}`;
-      const successField = `_attachMeshSuccess${token}`;
-      const exceptionField = `_attachMeshException${token}`;
-      const slot = api.input("slot").code;
-      const suppliedMesh = api.input("existingMesh").code;
-      const suppliedMaterial = api.input("existingMaterial").code;
-      const collider = api.input("collider").code;
-      const sortingOrder = api.input("sortingOrder").code;
-      const color = api.input("color").code;
-      const applyColor = api.node.parameters?.applyColor === true;
-      const done = api.emit("done");
-      return `try\n        {\n            ${exceptionField} = null;\n            ${slotField} = ${slot};\n            FrooxEngine.IAssetProvider<FrooxEngine.Mesh>? suppliedMesh${token} = ${suppliedMesh};\n            FrooxEngine.IAssetProvider<FrooxEngine.Material>? suppliedMaterial${token} = ${suppliedMaterial};\n\n            if (suppliedMesh${token} is not null && suppliedMaterial${token} is not null)\n            {\n                ${rendererField} = ${slot}.AttachMesh(suppliedMesh${token}, suppliedMaterial${token}, ${sortingOrder});\n                ${meshField} = suppliedMesh${token};\n                ${materialField} = suppliedMaterial${token};\n                if (${collider})\n                {\n                    ${colliderField} = ${slot}.AttachComponent<FrooxEngine.MeshCollider>();\n                    ${colliderField}.Mesh.Target = suppliedMesh${token};\n                }\n                else\n                {\n                    ${colliderField} = null;\n                }\n            }\n            else if (suppliedMaterial${token} is not null)\n            {\n                ${meshType} createdMesh${token} = ${slot}.AttachMesh<${meshType}>(suppliedMaterial${token}, out FrooxEngine.MeshRenderer createdRenderer${token}, ${collider}, ${sortingOrder});\n                ${meshField} = createdMesh${token};\n                ${materialField} = suppliedMaterial${token};\n                ${rendererField} = createdRenderer${token};\n                ${colliderField} = ${slot}.GetComponent<FrooxEngine.MeshCollider>();\n            }\n            else if (suppliedMesh${token} is not null)\n            {\n                ${materialType} createdMaterial${token} = ${slot}.AttachMesh<${materialType}>(suppliedMesh${token}, ${collider}, ${sortingOrder});\n                ${meshField} = suppliedMesh${token};\n                ${materialField} = createdMaterial${token};\n                ${rendererField} = ${slot}.GetComponent<FrooxEngine.MeshRenderer>();\n                ${colliderField} = ${slot}.GetComponent<FrooxEngine.MeshCollider>();\n            }\n            else\n            {\n                FrooxEngine.AttachedModel<${meshType}, ${materialType}> model${token} = ${slot}.AttachMesh<${meshType}, ${materialType}>(${collider}, ${sortingOrder});\n                ${meshField} = model${token}.mesh;\n                ${materialField} = model${token}.material;\n                ${rendererField} = model${token}.renderer;\n                ${colliderField} = model${token}.collider;\n            }\n${applyColor ? `\n            if (${materialField} is FrooxEngine.ICommonMaterial commonMaterial${token})\n            {\n                commonMaterial${token}.Color = ${color};\n            }\n` : ""}\n            ${successField} = ${meshField} is not null && ${materialField} is not null && ${rendererField} is not null && (!${collider} || ${colliderField} is not null);\n        }\n        catch (System.Exception caught)\n        {\n            ${exceptionField} = caught;\n            ${meshField} = null;\n            ${materialField} = null;\n            ${rendererField} = null;\n            ${colliderField} = null;\n            ${successField} = false;\n        }${done ? `\n        ${done}();` : ""}`;
-    }
-  });
-
-  function registerShapeAttachNode(specification) {
-    registerNode(specification.id, {
-      title: specification.title,
-      group: "Attach & Create",
-      symbol: specification.symbol,
-      description: specification.description,
-      parameters: [materialTypeParameter()],
-      inputs: [
-        port("call", "Call", "impulse"),
-        port("slot", "Slot", "slot", { defaultCs: DEFAULT_WORLD_ROOT_SLOT_CS }),
-        port("material", "Existing Material (optional)", "material"),
-        ...specification.inputs,
-        ...(specification.supportsCollider
-          ? [port("collider", "Collider", "bool", { defaultCs: "true" })]
-          : [])
-      ],
-      outputs: [
-        port("done", "Done", "impulse"),
-        port("slot", "Slot", "slot"),
-        port("mesh", "Mesh", specification.meshGraphType),
-        port("material", "Material", "material"),
-        port("renderer", "Renderer", "meshRenderer"),
-        port("collider", "Collider", "collider"),
-        port("success", "Success", "bool"),
-        port("exception", "Exception", "exception")
-      ],
-      codegenCollect(api) {
-        attachResultFields(
-          api,
-          specification.fieldPrefix,
-          specification.meshCsType
-        );
-      },
-      codegenExpression(api) {
-        return attachOutputExpression(
-          api,
-          specification.fieldPrefix
-        );
-      },
-      codegenAction(api) {
-        const materialType = directMaterialType(api);
-        const token = nodeToken(api);
-        const prefix = specification.fieldPrefix;
-        const slotField = `_${prefix}Slot${token}`;
-        const meshField = `_${prefix}Mesh${token}`;
-        const materialField = `_${prefix}Material${token}`;
-        const rendererField = `_${prefix}Renderer${token}`;
-        const colliderField = `_${prefix}Collider${token}`;
-        const successField = `_${prefix}Success${token}`;
-        const exceptionField = `_${prefix}Exception${token}`;
-        const slot = api.input("slot").code;
-        const suppliedMaterial = api.input("material").code;
-        const collider = specification.supportsCollider
-          ? api.input("collider").code
-          : "false";
-        const done = api.emit("done");
-        const existingCall = specification.existingCall(
-          api,
-          slot,
-          `suppliedMaterial${token}`,
-          collider
-        );
-        const genericCall = specification.genericCall(
-          api,
-          slot,
-          materialType,
-          collider
-        );
-
-        return `try\n        {\n            ${exceptionField} = null;\n            ${slotField} = ${slot};\n            FrooxEngine.IAssetProvider<FrooxEngine.Material>? suppliedMaterial${token} = ${suppliedMaterial};\n\n            if (suppliedMaterial${token} is not null)\n            {\n                ${meshField} = ${existingCall};\n                ${materialField} = suppliedMaterial${token};\n            }\n            else\n            {\n                ${meshField} = ${genericCall};\n                ${materialField} = ${slot}.GetComponent<${materialType}>();\n            }\n\n            ${rendererField} = ${slot}.GetComponent<FrooxEngine.MeshRenderer>();\n            ${colliderField} = ${slot}.GetComponent<FrooxEngine.Collider>();\n            ${successField} = ${meshField} is not null && ${materialField} is not null && ${rendererField} is not null && (!${collider} || ${colliderField} is not null);\n        }\n        catch (System.Exception caught)\n        {\n            ${exceptionField} = caught;\n            ${meshField} = null;\n            ${materialField} = null;\n            ${rendererField} = null;\n            ${colliderField} = null;\n            ${successField} = false;\n        }${done ? `\n        ${done}();` : ""}`;
-      }
-    });
-  }
-
-  registerShapeAttachNode({
-    id: "attach.quad",
-    title: "Attach Quad",
-    symbol: "+QUAD",
-    description:
-      "Covers both Slot.AttachQuad overloads with an existing or newly created material.",
-    fieldPrefix: "attachQuad",
-    meshGraphType: "quadMesh",
-    meshCsType: "FrooxEngine.QuadMesh",
-    supportsCollider: true,
-    inputs: [port("size", "Size", "float2", { defaultCs: "new Elements.Core.float2(1f, 1f)" })],
-    existingCall: (api, slot, material, collider) =>
-      `${slot}.AttachQuad(${api.input("size").code}, ${material}, ${collider})`,
-    genericCall: (api, slot, materialType, collider) =>
-      `${slot}.AttachQuad<${materialType}>(${api.input("size").code}, ${collider})`
-  });
-
-  registerShapeAttachNode({
-    id: "attach.box",
-    title: "Attach Box",
-    symbol: "+BOX",
-    description:
-      "Covers both Slot.AttachBox overloads with an existing or newly created material.",
-    fieldPrefix: "attachBox",
-    meshGraphType: "boxMesh",
-    meshCsType: "FrooxEngine.BoxMesh",
-    supportsCollider: true,
-    inputs: [port("size", "Size", "float3", { defaultCs: "Elements.Core.float3.One" })],
-    existingCall: (api, slot, material, collider) =>
-      `${slot}.AttachBox(${api.input("size").code}, ${material}, ${collider})`,
-    genericCall: (api, slot, materialType, collider) =>
-      `${slot}.AttachBox<${materialType}>(${api.input("size").code}, ${collider})`
-  });
-
-  registerShapeAttachNode({
-    id: "attach.sphere",
-    title: "Attach Sphere",
-    symbol: "+SPH",
-    description:
-      "Covers both Slot.AttachSphere overloads with an existing or newly created material.",
-    fieldPrefix: "attachSphere",
-    meshGraphType: "sphereMesh",
-    meshCsType: "FrooxEngine.SphereMesh",
-    supportsCollider: true,
-    inputs: [port("radius", "Radius", "float", { defaultCs: "0.5f" })],
-    existingCall: (api, slot, material, collider) =>
-      `${slot}.AttachSphere(${api.input("radius").code}, ${material}, ${collider})`,
-    genericCall: (api, slot, materialType, collider) =>
-      `${slot}.AttachSphere<${materialType}>(${api.input("radius").code}, ${collider})`
-  });
-
-  registerShapeAttachNode({
-    id: "attach.cylinder",
-    title: "Attach Cylinder",
-    symbol: "+CYL",
-    description:
-      "Covers both Slot.AttachCylinder overloads with an existing or newly created material.",
-    fieldPrefix: "attachCylinder",
-    meshGraphType: "cylinderMesh",
-    meshCsType: "FrooxEngine.CylinderMesh",
-    supportsCollider: true,
-    inputs: [
-      port("radius", "Radius", "float", { defaultCs: "0.5f" }),
-      port("height", "Height", "float", { defaultCs: "1f" })
-    ],
-    existingCall: (api, slot, material, collider) =>
-      `${slot}.AttachCylinder(${api.input("radius").code}, ${api.input("height").code}, ${material}, ${collider})`,
-    genericCall: (api, slot, materialType, collider) =>
-      `${slot}.AttachCylinder<${materialType}>(${api.input("radius").code}, ${api.input("height").code}, ${collider})`
-  });
-
-  registerNode("attach.arrow", {
-    title: "Attach Arrow",
-    group: "Attach & Create",
-    symbol: "+ARR",
-    description:
-      "Covers Slot.AttachArrow with a generated material or an existing material provider.",
-    parameters: [materialTypeParameter()],
-    inputs: [
-      port("call", "Call", "impulse"),
-      port("slot", "Slot", "slot", { defaultCs: DEFAULT_WORLD_ROOT_SLOT_CS }),
-      port("material", "Existing Material (optional)", "material"),
-      port("vector", "Vector", "float3", { defaultCs: "new Elements.Core.float3(0f, 0f, 1f)" }),
-      port("color", "Color", "colorX", { defaultCs: "colorX.White" })
-    ],
-    outputs: [
-      port("done", "Done", "impulse"),
-      port("slot", "Slot", "slot"),
-      port("mesh", "Arrow Mesh", "arrowMesh"),
-      port("material", "Material", "material"),
-      port("renderer", "Renderer", "meshRenderer"),
-      port("success", "Success", "bool"),
-      port("exception", "Exception", "exception")
-    ],
-    codegenCollect(api) {
-      attachResultFields(
-        api,
-        "attachArrow",
-        "FrooxEngine.ArrowMesh"
-      );
-    },
-    codegenExpression(api) {
-      return attachOutputExpression(api, "attachArrow");
-    },
-    codegenAction(api) {
-      const materialType = directMaterialType(api);
-      const token = nodeToken(api);
-      const slotField = `_attachArrowSlot${token}`;
-      const meshField = `_attachArrowMesh${token}`;
-      const materialField = `_attachArrowMaterial${token}`;
-      const rendererField = `_attachArrowRenderer${token}`;
-      const successField = `_attachArrowSuccess${token}`;
-      const exceptionField = `_attachArrowException${token}`;
-      const slot = api.input("slot").code;
-      const suppliedMaterial = api.input("material").code;
-      const vector = api.input("vector").code;
-      const color = api.input("color").code;
-      const done = api.emit("done");
-      return `try\n        {\n            ${exceptionField} = null;\n            ${slotField} = ${slot};\n            FrooxEngine.IAssetProvider<FrooxEngine.Material>? suppliedMaterial${token} = ${suppliedMaterial};\n\n            if (suppliedMaterial${token} is not null)\n            {\n                ${meshField} = ${slot}.AttachMesh<FrooxEngine.ArrowMesh>(suppliedMaterial${token});\n                ${meshField}.Vector.Value = ${vector};\n                ${materialField} = suppliedMaterial${token};\n            }\n            else\n            {\n                FrooxEngine.AttachedModel<FrooxEngine.ArrowMesh, ${materialType}> model${token} = ${slot}.AttachArrow<${materialType}>(${vector});\n                ${meshField} = model${token}.mesh;\n                ${materialField} = model${token}.material;\n                ${rendererField} = model${token}.renderer;\n            }\n\n            if (${materialField} is FrooxEngine.ICommonMaterial commonMaterial${token})\n            {\n                commonMaterial${token}.Color = ${color};\n            }\n\n            ${rendererField} ??= ${slot}.GetComponent<FrooxEngine.MeshRenderer>();\n            ${successField} = ${meshField} is not null && ${materialField} is not null && ${rendererField} is not null;\n        }\n        catch (System.Exception caught)\n        {\n            ${exceptionField} = caught;\n            ${meshField} = null;\n            ${materialField} = null;\n            ${rendererField} = null;\n            ${successField} = false;\n        }${done ? `\n        ${done}();` : ""}`;
-    }
-  });
-
-  function registerSimpleAttachNode(specification) {
-    registerNode(specification.id, {
-      title: specification.title,
-      group: "Attach & Create",
-      symbol: specification.symbol,
-      description: specification.description,
-      parameters: specification.parameters || [],
-      inputs: [
-        port("call", "Call", "impulse"),
-        port("slot", "Slot", "slot", { defaultCs: DEFAULT_WORLD_ROOT_SLOT_CS }),
-        ...specification.inputs
-      ],
-      outputs: [
-        port("done", "Done", "impulse"),
-        port("asset", specification.outputLabel, specification.outputType),
-        port("success", "Success", "bool"),
-        port("exception", "Exception", "exception")
-      ],
-      codegenCollect(api) {
-        ensureDirectResoniteCore(api);
-        addStatefulField(
-          api,
-          `${specification.fieldPrefix}Value`,
-          `${specification.outputCsType}?`,
-          "null"
-        );
-        addStatefulField(
-          api,
-          `${specification.fieldPrefix}Success`,
-          "bool",
-          "false"
-        );
-        addStatefulField(
-          api,
-          `${specification.fieldPrefix}Exception`,
-          "System.Exception?",
-          "null"
-        );
-      },
-      codegenExpression(api) {
-        const token = nodeToken(api);
-        if (api.portId === "success") {
-          return `_${specification.fieldPrefix}Success${token}`;
-        }
-        if (api.portId === "exception") {
-          return `_${specification.fieldPrefix}Exception${token}!`;
-        }
-        return `_${specification.fieldPrefix}Value${token}!`;
-      },
-      codegenAction(api) {
-        const token = nodeToken(api);
-        const value = `_${specification.fieldPrefix}Value${token}`;
-        const success = `_${specification.fieldPrefix}Success${token}`;
-        const exception = `_${specification.fieldPrefix}Exception${token}`;
-        const done = api.emit("done");
-        return `try\n        {\n            ${exception} = null;\n            ${value} = ${specification.call(api)};\n            ${success} = ${value} is not null;\n        }\n        catch (System.Exception caught)\n        {\n            ${exception} = caught;\n            ${value} = null;\n            ${success} = false;\n        }${done ? `\n        ${done}();` : ""}`;
-      }
-    });
-  }
-
-  registerSimpleAttachNode({
-    id: "attach.texture2D",
-    title: "Attach Texture 2D",
-    symbol: "+TEX",
-    description:
-      "Covers both Slot.AttachTexture overloads, including independent U/V wrap modes and optional MaxSize.",
-    fieldPrefix: "attachTexture",
-    outputLabel: "Static Texture 2D",
-    outputType: "staticTexture2D",
-    outputCsType: "FrooxEngine.StaticTexture2D",
-    inputs: [
-      port("uri", "URI", "Uri"),
-      port("getExisting", "Get Existing", "bool", { defaultCs: "true" }),
-      port("uncompressed", "Uncompressed", "bool", { defaultCs: "false" }),
-      port("directLoad", "Direct Load", "bool", { defaultCs: "false" }),
-      port("evenNull", "Create Even If Null", "bool", { defaultCs: "false" }),
-      port("wrapU", "Wrap U", "textureWrapMode", { defaultCs: "Renderite.Shared.TextureWrapMode.Repeat" }),
-      port("wrapV", "Wrap V", "textureWrapMode", { defaultCs: "Renderite.Shared.TextureWrapMode.Repeat" }),
-      port("maxSize", "Max Size (0 = none)", "int", { defaultCs: "0" })
-    ],
-    call: api => {
-      const maxSize = api.input("maxSize").code;
-      return `${api.input("slot").code}.AttachTexture(${api.input("uri").code}, ${api.input("getExisting").code}, ${api.input("uncompressed").code}, ${api.input("directLoad").code}, ${api.input("evenNull").code}, ${api.input("wrapU").code}, ${api.input("wrapV").code}, ${maxSize} > 0 ? ${maxSize} : (int?)null)`;
-    }
-  });
-
-  registerSimpleAttachNode({
-    id: "attach.cubemap",
-    title: "Attach Cubemap",
-    symbol: "+CUBE-T",
-    description:
-      "Calls Slot.AttachCubemap directly.",
-    fieldPrefix: "attachCubemap",
-    outputLabel: "Static Cubemap",
-    outputType: "staticCubemap",
-    outputCsType: "FrooxEngine.StaticCubemap",
-    inputs: [
-      port("uri", "URI", "Uri"),
-      port("getExisting", "Get Existing", "bool", { defaultCs: "true" }),
-      port("evenNull", "Create Even If Null", "bool", { defaultCs: "false" })
-    ],
-    call: api =>
-      `${api.input("slot").code}.AttachCubemap(${api.input("uri").code}, ${api.input("getExisting").code}, ${api.input("evenNull").code})`
-  });
-
-  registerSimpleAttachNode({
-    id: "attach.spriteUri",
-    title: "Attach Sprite From URI",
-    symbol: "+SPR-URI",
-    description:
-      "Covers the URI overload of Slot.AttachSprite.",
-    fieldPrefix: "attachSpriteUri",
-    outputLabel: "Sprite Provider",
-    outputType: "spriteProvider",
-    outputCsType: "FrooxEngine.SpriteProvider",
-    inputs: [
-      port("uri", "URI", "Uri"),
-      port("uncompressed", "Uncompressed", "bool", { defaultCs: "false" }),
-      port("evenNull", "Create Even If Null", "bool", { defaultCs: "false" }),
-      port("getExisting", "Get Existing", "bool", { defaultCs: "true" }),
-      port("maxSize", "Max Size (0 = none)", "int", { defaultCs: "0" })
-    ],
-    call: api => {
-      const maxSize = api.input("maxSize").code;
-      return `${api.input("slot").code}.AttachSprite(${api.input("uri").code}, ${api.input("uncompressed").code}, ${api.input("evenNull").code}, ${api.input("getExisting").code}, ${maxSize} > 0 ? ${maxSize} : (int?)null)`;
-    }
-  });
-
-  registerSimpleAttachNode({
-    id: "attach.spriteTexture",
-    title: "Attach Sprite From Texture",
-    symbol: "+SPR-TEX",
-    description:
-      "Covers the IAssetProvider<ITexture2D> overload of Slot.AttachSprite.",
-    fieldPrefix: "attachSpriteTexture",
-    outputLabel: "Sprite Provider",
-    outputType: "spriteProvider",
-    outputCsType: "FrooxEngine.SpriteProvider",
-    inputs: [port("texture", "Texture", "texture")],
-    call: api =>
-      `${api.input("slot").code}.AttachSprite(${api.input("texture").code})`
-  });
-
-  registerSimpleAttachNode({
-    id: "attach.staticMesh",
-    title: "Attach Static Mesh",
-    symbol: "+SMESH",
-    description:
-      "Calls Slot.AttachStaticMesh directly.",
-    fieldPrefix: "attachStaticMesh",
-    outputLabel: "Static Mesh",
-    outputType: "staticMesh",
-    outputCsType: "FrooxEngine.StaticMesh",
-    inputs: [
-      port("uri", "URI", "Uri"),
-      port("getExisting", "Get Existing", "bool", { defaultCs: "true" })
-    ],
-    call: api =>
-      `${api.input("slot").code}.AttachStaticMesh(${api.input("uri").code}, ${api.input("getExisting").code})`
-  });
-
-  registerSimpleAttachNode({
-    id: "attach.audioClip",
-    title: "Attach Audio Clip",
-    symbol: "+AUDIO",
-    description:
-      "Calls Slot.AttachAudioClip directly.",
-    fieldPrefix: "attachAudioClip",
-    outputLabel: "Static Audio Clip",
-    outputType: "staticAudioClip",
-    outputCsType: "FrooxEngine.StaticAudioClip",
-    inputs: [
-      port("uri", "URI", "Uri"),
-      port("getExisting", "Get Existing", "bool", { defaultCs: "true" })
-    ],
-    call: api =>
-      `${api.input("slot").code}.AttachAudioClip(${api.input("uri").code}, ${api.input("getExisting").code})`
-  });
-
-  registerSimpleAttachNode({
-    id: "attach.font",
-    title: "Attach Font",
-    symbol: "+FONT",
-    description:
-      "Calls Slot.AttachFont directly.",
-    fieldPrefix: "attachFont",
-    outputLabel: "Static Font",
-    outputType: "staticFont",
-    outputCsType: "FrooxEngine.StaticFont",
-    inputs: [
-      port("uri", "URI", "Uri"),
-      port("getExisting", "Get Existing", "bool", { defaultCs: "true" })
-    ],
-    call: api =>
-      `${api.input("slot").code}.AttachFont(${api.input("uri").code}, ${api.input("getExisting").code})`
-  });
-
-  registerNode("attach.skybox", {
-    title: "Attach Skybox",
-    group: "Attach & Create",
-    symbol: "+SKY",
-    description:
-      "Calls Slot.AttachSkybox<TMaterial>() directly and exposes both the Skybox and created material.",
-    parameters: [materialTypeParameter()],
-    resolveDefinition(node) {
-      return {
-        outputs: [
-          port("done", "Done", "impulse"),
-          port("skybox", "Skybox", "skybox"),
-          port(
-            "material",
-            "Material",
-            graphMaterialType(
-              node.parameters?.materialType
-            )
-          ),
-          port("success", "Success", "bool"),
-          port("exception", "Exception", "exception")
-        ]
-      };
-    },
-    inputs: [
-      port("call", "Call", "impulse"),
-      port("slot", "Slot", "slot", { defaultCs: DEFAULT_WORLD_ROOT_SLOT_CS })
-    ],
-    outputs: [
-      port("done", "Done", "impulse"),
-      port("skybox", "Skybox", "skybox"),
-      port("material", "Material", "commonMaterial"),
-      port("success", "Success", "bool"),
-      port("exception", "Exception", "exception")
-    ],
-    codegenCollect(api) {
-      ensureDirectResoniteCore(api);
-      const materialType = directMaterialType(api);
-      addStatefulField(api, "attachSkybox", "FrooxEngine.Skybox?", "null");
-      addStatefulField(api, "attachSkyboxMaterial", `${materialType}?`, "null");
-      addStatefulField(api, "attachSkyboxSuccess", "bool", "false");
-      addStatefulField(api, "attachSkyboxException", "System.Exception?", "null");
-    },
-    codegenExpression(api) {
-      const token = nodeToken(api);
-      return {
-        skybox: `_attachSkybox${token}!`,
-        material: `_attachSkyboxMaterial${token}!`,
-        success: `_attachSkyboxSuccess${token}`,
-        exception: `_attachSkyboxException${token}!`
-      }[api.portId] || "null!";
-    },
-    codegenAction(api) {
-      const materialType = directMaterialType(api);
-      const token = nodeToken(api);
-      const skybox = `_attachSkybox${token}`;
-      const material = `_attachSkyboxMaterial${token}`;
-      const success = `_attachSkyboxSuccess${token}`;
-      const exception = `_attachSkyboxException${token}`;
-      const slot = api.input("slot").code;
-      const done = api.emit("done");
-      return `try\n        {\n            ${exception} = null;\n            ${material} = ${slot}.AttachSkybox<${materialType}>();\n            ${skybox} = ${slot}.GetComponent<FrooxEngine.Skybox>();\n            ${success} = ${material} is not null && ${skybox} is not null;\n        }\n        catch (System.Exception caught)\n        {\n            ${exception} = caught;\n            ${material} = null;\n            ${skybox} = null;\n            ${success} = false;\n        }${done ? `\n        ${done}();` : ""}`;
-    }
-  });
-
-  registerNode("resonite.readMember", {
-    title: "Read Slot / Component Member",
-    group: "Slots & Components",
-    symbol: "SYNC→",
-    description:
-      "Reads a normal field/property or the Value of a Sync<T>-style member path, then converts it to the selected type.",
-    configurableTypeVar: "T",
-    configurableTypes: COMMON_VALUE_TYPES.filter(
-      type =>
-        ![
-          "patchContext",
-          "task",
-          "cancellationToken"
-        ].includes(type)
-    ),
-    defaultType: "object",
-    inputs: [
-      port("target", "Target", "object"),
-      port("path", "Member path", "string")
-    ],
-    outputs: [
-      genericPort(
-        "value",
-        "Value",
-        "T",
-        "anyValue"
-      )
-    ],
-    codegenExpression(api) {
-      ensureResoniteRuntime(api);
-      return `ConvertGraphValue<${api.csType(
-        api.node.parameters.valueType
-      )}>(ReadSyncMember(${api.input("target").code}, ${api.input("path").code}))`;
-    }
-  });
-
-  registerNode("resonite.writeMember", {
-    title: "Write Slot / Component Member",
-    group: "Slots & Components",
-    symbol: "→SYNC",
-    description:
-      "Writes either member.Value or the member itself through reflection.",
-    inputs: [
-      port("call", "Call", "impulse"),
-      port("target", "Target", "object"),
-      port("path", "Member path", "string"),
-      port("value", "Value", "object")
-    ],
-    outputs: [
-      port("done", "Done", "impulse"),
-      port("success", "Success", "bool")
-    ],
-    codegenCollect(api) {
-      ensureResoniteRuntime(api);
-      addStatefulField(
-        api,
-        "syncWriteSuccess",
-        "bool",
-        "false"
-      );
-    },
-    codegenExpression(api) {
-      return `_syncWriteSuccess${nodeToken(api)}`;
-    },
-    codegenAction(api) {
-      const field = `_syncWriteSuccess${nodeToken(api)}`;
-      const done = api.emit("done");
-      return `${field} = WriteSyncMember(${api.input("target").code}, ${api.input("path").code}, ${api.input("value").code});${done ? `\n        ${done}();` : ""}`;
-    }
-  });
-
-  registerNode("resonite.dynamicVariableSpace", {
-    title: "Get Dynamic Variable Space",
-    group: "Slots & Components",
-    symbol: "DVS",
-    description:
-      "Finds a real DynamicVariableSpace component on a Slot through the current Resonite assemblies.",
-    inputs: [port("slot", "Slot", "slot")],
-    outputs: [
-      port(
-        "space",
-        "Dynamic Variable Space",
-        "dynamicVariableSpace"
-      )
-    ],
-    codegenExpression(api) {
-      ensureResoniteRuntime(api);
-      return `((FrooxEngine.DynamicVariableSpace)FindComponentReflective(${api.input("slot").code}, typeof(FrooxEngine.DynamicVariableSpace))!)`;
-    }
-  });
-
-  registerNode("resonite.attachDynamicVariableSpace", {
-    title: "Attach Dynamic Variable Space",
-    group: "Slots & Components",
-    symbol: "+DVS",
-    description:
-      "Attaches a real DynamicVariableSpace component by reflected type name.",
-    inputs: [
-      port("call", "Call", "impulse"),
-      port("slot", "Slot", "slot")
-    ],
-    outputs: [
-      port("done", "Done", "impulse"),
-      port(
-        "space",
-        "Dynamic Variable Space",
-        "dynamicVariableSpace"
-      )
-    ],
-    codegenCollect(api) {
-      ensureResoniteRuntime(api);
-      addStatefulField(
-        api,
-        "dynamicSpace",
-        "FrooxEngine.DynamicVariableSpace?",
-        "null"
-      );
-    },
-    codegenExpression(api) {
-      return `_dynamicSpace${nodeToken(api)}!`;
-    },
-    codegenAction(api) {
-      const field = `_dynamicSpace${nodeToken(api)}`;
-      const done = api.emit("done");
-      return `${field} = (FrooxEngine.DynamicVariableSpace?)AttachComponentReflective(${api.input("slot").code}, typeof(FrooxEngine.DynamicVariableSpace));${done ? `\n        ${done}();` : ""}`;
-    }
-  });
-
-  registerNode("resonite.readDynamicVariable", {
-    title: "Read Dynamic Variable",
-    group: "Slots & Components",
-    symbol: "DYN→",
-    description:
-      "Reads a real dynamic variable from a DynamicVariableSpace using reflected ReadValue/GetValue fallbacks.",
-    configurableTypeVar: "T",
-    configurableTypes: COMMON_VALUE_TYPES.filter(
-      type =>
-        ![
-          "patchContext",
-          "task",
-          "cancellationToken"
-        ].includes(type)
-    ),
-    defaultType: "object",
-    inputs: [
-      port(
-        "space",
-        "Dynamic Variable Space",
-        "dynamicVariableSpace"
-      ),
-      port("name", "Variable name", "string")
-    ],
-    outputs: [
-      genericPort(
-        "value",
-        "Value",
-        "T",
-        "anyValue"
-      )
-    ],
-    codegenExpression(api) {
-      ensureResoniteRuntime(api);
-      return `ConvertGraphValue<${api.csType(
-        api.node.parameters.valueType
-      )}>(ReadDynamicVariableReflective(${api.input("space").code}, ${api.input("name").code}))`;
-    }
-  });
-
-  registerNode("resonite.writeDynamicVariable", {
-    title: "Write Dynamic Variable",
-    group: "Slots & Components",
-    symbol: "→DYN",
-    description:
-      "Writes a real dynamic variable through WriteValue/SetValue reflection fallbacks.",
-    inputs: [
-      port("call", "Call", "impulse"),
-      port(
-        "space",
-        "Dynamic Variable Space",
-        "dynamicVariableSpace"
-      ),
-      port("name", "Variable name", "string"),
-      port("value", "Value", "object")
-    ],
-    outputs: [
-      port("done", "Done", "impulse"),
-      port("success", "Success", "bool")
-    ],
-    codegenCollect(api) {
-      ensureResoniteRuntime(api);
-      addStatefulField(
-        api,
-        "dynamicWriteSuccess",
-        "bool",
-        "false"
-      );
-    },
-    codegenExpression(api) {
-      return `_dynamicWriteSuccess${nodeToken(api)}`;
-    },
-    codegenAction(api) {
-      const field = `_dynamicWriteSuccess${nodeToken(api)}`;
-      const done = api.emit("done");
-      return `${field} = WriteDynamicVariableReflective(${api.input("space").code}, ${api.input("name").code}, ${api.input("value").code});${done ? `\n        ${done}();` : ""}`;
-    }
-  });
-
-  registerNode("resonite.radiantDash", {
-    title: "Current Radiant Dash",
-    group: "Slots & Components",
-    symbol: "DASH",
-    description:
-      "Finds the current Userspace RadiantDash through member paths and component fallback.",
-    outputs: [
-      port("dash", "Radiant Dash", "radiantDash")
-    ],
-    codegenExpression(api) {
-      ensureResoniteRuntime(api);
-      return `((FrooxEngine.RadiantDash)CurrentRadiantDash()!)`;
-    }
-  });
-
-  registerNode("resonite.setRadiantDashOpen", {
-    title: "Set Radiant Dash Open",
-    group: "Slots & Components",
-    symbol: "DASH=",
-    description:
-      "Sets the reflected RadiantDash.Open member.",
-    inputs: [
-      port("call", "Call", "impulse"),
-      port("dash", "Radiant Dash", "radiantDash"),
-      port("open", "Open", "bool")
-    ],
-    outputs: [
-      port("done", "Done", "impulse"),
-      port("success", "Success", "bool")
-    ],
-    codegenCollect(api) {
-      ensureResoniteRuntime(api);
-      addStatefulField(
-        api,
-        "dashOpenSuccess",
-        "bool",
-        "false"
-      );
-    },
-    codegenExpression(api) {
-      return `_dashOpenSuccess${nodeToken(api)}`;
-    },
-    codegenAction(api) {
-      const field = `_dashOpenSuccess${nodeToken(api)}`;
-      const done = api.emit("done");
-      return `${field} = WriteMember(${api.input("dash").code}, "Open", ${api.input("open").code});${done ? `\n        ${done}();` : ""}`;
-    }
-  });
-
-  registerNode("resonite.openModalOverlay", {
-    title: "Open Radiant Dash Modal",
-    group: "UI",
-    symbol: "MODAL",
-    description:
-      "Calls OpenModalOverlay on RadiantDash.Slot or the dash itself and returns the created modal root.",
-    inputs: [
-      port("call", "Call", "impulse"),
-      port("dash", "Radiant Dash", "radiantDash"),
-      port("size", "Size", "float2"),
-      port("title", "Title", "string")
-    ],
-    outputs: [
-      port("done", "Done", "impulse"),
-      port("root", "Modal root", "slot")
-    ],
-    codegenCollect(api) {
-      ensureResoniteRuntime(api);
-      addStatefulField(
-        api,
-        "modalRoot",
-        "FrooxEngine.Slot?",
-        "null"
-      );
-    },
-    codegenExpression(api) {
-      return `_modalRoot${nodeToken(api)}!`;
-    },
-    codegenAction(api) {
-      const field = `_modalRoot${nodeToken(api)}`;
-      const done = api.emit("done");
-      return `${field} = (FrooxEngine.Slot?)OpenRadiantDashModalReflective(${api.input("dash").code}, ${api.input("size").code}, ${api.input("title").code});${done ? `\n        ${done}();` : ""}`;
-    }
-  });
-
-  registerNode("ui.createBuilder", {
-    title: "Create UIBuilder",
-    group: "UI",
-    symbol: "UIB",
-    description:
-      "Constructs FrooxEngine.UIX.UIBuilder for a target Slot through reflection.",
-    inputs: [port("slot", "Slot", "slot")],
-    outputs: [port("builder", "UIBuilder", "uiBuilder")],
-    codegenExpression(api) {
-      ensureResoniteRuntime(api);
-      return `((FrooxEngine.UIX.UIBuilder)CreateUiBuilderReflective(${api.input("slot").code})!)`;
-    }
-  });
-
-  function registerUiElementNode(
-    id,
-    title,
-    symbol,
-    methodName,
-    inputPorts,
-    argumentIds,
-    description
-  ) {
-    registerNode(id, {
-      title,
-      group: "UI",
-      symbol,
-      description,
-      inputs: [
-        port("call", "Call", "impulse"),
-        port("builder", "UIBuilder", "uiBuilder"),
-        ...inputPorts
-      ],
-      outputs: [
-        port("done", "Done", "impulse"),
-        port("element", "Element", "uiElement")
-      ],
-      codegenCollect(api) {
-        ensureResoniteRuntime(api);
-        addStatefulField(
-          api,
-          "uiElement",
-          "object?",
-          "null"
-        );
-      },
-      codegenExpression(api) {
-        return `_uiElement${nodeToken(api)}!`;
-      },
-      codegenAction(api) {
-        const field = `_uiElement${nodeToken(api)}`;
-        const done = api.emit("done");
-        const args = argumentIds
-          .map(argument =>
-            api.input(argument).code
-          )
-          .join(", ");
-        return `${field} = CreateUiElementReflective(${api.input("builder").code}, ${quote(api, methodName)}${args ? `, ${args}` : ""});${done ? `\n        ${done}();` : ""}`;
-      }
-    });
-  }
-
-  registerUiElementNode(
-    "ui.panel",
-    "UI Panel",
-    "PNL",
-    "Panel",
-    [],
-    [],
-    "Creates a panel/container with UIBuilder.Panel()."
-  );
-  registerUiElementNode(
-    "ui.text",
-    "UI Text",
-    "TXT",
-    "Text",
-    [port("text", "Text", "string")],
-    ["text"],
-    "Creates a text element through UIBuilder.Text()."
-  );
-  registerUiElementNode(
-    "ui.button",
-    "UI Button",
-    "BTN",
-    "Button",
-    [port("text", "Text", "string")],
-    ["text"],
-    "Creates a button. Subscribe to its reflected event/member to react to presses."
-  );
-  registerUiElementNode(
-    "ui.slider",
-    "UI Slider",
-    "SLD",
-    "Slider",
-    [
-      port("minimum", "Minimum", "float"),
-      port("maximum", "Maximum", "float"),
-      port("value", "Value", "float")
-    ],
-    ["minimum", "maximum", "value"],
-    "Creates a slider using the best matching UIBuilder.Slider overload."
-  );
-  registerUiElementNode(
-    "ui.checkbox",
-    "UI Checkbox",
-    "CHK",
-    "Checkbox",
-    [port("value", "Value", "bool")],
-    ["value"],
-    "Creates a checkbox using the best matching UIBuilder.Checkbox overload."
-  );
-  registerUiElementNode(
-    "ui.image",
-    "UI Image",
-    "IMG",
-    "Image",
-    [port("source", "Source", "object")],
-    ["source"],
-    "Creates an image using the best matching UIBuilder.Image overload."
-  );
-
-  registerNode("ui.callBuilderMethod", {
-    title: "Call UIBuilder Method",
-    group: "UI",
-    symbol: "UI()",
-    description:
-      "Universal UIBuilder escape hatch for methods not covered by a dedicated node.",
-    inputs: [
-      port("call", "Call", "impulse"),
-      port("builder", "UIBuilder", "uiBuilder"),
-      port("method", "Method", "string"),
-      port("arguments", "Arguments", "objectArray")
-    ],
-    outputs: [
-      port("done", "Done", "impulse"),
-      port("element", "Result", "uiElement")
-    ],
-    codegenCollect(api) {
-      ensureResoniteRuntime(api);
-      addStatefulField(
-        api,
-        "uiCallResult",
-        "object?",
-        "null"
-      );
-    },
-    codegenExpression(api) {
-      return `_uiCallResult${nodeToken(api)}!`;
-    },
-    codegenAction(api) {
-      const field = `_uiCallResult${nodeToken(api)}`;
-      const done = api.emit("done");
-      return `${field} = InvokeBest(${api.input("builder").code}, ${api.input("method").code}, ${api.input("arguments").code});${done ? `\n        ${done}();` : ""}`;
-    }
-  });
-
-  registerNode("ui.setMember", {
-    title: "Set UI Member",
-    group: "UI",
-    symbol: "UI=",
-    description:
-      "Sets any UI element/component field, property or Sync<T> path.",
-    inputs: [
-      port("call", "Call", "impulse"),
-      port("element", "Element", "uiElement"),
-      port("path", "Member path", "string"),
-      port("value", "Value", "object")
-    ],
-    outputs: [port("done", "Done", "impulse")],
-    codegenCollect(api) {
-      ensureResoniteRuntime(api);
-    },
-    codegenAction(api) {
-      const done = api.emit("done");
-      return `WriteSyncMember(${api.input("element").code}, ${api.input("path").code}, ${api.input("value").code});${done ? `\n        ${done}();` : ""}`;
-    }
-  });
-
-  registerNode("asset.manager", {
-    title: "Get Engine Asset Manager",
-    group: "Assets",
-    symbol: "AM",
-    description:
-      "Reads an Engine member path such as AssetManager, LocalDB or WorldManager.",
-    parameters: [
-      pText(
-        "memberPath",
-        "Engine member path",
-        "AssetManager"
-      )
-    ],
-    outputs: [port("manager", "Manager", "object")],
-    codegenExpression(api) {
-      ensureResoniteRuntime(api);
-      return `ReadMemberPath(CurrentEngine(), ${quote(api, api.node.parameters.memberPath)})!`;
-    }
-  });
-
-  registerNode("asset.request", {
-    title: "Request / Load Asset",
-    group: "Assets",
-    symbol: "LOAD",
-    description:
-      "Invokes an asset manager method with URI and optional arguments. Use Method name to match the current Resonite API.",
-    parameters: [
-      pText(
-        "methodName",
-        "Manager method",
-        "RequestAsset"
-      )
-    ],
-    inputs: [
-      port("call", "Call", "impulse"),
-      port("manager", "Manager", "object"),
-      port("uri", "URI", "Uri"),
-      port("arguments", "Extra arguments", "objectArray")
-    ],
-    outputs: [
-      port("done", "Done", "impulse"),
-      port("asset", "Result / request", "object")
-    ],
-    codegenCollect(api) {
-      ensureResoniteRuntime(api);
-      addStatefulField(
-        api,
-        "assetResult",
-        "object?",
-        "null"
-      );
-    },
-    codegenExpression(api) {
-      return `_assetResult${nodeToken(api)}!`;
-    },
-    codegenAction(api) {
-      const field = `_assetResult${nodeToken(api)}`;
-      const done = api.emit("done");
-      return `${field} = InvokeBest(${api.input("manager").code}, ${quote(api, api.node.parameters.methodName)}, new object?[] { ${api.input("uri").code} }.Concat(${api.input("arguments").code}).ToArray());${done ? `\n        ${done}();` : ""}`;
-    }
-  });
 
   registerNode("file.combinePath", {
     title: "Combine Path",
@@ -11576,6 +9072,2563 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
     }
   });
 
+  registerGroup("Text", { after: "Values" });
+  registerGroup("Dictionaries", { after: "Collections" });
+
+  const NORMAL_CORE_VALUE_TYPES = [
+    "bool",
+    "string",
+    "Uri",
+    "int",
+    "float",
+    "double",
+    "int2",
+    "int3",
+    "int4",
+    "float2",
+    "float3",
+    "float4",
+    "double2",
+    "double3",
+    "double4",
+    "colorX",
+    "object"
+  ];
+
+  const NORMAL_DICTIONARY_KEY_TYPES = [
+    "string",
+    "Uri",
+    "bool",
+    "int",
+    "float",
+    "double"
+  ];
+
+  const NORMAL_CONVERTIBLE_TYPES = [
+    "bool",
+    "string",
+    "Uri",
+    "int",
+    "float",
+    "double"
+  ];
+
+  function normalSelectedType(
+    node,
+    key = "valueType",
+    fallback = "string",
+    allowed = NORMAL_CORE_VALUE_TYPES
+  ) {
+    const candidate = String(
+      node?.parameters?.[key] || fallback
+    ).trim();
+    return allowed.includes(candidate)
+      ? candidate
+      : fallback;
+  }
+
+  function normalTypeInformation(type) {
+    return registry.getTypeDefinitions()?.[type] || {
+      label: type,
+      short: "T",
+      color: "#9da8b4",
+      csType: type,
+      defaultCs: "default!"
+    };
+  }
+
+  function normalListType(type) {
+    return `collectList:${type}`;
+  }
+
+  function ensureNormalListType(type) {
+    const id = normalListType(type);
+    const existing =
+      registry.getTypeDefinitions()?.[id];
+    if (existing) return id;
+    const information =
+      normalTypeInformation(type);
+    const itemCsType =
+      information.csType || type;
+    registerType(id, {
+      label: `List<${information.label || type}>`,
+      short: `${information.short || "T"}[]`,
+      color: information.color || "#9da8b4",
+      csType:
+        `System.Collections.Generic.List<${itemCsType}>`,
+      defaultCs:
+        `new System.Collections.Generic.List<${itemCsType}>()`,
+      referenceType: true,
+      valueType: true,
+      globalGenericCandidate: false,
+      collectionType: true,
+      collectorCollection: true,
+      syntheticCollectionType: true,
+      enumerableElementType: type,
+      enumerableElementCsType: itemCsType,
+      assignableTo: ["object"],
+      constraints: [
+        "reference",
+        "serializable",
+        "enumerable",
+        "collectableCollection"
+      ],
+      assembly: information.assembly || "",
+      assemblies:
+        Array.isArray(information.assemblies)
+          ? information.assemblies
+          : [],
+      assemblyReferences:
+        Array.isArray(information.assemblyReferences)
+          ? information.assemblyReferences
+          : []
+    });
+    return id;
+  }
+
+  function normalDictionaryType(
+    keyType,
+    valueType
+  ) {
+    return `normalDictionary:${keyType}:${valueType}`;
+  }
+
+  function ensureNormalDictionaryType(
+    keyType,
+    valueType
+  ) {
+    const id = normalDictionaryType(
+      keyType,
+      valueType
+    );
+    const existing =
+      registry.getTypeDefinitions()?.[id];
+    if (existing) return id;
+    const keyInformation =
+      normalTypeInformation(keyType);
+    const valueInformation =
+      normalTypeInformation(valueType);
+    const keyCsType =
+      keyInformation.csType || keyType;
+    const valueCsType =
+      valueInformation.csType || valueType;
+    registerType(id, {
+      label:
+        `Dictionary<${keyInformation.label || keyType}, ${valueInformation.label || valueType}>`,
+      short: "MAP",
+      color: "#7fd6b2",
+      csType:
+        `System.Collections.Generic.Dictionary<${keyCsType}, ${valueCsType}>`,
+      defaultCs:
+        `new System.Collections.Generic.Dictionary<${keyCsType}, ${valueCsType}>()`,
+      referenceType: true,
+      valueType: true,
+      globalGenericCandidate: false,
+      dictionaryType: true,
+      dictionaryKeyType: keyType,
+      dictionaryValueType: valueType,
+      assignableTo: ["object"],
+      constraints: ["reference", "serializable"]
+    });
+    return id;
+  }
+
+  for (const type of NORMAL_CORE_VALUE_TYPES) {
+    ensureNormalListType(type);
+  }
+  for (const keyType of NORMAL_DICTIONARY_KEY_TYPES) {
+    for (const valueType of NORMAL_CORE_VALUE_TYPES) {
+      ensureNormalDictionaryType(
+        keyType,
+        valueType
+      );
+    }
+  }
+
+  function normalVariadicIds(count) {
+    return Array.from(
+      { length: count },
+      (_, index) =>
+        index < 26
+          ? String.fromCharCode(97 + index)
+          : `input${index + 1}`
+    );
+  }
+
+  function normalStableHash(value) {
+    const text = String(value || "");
+    let hash = 0x811c9dc5;
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 0x01000193) >>> 0;
+    }
+    return hash.toString(16).padStart(8, "0");
+  }
+
+  const normalGraphTypeByCs = new Map();
+
+  function refreshNormalGraphTypeIndex() {
+    for (const [graphType, information] of Object.entries(
+      registry.getTypeDefinitions()
+    )) {
+      const csType = normalizedCatalogTypeName(
+        information?.csType || ""
+      );
+      if (csType && !normalGraphTypeByCs.has(csType)) {
+        normalGraphTypeByCs.set(csType, graphType);
+      }
+    }
+  }
+
+  refreshNormalGraphTypeIndex();
+
+  function ensureNormalExactGraphType(csType) {
+    const normalized = normalizedCatalogTypeName(csType)
+      .replace(/&$/, "");
+    refreshNormalGraphTypeIndex();
+    if (normalGraphTypeByCs.has(normalized)) {
+      return normalGraphTypeByCs.get(normalized);
+    }
+
+    const broadType = catalogGraphType(normalized);
+    if (broadType) {
+      const broadInformation =
+        registry.getTypeDefinitions()?.[broadType];
+      if (
+        normalizedCatalogTypeName(
+          broadInformation?.csType || ""
+        ) === normalized
+      ) {
+        normalGraphTypeByCs.set(normalized, broadType);
+        return broadType;
+      }
+    }
+
+    const information =
+      CATALOG_TYPE_BY_CS.get(normalized) || null;
+    const id = `normalExact:${normalStableHash(normalized)}`;
+    const valueType = Boolean(
+      information &&
+      ["struct", "enum"].includes(
+        String(information.kind || "").toLowerCase()
+      )
+    );
+    const references =
+      catalogAssemblyReferencesForCsType(normalized);
+    registerType(id, {
+      label: normalized
+        .replace(/^System\./, "")
+        .split(".")
+        .pop(),
+      short: "T",
+      color: "#91b9dd",
+      csType: normalized,
+      defaultCs: "default!",
+      referenceType: !valueType,
+      valueType: true,
+      globalGenericCandidate: false,
+      assignableTo: [
+        ...(broadType ? [broadType] : []),
+        "object"
+      ],
+      constraints: valueType
+        ? ["value", "serializable"]
+        : ["reference", "serializable"],
+      assembly:
+        information?.assembly ||
+        references[0]?.include ||
+        "",
+      assemblies: references.map(reference =>
+        reference.include
+      ),
+      assemblyReferences: references
+    });
+    normalGraphTypeByCs.set(normalized, id);
+    return id;
+  }
+
+  function normalClosedDelegateSignature(value) {
+    const normalized = normalizedCatalogTypeName(value)
+      .replace(/&$/, "");
+    if (normalized === "System.Action") {
+      return {
+        csType: normalized,
+        kind: "action",
+        argumentCsTypes: [],
+        returnCsType: null
+      };
+    }
+
+    const parsed = catalogGenericTypeParts(normalized);
+    if (!parsed || parsed.suffix) return null;
+    const supportedHeads = new Set([
+      "System.Action",
+      "System.Func",
+      "System.Predicate",
+      "System.Comparison"
+    ]);
+    if (!supportedHeads.has(parsed.head)) return null;
+
+    const closed = parsed.arguments.every(argument => {
+      if (!argument || /&$/.test(argument)) return false;
+      if (/^[A-Z][A-Za-z0-9_]*$/.test(argument)) {
+        return false;
+      }
+      return isSafeCSharpTypeExpression(argument);
+    });
+    if (!closed) return null;
+
+    if (parsed.head === "System.Action") {
+      return {
+        csType: normalized,
+        kind: "action",
+        argumentCsTypes: parsed.arguments,
+        returnCsType: null
+      };
+    }
+    if (
+      parsed.head === "System.Predicate" &&
+      parsed.arguments.length === 1
+    ) {
+      return {
+        csType: normalized,
+        kind: "predicate",
+        argumentCsTypes: parsed.arguments,
+        returnCsType: "System.Boolean"
+      };
+    }
+    if (
+      parsed.head === "System.Comparison" &&
+      parsed.arguments.length === 1
+    ) {
+      return {
+        csType: normalized,
+        kind: "comparison",
+        argumentCsTypes: [
+          parsed.arguments[0],
+          parsed.arguments[0]
+        ],
+        returnCsType: "System.Int32"
+      };
+    }
+    if (
+      parsed.head === "System.Func" &&
+      parsed.arguments.length >= 1
+    ) {
+      return {
+        csType: normalized,
+        kind: "function",
+        argumentCsTypes: parsed.arguments.slice(0, -1),
+        returnCsType: parsed.arguments.at(-1)
+      };
+    }
+    return null;
+  }
+
+  function normalCatalogDelegateSignatures() {
+    const values = [];
+    const add = value => {
+      if (typeof value === "string") values.push(value);
+    };
+    for (const row of CATALOG_TYPES) {
+      for (const constructor of row.constructors || []) {
+        for (const parameter of constructor.parameters || []) {
+          add(parameter.type);
+        }
+      }
+      for (const method of row.methods || []) {
+        add(method.returnType);
+        for (const parameter of method.parameters || []) {
+          add(parameter.type);
+        }
+      }
+      for (const property of row.properties || []) add(property.type);
+      for (const field of row.fields || []) add(field.type);
+      for (const event of row.events || []) add(event.handlerType);
+    }
+    return [...new Map(
+      values
+        .map(normalClosedDelegateSignature)
+        .filter(Boolean)
+        .map(signature => [signature.csType, signature])
+    ).values()].sort((left, right) =>
+      left.csType.localeCompare(right.csType)
+    );
+  }
+
+  const NORMAL_CATALOG_DELEGATES =
+    normalCatalogDelegateSignatures();
+  const NORMAL_CATALOG_DELEGATE_BY_CS = new Map(
+    NORMAL_CATALOG_DELEGATES.map(signature => [
+      signature.csType,
+      signature
+    ])
+  );
+
+  function ensureNormalDelegateGraphType(signature) {
+    refreshNormalGraphTypeIndex();
+    if (normalGraphTypeByCs.has(signature.csType)) {
+      return normalGraphTypeByCs.get(signature.csType);
+    }
+    const id = `normalDelegate:${normalStableHash(signature.csType)}`;
+    registerType(id, {
+      label: signature.csType.replace(/^System\./, ""),
+      short: "CALL",
+      color: "#e4a7ff",
+      csType: signature.csType,
+      defaultCs: "null!",
+      referenceType: true,
+      valueType: false,
+      globalGenericCandidate: false,
+      assignableTo: ["object"],
+      constraints: ["value", "reference", "delegate"]
+    });
+    normalGraphTypeByCs.set(signature.csType, id);
+    return id;
+  }
+
+  for (const signature of NORMAL_CATALOG_DELEGATES) {
+    for (const argument of signature.argumentCsTypes) {
+      ensureNormalExactGraphType(argument);
+    }
+    if (signature.returnCsType) {
+      ensureNormalExactGraphType(signature.returnCsType);
+    }
+    ensureNormalDelegateGraphType(signature);
+  }
+
+  if (NORMAL_CATALOG_DELEGATES.length > 0) {
+    const defaultDelegate =
+      NORMAL_CATALOG_DELEGATE_BY_CS.has(
+        "System.Action<System.String>"
+      )
+        ? "System.Action<System.String>"
+        : NORMAL_CATALOG_DELEGATES[0].csType;
+
+    registerNode("flow.typedCallback", {
+      title: "Create Typed Callback",
+      group: "Flow",
+      symbol: "CALL<T>",
+      description:
+        "Creates a strongly typed Action, Func, Predicate or Comparison required by a scanner API node. Closed signatures come directly from the active scanner catalog.",
+      parameters: [
+        pSelect(
+          "delegateType",
+          "Callback signature",
+          NORMAL_CATALOG_DELEGATES.map(
+            signature => signature.csType
+          ),
+          defaultDelegate
+        )
+      ],
+      inputs: [],
+      outputs: [
+        port("body", "Body", "impulse"),
+        port(
+          "callback",
+          "Callback",
+          ensureNormalDelegateGraphType(
+            NORMAL_CATALOG_DELEGATE_BY_CS.get(defaultDelegate)
+          )
+        )
+      ],
+      resolveDefinition(node) {
+        const selected =
+          NORMAL_CATALOG_DELEGATE_BY_CS.get(
+            String(node.parameters?.delegateType || "")
+          ) ||
+          NORMAL_CATALOG_DELEGATE_BY_CS.get(defaultDelegate);
+        return {
+          inputs: selected.returnCsType
+            ? [
+                port(
+                  "result",
+                  "Return Value",
+                  ensureNormalExactGraphType(
+                    selected.returnCsType
+                  )
+                )
+              ]
+            : [],
+          outputs: [
+            port("body", "Body", "impulse"),
+            ...selected.argumentCsTypes.map(
+              (argument, index) =>
+                port(
+                  `argument${index}`,
+                  `Argument ${index + 1}`,
+                  ensureNormalExactGraphType(argument)
+                )
+            ),
+            port(
+              "callback",
+              "Callback",
+              ensureNormalDelegateGraphType(selected)
+            )
+          ]
+        };
+      },
+      codegenExpression(api) {
+        const selected =
+          NORMAL_CATALOG_DELEGATE_BY_CS.get(
+            String(api.node.parameters?.delegateType || "")
+          ) ||
+          NORMAL_CATALOG_DELEGATE_BY_CS.get(defaultDelegate);
+        const token = nodeToken(api);
+        const argumentIndex =
+          String(api.portId || "").match(
+            /^argument([0-9]+)$/
+          );
+        if (argumentIndex) {
+          const index = Number(argumentIndex[1]);
+          const graphType = ensureNormalExactGraphType(
+            selected.argumentCsTypes[index]
+          );
+          const information = normalTypeInformation(graphType);
+          return `ReadGraphExecutionValue<${api.csType(graphType)}>("normal-callback:${token}:${index}", ${information.defaultCs || "default!"})`;
+        }
+
+        const body = api.inlineMethod(
+          api.node.id,
+          "body"
+        );
+        const parameters = selected.argumentCsTypes.map(
+          (argument, index) =>
+            `${argument} argument${index}`
+        );
+        const writes = selected.argumentCsTypes.map(
+          (_argument, index) =>
+            `WriteGraphExecutionValue("normal-callback:${token}:${index}", argument${index});`
+        );
+        const statements = [
+          "using GraphExecutionScope scope = OpenGraphEntry();",
+          ...writes,
+          ...(body ? [`${body}();`] : [])
+        ];
+        if (selected.returnCsType) {
+          statements.push(
+            `return ${api.input("result").code};`
+          );
+        }
+        return `new ${selected.csType}((${parameters.join(", ")}) =>\n        {\n            ${statements.join("\n            ")}\n        })`;
+      }
+    });
+  }
+
+  function normalSelectedCsType(
+    api,
+    key = "valueType",
+    fallback = "string",
+    allowed = NORMAL_CORE_VALUE_TYPES
+  ) {
+    return api.csType(
+      normalSelectedType(
+        api.node,
+        key,
+        fallback,
+        allowed
+      )
+    );
+  }
+
+  function ensureNormalConversionRuntime(api) {
+    api.addUsing("System.Globalization");
+    api.addMember(
+      "normal-core.conversion.helpers",
+      String.raw`
+private static bool NormalTryConvert<T>(object? value, out T result)
+{
+    try
+    {
+        if (value is T typed)
+        {
+            result = typed;
+            return true;
+        }
+
+        Type target = Nullable.GetUnderlyingType(typeof(T)) ?? typeof(T);
+
+        if (value is null)
+        {
+            result = default!;
+            return !target.IsValueType || Nullable.GetUnderlyingType(typeof(T)) is not null;
+        }
+
+        if (target == typeof(string))
+        {
+            result = (T)(object)(Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty);
+            return true;
+        }
+
+        if (target == typeof(Uri))
+        {
+            bool valid = Uri.TryCreate(
+                Convert.ToString(value, CultureInfo.InvariantCulture),
+                UriKind.RelativeOrAbsolute,
+                out Uri? uri);
+            result = valid ? (T)(object)uri! : default!;
+            return valid;
+        }
+
+        if (target.IsEnum)
+        {
+            object convertedEnum = value is string text
+                ? Enum.Parse(target, text, ignoreCase: true)
+                : Enum.ToObject(target, value);
+            result = (T)convertedEnum;
+            return true;
+        }
+
+        if (target == typeof(bool) && value is string booleanText)
+        {
+            bool valid = bool.TryParse(booleanText, out bool booleanValue);
+            result = valid ? (T)(object)booleanValue : default!;
+            return valid;
+        }
+
+        if (value is string numericText)
+        {
+            if (target == typeof(int))
+            {
+                bool valid = int.TryParse(numericText, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed);
+                result = valid ? (T)(object)parsed : default!;
+                return valid;
+            }
+            if (target == typeof(float))
+            {
+                bool valid = float.TryParse(numericText, NumberStyles.Float, CultureInfo.InvariantCulture, out float parsed);
+                result = valid ? (T)(object)parsed : default!;
+                return valid;
+            }
+            if (target == typeof(double))
+            {
+                bool valid = double.TryParse(numericText, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed);
+                result = valid ? (T)(object)parsed : default!;
+                return valid;
+            }
+        }
+
+        object? converted = Convert.ChangeType(
+            value,
+            target,
+            CultureInfo.InvariantCulture);
+        result = converted is null
+            ? default!
+            : (T)converted;
+        return converted is not null || !target.IsValueType;
+    }
+    catch
+    {
+        result = default!;
+        return false;
+    }
+}
+
+private static bool NormalTryCast<T>(object? value, out T result)
+{
+    if (value is T typed)
+    {
+        result = typed;
+        return true;
+    }
+
+    result = default!;
+    return false;
+}
+
+private static T NormalCastOrDefault<T>(object? value)
+{
+    return NormalTryCast<T>(value, out T result)
+        ? result
+        : default!;
+}
+
+private static T NormalConvertOrDefault<T>(object? value)
+{
+    return NormalTryConvert<T>(value, out T result)
+        ? result
+        : default!;
+}
+
+private static string NormalConversionError<T>(object? value)
+{
+    return NormalTryConvert<T>(value, out _)
+        ? string.Empty
+        : "Cannot convert '" +
+          (Convert.ToString(value, CultureInfo.InvariantCulture) ?? "null") +
+          "' to " + typeof(T).Name + ".";
+}
+`
+    );
+  }
+
+  registerNode("normal.isNull", {
+    title: "Is Null",
+    group: "Logic",
+    symbol: "∅?",
+    description:
+      "True when the connected reference is null. No C# type name is required.",
+    inputs: [
+      genericPort("value", "Value", "T", "anyValue")
+    ],
+    outputs: [port("result", "Is Null", "bool")],
+    codegenExpression(api) {
+      return `(${api.input("value").code} is null)`;
+    }
+  });
+
+  registerNode("normal.isNotNull", {
+    title: "Is Not Null",
+    group: "Logic",
+    symbol: "∅!",
+    description:
+      "True when the connected reference contains a value.",
+    inputs: [
+      genericPort("value", "Value", "T", "anyValue")
+    ],
+    outputs: [port("result", "Has Value", "bool")],
+    codegenExpression(api) {
+      return `(${api.input("value").code} is not null)`;
+    }
+  });
+
+  registerNode("normal.fallbackIfNull", {
+    title: "Fallback If Null",
+    group: "Logic",
+    symbol: "??",
+    description:
+      "Returns Value unless it is null; otherwise returns Fallback. Both inputs must use the same reference type.",
+    inputs: [
+      genericPort("value", "Value", "T", "reference"),
+      genericPort("fallback", "Fallback", "T", "reference")
+    ],
+    outputs: [
+      genericPort("result", "Result", "T", "reference")
+    ],
+    codegenExpression(api) {
+      return `(${api.input("value").code} ?? ${api.input("fallback").code})`;
+    }
+  });
+
+  registerNode("normal.tryCast", {
+    title: "Try Cast",
+    group: "Conversions",
+    symbol: "AS?",
+    description:
+      "Safely checks whether an object already has the selected runtime type. It does not parse or numerically convert; failure returns the selected type's default value.",
+    parameters: [
+      pSelect(
+        "outputType",
+        "Output type",
+        NORMAL_CORE_VALUE_TYPES,
+        "string"
+      )
+    ],
+    inputs: [port("value", "Value", "object")],
+    outputs: [
+      port("result", "Result", "string"),
+      port("success", "Success", "bool")
+    ],
+    resolveDefinition(node) {
+      const type = normalSelectedType(
+        node,
+        "outputType",
+        "string"
+      );
+      return {
+        outputs: [
+          port("result", "Result", type),
+          port("success", "Success", "bool")
+        ]
+      };
+    },
+    codegenCollect(api) {
+      ensureNormalConversionRuntime(api);
+    },
+    codegenExpression(api) {
+      const csType = normalSelectedCsType(
+        api,
+        "outputType",
+        "string"
+      );
+      const value = api.input("value").code;
+      return api.portId === "success"
+        ? `NormalTryCast<${csType}>(${value}, out _)`
+        : `NormalCastOrDefault<${csType}>(${value})`;
+    }
+  });
+
+  function registerNormalTryParse(
+    id,
+    title,
+    symbol,
+    types,
+    fallback
+  ) {
+    registerNode(id, {
+      title,
+      group: "Conversions",
+      symbol,
+      description:
+        "Parses invariant text without throwing. Result is default when Success is false.",
+      parameters: [
+        pSelect(
+          "outputType",
+          "Output type",
+          types,
+          fallback
+        )
+      ],
+      inputs: [port("text", "Text", "string")],
+      outputs: [
+        port("result", "Result", fallback),
+        port("success", "Success", "bool"),
+        port("error", "Error", "string")
+      ],
+      resolveDefinition(node) {
+        const type = normalSelectedType(
+          node,
+          "outputType",
+          fallback,
+          types
+        );
+        return {
+          outputs: [
+            port("result", "Result", type),
+            port("success", "Success", "bool"),
+            port("error", "Error", "string")
+          ]
+        };
+      },
+      codegenCollect(api) {
+        ensureNormalConversionRuntime(api);
+      },
+      codegenExpression(api) {
+        const csType = normalSelectedCsType(
+          api,
+          "outputType",
+          fallback,
+          types
+        );
+        const value = api.input("text").code;
+        return api.portId === "success"
+          ? `NormalTryConvert<${csType}>(${value}, out _)`
+          : api.portId === "error"
+            ? `NormalConversionError<${csType}>(${value})`
+          : `NormalConvertOrDefault<${csType}>(${value})`;
+      }
+    });
+  }
+
+  registerNormalTryParse(
+    "normal.tryParseNumber",
+    "Try Parse Number",
+    "#?",
+    ["int", "float", "double"],
+    "int"
+  );
+  registerNormalTryParse(
+    "normal.tryParseBoolean",
+    "Try Parse Boolean",
+    "B?",
+    ["bool"],
+    "bool"
+  );
+
+  registerNode("normal.tryConvertValue", {
+    title: "Try Convert Value",
+    group: "Conversions",
+    symbol: "→?",
+    description:
+      "Converts a normal graph value to a selected type without throwing and reports Success.",
+    parameters: [
+      pSelect(
+        "outputType",
+        "Output type",
+        NORMAL_CONVERTIBLE_TYPES,
+        "string"
+      )
+    ],
+    inputs: [port("value", "Value", "object")],
+    outputs: [
+      port("result", "Result", "string"),
+      port("success", "Success", "bool"),
+      port("error", "Error", "string")
+    ],
+    resolveDefinition(node) {
+      const type = normalSelectedType(
+        node,
+        "outputType",
+        "string",
+        NORMAL_CONVERTIBLE_TYPES
+      );
+      return {
+        outputs: [
+          port("result", "Result", type),
+          port("success", "Success", "bool"),
+          port("error", "Error", "string")
+        ]
+      };
+    },
+    codegenCollect(api) {
+      ensureNormalConversionRuntime(api);
+    },
+    codegenExpression(api) {
+      const csType = normalSelectedCsType(
+        api,
+        "outputType",
+        "string",
+        NORMAL_CONVERTIBLE_TYPES
+      );
+      const value = api.input("value").code;
+      return api.portId === "success"
+        ? `NormalTryConvert<${csType}>(${value}, out _)`
+        : api.portId === "error"
+          ? `NormalConversionError<${csType}>(${value})`
+        : `NormalConvertOrDefault<${csType}>(${value})`;
+    }
+  });
+
+  registerNode("text.concat", {
+    title: "Text Concat",
+    group: "Text",
+    symbol: "TXT+",
+    description:
+      "Joins two or more text inputs without a separator.",
+    inputs: [
+      port("a", "A", "string"),
+      port("b", "B", "string")
+    ],
+    variadicInputs: {
+      minimum: 2,
+      defaultCount: 2,
+      maximum: 64,
+      preserveAB: true,
+      template: port("a", "A", "string")
+    },
+    outputs: [port("text", "Text", "string")],
+    codegenExpression(api) {
+      const count = Math.max(
+        2,
+        Math.min(
+          64,
+          Number(api.node.parameters?.variadicInputCount) || 2
+        )
+      );
+      return `string.Concat(${normalVariadicIds(count).map(id => api.input(id).code).join(", ")})`;
+    }
+  });
+
+  registerNode("text.format", {
+    title: "Format Text",
+    group: "Text",
+    symbol: "{0}",
+    description:
+      "Formats values with invariant culture using placeholders such as {0} and {1}.",
+    inputs: [
+      port("format", "Format", "string"),
+      port("a", "Value A", "object"),
+      port("b", "Value B", "object")
+    ],
+    variadicInputs: {
+      minimum: 2,
+      defaultCount: 2,
+      maximum: 32,
+      preserved: 1,
+      template: port("a", "Value A", "object")
+    },
+    outputs: [port("text", "Text", "string")],
+    codegenCollect(api) {
+      api.addUsing("System.Globalization");
+    },
+    codegenExpression(api) {
+      const count = Math.max(
+        2,
+        Math.min(
+          32,
+          Number(api.node.parameters?.variadicInputCount) || 2
+        )
+      );
+      const values = normalVariadicIds(count)
+        .map(id => api.input(id).code)
+        .join(", ");
+      return `string.Format(CultureInfo.InvariantCulture, ${api.input("format").code}, new object?[] { ${values} })`;
+    }
+  });
+
+  registerNode("text.length", {
+    title: "Text Length",
+    group: "Text",
+    symbol: "LEN",
+    inputs: [port("text", "Text", "string")],
+    outputs: [port("length", "Length", "int")],
+    codegenExpression(api) {
+      return `(${api.input("text").code} ?? string.Empty).Length`;
+    }
+  });
+
+  function normalStringComparison(api) {
+    const comparison = String(
+      api.node.parameters?.comparison || "ordinal"
+    );
+    return comparison === "ordinalIgnoreCase"
+      ? "StringComparison.OrdinalIgnoreCase"
+      : "StringComparison.Ordinal";
+  }
+
+  for (const [id, title, symbol, method] of [
+    ["text.contains", "Text Contains", "⊃", "Contains"],
+    ["text.startsWith", "Text Starts With", "A…", "StartsWith"],
+    ["text.endsWith", "Text Ends With", "…Z", "EndsWith"]
+  ]) {
+    registerNode(id, {
+      title,
+      group: "Text",
+      symbol,
+      parameters: [
+        pSelect(
+          "comparison",
+          "Comparison",
+          ["ordinal", "ordinalIgnoreCase"],
+          "ordinal"
+        )
+      ],
+      inputs: [
+        port("text", "Text", "string"),
+        port("value", "Search", "string")
+      ],
+      outputs: [port("result", "Result", "bool")],
+      codegenExpression(api) {
+        return `(${api.input("text").code} ?? string.Empty).${method}(${api.input("value").code} ?? string.Empty, ${normalStringComparison(api)})`;
+      }
+    });
+  }
+
+  registerNode("text.replace", {
+    title: "Replace Text",
+    group: "Text",
+    symbol: "A→B",
+    inputs: [
+      port("text", "Text", "string"),
+      port("old", "Find", "string"),
+      port("replacement", "Replacement", "string")
+    ],
+    outputs: [port("text", "Result", "string")],
+    codegenExpression(api) {
+      return `(${api.input("text").code} ?? string.Empty).Replace(${api.input("old").code} ?? string.Empty, ${api.input("replacement").code} ?? string.Empty, StringComparison.Ordinal)`;
+    }
+  });
+
+  registerNode("text.split", {
+    title: "Split Text",
+    group: "Text",
+    symbol: "TXT÷",
+    parameters: [
+      pBool("removeEmpty", "Remove empty entries", true),
+      pBool("trimEntries", "Trim entries", true)
+    ],
+    inputs: [
+      port("text", "Text", "string"),
+      port("separator", "Separator", "string")
+    ],
+    outputs: [port("parts", "Parts", "stringArray")],
+    codegenExpression(api) {
+      const options = [
+        api.node.parameters?.removeEmpty === true
+          ? "StringSplitOptions.RemoveEmptyEntries"
+          : "StringSplitOptions.None",
+        api.node.parameters?.trimEntries === true
+          ? "StringSplitOptions.TrimEntries"
+          : "StringSplitOptions.None"
+      ].join(" | ");
+      return `(${api.input("text").code} ?? string.Empty).Split(new[] { ${api.input("separator").code} ?? string.Empty }, ${options})`;
+    }
+  });
+
+  registerNode("text.join", {
+    title: "Join Text",
+    group: "Text",
+    symbol: "TXT⋈",
+    inputs: [
+      port("parts", "Parts", "stringArray"),
+      port("separator", "Separator", "string")
+    ],
+    outputs: [port("text", "Text", "string")],
+    codegenExpression(api) {
+      return `string.Join(${api.input("separator").code} ?? string.Empty, ${api.input("parts").code} ?? Array.Empty<string>())`;
+    }
+  });
+
+  registerNode("text.trim", {
+    title: "Trim Text",
+    group: "Text",
+    symbol: "TRIM",
+    parameters: [
+      pSelect(
+        "mode",
+        "Mode",
+        ["both", "start", "end"],
+        "both"
+      )
+    ],
+    inputs: [port("text", "Text", "string")],
+    outputs: [port("text", "Text", "string")],
+    codegenExpression(api) {
+      const method = {
+        start: "TrimStart",
+        end: "TrimEnd"
+      }[api.node.parameters?.mode] || "Trim";
+      return `(${api.input("text").code} ?? string.Empty).${method}()`;
+    }
+  });
+
+  registerNode("text.changeCase", {
+    title: "Text Upper / Lower Case",
+    group: "Text",
+    symbol: "Aa",
+    parameters: [
+      pSelect(
+        "mode",
+        "Mode",
+        ["upper", "lower"],
+        "upper"
+      )
+    ],
+    inputs: [port("text", "Text", "string")],
+    outputs: [port("text", "Text", "string")],
+    codegenExpression(api) {
+      const method = api.node.parameters?.mode === "lower"
+        ? "ToLowerInvariant"
+        : "ToUpperInvariant";
+      return `(${api.input("text").code} ?? string.Empty).${method}()`;
+    }
+  });
+
+  registerNode("flow.switch", {
+    title: "Switch / Multi Branch",
+    group: "Flow",
+    symbol: "SW",
+    description:
+      "Routes Call to the first equal case or Default. Change Case count in the inspector.",
+    parameters: [
+      pNumber("caseCount", "Case count", 3)
+    ],
+    inputs: [
+      port("call", "Call", "impulse"),
+      genericPort("value", "Value", "T", "value"),
+      genericPort("case1", "Case 1", "T", "value"),
+      genericPort("case2", "Case 2", "T", "value")
+    ],
+    outputs: [
+      port("case1", "Case 1", "impulse"),
+      port("case2", "Case 2", "impulse"),
+      port("default", "Default", "impulse")
+    ],
+    resolveDefinition(node) {
+      const count = Math.max(
+        2,
+        Math.min(
+          16,
+          Math.trunc(
+            Number(node.parameters?.caseCount) || 3
+          )
+        )
+      );
+      return {
+        inputs: [
+          port("call", "Call", "impulse"),
+          genericPort("value", "Value", "T", "value"),
+          ...Array.from(
+            { length: count },
+            (_, index) =>
+              genericPort(
+                `case${index + 1}`,
+                `Case ${index + 1}`,
+                "T",
+                "value"
+              )
+          )
+        ],
+        outputs: [
+          ...Array.from(
+            { length: count },
+            (_, index) =>
+              port(
+                `case${index + 1}`,
+                `Case ${index + 1}`,
+                "impulse"
+              )
+          ),
+          port("default", "Default", "impulse")
+        ]
+      };
+    },
+    codegenCollect(api) {
+      api.addUsing("System.Collections.Generic");
+    },
+    codegenAction(api) {
+      const count = Math.max(
+        2,
+        Math.min(
+          16,
+          Math.trunc(
+            Number(api.node.parameters?.caseCount) || 3
+          )
+        )
+      );
+      const valueSpec = api.definition.inputs.find(
+        specification => specification.id === "value"
+      );
+      const valueType = api.resolvedType(
+        api.node,
+        valueSpec
+      ) || "object";
+      const csType = api.csType(valueType);
+      const selector = api.input("value").code;
+      const branches = [];
+      for (let index = 0; index < count; index += 1) {
+        const id = `case${index + 1}`;
+        const emit = api.emit(id);
+        if (!emit) continue;
+        branches.push(
+          `${branches.length === 0 ? "if" : "else if"} (EqualityComparer<${csType}>.Default.Equals(${selector}, ${api.input(id).code}))\n        {\n            ${emit}();\n        }`
+        );
+      }
+      const fallback = api.emit("default");
+      if (fallback) {
+        branches.push(
+          `${branches.length === 0 ? "" : "else "}{\n            ${fallback}();\n        }`
+        );
+      }
+      return branches.join("\n        ");
+    }
+  });
+
+  registerNode("math.modulo", {
+    title: "Modulo",
+    group: "Math",
+    symbol: "%",
+    inputs: [
+      genericPort("a", "A", "T", "scalar"),
+      genericPort("b", "B", "T", "scalar")
+    ],
+    outputs: [
+      genericPort("result", "Result", "T", "scalar")
+    ],
+    codegenExpression(api) {
+      return `(${api.input("a").code} % ${api.input("b").code})`;
+    }
+  });
+
+  function registerDoubleMathNode(
+    id,
+    title,
+    symbol,
+    renderer,
+    inputs = [port("value", "Value", "double")]
+  ) {
+    registerNode(id, {
+      title,
+      group: "Math",
+      symbol,
+      inputs,
+      outputs: [port("result", "Result", "double")],
+      codegenExpression: renderer
+    });
+  }
+
+  registerDoubleMathNode(
+    "math.power",
+    "Power",
+    "xʸ",
+    api => `Math.Pow(${api.input("value").code}, ${api.input("exponent").code})`,
+    [
+      port("value", "Value", "double"),
+      port("exponent", "Exponent", "double")
+    ]
+  );
+  registerDoubleMathNode(
+    "math.squareRoot",
+    "Square Root",
+    "√",
+    api => `Math.Sqrt(${api.input("value").code})`
+  );
+  registerDoubleMathNode(
+    "math.round",
+    "Round",
+    "≈",
+    api => `Math.Round(${api.input("value").code})`
+  );
+  registerDoubleMathNode(
+    "math.floor",
+    "Floor",
+    "⌊x⌋",
+    api => `Math.Floor(${api.input("value").code})`
+  );
+  registerDoubleMathNode(
+    "math.ceiling",
+    "Ceiling",
+    "⌈x⌉",
+    api => `Math.Ceiling(${api.input("value").code})`
+  );
+  registerDoubleMathNode(
+    "math.distance",
+    "Scalar Distance",
+    "↔#",
+    api => `Math.Abs(${api.input("a").code} - ${api.input("b").code})`,
+    [
+      port("a", "A", "double"),
+      port("b", "B", "double")
+    ]
+  );
+  registerDoubleMathNode(
+    "math.remapRange",
+    "Remap Range",
+    "MAP",
+    api => `(${api.input("outputMin").code} + ((${api.input("value").code} - ${api.input("inputMin").code}) / (${api.input("inputMax").code} - ${api.input("inputMin").code})) * (${api.input("outputMax").code} - ${api.input("outputMin").code}))`,
+    [
+      port("value", "Value", "double"),
+      port("inputMin", "Input Minimum", "double"),
+      port("inputMax", "Input Maximum", "double"),
+      port("outputMin", "Output Minimum", "double"),
+      port("outputMax", "Output Maximum", "double")
+    ]
+  );
+
+  registerNode("math.randomRange", {
+    title: "Random Range",
+    group: "Math",
+    symbol: "RND",
+    parameters: [
+      pSelect(
+        "valueType",
+        "Number type",
+        ["int", "float", "double"],
+        "int"
+      )
+    ],
+    inputs: [
+      port("minimum", "Minimum", "int"),
+      port("maximum", "Maximum", "int")
+    ],
+    outputs: [port("value", "Value", "int")],
+    resolveDefinition(node) {
+      const type = normalSelectedType(
+        node,
+        "valueType",
+        "int",
+        ["int", "float", "double"]
+      );
+      return {
+        inputs: [
+          port("minimum", "Minimum", type),
+          port("maximum", "Maximum", type)
+        ],
+        outputs: [port("value", "Value", type)]
+      };
+    },
+    codegenExpression(api) {
+      const type = normalSelectedType(
+        api.node,
+        "valueType",
+        "int",
+        ["int", "float", "double"]
+      );
+      const minimum = api.input("minimum").code;
+      const maximum = api.input("maximum").code;
+      if (type === "int") {
+        return `(${minimum} >= ${maximum} ? ${minimum} : Random.Shared.Next(${minimum}, ${maximum}))`;
+      }
+      const expression = `(${minimum} + Random.Shared.NextDouble() * (${maximum} - ${minimum}))`;
+      return type === "float"
+        ? `(${minimum} >= ${maximum} ? ${minimum} : (float)${expression})`
+        : `(${minimum} >= ${maximum} ? ${minimum} : ${expression})`;
+    }
+  });
+
+  registerNode("time.current", {
+    title: "Current Time",
+    group: "Values",
+    symbol: "NOW",
+    description:
+      "Returns current UTC time as Unix milliseconds and ISO-8601 text.",
+    outputs: [
+      port("unixMilliseconds", "Unix Milliseconds", "double"),
+      port("isoUtc", "ISO UTC", "string")
+    ],
+    codegenExpression(api) {
+      return api.portId === "isoUtc"
+        ? `DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture)`
+        : `(double)DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()`;
+    },
+    codegenCollect(api) {
+      api.addUsing("System.Globalization");
+    }
+  });
+
+  registerNode("time.stopwatch", {
+    title: "Stopwatch / Elapsed Time",
+    group: "Flow",
+    symbol: "⏱",
+    inputs: [
+      port("start", "Start / Resume", "impulse"),
+      port("stop", "Stop", "impulse"),
+      port("reset", "Reset", "impulse")
+    ],
+    outputs: [
+      port("changed", "Changed", "impulse"),
+      port("elapsedMilliseconds", "Elapsed ms", "double"),
+      port("running", "Running", "bool")
+    ],
+    codegenCollect(api) {
+      api.addUsing("System.Diagnostics");
+      const token = nodeToken(api);
+      api.addField(
+        `${api.node.id}.stopwatch`,
+        `private static readonly Stopwatch _normalStopwatch${token} = new();`
+      );
+    },
+    codegenExpression(api) {
+      const field = `_normalStopwatch${nodeToken(api)}`;
+      return api.portId === "running"
+        ? `${field}.IsRunning`
+        : `${field}.Elapsed.TotalMilliseconds`;
+    },
+    codegenAction(api) {
+      const field = `_normalStopwatch${nodeToken(api)}`;
+      const portId = api.connection?.toPort;
+      const operation = portId === "stop"
+        ? `${field}.Stop();`
+        : portId === "reset"
+          ? `${field}.Reset();`
+          : `${field}.Start();`;
+      const changed = api.emit("changed");
+      return `${operation}${changed ? `\n        ${changed}();` : ""}`;
+    }
+  });
+
+  function normalListNodeParameters(
+    fallback = "string",
+    allowed = NORMAL_CORE_VALUE_TYPES
+  ) {
+    return [
+      pSelect(
+        "itemType",
+        "Item type",
+        allowed,
+        fallback
+      )
+    ];
+  }
+
+  function normalListNodeType(
+    node,
+    allowed = NORMAL_CORE_VALUE_TYPES,
+    fallback = "string"
+  ) {
+    const itemType = normalSelectedType(
+      node,
+      "itemType",
+      fallback,
+      allowed
+    );
+    return {
+      itemType,
+      listType: ensureNormalListType(itemType)
+    };
+  }
+
+  function normalListResolvedDefinition(
+    node,
+    extraInputs = [],
+    extraOutputs = [],
+    options = {}
+  ) {
+    const information = normalListNodeType(
+      node,
+      options.allowed || NORMAL_CORE_VALUE_TYPES,
+      options.fallback || "string"
+    );
+    return {
+      inputs: [
+        ...(options.action === true
+          ? [port("call", "Call", "impulse")]
+          : []),
+        port("list", "List", information.listType),
+        ...extraInputs.map(specification =>
+          specification.type === "$item"
+            ? port(
+                specification.id,
+                specification.label,
+                information.itemType,
+                specification.extra || {}
+              )
+            : specification
+        )
+      ],
+      outputs: [
+        ...(options.action === true
+          ? [port("done", "Done", "impulse")]
+          : []),
+        ...extraOutputs.map(specification => {
+          if (specification.type === "$item") {
+            return port(
+              specification.id,
+              specification.label,
+              information.itemType,
+              specification.extra || {}
+            );
+          }
+          if (specification.type === "$list") {
+            return port(
+              specification.id,
+              specification.label,
+              information.listType,
+              specification.extra || {}
+            );
+          }
+          return specification;
+        })
+      ]
+    };
+  }
+
+  registerNode("collection.createList", {
+    title: "Create List",
+    group: "Collections",
+    symbol: "NEW[]",
+    description:
+      "Creates and owns one strongly typed list. Reset empties the existing list without changing its identity.",
+    parameters: normalListNodeParameters(),
+    inputs: [port("reset", "Reset", "impulse")],
+    outputs: [
+      port("resetDone", "Reset Done", "impulse"),
+      port("list", "List", normalListType("string")),
+      port("count", "Count", "int")
+    ],
+    resolveDefinition(node) {
+      const { listType } = normalListNodeType(node);
+      return {
+        inputs: [port("reset", "Reset", "impulse")],
+        outputs: [
+          port("resetDone", "Reset Done", "impulse"),
+          port("list", "List", listType),
+          port("count", "Count", "int")
+        ]
+      };
+    },
+    codegenCollect(api) {
+      const { listType } = normalListNodeType(api.node);
+      const csType = api.csType(listType);
+      addStatefulField(
+        api,
+        "normalCreatedList",
+        csType,
+        `new ${csType}()`
+      );
+    },
+    codegenExpression(api) {
+      const field = `_normalCreatedList${nodeToken(api)}`;
+      return api.portId === "count"
+        ? `${field}.Count`
+        : field;
+    },
+    codegenAction(api) {
+      const field = `_normalCreatedList${nodeToken(api)}`;
+      const done = api.emit("resetDone");
+      return `lock (${field}) { ${field}.Clear(); }${done ? `\n        ${done}();` : ""}`;
+    }
+  });
+
+  function registerNormalListMutation(
+    id,
+    title,
+    symbol,
+    extraInputs,
+    actionRenderer,
+    options = {}
+  ) {
+    registerNode(id, {
+      title,
+      group: "Collections",
+      symbol,
+      description: options.description || "Mutates a strongly typed list and reports the resulting count.",
+      parameters: normalListNodeParameters(
+        options.fallback || "string",
+        options.allowed || NORMAL_CORE_VALUE_TYPES
+      ).concat(options.parameters || []),
+      inputs: [
+        port("call", "Call", "impulse"),
+        port("list", "List", normalListType(options.fallback || "string")),
+        ...extraInputs.map(specification =>
+          specification.type === "$item"
+            ? port(
+                specification.id,
+                specification.label,
+                options.fallback || "string"
+              )
+            : specification
+        )
+      ],
+      outputs: [
+        port("done", "Done", "impulse"),
+        port("list", "List", normalListType(options.fallback || "string")),
+        port("success", "Success", "bool"),
+        port("count", "Count", "int")
+      ],
+      resolveDefinition(node) {
+        return normalListResolvedDefinition(
+          node,
+          extraInputs,
+          [
+            { id: "list", label: "List", type: "$list" },
+            port("success", "Success", "bool"),
+            port("count", "Count", "int")
+          ],
+          {
+            action: true,
+            fallback: options.fallback || "string",
+            allowed: options.allowed || NORMAL_CORE_VALUE_TYPES
+          }
+        );
+      },
+      codegenCollect(api) {
+        addStatefulField(
+          api,
+          `${id.replace(/[^A-Za-z0-9]/g, "")}Success`,
+          "bool",
+          "false"
+        );
+      },
+      codegenExpression(api) {
+        const token = nodeToken(api);
+        const list = api.input("list").code;
+        if (api.portId === "success") {
+          return `_${id.replace(/[^A-Za-z0-9]/g, "")}Success${token}`;
+        }
+        if (api.portId === "count") {
+          return `${list}.Count`;
+        }
+        return list;
+      },
+      codegenAction(api) {
+        const token = nodeToken(api);
+        const success = `_${id.replace(/[^A-Za-z0-9]/g, "")}Success${token}`;
+        const list = api.input("list").code;
+        const action = actionRenderer(
+          api,
+          list,
+          success
+        );
+        const done = api.emit("done");
+        return `${action}${done ? `\n        ${done}();` : ""}`;
+      }
+    });
+  }
+
+  registerNormalListMutation(
+    "collection.addItem",
+    "Add List Item",
+    "+[]",
+    [{ id: "value", label: "Value", type: "$item" }],
+    (api, list, success) =>
+      `lock (${list}) { ${list}.Add(${api.input("value").code}); ${success} = true; }`
+  );
+  registerNormalListMutation(
+    "collection.insertItem",
+    "Insert List Item",
+    "INS",
+    [
+      port("index", "Index", "int"),
+      { id: "value", label: "Value", type: "$item" }
+    ],
+    (api, list, success) => {
+      const index = api.input("index").code;
+      return `lock (${list}) { ${success} = ${index} >= 0 && ${index} <= ${list}.Count; if (${success}) { ${list}.Insert(${index}, ${api.input("value").code}); } }`;
+    }
+  );
+  registerNormalListMutation(
+    "collection.removeItem",
+    "Remove List Item",
+    "−[]",
+    [{ id: "value", label: "Value", type: "$item" }],
+    (api, list, success) =>
+      `lock (${list}) { ${success} = ${list}.Remove(${api.input("value").code}); }`
+  );
+  registerNormalListMutation(
+    "collection.removeAt",
+    "Remove List Item At Index",
+    "−[i]",
+    [port("index", "Index", "int")],
+    (api, list, success) => {
+      const index = api.input("index").code;
+      return `lock (${list}) { ${success} = ${index} >= 0 && ${index} < ${list}.Count; if (${success}) { ${list}.RemoveAt(${index}); } }`;
+    }
+  );
+  registerNormalListMutation(
+    "collection.clearList",
+    "Clear List",
+    "CLR[]",
+    [],
+    (_api, list, success) =>
+      `lock (${list}) { ${list}.Clear(); ${success} = true; }`
+  );
+
+  function registerNormalListQuery(
+    id,
+    title,
+    symbol,
+    extraInputs,
+    outputs,
+    renderer,
+    options = {}
+  ) {
+    registerNode(id, {
+      title,
+      group: "Collections",
+      symbol,
+      parameters: normalListNodeParameters(
+        options.fallback || "string",
+        options.allowed || NORMAL_CORE_VALUE_TYPES
+      ),
+      inputs: [
+        port("list", "List", normalListType(options.fallback || "string")),
+        ...extraInputs.map(specification =>
+          specification.type === "$item"
+            ? port(
+                specification.id,
+                specification.label,
+                options.fallback || "string"
+              )
+            : specification
+        )
+      ],
+      outputs: outputs.map(specification =>
+        specification.type === "$item"
+          ? port(
+              specification.id,
+              specification.label,
+              options.fallback || "string"
+            )
+          : specification.type === "$list"
+            ? port(
+                specification.id,
+                specification.label,
+                normalListType(options.fallback || "string")
+              )
+            : specification
+      ),
+      resolveDefinition(node) {
+        return normalListResolvedDefinition(
+          node,
+          extraInputs,
+          outputs,
+          {
+            fallback: options.fallback || "string",
+            allowed: options.allowed || NORMAL_CORE_VALUE_TYPES
+          }
+        );
+      },
+      codegenCollect(api) {
+        if (options.linq === true) {
+          api.addUsing("System.Linq");
+          api.addUsing("System.Collections.Generic");
+        }
+      },
+      codegenExpression: renderer
+    });
+  }
+
+  registerNormalListQuery(
+    "collection.listContains",
+    "List Contains",
+    "[]?",
+    [{ id: "value", label: "Value", type: "$item" }],
+    [port("result", "Contains", "bool")],
+    api => `${api.input("list").code}.Contains(${api.input("value").code})`
+  );
+  registerNormalListQuery(
+    "collection.indexOf",
+    "List Index Of",
+    "i?",
+    [{ id: "value", label: "Value", type: "$item" }],
+    [port("index", "Index", "int")],
+    api => `${api.input("list").code}.IndexOf(${api.input("value").code})`
+  );
+  registerNormalListQuery(
+    "collection.listCount",
+    "List Count",
+    "#[]",
+    [],
+    [port("count", "Count", "int")],
+    api => `${api.input("list").code}.Count`
+  );
+  registerNormalListQuery(
+    "collection.findItem",
+    "Find List Item",
+    "FIND",
+    [{ id: "value", label: "Search Value", type: "$item" }],
+    [
+      { id: "item", label: "Item", type: "$item" },
+      port("index", "Index", "int"),
+      port("success", "Success", "bool")
+    ],
+    api => {
+      const list = api.input("list").code;
+      const value = api.input("value").code;
+      if (api.portId === "index") return `${list}.IndexOf(${value})`;
+      if (api.portId === "success") return `${list}.Contains(${value})`;
+      return `(${list}.Contains(${value}) ? ${value} : default!)`;
+    }
+  );
+  registerNormalListQuery(
+    "collection.filterList",
+    "Filter List By Value",
+    "FILTER",
+    [{ id: "value", label: "Value", type: "$item" }],
+    [{ id: "list", label: "Filtered List", type: "$list" }],
+    api => {
+      const type = normalSelectedType(
+        api.node,
+        "itemType",
+        "string"
+      );
+      const csType = api.csType(type);
+      return `${api.input("list").code}.Where(item => EqualityComparer<${csType}>.Default.Equals(item, ${api.input("value").code})).ToList()`;
+    },
+    { linq: true }
+  );
+  registerNormalListQuery(
+    "collection.sortList",
+    "Sort List",
+    "SORT",
+    [],
+    [{ id: "list", label: "Sorted List", type: "$list" }],
+    api => api.node.parameters?.descending === true
+      ? `${api.input("list").code}.OrderByDescending(item => item).ToList()`
+      : `${api.input("list").code}.OrderBy(item => item).ToList()`,
+    {
+      linq: true,
+      allowed: ["string", "int", "float", "double"],
+      fallback: "string",
+      parameters: [
+        pBool("descending", "Descending", false)
+      ]
+    }
+  );
+
+  function normalDictionarySelection(node) {
+    const keyType = normalSelectedType(
+      node,
+      "keyType",
+      "string",
+      NORMAL_DICTIONARY_KEY_TYPES
+    );
+    const valueType = normalSelectedType(
+      node,
+      "dictionaryValueType",
+      "string"
+    );
+    return {
+      keyType,
+      valueType,
+      dictionaryType:
+        ensureNormalDictionaryType(
+          keyType,
+          valueType
+        ),
+      keyListType: ensureNormalListType(keyType),
+      valueListType: ensureNormalListType(valueType)
+    };
+  }
+
+  function normalDictionaryParameters() {
+    return [
+      pSelect(
+        "keyType",
+        "Key type",
+        NORMAL_DICTIONARY_KEY_TYPES,
+        "string"
+      ),
+      pSelect(
+        "dictionaryValueType",
+        "Value type",
+        NORMAL_CORE_VALUE_TYPES,
+        "string"
+      )
+    ];
+  }
+
+  function normalDictionaryPorts(
+    node,
+    options = {}
+  ) {
+    const selected = normalDictionarySelection(node);
+    return {
+      inputs: [
+        ...(options.action === true
+          ? [port("call", "Call", "impulse")]
+          : []),
+        ...(options.includeDictionary === false
+          ? []
+          : [port("dictionary", "Dictionary", selected.dictionaryType)]),
+        ...(options.key === true
+          ? [port("key", "Key", selected.keyType)]
+          : []),
+        ...(options.value === true
+          ? [port("value", "Value", selected.valueType)]
+          : [])
+      ],
+      outputs: [
+        ...(options.action === true
+          ? [port("done", "Done", "impulse")]
+          : []),
+        ...(options.dictionaryOutput === true
+          ? [port("dictionary", "Dictionary", selected.dictionaryType)]
+          : []),
+        ...(options.valueOutput === true
+          ? [port("value", "Value", selected.valueType)]
+          : []),
+        ...(options.keysOutput === true
+          ? [port("keys", "Keys", selected.keyListType)]
+          : []),
+        ...(options.valuesOutput === true
+          ? [port("values", "Values", selected.valueListType)]
+          : []),
+        ...(options.success === true
+          ? [port("success", "Success", "bool")]
+          : []),
+        ...(options.count === true
+          ? [port("count", "Count", "int")]
+          : [])
+      ]
+    };
+  }
+
+  registerNode("dictionary.create", {
+    title: "Create Dictionary",
+    group: "Dictionaries",
+    symbol: "NEW{}",
+    parameters: normalDictionaryParameters(),
+    inputs: [port("reset", "Reset", "impulse")],
+    outputs: [
+      port("resetDone", "Reset Done", "impulse"),
+      port("dictionary", "Dictionary", normalDictionaryType("string", "string")),
+      port("count", "Count", "int")
+    ],
+    resolveDefinition(node) {
+      const selected = normalDictionarySelection(node);
+      return {
+        inputs: [port("reset", "Reset", "impulse")],
+        outputs: [
+          port("resetDone", "Reset Done", "impulse"),
+          port("dictionary", "Dictionary", selected.dictionaryType),
+          port("count", "Count", "int")
+        ]
+      };
+    },
+    codegenCollect(api) {
+      const selected = normalDictionarySelection(api.node);
+      const csType = api.csType(selected.dictionaryType);
+      addStatefulField(
+        api,
+        "normalDictionary",
+        csType,
+        `new ${csType}()`
+      );
+    },
+    codegenExpression(api) {
+      const field = `_normalDictionary${nodeToken(api)}`;
+      return api.portId === "count"
+        ? `${field}.Count`
+        : field;
+    },
+    codegenAction(api) {
+      const field = `_normalDictionary${nodeToken(api)}`;
+      const done = api.emit("resetDone");
+      return `lock (${field}) { ${field}.Clear(); }${done ? `\n        ${done}();` : ""}`;
+    }
+  });
+
+  function registerNormalDictionaryNode(
+    id,
+    title,
+    symbol,
+    options,
+    expression,
+    action
+  ) {
+    registerNode(id, {
+      title,
+      group: "Dictionaries",
+      symbol,
+      parameters: normalDictionaryParameters(),
+      ...normalDictionaryPorts(
+        { parameters: { keyType: "string", dictionaryValueType: "string" } },
+        options
+      ),
+      resolveDefinition(node) {
+        return normalDictionaryPorts(
+          node,
+          options
+        );
+      },
+      codegenCollect(api) {
+        if (options.statefulSuccess === true) {
+          addStatefulField(
+            api,
+            `${id.replace(/[^A-Za-z0-9]/g, "")}Success`,
+            "bool",
+            "false"
+          );
+        }
+        if (
+          options.keysOutput === true ||
+          options.valuesOutput === true
+        ) {
+          api.addUsing("System.Linq");
+        }
+      },
+      codegenExpression(api) {
+        if (
+          options.statefulSuccess === true &&
+          api.portId === "success"
+        ) {
+          return `_${id.replace(/[^A-Za-z0-9]/g, "")}Success${nodeToken(api)}`;
+        }
+        return expression ? expression(api) : "default!";
+      },
+      codegenAction(api) {
+        const body = action ? action(api) : "";
+        const done = api.emit("done");
+        return `${body}${done ? `\n        ${done}();` : ""}`;
+      }
+    });
+  }
+
+  registerNormalDictionaryNode(
+    "dictionary.setValue",
+    "Set Dictionary Value",
+    "{}=",
+    {
+      action: true,
+      key: true,
+      value: true,
+      dictionaryOutput: true,
+      success: true,
+      count: true,
+      statefulSuccess: true
+    },
+    api => api.portId === "count"
+      ? `${api.input("dictionary").code}.Count`
+      : api.input("dictionary").code,
+    api => {
+      const success = `_dictionarysetValueSuccess${nodeToken(api)}`;
+      const dictionary = api.input("dictionary").code;
+      return `try { lock (${dictionary}) { ${dictionary}[${api.input("key").code}] = ${api.input("value").code}; } ${success} = true; } catch { ${success} = false; }`;
+    }
+  );
+  registerNormalDictionaryNode(
+    "dictionary.tryGetValue",
+    "Try Get Dictionary Value",
+    "{}?",
+    {
+      key: true,
+      valueOutput: true,
+      success: true
+    },
+    api => {
+      const selected = normalDictionarySelection(api.node);
+      const valueCsType = api.csType(selected.valueType);
+      const dictionary = api.input("dictionary").code;
+      const key = api.input("key").code;
+      return api.portId === "success"
+        ? `${dictionary}.ContainsKey(${key})`
+        : `(${dictionary}.TryGetValue(${key}, out ${valueCsType} normalValue${nodeToken(api)}) ? normalValue${nodeToken(api)} : default!)`;
+    }
+  );
+  registerNormalDictionaryNode(
+    "dictionary.removeKey",
+    "Remove Dictionary Key",
+    "{}−",
+    {
+      action: true,
+      key: true,
+      dictionaryOutput: true,
+      success: true,
+      count: true,
+      statefulSuccess: true
+    },
+    api => api.portId === "count"
+      ? `${api.input("dictionary").code}.Count`
+      : api.input("dictionary").code,
+    api => {
+      const success = `_dictionaryremoveKeySuccess${nodeToken(api)}`;
+      const dictionary = api.input("dictionary").code;
+      return `lock (${dictionary}) { ${success} = ${dictionary}.Remove(${api.input("key").code}); }`;
+    }
+  );
+  registerNormalDictionaryNode(
+    "dictionary.containsKey",
+    "Dictionary Contains Key",
+    "K?",
+    { key: true, success: true },
+    api => `${api.input("dictionary").code}.ContainsKey(${api.input("key").code})`
+  );
+  registerNormalDictionaryNode(
+    "dictionary.keysValues",
+    "Dictionary Keys / Values",
+    "K/V",
+    {
+      keysOutput: true,
+      valuesOutput: true,
+      count: true
+    },
+    api => {
+      const dictionary = api.input("dictionary").code;
+      if (api.portId === "keys") return `${dictionary}.Keys.ToList()`;
+      if (api.portId === "values") return `${dictionary}.Values.ToList()`;
+      return `${dictionary}.Count`;
+    }
+  );
+
+  function registerNormalFileTransfer(
+    id,
+    title,
+    symbol,
+    method
+  ) {
+    registerNode(id, {
+      title,
+      group: "Files & JSON",
+      symbol,
+      description:
+        `${title} with optional overwrite and explicit success/exception outputs.`,
+      parameters: [
+        pBool("overwrite", "Overwrite destination", false)
+      ],
+      inputs: [
+        port("call", "Call", "impulse"),
+        port("source", "Source", "string"),
+        port("destination", "Destination", "string")
+      ],
+      outputs: [
+        port("done", "Done", "impulse"),
+        port("success", "Success", "bool"),
+        port("exception", "Exception", "exception")
+      ],
+      codegenCollect(api) {
+        api.addUsing("System.IO");
+        addStatefulField(
+          api,
+          `${id.replace(/[^A-Za-z0-9]/g, "")}Success`,
+          "bool",
+          "false"
+        );
+        addStatefulField(
+          api,
+          `${id.replace(/[^A-Za-z0-9]/g, "")}Exception`,
+          "Exception",
+          "null!"
+        );
+      },
+      codegenExpression(api) {
+        const stem = id.replace(/[^A-Za-z0-9]/g, "");
+        return api.portId === "exception"
+          ? `_${stem}Exception${nodeToken(api)}`
+          : `_${stem}Success${nodeToken(api)}`;
+      },
+      codegenAction(api) {
+        const stem = id.replace(/[^A-Za-z0-9]/g, "");
+        const token = nodeToken(api);
+        const success = `_${stem}Success${token}`;
+        const exception = `_${stem}Exception${token}`;
+        const overwrite = api.node.parameters?.overwrite === true
+          ? "true"
+          : "false";
+        const done = api.emit("done");
+        return `try\n        {\n            ${exception} = null!;\n            ${method}(${api.input("source").code}, ${api.input("destination").code}, ${overwrite});\n            ${success} = true;\n        }\n        catch (Exception caught)\n        {\n            ${success} = false;\n            ${exception} = caught;\n        }${done ? `\n        ${done}();` : ""}`;
+      }
+    });
+  }
+
+  registerNormalFileTransfer(
+    "file.copy",
+    "Copy File",
+    "COPY",
+    "File.Copy"
+  );
+  registerNormalFileTransfer(
+    "file.move",
+    "Move File",
+    "MOVE",
+    "File.Move"
+  );
+
+  function registerNormalJsonContainer(
+    id,
+    title,
+    symbol,
+    csType,
+    fieldStem
+  ) {
+    registerNode(id, {
+      title,
+      group: "Files & JSON",
+      symbol,
+      description:
+        "Creates and owns a reusable JSON container. Reset clears it without changing the connected object.",
+      inputs: [port("reset", "Reset", "impulse")],
+      outputs: [
+        port("resetDone", "Reset Done", "impulse"),
+        port("json", "JSON", "json"),
+        port("count", "Count", "int")
+      ],
+      codegenCollect(api) {
+        ensureJsonRuntime(api);
+        addStatefulField(
+          api,
+          fieldStem,
+          csType,
+          `new ${csType}()`
+        );
+      },
+      codegenExpression(api) {
+        const field = `_${fieldStem}${nodeToken(api)}`;
+        return api.portId === "count"
+          ? `${field}.Count`
+          : field;
+      },
+      codegenAction(api) {
+        const field = `_${fieldStem}${nodeToken(api)}`;
+        const done = api.emit("resetDone");
+        return `${field}.Clear();${done ? `\n        ${done}();` : ""}`;
+      }
+    });
+  }
+
+  registerNormalJsonContainer(
+    "json.createObject",
+    "Create JSON Object",
+    "NEW{}",
+    "JsonObject",
+    "normalJsonObject"
+  );
+  registerNormalJsonContainer(
+    "json.createArray",
+    "Create JSON Array",
+    "NEW[]",
+    "JsonArray",
+    "normalJsonArray"
+  );
+
+  function registerNormalJsonMutation(
+    id,
+    title,
+    symbol,
+    extraInputs,
+    operation
+  ) {
+    registerNode(id, {
+      title,
+      group: "Files & JSON",
+      symbol,
+      inputs: [
+        port("call", "Call", "impulse"),
+        port("json", "JSON", "json"),
+        ...extraInputs
+      ],
+      outputs: [
+        port("done", "Done", "impulse"),
+        port("json", "JSON", "json"),
+        port("success", "Success", "bool"),
+        port("exception", "Exception", "exception")
+      ],
+      codegenCollect(api) {
+        ensureJsonRuntime(api);
+        const stem = id.replace(/[^A-Za-z0-9]/g, "");
+        addStatefulField(
+          api,
+          `${stem}Success`,
+          "bool",
+          "false"
+        );
+        addStatefulField(
+          api,
+          `${stem}Exception`,
+          "Exception",
+          "null!"
+        );
+      },
+      codegenExpression(api) {
+        const stem = id.replace(/[^A-Za-z0-9]/g, "");
+        if (api.portId === "success") {
+          return `_${stem}Success${nodeToken(api)}`;
+        }
+        if (api.portId === "exception") {
+          return `_${stem}Exception${nodeToken(api)}`;
+        }
+        return api.input("json").code;
+      },
+      codegenAction(api) {
+        const stem = id.replace(/[^A-Za-z0-9]/g, "");
+        const token = nodeToken(api);
+        const success = `_${stem}Success${token}`;
+        const exception = `_${stem}Exception${token}`;
+        const done = api.emit("done");
+        return `try\n        {\n            ${exception} = null!;\n            ${success} = ${operation(api)};\n        }\n        catch (Exception caught)\n        {\n            ${success} = false;\n            ${exception} = caught;\n        }${done ? `\n        ${done}();` : ""}`;
+      }
+    });
+  }
+
+  registerNormalJsonMutation(
+    "json.setProperty",
+    "Set JSON Property",
+    "{}=",
+    [
+      port("property", "Property", "string"),
+      port("value", "Value", "object")
+    ],
+    api => `SetGraphJsonProperty(${api.input("json").code}, ${api.input("property").code}, ${api.input("value").code})`
+  );
+  registerNormalJsonMutation(
+    "json.removeProperty",
+    "Remove JSON Property",
+    "{}−",
+    [port("property", "Property", "string")],
+    api => `RemoveGraphJsonProperty(${api.input("json").code}, ${api.input("property").code})`
+  );
+  registerNormalJsonMutation(
+    "json.addArrayItem",
+    "Add JSON Array Item",
+    "+[]",
+    [port("value", "Value", "object")],
+    api => `AddGraphJsonArrayItem(${api.input("json").code}, ${api.input("value").code})`
+  );
+
+  registerNode("task.cancelTask", {
+    title: "Cancel Task (Cooperative)",
+    group: "Tasks & Threading",
+    symbol: "CANCEL",
+    description:
+      "Creates a CancellationToken and requests cancellation when Cancel is triggered. The receiving operation must support that token; .NET cannot safely force-stop an arbitrary Task.",
+    inputs: [
+      port("reset", "Create / Reset", "impulse"),
+      port("cancel", "Cancel", "impulse")
+    ],
+    outputs: [
+      port("ready", "Ready", "impulse"),
+      port("cancelled", "Cancellation Requested", "impulse"),
+      port("failed", "Failed", "impulse"),
+      port("token", "Cancellation Token", "cancellationToken"),
+      port("isCancellationRequested", "Is Cancellation Requested", "bool"),
+      port("exception", "Exception", "exception")
+    ],
+    codegenCollect(api) {
+      ensureTaskRuntime(api);
+      const token = nodeToken(api);
+      api.addField(
+        `${api.node.id}.source`,
+        `private static CancellationTokenSource _normalCancellation${token} = new();`
+      );
+      addStatefulField(
+        api,
+        "normalCancellationException",
+        "Exception",
+        "null!"
+      );
+    },
+    codegenExpression(api) {
+      const token = nodeToken(api);
+      if (api.portId === "isCancellationRequested") {
+        return `_normalCancellation${token}.IsCancellationRequested`;
+      }
+      if (api.portId === "exception") {
+        return `_normalCancellationException${token}`;
+      }
+      return `_normalCancellation${token}.Token`;
+    },
+    codegenAction(api) {
+      const token = nodeToken(api);
+      const exception = `_normalCancellationException${token}`;
+      const failed = api.emit("failed");
+      if (api.connection?.toPort === "cancel") {
+        const cancelled = api.emit("cancelled");
+        return `try\n        {\n            ${exception} = null!;\n            _normalCancellation${token}.Cancel();${cancelled ? `\n            ${cancelled}();` : ""}\n        }\n        catch (Exception caught)\n        {\n            ${exception} = caught;${failed ? `\n            ${failed}();` : ""}\n        }`;
+      }
+      const ready = api.emit("ready");
+      return `try\n        {\n            _normalCancellation${token}.Dispose();\n            _normalCancellation${token} = new CancellationTokenSource();\n            ${exception} = null!;${ready ? `\n            ${ready}();` : ""}\n        }\n        catch (Exception caught)\n        {\n            ${exception} = caught;${failed ? `\n            ${failed}();` : ""}\n        }`;
+    }
+  });
+
+  registerNode("task.timeout", {
+    title: "Task Timeout",
+    group: "Tasks & Threading",
+    symbol: "TIMEOUT",
+    description:
+      "Waits for a Task up to the selected duration. A timeout does not forcibly terminate the underlying Task.",
+    inputs: [
+      port("call", "Start", "impulse"),
+      port("task", "Task", "task"),
+      port("milliseconds", "Timeout ms", "int")
+    ],
+    outputs: [
+      port("completed", "Completed", "impulse"),
+      port("timedOut", "Timed Out", "impulse"),
+      port("faulted", "Faulted", "impulse"),
+      port("exception", "Exception", "exception")
+    ],
+    codegenCollect(api) {
+      ensureTaskRuntime(api);
+      const token = nodeToken(api);
+      const completed = api.emitMethod(
+        api.node.id,
+        "completed"
+      );
+      const timedOut = api.emitMethod(
+        api.node.id,
+        "timedOut"
+      );
+      const faulted = api.emitMethod(
+        api.node.id,
+        "faulted"
+      );
+      addStatefulField(
+        api,
+        "normalTimeoutException",
+        "Exception",
+        "null!"
+      );
+      api.addMember(
+        `${api.node.id}.timeout`,
+        `private static async void WaitWithTimeout${token}(Task task, int milliseconds)\n{\n    try\n    {\n        _normalTimeoutException${token} = null!;\n        Task delay = Task.Delay(Math.Max(0, milliseconds));\n        Task winner = await Task.WhenAny(task, delay).ConfigureAwait(false);\n        if (ReferenceEquals(winner, delay))\n        {${timedOut ? `\n            ${timedOut}();` : ""}\n            return;\n        }\n\n        await task.ConfigureAwait(false);${completed ? `\n        ${completed}();` : ""}\n    }\n    catch (Exception caught)\n    {\n        _normalTimeoutException${token} = caught;${faulted ? `\n        ${faulted}();` : ""}\n    }\n}`
+      );
+    },
+    codegenExpression(api) {
+      return `_normalTimeoutException${nodeToken(api)}`;
+    },
+    codegenAction(api) {
+      return `WaitWithTimeout${nodeToken(api)}(${api.input("task").code}, ${api.input("milliseconds").code});`;
+    }
+  });
+
+  registerNode("task.retry", {
+    title: "Retry Flow",
+    group: "Tasks & Threading",
+    symbol: "RETRY",
+    description:
+      "Emits Attempt. Route the attempted operation back to Success or Failure; Failure waits and retries until Max Attempts is reached.",
+    inputs: [
+      port("start", "Start", "impulse"),
+      port("success", "Attempt Succeeded", "impulse"),
+      port("failure", "Attempt Failed", "impulse"),
+      port("maxAttempts", "Max Attempts", "int"),
+      port("delayMilliseconds", "Retry Delay ms", "int")
+    ],
+    outputs: [
+      port("attempt", "Attempt", "impulse"),
+      port("completed", "Completed", "impulse"),
+      port("exhausted", "Retries Exhausted", "impulse"),
+      port("attemptNumber", "Attempt Number", "int")
+    ],
+    codegenCollect(api) {
+      ensureTaskRuntime(api);
+      const token = nodeToken(api);
+      const attempt = api.emitMethod(
+        api.node.id,
+        "attempt"
+      );
+      const completed = api.emitMethod(
+        api.node.id,
+        "completed"
+      );
+      const exhausted = api.emitMethod(
+        api.node.id,
+        "exhausted"
+      );
+      api.addField(
+        `${api.node.id}.state`,
+        `private static int _normalRetryAttempt${token};\nprivate static int _normalRetryMaximum${token} = 1;\nprivate static int _normalRetryDelay${token};\nprivate static int _normalRetryGeneration${token};`
+      );
+      api.addMember(
+        `${api.node.id}.retry`,
+        `private static void StartRetry${token}(int maximum, int delay)\n{\n    _normalRetryGeneration${token}++;\n    _normalRetryMaximum${token} = Math.Max(1, maximum);\n    _normalRetryDelay${token} = Math.Max(0, delay);\n    _normalRetryAttempt${token} = 1;${attempt ? `\n    ${attempt}();` : ""}\n}\n\nprivate static void CompleteRetry${token}()\n{\n    _normalRetryGeneration${token}++;${completed ? `\n    ${completed}();` : ""}\n}\n\nprivate static async void FailRetry${token}()\n{\n    int generation = _normalRetryGeneration${token};\n    if (_normalRetryAttempt${token} >= _normalRetryMaximum${token})\n    {\n        _normalRetryGeneration${token}++;${exhausted ? `\n        ${exhausted}();` : ""}\n        return;\n    }\n\n    if (_normalRetryDelay${token} > 0)\n    {\n        await Task.Delay(_normalRetryDelay${token}).ConfigureAwait(false);\n    }\n\n    if (generation != _normalRetryGeneration${token})\n    {\n        return;\n    }\n\n    _normalRetryAttempt${token}++;${attempt ? `\n    ${attempt}();` : ""}\n}`
+      );
+    },
+    codegenExpression(api) {
+      return `_normalRetryAttempt${nodeToken(api)}`;
+    },
+    codegenAction(api) {
+      const token = nodeToken(api);
+      if (api.connection?.toPort === "success") {
+        return `CompleteRetry${token}();`;
+      }
+      if (api.connection?.toPort === "failure") {
+        return `FailRetry${token}();`;
+      }
+      return `StartRetry${token}(${api.input("maxAttempts").code}, ${api.input("delayMilliseconds").code});`;
+    }
+  });
+
+  function registerNormalTaskAggregate(
+    id,
+    title,
+    symbol,
+    renderer
+  ) {
+    registerNode(id, {
+      title,
+      group: "Tasks & Threading",
+      symbol,
+      description:
+        `${title}. Select the node and use + / − to change the Task count.`,
+      inputs: [
+        port("a", "Task A", "task"),
+        port("b", "Task B", "task")
+      ],
+      variadicInputs: {
+        minimum: 2,
+        defaultCount: 2,
+        maximum: 64,
+        preserveAB: true,
+        template: port("a", "Task", "task")
+      },
+      outputs: [port("task", "Combined Task", "task")],
+      codegenCollect(api) {
+        ensureTaskRuntime(api);
+      },
+      codegenExpression(api) {
+        const count = Math.max(
+          2,
+          Math.min(
+            64,
+            Math.trunc(
+              Number(api.node.parameters?.variadicInputCount) || 2
+            )
+          )
+        );
+        return renderer(
+          normalVariadicIds(count).map(
+            id => api.input(id).code
+          )
+        );
+      }
+    });
+  }
+
+  registerNormalTaskAggregate(
+    "task.whenAll",
+    "When All Tasks Finish",
+    "ALL",
+    tasks => `Task.WhenAll(new Task[] { ${tasks.join(", ")} })`
+  );
+  registerNormalTaskAggregate(
+    "task.whenAny",
+    "When Any Task Finishes",
+    "ANY",
+    tasks => `WaitForAnyGraphTask(new Task[] { ${tasks.join(", ")} })`
+  );
+
   const RAW_CSHARP_USING_RULES = [
     [
       "System.Diagnostics",
@@ -12207,6 +12260,14 @@ private static bool IsGraphComponentValid(FrooxEngine.Component? component)
       )
     ]
   });
+
+  for (const [id, definition] of Object.entries(
+    registry.getNodeDefinitions()
+  )) {
+    if (id.startsWith("reflection.")) {
+      definition.expertOnly = true;
+    }
+  }
 
   registerCodegenPlugin({
     collect(api) {

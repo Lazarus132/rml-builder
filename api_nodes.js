@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const FACTORY_VERSION = 13;
+  const FACTORY_VERSION = 14;
   const API_VERIFICATION_SCHEMA_VERSION = 1;
   const ADVANCED_GROUP = "Advanced / Raw C#";
   const API_GROUPS = Object.freeze({
@@ -351,6 +351,7 @@
       registerGroup,
       registerNode,
       getNodeDefinitions,
+      getTypeDefinitions,
       getTypeInformation
     } = registry;
 
@@ -604,6 +605,7 @@
       "System.Exception": "exception",
       "System.Threading.Tasks.Task": "task",
       "System.Threading.CancellationToken": "cancellationToken",
+      "System.Action": "action",
       "System.Net.WebSockets.ClientWebSocket": "webSocket",
       "System.Text.Json.Nodes.JsonNode": "json",
       "Elements.Core.int2": "int2",
@@ -665,6 +667,24 @@
       graphTypeByCs.set(normalizedCsType, graphType);
       graphTypeByNormalizedCs.set(
         normalizeTypeForLookup(normalizedCsType),
+        graphType
+      );
+    }
+
+    for (const [graphType, information] of Object.entries(
+      typeof getTypeDefinitions === "function"
+        ? getTypeDefinitions()
+        : {}
+    )) {
+      const csType = normalizeCsType(
+        information?.csType || ""
+      );
+      if (!csType || graphTypeByCs.has(csType)) {
+        continue;
+      }
+      graphTypeByCs.set(csType, graphType);
+      graphTypeByNormalizedCs.set(
+        normalizeTypeForLookup(csType),
         graphType
       );
     }

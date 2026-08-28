@@ -36,7 +36,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "csharp14-roslyn-wasm-20260827-v602f3";
+  "complete-help-builtins-no-catalog-20260828-v603f5";
 
 function exposeRmlBuilderBuildId() {
   document.documentElement.dataset
@@ -356,6 +356,7 @@ function requestGeneratedOutputUpdate() {
     elements.codeSummary.textContent =
       "Large runtime graph loaded · generated files are being refreshed";
   }
+
   updateGeneratedOutput();
 }
 
@@ -951,7 +952,7 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "graph_codegen_worker.js?v=35-complete-visual-csharp-v600f1",
+      "graph_codegen_worker.js?v=41-complete-help-v603f5",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -1151,6 +1152,8 @@ function pendingLargeGraphContribution() {
 
 let colorPickerAdaptiveFitLoadPromise = null;
 let informationTemplateLoadPromise = null;
+let informationBuiltInRegistryReady = false;
+let informationBuiltInRegistryWaitPromise = null;
 let setupAssistantLoadPromise = null;
 const SETUP_ASSISTANT_STORAGE_KEY = "rml-builder-setup-tour-v1-complete";
 const ACTIVE_SETUP_ASSISTANT_STORAGE_KEY = RML_VISUAL_TOUR_TEST
@@ -25281,7 +25284,32 @@ function renderInformationNodeReference() {
       <p class="information-node-reference-status">
         The runtime node registry is still loading. The complete built-in node reference will appear automatically when the node library has initialized.
       </p>`;
-    window.RMLModNodesReady?.then?.(() => renderInformationNodeReference()).catch?.(() => {});
+    window.RMLBaseModNodesReady?.then?.(() => renderInformationNodeReference()).catch?.(() => {});
+    return;
+  }
+
+  if (
+    !informationBuiltInRegistryReady &&
+    window.RMLBaseModNodesReady &&
+    typeof window.RMLBaseModNodesReady.then === "function"
+  ) {
+    host.innerHTML = `
+      <p class="information-node-reference-status">
+        Loading every fixed built-in node before creating the complete reference…
+      </p>`;
+    if (!informationBuiltInRegistryWaitPromise) {
+      informationBuiltInRegistryWaitPromise = Promise.resolve(
+        window.RMLBaseModNodesReady
+      )
+        .then(() => {
+          informationBuiltInRegistryReady = true;
+          renderInformationNodeReference();
+        })
+        .catch(error => {
+          informationBuiltInRegistryWaitPromise = null;
+          console.error("The complete built-in Help node reference could not be initialized.", error);
+        });
+    }
     return;
   }
 
@@ -25293,21 +25321,6 @@ function renderInformationNodeReference() {
       definition.catalogGenerated !== true
     )
     .map(([operatorId, definition]) => ({ operatorId, definition }));
-
-  if (
-    window.RMLModNodesReady &&
-    typeof window.RMLModNodesReady.then === "function" &&
-    !builtInEntries.some(entry => entry.operatorId === "harmony.earlyPatchSource")
-  ) {
-    host.innerHTML = `
-      <p class="information-node-reference-status">
-        Loading the complete built-in node library…
-      </p>`;
-    Promise.resolve(window.RMLModNodesReady)
-      .then(() => renderInformationNodeReference())
-      .catch(() => {});
-    return;
-  }
 
   const standardEntries = builtInEntries.filter(
     entry => !informationNodeIsAdvanced(entry.definition)
@@ -25429,17 +25442,22 @@ function renderInformationNodeReference() {
     }
   );
 
-  const catalogCount = Object.values(definitions || {}).filter(
-    definition => definition?.catalogGenerated === true
-  ).length;
   const catalogNote = document.createElement("div");
   catalogNote.className = "information-node-tier-note catalog";
   catalogNote.innerHTML = `
-    <strong>Live Resonite API catalog${catalogCount ? ` · ${catalogCount.toLocaleString()} generated nodes` : ""}</strong>
-    <span>Scanner-generated Type, Enum, Constructor, Method, Property, Field and Event nodes are version-derived rather than fixed builder nodes. Their collapsed groups and complete counts are always visible in the Node Library and load in safe batches; Node Search remains the fastest direct lookup. The set changes with the loaded Resonite/FrooxEngine catalog. HarmonyLib scanner nodes are classified as Advanced / Raw C# because they are low-level runtime API calls; they do not infer a patch signature or an early rml_libs load phase.</span>`;
+    <strong>Scanner catalog intentionally excluded</strong>
+    <span>This Help list contains every fixed built-in node and no scanner-generated catalog nodes. Use Node Search for the version-derived Resonite, FrooxEngine and HarmonyLib API catalog.</span>`;
   fragment.appendChild(catalogNote);
 
   host.replaceChildren(fragment);
+  window.RMLHelpNodeReferenceReport = Object.freeze({
+    complete: true,
+    catalogNodesIncluded: false,
+    syntheticConfigurationNodes: 1,
+    builtInNodeCount: builtInEntries.length,
+    documentedNodeCount: builtInEntries.length + 1,
+    operatorIds: Object.freeze(builtInEntries.map(entry => entry.operatorId).sort())
+  });
 }
 
 function renderInformationOutlineNodeReference() {
@@ -25998,8 +26016,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "help_template.html?v=59-api-catalog-collapsed-groups-v361f1",
-    "help_template.js?v=59-api-catalog-collapsed-groups-v361f1",
+    "help_template.html?v=60-complete-builtins-no-catalog-v603f5",
+    "help_template.js?v=60-complete-builtins-no-catalog-v603f5",
     "help-template",
     "RMLHelpTemplateMarkup"
   )
@@ -26012,6 +26030,13 @@ async function ensureInformationDialogLoaded() {
       elements.informationOutlineNodeReference = document.getElementById(
         "information-outline-node-reference"
       );
+      const nodeReferenceIntro = elements.informationDialog?.querySelector(
+        ".information-node-page-intro .information-api-note"
+      );
+      if (nodeReferenceIntro) {
+        nodeReferenceIntro.textContent =
+          "This Help list documents every fixed built-in node and intentionally contains no scanner-generated catalog nodes. Use Node Search for the version-derived Resonite, FrooxEngine and HarmonyLib API catalog.";
+      }
       bindInformationDialogEvents();
       return elements.informationDialog;
     })

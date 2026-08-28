@@ -13,7 +13,7 @@
     )
       ? RML_GRAPH_REQUESTED_TEST_STORAGE_SCOPE
       : "rml-configuration-builder-visual-test-default";
-  const GRAPH_SCHEMA_VERSION = 22;
+  const GRAPH_SCHEMA_VERSION = 23;
   const GRAPH_STAGE_WIDTH = 5200;
   const GRAPH_STAGE_HEIGHT = 3400;
   const GRAPH_MIN_ZOOM = 0.005;
@@ -1052,6 +1052,8 @@
 
   let bridge = null;
   let graph = null;
+  let customCSharpEditor = null;
+  let customCSharpRootOperation = false;
   let runtimeGraphViewActive = false;
   let graphCatalogReadiness = "ready";
   let graphCatalogReadinessMessage = "";
@@ -2540,6 +2542,7 @@
       sourceSignature: "",
       showAdvancedNodes: false,
       configSnapshot: null,
+      customCSharpFiles: {},
       nodes: [],
       connections: [],
       viewport: {
@@ -2552,6 +2555,208 @@
       selectedWirePoint: null,
       nextSequence: 1
     };
+  }
+
+  function graphViewFrom(source) {
+    return {
+      nodes: Array.isArray(source?.nodes) ? source.nodes : [],
+      connections: Array.isArray(source?.connections) ? source.connections : [],
+      viewport: source?.viewport && typeof source.viewport === "object"
+        ? source.viewport
+        : { x: 56, y: 54, scale: 0.9 },
+      selectedNodeId: source?.selectedNodeId || null,
+      selectedConnectionId: source?.selectedConnectionId || null,
+      selectedWirePoint: source?.selectedWirePoint || null,
+      nextSequence: Math.max(1, Math.trunc(finiteNumber(source?.nextSequence, 1)))
+    };
+  }
+
+  function applyGraphView(view) {
+    if (!graph || !view) return;
+    graph.nodes = view.nodes;
+    graph.connections = view.connections;
+    graph.viewport = view.viewport;
+    graph.selectedNodeId = view.selectedNodeId;
+    graph.selectedConnectionId = view.selectedConnectionId;
+    graph.selectedWirePoint = view.selectedWirePoint;
+    graph.nextSequence = view.nextSequence;
+  }
+
+  function captureCustomCSharpEditorView() {
+    if (!customCSharpEditor || !graph) return null;
+    const existing = graph.customCSharpFiles?.[customCSharpEditor.fileNodeId] || {};
+    const captured = {
+      ...existing,
+      ...graphViewFrom(graph)
+    };
+    graph.customCSharpFiles[customCSharpEditor.fileNodeId] = captured;
+    const rendered = window.RMLVisualCSharp?.renderCustomCSharpGraph?.(captured);
+    if (rendered && typeof rendered.source === "string") {
+      const owner = customCSharpEditor.mainView.nodes.find(
+        node => node.id === customCSharpEditor.fileNodeId
+      );
+      if (owner) {
+        owner.parameters = owner.parameters && typeof owner.parameters === "object"
+          ? owner.parameters
+          : {};
+        owner.parameters.source = rendered.source;
+      }
+    }
+    return captured;
+  }
+
+  function rootRuntimeGraphView() {
+    return customCSharpEditor?.mainView || graphViewFrom(graph);
+  }
+
+  function createEmptyCustomCSharpFileGraph(fileNode) {
+    const outputNodeId = makeId("custom-csharp-output");
+    return {
+      version: 1,
+      fileName: String(fileNode?.parameters?.fileName || "VisualProgram.cs"),
+      projectId: String(fileNode?.parameters?.projectId || "main"),
+      parser: "Visual C#",
+      languageVersion: "14.0",
+      sourceHash: "",
+      outputNodeId,
+      rootSyntaxNodeId: "",
+      nodes: [
+        {
+          id: outputNodeId,
+          kind: "operator",
+          operatorId: "csharp.customFileOutput",
+          x: 720,
+          y: 260,
+          width: null,
+          height: null,
+          label: `Output · ${String(fileNode?.parameters?.fileName || "Custom C# File")}`,
+          parameters: {}
+        }
+      ],
+      connections: [],
+      viewport: { x: 56, y: 54, scale: 0.9 },
+      selectedNodeId: outputNodeId,
+      selectedConnectionId: null,
+      selectedWirePoint: null,
+      nextSequence: 2
+    };
+  }
+
+  function openCustomCSharpFileGraph(fileNodeId) {
+    if (!graph || customCSharpEditor) return false;
+    const fileNode = findGraphNode(fileNodeId);
+    const definition = fileNode ? nodeDefinition(fileNode) : null;
+    if (!fileNode || definition?.customCSharpFile !== true) return false;
+
+    graph.customCSharpFiles = graph.customCSharpFiles && typeof graph.customCSharpFiles === "object"
+      ? graph.customCSharpFiles
+      : {};
+    const customGraph = graph.customCSharpFiles[fileNodeId];
+    if (!customGraph) return false;
+    customCSharpEditor = {
+      fileNodeId,
+      fileName: String(fileNode.parameters?.fileName || "Custom C# File"),
+      mainView: graphViewFrom(graph)
+    };
+    applyGraphView(graphViewFrom(customGraph));
+    resetGraphRenderCaches();
+    pruneConnections();
+    persistGraph(true);
+    activateGraphMode();
+    showGraphMessage(`Opened ${customCSharpEditor.fileName} in its separate C# graph.`, "success");
+    return true;
+  }
+
+  function closeCustomCSharpFileGraph() {
+    if (!customCSharpEditor || !graph) return false;
+    const fileName = customCSharpEditor.fileName;
+    captureCustomCSharpEditorView();
+    const mainView = customCSharpEditor.mainView;
+    customCSharpEditor = null;
+    applyGraphView(mainView);
+    resetGraphRenderCaches();
+    pruneConnections();
+    persistGraph(true);
+    activateGraphMode();
+    showGraphMessage(`Returned from ${fileName} to the Runtime Graph.`, "success");
+    return true;
+  }
+
+  async function convertCustomCSharpFileToNodes(nodeId) {
+    if (!graph || customCSharpEditor) return false;
+    const owner = findGraphNode(nodeId);
+    const definition = owner ? nodeDefinition(owner) : null;
+    if (!owner || definition?.customCSharpFile !== true) return false;
+    const ownerId = owner.id;
+    const source = String(owner.parameters?.source || "");
+    if (!source.trim()) {
+      showGraphMessage("Enter or import C# source in this Custom C# File node before converting it.", "error");
+      return false;
+    }
+
+    const roslyn = window.RMLCSharp14Roslyn;
+    const visualCSharp = window.RMLVisualCSharp;
+    if (
+      typeof roslyn?.parse !== "function" ||
+      typeof visualCSharp?.createRoslynImportFragment !== "function" ||
+      typeof visualCSharp?.createCustomCSharpFileGraphFromFragment !== "function"
+    ) {
+      showGraphMessage("The bundled .NET 10 Roslyn converter is unavailable.", "error");
+      return false;
+    }
+
+    showGraphMessage("Roslyn is validating the direct C# 14 source…");
+    try {
+      const parseResult = await roslyn.parse(source);
+      const currentOwner = findGraphNode(ownerId);
+      if (String(currentOwner?.parameters?.source || "") !== source) {
+        showGraphMessage("The source changed during validation. Convert again to use the latest text.", "warning");
+        return false;
+      }
+      if (parseResult?.ok !== true) {
+        const messages = visualCSharp.formatRoslynDiagnostics?.(parseResult?.diagnostics) || [];
+        throw new Error(messages[0] || "Roslyn rejected the direct source as invalid C# 14 syntax.");
+      }
+      const fragment = visualCSharp.createRoslynImportFragment(source, parseResult, {
+        fileName: String(owner.parameters?.fileName || "VisualProgram.cs"),
+        projectId: String(owner.parameters?.projectId || "main"),
+        nullable: owner.parameters?.nullable || "inherit",
+        autoGeneratedHeader: owner.parameters?.autoGeneratedHeader === true,
+        prefix: `custom-csharp-convert-${hashText(`${ownerId}\0${source}`)}`
+      });
+      if (!fragment?.ok) throw new Error(fragment?.diagnostics?.[0] || "The Roslyn graph conversion failed.");
+      const prepared = visualCSharp.createCustomCSharpFileGraphFromFragment(fragment);
+      if (!prepared?.ok) throw new Error(prepared?.diagnostics?.[0] || "The Custom C# File graph could not be created.");
+
+      graph.customCSharpFiles[ownerId] = prepared.customGraph;
+      persistGraph(true);
+      const opened = openCustomCSharpFileGraph(ownerId);
+      if (opened) {
+        showGraphMessage(`Converted the source into ${prepared.importedSyntaxNodeCount.toLocaleString()} editable C# syntax nodes.`, "success");
+      }
+      return opened;
+    } catch (error) {
+      showGraphMessage(error instanceof Error ? error.message : String(error), "error");
+      return false;
+    }
+  }
+
+  function withRuntimeRootGraph(callback) {
+    if (!customCSharpEditor || customCSharpRootOperation) return callback();
+    captureCustomCSharpEditorView();
+    const nestedView = graphViewFrom(graph);
+    const editor = customCSharpEditor;
+    customCSharpRootOperation = true;
+    applyGraphView(editor.mainView);
+    resetGraphRenderCaches();
+    try {
+      return callback();
+    } finally {
+      editor.mainView = graphViewFrom(graph);
+      applyGraphView(nestedView);
+      resetGraphRenderCaches();
+      customCSharpRootOperation = false;
+    }
   }
 
   function hasPackedRuntimeProgram() {
@@ -3174,6 +3379,179 @@
       )
     );
 
+    const rawCustomCSharpFiles =
+      raw.customCSharpFiles &&
+      typeof raw.customCSharpFiles === "object" &&
+      !Array.isArray(raw.customCSharpFiles)
+        ? raw.customCSharpFiles
+        : {};
+    const customFileOwnerIds = new Set(
+      result.nodes
+        .filter(node => node.kind === "operator" && node.operatorId === "csharp.file")
+        .map(node => node.id)
+    );
+
+    for (const [ownerId, source] of Object.entries(rawCustomCSharpFiles)) {
+      if (
+        !customFileOwnerIds.has(ownerId) ||
+        !source ||
+        typeof source !== "object" ||
+        Array.isArray(source)
+      ) {
+        continue;
+      }
+      const owner = result.nodes.find(node => node.id === ownerId);
+      const legacyDirectSource = Array.isArray(source.nodes)
+        ? source.nodes.find(node => node?.operatorId === "csharp.directSource")
+        : null;
+      if (
+        owner &&
+        legacyDirectSource &&
+        !String(owner.parameters?.source || "")
+      ) {
+        owner.parameters = owner.parameters && typeof owner.parameters === "object"
+          ? owner.parameters
+          : {};
+        owner.parameters.source = String(legacyDirectSource.parameters?.source || "");
+      }
+      const sanitizedView = sanitizeGraphState({
+        nodes: source.nodes,
+        connections: source.connections,
+        viewport: source.viewport,
+        selectedNodeId: source.selectedNodeId,
+        selectedConnectionId: source.selectedConnectionId,
+        selectedWirePoint: source.selectedWirePoint,
+        nextSequence: source.nextSequence
+      });
+      sanitizedView.nodes = sanitizedView.nodes.filter(node => {
+        if (node.operatorId === "csharp.directSource") return false;
+        const definition = OPERATOR_DEFINITIONS[node.operatorId];
+        return Boolean(
+          definition?.customCSharpSyntaxNode === true ||
+          definition?.customCSharpSubgraphOnly === true
+        );
+      });
+      const allowedInternalIds = new Set(sanitizedView.nodes.map(node => node.id));
+      sanitizedView.connections = sanitizedView.connections.filter(connection =>
+        allowedInternalIds.has(connection.fromNode) &&
+        allowedInternalIds.has(connection.toNode)
+      );
+      if (!allowedInternalIds.has(sanitizedView.selectedNodeId)) {
+        sanitizedView.selectedNodeId = null;
+      }
+      const allowedInternalConnectionIds = new Set(
+        sanitizedView.connections.map(connection => connection.id)
+      );
+      if (!allowedInternalConnectionIds.has(sanitizedView.selectedConnectionId)) {
+        sanitizedView.selectedConnectionId = null;
+        sanitizedView.selectedWirePoint = null;
+      }
+      const internalIds = new Set(sanitizedView.nodes.map(node => node.id));
+      result.customCSharpFiles[ownerId] = {
+        version: 1,
+        fileName: String(source.fileName || "VisualProgram.cs").slice(0, 260),
+        projectId: String(source.projectId || "main").slice(0, 160),
+        parser: String(source.parser || "Visual C#").slice(0, 120),
+        languageVersion: String(source.languageVersion || "14.0").slice(0, 32),
+        sourceHash: String(source.sourceHash || "").slice(0, 160),
+        outputNodeId: internalIds.has(source.outputNodeId) ? source.outputNodeId : "",
+        rootSyntaxNodeId: internalIds.has(source.rootSyntaxNodeId) ? source.rootSyntaxNodeId : "",
+        directSourceNodeId: internalIds.has(source.directSourceNodeId) ? source.directSourceNodeId : "",
+        ...graphViewFrom(sanitizedView)
+      };
+    }
+
+    const migratedSyntaxIds = new Set();
+    for (const owner of result.nodes.filter(node =>
+      node.kind === "operator" &&
+      node.operatorId === "csharp.file" &&
+      !result.customCSharpFiles[node.id]
+    )) {
+      const rootConnection = result.connections.find(connection =>
+        connection.toNode === owner.id &&
+        connection.toPort === "content"
+      );
+      const rootNode = result.nodes.find(node => node.id === rootConnection?.fromNode);
+      if (
+        !rootConnection ||
+        OPERATOR_DEFINITIONS[rootNode?.operatorId]?.customCSharpSyntaxNode !== true
+      ) {
+        if (rootConnection) owner.parameters.legacyInlineContent = true;
+        continue;
+      }
+
+      const localSyntaxIds = new Set();
+      const pending = [rootNode.id];
+      while (pending.length > 0) {
+        const nodeId = pending.pop();
+        if (localSyntaxIds.has(nodeId)) continue;
+        const syntaxNode = result.nodes.find(node => node.id === nodeId);
+        if (OPERATOR_DEFINITIONS[syntaxNode?.operatorId]?.customCSharpSyntaxNode !== true) continue;
+        localSyntaxIds.add(nodeId);
+        for (const connection of result.connections) {
+          if (connection.toNode === nodeId) pending.push(connection.fromNode);
+        }
+      }
+
+      const hasRuntimeDependency = result.connections.some(connection =>
+        localSyntaxIds.has(connection.toNode) &&
+        !localSyntaxIds.has(connection.fromNode)
+      );
+      if (hasRuntimeDependency) {
+        owner.parameters.legacyInlineContent = true;
+        continue;
+      }
+
+      const internalNodes = result.nodes
+        .filter(node => localSyntaxIds.has(node.id))
+        .map(node => clone(node));
+      internalNodes.push({
+        ...clone(owner),
+        operatorId: "csharp.customFileOutput",
+        label: `Output · ${String(owner.parameters?.fileName || "Custom C# File")}`,
+        parameters: {}
+      });
+      const internalConnections = result.connections
+        .filter(connection =>
+          (localSyntaxIds.has(connection.fromNode) && localSyntaxIds.has(connection.toNode)) ||
+          connection.id === rootConnection.id
+        )
+        .map(connection => clone(connection));
+      result.customCSharpFiles[owner.id] = {
+        version: 1,
+        fileName: String(owner.parameters?.fileName || "VisualProgram.cs"),
+        projectId: String(owner.parameters?.projectId || "main"),
+        parser: "Migrated visual C# graph",
+        languageVersion: "14.0",
+        sourceHash: "",
+        outputNodeId: owner.id,
+        rootSyntaxNodeId: rootNode.id,
+        nodes: internalNodes,
+        connections: internalConnections,
+        viewport: { x: 56, y: 54, scale: 0.45 },
+        selectedNodeId: owner.id,
+        selectedConnectionId: null,
+        selectedWirePoint: null,
+        nextSequence: internalNodes.length + internalConnections.length + 1
+      };
+      for (const nodeId of localSyntaxIds) migratedSyntaxIds.add(nodeId);
+    }
+
+    if (migratedSyntaxIds.size > 0) {
+      result.nodes = result.nodes.filter(node => !migratedSyntaxIds.has(node.id));
+      result.connections = result.connections.filter(connection =>
+        !migratedSyntaxIds.has(connection.fromNode) &&
+        !migratedSyntaxIds.has(connection.toNode)
+      );
+      result.selectedNodeId = result.nodes.some(node => node.id === result.selectedNodeId)
+        ? result.selectedNodeId
+        : null;
+      result.selectedConnectionId = result.connections.some(connection => connection.id === result.selectedConnectionId)
+        ? result.selectedConnectionId
+        : null;
+      result.selectedWirePoint = null;
+    }
+
     return result;
   }
 
@@ -3266,33 +3644,10 @@
     );
   }
 
-  function graphSerializableState() {
+  function serializableGraphView(source) {
+    const view = graphViewFrom(source);
     return {
-      version: GRAPH_SCHEMA_VERSION,
-      revision:
-        Math.max(
-          0,
-          Math.trunc(
-            finiteNumber(
-              graph.revision,
-              graphCodegenRevision
-            )
-          )
-        ),
-      active: graph.active,
-      lastOpenPage:
-        graph.lastOpenPage === "runtime-graph"
-          ? "runtime-graph"
-          : "configuration-outline",
-      sourceSignature:
-        graph.sourceSignature,
-      showAdvancedNodes:
-        graph.showAdvancedNodes === true,
-      configSnapshot:
-        graph.configSnapshot
-          ? clone(graph.configSnapshot)
-          : null,
-      nodes: graph.nodes.map(node => ({
+      nodes: view.nodes.map(node => ({
         id: node.id,
         kind: node.kind,
         ...(node.kind === "operator"
@@ -3328,7 +3683,7 @@
           )
       })),
       connections:
-        graph.connections.map(
+        view.connections.map(
           connection => ({
             id: connection.id,
             fromNode:
@@ -3360,25 +3715,55 @@
           })
         ),
       viewport: {
-        ...graph.viewport
+        ...view.viewport
       },
       selectedNodeId:
-        graph.selectedNodeId,
+        view.selectedNodeId,
       selectedConnectionId:
-        graph.selectedConnectionId,
+        view.selectedConnectionId,
       selectedWirePoint:
-        graph.selectedWirePoint
+        view.selectedWirePoint
           ? {
               connectionId:
-                graph.selectedWirePoint
+                view.selectedWirePoint
                   .connectionId,
               pointId:
-                graph.selectedWirePoint
+                view.selectedWirePoint
                   .pointId
             }
           : null,
       nextSequence:
-        graph.nextSequence
+        view.nextSequence
+    };
+  }
+
+  function graphSerializableState() {
+    captureCustomCSharpEditorView();
+    const customCSharpFiles = {};
+    for (const [ownerId, customGraph] of Object.entries(graph.customCSharpFiles || {})) {
+      customCSharpFiles[ownerId] = {
+        version: 1,
+        fileName: String(customGraph?.fileName || "VisualProgram.cs"),
+        projectId: String(customGraph?.projectId || "main"),
+        parser: String(customGraph?.parser || "Visual C#"),
+        languageVersion: String(customGraph?.languageVersion || "14.0"),
+        sourceHash: String(customGraph?.sourceHash || ""),
+        outputNodeId: String(customGraph?.outputNodeId || ""),
+        rootSyntaxNodeId: String(customGraph?.rootSyntaxNodeId || ""),
+        directSourceNodeId: String(customGraph?.directSourceNodeId || ""),
+        ...serializableGraphView(customGraph)
+      };
+    }
+    return {
+      version: GRAPH_SCHEMA_VERSION,
+      revision: Math.max(0, Math.trunc(finiteNumber(graph.revision, graphCodegenRevision))),
+      active: graph.active,
+      lastOpenPage: graph.lastOpenPage === "runtime-graph" ? "runtime-graph" : "configuration-outline",
+      sourceSignature: graph.sourceSignature,
+      showAdvancedNodes: graph.showAdvancedNodes === true,
+      configSnapshot: graph.configSnapshot ? clone(graph.configSnapshot) : null,
+      customCSharpFiles,
+      ...serializableGraphView(rootRuntimeGraphView())
     };
   }
 
@@ -3439,12 +3824,13 @@
       }
 
       graph.version = GRAPH_SCHEMA_VERSION;
-      lastPersistedGraphReference = graph;
+      const persistedGraph = graphSerializableState();
+      lastPersistedGraphReference = persistedGraph;
       lastPersistedGraphJson = "";
 
       bridge.setExtensionState(
         EXTENSION_NAME,
-        graph,
+        persistedGraph,
         {
           assumeDetached: true,
           persistImmediately:
@@ -8848,6 +9234,11 @@
   function buildTypedNodeGraphCSharpContribution(
     request = {}
   ) {
+    if (customCSharpEditor && !customCSharpRootOperation) {
+      return withRuntimeRootGraph(() =>
+        buildTypedNodeGraphCSharpContribution(request)
+      );
+    }
     synchronizeGraphForCodegen(
       request
     );
@@ -9033,7 +9424,6 @@
           ]
         )
       );
-
     const configurationValueEntries =
       configurationEntries.filter(entry => {
         const node = entry?.node;
@@ -12926,8 +13316,13 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         requestedGraph
       );
     const diagnostics = [];
+    const legacyCSharpMigration =
+      finiteNumber(requestedGraph.version, 0) < 23 &&
+      Object.keys(candidate.customCSharpFiles || {}).length >
+        Object.keys(requestedGraph.customCSharpFiles || {}).length;
 
     if (
+      !legacyCSharpMigration &&
       candidate.nodes.length !==
         rawNodes.length
     ) {
@@ -12937,6 +13332,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     }
 
     if (
+      !legacyCSharpMigration &&
       candidate.connections.length !==
         rawConnections.length
     ) {
@@ -15299,6 +15695,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         ? `<span class="brand-mark rml-pack-brand-mark rml-runtime-graph-loader rml-runtime-graph-spinner" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">Loading Runtime Graph…</span>`
         : catalogFailed
           ? `<span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">Runtime Graph unavailable</span>`
+          : customCSharpEditor
+            ? `<svg class="rml-pack-back-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5 M10 7l-5 5 5 5"></path></svg><span class="top-action-label">Back to Runtime Graph</span>`
           : active
             ? `<svg class="rml-pack-back-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5 M10 7l-5 5 5 5"></path></svg><span class="top-action-label">Back to Outline</span>`
             : graph?.active
@@ -15311,6 +15709,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         ? "Runtime Graph is loading"
         : catalogFailed
           ? "Runtime Graph is unavailable"
+          : customCSharpEditor
+            ? "Back to Runtime Graph"
           : active
             ? "Back to Configuration Outline"
             : graph?.active
@@ -15559,6 +15959,11 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       return;
     }
 
+    if (customCSharpEditor) {
+      closeCustomCSharpFileGraph();
+      return;
+    }
+
     if (
       graphUsesCatalogOperators() &&
       graphCatalogReadiness !== "ready"
@@ -15795,6 +16200,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
   }
 
   function unpackToOutline() {
+    if (customCSharpEditor) {
+      closeCustomCSharpFileGraph();
+    }
     cancelInteraction(true);
     commitPresentationPage(
       "configuration-outline",
@@ -16510,22 +16918,30 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
     if (dom.paletteTitle) {
       dom.paletteTitle.innerHTML =
-        "<small>Step 2</small> Node library";
+        customCSharpEditor
+          ? "<small>Custom C# File</small> Node library"
+          : "<small>Step 2</small> Node library";
     }
 
     if (dom.canvasTitle) {
       dom.canvasTitle.innerHTML =
-        "<small>Step 3</small> Typed runtime graph";
+        customCSharpEditor
+          ? "<small>File graph</small> Custom C# File"
+          : "<small>Step 3</small> Typed runtime graph";
     }
 
     if (dom.inspectorTitle) {
       dom.inspectorTitle.innerHTML =
-        "<small>Step 4</small> Node inspector";
+        customCSharpEditor
+          ? "<small>C# file graph</small> Node inspector"
+          : "<small>Step 4</small> Node inspector";
     }
 
     if (dom.activeContainerName) {
       dom.activeContainerName.textContent =
-        "Exact type matching";
+        customCSharpEditor
+          ? `Isolated · ${customCSharpEditor.fileName}`
+          : "Exact type matching";
     }
 
     renderGraphPalette();
@@ -16716,6 +17132,19 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     );
 
     return button;
+  }
+
+  function definitionBelongsToCurrentGraph(definition) {
+    if (customCSharpEditor) {
+      return Boolean(
+        definition?.customCSharpSyntaxNode === true ||
+        definition?.customCSharpSubgraphOnly === true
+      );
+    }
+    return !(
+      definition?.customCSharpSyntaxNode === true ||
+      definition?.customCSharpSubgraphOnly === true
+    );
   }
 
   function renderGraphPalette() {
@@ -17085,9 +17514,11 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         configSummary,
         configList
       );
-      scroll.appendChild(
-        configGroup
-      );
+      if (!customCSharpEditor) {
+        scroll.appendChild(
+          configGroup
+        );
+      }
 
       const query =
         search.value
@@ -17107,9 +17538,11 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
           if (
             definition.hiddenFromPalette === true ||
+            !definitionBelongsToCurrentGraph(definition) ||
             (
               !showAdvanced &&
-              definition.expertOnly === true
+              definition.expertOnly === true &&
+              !customCSharpEditor
             )
           ) {
             continue;
@@ -17227,9 +17660,11 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
         if (
           definition.hiddenFromPalette === true ||
+          !definitionBelongsToCurrentGraph(definition) ||
           (
             !showAdvanced &&
-            definition.expertOnly === true
+            definition.expertOnly === true &&
+            !customCSharpEditor
           )
         ) {
           continue;
@@ -17522,7 +17957,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         operatorId
       ];
 
-    if (!definition) {
+    if (
+      !definition ||
+      !definitionBelongsToCurrentGraph(definition)
+    ) {
       return null;
     }
 
@@ -26010,6 +26448,14 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       return;
     }
 
+    if (
+      !customCSharpEditor &&
+      node.operatorId === "csharp.file" &&
+      graph.customCSharpFiles
+    ) {
+      delete graph.customCSharpFiles[nodeId];
+    }
+
     nodeBodyScrollPositions.delete(
       nodeId
     );
@@ -27397,6 +27843,31 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         )
       );
     } else {
+      if (
+        definition.customCSharpFile === true &&
+        !customCSharpEditor
+      ) {
+        actions.appendChild(
+          inspectorButton(
+            "Convert to Node Graph",
+            () => convertCustomCSharpFileToNodes(node.id),
+            "primary"
+          )
+        );
+      }
+      if (
+        definition.customCSharpFile === true &&
+        !customCSharpEditor &&
+        graph.customCSharpFiles?.[node.id]
+      ) {
+        actions.appendChild(
+          inspectorButton(
+            "Open Node Graph",
+            () => openCustomCSharpFileGraph(node.id),
+            "secondary"
+          )
+        );
+      }
       actions.appendChild(
         inspectorButton(
           "Duplicate",
@@ -28091,6 +28562,15 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     };
 
     graph.nodes.push(copy);
+    if (
+      !customCSharpEditor &&
+      node.operatorId === "csharp.file" &&
+      graph.customCSharpFiles?.[node.id]
+    ) {
+      graph.customCSharpFiles[copy.id] = clone(
+        graph.customCSharpFiles[node.id]
+      );
+    }
     graph.selectedNodeId = copy.id;
     graph.selectedConnectionId = null;
     clearSelectedWirePoint();
@@ -31247,7 +31727,6 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       graph = sanitizeGraphState(incoming);
       graph.lastOpenPage =
         savedPresentationPage();
-
       runtimeGraphViewActive = false;
       updateGraphCatalogReadiness();
       resetGraphRenderCaches();
@@ -31296,6 +31775,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         value.showAdvancedNodes === true,
       configSnapshot:
         value.configSnapshot,
+      customCSharpFiles:
+        value.customCSharpFiles || {},
       nodes: value.nodes,
       connections: value.connections,
       viewport: value.viewport,
@@ -31928,6 +32409,21 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     updatePackButton();
   }
 
+  function handleVisualCSharpReady() {
+    if (!graph || customCSharpEditor) return;
+    const wasActive = graph.active === true;
+    graph = sanitizeGraphState(graphSerializableState());
+    graph.active = wasActive;
+    resetGraphRenderCaches();
+    pruneConnections();
+    persistGraph(true);
+    if (runtimeGraphViewActive) {
+      renderGraphPalette();
+      renderGraphNodesAndWires();
+      renderGraphInspector();
+    }
+  }
+
   function refreshAfterNodeModulesReady() {
     if (!bridge || !graph) {
       return;
@@ -32031,6 +32527,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     window.addEventListener(
       "rml-api-node-factory-ready",
       handleApiNodeFactoryReady
+    );
+    window.addEventListener(
+      "rml-visual-csharp-ready",
+      handleVisualCSharpReady
     );
     document.addEventListener(
       "rml-catalog:loaded",
@@ -34302,8 +34802,32 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
   Object.defineProperty(window, "RMLDynamicGraphHost", {
     value: Object.freeze({
-      version: 32,
+      version: 36,
       getState() { return graph; },
+      getRootState() {
+        if (!customCSharpEditor) return graph;
+        captureCustomCSharpEditorView();
+        return {
+          ...graph,
+          ...rootRuntimeGraphView()
+        };
+      },
+      getCustomCSharpEditorState() {
+        return Object.freeze({
+          active: Boolean(customCSharpEditor),
+          fileNodeId: customCSharpEditor?.fileNodeId || "",
+          fileName: customCSharpEditor?.fileName || ""
+        });
+      },
+      openCustomCSharpFile(fileNodeId) {
+        return {
+          ok: openCustomCSharpFileGraph(String(fileNodeId || "")),
+          fileNodeId: String(fileNodeId || "")
+        };
+      },
+      closeCustomCSharpFile() {
+        return { ok: closeCustomCSharpFileGraph() };
+      },
       getRendererStats() {
         return {
           ...(
@@ -34870,12 +35394,22 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           Array.isArray(graph.connections)
         );
       },
-      ensureActiveMode() {
+      ensureActiveMode(options = {}) {
         if (graph?.active !== true) {
-          return {
-            ok: false,
-            reason: "The Runtime Graph product state is not active."
-          };
+          if (options.activateIfNeeded !== true) {
+            return {
+              ok: false,
+              reason: "The Runtime Graph product state is not active."
+            };
+          }
+          const snapshot = snapshotFromBuilder();
+          graph.active = true;
+          graph.configSnapshot = snapshot;
+          graph.sourceSignature = snapshotSignature(snapshot);
+          if (Array.isArray(snapshot.nodes) && snapshot.nodes.length > 0) {
+            ensureConfigurationNode();
+          }
+          pruneConnections();
         }
         commitPresentationPage(
           "runtime-graph",
