@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = 5;
+  const VERSION = 6;
   const WIRE_CELL_SIZE = 240;
   const NODE_CELL_SIZE = 360;
   const WIRE_LINEAR_PICK_LIMIT = 512;
@@ -538,18 +538,54 @@
             : 1.0;
           float t = clamp(float(pointIndex) / STEPS, 0.0, 1.0);
           vec2 position = cubicPoint(t);
-          vec2 tangent = cubicDerivative(t);
-          float tangentLength = length(tangent);
-          if (tangentLength <= 0.000001) {
-            tangent = aP3 - aP0;
-            tangentLength = max(0.000001, length(tangent));
+          float stepSize = 1.0 / STEPS;
+          vec2 previousPosition = cubicPoint(max(0.0, t - stepSize));
+          vec2 nextPosition = cubicPoint(min(1.0, t + stepSize));
+          vec2 incoming = position - previousPosition;
+          vec2 outgoing = nextPosition - position;
+          float incomingLength = length(incoming);
+          float outgoingLength = length(outgoing);
+          vec2 incomingDirection = incomingLength > 0.000001
+            ? incoming / incomingLength
+            : vec2(0.0);
+          vec2 outgoingDirection = outgoingLength > 0.000001
+            ? outgoing / outgoingLength
+            : vec2(0.0);
+          if (pointIndex == 0) {
+            incomingDirection = outgoingDirection;
           }
-          vec2 normal = vec2(-tangent.y, tangent.x) / tangentLength;
+          if (pointIndex == int(STEPS)) {
+            outgoingDirection = incomingDirection;
+          }
+          vec2 joinedDirection =
+            incomingDirection + outgoingDirection;
+          float joinLength = length(joinedDirection);
+          vec2 fallbackDirection = aP3 - aP0;
+          float fallbackLength = length(fallbackDirection);
+          if (fallbackLength <= 0.000001) {
+            fallbackDirection = vec2(1.0, 0.0);
+            fallbackLength = 1.0;
+          }
+          vec2 tangent = joinLength > 0.000001
+            ? joinedDirection / joinLength
+            : fallbackDirection / fallbackLength;
+          vec2 normal = vec2(-tangent.y, tangent.x);
+          float reversalDot = dot(
+            incomingDirection,
+            outgoingDirection
+          );
+          float joinWidthFactor = smoothstep(
+            -0.985,
+            -0.90,
+            reversalDot
+          );
           float safeScale = max(uScale, 0.0001);
           float antialiasGraph = 1.25 / safeScale;
           float totalHalfWidth = 7.0 + antialiasGraph;
+          float extrusionHalfWidth =
+            totalHalfWidth * joinWidthFactor;
           vec2 graphPosition =
-            position + normal * side * totalHalfWidth;
+            position + normal * side * extrusionHalfWidth;
           vec2 screenPosition =
             graphPosition * uScale + uPan;
           vec2 clipPosition = vec2(
@@ -558,7 +594,7 @@
           );
           gl_Position = vec4(clipPosition, 0.0, 1.0);
           vColor = aColor;
-          vEdgePixels = side * totalHalfWidth * uScale;
+          vEdgePixels = side * extrusionHalfWidth * uScale;
           vCoreHalfPixels = max(0.05, 2.0 * uScale);
           vDistance = t * aLength;
           vDash = aDash;

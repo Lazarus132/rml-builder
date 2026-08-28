@@ -36,7 +36,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "custom-csharp-open-auto-sync-20260828-v603f14";
+  "assistant-ready-event-paint-start-20260828-v603f17";
 
 function removeLegacyHelpHashFromAddress() {
   if (!/^#(?:info-|shortcut-)/i.test(window.location.hash)) {
@@ -30404,13 +30404,6 @@ async function initialize() {
   renderMetadata();
   renderPalette();
   installSetupAssistantBridge();
-  window.setTimeout(() => {
-    const visualTourTest =
-      new URLSearchParams(window.location.search).has("rmlTourTest") ||
-      window.location.hash.includes("rmlTourTest");
-
-    void ensureSetupAssistantLoaded(!visualTourTest);
-  }, 250);
 
   document
     .querySelectorAll(
@@ -31436,7 +31429,7 @@ async function initialize() {
       initialExampleProjectLoadError;
     initialExampleProjectLoadError = null;
 
-    void showBuilderNotice({
+    await showBuilderNotice({
       tone: "warning",
       kicker: "First-start example unavailable",
       title: `${EXAMPLE_PROJECT_FILE_NAME} was not loaded`,
@@ -31446,6 +31439,18 @@ async function initialize() {
       confirmLabel: "OK"
     });
   }
+
+  await paintBuilderUi();
+  const visualTourTest =
+    new URLSearchParams(
+      window.location.search
+    ).has("rmlTourTest") ||
+    window.location.hash.includes(
+      "rmlTourTest"
+    );
+  void ensureSetupAssistantLoaded(
+    !visualTourTest
+  );
 }
 
 if (document.readyState === "loading") {

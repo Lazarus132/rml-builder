@@ -26,7 +26,7 @@
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "visual_csharp.js?v=12-auto-open-sync-v603f14",
+    "visual_csharp.js?v=13-large-coordinate-space-v603f16",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(

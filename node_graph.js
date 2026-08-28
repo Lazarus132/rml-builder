@@ -21,7 +21,9 @@
   const GRAPH_GRID = 12;
   const GRAPH_AUTOPAN_EDGE = 54;
   const GRAPH_AUTOPAN_MAX_SPEED = 24;
-  const GRAPH_COORDINATE_LIMIT = 100000;
+  const LEGACY_GRAPH_COORDINATE_LIMIT = 100000;
+  const GRAPH_COORDINATE_LIMIT = 250000000;
+  const CUSTOM_CSHARP_COORDINATE_SPACE_VERSION = 2;
   const GRAPH_NODE_MIN_WIDTH = 120;
   const GRAPH_NODE_MIN_HEIGHT = 96;
   const GRAPH_NODE_MIN_BODY_HEIGHT = 48;
@@ -30,6 +32,7 @@
   const GRAPH_NODE_MAX_HEIGHT =
     GRAPH_STAGE_HEIGHT - 120;
   const GRAPH_WIRE_DRAG_THRESHOLD = 4;
+  const GRAPH_NODE_DRAG_THRESHOLD = 3;
   const GRAPH_WIRE_POINT_SNAP = 6;
   const GRAPH_WIRE_POINT_REUSE_DISTANCE = 18;
   const GRAPH_WIRE_PATH_SAMPLES = 36;
@@ -2622,6 +2625,8 @@
       parser: "Visual C#",
       languageVersion: "14.0",
       importedSource: false,
+      coordinateSpaceVersion:
+        CUSTOM_CSHARP_COORDINATE_SPACE_VERSION,
       sourceHash: "",
       outputNodeId,
       rootSyntaxNodeId: "",
@@ -3512,14 +3517,40 @@
         sanitizedView.selectedWirePoint = null;
       }
       const internalIds = new Set(sanitizedView.nodes.map(node => node.id));
+      const importedSource =
+        source.importedSource === true;
+      const coordinateSpaceVersion =
+        Math.max(
+          0,
+          Math.trunc(
+            finiteNumber(
+              source.coordinateSpaceVersion,
+              0
+            )
+          )
+        );
+      const legacyImportedLayoutSaturated =
+        importedSource &&
+        coordinateSpaceVersion <
+          CUSTOM_CSHARP_COORDINATE_SPACE_VERSION &&
+        sanitizedView.nodes.some(node =>
+          Math.abs(node.x) ===
+            LEGACY_GRAPH_COORDINATE_LIMIT ||
+          Math.abs(node.y) ===
+            LEGACY_GRAPH_COORDINATE_LIMIT
+        );
       result.customCSharpFiles[ownerId] = {
         version: 1,
         fileName: String(source.fileName || "VisualProgram.cs").slice(0, 260),
         projectId: String(source.projectId || "main").slice(0, 160),
         parser: String(source.parser || "Visual C#").slice(0, 120),
         languageVersion: String(source.languageVersion || "14.0").slice(0, 32),
-        importedSource: source.importedSource === true,
-        sourceHash: String(source.sourceHash || "").slice(0, 160),
+        importedSource,
+        coordinateSpaceVersion:
+          CUSTOM_CSHARP_COORDINATE_SPACE_VERSION,
+        sourceHash: legacyImportedLayoutSaturated
+          ? ""
+          : String(source.sourceHash || "").slice(0, 160),
         outputNodeId: internalIds.has(source.outputNodeId) ? source.outputNodeId : "",
         rootSyntaxNodeId: internalIds.has(source.rootSyntaxNodeId) ? source.rootSyntaxNodeId : "",
         directSourceNodeId: internalIds.has(source.directSourceNodeId) ? source.directSourceNodeId : "",
@@ -3590,6 +3621,8 @@
         parser: "Migrated visual C# graph",
         languageVersion: "14.0",
         importedSource: false,
+        coordinateSpaceVersion:
+          CUSTOM_CSHARP_COORDINATE_SPACE_VERSION,
         sourceHash: "",
         outputNodeId: owner.id,
         rootSyntaxNodeId: rootNode.id,
@@ -3815,6 +3848,8 @@
         parser: String(customGraph?.parser || "Visual C#"),
         languageVersion: String(customGraph?.languageVersion || "14.0"),
         importedSource: customGraph?.importedSource === true,
+        coordinateSpaceVersion:
+          CUSTOM_CSHARP_COORDINATE_SPACE_VERSION,
         sourceHash: String(customGraph?.sourceHash || ""),
         outputNodeId: String(customGraph?.outputNodeId || ""),
         rootSyntaxNodeId: String(customGraph?.rootSyntaxNodeId || ""),
@@ -9492,6 +9527,7 @@
           ]
         )
       );
+
     const configurationValueEntries =
       configurationEntries.filter(entry => {
         const node = entry?.node;
@@ -19238,13 +19274,20 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       `[data-graph-node-id="${CSS.escape(node.id)}"]`
     );
     const rectangle = dom.viewport?.getBoundingClientRect();
-    if (element && rectangle) {
-      const width = element.offsetWidth || 280;
-      const height = element.offsetHeight || 180;
+    if (rectangle) {
+      const estimated =
+        estimatedGraphNodeGeometry(node);
+      const width =
+        element?.offsetWidth ||
+        estimated.width;
+      const height =
+        element?.offsetHeight ||
+        estimated.height;
       graph.viewport.x = rectangle.width / 2 - (node.x + width / 2) * graph.viewport.scale;
       graph.viewport.y = rectangle.height / 2 - (node.y + height / 2) * graph.viewport.scale;
       applyViewportTransform();
       persistGraphView();
+      scheduleGraphNodeVirtualization();
     }
 
     showGraphMessage(
@@ -24540,7 +24583,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
     graphNodeVirtualizationSignature =
       renderedGraphNodeSignature(nodes);
-    
+
     if (!graphWireFullRenderPending) {
       synchronizeGpuOverviewNodes();
     }
@@ -29880,6 +29923,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       originalY: node.y,
       clientX: event.clientX,
       clientY: event.clientY,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      dragging: false,
       connectionIds:
         incidentGraphConnectionIds(
           nodeId
@@ -29894,21 +29940,6 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     } catch {
     }
 
-    startAutoPan(
-      event.clientX,
-      event.clientY,
-      () => {
-        if (
-          activeInteraction?.kind ===
-          "node"
-        ) {
-          updateNodeDragPosition(
-            activeInteraction.clientX,
-            activeInteraction.clientY
-          );
-        }
-      }
-    );
   }
 
   function updateNodeDragPosition(
@@ -29926,6 +29957,39 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
     interaction.clientX = clientX;
     interaction.clientY = clientY;
+
+    if (!interaction.dragging) {
+      const screenDistance =
+        Math.hypot(
+          clientX -
+            interaction.startClientX,
+          clientY -
+            interaction.startClientY
+        );
+      if (
+        screenDistance <
+          GRAPH_NODE_DRAG_THRESHOLD
+      ) {
+        return;
+      }
+      interaction.dragging = true;
+      startAutoPan(
+        clientX,
+        clientY,
+        () => {
+          if (
+            activeInteraction?.kind ===
+              "node" &&
+            activeInteraction.dragging
+          ) {
+            updateNodeDragPosition(
+              activeInteraction.clientX,
+              activeInteraction.clientY
+            );
+          }
+        }
+      );
+    }
 
     const node =
       findGraphNode(
@@ -31533,7 +31597,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           activeInteraction.nodeId
         );
 
-      if (node) {
+      if (
+        node &&
+        activeInteraction.dragging
+      ) {
         node.x =
           Math.round(
             node.x / GRAPH_GRID
@@ -34878,7 +34945,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
   Object.defineProperty(window, "RMLDynamicGraphHost", {
     value: Object.freeze({
-      version: 37,
+      version: 38,
       getState() { return graph; },
       getRootState() {
         if (!customCSharpEditor) return graph;
