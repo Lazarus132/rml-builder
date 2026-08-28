@@ -26,7 +26,7 @@
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "visual_csharp.js?v=10-tree-layout-empty-graph-v603f6",
+    "visual_csharp.js?v=11-import-expert-visibility-v603f8",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
@@ -1149,7 +1149,6 @@
         return live;
       }
     }
-
     try {
       live =
         await probeDirectScannerRange(

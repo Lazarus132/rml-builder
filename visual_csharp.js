@@ -1879,6 +1879,23 @@
     const expertPanel = document.createElement("details");
     expertPanel.className = "project-csharp-import-expert";
 
+    const refreshExpertPanelVisibility = () => {
+      const host = window.RMLDynamicGraphHost;
+      const editorState = host?.getCustomCSharpEditorState?.();
+      if (editorState?.active === true) {
+        expertPanel.hidden = true;
+        expertPanel.open = false;
+        return;
+      }
+      const rootState = host?.getRootState?.();
+      expertPanel.hidden = !(
+        rootState?.showAdvancedNodes === true
+      );
+      if (expertPanel.hidden) {
+        expertPanel.open = false;
+      }
+    };
+
     const summary = document.createElement("summary");
     summary.textContent = "Expert tools · C# 14 / Roslyn conversion";
     expertPanel.appendChild(summary);
@@ -2016,6 +2033,15 @@
     body.append(button, input, pending, localStatus);
     expertPanel.appendChild(body);
     actions.insertAdjacentElement("afterend", expertPanel);
+    refreshExpertPanelVisibility();
+    window.addEventListener(
+      "rml-graph-advanced-mode-change",
+      refreshExpertPanelVisibility
+    );
+    window.addEventListener(
+      "rml-dynamic-graph-commit",
+      refreshExpertPanelVisibility
+    );
   }
 
   const visualCSharpApi = Object.freeze({

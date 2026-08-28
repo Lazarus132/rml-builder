@@ -36,7 +36,21 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "custom-csharp-always-open-action-20260828-v603f7";
+  "help-buttons-no-anchor-fallback-20260828-v603f13";
+
+function removeLegacyHelpHashFromAddress() {
+  if (!/^#(?:info-|shortcut-)/i.test(window.location.hash)) {
+    return;
+  }
+
+  window.history.replaceState(
+    window.history.state,
+    "",
+    `${window.location.pathname}${window.location.search}`
+  );
+}
+
+removeLegacyHelpHashFromAddress();
 
 function exposeRmlBuilderBuildId() {
   document.documentElement.dataset
@@ -356,7 +370,6 @@ function requestGeneratedOutputUpdate() {
     elements.codeSummary.textContent =
       "Large runtime graph loaded · generated files are being refreshed";
   }
-
   updateGeneratedOutput();
 }
 
@@ -23190,7 +23203,6 @@ async function saveProjectJson() {
     setProjectFileStatus(
       "Preparing project JSON…"
     );
-
     captureVisibleBuilderPage(
       "save-json",
       true
@@ -25183,6 +25195,17 @@ function informationNodeCard(operatorId, definition) {
     heading.appendChild(badge);
   }
 
+  if (
+    definition.customCSharpSyntaxNode === true ||
+    definition.customCSharpSubgraphOnly === true
+  ) {
+    const badge = document.createElement("span");
+    badge.className = "information-node-badge file-graph";
+    badge.textContent = "Custom C# File Graph only";
+    badge.title = "This node is available only inside the isolated graph opened from a Custom C# File node.";
+    heading.appendChild(badge);
+  }
+
   const id = document.createElement("small");
   id.textContent = operatorId;
   const description = document.createElement("p");
@@ -25415,8 +25438,13 @@ function renderInformationNodeReference() {
   const harmonySourceEntries = advancedEntries.filter(entry =>
     harmonySourceIds.has(entry.operatorId)
   );
+  const customCSharpFileGraphEntries = advancedEntries.filter(entry =>
+    entry.definition.customCSharpSyntaxNode === true ||
+    entry.definition.customCSharpSubgraphOnly === true
+  );
   const remainingAdvanced = advancedEntries.filter(entry =>
-    !harmonySourceIds.has(entry.operatorId)
+    !harmonySourceIds.has(entry.operatorId) &&
+    !customCSharpFileGraphEntries.includes(entry)
   );
 
   appendInformationNodeSection(
@@ -25427,6 +25455,17 @@ function renderInformationNodeReference() {
       advanced: true,
       description:
         "These two nodes deliberately look similar but solve different load phases: Harmony Exact Patch Source is compiled into the normal rml_mods DLL and PatchAll is invoked from OnEngineInit; Early Harmony Patch Library creates a separate rml_libs DLL for patches that must exist before normal mods load. The early library cannot use graph sockets or generated main-mod state."
+    }
+  );
+
+  appendInformationNodeSection(
+    fragment,
+    "Advanced · Custom C# File Graph Nodes",
+    customCSharpFileGraphEntries,
+    {
+      advanced: true,
+      description:
+        "C# 14 syntax, Roslyn AST/token/trivia and file-output building blocks available exclusively inside the isolated graph of a Custom C# File node. They construct the file's complete source and do not appear in the normal Runtime Graph palette."
     }
   );
 
@@ -25892,7 +25931,11 @@ function setInformationNodeScope(
       panel.hidden = !active;
 
       if (active && resetScroll) {
-        panel.scrollTop = 0;
+        panel.scrollTo({
+          top: 0,
+          left: panel.scrollLeft,
+          behavior: "smooth"
+        });
       }
     });
 
@@ -25931,7 +25974,11 @@ function setInformationPage(pageName) {
   );
 
   if (activeContent) {
-    activeContent.scrollTop = 0;
+    activeContent.scrollTo({
+      top: 0,
+      left: activeContent.scrollLeft,
+      behavior: "smooth"
+    });
   }
 
   if (targetName === "nodes") {
@@ -26010,8 +26057,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "help_template.html?v=61-custom-csharp-layout-v603f6",
-    "help_template.js?v=61-custom-csharp-layout-v603f6",
+    "help_template.html?v=62-section-buttons-v603f13",
+    "help_template.js?v=62-section-buttons-v603f13",
     "help-template",
     "RMLHelpTemplateMarkup"
   )
@@ -26051,6 +26098,43 @@ function bindInformationDialogEvents() {
   dialog.dataset.bound = "true";
   elements.informationClose?.addEventListener("click", closeInformationDialog);
   dialog.addEventListener("click", event => {
+    const sectionButton = event.target.closest(
+      ".information-nav [data-information-section-target]"
+    );
+    if (sectionButton) {
+      const targetId =
+        sectionButton.dataset
+          .informationSectionTarget || "";
+      const page = sectionButton.closest(
+        "[data-information-page]"
+      );
+      const content = page?.querySelector(
+        ".information-content"
+      );
+      const section = targetId
+        ? page?.querySelector(
+            `#${CSS.escape(targetId)}`
+          )
+        : null;
+
+      if (content && section) {
+        const contentRect =
+          content.getBoundingClientRect();
+        const sectionRect =
+          section.getBoundingClientRect();
+
+        content.scrollTo({
+          top:
+            content.scrollTop +
+            sectionRect.top -
+            contentRect.top,
+          left: content.scrollLeft,
+          behavior: "smooth"
+        });
+      }
+      return;
+    }
+
     const scopeButton = event.target.closest(
       "[data-information-node-scope-target]"
     );
@@ -29835,6 +29919,12 @@ function installUniversalScrollLayerSelector() {
       const modifierCycling =
         event.ctrlKey ||
         event.metaKey;
+      const insideInformationDialog =
+        Boolean(
+          target?.closest(
+            ".information-dialog[open]"
+          )
+        );
 
       if (modifierCycling) {
         if (session) {
@@ -29880,6 +29970,13 @@ function installUniversalScrollLayerSelector() {
         }
 
         cycleSelection(event);
+        return;
+      }
+
+      if (
+        insideInformationDialog &&
+        !universalOwnsWheel
+      ) {
         return;
       }
 

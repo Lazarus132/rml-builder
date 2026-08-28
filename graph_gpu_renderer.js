@@ -1042,9 +1042,6 @@
 
     createWireLayerData(record) {
       if (record.hidden === true) {
-        // A structural deletion is painted before the full graph analysis
-        // finishes. Move this transient instance completely off-canvas so
-        // shadows and glows disappear with the core in one buffer update.
         return [
           -1000000, -1000000,
           -1000000, -1000000,

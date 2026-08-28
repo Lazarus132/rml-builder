@@ -2182,6 +2182,7 @@ footer strong {
   letter-spacing: 0.035em;
   cursor: pointer;
   list-style: none;
+  -webkit-user-select: none;
   user-select: none;
 }
 
@@ -6761,18 +6762,22 @@ body:has(.node-pointer-ghost) .builder-canvas {
   background: rgba(10, 9, 15, 0.76);
 }
 
-.information-nav a {
+.information-nav button {
+  width: 100%;
   padding: 9px 10px;
   border: 1px solid transparent;
   border-radius: 7px;
+  background: transparent;
   color: var(--muted);
   font-size: 10px;
   font-weight: 720;
+  text-align: left;
   text-decoration: none;
+  cursor: pointer;
 }
 
-.information-nav a:hover,
-.information-nav a:focus-visible {
+.information-nav button:hover,
+.information-nav button:focus-visible {
   border-color: var(--line-strong);
   outline: 0;
   background: var(--panel-raised);
@@ -6782,7 +6787,7 @@ body:has(.node-pointer-ghost) .builder-canvas {
 .information-content {
   min-height: 0;
   overflow: auto;
-  scroll-behavior: smooth;
+  scroll-behavior: auto;
   padding: 22px clamp(18px, 4vw, 48px) 48px;
 }
 

@@ -3488,7 +3488,6 @@
         ...graphViewFrom(sanitizedView)
       };
     }
-
     const migratedSyntaxIds = new Set();
     for (const owner of result.nodes.filter(node =>
       node.kind === "operator" &&
@@ -9452,7 +9451,6 @@
           ]
         )
       );
-
     const configurationValueEntries =
       configurationEntries.filter(entry => {
         const node = entry?.node;
@@ -16980,6 +16978,17 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       true
     );
     updatePackButton();
+    window.dispatchEvent(
+      new CustomEvent(
+        "rml-graph-advanced-mode-change",
+        {
+          detail: Object.freeze({
+            enabled: graph.showAdvancedNodes === true,
+            customCSharpGraph: Boolean(customCSharpEditor)
+          })
+        }
+      )
+    );
   }
 
   function deactivateGraphMode() {
@@ -17226,6 +17235,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     modeInput.type = "checkbox";
     modeInput.checked =
       graph.showAdvancedNodes === true;
+    modeInput.disabled = Boolean(customCSharpEditor);
 
     const modeCopy =
       document.createElement("span");
@@ -17240,6 +17250,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       modeInput,
       modeCopy
     );
+    modeWrap.hidden = Boolean(customCSharpEditor);
 
     const scroll =
       document.createElement("div");
@@ -17810,6 +17821,17 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         graph.showAdvancedNodes =
           modeInput.checked;
         persistGraph(true);
+        window.dispatchEvent(
+          new CustomEvent(
+            "rml-graph-advanced-mode-change",
+            {
+              detail: Object.freeze({
+                enabled: graph.showAdvancedNodes === true,
+                customCSharpGraph: Boolean(customCSharpEditor)
+              })
+            }
+          )
+        );
         renderEntries();
       }
     );
