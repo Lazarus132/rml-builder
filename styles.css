@@ -2183,6 +2183,8 @@ footer strong {
   cursor: pointer;
   list-style: none;
   -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
   user-select: none;
 }
 

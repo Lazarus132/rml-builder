@@ -26,7 +26,7 @@
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "visual_csharp.js?v=11-import-expert-visibility-v603f8",
+    "visual_csharp.js?v=12-auto-open-sync-v603f14",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(

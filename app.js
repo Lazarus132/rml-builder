@@ -36,7 +36,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "help-buttons-no-anchor-fallback-20260828-v603f13";
+  "custom-csharp-open-auto-sync-20260828-v603f14";
 
 function removeLegacyHelpHashFromAddress() {
   if (!/^#(?:info-|shortcut-)/i.test(window.location.hash)) {
@@ -23203,6 +23203,7 @@ async function saveProjectJson() {
     setProjectFileStatus(
       "Preparing project JSON…"
     );
+
     captureVisibleBuilderPage(
       "save-json",
       true
