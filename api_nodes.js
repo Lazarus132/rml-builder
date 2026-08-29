@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const FACTORY_VERSION = 16;
+  const FACTORY_VERSION = 17;
   const API_VERIFICATION_SCHEMA_VERSION = 1;
   const ADVANCED_GROUP = "Advanced / Raw C#";
   const API_GROUPS = Object.freeze({
@@ -1957,6 +1957,87 @@
       return true;
     }
 
+    function installCustomCSharpSyntaxContract(definition) {
+      const kind = String(definition?.apiMemberKind || "");
+      const supported = new Set([
+        "method",
+        "constructor",
+        "property-get",
+        "property-set",
+        "field-get",
+        "field-set",
+        "type"
+      ]);
+      if (!supported.has(kind)) return definition;
+
+      const owner = normalizeCsType(definition.catalogType || "");
+      const member = escapeCSharpIdentifier(definition.catalogMember || "");
+      const parameters = Array.isArray(definition.apiParameters)
+        ? definition.apiParameters
+        : [];
+      const genericArity = Math.max(0, Number(definition.apiGenericArity) || 0);
+      const input = (context, id) => String(context.input(id) || "").trim();
+      const argument = (context, parameter) => {
+        const position = Math.max(0, Number(parameter?.position) || 0);
+        const value = input(context, `arg${position}`) ||
+          String(parameter?.defaultValueCSharp || "default");
+        if (parameter?.isOut === true) return `out ${value}`;
+        if (parameter?.isByRef === true) return `${parameter?.isIn === true ? "in" : "ref"} ${value}`;
+        return value;
+      };
+      const host = context => definition.apiIsStatic === true
+        ? String(context.node?.parameters?.customCSharpStaticTarget || owner)
+        : input(context, "target");
+      const genericSuffix = context => {
+        if (genericArity === 0) return "";
+        const types = Array.from({ length: genericArity }, (_, index) =>
+          input(context, `generic${index}`) || "object"
+        );
+        return `<${types.join(", ")}>`;
+      };
+
+      definition.customCSharpCatalogNode = true;
+      definition.customCSharpOutputPort =
+        kind === "method"
+          ? (definition.outputs || []).some(port => port.id === "result") ? "result" : "done"
+          : kind === "constructor" ? "result"
+            : kind === "property-get" || kind === "field-get" || kind === "type" ? "value"
+              : "done";
+      definition.syntaxRender = context => {
+        if (kind === "type") return `typeof(${owner})`;
+        if (kind === "constructor") {
+          const type = String(context.node?.parameters?.customCSharpTypeText || owner);
+          return `new ${type}(${parameters.filter(parameter => parameter?.isOut !== true).map(parameter => argument(context, parameter)).join(", ")})`;
+        }
+        if (kind === "method") {
+          const receiver = host(context);
+          const callTarget = receiver ? `${receiver}.${member}` : member;
+          return `${callTarget}${genericSuffix(context)}(${parameters.map(parameter => argument(context, parameter)).join(", ")})`;
+        }
+        if (kind === "property-get") {
+          const receiver = host(context);
+          if (parameters.length > 0) {
+            return `${receiver}[${parameters.map(parameter => argument(context, parameter)).join(", ")}]`;
+          }
+          return `${receiver}.${member}`;
+        }
+        if (kind === "field-get") return `${host(context)}.${member}`;
+        if (kind === "property-set") {
+          const receiver = host(context);
+          const indexes = parameters.slice(0, -1);
+          const access = indexes.length > 0
+            ? `${receiver}[${indexes.map(parameter => argument(context, parameter)).join(", ")}]`
+            : `${receiver}.${member}`;
+          return `${access} = ${input(context, "value") || "default"}`;
+        }
+        if (kind === "field-set") {
+          return `${host(context)}.${member} = ${input(context, "value") || "default"}`;
+        }
+        return "";
+      };
+      return definition;
+    }
+
     function registerGeneratedNode(id, definition) {
       if (generatedNodeIds.has(id) || definitions[id]) {
         rejectedGeneratedNodeIds.add(id);
@@ -1970,6 +2051,8 @@
         rejectedGeneratedNodeIds.add(id);
         return false;
       }
+
+      installCustomCSharpSyntaxContract(definition);
 
       const verification =
         createApiVerificationContract(

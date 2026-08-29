@@ -8261,6 +8261,191 @@ private static string NormalConversionError<T>(object? value)
     }
   });
 
+  const runtimeFamilyVariadicIds = definition =>
+    (definition?.inputs || []).map(specification => specification.id);
+
+  const runtimeFamilyReduce = (api, helper) => {
+    const ids = runtimeFamilyVariadicIds(api.definition);
+    let expression = api.input(ids[0]).code;
+    for (let index = 1; index < ids.length; index += 1) {
+      expression = `${helper}<${api.csType(api.resolvedType(api.node, api.definition.outputs[0]) || "float")}>(${expression}, ${api.input(ids[index]).code})`;
+    }
+    return expression;
+  };
+
+  registerNode("math.operation", {
+    title: "Math Operation",
+    group: "Math",
+    symbol: "±×",
+    description: "One typed arithmetic node. Operation selects Add, Subtract, Multiply, Divide, Modulo, Power, Minimum or Maximum.",
+    parameters: [
+      pSelect("operation", "Operation", [["add", "Add"], ["subtract", "Subtract"], ["multiply", "Multiply"], ["divide", "Divide"], ["modulo", "Modulo"], ["power", "Power"], ["minimum", "Minimum"], ["maximum", "Maximum"]], "add", "", { affectsPorts: true, affectsNode: true, commitImmediately: true })
+    ],
+    inputs: [
+      genericPort("a", "A", "T", "arithmetic"),
+      genericPort("b", "B", "T", "arithmetic")
+    ],
+    outputs: [genericPort("result", "Result", "T", "arithmetic")],
+    variadicInputs: {
+      minimum: 2,
+      defaultCount: 2,
+      maximum: 64,
+      preserveAB: true,
+      template: genericPort("a", "A", "T", "arithmetic")
+    },
+    resolveDefinition(node) {
+      const operation = String(node.parameters?.operation || "add");
+      const information = {
+        add: ["Add", "+", "arithmetic", true],
+        subtract: ["Subtract", "−", "arithmetic", false],
+        multiply: ["Multiply", "×", "arithmetic", true],
+        divide: ["Divide", "÷", "arithmetic", false],
+        modulo: ["Modulo", "%", "scalar", false],
+        power: ["Power", "xʸ", "double", false],
+        minimum: ["Minimum", "min", "scalar", true],
+        maximum: ["Maximum", "max", "scalar", true]
+      }[operation] || ["Add", "+", "arithmetic", true];
+      const constraint = information[2];
+      const inputs = constraint === "double"
+        ? [port("a", "Value", "double"), port("b", "Exponent", "double")]
+        : [genericPort("a", "A", "T", constraint), genericPort("b", "B", "T", constraint)];
+      const outputs = constraint === "double"
+        ? [port("result", "Result", "double")]
+        : [genericPort("result", "Result", "T", constraint)];
+      return {
+        title: `Math · ${information[0]}`,
+        symbol: information[1],
+        inputs,
+        outputs,
+        variadicInputs: information[3]
+          ? { minimum: 2, defaultCount: 2, maximum: 64, preserveAB: true, template: inputs[0] }
+          : null
+      };
+    },
+    codegenExpression(api) {
+      const operation = String(api.node.parameters?.operation || "add");
+      if (operation === "power") return `Math.Pow(${api.input("a").code}, ${api.input("b").code})`;
+      if (operation === "modulo") return `(${api.input("a").code} % ${api.input("b").code})`;
+      if (operation === "subtract") return `GraphSubtract<${api.csType(api.resolvedType(api.node, api.definition.outputs[0]) || "float")}>(${api.input("a").code}, ${api.input("b").code})`;
+      if (operation === "divide") return `GraphDivide<${api.csType(api.resolvedType(api.node, api.definition.outputs[0]) || "float")}>(${api.input("a").code}, ${api.input("b").code})`;
+      return runtimeFamilyReduce(api, { add: "GraphAdd", multiply: "GraphMultiply", minimum: "GraphMinimum", maximum: "GraphMaximum" }[operation] || "GraphAdd");
+    },
+    previewEvaluate({ node, definition, type, input, known, unknown }) {
+      const operation = String(node.parameters?.operation || "add");
+      const ids = runtimeFamilyVariadicIds(definition);
+      const values = ids.map(id => input(id));
+      if (values.some(value => !value.known)) return unknown(type, values.find(value => !value.known)?.reason || "Unknown input");
+      const apply = (left, right, callback) => Array.isArray(left)
+        ? left.map((value, index) => callback(value, Array.isArray(right) ? right[index] : right))
+        : callback(left, right);
+      const callback = {
+        add: (a, b) => a + b, subtract: (a, b) => a - b,
+        multiply: (a, b) => a * b, divide: (a, b) => b === 0 ? Number.NaN : a / b,
+        modulo: (a, b) => a % b, power: Math.pow, minimum: Math.min, maximum: Math.max
+      }[operation] || ((a, b) => a + b);
+      return known(type, values.slice(1).reduce((result, value) => apply(result, value.value, callback), values[0].value));
+    }
+  });
+
+  registerNode("math.unaryOperation", {
+    title: "Unary Math",
+    group: "Math",
+    symbol: "ƒx",
+    parameters: [pSelect("operation", "Operation", [["negate", "Negate"], ["absolute", "Absolute"], ["squareRoot", "Square Root"], ["round", "Round"], ["floor", "Floor"], ["ceiling", "Ceiling"]], "negate", "", { affectsPorts: true, affectsNode: true, commitImmediately: true })],
+    inputs: [genericPort("value", "Value", "T", "arithmetic")],
+    outputs: [genericPort("result", "Result", "T", "arithmetic")],
+    resolveDefinition(node) {
+      const operation = String(node.parameters?.operation || "negate");
+      const information = {
+        negate: ["Negate", "±", "arithmetic"], absolute: ["Absolute", "|x|", "scalar"],
+        squareRoot: ["Square Root", "√", "double"], round: ["Round", "≈", "double"],
+        floor: ["Floor", "⌊x⌋", "double"], ceiling: ["Ceiling", "⌈x⌉", "double"]
+      }[operation] || ["Negate", "±", "arithmetic"];
+      return information[2] === "double"
+        ? { title: `Unary Math · ${information[0]}`, symbol: information[1], inputs: [port("value", "Value", "double")], outputs: [port("result", "Result", "double")] }
+        : { title: `Unary Math · ${information[0]}`, symbol: information[1], inputs: [genericPort("value", "Value", "T", information[2])], outputs: [genericPort("result", "Result", "T", information[2])] };
+    },
+    codegenExpression(api) {
+      const operation = String(api.node.parameters?.operation || "negate");
+      const value = api.input("value").code;
+      if (["squareRoot", "round", "floor", "ceiling"].includes(operation)) {
+        return `Math.${{ squareRoot: "Sqrt", round: "Round", floor: "Floor", ceiling: "Ceiling" }[operation]}(${value})`;
+      }
+      const type = api.csType(api.resolvedType(api.node, api.definition.outputs[0]) || "float");
+      return `${operation === "absolute" ? "GraphAbsolute" : "GraphNegate"}<${type}>(${value})`;
+    },
+    previewEvaluate({ node, type, input, known, unknown }) {
+      const value = input("value");
+      if (!value.known) return unknown(type, value.reason);
+      const operation = String(node.parameters?.operation || "negate");
+      const callback = { negate: value => -value, absolute: Math.abs, squareRoot: Math.sqrt, round: Math.round, floor: Math.floor, ceiling: Math.ceil }[operation] || (value => -value);
+      return known(type, Array.isArray(value.value) ? value.value.map(callback) : callback(value.value));
+    }
+  });
+
+  registerNode("logic.compare", {
+    title: "Compare",
+    group: "Logic",
+    symbol: "≶",
+    parameters: [pSelect("operation", "Comparison", [["equal", "Equal"], ["notEqual", "Not Equal"], ["greater", "Greater"], ["greaterOrEqual", "Greater or Equal"], ["less", "Less"], ["lessOrEqual", "Less or Equal"]], "equal", "", { affectsPorts: true, affectsNode: true, commitImmediately: true })],
+    inputs: [genericPort("a", "A", "T", "value"), genericPort("b", "B", "T", "value")],
+    outputs: [port("result", "Result", "bool")],
+    resolveDefinition(node) {
+      const operation = String(node.parameters?.operation || "equal");
+      const ordered = !["equal", "notEqual"].includes(operation);
+      const info = { equal: ["Equal", "="], notEqual: ["Not Equal", "≠"], greater: ["Greater", ">"], greaterOrEqual: ["Greater or Equal", "≥"], less: ["Less", "<"], lessOrEqual: ["Less or Equal", "≤"] }[operation] || ["Equal", "="];
+      return { title: `Compare · ${info[0]}`, symbol: info[1], inputs: [genericPort("a", "A", "T", ordered ? "ordered" : "value"), genericPort("b", "B", "T", ordered ? "ordered" : "value")] };
+    },
+    codegenCollect(api) { api.addUsing("System.Collections.Generic"); },
+    codegenExpression(api) {
+      const operation = String(api.node.parameters?.operation || "equal");
+      const a = api.input("a").code;
+      const b = api.input("b").code;
+      if (["equal", "notEqual"].includes(operation)) {
+        const type = api.csType(api.resolvedType(api.node, api.definition.inputs[0]) || "object");
+        const equal = `EqualityComparer<${type}>.Default.Equals(${a}, ${b})`;
+        return operation === "notEqual" ? `!${equal}` : equal;
+      }
+      return `(${a} ${{ greater: ">", greaterOrEqual: ">=", less: "<", lessOrEqual: "<=" }[operation]} ${b})`;
+    },
+    previewEvaluate({ node, input, known, unknown }) {
+      const a = input("a"), b = input("b");
+      if (!a.known || !b.known) return unknown("bool", a.reason || b.reason);
+      const operation = String(node.parameters?.operation || "equal");
+      return known("bool", { equal: () => a.value === b.value, notEqual: () => a.value !== b.value, greater: () => a.value > b.value, greaterOrEqual: () => a.value >= b.value, less: () => a.value < b.value, lessOrEqual: () => a.value <= b.value }[operation]());
+    }
+  });
+
+  registerNode("logic.booleanOperation", {
+    title: "Boolean Operation",
+    group: "Logic",
+    symbol: "⊕",
+    parameters: [pSelect("operation", "Operation", [["and", "AND"], ["or", "OR"], ["xor", "XOR"], ["not", "NOT"]], "and", "", { affectsPorts: true, affectsNode: true, commitImmediately: true })],
+    inputs: [port("a", "A", "bool"), port("b", "B", "bool")],
+    outputs: [port("result", "Result", "bool")],
+    variadicInputs: { minimum: 2, defaultCount: 2, maximum: 64, preserveAB: true, template: port("a", "A", "bool") },
+    resolveDefinition(node) {
+      const operation = String(node.parameters?.operation || "and");
+      const info = { and: ["AND", "∧"], or: ["OR", "∨"], xor: ["XOR", "⊕"], not: ["NOT", "¬"] }[operation] || ["AND", "∧"];
+      return operation === "not"
+        ? { title: `Boolean · ${info[0]}`, symbol: info[1], inputs: [port("value", "Value", "bool")], variadicInputs: null }
+        : { title: `Boolean · ${info[0]}`, symbol: info[1], inputs: [port("a", "A", "bool"), port("b", "B", "bool")], variadicInputs: { minimum: 2, defaultCount: 2, maximum: 64, preserveAB: true, template: port("a", "A", "bool") } };
+    },
+    codegenExpression(api) {
+      const operation = String(api.node.parameters?.operation || "and");
+      if (operation === "not") return `(!${api.input("value").code})`;
+      const separator = { and: " && ", or: " || ", xor: " ^ " }[operation] || " && ";
+      return `(${runtimeFamilyVariadicIds(api.definition).map(id => api.input(id).code).join(separator)})`;
+    },
+    previewEvaluate({ node, definition, input, known, unknown }) {
+      const operation = String(node.parameters?.operation || "and");
+      if (operation === "not") { const value = input("value"); return value.known ? known("bool", !value.value) : unknown("bool", value.reason); }
+      const values = runtimeFamilyVariadicIds(definition).map(id => input(id));
+      if (values.some(value => !value.known)) return unknown("bool", values.find(value => !value.known)?.reason);
+      return known("bool", operation === "and" ? values.every(value => Boolean(value.value)) : operation === "or" ? values.some(value => Boolean(value.value)) : values.reduce((result, value) => result !== Boolean(value.value), false));
+    }
+  });
+
   registerNode("text.concat", {
     title: "Text Concat",
     group: "Text",
@@ -8348,6 +8533,55 @@ private static string NormalConversionError<T>(object? value)
       : "StringComparison.Ordinal";
   }
 
+  registerNode("text.matchOperation", {
+    title: "Text Match",
+    group: "Text",
+    symbol: "TXT?",
+    parameters: [
+      pSelect("operation", "Operation", [["contains", "Contains"], ["startsWith", "Starts With"], ["endsWith", "Ends With"]], "contains", "", { affectsPorts: true, affectsNode: true, commitImmediately: true }),
+      pSelect("comparison", "Comparison", ["ordinal", "ordinalIgnoreCase"], "ordinal")
+    ],
+    inputs: [port("text", "Text", "string"), port("value", "Search", "string")],
+    outputs: [port("result", "Result", "bool")],
+    resolveDefinition(node) {
+      const operation = String(node.parameters?.operation || "contains");
+      const info = { contains: ["Contains", "⊃"], startsWith: ["Starts With", "A…"], endsWith: ["Ends With", "…Z"] }[operation] || ["Contains", "⊃"];
+      return { title: `Text Match · ${info[0]}`, symbol: info[1] };
+    },
+    codegenExpression(api) {
+      const method = { contains: "Contains", startsWith: "StartsWith", endsWith: "EndsWith" }[api.node.parameters?.operation] || "Contains";
+      return `(${api.input("text").code} ?? string.Empty).${method}(${api.input("value").code} ?? string.Empty, ${normalStringComparison(api)})`;
+    }
+  });
+
+  registerNode("text.transformOperation", {
+    title: "Text Transform",
+    group: "Text",
+    symbol: "TXT→",
+    parameters: [
+      pSelect("operation", "Operation", [["replace", "Replace"], ["trim", "Trim"], ["trimStart", "Trim Start"], ["trimEnd", "Trim End"], ["upper", "Upper Case"], ["lower", "Lower Case"]], "replace", "", { affectsPorts: true, affectsNode: true, commitImmediately: true })
+    ],
+    inputs: [port("text", "Text", "string"), port("old", "Find", "string"), port("replacement", "Replacement", "string")],
+    outputs: [port("text", "Result", "string")],
+    resolveDefinition(node) {
+      const operation = String(node.parameters?.operation || "replace");
+      const info = { replace: ["Replace", "A→B"], trim: ["Trim", "TRIM"], trimStart: ["Trim Start", "▷"], trimEnd: ["Trim End", "◁"], upper: ["Upper Case", "AA"], lower: ["Lower Case", "aa"] }[operation] || ["Replace", "A→B"];
+      return {
+        title: `Text Transform · ${info[0]}`,
+        symbol: info[1],
+        inputs: operation === "replace"
+          ? [port("text", "Text", "string"), port("old", "Find", "string"), port("replacement", "Replacement", "string")]
+          : [port("text", "Text", "string")]
+      };
+    },
+    codegenExpression(api) {
+      const operation = String(api.node.parameters?.operation || "replace");
+      const text = `(${api.input("text").code} ?? string.Empty)`;
+      if (operation === "replace") return `${text}.Replace(${api.input("old").code} ?? string.Empty, ${api.input("replacement").code} ?? string.Empty, StringComparison.Ordinal)`;
+      return `${text}.${{ trim: "Trim", trimStart: "TrimStart", trimEnd: "TrimEnd", upper: "ToUpperInvariant", lower: "ToLowerInvariant" }[operation] || "Trim"}()`;
+    }
+  });
+
   for (const [id, title, symbol, method] of [
     ["text.contains", "Text Contains", "⊃", "Contains"],
     ["text.startsWith", "Text Starts With", "A…", "StartsWith"],
@@ -8357,6 +8591,7 @@ private static string NormalConversionError<T>(object? value)
       title,
       group: "Text",
       symbol,
+      hiddenFromPalette: true,
       parameters: [
         pSelect(
           "comparison",
@@ -8380,6 +8615,7 @@ private static string NormalConversionError<T>(object? value)
     title: "Replace Text",
     group: "Text",
     symbol: "A→B",
+    hiddenFromPalette: true,
     inputs: [
       port("text", "Text", "string"),
       port("old", "Find", "string"),
@@ -8435,6 +8671,7 @@ private static string NormalConversionError<T>(object? value)
     title: "Trim Text",
     group: "Text",
     symbol: "TRIM",
+    hiddenFromPalette: true,
     parameters: [
       pSelect(
         "mode",
@@ -8458,6 +8695,7 @@ private static string NormalConversionError<T>(object? value)
     title: "Text Upper / Lower Case",
     group: "Text",
     symbol: "Aa",
+    hiddenFromPalette: true,
     parameters: [
       pSelect(
         "mode",
@@ -8580,6 +8818,7 @@ private static string NormalConversionError<T>(object? value)
     title: "Modulo",
     group: "Math",
     symbol: "%",
+    hiddenFromPalette: true,
     inputs: [
       genericPort("a", "A", "T", "scalar"),
       genericPort("b", "B", "T", "scalar")
@@ -8597,12 +8836,14 @@ private static string NormalConversionError<T>(object? value)
     title,
     symbol,
     renderer,
-    inputs = [port("value", "Value", "double")]
+    inputs = [port("value", "Value", "double")],
+    hiddenFromPalette = true
   ) {
     registerNode(id, {
       title,
       group: "Math",
       symbol,
+      hiddenFromPalette,
       inputs,
       outputs: [port("result", "Result", "double")],
       codegenExpression: renderer
@@ -8651,7 +8892,8 @@ private static string NormalConversionError<T>(object? value)
     [
       port("a", "A", "double"),
       port("b", "B", "double")
-    ]
+    ],
+    false
   );
   registerDoubleMathNode(
     "math.remapRange",
@@ -8664,7 +8906,8 @@ private static string NormalConversionError<T>(object? value)
       port("inputMax", "Input Maximum", "double"),
       port("outputMin", "Output Minimum", "double"),
       port("outputMax", "Output Maximum", "double")
-    ]
+    ],
+    false
   );
 
   registerNode("math.randomRange", {
@@ -10532,6 +10775,287 @@ private static string NormalConversionError<T>(object? value)
       )
     ]
   });
+
+  function registerCompatibleRuntimeFamily(
+    id,
+    title,
+    symbol,
+    members
+  ) {
+    const definitions = registry.getNodeDefinitions();
+    const entries = Object.entries(members)
+      .map(([operation, memberId]) => [operation, memberId, definitions[memberId]])
+      .filter(([, , definition]) => definition);
+    if (entries.length === 0) return;
+    const defaultOperation = entries[0][0];
+    const defaultDefinition = entries[0][2];
+    const parameterByKey = new Map();
+    for (const [, , definition] of entries) {
+      for (const parameter of definition.parameters || []) {
+        if (!parameterByKey.has(parameter.key)) {
+          parameterByKey.set(parameter.key, { ...parameter });
+        } else if (parameter.kind === "select") {
+          const existing = parameterByKey.get(parameter.key);
+          const options = [...(existing.options || []), ...(parameter.options || [])];
+          const seen = new Set();
+          existing.options = options.filter(option => {
+            const value = String(Array.isArray(option) ? option[0] : option?.value ?? option);
+            if (seen.has(value)) return false;
+            seen.add(value);
+            return true;
+          });
+        }
+      }
+      definition.hiddenFromPalette = true;
+    }
+    const selected = node => {
+      const operation = String(node.parameters?.operation || defaultOperation);
+      return entries.find(entry => entry[0] === operation) || entries[0];
+    };
+    const delegatedApi = (api, definition) => ({ ...api, definition });
+    registerNode(id, {
+      title,
+      group: defaultDefinition.group,
+      symbol,
+      description: `Selects one compatible ${title.toLowerCase()} behavior without requiring separate palette nodes.`,
+      configurableTypeVar: defaultDefinition.configurableTypeVar,
+      configurableTypes: defaultDefinition.configurableTypes,
+      defaultType: defaultDefinition.defaultType,
+      parameters: [
+        pSelect("operation", "Operation", entries.map(entry => [entry[0], entry[2].title || entry[0]]), defaultOperation, "", { affectsPorts: true, affectsNode: true, commitImmediately: true }),
+        ...parameterByKey.values()
+      ],
+      inputs: defaultDefinition.inputs || [],
+      outputs: defaultDefinition.outputs || [],
+      resolveDefinition(node) {
+        const [operation, , definition] = selected(node);
+        const resolved = typeof definition.resolveDefinition === "function"
+          ? { ...definition, ...definition.resolveDefinition(node) }
+          : definition;
+        return {
+          title: `${title} · ${resolved.title}`,
+          symbol: resolved.symbol || symbol,
+          description: resolved.description,
+          inputs: resolved.inputs || [],
+          outputs: resolved.outputs || [],
+          variadicInputs: resolved.variadicInputs || null,
+          variadicOutputs: resolved.variadicOutputs || null,
+          selectedFamilyOperation: operation
+        };
+      },
+      codegenCollect(api) {
+        const [, , definition] = selected(api.node);
+        return definition.codegenCollect?.(delegatedApi(api, api.definition));
+      },
+      codegenExpression(api) {
+        const [, , definition] = selected(api.node);
+        return definition.codegenExpression?.(delegatedApi(api, api.definition));
+      },
+      codegenAction(api) {
+        const [, , definition] = selected(api.node);
+        return definition.codegenAction?.(delegatedApi(api, api.definition));
+      },
+      previewEvaluate(api) {
+        const [, , definition] = selected(api.node);
+        return definition.previewEvaluate?.(api);
+      }
+    });
+  }
+
+  registerCompatibleRuntimeFamily("normal.nullCheck", "Null Check", "∅?", {
+    isNull: "normal.isNull",
+    isNotNull: "normal.isNotNull"
+  });
+  registerCompatibleRuntimeFamily("file.pathExists", "Path Exists", "PATH?", {
+    file: "file.fileExists",
+    directory: "file.directoryExists"
+  });
+  registerCompatibleRuntimeFamily("file.writeOperation", "Write File", "FILE→", {
+    overwrite: "file.writeText",
+    append: "file.appendText",
+    bytes: "file.writeBytes"
+  });
+  registerCompatibleRuntimeFamily("file.readOperation", "Read File", "FILE←", {
+    text: "file.readText",
+    bytes: "file.readBytes"
+  });
+  registerCompatibleRuntimeFamily("file.transfer", "File Transfer", "FILE→", {
+    copy: "file.copy",
+    move: "file.move"
+  });
+  registerCompatibleRuntimeFamily("file.pathMutation", "Path Operation", "PATH!", {
+    createDirectory: "file.createDirectory",
+    delete: "file.delete"
+  });
+  registerCompatibleRuntimeFamily("json.createContainer", "Create JSON", "NEW JSON", {
+    object: "json.createObject",
+    array: "json.createArray"
+  });
+  registerCompatibleRuntimeFamily("task.waitMany", "Wait Tasks", "TASKS", {
+    all: "task.whenAll",
+    any: "task.whenAny"
+  });
+  registerCompatibleRuntimeFamily("collection.mutateItem", "List Item", "LIST±", {
+    add: "collection.addItem",
+    insert: "collection.insertItem",
+    remove: "collection.removeItem",
+    removeAt: "collection.removeAt",
+    clear: "collection.clearList"
+  });
+  registerCompatibleRuntimeFamily("dictionary.mutate", "Dictionary Operation", "DICT±", {
+    set: "dictionary.setValue",
+    remove: "dictionary.removeKey"
+  });
+  registerCompatibleRuntimeFamily("json.mutate", "JSON Operation", "JSON±", {
+    setProperty: "json.setProperty",
+    removeProperty: "json.removeProperty",
+    addArrayItem: "json.addArrayItem"
+  });
+  registerCompatibleRuntimeFamily("normal.tryParse", "Try Parse", "PARSE?", {
+    number: "normal.tryParseNumber",
+    boolean: "normal.tryParseBoolean"
+  });
+  registerCompatibleRuntimeFamily("text.combineOperation", "Combine Text", "TXT+", {
+    concat: "text.concat",
+    format: "text.format",
+    join: "text.join"
+  });
+  registerNode("cast.operation", {
+    title: "Convert Value",
+    group: "Conversions",
+    symbol: "→",
+    parameters: [
+      pSelect("operation", "Conversion", [["doubleToFloat", "Double To Float"], ["floatToInt", "Float To Int"], ["toString", "To String"]], "doubleToFloat", "", { affectsPorts: true, affectsNode: true, commitImmediately: true })
+    ],
+    inputs: [port("value", "Value", "double")],
+    outputs: [port("result", "Result", "float")],
+    resolveDefinition(node) {
+      const operation = String(node.parameters?.operation || "doubleToFloat");
+      if (operation === "floatToInt") return { title: "Convert · Float To Int", symbol: "F→I", inputs: [port("value", "Value", "float")], outputs: [port("result", "Result", "int")] };
+      if (operation === "toString") return { title: "Convert · To String", symbol: "→T", inputs: [genericPort("value", "Value", "T", "value")], outputs: [port("result", "Result", "string")] };
+      return { title: "Convert · Double To Float", symbol: "D→F", inputs: [port("value", "Value", "double")], outputs: [port("result", "Result", "float")] };
+    },
+    codegenExpression(api) {
+      const value = api.input("value").code;
+      return api.node.parameters?.operation === "floatToInt"
+        ? `((int)${value})`
+        : api.node.parameters?.operation === "toString"
+          ? `FormatValue(${value})`
+          : `((float)${value})`;
+    },
+    previewEvaluate({ node, type, input, known, unknown, format }) {
+      const value = input("value");
+      if (!value.known) return unknown(type, value.reason);
+      return node.parameters?.operation === "toString"
+        ? known("string", format(value))
+        : known(type, node.parameters?.operation === "floatToInt" ? Math.trunc(value.value) : Number(value.value));
+    }
+  });
+  registerCompatibleRuntimeFamily("network.socketSend", "Socket Send", "NET→", {
+    tcp: "network.tcpSend",
+    udp: "network.udpSend"
+  });
+  registerCompatibleRuntimeFamily("flow.loop", "Conditional Loop", "LOOP", {
+    while: "flow.whileLoop",
+    doWhile: "flow.doWhileLoop"
+  });
+  registerCompatibleRuntimeFamily("flow.loopControl", "Loop Control", "↪", {
+    break: "flow.break",
+    continue: "flow.continue"
+  });
+  registerCompatibleRuntimeFamily("lifecycle.shutdownEvent", "Shutdown Event", "POWER", {
+    processExit: "lifecycle.processExit",
+    modUnload: "lifecycle.modUnload"
+  });
+  registerCompatibleRuntimeFamily("configuration.visibilityOperation", "Configuration Visibility", "CFG◉", {
+    item: "configuration.setVisibility",
+    label: "configuration.setLabelVisibility"
+  });
+  registerCompatibleRuntimeFamily("harmony.readPatchValue", "Read Patch Value", "PATCH→", {
+    argument: "harmony.patchArgument",
+    result: "harmony.patchResult"
+  });
+  registerCompatibleRuntimeFamily("harmony.writePatchValue", "Write Patch Value", "PATCH=", {
+    argument: "harmony.setArgument",
+    result: "harmony.setResult"
+  });
+
+  {
+    const harmonyDefinition = registry.getNodeDefinition("harmony.patchEvent");
+    const lifecyclePresets = {
+      worldStart: ["On World Start", "WORLD+", "FrooxEngine.World", "OnStart"],
+      worldDestroy: ["On World Destroy", "WORLD−", "FrooxEngine.World", "OnDestroy"],
+      userJoin: ["On User Join", "USER+", "FrooxEngine.World", "OnUserJoined"],
+      userLeave: ["On User Leave", "USER−", "FrooxEngine.World", "OnUserLeft"],
+      componentAttach: ["On Component Attach", "ATTACH", "FrooxEngine.Component", "OnAttach"],
+      componentDestroy: ["On Component Destroy", "DEST", "FrooxEngine.Component", "OnDestroy"],
+      engineUpdate: ["On Engine Update", "UPDATE", "FrooxEngine.Engine", "Update"]
+    };
+    const legacyLifecycleIds = {
+      worldStart: "lifecycle.worldStart", worldDestroy: "lifecycle.worldDestroy",
+      userJoin: "lifecycle.userJoin", userLeave: "lifecycle.userLeave",
+      componentAttach: "lifecycle.componentAttach", componentDestroy: "lifecycle.componentDestroy",
+      engineUpdate: "lifecycle.engineUpdate"
+    };
+    for (const legacyId of Object.values(legacyLifecycleIds)) {
+      const definition = registry.getNodeDefinition(legacyId);
+      if (definition) definition.hiddenFromPalette = true;
+    }
+    registerNode("lifecycle.harmonyEvent", {
+      title: "Lifecycle Harmony Event",
+      group: "Lifecycle",
+      symbol: "LIFE",
+      parameters: [
+        pSelect("operation", "Event", Object.entries(lifecyclePresets).map(([value, preset]) => [value, preset[0]]), "worldStart", "", { affectsPorts: true, affectsNode: true, commitImmediately: true }),
+        pSelect("patchKind", "Patch kind", ["prefix", "postfix", "finalizer"], "postfix"),
+        pText("targetTypeOverride", "Target type override", "", "Empty uses the selected event preset."),
+        pText("targetMethodOverride", "Target method override", "", "Empty uses the selected event preset."),
+        pText("argumentTypes", "Argument types", ""),
+        pNumber("priority", "Harmony priority", 400),
+        pBool("captureResult", "Capture / replace __result", false)
+      ],
+      outputs: [port("called", "Called", "impulse"), port("context", "Context", "patchContext")],
+      resolveDefinition(node) {
+        const preset = lifecyclePresets[node.parameters?.operation] || lifecyclePresets.worldStart;
+        return { title: `Lifecycle · ${preset[0]}`, symbol: preset[1] };
+      },
+      codegenCollect(api) {
+        const preset = lifecyclePresets[api.node.parameters?.operation] || lifecyclePresets.worldStart;
+        const node = {
+          ...api.node,
+          parameters: {
+            ...api.node.parameters,
+            targetType: String(api.node.parameters?.targetTypeOverride || "").trim() || preset[2],
+            targetMethod: String(api.node.parameters?.targetMethodOverride || "").trim() || preset[3]
+          }
+        };
+        return harmonyDefinition.codegenCollect({ ...api, node });
+      },
+      codegenExpression(api) {
+        return harmonyDefinition.codegenExpression(api);
+      }
+    });
+  }
+
+  for (const legacyId of [
+    "math.add", "math.subtract", "math.multiply", "math.divide", "math.modulo", "math.power", "math.minimum", "math.maximum",
+    "math.negate", "math.absolute", "math.squareRoot", "math.round", "math.floor", "math.ceiling",
+    "logic.and", "logic.or", "logic.not", "logic.equal", "logic.greater", "logic.less",
+    "text.contains", "text.startsWith", "text.endsWith", "text.replace", "text.trim", "text.changeCase",
+    "normal.isNull", "normal.isNotNull", "normal.tryParseNumber", "normal.tryParseBoolean", "file.fileExists", "file.directoryExists", "file.readText", "file.readBytes", "file.writeText", "file.appendText", "file.writeBytes",
+    "file.copy", "file.move", "file.createDirectory", "file.delete", "json.createObject", "json.createArray",
+    "task.whenAll", "task.whenAny", "collection.addItem", "collection.insertItem", "collection.removeItem", "collection.removeAt", "collection.clearList", "dictionary.setValue", "dictionary.removeKey", "json.setProperty", "json.removeProperty", "json.addArrayItem", "text.concat", "text.format", "text.join", "cast.doubleToFloat", "cast.floatToInt", "cast.toString", "network.tcpSend", "network.udpSend",
+    "flow.whileLoop", "flow.doWhileLoop", "flow.break", "flow.continue", "lifecycle.processExit", "lifecycle.modUnload",
+    "configuration.setVisibility", "configuration.setLabelVisibility", "harmony.patchArgument", "harmony.patchResult",
+    "harmony.setArgument", "harmony.setResult", "lifecycle.worldStart", "lifecycle.worldDestroy", "lifecycle.userJoin",
+    "lifecycle.userLeave", "lifecycle.componentAttach", "lifecycle.componentDestroy", "lifecycle.engineUpdate"
+  ]) {
+    const definition = registry.getNodeDefinition(legacyId);
+    if (definition) {
+      definition.hiddenFromPalette = true;
+      definition.internalFamilyImplementation = true;
+    }
+  }
 
   for (const [id, definition] of Object.entries(
     registry.getNodeDefinitions()

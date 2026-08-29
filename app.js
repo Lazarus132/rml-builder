@@ -36,7 +36,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "cross-browser-css-prefix-order-20260829-v603f28";
+  "runtime-node-families-20260829-v603f34";
 
 function removeLegacyHelpHashFromAddress() {
   if (!/^#(?:info-|shortcut-)/i.test(window.location.hash)) {
@@ -25363,7 +25363,8 @@ function renderInformationNodeReference() {
     .filter(([, definition]) =>
       definition &&
       typeof definition === "object" &&
-      definition.catalogGenerated !== true
+      definition.catalogGenerated !== true &&
+      definition.internalFamilyImplementation !== true
     )
     .map(([operatorId, definition]) => ({ operatorId, definition }));
 

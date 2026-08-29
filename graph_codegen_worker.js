@@ -194,16 +194,16 @@ async function ensureRuntime(catalog) {
       self.RMLResoniteApiCatalog;
 
     importScripts(
-      "node_graph.js?v=268-custom-csharp-import-visibility-v603f8"
+      "node_graph.js?v=282-runtime-node-families-v603f34"
     );
     importScripts(
-      "mod_nodes.js?v=44-scanner-only-v603f4"
+      "mod_nodes.js?v=45-runtime-node-families-v603f34"
     );
     importScripts(
-      "visual_csharp.js?v=11-import-expert-visibility-v603f8"
+      "visual_csharp.js?v=18-line-ending-safe-semantic-fallback-v603f34"
     );
     importScripts(
-      "api_nodes.js?v=26-normal-core-v603"
+      "api_nodes.js?v=31-custom-csharp-catalog-contract-v603f34"
     );
 
     if (

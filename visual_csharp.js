@@ -14,10 +14,12 @@
     registerGroup,
     registerNode,
     registerCodegenPlugin,
-    getNodeDefinition
+    getNodeDefinition,
+    getNodeDefinitions,
+    getTypeDefinitions
   } = registry;
 
-  const VERSION = 8;
+  const VERSION = 13;
   const CUSTOM_CSHARP_COORDINATE_SPACE_VERSION = 2;
   const SYNTAX_TYPE = "csharpSyntax";
   const GROUPS = {
@@ -633,13 +635,31 @@
       text("name", "Namespace or type", "System"),
       text("alias", "Alias", ""),
       bool("global", "Global", false),
-      bool("static", "Static", false)
+      bool("static", "Static", false),
+      code("exactSource", "Exact Roslyn source", "", "Roslyn-certified directive text, including any valid comments, tabs and line breaks.", 3),
+      code("leadingTrivia", "Leading trivia", "", "Exact Roslyn trivia retained by compact imports.", 2),
+      code("trailingTrivia", "Trailing trivia", "", "Exact Roslyn trivia retained by compact imports.", 2),
+      text("validationSignature", "Import validation signature", "")
     ],
     syntaxRender(ctx) {
+      const exactSource = String(parameter(ctx.node, "exactSource", ""));
+      const signature = String(parameter(ctx.node, "validationSignature", ""));
+      if (exactSource) {
+        if (signature && signature !== stableHash(`using-exact\0${exactSource}`)) {
+          ctx.diagnostic(`${ctx.title}: the exact imported using directive no longer matches its Roslyn validation signature.`);
+          return "";
+        }
+        return exactSource;
+      }
       const name = requireQualifiedName(ctx, parameter(ctx.node, "name", "System"), "namespace/type name");
       const aliasRaw = String(parameter(ctx.node, "alias", "")).trim();
       const alias = aliasRaw ? `${requireIdentifier(ctx, aliasRaw, "alias")} = ` : "";
-      return `${parameter(ctx.node, "global", false) ? "global " : ""}using ${parameter(ctx.node, "static", false) ? "static " : ""}${alias}${name};`;
+      const result = `${String(parameter(ctx.node, "leadingTrivia", ""))}${parameter(ctx.node, "global", false) ? "global " : ""}using ${parameter(ctx.node, "static", false) ? "static " : ""}${alias}${name};${String(parameter(ctx.node, "trailingTrivia", ""))}`;
+      if (signature && signature !== stableHash(`using\0${result}`)) {
+        ctx.diagnostic(`${ctx.title}: the imported using directive changed after Roslyn validation. Reopen the graph to validate it again.`);
+        return "";
+      }
+      return result;
     }
   });
 
@@ -912,6 +932,63 @@
   const expressionNode = (id, title, symbol, parameters, inputs, renderer) =>
     registerSyntaxNode(id, { title, group: GROUPS.expressions, symbol, parameters, inputs, syntaxRender: renderer });
 
+  registerSyntaxNode("csharp.qualifiedAccess", {
+    title: "Qualified Member Access",
+    group: GROUPS.expressions,
+    symbol: "A.B",
+    parameters: [text("path", "Qualified path", "value.Member")],
+    syntaxRender(ctx) {
+      return requireQualifiedName(ctx, parameter(ctx.node, "path", "value.Member"), "qualified member path");
+    }
+  });
+  registerSyntaxNode("csharp.compactInvocation", {
+    title: "Compact Invocation",
+    group: GROUPS.expressions,
+    symbol: "CALL",
+    parameters: [
+      text("target", "Call target", "Method"),
+      number("variadicInputCount", "Argument count", 2)
+    ],
+    inputs: [syntaxInput("a", "Argument A"), syntaxInput("b", "Argument B")],
+    variadicInputs: {
+      minimum: 2,
+      defaultCount: 2,
+      maximum: 512,
+      template: syntaxInput("a", "Argument A")
+    },
+    syntaxRender(ctx) {
+      const target = String(parameter(ctx.node, "target", "Method")).trim();
+      if (!TYPE_TEXT.test(target)) {
+        ctx.diagnostic(`${ctx.title}: '${target}' is not a valid qualified or generic invocation target.`);
+        return "__invalid_call()";
+      }
+      const argumentsList = ctx.variadic().map(value => value.trim()).filter(Boolean);
+      return `${target}(${argumentsList.join(", ")})`;
+    }
+  });
+  registerSyntaxNode("csharp.conditionalInvocation", {
+    title: "Conditional Invocation",
+    group: GROUPS.expressions,
+    symbol: "?.()",
+    parameters: [
+      text("target", "Conditional target", "value"),
+      text("member", "Member", "Method"),
+      number("variadicInputCount", "Argument count", 2)
+    ],
+    inputs: [syntaxInput("a", "Argument A"), syntaxInput("b", "Argument B")],
+    variadicInputs: {
+      minimum: 2,
+      defaultCount: 2,
+      maximum: 512,
+      template: syntaxInput("a", "Argument A")
+    },
+    syntaxRender(ctx) {
+      const target = requireQualifiedName(ctx, parameter(ctx.node, "target", "value"), "conditional target");
+      const member = requireIdentifier(ctx, parameter(ctx.node, "member", "Method"), "conditional member");
+      const argumentsList = ctx.variadic().map(value => value.trim()).filter(Boolean);
+      return `${target}?.${member}(${argumentsList.join(", ")})`;
+    }
+  });
   expressionNode("csharp.memberAccess", "Member Access", ".", [], [syntaxInput("target", "Target") , syntaxInput("member", "Member")], ctx => `${ctx.input("target")}.${ctx.input("member")}`);
   expressionNode("csharp.conditionalAccess", "Conditional Access", "?.", [], [syntaxInput("target", "Target"), syntaxInput("access", "Access")], ctx => `${ctx.input("target")}?.${ctx.input("access")}`);
   expressionNode("csharp.invocation", "Invocation", "()", [], [syntaxInput("target", "Target"), syntaxInput("typeArguments", "Type arguments"), syntaxInput("arguments", "Arguments")], ctx => `${ctx.input("target")}${ctx.input("typeArguments").trim() ? `<${ctx.input("typeArguments").trim()}>` : ""}(${ctx.input("arguments")})`);
@@ -957,7 +1034,7 @@
 
   statementNode("csharp.block", "Block", "{}", [], [syntaxInput("statements", "Statements")], ctx => `{\n${indent(ctx.input("statements"))}\n}`);
   statementNode("csharp.expressionStatement", "Expression Statement", "EXPR;", [], [syntaxInput("expression", "Expression")], ctx => statement(ctx.input("expression")));
-  statementNode("csharp.localDeclaration", "Local Declaration", "VAR", [text("type", "Type", "var"), text("name", "Name", "value"), select("modifier", "Modifier", ["none", "const", "using", "await using", "ref", "ref readonly", "scoped", "scoped ref"], "none")], [syntaxInput("initializer", "Initializer")], ctx => `${parameter(ctx.node, "modifier", "none") === "none" ? "" : `${parameter(ctx.node, "modifier")} `}${parameter(ctx.node, "type", "var") === "var" ? "var" : requireType(ctx, parameter(ctx.node, "type", "object"))} ${requireIdentifier(ctx, parameter(ctx.node, "name", "value"), "local name")}${ctx.input("initializer").trim() ? ` = ${ctx.input("initializer")}` : ""};`);
+  statementNode("csharp.localDeclaration", "Local Declaration", "VAR", [text("type", "Type", "var"), text("name", "Name", "value"), select("modifier", "Modifier", ["none", "const", "using", "await using", "ref", "ref readonly", "scoped", "scoped ref"], "none"), bool("omitSemicolon", "Omit semicolon", false)], [syntaxInput("initializer", "Initializer")], ctx => `${parameter(ctx.node, "modifier", "none") === "none" ? "" : `${parameter(ctx.node, "modifier")} `}${parameter(ctx.node, "type", "var") === "var" ? "var" : requireType(ctx, parameter(ctx.node, "type", "object"))} ${requireIdentifier(ctx, parameter(ctx.node, "name", "value"), "local name")}${ctx.input("initializer").trim() ? ` = ${ctx.input("initializer")}` : ""}${parameter(ctx.node, "omitSemicolon", false) ? "" : ";"}`);
   statementNode("csharp.jump", "Jump Statement", "JUMP", [select("kind", "Kind", ["return", "yield return", "yield break", "throw", "break", "continue", "goto", "goto case", "goto default"], "return")], [syntaxInput("value", "Value / label")], ctx => {
     const kind = parameter(ctx.node, "kind", "return");
     const value = ctx.input("value").trim();
@@ -1418,10 +1495,19 @@
       });
       return id;
     };
-    const connect = (fromNode, toNode, toPort) => connections.push({
-      id: nextEdgeId(), fromNode, fromPort: "syntax", toNode, toPort,
-      points: [], branchFrom: null
-    });
+    const connect = (fromNode, toNode, toPort, fromPort = null) => {
+      const sourceNode = nodes.find(node => node.id === fromNode);
+      const sourceDefinition = sourceNode ? getNodeDefinition(sourceNode.operatorId) : null;
+      connections.push({
+        id: nextEdgeId(),
+        fromNode,
+        fromPort: fromPort || sourceDefinition?.customCSharpOutputPort || "syntax",
+        toNode,
+        toPort,
+        points: [],
+        branchFrom: null
+      });
+    };
     let syntaxIds = lexical.items.map(item => addNode(item.operatorId, item.parameters));
     if (syntaxIds.length === 0) {
       syntaxIds = [addNode("csharp.trivia", { kind: "exact", value: "", count: 1 })];
@@ -1524,6 +1610,36 @@
     return count;
   }
 
+  function roslynStructuralSignature(root) {
+    const parts = [];
+    const stack = [{ type: "node", node: root }];
+    while (stack.length > 0) {
+      const item = stack.pop();
+      if (item?.type === "node" && item.node) {
+        const children = Array.isArray(item.node.children) ? item.node.children : [];
+        for (let index = children.length - 1; index >= 0; index -= 1) stack.push(children[index]);
+        continue;
+      }
+      if (item?.type !== "token" || !item.token) continue;
+      const token = item.token;
+      const meaningfulTrivia = trivia => {
+        const value = String(trivia?.text || "");
+        if (!value || /^\s*$/.test(value)) return;
+        parts.push(`R:${String(trivia?.kind || "")}:${value.replace(/\r\n?/g, "\n")}`);
+      };
+      for (const trivia of token.leading || []) meaningfulTrivia(trivia);
+      if (
+        token.isMissing !== true &&
+        token.kind !== "OpenParenToken" &&
+        token.kind !== "CloseParenToken"
+      ) {
+        parts.push(`T:${String(token.kind || "")}:${String(token.text || "")}`);
+      }
+      for (const trivia of token.trailing || []) meaningfulTrivia(trivia);
+    }
+    return stableHash(parts.join("\0"));
+  }
+
   function createRoslynImportFragment(source, parseResult, options = {}) {
     const sourceText = String(source ?? "");
     const normalizedSource = normalize(sourceText);
@@ -1576,10 +1692,35 @@
       layoutDepthById.set(id, Math.max(0, depth));
       return id;
     };
-    const connect = (fromNode, toNode, toPort) => connections.push({
-      id: nextEdgeId(), fromNode, fromPort: "syntax", toNode, toPort,
-      points: [], branchFrom: null
-    });
+    const connect = (fromNode, toNode, toPort, fromPort = null) => {
+      const sourceNode = nodes.find(node => node.id === fromNode);
+      const sourceDefinition = sourceNode ? getNodeDefinition(sourceNode.operatorId) : null;
+      connections.push({
+        id: nextEdgeId(),
+        fromNode,
+        fromPort: fromPort || sourceDefinition?.customCSharpOutputPort || "syntax",
+        toNode,
+        toPort,
+        points: [], branchFrom: null
+      });
+    };
+
+    const tryAddCompactUsing = (syntaxNode, depth) => {
+      if (String(syntaxNode?.kind || "") !== "UsingDirective") return null;
+      const value = roslynRootFullText(syntaxNode);
+      if (value === null) return null;
+      const parameters = {
+        name: "System",
+        alias: "",
+        global: false,
+        static: false,
+        exactSource: value,
+        leadingTrivia: "",
+        trailingTrivia: ""
+      };
+      parameters.validationSignature = stableHash(`using-exact\0${value}`);
+      return addNode("csharp.using", parameters, depth, "Using Directive");
+    };
 
     const collapseChildren = (childIds, depth, label) => {
       let current = childIds;
@@ -1635,10 +1776,11 @@
       return ids;
     };
 
+    let addOptimizedSyntaxNode;
     const addSyntaxNode = (syntaxNode, depth = 0) => {
       let childIds = [];
       for (const child of syntaxNode?.children || []) {
-        if (child?.type === "node" && child.node) childIds.push(addSyntaxNode(child.node, depth + 1));
+        if (child?.type === "node" && child.node) childIds.push(addOptimizedSyntaxNode(child.node, depth + 1, true));
         else if (child?.type === "token" && child.token) childIds.push(...addTokenParts(child.token, depth + 1));
       }
       childIds = collapseChildren(childIds, depth, syntaxNode?.kind || "Syntax");
@@ -1652,7 +1794,1410 @@
       return id;
     };
 
-    const rootSyntaxNodeId = addSyntaxNode(parseResult.root, 0);
+    const directSyntaxChildren = syntaxNode => (syntaxNode?.children || [])
+      .filter(child => child?.type === "node" && child.node)
+      .map(child => child.node);
+    const directTokens = syntaxNode => (syntaxNode?.children || [])
+      .filter(child => child?.type === "token" && child.token)
+      .map(child => child.token);
+    const findDescendant = (syntaxNode, predicate) => {
+      const stack = [...directSyntaxChildren(syntaxNode)].reverse();
+      while (stack.length > 0) {
+        const candidate = stack.pop();
+        if (predicate(candidate)) return candidate;
+        stack.push(...directSyntaxChildren(candidate).reverse());
+      }
+      return null;
+    };
+    const syntaxTextCache = new WeakMap();
+    const directTriviaProfileCache = new WeakMap();
+    const syntaxText = syntaxNode => {
+      if (!syntaxNode || typeof syntaxNode !== "object") return null;
+      if (syntaxTextCache.has(syntaxNode)) return syntaxTextCache.get(syntaxNode);
+      const fullStart = Number(syntaxNode.fullStart);
+      const fullLength = Number(syntaxNode.fullLength);
+      const result = Number.isInteger(fullStart) && Number.isInteger(fullLength) && fullStart >= 0 && fullLength >= 0
+        ? sourceText.slice(fullStart, fullStart + fullLength)
+        : roslynRootFullText(syntaxNode);
+      syntaxTextCache.set(syntaxNode, result);
+      return result;
+    };
+    const syntaxCoreText = syntaxNode => {
+      const start = Number(syntaxNode?.start);
+      const length = Number(syntaxNode?.length);
+      return Number.isInteger(start) && Number.isInteger(length) && start >= 0 && length >= 0
+        ? sourceText.slice(start, start + length)
+        : String(syntaxText(syntaxNode) || "").trim();
+    };
+    const catalogDefinitions = Object.entries(
+      options.disableCatalogNodes === true
+        ? {}
+        : options.catalogDefinitions && typeof options.catalogDefinitions === "object"
+        ? options.catalogDefinitions
+        : getNodeDefinitions?.() || {}
+    ).filter(([, definition]) =>
+      definition?.catalogGenerated === true &&
+      definition?.customCSharpCatalogNode === true &&
+      definition?.apiVerification?.catalogSource === "scanner" &&
+      String(definition?.apiVerification?.catalogFingerprint || "").trim()
+    );
+    const catalogTypeAlias = new Map([
+      ["bool", "System.Boolean"], ["byte", "System.Byte"], ["sbyte", "System.SByte"],
+      ["short", "System.Int16"], ["ushort", "System.UInt16"], ["int", "System.Int32"],
+      ["uint", "System.UInt32"], ["long", "System.Int64"], ["ulong", "System.UInt64"],
+      ["float", "System.Single"], ["double", "System.Double"], ["decimal", "System.Decimal"],
+      ["char", "System.Char"], ["string", "System.String"], ["object", "System.Object"],
+      ["void", "System.Void"]
+    ]);
+    const normalizeCatalogType = value => {
+      let type = String(value || "").replace(/global::/g, "").trim();
+      while (type.endsWith("?")) type = type.slice(0, -1).trim();
+      return catalogTypeAlias.get(type) || type;
+    };
+    const catalogTypes = new Set();
+    for (const [, definition] of catalogDefinitions) {
+      for (const type of [
+        definition.catalogType,
+        definition.apiReturnType,
+        ...(definition.apiParameters || []).flatMap(parameter => [parameter?.type, parameter?.elementType])
+      ]) {
+        const normalized = normalizeCatalogType(type);
+        if (normalized) catalogTypes.add(normalized);
+      }
+    }
+    const shortCatalogType = value => normalizeCatalogType(value)
+      .replace(/<.*>$/, "")
+      .split(".")
+      .at(-1);
+    const resolveCatalogType = value => {
+      const normalized = normalizeCatalogType(value);
+      if (!normalized) return "";
+      if (catalogTypes.has(normalized)) return normalized;
+      const matches = [...catalogTypes].filter(type => shortCatalogType(type) === shortCatalogType(normalized));
+      return matches.length === 1 ? matches[0] : normalized;
+    };
+    const symbolTypes = new Map();
+    const sourceMemberNames = new Set();
+    const pendingVarSymbols = [];
+    const recordSymbolType = (name, type) => {
+      const symbol = String(name || "").replace(/^@/, "");
+      const resolved = resolveCatalogType(type);
+      if (!symbol || !resolved) return;
+      if (!symbolTypes.has(symbol)) symbolTypes.set(symbol, resolved);
+      else if (symbolTypes.get(symbol) !== resolved) symbolTypes.set(symbol, "");
+    };
+    const collectSourceSymbols = root => {
+      const stack = [root];
+      while (stack.length > 0) {
+        const current = stack.pop();
+        const kind = String(current?.kind || "");
+        const core = syntaxCoreText(current);
+        if (kind === "Parameter") {
+          const match = /^(?:(?:this|ref readonly|ref|out|in|params|scoped ref|scoped)\s+)?(.+?)\s+(@?[\p{L}_][\p{L}\p{N}_]*)(?:\s*=|$)/u.exec(core);
+          if (match) recordSymbolType(match[2], match[1]);
+        } else if (kind === "VariableDeclaration") {
+          const match = /^(.+?)\s+(@?[\p{L}_][\p{L}\p{N}_]*)(?:\s*=|\s*,|$)/u.exec(core);
+          if (match && match[1] !== "var") {
+            for (const declarator of directSyntaxChildren(current).filter(child => String(child?.kind || "") === "VariableDeclarator")) {
+              const name = /^@?[\p{L}_][\p{L}\p{N}_]*/u.exec(syntaxCoreText(declarator))?.[0];
+              if (name) recordSymbolType(name, match[1]);
+            }
+          } else if (match?.[1] === "var") {
+            for (const declarator of directSyntaxChildren(current).filter(child => String(child?.kind || "") === "VariableDeclarator")) {
+              const name = /^@?[\p{L}_][\p{L}\p{N}_]*/u.exec(syntaxCoreText(declarator))?.[0];
+              const equalsValue = findDescendant(declarator, child => String(child?.kind || "") === "EqualsValueClause");
+              const initializer = equalsValue ? directSyntaxChildren(equalsValue).at(-1) : null;
+              if (name && initializer) pendingVarSymbols.push({ name, initializer });
+            }
+          }
+        } else if (/^(?:MethodDeclaration|LocalFunctionStatement|ConstructorDeclaration)$/.test(kind)) {
+          const name = /(@?[\p{L}_][\p{L}\p{N}_]*)\s*(?:<[^>{}()]*>)?\s*\(/u.exec(core)?.[1];
+          if (name) sourceMemberNames.add(name.replace(/^@/, ""));
+        }
+        stack.push(...directSyntaxChildren(current));
+      }
+    };
+    collectSourceSymbols(parseResult.root);
+
+    const catalogByOwnerKindMember = new Map();
+    for (const [operatorId, definition] of catalogDefinitions) {
+      const key = [
+        resolveCatalogType(definition.catalogType),
+        String(definition.apiMemberKind || ""),
+        String(definition.catalogMember || "")
+      ].join("\0");
+      if (!catalogByOwnerKindMember.has(key)) catalogByOwnerKindMember.set(key, []);
+      catalogByOwnerKindMember.get(key).push({ operatorId, definition });
+    }
+    const typeDefinitions = getTypeDefinitions?.() || {};
+    const graphTypeByCatalogType = new Map(
+      Object.entries(typeDefinitions)
+        .map(([graphType, information]) => [resolveCatalogType(information?.apiCatalogType || information?.csType), graphType])
+        .filter(([type]) => Boolean(type))
+    );
+    const catalogAssignableOwners = owner => {
+      const resolved = resolveCatalogType(owner);
+      const graphType = graphTypeByCatalogType.get(resolved);
+      const information = graphType ? typeDefinitions[graphType] : null;
+      const result = [resolved];
+      for (const assignableGraphType of information?.assignableTo || []) {
+        const candidate = resolveCatalogType(typeDefinitions[assignableGraphType]?.apiCatalogType || typeDefinitions[assignableGraphType]?.csType);
+        if (candidate && !result.includes(candidate)) result.push(candidate);
+      }
+      return result;
+    };
+    const catalogMembers = (owner, kind, member) => {
+      const name = String(member || "").replace(/^@/, "");
+      for (const candidateOwner of catalogAssignableOwners(owner)) {
+        const candidates = catalogByOwnerKindMember.get([candidateOwner, kind, name].join("\0")) || [];
+        if (candidates.length > 0) return candidates;
+      }
+      return [];
+    };
+    const argumentValueNode = argument => {
+      const children = directSyntaxChildren(argument);
+      return children.at(-1) || argument;
+    };
+    const expressionTypeCache = new WeakMap();
+    const inferExpressionType = syntaxNode => {
+      if (!syntaxNode || typeof syntaxNode !== "object") return "";
+      if (expressionTypeCache.has(syntaxNode)) return expressionTypeCache.get(syntaxNode);
+      const kind = String(syntaxNode.kind || "");
+      const core = syntaxCoreText(syntaxNode).trim();
+      const children = directSyntaxChildren(syntaxNode);
+      let result = "";
+      if (kind === "IdentifierName") {
+        result = symbolTypes.get(core.replace(/^@/, "")) || resolveCatalogType(core);
+      } else if (/^(?:ObjectCreationExpression|ImplicitObjectCreationExpression)$/.test(kind)) {
+        const type = /^new\s+([^({]+?)(?:\s*\(|\s*\{)/s.exec(core)?.[1];
+        result = resolveCatalogType(type || "");
+      } else if (kind === "CastExpression") {
+        result = resolveCatalogType(/^\(\s*([^()]+)\s*\)/s.exec(core)?.[1] || "");
+      } else if (kind === "StringLiteralExpression" || kind === "InterpolatedStringExpression") {
+        result = "System.String";
+      } else if (kind === "TrueLiteralExpression" || kind === "FalseLiteralExpression") {
+        result = "System.Boolean";
+      } else if (kind === "NumericLiteralExpression") {
+        result = /[fF]$/.test(core) ? "System.Single" : /[dD]$/.test(core) ? "System.Double" : /[mM]$/.test(core) ? "System.Decimal" : "System.Int32";
+      } else if (kind === "ParenthesizedExpression") {
+        result = inferExpressionType(children[0]);
+      } else if (kind === "ElementAccessExpression") {
+        const collection = inferExpressionType(children[0]);
+        result = collection.endsWith("[]") ? collection.slice(0, -2) : "";
+      } else if (kind === "SimpleMemberAccessExpression") {
+        const owner = inferExpressionType(children[0]);
+        const member = syntaxCoreText(children.at(-1)).replace(/<.*>$/, "");
+        const candidates = [
+          ...catalogMembers(owner, "property-get", member),
+          ...catalogMembers(owner, "field-get", member)
+        ];
+        if (candidates.length === 1) result = resolveCatalogType(candidates[0].definition.apiReturnType);
+      } else if (kind === "InvocationExpression") {
+        const match = resolveCatalogInvocation(syntaxNode, false);
+        if (match) {
+          const declaredReturn = normalizeCatalogType(match.definition.apiReturnType);
+          result = /^[A-Z][A-Za-z0-9_]*$/.test(declaredReturn) && match.genericTypes.length === 1
+            ? resolveCatalogType(match.genericTypes[0])
+            : resolveCatalogType(declaredReturn);
+        }
+      }
+      expressionTypeCache.set(syntaxNode, result || "");
+      return result || "";
+    };
+    const parameterAcceptsType = (parameter, actualType) => {
+      if (!actualType) return true;
+      const expected = resolveCatalogType(parameter?.elementType || parameter?.type || "");
+      if (!expected || /^[A-Z][A-Za-z0-9_]*$/.test(expected)) return true;
+      return expected === resolveCatalogType(actualType) || expected === "System.Object";
+    };
+    function resolveCatalogInvocation(syntaxNode, requireUnique = true) {
+      const children = directSyntaxChildren(syntaxNode);
+      const target = children[0];
+      const argumentList = children.find(child => String(child?.kind || "") === "ArgumentList");
+      if (!target || !argumentList) return null;
+      const targetChildren = directSyntaxChildren(target);
+      if (String(target.kind || "") !== "SimpleMemberAccessExpression" || targetChildren.length < 2) return null;
+      const receiver = targetChildren[0];
+      const memberSyntax = targetChildren.at(-1);
+      const memberText = syntaxCoreText(memberSyntax).trim();
+      const member = memberText.replace(/<.*>$/, "").replace(/^@/, "");
+      if (sourceMemberNames.has(member)) return null;
+      const genericText = /<([\s\S]*)>$/.exec(memberText)?.[1] || "";
+      const genericTypes = genericText ? genericText.split(",").map(item => item.trim()).filter(Boolean) : [];
+      const owner = inferExpressionType(receiver);
+      if (!owner) return null;
+      const args = directSyntaxChildren(argumentList).filter(child => String(child?.kind || "") === "Argument");
+      let candidates = catalogMembers(owner, "method", member).filter(({ definition }) => {
+        const parameters = Array.isArray(definition.apiParameters) ? definition.apiParameters : [];
+        if (parameters.some(parameter => parameter?.isOut === true)) return false;
+        const required = parameters.filter(parameter => parameter?.isOptional !== true && parameter?.hasDefaultValue !== true).length;
+        if (args.length < required || args.length > parameters.length) return false;
+        if (Math.max(0, Number(definition.apiGenericArity) || 0) !== genericTypes.length) return false;
+        return args.every((argument, index) => parameterAcceptsType(parameters[index], inferExpressionType(argumentValueNode(argument))));
+      });
+      if (candidates.length > 1) {
+        const scored = candidates.map(candidate => ({
+          candidate,
+          score: args.reduce((score, argument, index) => {
+            const actual = resolveCatalogType(inferExpressionType(argumentValueNode(argument)));
+            const expected = resolveCatalogType(candidate.definition.apiParameters?.[index]?.elementType || candidate.definition.apiParameters?.[index]?.type || "");
+            return score + (actual && expected === actual ? 1 : 0);
+          }, 0)
+        })).sort((a, b) => b.score - a.score);
+        if (scored.length > 1 && scored[0].score === scored[1].score) return null;
+        candidates = [scored[0].candidate];
+      }
+      if (candidates.length !== 1 && requireUnique) return null;
+      if (candidates.length !== 1) return null;
+      return { ...candidates[0], receiver, args, genericTypes };
+    }
+    const addCatalogInvocation = (match, depth, label) => {
+      const id = addNode(match.operatorId, {
+        customCSharpStaticTarget: match.definition.apiIsStatic === true
+          ? syntaxCoreText(match.receiver)
+          : ""
+      }, depth, label || match.definition.title);
+      if (match.definition.apiIsStatic !== true) {
+        connect(addOptimizedSyntaxNode(match.receiver, depth + 1), id, "target");
+      }
+      match.genericTypes.forEach((type, index) => {
+        const typeId = addNode("csharp.type", { name: type }, depth + 1, type);
+        connect(typeId, id, `generic${index}`);
+      });
+      match.args.forEach((argument, index) => {
+        connect(addOptimizedSyntaxNode(argumentValueNode(argument), depth + 1), id, `arg${index}`);
+      });
+      return id;
+    };
+    for (const pending of pendingVarSymbols) {
+      const inferred = inferExpressionType(pending.initializer);
+      if (inferred) recordSymbolType(pending.name, inferred);
+    }
+    const directTriviaProfile = syntaxNode => {
+      if (!syntaxNode || typeof syntaxNode !== "object") {
+        return { prefix: [], suffix: [], prefixSignificant: false, suffixSignificant: false, internalSignificant: false };
+      }
+      if (directTriviaProfileCache.has(syntaxNode)) return directTriviaProfileCache.get(syntaxNode);
+      const tokenStack = [syntaxNode];
+      const allTokens = [];
+      while (tokenStack.length > 0) {
+        const current = tokenStack.pop();
+        allTokens.push(...directTokens(current));
+        tokenStack.push(...directSyntaxChildren(current));
+      }
+      allTokens.sort((left, right) => Number(left?.start) - Number(right?.start));
+      const tokens = allTokens.length > 1
+        ? [allTokens[0], allTokens.at(-1)]
+        : allTokens;
+      const prefix = [];
+      const suffix = [];
+      let internalSignificant = false;
+      const nodeStart = Number(syntaxNode.start);
+      const nodeLength = Number(syntaxNode.length);
+      const hasSpan = Number.isInteger(nodeStart) && Number.isInteger(nodeLength) && nodeStart >= 0 && nodeLength >= 0;
+      const nodeEnd = nodeStart + nodeLength;
+      tokens.forEach((token, tokenIndex) => {
+        const inspect = (trivia, side) => {
+          const value = String(trivia?.text || "");
+          if (!value) return;
+          const triviaStart = Number(trivia?.start);
+          const triviaLength = Number(trivia?.length);
+          const hasTriviaSpan = hasSpan && Number.isInteger(triviaStart) && Number.isInteger(triviaLength);
+          const isPrefix = hasTriviaSpan
+            ? triviaStart + triviaLength <= nodeStart
+            : tokenIndex === 0 && side === "leading";
+          const isSuffix = hasTriviaSpan
+            ? triviaStart >= nodeEnd
+            : tokenIndex === tokens.length - 1 && side === "trailing";
+          if (isPrefix) prefix.push(trivia);
+          else if (isSuffix) suffix.push(trivia);
+          else if (!/^\s*$/.test(value)) internalSignificant = true;
+        };
+        for (const trivia of token?.leading || []) inspect(trivia, "leading");
+        for (const trivia of token?.trailing || []) inspect(trivia, "trailing");
+      });
+      const profile = {
+        prefix,
+        suffix,
+        prefixSignificant: prefix.some(item => !/^\s*$/.test(String(item?.text || ""))),
+        suffixSignificant: suffix.some(item => !/^\s*$/.test(String(item?.text || ""))),
+        internalSignificant
+      };
+      directTriviaProfileCache.set(syntaxNode, profile);
+      return profile;
+    };
+    const addSemanticNode = (operatorId, parameters, inputs, depth, label) => {
+      const id = addNode(operatorId, parameters, depth, label);
+      Object.entries(inputs || {}).forEach(([portName, childId]) => {
+        if (childId) connect(childId, id, portName);
+      });
+      return id;
+    };
+    const addSyntaxSequence = (syntaxNodes, separator, depth, label) => {
+      const ids = syntaxNodes.map(item => addOptimizedSyntaxNode(item, depth + 1));
+      if (ids.length === 0) return null;
+      if (ids.length === 1) return ids[0];
+      const compactIds = collapseChildren(ids, depth, label);
+      if (compactIds.length === 1) return compactIds[0];
+      const sequenceId = addNode("csharp.sequence", {
+        separator,
+        variadicInputCount: compactIds.length
+      }, depth, label);
+      compactIds.forEach((childId, index) => connect(childId, sequenceId, portId(index)));
+      return sequenceId;
+    };
+    const wrapSemanticTrivia = (syntaxNode, semanticId, depth, preserveWhitespace = false) => {
+      if (!semanticId || String(syntaxNode?.kind || "") === "UsingDirective") return semanticId;
+      const profile = directTriviaProfile(syntaxNode);
+      const ids = [];
+      const prefix = preserveWhitespace || profile.prefixSignificant ? profile.prefix : [];
+      const suffix = preserveWhitespace || profile.suffixSignificant ? profile.suffix : [];
+      for (const trivia of prefix) {
+        const triviaId = addTrivia(trivia, depth + 1);
+        if (triviaId) ids.push(triviaId);
+      }
+      ids.push(semanticId);
+      for (const trivia of suffix) {
+        const triviaId = addTrivia(trivia, depth + 1);
+        if (triviaId) ids.push(triviaId);
+      }
+      if (ids.length === 1) return semanticId;
+      const sequenceId = addNode("csharp.sequence", {
+        separator: "none",
+        variadicInputCount: ids.length
+      }, depth, `${syntaxNode.kind} with trivia`);
+      ids.forEach((childId, index) => connect(childId, sequenceId, portId(index)));
+      return sequenceId;
+    };
+    const literalKindBySyntaxKind = new Map([
+      ["NumericLiteralExpression", "number"],
+      ["TrueLiteralExpression", "true"],
+      ["FalseLiteralExpression", "false"],
+      ["NullLiteralExpression", "null"],
+      ["DefaultLiteralExpression", "default"]
+    ]);
+    const binaryOperatorByKind = new Map([
+      ["AddExpression", "+"], ["SubtractExpression", "-"],
+      ["MultiplyExpression", "*"], ["DivideExpression", "/"],
+      ["ModuloExpression", "%"], ["EqualsExpression", "=="],
+      ["NotEqualsExpression", "!="], ["LessThanExpression", "<"],
+      ["GreaterThanExpression", ">"], ["LessThanOrEqualExpression", "<="],
+      ["GreaterThanOrEqualExpression", ">="], ["LogicalAndExpression", "&&"],
+      ["LogicalOrExpression", "||"], ["BitwiseAndExpression", "&"],
+      ["BitwiseOrExpression", "|"], ["ExclusiveOrExpression", "^"],
+      ["LeftShiftExpression", "<<"], ["RightShiftExpression", ">>"],
+      ["CoalesceExpression", "??"], ["IsExpression", "is"],
+      ["AsExpression", "as"]
+    ]);
+    const assignmentOperatorByKind = new Map([
+      ["SimpleAssignmentExpression", "="], ["AddAssignmentExpression", "+="],
+      ["SubtractAssignmentExpression", "-="], ["MultiplyAssignmentExpression", "*="],
+      ["DivideAssignmentExpression", "/="], ["ModuloAssignmentExpression", "%="],
+      ["AndAssignmentExpression", "&="], ["OrAssignmentExpression", "|="],
+      ["ExclusiveOrAssignmentExpression", "^="], ["LeftShiftAssignmentExpression", "<<="],
+      ["RightShiftAssignmentExpression", ">>="], ["CoalesceAssignmentExpression", "??="]
+    ]);
+    const jumpKindBySyntaxKind = new Map([
+      ["ReturnStatement", "return"], ["ThrowStatement", "throw"],
+      ["BreakStatement", "break"], ["ContinueStatement", "continue"],
+      ["YieldReturnStatement", "yield return"], ["YieldBreakStatement", "yield break"],
+      ["GotoStatement", "goto"], ["GotoCaseStatement", "goto case"],
+      ["GotoDefaultStatement", "goto default"]
+    ]);
+    const typeDeclarationKind = new Map([
+      ["ClassDeclaration", "class"], ["StructDeclaration", "struct"],
+      ["InterfaceDeclaration", "interface"], ["RecordDeclaration", "record"],
+      ["RecordStructDeclaration", "record struct"], ["EnumDeclaration", "enum"]
+    ]);
+    const keywordByKind = new Map([
+      ["TypeOfExpression", "typeof"], ["NameOfExpression", "nameof"],
+      ["SizeOfExpression", "sizeof"], ["DefaultExpression", "default"],
+      ["CheckedExpression", "checked"], ["UncheckedExpression", "unchecked"]
+    ]);
+    const unaryOperatorByKind = new Map([
+      ["UnaryPlusExpression", "+"], ["UnaryMinusExpression", "-"],
+      ["LogicalNotExpression", "!"], ["BitwiseNotExpression", "~"],
+      ["PreIncrementExpression", "++pre"], ["PreDecrementExpression", "--pre"],
+      ["PostIncrementExpression", "++post"], ["PostDecrementExpression", "--post"],
+      ["AddressOfExpression", "&"], ["PointerIndirectionExpression", "*"],
+      ["IndexExpression", "^"], ["AwaitExpression", "await"],
+      ["SuppressNullableWarningExpression", "!post"]
+    ]);
+    const resourceKindBySyntaxKind = new Map([
+      ["UsingStatement", "using"], ["LockStatement", "lock"],
+      ["FixedStatement", "fixed"], ["CheckedStatement", "checked"],
+      ["UncheckedStatement", "unchecked"], ["UnsafeStatement", "unsafe"]
+    ]);
+    const initializerDelimiterByKind = new Map([
+      ["ArrayInitializerExpression", "braces"],
+      ["ObjectInitializerExpression", "braces"],
+      ["CollectionInitializerExpression", "braces"],
+      ["ComplexElementInitializerExpression", "braces"],
+      ["CollectionExpression", "brackets"]
+    ]);
+
+    const tryAddSemanticNode = (syntaxNode, depth) => {
+      const kind = String(syntaxNode?.kind || "");
+      const value = syntaxText(syntaxNode);
+      if (value === null) return null;
+
+      const compactUsing = tryAddCompactUsing(syntaxNode, depth);
+      if (compactUsing) return compactUsing;
+
+      const triviaProfile = directTriviaProfile(syntaxNode);
+      const significantTrivia = triviaProfile.internalSignificant;
+      const semanticValue = significantTrivia ? value : syntaxCoreText(syntaxNode);
+
+      if (kind === "IdentifierName" && IDENTIFIER.test(semanticValue)) {
+        return addNode("csharp.identifier", { name: semanticValue }, depth, semanticValue);
+      }
+      if ((kind === "PredefinedType" || /(?:Name|Type)$/.test(kind)) && TYPE_TEXT.test(semanticValue)) {
+        return addNode("csharp.type", { name: semanticValue }, depth, kind);
+      }
+      if (literalKindBySyntaxKind.has(kind)) {
+        const literalKind = literalKindBySyntaxKind.get(kind);
+        if (literalKind !== "number" || NUMBER_LITERAL.test(semanticValue)) {
+          return addNode("csharp.literal", {
+            kind: literalKind === "number" && /[.eEfFdDmM]/.test(semanticValue) ? "real" : literalKind === "number" ? "integer" : literalKind,
+            value: literalKind === "number" ? semanticValue : ""
+          }, depth, kind);
+        }
+      }
+      if (!significantTrivia && kind === "StringLiteralExpression" && /^"(?:[^"\\]|\\.)*"$/s.test(semanticValue)) {
+        try {
+          const decoded = JSON.parse(semanticValue);
+          return addNode("csharp.literal", { kind: "string", value: decoded }, depth, kind);
+        } catch {}
+      }
+
+      const children = directSyntaxChildren(syntaxNode);
+
+      if (!significantTrivia && kind === "CompilationUnit") {
+        return addSyntaxSequence(children, "newline", depth, "Compilation Unit") ||
+          addNode("csharp.trivia", { kind: "exact", count: 1, value: "" }, depth, kind);
+      }
+
+      if (!significantTrivia && kind === "Parameter") {
+        const core = syntaxCoreText(syntaxNode);
+        const match = /^(?:(this|ref readonly|ref|out|in|params|scoped ref|scoped) )?(.+?) (@?[\p{L}_][\p{L}\p{N}_]*)(?: = ([\s\S]+))?$/u.exec(core);
+        if (match && TYPE_TEXT.test(match[2])) {
+          const defaultNode = match[4] ? children[children.length - 1] : null;
+          return addSemanticNode("csharp.parameter", {
+            name: match[3], type: match[2], modifier: match[1] || "none"
+          }, {
+            default: defaultNode ? addOptimizedSyntaxNode(defaultNode, depth + 1) : null
+          }, depth, kind);
+        }
+      }
+
+      if (!significantTrivia && kind === "TypeParameter") {
+        const core = syntaxCoreText(syntaxNode);
+        const match = /^(?:(in|out) )?(@?[\p{L}_][\p{L}\p{N}_]*)$/u.exec(core);
+        if (match) {
+          return addNode("csharp.genericParameter", {
+            variance: match[1] || "none", name: match[2]
+          }, depth, kind);
+        }
+      }
+
+      if (!significantTrivia && kind === "TypeParameterConstraintClause") {
+        const core = syntaxCoreText(syntaxNode);
+        const match = /^where (@?[\p{L}_][\p{L}\p{N}_]*)\s*:\s*([\s\S]+)$/u.exec(core);
+        if (match) {
+          const constraintNodes = children.filter(child => /Constraint$/.test(String(child?.kind || "")));
+          return addSemanticNode("csharp.constraint", { parameter: match[1] }, {
+            constraints: addSyntaxSequence(constraintNodes, "commaSpace", depth + 1, "Constraints")
+          }, depth, kind);
+        }
+      }
+
+      if (!significantTrivia && kind === "AttributeList") {
+        const core = syntaxCoreText(syntaxNode);
+        const match = /^\[(?:(assembly|module|field|event|method|param|property|return|type):\s*)?([^\]()]+)(?:\((.*)\))?\]$/u.exec(core);
+        if (match && TYPE_TEXT.test(match[2].trim())) {
+          const attributeNode = children.find(child => String(child?.kind || "") === "Attribute");
+          const argumentList = attributeNode
+            ? directSyntaxChildren(attributeNode).find(child => String(child?.kind || "") === "AttributeArgumentList")
+            : null;
+          const argumentNodes = argumentList ? directSyntaxChildren(argumentList) : [];
+          return addSemanticNode("csharp.attribute", {
+            target: match[1] || "none", name: match[2].trim()
+          }, {
+            arguments: addSyntaxSequence(argumentNodes, "commaSpace", depth + 1, "Arguments")
+          }, depth, kind);
+        }
+      }
+
+      if (!significantTrivia && kind === "Block") {
+        const statements = children.filter(child => /Statement$/.test(String(child?.kind || "")));
+        return addSemanticNode("csharp.block", {}, {
+          statements: addSyntaxSequence(statements, "newline", depth + 1, "Statements")
+        }, depth, kind);
+      }
+
+      if (!significantTrivia && initializerDelimiterByKind.has(kind)) {
+        const items = children.filter(child => !/(?:ArgumentList|BracketedArgumentList)$/.test(String(child?.kind || "")));
+        return addSemanticNode("csharp.delimited", {
+          delimiter: initializerDelimiterByKind.get(kind),
+          layout: /[\r\n]/.test(syntaxCoreText(syntaxNode)) ? "block" : "inline",
+          suffix: "none"
+        }, {
+          content: addSyntaxSequence(items, "commaSpace", depth + 1, "Initializer Items")
+        }, depth, kind);
+      }
+
+      if (!significantTrivia && kind === "ImplicitArrayCreationExpression") {
+        const initializer = children.find(child => String(child?.kind || "") === "ArrayInitializerExpression");
+        const items = initializer ? directSyntaxChildren(initializer) : [];
+        return addSemanticNode("csharp.objectCreation", {
+          type: "object", kind: "implicitArray"
+        }, {
+          initializer: addSyntaxSequence(items, "commaSpace", depth + 1, "Initializer Items")
+        }, depth, kind);
+      }
+
+      if (!significantTrivia && kind === "ImplicitObjectCreationExpression") {
+        const argumentList = children.find(child => String(child?.kind || "") === "ArgumentList");
+        const initializer = children.find(child => String(child?.kind || "") === "ObjectInitializerExpression");
+        const argumentsList = argumentList
+          ? directSyntaxChildren(argumentList).filter(child => String(child?.kind || "") === "Argument")
+          : [];
+        const initializerItems = initializer ? directSyntaxChildren(initializer) : [];
+        return addSemanticNode("csharp.objectCreation", {
+          type: "object", kind: "implicitObject"
+        }, {
+          arguments: addSyntaxSequence(argumentsList, "commaSpace", depth + 1, "Arguments"),
+          initializer: addSyntaxSequence(initializerItems, "commaSpace", depth + 1, "Initializer Items")
+        }, depth, kind);
+      }
+
+      if (!significantTrivia && ["NamespaceDeclaration", "FileScopedNamespaceDeclaration"].includes(kind)) {
+        const core = syntaxCoreText(syntaxNode);
+        const match = /^namespace\s+([^\s;{]+)\s*[;{]/u.exec(core);
+        if (match && QUALIFIED_NAME.test(match[1])) {
+          const members = children.filter(child => {
+            const childKind = String(child?.kind || "");
+            return childKind === "UsingDirective" || childKind === "ExternAliasDirective" ||
+              (/Declaration$/.test(childKind) && !/(?:Name|Type)Declaration$/.test(childKind));
+          });
+          return addSemanticNode("csharp.namespace", {
+            name: match[1], style: kind === "FileScopedNamespaceDeclaration" ? "fileScoped" : "block"
+          }, {
+            members: addSyntaxSequence(members, "newline", depth + 1, "Members")
+          }, depth, kind);
+        }
+      }
+      if (!significantTrivia && typeDeclarationKind.has(kind)) {
+        const tokens = directTokens(syntaxNode).filter(token => token?.isMissing !== true);
+        const keywordIndex = tokens.findIndex(token => ["ClassKeyword", "StructKeyword", "InterfaceKeyword", "RecordKeyword", "EnumKeyword"].includes(String(token?.kind || "")));
+        const nameToken = tokens.slice(keywordIndex + 1).find(token => String(token?.kind || "") === "IdentifierToken");
+        if (keywordIndex >= 0 && nameToken) {
+          const modifiers = tokens.slice(0, keywordIndex).map(token => String(token.text || "")).filter(Boolean).join(" ");
+          const members = children.filter(child => /(?:Declaration|Member)$/.test(String(child?.kind || "")));
+          const attributes = children.filter(child => String(child?.kind || "") === "AttributeList");
+          const typeParameterList = children.find(child => String(child?.kind || "") === "TypeParameterList");
+          const typeParameters = typeParameterList
+            ? directSyntaxChildren(typeParameterList).filter(child => String(child?.kind || "") === "TypeParameter")
+            : [];
+          const primaryConstructor = children.find(child => String(child?.kind || "") === "ParameterList");
+          const primaryParameters = primaryConstructor
+            ? directSyntaxChildren(primaryConstructor).filter(child => String(child?.kind || "") === "Parameter")
+            : [];
+          const baseList = children.find(child => String(child?.kind || "") === "BaseList");
+          const baseTypes = baseList ? directSyntaxChildren(baseList) : [];
+          const constraints = children.filter(child => String(child?.kind || "") === "TypeParameterConstraintClause");
+          return addSemanticNode("csharp.typeDeclaration", {
+            kind: typeDeclarationKind.get(kind),
+            name: String(nameToken.text || "GeneratedType"),
+            modifiers
+          }, {
+            attributes: addSyntaxSequence(attributes, "newline", depth + 1, "Attributes"),
+            typeParameters: addSyntaxSequence(typeParameters, "commaSpace", depth + 1, "Type Parameters"),
+            primaryConstructor: addSyntaxSequence(primaryParameters, "commaSpace", depth + 1, "Primary Constructor"),
+            baseTypes: addSyntaxSequence(baseTypes, "commaSpace", depth + 1, "Base Types"),
+            constraints: addSyntaxSequence(constraints, "newline", depth + 1, "Constraints"),
+            members: addSyntaxSequence(
+              members,
+              typeDeclarationKind.get(kind) === "enum" ? "commaSpace" : "newline",
+              depth + 1,
+              "Members"
+            )
+          }, depth, kind);
+        }
+      }
+
+      if (!significantTrivia && (kind === "MethodDeclaration" || kind === "LocalFunctionStatement")) {
+        const parameterList = children.find(child => String(child?.kind || "") === "ParameterList");
+        const bodyNode = children.find(child => ["Block", "ArrowExpressionClause"].includes(String(child?.kind || "")));
+        const tokens = directTokens(syntaxNode).filter(token => token?.isMissing !== true);
+        const nameTokenIndex = tokens.findIndex(token => String(token?.kind || "") === "IdentifierToken");
+        const core = syntaxCoreText(syntaxNode);
+        const headerMatch = /^(?:(.*?) )?([^\s]+) (@?[\p{L}_][\p{L}\p{N}_]*)(?:<[^>{}]+>)?\s*\(/u.exec(core);
+        if (parameterList && bodyNode && nameTokenIndex >= 0 && headerMatch && TYPE_TEXT.test(headerMatch[2])) {
+          const parameters = directSyntaxChildren(parameterList).filter(child => String(child?.kind || "") === "Parameter");
+          const attributes = children.filter(child => String(child?.kind || "") === "AttributeList");
+          const typeParameterList = children.find(child => String(child?.kind || "") === "TypeParameterList");
+          const typeParameters = typeParameterList
+            ? directSyntaxChildren(typeParameterList).filter(child => String(child?.kind || "") === "TypeParameter")
+            : [];
+          const constraints = children.filter(child => String(child?.kind || "") === "TypeParameterConstraintClause");
+          const bodyChildren = String(bodyNode.kind || "") === "Block"
+            ? directSyntaxChildren(bodyNode).filter(child => /Statement$/.test(String(child?.kind || "")))
+            : directSyntaxChildren(bodyNode);
+          return addSemanticNode("csharp.method", {
+            name: String(tokens[nameTokenIndex].text || headerMatch[3]),
+            returnType: headerMatch[2],
+            modifiers: String(headerMatch[1] || ""),
+            bodyStyle: String(bodyNode.kind || "") === "Block" ? "block" : "expression"
+          }, {
+            attributes: addSyntaxSequence(attributes, "newline", depth + 1, "Attributes"),
+            typeParameters: addSyntaxSequence(typeParameters, "commaSpace", depth + 1, "Type Parameters"),
+            parameters: addSyntaxSequence(parameters, "commaSpace", depth + 1, "Parameters"),
+            constraints: addSyntaxSequence(constraints, "newline", depth + 1, "Constraints"),
+            body: addSyntaxSequence(bodyChildren, "newline", depth + 1, "Body")
+          }, depth, kind);
+        }
+      }
+
+      if (!significantTrivia && kind === "ConstructorDeclaration") {
+        const parameterList = children.find(child => String(child?.kind || "") === "ParameterList");
+        const bodyNode = children.find(child => ["Block", "ArrowExpressionClause"].includes(String(child?.kind || "")));
+        const core = syntaxCoreText(syntaxNode);
+        const headerMatch = /^(?:(.*?) )?(@?[\p{L}_][\p{L}\p{N}_]*)\s*\(/u.exec(core);
+        const initializerNode = children.find(child => /ConstructorInitializer$/.test(String(child?.kind || "")));
+        if (parameterList && bodyNode && headerMatch && String(bodyNode.kind || "") === "Block") {
+          const parameters = directSyntaxChildren(parameterList).filter(child => String(child?.kind || "") === "Parameter");
+          const bodyChildren = directSyntaxChildren(bodyNode).filter(child => /Statement$/.test(String(child?.kind || "")));
+          const initializerArgumentList = initializerNode
+            ? directSyntaxChildren(initializerNode).find(child => String(child?.kind || "") === "ArgumentList")
+            : null;
+          const initializerArguments = initializerArgumentList
+            ? directSyntaxChildren(initializerArgumentList).filter(child => String(child?.kind || "") === "Argument")
+            : [];
+          return addSemanticNode("csharp.constructor", {
+            name: headerMatch[2], modifiers: String(headerMatch[1] || ""), destructor: false,
+            initializer: !initializerNode ? "none" : String(initializerNode.kind || "").startsWith("Base") ? "base" : "this"
+          }, {
+            parameters: addSyntaxSequence(parameters, "commaSpace", depth + 1, "Parameters"),
+            initializerArguments: addSyntaxSequence(initializerArguments, "commaSpace", depth + 1, "Initializer Arguments"),
+            body: addSyntaxSequence(bodyChildren, "newline", depth + 1, "Body")
+          }, depth, kind);
+        }
+      }
+
+      if (!significantTrivia && kind === "DelegateDeclaration") {
+        const core = syntaxCoreText(syntaxNode);
+        const match = /^(?:(.*?) )?delegate ([^\s]+) (@?[\p{L}_][\p{L}\p{N}_]*)(?:<[^>{}]+>)?\s*\(/u.exec(core);
+        const parameterList = children.find(child => String(child?.kind || "") === "ParameterList");
+        if (match && parameterList && TYPE_TEXT.test(match[2])) {
+          const parameters = directSyntaxChildren(parameterList).filter(child => String(child?.kind || "") === "Parameter");
+          const attributes = children.filter(child => String(child?.kind || "") === "AttributeList");
+          const typeParameterList = children.find(child => String(child?.kind || "") === "TypeParameterList");
+          const typeParameters = typeParameterList
+            ? directSyntaxChildren(typeParameterList).filter(child => String(child?.kind || "") === "TypeParameter")
+            : [];
+          const constraints = children.filter(child => String(child?.kind || "") === "TypeParameterConstraintClause");
+          return addSemanticNode("csharp.delegate", {
+            modifiers: String(match[1] || ""), returnType: match[2], name: match[3]
+          }, {
+            attributes: addSyntaxSequence(attributes, "newline", depth + 1, "Attributes"),
+            typeParameters: addSyntaxSequence(typeParameters, "commaSpace", depth + 1, "Type Parameters"),
+            parameters: addSyntaxSequence(parameters, "commaSpace", depth + 1, "Parameters"),
+            constraints: addSyntaxSequence(constraints, "newline", depth + 1, "Constraints")
+          }, depth, kind);
+        }
+      }
+
+      if (!significantTrivia && kind === "FieldDeclaration") {
+        const core = syntaxCoreText(syntaxNode);
+        const match = /^(?:(.*?)\s+)?([^\s]+)\s+(@?[\p{L}_][\p{L}\p{N}_]*)(?:\s*=\s*([\s\S]+))?;$/u.exec(core);
+        const attributes = children.filter(child => String(child?.kind || "") === "AttributeList");
+        if (match && TYPE_TEXT.test(match[2])) {
+          const equalsValue = findDescendant(syntaxNode, child => String(child?.kind || "") === "EqualsValueClause");
+          const initializer = equalsValue ? directSyntaxChildren(equalsValue).at(-1) : null;
+          const modifiers = String(match[1] || "");
+          return addSemanticNode("csharp.field", {
+            name: match[3], type: match[2],
+            modifiers: modifiers.replace(/(?:^|\s)const(?:\s|$)/g, " ").trim(),
+            constant: /(?:^|\s)const(?:\s|$)/.test(modifiers)
+          }, {
+            attributes: addSyntaxSequence(attributes, "newline", depth + 1, "Attributes"),
+            initializer: match[4] && initializer ? addOptimizedSyntaxNode(initializer, depth + 1) : null
+          }, depth, kind);
+        }
+      }
+
+      if (!significantTrivia && kind === "PropertyDeclaration") {
+        const core = syntaxCoreText(syntaxNode);
+        const match = /^(?:(.*?) )?([^\s]+) (@?[\p{L}_][\p{L}\p{N}_]*)\s*(?:\{|=>)/u.exec(core);
+        const accessorList = children.find(child => String(child?.kind || "") === "AccessorList");
+        const arrow = children.find(child => String(child?.kind || "") === "ArrowExpressionClause");
+        if (match && TYPE_TEXT.test(match[2]) && (accessorList || arrow)) {
+          const bodyNodes = accessorList
+            ? directSyntaxChildren(accessorList).filter(child => String(child?.kind || "") === "AccessorDeclaration")
+            : directSyntaxChildren(arrow);
+          const attributes = children.filter(child => String(child?.kind || "") === "AttributeList");
+          const equalsValue = children.find(child => String(child?.kind || "") === "EqualsValueClause");
+          const initializerValue = equalsValue ? directSyntaxChildren(equalsValue).at(-1) : null;
+          return addSemanticNode("csharp.property", {
+            name: match[3], type: match[2], modifiers: String(match[1] || ""),
+            indexer: false, bodyStyle: arrow ? "expression" : "accessors"
+          }, {
+            attributes: addSyntaxSequence(attributes, "newline", depth + 1, "Attributes"),
+            body: addSyntaxSequence(bodyNodes, "newline", depth + 1, "Accessors"),
+            initializer: initializerValue ? addOptimizedSyntaxNode(initializerValue, depth + 1) : null
+          }, depth, kind);
+        }
+      }
+
+      if (!significantTrivia && kind === "AccessorDeclaration") {
+        const core = syntaxCoreText(syntaxNode);
+        const accessorMatch = /^(?:(.*?) )?(get|set|init|add|remove)(?:;|\s*=>|\s*\{)/.exec(core);
+        if (accessorMatch) {
+          const bodyNode = children.find(child => ["Block", "ArrowExpressionClause"].includes(String(child?.kind || "")));
+          const bodyChildren = bodyNode
+            ? String(bodyNode.kind || "") === "Block"
+              ? directSyntaxChildren(bodyNode).filter(child => /Statement$/.test(String(child?.kind || "")))
+              : directSyntaxChildren(bodyNode)
+            : [];
+          return addSemanticNode("csharp.accessor", {
+            kind: accessorMatch[2], modifiers: String(accessorMatch[1] || ""),
+            bodyStyle: !bodyNode ? "semicolon" : String(bodyNode.kind || "") === "Block" ? "block" : "expression"
+          }, {
+            body: addSyntaxSequence(bodyChildren, "newline", depth + 1, "Body")
+          }, depth, kind);
+        }
+      }
+
+      if (!significantTrivia && kind === "EventFieldDeclaration") {
+        const core = syntaxCoreText(syntaxNode);
+        const match = /^(?:(.*?)\s+)?event\s+([^\s]+)\s+(@?[\p{L}_][\p{L}\p{N}_]*)(?:\s*=\s*([\s\S]+))?;$/u.exec(core);
+        if (match && TYPE_TEXT.test(match[2])) {
+          const equalsValue = findDescendant(syntaxNode, child => String(child?.kind || "") === "EqualsValueClause");
+          const initializer = equalsValue ? directSyntaxChildren(equalsValue).at(-1) : null;
+          return addSemanticNode("csharp.event", {
+            name: match[3], type: match[2], modifiers: String(match[1] || "")
+          }, {
+            initializer: match[4] && initializer ? addOptimizedSyntaxNode(initializer, depth + 1) : null
+          }, depth, kind);
+        }
+      }
+
+      if (!significantTrivia && kind === "EventDeclaration") {
+        const core = syntaxCoreText(syntaxNode);
+        const match = /^(?:(.*?) )?event ([^\s]+) (@?[\p{L}_][\p{L}\p{N}_]*)\s*\{/u.exec(core);
+        const accessorList = children.find(child => String(child?.kind || "") === "AccessorList");
+        if (match && TYPE_TEXT.test(match[2]) && accessorList) {
+          const attributes = children.filter(child => String(child?.kind || "") === "AttributeList");
+          const accessors = directSyntaxChildren(accessorList).filter(child => String(child?.kind || "") === "AccessorDeclaration");
+          return addSemanticNode("csharp.event", {
+            name: match[3], type: match[2], modifiers: String(match[1] || "")
+          }, {
+            attributes: addSyntaxSequence(attributes, "newline", depth + 1, "Attributes"),
+            accessors: addSyntaxSequence(accessors, "newline", depth + 1, "Accessors")
+          }, depth, kind);
+        }
+      }
+
+      if (!significantTrivia && kind === "EnumMemberDeclaration") {
+        const core = syntaxCoreText(syntaxNode);
+        const match = /^(@?[\p{L}_][\p{L}\p{N}_]*)(?:\s*=\s*([\s\S]+))?$/u.exec(core);
+        if (match) {
+          const valueNode = children.at(-1);
+          return addSemanticNode("csharp.enumMember", { name: match[1] }, {
+            value: match[2] && valueNode ? addOptimizedSyntaxNode(valueNode, depth + 1) : null
+          }, depth, kind);
+        }
+      }
+
+      if (!significantTrivia && kind === "LocalDeclarationStatement") {
+        const core = syntaxCoreText(syntaxNode);
+        const match = /^(?:(const|using|await using|ref readonly|ref|scoped ref|scoped)\s+)?([^\s]+)\s+(@?[\p{L}_][\p{L}\p{N}_]*)(?:\s*=\s*([\s\S]+))?;$/u.exec(core);
+        if (match && (match[2] === "var" || TYPE_TEXT.test(match[2]))) {
+          const equalsValue = findDescendant(syntaxNode, child => String(child?.kind || "") === "EqualsValueClause");
+          const initializer = equalsValue ? directSyntaxChildren(equalsValue).at(-1) : null;
+          return addSemanticNode("csharp.localDeclaration", {
+            modifier: match[1] || "none", type: match[2], name: match[3]
+          }, {
+            initializer: match[4] && initializer ? addOptimizedSyntaxNode(initializer, depth + 1) : null
+          }, depth, kind);
+        }
+      }
+      if (!significantTrivia && kind === "VariableDeclaration") {
+        const core = syntaxCoreText(syntaxNode);
+        const match = /^([^,=]+?)\s+(@?[\p{L}_][\p{L}\p{N}_]*)(?:\s*=\s*([\s\S]+))?$/u.exec(core);
+        const declarators = children.filter(child => String(child?.kind || "") === "VariableDeclarator");
+        if (match && declarators.length === 1 && (match[1].trim() === "var" || TYPE_TEXT.test(match[1].trim()))) {
+          const equalsValue = findDescendant(declarators[0], child => String(child?.kind || "") === "EqualsValueClause");
+          const initializer = equalsValue ? directSyntaxChildren(equalsValue).at(-1) : null;
+          return addSemanticNode("csharp.localDeclaration", {
+            modifier: "none",
+            type: match[1].trim(),
+            name: match[2],
+            omitSemicolon: true
+          }, {
+            initializer: match[3] && initializer ? addOptimizedSyntaxNode(initializer, depth + 1) : null
+          }, depth, kind);
+        }
+      }
+      if (kind === "ParenthesizedExpression" && children.length === 1) {
+        const child = children[0];
+        const childText = syntaxCoreText(child);
+        const binaryOperator = binaryOperatorByKind.get(String(child?.kind || ""));
+        const binaryChildren = directSyntaxChildren(child);
+        if (binaryOperator && binaryChildren.length === 2) {
+          const leftText = syntaxCoreText(binaryChildren[0]);
+          const rightText = syntaxCoreText(binaryChildren[1]);
+          if (!significantTrivia && semanticValue === `(${leftText} ${binaryOperator} ${rightText})`) {
+            return addSemanticNode("csharp.binary", { operator: binaryOperator }, {
+              left: addOptimizedSyntaxNode(binaryChildren[0], depth + 1),
+              right: addOptimizedSyntaxNode(binaryChildren[1], depth + 1)
+            }, depth, kind);
+          }
+        }
+        if (!significantTrivia && semanticValue === `(${childText})`) {
+          return addSemanticNode("csharp.delimited", {
+            delimiter: "parentheses", layout: "inline", suffix: "none"
+          }, { content: addOptimizedSyntaxNode(child, depth + 1) }, depth, kind);
+        }
+      }
+
+      if ((kind === "SimpleMemberAccessExpression" || kind === "MemberBindingExpression") && children.length === 2) {
+        const leftText = syntaxCoreText(children[0]);
+        const rightText = syntaxCoreText(children[1]);
+        if (!significantTrivia && semanticValue.replace(/\s+/g, "") === `${leftText}.${rightText}`.replace(/\s+/g, "")) {
+          if (kind === "SimpleMemberAccessExpression") {
+            const owner = inferExpressionType(children[0]);
+            const member = rightText.replace(/<.*>$/, "").replace(/^@/, "");
+            const candidates = [
+              ...catalogMembers(owner, "property-get", member),
+              ...catalogMembers(owner, "field-get", member)
+            ];
+            if (candidates.length === 1) {
+              const [{ operatorId, definition }] = candidates;
+              const id = addNode(operatorId, {
+                customCSharpStaticTarget: definition.apiIsStatic === true ? leftText : ""
+              }, depth, definition.title || kind);
+              if (definition.apiIsStatic !== true) {
+                connect(addOptimizedSyntaxNode(children[0], depth + 1), id, "target");
+              }
+              return id;
+            }
+          }
+          if (QUALIFIED_NAME.test(semanticValue)) {
+            return addNode("csharp.qualifiedAccess", { path: semanticValue }, depth, kind);
+          }
+          return addSemanticNode("csharp.memberAccess", {}, {
+            target: addOptimizedSyntaxNode(children[0], depth + 1),
+            member: addOptimizedSyntaxNode(children[1], depth + 1)
+          }, depth, kind);
+        }
+      }
+
+      if (!significantTrivia && kind === "InvocationExpression" && children.length >= 2) {
+        const catalogInvocation = resolveCatalogInvocation(syntaxNode);
+        if (catalogInvocation) {
+          return addCatalogInvocation(catalogInvocation, depth, kind);
+        }
+        const target = children[0];
+        const argumentList = children.find(child => String(child?.kind || "") === "ArgumentList");
+        if (argumentList) {
+          const argumentsList = directSyntaxChildren(argumentList).filter(child => String(child?.kind || "") === "Argument");
+          const targetText = syntaxCoreText(target);
+          if (TYPE_TEXT.test(targetText)) {
+            const argumentIds = argumentsList.map(argument => addOptimizedSyntaxNode(argument, depth + 1));
+            const invocationId = addNode("csharp.compactInvocation", {
+              target: targetText,
+              variadicInputCount: Math.max(2, argumentIds.length)
+            }, depth, kind);
+            argumentIds.forEach((argumentId, index) => connect(argumentId, invocationId, portId(index)));
+            return invocationId;
+          }
+          return addSemanticNode("csharp.invocation", {}, {
+            target: addOptimizedSyntaxNode(target, depth + 1),
+            arguments: addSyntaxSequence(argumentsList, "commaSpace", depth + 1, "Arguments")
+          }, depth, kind);
+        }
+      }
+
+      if (!significantTrivia && kind === "ConditionalAccessExpression") {
+        const core = syntaxCoreText(syntaxNode);
+        const match = /^((?:global::)?@?[\p{L}_][\p{L}\p{N}_]*(?:(?:::|\.)@?[\p{L}_][\p{L}\p{N}_]*)*)\?\.(@?[\p{L}_][\p{L}\p{N}_]*)\((.*)\)$/u.exec(core);
+        const argumentList = findDescendant(syntaxNode, child => String(child?.kind || "") === "ArgumentList");
+        if (match && argumentList) {
+          const argumentsList = directSyntaxChildren(argumentList).filter(child => String(child?.kind || "") === "Argument");
+          const argumentIds = argumentsList.map(argument => addOptimizedSyntaxNode(argument, depth + 1));
+          const id = addNode("csharp.conditionalInvocation", {
+            target: match[1], member: match[2], variadicInputCount: Math.max(2, argumentIds.length)
+          }, depth, kind);
+          argumentIds.forEach((argumentId, index) => connect(argumentId, id, portId(index)));
+          return id;
+        }
+      }
+
+      if (!significantTrivia && kind === "ElementAccessExpression" && children.length >= 2) {
+        const target = children[0];
+        const argumentList = children.find(child => String(child?.kind || "") === "BracketedArgumentList");
+        if (argumentList) {
+          const argumentsList = directSyntaxChildren(argumentList).filter(child => String(child?.kind || "") === "Argument");
+          const owner = inferExpressionType(target);
+          const candidates = catalogMembers(owner, "property-get", "Item").filter(({ definition }) => {
+            const parameters = Array.isArray(definition.apiParameters) ? definition.apiParameters : [];
+            return parameters.length === argumentsList.length &&
+              argumentsList.every((argument, index) => parameterAcceptsType(parameters[index], inferExpressionType(argumentValueNode(argument))));
+          });
+          if (candidates.length === 1) {
+            const [{ operatorId, definition }] = candidates;
+            const id = addNode(operatorId, {}, depth, definition.title || kind);
+            if (definition.apiIsStatic !== true) connect(addOptimizedSyntaxNode(target, depth + 1), id, "target");
+            argumentsList.forEach((argument, index) => {
+              connect(addOptimizedSyntaxNode(argumentValueNode(argument), depth + 1), id, `arg${index}`);
+            });
+            return id;
+          }
+          return addSemanticNode("csharp.elementAccess", {}, {
+            target: addOptimizedSyntaxNode(target, depth + 1),
+            arguments: addSyntaxSequence(argumentsList, "commaSpace", depth + 1, "Arguments")
+          }, depth, kind);
+        }
+      }
+
+      if (!significantTrivia && binaryOperatorByKind.has(kind) && children.length === 2) {
+        return addSemanticNode("csharp.binary", { operator: binaryOperatorByKind.get(kind) }, {
+          left: addOptimizedSyntaxNode(children[0], depth + 1),
+          right: addOptimizedSyntaxNode(children[1], depth + 1)
+        }, depth, kind);
+      }
+
+      if (!significantTrivia && kind === "IsPatternExpression" && children.length === 2) {
+        return addSemanticNode("csharp.binary", { operator: "is" }, {
+          left: addOptimizedSyntaxNode(children[0], depth + 1),
+          right: addOptimizedSyntaxNode(children[1], depth + 1)
+        }, depth, kind);
+      }
+
+      if (!significantTrivia && ["ConstantPattern", "TypePattern", "ParenthesizedPattern"].includes(kind) && children.length === 1) {
+        return addOptimizedSyntaxNode(children[0], depth);
+      }
+
+      if (!significantTrivia && kind === "NotPattern" && children.length === 1) {
+        return addSemanticNode("csharp.unary", { operator: "not" }, {
+          operand: addOptimizedSyntaxNode(children[0], depth + 1)
+        }, depth, kind);
+      }
+
+      if (!significantTrivia && ["AndPattern", "OrPattern"].includes(kind) && children.length === 2) {
+        return addSemanticNode("csharp.binary", {
+          operator: kind === "AndPattern" ? "and" : "or"
+        }, {
+          left: addOptimizedSyntaxNode(children[0], depth + 1),
+          right: addOptimizedSyntaxNode(children[1], depth + 1)
+        }, depth, kind);
+      }
+
+      if (!significantTrivia && unaryOperatorByKind.has(kind) && children.length === 1) {
+        const operator = unaryOperatorByKind.get(kind);
+        if (operator !== "!post") {
+          return addSemanticNode("csharp.unary", { operator }, {
+            operand: addOptimizedSyntaxNode(children[0], depth + 1)
+          }, depth, kind);
+        }
+      }
+
+      if (!significantTrivia && kind === "CastExpression" && children.length === 2) {
+        const typeText = syntaxCoreText(children[0]);
+        if (TYPE_TEXT.test(typeText)) {
+          return addSemanticNode("csharp.cast", { type: typeText }, {
+            value: addOptimizedSyntaxNode(children[1], depth + 1)
+          }, depth, kind);
+        }
+      }
+
+      if (!significantTrivia && kind === "ObjectCreationExpression") {
+        const core = syntaxCoreText(syntaxNode);
+        const match = /^new\s+([^\s(\[{]+(?:<[^{};=]+>)?)\s*\(/u.exec(core);
+        const argumentList = children.find(child => String(child?.kind || "") === "ArgumentList");
+        const initializer = children.find(child => String(child?.kind || "") === "ObjectInitializerExpression");
+        if (match && argumentList && TYPE_TEXT.test(match[1])) {
+          const argumentsList = directSyntaxChildren(argumentList).filter(child => String(child?.kind || "") === "Argument");
+          const initializerItems = initializer ? directSyntaxChildren(initializer) : [];
+          if (initializerItems.length === 0) {
+            const owner = resolveCatalogType(match[1]);
+            let constructors = catalogMembers(owner, "constructor", "").filter(({ definition }) => {
+              const parameters = Array.isArray(definition.apiParameters) ? definition.apiParameters : [];
+              if (parameters.some(parameter => parameter?.isOut === true)) return false;
+              const required = parameters.filter(parameter => parameter?.isOptional !== true && parameter?.hasDefaultValue !== true).length;
+              return argumentsList.length >= required && argumentsList.length <= parameters.length &&
+                argumentsList.every((argument, index) => parameterAcceptsType(parameters[index], inferExpressionType(argumentValueNode(argument))));
+            });
+            if (constructors.length === 1) {
+              const [{ operatorId, definition }] = constructors;
+              const id = addNode(operatorId, {
+                customCSharpTypeText: match[1]
+              }, depth, definition.title || kind);
+              argumentsList.forEach((argument, index) => {
+                connect(addOptimizedSyntaxNode(argumentValueNode(argument), depth + 1), id, `arg${index}`);
+              });
+              return id;
+            }
+          }
+          return addSemanticNode("csharp.objectCreation", { type: match[1], kind: "object" }, {
+            arguments: addSyntaxSequence(argumentsList, "commaSpace", depth + 1, "Arguments"),
+            initializer: addSyntaxSequence(initializerItems, "commaSpace", depth + 1, "Initializer")
+          }, depth, kind);
+        }
+      }
+
+      if (!significantTrivia && kind === "ConditionalExpression" && children.length === 3) {
+        return addSemanticNode("csharp.conditional", {}, {
+          condition: addOptimizedSyntaxNode(children[0], depth + 1),
+          true: addOptimizedSyntaxNode(children[1], depth + 1),
+          false: addOptimizedSyntaxNode(children[2], depth + 1)
+        }, depth, kind);
+      }
+
+      if (!significantTrivia && ["SimpleLambdaExpression", "ParenthesizedLambdaExpression", "AnonymousMethodExpression"].includes(kind)) {
+        const bodyNode = children.at(-1);
+        const parameterContainer = children.find(child => String(child?.kind || "") === "ParameterList");
+        const parameters = parameterContainer
+          ? directSyntaxChildren(parameterContainer).filter(child => String(child?.kind || "") === "Parameter")
+          : children.filter(child => String(child?.kind || "") === "Parameter");
+        if (bodyNode) {
+          const blockBody = String(bodyNode.kind || "") === "Block";
+          const bodyNodes = blockBody
+            ? directSyntaxChildren(bodyNode).filter(child => /Statement$/.test(String(child?.kind || "")))
+            : [bodyNode];
+          const core = syntaxCoreText(syntaxNode);
+          const modifierMatch = /^(?:(static|async)\s+|((?:static\s+async|async\s+static))\s+)?/.exec(core);
+          return addSemanticNode("csharp.lambda", {
+            kind: kind === "AnonymousMethodExpression" ? "anonymous" : "lambda",
+            modifiers: String(modifierMatch?.[1] || modifierMatch?.[2] || ""),
+            expressionBody: !blockBody
+          }, {
+            parameters: addSyntaxSequence(parameters, "commaSpace", depth + 1, "Parameters"),
+            body: addSyntaxSequence(bodyNodes, "newline", depth + 1, "Body")
+          }, depth, kind);
+        }
+      }
+
+      if (assignmentOperatorByKind.has(kind) && children.length === 2) {
+        const operator = assignmentOperatorByKind.get(kind);
+        if (!significantTrivia) {
+          if (operator === "=" && String(children[0]?.kind || "") === "SimpleMemberAccessExpression") {
+            const accessChildren = directSyntaxChildren(children[0]);
+            if (accessChildren.length === 2) {
+              const owner = inferExpressionType(accessChildren[0]);
+              const member = syntaxCoreText(accessChildren[1]).replace(/^@/, "");
+              const candidates = [
+                ...catalogMembers(owner, "property-set", member),
+                ...catalogMembers(owner, "field-set", member)
+              ];
+              if (candidates.length === 1) {
+                const [{ operatorId, definition }] = candidates;
+                const id = addNode(operatorId, {
+                  customCSharpStaticTarget: definition.apiIsStatic === true
+                    ? syntaxCoreText(accessChildren[0])
+                    : ""
+                }, depth, definition.title || kind);
+                if (definition.apiIsStatic !== true) {
+                  connect(addOptimizedSyntaxNode(accessChildren[0], depth + 1), id, "target");
+                }
+                connect(addOptimizedSyntaxNode(children[1], depth + 1), id, "value");
+                return id;
+              }
+            }
+          }
+          if (operator === "=" && String(children[0]?.kind || "") === "ElementAccessExpression") {
+            const accessChildren = directSyntaxChildren(children[0]);
+            const target = accessChildren[0];
+            const argumentList = accessChildren.find(child => String(child?.kind || "") === "BracketedArgumentList");
+            const argumentsList = argumentList
+              ? directSyntaxChildren(argumentList).filter(child => String(child?.kind || "") === "Argument")
+              : [];
+            const owner = inferExpressionType(target);
+            const candidates = catalogMembers(owner, "property-set", "Item").filter(({ definition }) => {
+              const parameters = Array.isArray(definition.apiParameters) ? definition.apiParameters : [];
+              return parameters.length === argumentsList.length + 1 &&
+                argumentsList.every((argument, index) => parameterAcceptsType(parameters[index], inferExpressionType(argumentValueNode(argument))));
+            });
+            if (candidates.length === 1) {
+              const [{ operatorId, definition }] = candidates;
+              const id = addNode(operatorId, {}, depth, definition.title || kind);
+              if (definition.apiIsStatic !== true) connect(addOptimizedSyntaxNode(target, depth + 1), id, "target");
+              argumentsList.forEach((argument, index) => {
+                connect(addOptimizedSyntaxNode(argumentValueNode(argument), depth + 1), id, `arg${index}`);
+              });
+              connect(addOptimizedSyntaxNode(children[1], depth + 1), id, "value");
+              return id;
+            }
+          }
+          return addSemanticNode("csharp.assignment", { operator }, {
+            target: addOptimizedSyntaxNode(children[0], depth + 1),
+            value: addOptimizedSyntaxNode(children[1], depth + 1)
+          }, depth, kind);
+        }
+      }
+
+      if (kind === "Argument" && children.length === 1) {
+        const childText = syntaxCoreText(children[0]);
+        const match = /^(?:(@?[\p{L}_][\p{L}\p{N}_]*):\s*)?(?:(ref|out|in)\s+)?([\s\S]+)$/u.exec(semanticValue);
+        if (match && match[3] === childText) {
+          if (!match[1] && !match[2]) {
+            return addOptimizedSyntaxNode(children[0], depth);
+          }
+          return addSemanticNode("csharp.argument", {
+            modifier: match[2] || "none", name: match[1] || ""
+          }, { value: addOptimizedSyntaxNode(children[0], depth + 1) }, depth, kind);
+        }
+      }
+
+      if (!significantTrivia && kind === "ExpressionStatement" && children.length === 1) {
+        return addSemanticNode("csharp.expressionStatement", {}, {
+          expression: addOptimizedSyntaxNode(children[0], depth + 1)
+        }, depth, kind);
+      }
+
+      if (!significantTrivia && kind === "IfStatement" && children.length >= 2) {
+        const condition = children[0];
+        const thenNode = children[1];
+        const elseClause = children.find(child => String(child?.kind || "") === "ElseClause");
+        const thenNodes = String(thenNode?.kind || "") === "Block"
+          ? directSyntaxChildren(thenNode).filter(child => /Statement$/.test(String(child?.kind || "")))
+          : [thenNode];
+        const elseStatement = elseClause ? directSyntaxChildren(elseClause).at(-1) : null;
+        const elseNodes = !elseStatement ? [] : String(elseStatement?.kind || "") === "Block"
+          ? directSyntaxChildren(elseStatement).filter(child => /Statement$/.test(String(child?.kind || "")))
+          : [elseStatement];
+        return addSemanticNode("csharp.if", {}, {
+          condition: addOptimizedSyntaxNode(condition, depth + 1),
+          then: addSyntaxSequence(thenNodes, "newline", depth + 1, "Then"),
+          else: addSyntaxSequence(elseNodes, "newline", depth + 1, "Else")
+        }, depth, kind);
+      }
+
+      if (!significantTrivia && kind === "LabeledStatement" && children.length === 1) {
+        const match = /^(@?[\p{L}_][\p{L}\p{N}_]*):/u.exec(syntaxCoreText(syntaxNode));
+        if (match) {
+          return addSemanticNode("csharp.label", { name: match[1] }, {
+            statement: addOptimizedSyntaxNode(children[0], depth + 1)
+          }, depth, kind);
+        }
+      }
+
+      if (!significantTrivia && resourceKindBySyntaxKind.has(kind) && children.length >= 1) {
+        const bodyNode = children.at(-1);
+        const resourceNode = children.length > 1 ? children[0] : null;
+        const bodyNodes = String(bodyNode?.kind || "") === "Block"
+          ? directSyntaxChildren(bodyNode).filter(child => /Statement$/.test(String(child?.kind || "")))
+          : [bodyNode];
+        return addSemanticNode("csharp.resourceStatement", {
+          kind: resourceKindBySyntaxKind.get(kind)
+        }, {
+          resource: resourceNode ? addOptimizedSyntaxNode(resourceNode, depth + 1) : null,
+          body: addSyntaxSequence(bodyNodes, "newline", depth + 1, "Body")
+        }, depth, kind);
+      }
+
+      if (!significantTrivia && kind === "CatchClause") {
+        const bodyNode = children.find(child => String(child?.kind || "") === "Block");
+        const declaration = children.find(child => String(child?.kind || "") === "CatchDeclaration");
+        const filter = children.find(child => String(child?.kind || "") === "CatchFilterClause");
+        const declarationMatch = declaration
+          ? /^\(([^\s)]+)(?:\s+(@?[\p{L}_][\p{L}\p{N}_]*))?\)$/u.exec(syntaxCoreText(declaration))
+          : null;
+        if (bodyNode && (!declaration || declarationMatch)) {
+          const bodyNodes = directSyntaxChildren(bodyNode).filter(child => /Statement$/.test(String(child?.kind || "")));
+          const filterValue = filter ? directSyntaxChildren(filter).at(-1) : null;
+          return addSemanticNode("csharp.catch", {
+            catchAll: !declaration,
+            type: declarationMatch?.[1] || "System.Exception",
+            name: declarationMatch?.[2] || "exception"
+          }, {
+            filter: filterValue ? addOptimizedSyntaxNode(filterValue, depth + 1) : null,
+            body: addSyntaxSequence(bodyNodes, "newline", depth + 1, "Body")
+          }, depth, kind);
+        }
+      }
+
+      if (!significantTrivia && kind === "TryStatement") {
+        const bodyNode = children.find(child => String(child?.kind || "") === "Block");
+        const catches = children.filter(child => String(child?.kind || "") === "CatchClause");
+        const finallyClause = children.find(child => String(child?.kind || "") === "FinallyClause");
+        if (bodyNode) {
+          const bodyNodes = directSyntaxChildren(bodyNode).filter(child => /Statement$/.test(String(child?.kind || "")));
+          const finallyBlock = finallyClause
+            ? directSyntaxChildren(finallyClause).find(child => String(child?.kind || "") === "Block")
+            : null;
+          const finallyNodes = finallyBlock
+            ? directSyntaxChildren(finallyBlock).filter(child => /Statement$/.test(String(child?.kind || "")))
+            : [];
+          return addSemanticNode("csharp.try", {}, {
+            body: addSyntaxSequence(bodyNodes, "newline", depth + 1, "Body"),
+            catches: addSyntaxSequence(catches, "newline", depth + 1, "Catches"),
+            finally: addSyntaxSequence(finallyNodes, "newline", depth + 1, "Finally")
+          }, depth, kind);
+        }
+      }
+
+      if (!significantTrivia && kind === "SwitchStatement" && children.length >= 1) {
+        const valueNode = children[0];
+        const sections = children.filter(child => String(child?.kind || "") === "SwitchSection");
+        return addSemanticNode("csharp.switch", { expression: false }, {
+          value: addOptimizedSyntaxNode(valueNode, depth + 1),
+          sections: addSyntaxSequence(sections, "newline", depth + 1, "Sections")
+        }, depth, kind);
+      }
+
+      if (!significantTrivia && kind === "SwitchSection") {
+        const labels = children.filter(child => /SwitchLabel$/.test(String(child?.kind || "")));
+        const statements = children.filter(child => /Statement$/.test(String(child?.kind || "")));
+        if (labels.length === 1) {
+          const label = labels[0];
+          const isDefault = String(label.kind || "") === "DefaultSwitchLabel";
+          const labelChildren = directSyntaxChildren(label);
+          const pattern = isDefault ? null : labelChildren[0] || null;
+          const whenClause = labelChildren.find(child => String(child?.kind || "") === "WhenClause");
+          const whenValue = whenClause ? directSyntaxChildren(whenClause).at(-1) : null;
+          return addSemanticNode("csharp.switchSection", {
+            expressionArm: false, default: isDefault
+          }, {
+            pattern: pattern ? addOptimizedSyntaxNode(pattern, depth + 1) : null,
+            when: whenValue ? addOptimizedSyntaxNode(whenValue, depth + 1) : null,
+            body: addSyntaxSequence(statements, "newline", depth + 1, "Body")
+          }, depth, kind);
+        }
+      }
+
+      if (!significantTrivia && kind === "SwitchExpression" && children.length >= 1) {
+        const valueNode = children[0];
+        const arms = children.filter(child => String(child?.kind || "") === "SwitchExpressionArm");
+        return addSemanticNode("csharp.switch", { expression: true }, {
+          value: addOptimizedSyntaxNode(valueNode, depth + 1),
+          sections: addSyntaxSequence(arms, "newline", depth + 1, "Arms")
+        }, depth, kind);
+      }
+
+      if (!significantTrivia && kind === "SwitchExpressionArm" && children.length >= 2) {
+        const whenClause = children.find(child => String(child?.kind || "") === "WhenClause");
+        const pattern = children[0];
+        const result = children.at(-1);
+        const whenValue = whenClause ? directSyntaxChildren(whenClause).at(-1) : null;
+        return addSemanticNode("csharp.switchSection", {
+          expressionArm: true, default: false
+        }, {
+          pattern: addOptimizedSyntaxNode(pattern, depth + 1),
+          when: whenValue ? addOptimizedSyntaxNode(whenValue, depth + 1) : null,
+          body: addOptimizedSyntaxNode(result, depth + 1)
+        }, depth, kind);
+      }
+
+      if (!significantTrivia && ["WhileStatement", "DoStatement"].includes(kind) && children.length >= 2) {
+        const condition = kind === "WhileStatement" ? children[0] : children.at(-1);
+        const bodyNode = kind === "WhileStatement" ? children[1] : children[0];
+        const bodyNodes = String(bodyNode?.kind || "") === "Block"
+          ? directSyntaxChildren(bodyNode).filter(child => /Statement$/.test(String(child?.kind || "")))
+          : [bodyNode];
+        return addSemanticNode("csharp.loop", {
+          kind: kind === "DoStatement" ? "do" : "while", iterator: "item", iteratorType: "var"
+        }, {
+          condition: addOptimizedSyntaxNode(condition, depth + 1),
+          body: addSyntaxSequence(bodyNodes, "newline", depth + 1, "Body")
+        }, depth, kind);
+      }
+
+      if (!significantTrivia && kind === "ForStatement") {
+        const semicolons = directTokens(syntaxNode)
+          .filter(token => String(token?.kind || "") === "SemicolonToken")
+          .sort((left, right) => Number(left.start) - Number(right.start));
+        const bodyNode = children.at(-1);
+        if (semicolons.length === 2 && bodyNode) {
+          const first = Number(semicolons[0].start);
+          const second = Number(semicolons[1].start);
+          const headerNodes = children.slice(0, -1);
+          const initializers = headerNodes.filter(child => Number(child?.start) < first);
+          const conditions = headerNodes.filter(child => Number(child?.start) > first && Number(child?.start) < second);
+          const increments = headerNodes.filter(child => Number(child?.start) > second);
+          const bodyNodes = String(bodyNode?.kind || "") === "Block"
+            ? directSyntaxChildren(bodyNode).filter(child => /Statement$/.test(String(child?.kind || "")))
+            : [bodyNode];
+          return addSemanticNode("csharp.loop", {
+            kind: "for", iterator: "item", iteratorType: "var"
+          }, {
+            initializer: addSyntaxSequence(initializers, "commaSpace", depth + 1, "Initializers"),
+            condition: addSyntaxSequence(conditions, "commaSpace", depth + 1, "Condition"),
+            increment: addSyntaxSequence(increments, "commaSpace", depth + 1, "Increment"),
+            body: addSyntaxSequence(bodyNodes, "newline", depth + 1, "Body")
+          }, depth, kind);
+        }
+      }
+
+      if (!significantTrivia && ["ForEachStatement", "ForEachVariableStatement"].includes(kind)) {
+        const core = syntaxCoreText(syntaxNode);
+        const match = /^(await )?foreach \(([^\s]+) (@?[\p{L}_][\p{L}\p{N}_]*) in /u.exec(core);
+        const bodyNode = children.at(-1);
+        const collection = children.length >= 2 ? children.at(-2) : null;
+        if (match && bodyNode && collection) {
+          const bodyNodes = String(bodyNode?.kind || "") === "Block"
+            ? directSyntaxChildren(bodyNode).filter(child => /Statement$/.test(String(child?.kind || "")))
+            : [bodyNode];
+          return addSemanticNode("csharp.loop", {
+            kind: match[1] ? "await foreach" : "foreach", iteratorType: match[2], iterator: match[3]
+          }, {
+            condition: addOptimizedSyntaxNode(collection, depth + 1),
+            body: addSyntaxSequence(bodyNodes, "newline", depth + 1, "Body")
+          }, depth, kind);
+        }
+      }
+
+      if (jumpKindBySyntaxKind.has(kind)) {
+        const jumpKind = jumpKindBySyntaxKind.get(kind);
+        const childText = children.length === 1 ? syntaxText(children[0]) : "";
+        const expected = ["break", "continue", "yield break", "goto default"].includes(jumpKind)
+          ? `${jumpKind};`
+          : `${jumpKind}${childText ? ` ${childText}` : ""};`;
+        if (!significantTrivia && semanticValue.replace(/\s+/g, " ").trim() === expected.replace(/\s+/g, " ").trim()) {
+          return addSemanticNode("csharp.jump", { kind: jumpKind }, {
+            value: children.length === 1 ? addOptimizedSyntaxNode(children[0], depth + 1) : null
+          }, depth, kind);
+        }
+      }
+
+      if (keywordByKind.has(kind) && children.length === 1) {
+        const keyword = keywordByKind.get(kind);
+        if (!significantTrivia && semanticValue.replace(/\s+/g, "") === `${keyword}(${syntaxCoreText(children[0])})`.replace(/\s+/g, "")) {
+          return addSemanticNode("csharp.keywordExpression", { keyword }, {
+            value: addOptimizedSyntaxNode(children[0], depth + 1)
+          }, depth, kind);
+        }
+      }
+      return null;
+    };
+
+    let preserveWhitespaceContext = 0;
+    addOptimizedSyntaxNode = (syntaxNode, depth = 0, preserveExact = false) => {
+      const effectivePreserve = preserveExact || preserveWhitespaceContext > 0;
+      if (preserveExact) preserveWhitespaceContext += 1;
+      try {
+        const semanticId = tryAddSemanticNode(syntaxNode, depth);
+        return semanticId
+          ? wrapSemanticTrivia(syntaxNode, semanticId, depth, effectivePreserve)
+          : addSyntaxNode(syntaxNode, depth);
+      } finally {
+        if (preserveExact) preserveWhitespaceContext -= 1;
+      }
+    };
+
+    const rootChildren = String(parseResult.root?.kind || "") === "CompilationUnit"
+      ? directSyntaxChildren(parseResult.root)
+      : [];
+    let rootSyntaxNodeId;
+    if (options.semanticOptimization === false) {
+      rootSyntaxNodeId = addSyntaxNode(parseResult.root, 0);
+    } else if (rootChildren.length === 1 && syntaxText(rootChildren[0]) === sourceText) {
+      rootSyntaxNodeId = addOptimizedSyntaxNode(rootChildren[0], 0);
+    } else {
+      rootSyntaxNodeId = addOptimizedSyntaxNode(parseResult.root, 0);
+    }
     const fileId = addNode("csharp.file", {
       fileName,
       projectId,
@@ -1750,7 +3295,7 @@
     return storeCustomCSharpFragment(fragment, host, state, source);
   }
 
-  function importRoslynIntoCurrentGraph(source, parseResult, options = {}) {
+  async function importRoslynIntoCurrentGraph(source, parseResult, options = {}) {
     const host = window.RMLDynamicGraphHost;
     const state = host?.getRootState?.() || host?.getState?.();
     if (!state || !Array.isArray(state.nodes) || !Array.isArray(state.connections)) {
@@ -1767,6 +3312,36 @@
       attempt += 1;
     } while (fragment.ok && [...fragment.nodes, ...fragment.connections].some(item => usedIds.has(item.id)) && attempt < 100);
     if (!fragment.ok) return fragment;
+    const validateFragment = async candidate => {
+      const prepared = createCustomCSharpFileGraphFromFragment(candidate);
+      if (!prepared.ok) return false;
+      const rendered = renderCustomCSharpGraph(prepared.customGraph);
+      if (!rendered.ok) return false;
+      const reparsed = await window.RMLCSharp14Roslyn.parse(rendered.source);
+      return reparsed?.ok === true &&
+        roslynStructuralSignature(parseResult.root) === roslynStructuralSignature(reparsed.root);
+    };
+    if (!await validateFragment(fragment)) {
+      fragment = createRoslynImportFragment(source, parseResult, {
+        ...options,
+        prefix: `${options.prefix || "csharp14-roslyn-import"}-${stableHash(source)}-semantic-${attempt}`,
+        disableCatalogNodes: true
+      });
+    }
+    if (!fragment.ok || !await validateFragment(fragment)) {
+      fragment = createRoslynImportFragment(source, parseResult, {
+        ...options,
+        prefix: `${options.prefix || "csharp14-roslyn-import"}-${stableHash(source)}-exact-${attempt}`,
+        semanticOptimization: false
+      });
+      if (!fragment.ok || !await validateFragment(fragment)) {
+        return {
+          ok: false,
+          diagnostics: ["The imported Node Graph did not reproduce the complete validated C# 14 token and meaningful-trivia stream."],
+          nodes: [], connections: []
+        };
+      }
+    }
     return storeCustomCSharpFragment(fragment, host, state, source);
   }
 
@@ -1790,6 +3365,7 @@
       projectId: String(mainFileNode.parameters?.projectId || "main"),
       parser: String(fragment.parser || "Visual C# lexer"),
       languageVersion: String(fragment.languageVersion || "14.0"),
+      optimizerVersion: VERSION,
       importedSource: false,
       coordinateSpaceVersion:
         CUSTOM_CSHARP_COORDINATE_SPACE_VERSION,
@@ -2023,10 +3599,10 @@
       localStatus.classList.remove("success", "error");
     });
 
-    commit.addEventListener("click", () => {
+    commit.addEventListener("click", async () => {
       if (!pendingImport || !acknowledgement.checked) return;
       try {
-        const result = importRoslynIntoCurrentGraph(pendingImport.source, pendingImport.parseResult, {
+        const result = await importRoslynIntoCurrentGraph(pendingImport.source, pendingImport.parseResult, {
           fileName: pendingImport.fileName,
           projectId: "main"
         });
@@ -2068,6 +3644,7 @@
     createRoslynImportFragment,
     createCustomCSharpFileGraphFromFragment,
     sourceHash: stableHash,
+    roslynStructuralSignature,
     renderCustomCSharpGraph,
     importRoslynIntoCurrentGraph,
     formatRoslynDiagnostics
@@ -2086,13 +3663,18 @@
   Object.defineProperty(window, "RMLVisualCSharpReport", {
     value: Object.freeze({
       version: VERSION,
-      representation: "roslyn-csharp14-ast-token-trivia-plus-structured-nodes",
+      representation: "verified-scanner-catalog-first-recursive-semantic-minimizer-plus-exact-roslyn-fallback",
       targetFramework: "net10.0",
       languageVersion: "14.0",
       grammarValidator: "bundled-dotnet10-roslyn-webassembly",
       grammarImportFailClosed: true,
       sourceBoundAst: true,
       roslynAstNodes: true,
+      compactRoslynGraph: true,
+      verifiedScannerCatalogFirst: true,
+      catalogOverloadGuessing: false,
+      tokenAndMeaningfulTriviaRoundtripGate: true,
+      opaqueRoslynSubtrees: false,
       contextualKeywords: Object.freeze(["allows", "args", "extension", "field"]),
       fileBasedDirectives: true,
       escapeCharacterE: true,

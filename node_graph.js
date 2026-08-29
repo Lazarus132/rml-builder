@@ -13,7 +13,7 @@
     )
       ? RML_GRAPH_REQUESTED_TEST_STORAGE_SCOPE
       : "rml-configuration-builder-visual-test-default";
-  const GRAPH_SCHEMA_VERSION = 23;
+  const GRAPH_SCHEMA_VERSION = 24;
   const GRAPH_STAGE_WIDTH = 5200;
   const GRAPH_STAGE_HEIGHT = 3400;
   const GRAPH_MIN_ZOOM = 0.005;
@@ -356,6 +356,7 @@
       title: "Add",
       group: "Math",
       symbol: "+",
+      hiddenFromPalette: true,
       description:
         "Adds two or more values of the same numeric or vector type. Select the node and use + / − in the inspector to change the input count.",
       inputs: [
@@ -377,6 +378,7 @@
       title: "Subtract",
       group: "Math",
       symbol: "−",
+      hiddenFromPalette: true,
       description:
         "Subtracts B from A. Both ports must resolve to the same type.",
       inputs: [
@@ -391,6 +393,7 @@
       title: "Multiply",
       group: "Math",
       symbol: "×",
+      hiddenFromPalette: true,
       description:
         "Multiplies two or more values of the same arithmetic type. Select the node and use + / − in the inspector to change the input count.",
       inputs: [
@@ -412,6 +415,7 @@
       title: "Divide",
       group: "Math",
       symbol: "÷",
+      hiddenFromPalette: true,
       description:
         "Divides A by B. Both ports must resolve to the same arithmetic type.",
       inputs: [
@@ -426,6 +430,7 @@
       title: "Minimum",
       group: "Math",
       symbol: "min",
+      hiddenFromPalette: true,
       description:
         "Returns the minimum of two or more scalar numeric values. Select the node and use + / − in the inspector to change the input count.",
       inputs: [
@@ -447,6 +452,7 @@
       title: "Maximum",
       group: "Math",
       symbol: "max",
+      hiddenFromPalette: true,
       description:
         "Returns the maximum of two or more scalar numeric values. Select the node and use + / − in the inspector to change the input count.",
       inputs: [
@@ -483,6 +489,7 @@
       title: "Negate",
       group: "Math",
       symbol: "±",
+      hiddenFromPalette: true,
       description:
         "Inverts the sign of a numeric or vector value.",
       inputs: [
@@ -496,6 +503,7 @@
       title: "Absolute",
       group: "Math",
       symbol: "|x|",
+      hiddenFromPalette: true,
       description:
         "Returns the absolute value of a scalar number.",
       inputs: [
@@ -525,6 +533,7 @@
       title: "AND",
       group: "Logic",
       symbol: "∧",
+      hiddenFromPalette: true,
       description:
         "True only when every Boolean input is true. Select the node and use + / − in the inspector to change the input count.",
       inputs: [
@@ -546,6 +555,7 @@
       title: "OR",
       group: "Logic",
       symbol: "∨",
+      hiddenFromPalette: true,
       description:
         "True when at least one Boolean input is true. Select the node and use + / − in the inspector to change the input count.",
       inputs: [
@@ -567,6 +577,7 @@
       title: "NOT",
       group: "Logic",
       symbol: "¬",
+      hiddenFromPalette: true,
       description:
         "Inverts a Boolean value.",
       inputs: [
@@ -580,6 +591,7 @@
       title: "Equal",
       group: "Logic",
       symbol: "=",
+      hiddenFromPalette: true,
       description:
         "Compares two values. Both inputs must have exactly the same concrete type.",
       inputs: [
@@ -594,6 +606,7 @@
       title: "Greater Than",
       group: "Logic",
       symbol: ">",
+      hiddenFromPalette: true,
       description:
         "Compares two scalar numbers of the same type.",
       inputs: [
@@ -608,6 +621,7 @@
       title: "Less Than",
       group: "Logic",
       symbol: "<",
+      hiddenFromPalette: true,
       description:
         "Compares two scalar numbers of the same type.",
       inputs: [
@@ -1010,7 +1024,7 @@
     "RMLModNodeRegistry",
     {
       value: Object.freeze({
-        version: 6,
+        version: 7,
         port,
         genericPort,
         registerType:
@@ -1056,6 +1070,7 @@
   let bridge = null;
   let graph = null;
   let customCSharpEditor = null;
+  const customCSharpSourceSyncTimers = new Map();
   let customCSharpRootOperation = false;
   
   
@@ -2359,6 +2374,9 @@
     fromType,
     toType
   ) {
+    if (customCSharpEditor) {
+      return true;
+    }
     if (!fromType || !toType) {
       return false;
     }
@@ -2633,6 +2651,7 @@
       projectId: String(fileNode?.parameters?.projectId || "main"),
       parser: "Visual C#",
       languageVersion: "14.0",
+      optimizerVersion: 0,
       importedSource: false,
       sourceEditedInInspector: false,
       coordinateSpaceVersion:
@@ -2721,8 +2740,10 @@
     return true;
   }
 
-  async function openCustomCSharpFileGraphSynced(nodeId) {
+  async function openCustomCSharpFileGraphSynced(nodeId, options = {}) {
     if (!graph || customCSharpEditor) return false;
+    const openAfterSync = options.openAfterSync !== false;
+    const quiet = options.quiet === true;
     const owner = findGraphNode(nodeId);
     const definition = owner ? nodeDefinition(owner) : null;
     if (!owner || definition?.customCSharpFile !== true) return false;
@@ -2737,6 +2758,7 @@
       graph.customCSharpFiles[ownerId] = graph.customCSharpFiles[ownerId]
         || createEmptyCustomCSharpFileGraph(owner);
       persistGraph(true);
+      if (!openAfterSync) return true;
       const opened = openCustomCSharpFileGraph(ownerId);
       if (opened) {
         showGraphMessage("Opened an empty visual C# 14 file graph. Build the complete source with syntax nodes and connect it to Output.", "success");
@@ -2755,8 +2777,8 @@
         existingGraph ||
         createEmptyCustomCSharpFileGraph(owner);
       persistGraph(true);
-      const opened =
-        openCustomCSharpFileGraph(ownerId);
+      if (!openAfterSync) return true;
+      const opened = openCustomCSharpFileGraph(ownerId);
       if (opened && !existingGraph) {
         showGraphMessage(
           "Opened an empty visual C# 14 file graph. This manually created Custom C# File is graph-authoritative, so its persistent Source field does not overwrite its nodes.",
@@ -2773,7 +2795,7 @@
       typeof visualCSharp?.createRoslynImportFragment !== "function" ||
       typeof visualCSharp?.createCustomCSharpFileGraphFromFragment !== "function"
     ) {
-      showGraphMessage("The bundled .NET 10 Roslyn converter is unavailable.", "error");
+      if (!quiet) showGraphMessage("The bundled .NET 10 Roslyn converter is unavailable.", "error");
       return false;
     }
 
@@ -2782,48 +2804,87 @@
       hashText(source);
     if (
       existingGraph &&
-      existingGraph.sourceHash === sourceHash
+      existingGraph.sourceEditedInInspector !== true &&
+      existingGraph.sourceHash === sourceHash &&
+      Number(existingGraph.optimizerVersion || 0) === Number(visualCSharp.version || 0)
     ) {
       existingGraph.sourceEditedInInspector = false;
       persistGraph(true);
-      return openCustomCSharpFileGraph(ownerId);
+      return openAfterSync ? openCustomCSharpFileGraph(ownerId) : true;
     }
 
-    showGraphMessage("Roslyn is synchronizing the persistent C# 14 source with its Node Graph…");
+    if (!quiet) showGraphMessage("Roslyn is synchronizing the persistent C# 14 source with its Node Graph…");
     try {
       const parseResult = await roslyn.parse(source);
       const currentOwner = findGraphNode(ownerId);
       if (String(currentOwner?.parameters?.source || "") !== source) {
-        showGraphMessage("The source changed during validation. Open Node Graph again to synchronize the latest text.", "warning");
+        if (!quiet) showGraphMessage("The source changed during validation. Open Node Graph again to synchronize the latest text.", "warning");
         return false;
       }
       if (parseResult?.ok !== true) {
         const messages = visualCSharp.formatRoslynDiagnostics?.(parseResult?.diagnostics) || [];
         throw new Error(messages[0] || "Roslyn rejected the direct source as invalid C# 14 syntax.");
       }
-      const fragment = visualCSharp.createRoslynImportFragment(source, parseResult, {
+      const fragmentOptions = {
         fileName: String(owner.parameters?.fileName || "VisualProgram.cs"),
         projectId: String(owner.parameters?.projectId || "main"),
         nullable: owner.parameters?.nullable || "inherit",
         autoGeneratedHeader: owner.parameters?.autoGeneratedHeader === true,
         prefix: `custom-csharp-sync-${hashText(`${ownerId}\0${source}`)}`
-      });
+      };
+      let fragment = visualCSharp.createRoslynImportFragment(source, parseResult, fragmentOptions);
       if (!fragment?.ok) throw new Error(fragment?.diagnostics?.[0] || "The Roslyn Node Graph synchronization failed.");
-      const prepared = visualCSharp.createCustomCSharpFileGraphFromFragment(fragment);
+      let prepared = visualCSharp.createCustomCSharpFileGraphFromFragment(fragment);
       if (!prepared?.ok) throw new Error(prepared?.diagnostics?.[0] || "The Custom C# File graph could not be created.");
 
+      const validatePreparedGraph = async candidate => {
+        const rendered = visualCSharp.renderCustomCSharpGraph(candidate.customGraph);
+        if (rendered?.ok !== true) return false;
+        const validation = await roslyn.parse(rendered.source);
+        if (validation?.ok !== true) return false;
+        const signature = visualCSharp.roslynStructuralSignature;
+        return typeof signature !== "function" ||
+          signature(parseResult.root) === signature(validation.root);
+      };
+      if (!await validatePreparedGraph(prepared)) {
+        fragment = visualCSharp.createRoslynImportFragment(source, parseResult, {
+          ...fragmentOptions,
+          prefix: `${fragmentOptions.prefix}-semantic`,
+          disableCatalogNodes: true
+        });
+        if (!fragment?.ok) throw new Error(fragment?.diagnostics?.[0] || "The catalog-independent semantic graph could not be created.");
+        prepared = visualCSharp.createCustomCSharpFileGraphFromFragment(fragment);
+      }
+      if (!prepared?.ok || !await validatePreparedGraph(prepared)) {
+        fragment = visualCSharp.createRoslynImportFragment(source, parseResult, {
+          ...fragmentOptions,
+          prefix: `${fragmentOptions.prefix}-exact`,
+          semanticOptimization: false
+        });
+        if (!fragment?.ok) throw new Error(fragment?.diagnostics?.[0] || "The exact Roslyn fallback graph could not be created.");
+        prepared = visualCSharp.createCustomCSharpFileGraphFromFragment(fragment);
+        if (!prepared?.ok || !await validatePreparedGraph(prepared)) {
+          throw new Error("The synchronized Node Graph did not reproduce valid C# 14 source. The previous valid graph was preserved.");
+        }
+      }
+
       prepared.customGraph.sourceHash = sourceHash;
+      prepared.customGraph.optimizerVersion = Number(visualCSharp.version || 0);
       prepared.customGraph.importedSource = true;
       prepared.customGraph.sourceEditedInInspector = false;
       graph.customCSharpFiles[ownerId] = prepared.customGraph;
       persistGraph(true);
+      if (!openAfterSync) return true;
       const opened = openCustomCSharpFileGraph(ownerId);
       if (opened) {
-        showGraphMessage(`Opened ${prepared.importedSyntaxNodeCount.toLocaleString()} editable C# syntax nodes synchronized from the persistent source.`, "success");
+        const synchronizedNodes = prepared.customGraph.nodes || [];
+        const usingCount = synchronizedNodes.filter(node => node.operatorId === "csharp.using").length;
+        const catalogCount = synchronizedNodes.filter(node => String(node.operatorId || "").startsWith("api.")).length;
+        showGraphMessage(`Opened ${prepared.importedSyntaxNodeCount.toLocaleString()} editable C# nodes: ${usingCount.toLocaleString()} Using Directive and ${catalogCount.toLocaleString()} verified scanner API nodes.`, "success");
       }
       return opened;
     } catch (error) {
-      showGraphMessage(error instanceof Error ? error.message : String(error), "error");
+      if (!quiet) showGraphMessage(error instanceof Error ? error.message : String(error), "error");
       return false;
     }
   }
@@ -3158,6 +3219,116 @@
         : [];
 
     const usedNodeIds = new Set();
+    const migratedRuntimeFamilyPorts = new Map();
+
+    const migrateRuntimeFamilyOperator = (nodeId, operatorId, parameters) => {
+      const migration = {
+        "math.add": ["math.operation", "add"],
+        "math.subtract": ["math.operation", "subtract"],
+        "math.multiply": ["math.operation", "multiply"],
+        "math.divide": ["math.operation", "divide"],
+        "math.modulo": ["math.operation", "modulo"],
+        "math.power": ["math.operation", "power"],
+        "math.minimum": ["math.operation", "minimum"],
+        "math.maximum": ["math.operation", "maximum"],
+        "math.negate": ["math.unaryOperation", "negate"],
+        "math.absolute": ["math.unaryOperation", "absolute"],
+        "math.squareRoot": ["math.unaryOperation", "squareRoot"],
+        "math.round": ["math.unaryOperation", "round"],
+        "math.floor": ["math.unaryOperation", "floor"],
+        "math.ceiling": ["math.unaryOperation", "ceiling"],
+        "logic.and": ["logic.booleanOperation", "and"],
+        "logic.or": ["logic.booleanOperation", "or"],
+        "logic.not": ["logic.booleanOperation", "not"],
+        "logic.equal": ["logic.compare", "equal"],
+        "logic.greater": ["logic.compare", "greater"],
+        "logic.less": ["logic.compare", "less"],
+        "text.contains": ["text.matchOperation", "contains"],
+        "text.startsWith": ["text.matchOperation", "startsWith"],
+        "text.endsWith": ["text.matchOperation", "endsWith"],
+        "text.replace": ["text.transformOperation", "replace"],
+        "normal.isNull": ["normal.nullCheck", "isNull"],
+        "normal.isNotNull": ["normal.nullCheck", "isNotNull"],
+        "file.fileExists": ["file.pathExists", "file"],
+        "file.directoryExists": ["file.pathExists", "directory"],
+        "file.readText": ["file.readOperation", "text"],
+        "file.readBytes": ["file.readOperation", "bytes"],
+        "file.writeText": ["file.writeOperation", "overwrite"],
+        "file.appendText": ["file.writeOperation", "append"],
+        "file.writeBytes": ["file.writeOperation", "bytes"],
+        "file.copy": ["file.transfer", "copy"],
+        "file.move": ["file.transfer", "move"],
+        "file.createDirectory": ["file.pathMutation", "createDirectory"],
+        "file.delete": ["file.pathMutation", "delete"],
+        "json.createObject": ["json.createContainer", "object"],
+        "json.createArray": ["json.createContainer", "array"],
+        "task.whenAll": ["task.waitMany", "all"],
+        "task.whenAny": ["task.waitMany", "any"],
+        "collection.addItem": ["collection.mutateItem", "add"],
+        "collection.insertItem": ["collection.mutateItem", "insert"],
+        "collection.removeItem": ["collection.mutateItem", "remove"],
+        "collection.removeAt": ["collection.mutateItem", "removeAt"],
+        "collection.clearList": ["collection.mutateItem", "clear"],
+        "dictionary.setValue": ["dictionary.mutate", "set"],
+        "dictionary.removeKey": ["dictionary.mutate", "remove"],
+        "json.setProperty": ["json.mutate", "setProperty"],
+        "json.removeProperty": ["json.mutate", "removeProperty"],
+        "json.addArrayItem": ["json.mutate", "addArrayItem"],
+        "normal.tryParseNumber": ["normal.tryParse", "number"],
+        "normal.tryParseBoolean": ["normal.tryParse", "boolean"],
+        "text.concat": ["text.combineOperation", "concat"],
+        "text.format": ["text.combineOperation", "format"],
+        "text.join": ["text.combineOperation", "join"],
+        "cast.doubleToFloat": ["cast.operation", "doubleToFloat"],
+        "cast.floatToInt": ["cast.operation", "floatToInt"],
+        "cast.toString": ["cast.operation", "toString"],
+        "network.tcpSend": ["network.socketSend", "tcp"],
+        "network.udpSend": ["network.socketSend", "udp"],
+        "flow.whileLoop": ["flow.loop", "while"],
+        "flow.doWhileLoop": ["flow.loop", "doWhile"],
+        "flow.break": ["flow.loopControl", "break"],
+        "flow.continue": ["flow.loopControl", "continue"],
+        "lifecycle.processExit": ["lifecycle.shutdownEvent", "processExit"],
+        "lifecycle.modUnload": ["lifecycle.shutdownEvent", "modUnload"],
+        "configuration.setVisibility": ["configuration.visibilityOperation", "item"],
+        "configuration.setLabelVisibility": ["configuration.visibilityOperation", "label"],
+        "harmony.patchArgument": ["harmony.readPatchValue", "argument"],
+        "harmony.patchResult": ["harmony.readPatchValue", "result"],
+        "harmony.setArgument": ["harmony.writePatchValue", "argument"],
+        "harmony.setResult": ["harmony.writePatchValue", "result"],
+        "lifecycle.worldStart": ["lifecycle.harmonyEvent", "worldStart"],
+        "lifecycle.worldDestroy": ["lifecycle.harmonyEvent", "worldDestroy"],
+        "lifecycle.userJoin": ["lifecycle.harmonyEvent", "userJoin"],
+        "lifecycle.userLeave": ["lifecycle.harmonyEvent", "userLeave"],
+        "lifecycle.componentAttach": ["lifecycle.harmonyEvent", "componentAttach"],
+        "lifecycle.componentDestroy": ["lifecycle.harmonyEvent", "componentDestroy"],
+        "lifecycle.engineUpdate": ["lifecycle.harmonyEvent", "engineUpdate"]
+      }[operatorId];
+      if (migration) {
+        parameters.operation = migration[1];
+        if (operatorId === "math.power") {
+          migratedRuntimeFamilyPorts.set(nodeId, { input: { value: "a", exponent: "b" } });
+        }
+        if (operatorId.startsWith("lifecycle.") && migration[0] === "lifecycle.harmonyEvent") {
+          parameters.targetTypeOverride = String(parameters.targetType || "");
+          parameters.targetMethodOverride = String(parameters.targetMethod || "");
+          delete parameters.targetType;
+          delete parameters.targetMethod;
+        }
+        return migration[0];
+      }
+      if (operatorId === "text.trim") {
+        parameters.operation = { start: "trimStart", end: "trimEnd" }[parameters.mode] || "trim";
+        delete parameters.mode;
+        return "text.transformOperation";
+      }
+      if (operatorId === "text.changeCase") {
+        parameters.operation = parameters.mode === "lower" ? "lower" : "upper";
+        delete parameters.mode;
+        return "text.transformOperation";
+      }
+      return operatorId;
+    };
 
     for (const source of rawNodes) {
       if (
@@ -3180,10 +3351,14 @@
         !Array.isArray(source.parameters)
           ? clone(source.parameters)
           : {};
-      const operatorId =
+      let operatorId =
         kind === "operator"
           ? source.operatorId
           : undefined;
+
+      if (kind === "operator") {
+        operatorId = migrateRuntimeFamilyOperator(source.id, operatorId, parameters);
+      }
 
       usedNodeIds.add(source.id);
 
@@ -3301,12 +3476,14 @@
       }
 
       usedConnectionIds.add(source.id);
+      const sourcePortMigration = migratedRuntimeFamilyPorts.get(source.fromNode)?.output || {};
+      const targetPortMigration = migratedRuntimeFamilyPorts.get(source.toNode)?.input || {};
       result.connections.push({
         id: source.id,
         fromNode: source.fromNode,
-        fromPort: source.fromPort,
+        fromPort: sourcePortMigration[source.fromPort] || source.fromPort,
         toNode: source.toNode,
-        toPort: source.toPort,
+        toPort: targetPortMigration[source.toPort] || source.toPort,
         points:
           sanitizeWirePoints(
             source.points,
@@ -3568,6 +3745,7 @@
         projectId: String(source.projectId || "main").slice(0, 160),
         parser: String(source.parser || "Visual C#").slice(0, 120),
         languageVersion: String(source.languageVersion || "14.0").slice(0, 32),
+        optimizerVersion: Math.max(0, Math.trunc(finiteNumber(source.optimizerVersion, 0))),
         importedSource,
         sourceEditedInInspector,
         coordinateSpaceVersion:
@@ -3875,6 +4053,7 @@
         projectId: String(customGraph?.projectId || "main"),
         parser: String(customGraph?.parser || "Visual C#"),
         languageVersion: String(customGraph?.languageVersion || "14.0"),
+        optimizerVersion: Math.max(0, Math.trunc(finiteNumber(customGraph?.optimizerVersion, 0))),
         importedSource: customGraph?.importedSource === true,
         sourceEditedInInspector:
           customGraph?.sourceEditedInInspector === true,
@@ -4359,10 +4538,10 @@
           typeof resolved === "object" &&
           !Array.isArray(resolved)
         ) {
-          return {
+          return expandVariadicDefinition(node, {
             ...definition,
             ...resolved
-          };
+          });
         }
       } catch (error) {
         console.error(
@@ -6469,6 +6648,18 @@
       candidate
     ];
 
+    if (customCSharpEditor) {
+      return {
+        valid: true,
+        reason: "",
+        candidate,
+        nextConnections,
+        analysis: null,
+        autoVectorUpdates: new Map(),
+        incremental: true
+      };
+    }
+
     const sourcePort = findPortSpec(
       candidate.fromNode,
       candidate.fromPort,
@@ -6609,6 +6800,16 @@
   }
 
   function pruneConnections() {
+    if (customCSharpEditor) {
+      graph.connections = graph.connections.filter(connection => {
+        const fromNode = findGraphNode(connection.fromNode);
+        const toNode = findGraphNode(connection.toNode);
+        return Boolean(fromNode && toNode && nodeDefinition(fromNode) && nodeDefinition(toNode));
+      });
+      normalizeConnectionRouting(graph.connections);
+      currentAnalysis = null;
+      return;
+    }
     if (hasMissingOperatorDefinitions()) {
       return;
     }
@@ -17394,7 +17595,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     if (customCSharpEditor) {
       return Boolean(
         definition?.customCSharpSyntaxNode === true ||
-        definition?.customCSharpSubgraphOnly === true
+        definition?.customCSharpSubgraphOnly === true ||
+        definition?.customCSharpCatalogNode === true
       );
     }
     return !(
@@ -28834,6 +29036,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
             graph.customCSharpFiles[node.id] ||
             createEmptyCustomCSharpFileGraph(node);
           customGraph.sourceEditedInInspector = true;
+          customGraph.sourceHash = "";
           graph.customCSharpFiles[node.id] = customGraph;
         }
 
@@ -28841,12 +29044,31 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           specification.affectsPorts ===
           true
         ) {
+          graphNodeDefinitionCache = new WeakMap();
+          currentAnalysis = null;
+          const previousConnectionIds = new Set(
+            graph.connections
+              .filter(connection => connection.fromNode === node.id || connection.toNode === node.id)
+              .map(connection => connection.id)
+          );
           pruneConnections();
+          const remainingConnectionIds = new Set(graph.connections.map(connection => connection.id));
+          const removedConnectionCount = [...previousConnectionIds]
+            .filter(connectionId => !remainingConnectionIds.has(connectionId))
+            .length;
+          if (removedConnectionCount > 0) {
+            showGraphMessage(
+              `${removedConnectionCount.toLocaleString()} incompatible connection${removedConnectionCount === 1 ? " was" : "s were"} removed because ${specification.label || specification.key} changed the node's port contract.`,
+              "warning"
+            );
+          }
           renderGraphNodesAndWires();
         } else if (
           specification.affectsNode ===
           true
         ) {
+          graphNodeDefinitionCache = new WeakMap();
+          currentAnalysis = null;
           renderGraphNodesAndWires();
         }
 
@@ -28864,6 +29086,31 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           : "input",
         update
       );
+
+      if (
+        definition.customCSharpFile === true &&
+        specification.key === "source" &&
+        !customCSharpEditor
+      ) {
+        const synchronizeSource = () => {
+          const pending = customCSharpSourceSyncTimers.get(node.id);
+          if (pending) window.clearTimeout(pending);
+          customCSharpSourceSyncTimers.delete(node.id);
+          void openCustomCSharpFileGraphSynced(node.id, {
+            openAfterSync: false,
+            quiet: true
+          });
+        };
+        control.addEventListener("input", () => {
+          const pending = customCSharpSourceSyncTimers.get(node.id);
+          if (pending) window.clearTimeout(pending);
+          customCSharpSourceSyncTimers.set(
+            node.id,
+            window.setTimeout(synchronizeSource, 450)
+          );
+        });
+        control.addEventListener("change", synchronizeSource);
+      }
 
       if (
         (kind === "bool" || kind === "select") &&
@@ -35243,7 +35490,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
   Object.defineProperty(window, "RMLDynamicGraphHost", {
     value: Object.freeze({
-      version: 38,
+      version: 39,
       getState() { return graph; },
       getRootState() {
         if (!customCSharpEditor) return graph;

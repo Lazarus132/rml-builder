@@ -26,14 +26,10 @@ html {
   background: var(--background);
 }
 
-@supports (-webkit-text-size-adjust: 100%) {
+@supports (-webkit-text-size-adjust: 100%) or (-moz-text-size-adjust: 100%) or (text-size-adjust: 100%) {
   html {
     -webkit-text-size-adjust: 100%;
-  }
-}
-
-@supports (text-size-adjust: 100%) {
-  html {
+    -moz-text-size-adjust: 100%;
     text-size-adjust: 100%;
   }
 }
