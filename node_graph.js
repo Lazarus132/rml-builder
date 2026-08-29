@@ -2603,6 +2603,7 @@
     graph.customCSharpFiles[customCSharpEditor.fileNodeId] = captured;
     const rendered = window.RMLVisualCSharp?.renderCustomCSharpGraph?.(captured);
     if (rendered && typeof rendered.source === "string") {
+      captured.sourceEditedInInspector = false;
       captured.sourceHash =
         window.RMLVisualCSharp?.sourceHash?.(
           rendered.source
@@ -2633,6 +2634,7 @@
       parser: "Visual C#",
       languageVersion: "14.0",
       importedSource: false,
+      sourceEditedInInspector: false,
       coordinateSpaceVersion:
         CUSTOM_CSHARP_COORDINATE_SPACE_VERSION,
       sourceHash: "",
@@ -2744,7 +2746,11 @@
 
     const existingGraph =
       graph.customCSharpFiles?.[ownerId];
-    if (existingGraph?.importedSource !== true) {
+    if (
+      existingGraph &&
+      existingGraph.importedSource !== true &&
+      existingGraph.sourceEditedInInspector !== true
+    ) {
       graph.customCSharpFiles[ownerId] =
         existingGraph ||
         createEmptyCustomCSharpFileGraph(owner);
@@ -2778,6 +2784,8 @@
       existingGraph &&
       existingGraph.sourceHash === sourceHash
     ) {
+      existingGraph.sourceEditedInInspector = false;
+      persistGraph(true);
       return openCustomCSharpFileGraph(ownerId);
     }
 
@@ -2806,6 +2814,7 @@
 
       prepared.customGraph.sourceHash = sourceHash;
       prepared.customGraph.importedSource = true;
+      prepared.customGraph.sourceEditedInInspector = false;
       graph.customCSharpFiles[ownerId] = prepared.customGraph;
       persistGraph(true);
       const opened = openCustomCSharpFileGraph(ownerId);
@@ -3531,6 +3540,8 @@
       const internalIds = new Set(sanitizedView.nodes.map(node => node.id));
       const importedSource =
         source.importedSource === true;
+      const sourceEditedInInspector =
+        source.sourceEditedInInspector === true;
       const coordinateSpaceVersion =
         Math.max(
           0,
@@ -3558,6 +3569,7 @@
         parser: String(source.parser || "Visual C#").slice(0, 120),
         languageVersion: String(source.languageVersion || "14.0").slice(0, 32),
         importedSource,
+        sourceEditedInInspector,
         coordinateSpaceVersion:
           CUSTOM_CSHARP_COORDINATE_SPACE_VERSION,
         sourceHash: legacyImportedLayoutSaturated
@@ -3636,6 +3648,7 @@
         parser: "Migrated visual C# graph",
         languageVersion: "14.0",
         importedSource: false,
+        sourceEditedInInspector: false,
         coordinateSpaceVersion:
           CUSTOM_CSHARP_COORDINATE_SPACE_VERSION,
         sourceHash: "",
@@ -3863,6 +3876,8 @@
         parser: String(customGraph?.parser || "Visual C#"),
         languageVersion: String(customGraph?.languageVersion || "14.0"),
         importedSource: customGraph?.importedSource === true,
+        sourceEditedInInspector:
+          customGraph?.sourceEditedInInspector === true,
         coordinateSpaceVersion:
           CUSTOM_CSHARP_COORDINATE_SPACE_VERSION,
         sourceHash: String(customGraph?.sourceHash || ""),
@@ -13758,11 +13773,48 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       }
 
       .rml-graph-palette-scroll {
+        height: 100%;
         min-height: 0;
         overflow-x: hidden;
         overflow-y: auto;
         overscroll-behavior: contain;
         scrollbar-width: thin;
+      }
+
+      .rml-graph-palette-scroll-shell {
+        position: relative;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      .rml-graph-palette-scroll-indicator {
+        position: absolute;
+        z-index: 8;
+        top: 4px;
+        right: 2px;
+        bottom: 4px;
+        width: 6px;
+        border-radius: 999px;
+        background: rgba(30, 23, 43, 0.72);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 120ms ease;
+      }
+
+      .rml-graph-palette-scroll-indicator.visible {
+        opacity: 1;
+      }
+
+      .rml-graph-palette-scroll-indicator > span {
+        position: absolute;
+        top: 0;
+        right: 0;
+        width: 6px;
+        min-height: 34px;
+        border-radius: 999px;
+        background: rgba(166, 111, 255, 0.96);
+        box-shadow: 0 0 8px rgba(166, 111, 255, 0.45);
+        transform: translateY(0);
       }
 
       .rml-graph-palette-group {
@@ -13786,6 +13838,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         cursor: pointer;
         list-style: none;
         -webkit-user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
         user-select: none;
       }
 
@@ -13997,6 +14051,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         padding: 0 !important;
         overflow: hidden !important;
         clip: rect(0 0 0 0) !important;
+        -webkit-clip-path: inset(50%) !important;
         clip-path: inset(50%) !important;
         border: 0 !important;
         white-space: nowrap !important;
@@ -14456,6 +14511,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       }
 
       .rml-graph-node.resizing {
+        -webkit-user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
         user-select: none;
       }
 
@@ -14645,6 +14703,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         border: 0;
         border-radius: 0;
         outline: 0;
+        -webkit-clip-path: polygon(8% 0, 100% 50%, 8% 100%);
         clip-path: polygon(8% 0, 100% 50%, 8% 100%);
       }
 
@@ -14905,6 +14964,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         font-size: 9px !important;
         tab-size: 4;
         white-space: pre;
+        overflow: auto;
+        touch-action: pan-x pan-y;
+        -webkit-overflow-scrolling: touch;
       }
 
       .rml-graph-inspector-type-list {
@@ -15038,6 +15100,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         padding: 0 !important;
         overflow: hidden !important;
         clip: rect(0 0 0 0) !important;
+        -webkit-clip-path: inset(50%) !important;
         clip-path: inset(50%) !important;
         border: 0 !important;
         white-space: nowrap !important;
@@ -15323,8 +15386,28 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         }
 
         body.rml-node-graph-mode #palette-content {
-          min-height: 340px;
-          max-height: 480px;
+          height: clamp(340px, 58dvh, 480px) !important;
+          min-height: 0;
+          max-height: none;
+          overflow: hidden !important;
+        }
+
+        body.rml-node-graph-mode .rml-graph-palette {
+          height: 100%;
+          min-height: 0;
+        }
+
+        body.rml-node-graph-mode .rml-graph-palette-scroll-shell {
+          min-height: 0;
+        }
+
+        body.rml-node-graph-mode .rml-graph-palette-scroll {
+          min-height: 0;
+          overflow-x: hidden !important;
+          overflow-y: auto !important;
+          overscroll-behavior-y: contain;
+          touch-action: pan-y;
+          -webkit-overflow-scrolling: touch;
         }
 
         body.rml-node-graph-mode #builder-canvas {
@@ -15560,6 +15643,43 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
         body.rml-node-graph-mode .rml-graph-palette-scroll {
           -webkit-overflow-scrolling: touch;
+        }
+
+        body.rml-node-graph-mode.rml-graph-edit-mode .workspace,
+        body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-palette-scroll,
+        body.rml-node-graph-mode.rml-graph-edit-mode #inspector-content,
+        body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-code-input,
+        body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-toolbar {
+          scrollbar-width: auto;
+          scrollbar-color: rgba(166, 111, 255, 0.88) rgba(30, 23, 43, 0.78);
+        }
+
+        body.rml-node-graph-mode.rml-graph-edit-mode .workspace::-webkit-scrollbar,
+        body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-palette-scroll::-webkit-scrollbar,
+        body.rml-node-graph-mode.rml-graph-edit-mode #inspector-content::-webkit-scrollbar,
+        body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-code-input::-webkit-scrollbar,
+        body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-toolbar::-webkit-scrollbar {
+          width: 9px;
+          height: 9px;
+        }
+
+        body.rml-node-graph-mode.rml-graph-edit-mode .workspace::-webkit-scrollbar-track,
+        body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-palette-scroll::-webkit-scrollbar-track,
+        body.rml-node-graph-mode.rml-graph-edit-mode #inspector-content::-webkit-scrollbar-track,
+        body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-code-input::-webkit-scrollbar-track,
+        body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-toolbar::-webkit-scrollbar-track {
+          background: rgba(30, 23, 43, 0.78);
+        }
+
+        body.rml-node-graph-mode.rml-graph-edit-mode .workspace::-webkit-scrollbar-thumb,
+        body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-palette-scroll::-webkit-scrollbar-thumb,
+        body.rml-node-graph-mode.rml-graph-edit-mode #inspector-content::-webkit-scrollbar-thumb,
+        body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-code-input::-webkit-scrollbar-thumb,
+        body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-toolbar::-webkit-scrollbar-thumb {
+          min-height: 34px;
+          border: 2px solid rgba(30, 23, 43, 0.78);
+          border-radius: 999px;
+          background: rgba(166, 111, 255, 0.88);
         }
 
         body.rml-node-graph-mode.rml-graph-edit-mode main {
@@ -16340,10 +16460,6 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     runtimeGraphViewActive = false;
     graph.selectedNodeId = null;
     graph.selectedConnectionId = null;
-    if (graphGpuOverviewActive()) {
-      graphForcedNodeIds.clear();
-      graphNodeVirtualizationSignature = "";
-    }
     clearSelectedWirePoint();
     persistGraphView(true);
     deactivateGraphMode();
@@ -17358,6 +17474,63 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       document.createElement("div");
     scroll.className =
       "rml-graph-palette-scroll";
+    const scrollShell =
+      document.createElement("div");
+    scrollShell.className =
+      "rml-graph-palette-scroll-shell";
+    const scrollIndicator =
+      document.createElement("div");
+    scrollIndicator.className =
+      "rml-graph-palette-scroll-indicator";
+    const scrollThumb =
+      document.createElement("span");
+    scrollIndicator.appendChild(
+      scrollThumb
+    );
+    scrollShell.append(
+      scroll,
+      scrollIndicator
+    );
+    const updateScrollIndicator = () => {
+      const viewportHeight =
+        scroll.clientHeight;
+      const contentHeight =
+        scroll.scrollHeight;
+      const trackHeight =
+        scrollIndicator.clientHeight;
+      const scrollRange = Math.max(
+        0,
+        contentHeight - viewportHeight
+      );
+      const visible =
+        viewportHeight > 0 &&
+        scrollRange > 1 &&
+        trackHeight > 0;
+      scrollIndicator.classList.toggle(
+        "visible",
+        visible
+      );
+      if (!visible) {
+        return;
+      }
+      const thumbHeight = Math.max(
+        34,
+        trackHeight * viewportHeight /
+          contentHeight
+      );
+      const thumbRange = Math.max(
+        0,
+        trackHeight - thumbHeight
+      );
+      const offset = scrollRange > 0
+        ? thumbRange * scroll.scrollTop /
+          scrollRange
+        : 0;
+      scrollThumb.style.height =
+        `${thumbHeight}px`;
+      scrollThumb.style.transform =
+        `translateY(${offset}px)`;
+    };
     scroll.addEventListener(
       "scroll",
       () => {
@@ -17368,8 +17541,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
               scroll.scrollTop,
               0
             )
-          );
+        );
         persistGraphPaletteUiState();
+        updateScrollIndicator();
       },
       { passive: true }
     );
@@ -17379,7 +17553,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     root.append(
       searchWrap,
       modeWrap,
-      scroll
+      scrollShell
     );
     dom.paletteContent.appendChild(root);
 
@@ -17419,6 +17593,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       entriesRendered = true;
       restoreGraphPaletteScroll(
         scroll
+      );
+      requestAnimationFrame(
+        updateScrollIndicator
       );
     };
 
@@ -19791,14 +19968,22 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     graphHybridRenderer?.setCamera?.(
       graph.viewport
     );
+    const viewportPanActive =
+      activeInteraction?.kind === "pan";
     if (
-      !overview ||
-      overview !== previousOverview
+      !viewportPanActive &&
+      (
+        !overview ||
+        overview !== previousOverview
+      )
     ) {
       scheduleGraphNodeVirtualization();
     }
 
-    if (fallbackGraphVirtualizationActive()) {
+    if (
+      !viewportPanActive &&
+      fallbackGraphVirtualizationActive()
+    ) {
       scheduleGraphWireRender();
     }
 
@@ -26396,9 +26581,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     refreshGraphSelectionWires(
       previousConnectionId
     );
-    synchronizeGpuOverviewNodes();
     renderGraphInspector();
-    scheduleGraphNodeVirtualization();
   }
 
   function selectGraphConnection(
@@ -28636,6 +28819,23 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         node.parameters[
           specification.key
         ] = value;
+
+        if (
+          definition.customCSharpFile === true &&
+          specification.key === "source" &&
+          !customCSharpEditor
+        ) {
+          graph.customCSharpFiles =
+            graph.customCSharpFiles &&
+            typeof graph.customCSharpFiles === "object"
+              ? graph.customCSharpFiles
+              : {};
+          const customGraph =
+            graph.customCSharpFiles[node.id] ||
+            createEmptyCustomCSharpFileGraph(node);
+          customGraph.sourceEditedInInspector = true;
+          graph.customCSharpFiles[node.id] = customGraph;
+        }
 
         if (
           specification.affectsPorts ===
@@ -31011,8 +31211,11 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       return;
     }
 
-    const touchScrollPending =
-      event.pointerType === "touch";
+    if (event.pointerType === "touch") {
+      return;
+    }
+
+    const touchScrollPending = false;
 
     if (!touchScrollPending) {
       event.preventDefault();
@@ -31659,6 +31862,11 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       );
       activeInteraction = null;
       persistGraphView();
+      if (graphGpuOverviewActive()) {
+        graphForcedNodeIds.clear();
+        graphNodeVirtualizationSignature = "";
+        synchronizeGpuOverviewNodes();
+      }
       scheduleGraphNodeVirtualization();
     } else if (
       activeInteraction.kind ===

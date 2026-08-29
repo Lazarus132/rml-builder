@@ -22,7 +22,7 @@
     document.currentScript?.src ||
     window.location.href;
   const modNodesUrl = new URL(
-    "mod_nodes.js?v=46-source-comment-cleanup-v603f20",
+    "mod_nodes.js?v=47-custom-csharp-action-registry-v603f24",
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(

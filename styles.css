@@ -26,6 +26,18 @@ html {
   background: var(--background);
 }
 
+@supports (-webkit-text-size-adjust: 100%) {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+}
+
+@supports (text-size-adjust: 100%) {
+  html {
+    text-size-adjust: 100%;
+  }
+}
+
 body {
   min-width: 360px;
   margin: 0;
@@ -48,6 +60,7 @@ button {
 }
 
 .topbar {
+  position: -webkit-sticky;
   position: sticky;
   z-index: 50;
   top: 0;
@@ -407,6 +420,8 @@ fieldset legend {
   cursor: pointer;
   list-style: none;
   -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
   user-select: none;
 }
 
@@ -1078,6 +1093,8 @@ fieldset legend {
   padding: 0;
   border: 0;
   border-radius: 9px;
+  -webkit-appearance: none;
+  -moz-appearance: none;
   appearance: none;
   box-shadow:
     inset 0 0 0 1px var(--line-strong);
@@ -1120,6 +1137,8 @@ fieldset legend {
   height: 18px;
   border: 2px solid #fff;
   border-radius: 50%;
+  -webkit-appearance: none;
+  -moz-appearance: none;
   appearance: none;
   background: #282231;
   box-shadow:
@@ -3238,6 +3257,8 @@ footer strong {
   padding: 0;
   border: 0;
   border-radius: 0;
+  -webkit-appearance: none;
+  -moz-appearance: none;
   appearance: none;
   background: transparent;
   cursor: pointer;
@@ -3263,6 +3284,8 @@ footer strong {
   margin-top: -7.5px;
   border: 0;
   border-radius: 50%;
+  -webkit-appearance: none;
+  -moz-appearance: none;
   appearance: none;
   background: #ffffff;
   box-shadow:
@@ -3435,6 +3458,8 @@ footer strong {
   padding: 0;
   border: 0;
   border-radius: 15px;
+  -webkit-appearance: none;
+  -moz-appearance: none;
   appearance: none;
   writing-mode: vertical-lr;
   direction: ltr;
@@ -3466,6 +3491,8 @@ footer strong {
   height: 22px;
   border: 3px solid #ffffff;
   border-radius: 50%;
+  -webkit-appearance: none;
+  -moz-appearance: none;
   appearance: none;
   background: transparent;
   box-shadow:
@@ -3613,6 +3640,8 @@ footer strong {
   padding: 0;
   border: 0;
   border-radius: 0;
+  -webkit-appearance: none;
+  -moz-appearance: none;
   appearance: none;
   background: transparent;
   cursor: pointer;
@@ -3638,6 +3667,8 @@ footer strong {
   margin-top: -8px;
   border: 0;
   border-radius: 6px;
+  -webkit-appearance: none;
+  -moz-appearance: none;
   appearance: none;
   background: #ffffff;
   box-shadow:
@@ -3679,12 +3710,16 @@ footer strong {
   font-size: 16px !important;
   font-weight: 700 !important;
   text-align: center;
+  -webkit-appearance: textfield;
+  -moz-appearance: textfield;
   appearance: textfield;
 }
 
 .rml-preview-color-channel-value::-webkit-inner-spin-button,
 .rml-preview-color-channel-value::-webkit-outer-spin-button {
   margin: 0;
+  -webkit-appearance: none;
+  -moz-appearance: none;
   appearance: none;
 }
 
@@ -4037,6 +4072,11 @@ footer strong {
   transform: none;
   filter: none;
 
+  -webkit-clip-path:
+    inset(
+      50% 0 50% 0
+      round 27px
+    );
   clip-path:
     inset(
       50% 0 50% 0
@@ -4074,6 +4114,11 @@ footer strong {
 }
 
 .settings-preview-dialog[open].rml-overlay-opened {
+  -webkit-clip-path:
+    inset(
+      0 0 0 0
+      round 27px
+    );
   clip-path:
     inset(
       0 0 0 0
@@ -4084,6 +4129,11 @@ footer strong {
 }
 
 .settings-preview-dialog[open].rml-overlay-closing {
+  -webkit-clip-path:
+    inset(
+      50% 0 50% 0
+      round 27px
+    );
   clip-path:
     inset(
       50% 0 50% 0
@@ -4206,6 +4256,7 @@ footer strong {
 }
 
 .export-dialog-header {
+  position: -webkit-sticky;
   position: sticky;
   z-index: 3;
   top: 0;
@@ -4216,6 +4267,7 @@ footer strong {
 }
 
 .export-dialog-actions {
+  position: -webkit-sticky;
   position: sticky;
   z-index: 3;
   bottom: 0;
@@ -4259,14 +4311,17 @@ footer strong {
 
   .settings-preview-dialog {
     border: 0;
+    -webkit-clip-path: inset(50% 0 50% 0);
     clip-path: inset(50% 0 50% 0);
   }
 
   .settings-preview-dialog[open].rml-overlay-opened {
+    -webkit-clip-path: inset(0 0 0 0);
     clip-path: inset(0 0 0 0);
   }
 
   .settings-preview-dialog[open].rml-overlay-closing {
+    -webkit-clip-path: inset(50% 0 50% 0);
     clip-path: inset(50% 0 50% 0);
   }
 
@@ -6095,6 +6150,8 @@ strong,
 code,
 pre {
   -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
   user-select: none;
 
   -webkit-touch-callout: none;
@@ -6105,6 +6162,8 @@ textarea,
 select,
 [contenteditable="true"] {
   -webkit-user-select: text;
+  -moz-user-select: text;
+  -ms-user-select: text;
   user-select: text;
 }
 
@@ -6493,6 +6552,8 @@ body:has(.controller-options.option-drag-over) {
 body:has(.option-pointer-ghost) {
   cursor: grabbing;
   -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
   user-select: none;
 }
 .node-pointer-source {
@@ -6533,6 +6594,8 @@ body:has(.option-pointer-ghost) {
 body:has(.node-pointer-ghost) {
   cursor: grabbing;
   -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
   user-select: none;
 }
 
@@ -6969,6 +7032,7 @@ body:has(.node-pointer-ghost) .builder-canvas {
   width: 1px;
   height: 1px;
   overflow: hidden;
+  -webkit-clip-path: inset(50%);
   clip-path: inset(50%);
   white-space: nowrap;
 }
@@ -7047,6 +7111,7 @@ body:has(.node-pointer-ghost) .builder-canvas {
 
 @media (max-width: 780px) {
   .topbar {
+    position: -webkit-sticky;
     position: sticky;
     top: 0;
     min-height: 58px;
@@ -7185,6 +7250,8 @@ body:has(.node-pointer-ghost) .builder-canvas {
 .api-catalog-state[role="button"] {
   cursor: pointer;
   -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
   user-select: none;
 }
 
@@ -7213,6 +7280,7 @@ body:has(.node-pointer-ghost) .builder-canvas {
 }
 
 .rml-graph-inspector-search {
+  position: -webkit-sticky;
   position: sticky;
   z-index: 3;
   top: 0;
@@ -8285,6 +8353,8 @@ html.rml-setup-tour-active.rml-setup-drag-scroll-live body {
 html.rml-setup-demonstration-active body >
   :not(#rml-setup-assistant):not(script) {
   -webkit-user-select: none !important;
+  -moz-user-select: none !important;
+  -ms-user-select: none !important;
   user-select: none !important;
 }
 
@@ -8502,6 +8572,8 @@ dialog[open] > #rml-setup-assistant.rml-setup-modal-demonstration
 
 #rml-setup-assistant.rml-setup-narration-clickable [data-setup-text] {
   -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
   user-select: none;
 }
 

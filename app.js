@@ -36,7 +36,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "optional-signature-extension-20260828-v603f22";
+  "cross-browser-css-prefix-order-20260829-v603f28";
 
 function removeLegacyHelpHashFromAddress() {
   if (!/^#(?:info-|shortcut-)/i.test(window.location.hash)) {
