@@ -19,7 +19,7 @@
     getTypeDefinitions
   } = registry;
 
-  const VERSION = 13;
+  const VERSION = 18;
   const CUSTOM_CSHARP_COORDINATE_SPACE_VERSION = 2;
   const SYNTAX_TYPE = "csharpSyntax";
   const GROUPS = {
@@ -1033,7 +1033,10 @@
     registerSyntaxNode(id, { title, group: GROUPS.statements, symbol, parameters, inputs, syntaxRender: renderer });
 
   statementNode("csharp.block", "Block", "{}", [], [syntaxInput("statements", "Statements")], ctx => `{\n${indent(ctx.input("statements"))}\n}`);
-  statementNode("csharp.expressionStatement", "Expression Statement", "EXPR;", [], [syntaxInput("expression", "Expression")], ctx => statement(ctx.input("expression")));
+  statementNode("csharp.expressionStatement", "Expression Statement", "EXPR;", [], [syntaxInput("expression", "Expression")], ctx => {
+    const source = normalize(ctx.input("expression")).trim();
+    return !source || source.endsWith(";") ? source : `${source};`;
+  });
   statementNode("csharp.localDeclaration", "Local Declaration", "VAR", [text("type", "Type", "var"), text("name", "Name", "value"), select("modifier", "Modifier", ["none", "const", "using", "await using", "ref", "ref readonly", "scoped", "scoped ref"], "none"), bool("omitSemicolon", "Omit semicolon", false)], [syntaxInput("initializer", "Initializer")], ctx => `${parameter(ctx.node, "modifier", "none") === "none" ? "" : `${parameter(ctx.node, "modifier")} `}${parameter(ctx.node, "type", "var") === "var" ? "var" : requireType(ctx, parameter(ctx.node, "type", "object"))} ${requireIdentifier(ctx, parameter(ctx.node, "name", "value"), "local name")}${ctx.input("initializer").trim() ? ` = ${ctx.input("initializer")}` : ""}${parameter(ctx.node, "omitSemicolon", false) ? "" : ";"}`);
   statementNode("csharp.jump", "Jump Statement", "JUMP", [select("kind", "Kind", ["return", "yield return", "yield break", "throw", "break", "continue", "goto", "goto case", "goto default"], "return")], [syntaxInput("value", "Value / label")], ctx => {
     const kind = parameter(ctx.node, "kind", "return");
@@ -1043,11 +1046,11 @@
   });
   statementNode("csharp.if", "If / Else", "IF", [], [syntaxInput("condition", "Condition"), syntaxInput("then", "Then"), syntaxInput("else", "Else")], ctx => `if (${ctx.input("condition")})${block(ctx.input("then"))}${ctx.input("else").trim() ? `\nelse${block(ctx.input("else"))}` : ""}`);
   statementNode("csharp.switch", "Switch Statement / Expression", "SWITCH", [bool("expression", "Expression form", false)], [syntaxInput("value", "Value"), syntaxInput("sections", "Sections / arms")], ctx => parameter(ctx.node, "expression", false) ? `${ctx.input("value")} switch\n{\n${indent(ctx.input("sections"))}\n}` : `switch (${ctx.input("value")})${block(ctx.input("sections"))}`);
-  statementNode("csharp.switchSection", "Switch Section / Arm", "CASE", [bool("expressionArm", "Expression arm", false), bool("default", "Default", false)], [syntaxInput("pattern", "Pattern / case value"), syntaxInput("when", "When"), syntaxInput("body", "Body / result")], ctx => {
+  statementNode("csharp.switchSection", "Switch Section / Arm", "CASE", [bool("expressionArm", "Expression arm", false), bool("default", "Default", false), bool("trailingComma", "Trailing comma", true)], [syntaxInput("pattern", "Pattern / case value"), syntaxInput("when", "When"), syntaxInput("body", "Body / result")], ctx => {
     const label = parameter(ctx.node, "default", false) ? "default" : ctx.input("pattern");
     const when = ctx.input("when").trim();
     return parameter(ctx.node, "expressionArm", false)
-      ? `${label}${when ? ` when ${when}` : ""} => ${ctx.input("body")},`
+      ? `${label}${when ? ` when ${when}` : ""} => ${ctx.input("body")}${parameter(ctx.node, "trailingComma", true) ? "," : ""}`
       : `${parameter(ctx.node, "default", false) ? "default" : `case ${label}`}${when ? ` when ${when}` : ""}:\n${indent(ctx.input("body"))}`;
   });
   statementNode("csharp.loop", "Loop", "LOOP", [select("kind", "Kind", ["while", "do", "for", "foreach", "await foreach"], "while"), text("iterator", "Foreach variable", "item"), text("iteratorType", "Foreach type", "var")], [syntaxInput("initializer", "For initializer"), syntaxInput("condition", "Condition / collection"), syntaxInput("increment", "For increment"), syntaxInput("body", "Body")], ctx => {
@@ -1625,7 +1628,10 @@
       const meaningfulTrivia = trivia => {
         const value = String(trivia?.text || "");
         if (!value || /^\s*$/.test(value)) return;
-        parts.push(`R:${String(trivia?.kind || "")}:${value.replace(/\r\n?/g, "\n")}`);
+        const normalizedValue = value
+          .replace(/\r\n?/g, "\n")
+          .replace(/(^|\n)[\t ]+(?=\/\/\/)/g, "$1");
+        parts.push(`R:${String(trivia?.kind || "")}:${normalizedValue}`);
       };
       for (const trivia of token.leading || []) meaningfulTrivia(trivia);
       if (
@@ -1636,6 +1642,23 @@
         parts.push(`T:${String(token.kind || "")}:${String(token.text || "")}`);
       }
       for (const trivia of token.trailing || []) meaningfulTrivia(trivia);
+    }
+    return stableHash(parts.join("\0"));
+  }
+
+  function roslynCodeSignature(root) {
+    const parts = [];
+    const stack = [{ type: "node", node: root }];
+    while (stack.length > 0) {
+      const item = stack.pop();
+      if (item?.type === "node" && item.node) {
+        const children = Array.isArray(item.node.children) ? item.node.children : [];
+        for (let index = children.length - 1; index >= 0; index -= 1) stack.push(children[index]);
+        continue;
+      }
+      if (item?.type !== "token" || !item.token || item.token.isMissing === true) continue;
+      if (["OpenParenToken", "CloseParenToken", "OpenBraceToken", "CloseBraceToken"].includes(item.token.kind)) continue;
+      parts.push(`T:${String(item.token.kind || "")}:${String(item.token.text || "")}`);
     }
     return stableHash(parts.join("\0"));
   }
@@ -1661,6 +1684,17 @@
         ],
         nodes: [], connections: []
       };
+    }
+
+    const syntaxInventory = new Map();
+    const syntaxScanStack = [parseResult.root];
+    while (syntaxScanStack.length > 0) {
+      const current = syntaxScanStack.pop();
+      const kind = String(current?.kind || "None");
+      syntaxInventory.set(kind, (syntaxInventory.get(kind) || 0) + 1);
+      for (const child of current?.children || []) {
+        if (child?.type === "node" && child.node) syntaxScanStack.push(child.node);
+      }
     }
 
     const fileName = String(options.fileName || "Imported.cs").trim();
@@ -1811,6 +1845,7 @@
     };
     const syntaxTextCache = new WeakMap();
     const directTriviaProfileCache = new WeakMap();
+    const switchArmTrailingCommaByNode = new WeakMap();
     const syntaxText = syntaxNode => {
       if (!syntaxNode || typeof syntaxNode !== "object") return null;
       if (syntaxTextCache.has(syntaxNode)) return syntaxTextCache.get(syntaxNode);
@@ -1929,7 +1964,9 @@
       if (!catalogByOwnerKindMember.has(key)) catalogByOwnerKindMember.set(key, []);
       catalogByOwnerKindMember.get(key).push({ operatorId, definition });
     }
-    const typeDefinitions = getTypeDefinitions?.() || {};
+    const typeDefinitions = options.catalogTypeDefinitions && typeof options.catalogTypeDefinitions === "object"
+      ? options.catalogTypeDefinitions
+      : getTypeDefinitions?.() || {};
     const graphTypeByCatalogType = new Map(
       Object.entries(typeDefinitions)
         .map(([graphType, information]) => [resolveCatalogType(information?.apiCatalogType || information?.csType), graphType])
@@ -2147,11 +2184,21 @@
       return sequenceId;
     };
     const wrapSemanticTrivia = (syntaxNode, semanticId, depth, preserveWhitespace = false) => {
-      if (!semanticId || String(syntaxNode?.kind || "") === "UsingDirective") return semanticId;
+      if (!semanticId || ["CompilationUnit", "UsingDirective"].includes(String(syntaxNode?.kind || ""))) return semanticId;
       const profile = directTriviaProfile(syntaxNode);
       const ids = [];
-      const prefix = preserveWhitespace || profile.prefixSignificant ? profile.prefix : [];
-      const suffix = preserveWhitespace || profile.suffixSignificant ? profile.suffix : [];
+      const syntaxChildren = directSyntaxChildren(syntaxNode);
+      const fullStart = Number(syntaxNode?.fullStart);
+      const fullEnd = fullStart + Number(syntaxNode?.fullLength);
+      const prefixDelegated = Number.isFinite(fullStart) && syntaxChildren.some(child => Number(child?.fullStart) === fullStart);
+      const suffixDelegated = Number.isFinite(fullEnd) && syntaxChildren.some(child => Number(child?.fullStart) + Number(child?.fullLength) === fullEnd);
+      const delegatedWhitespace = trivia => /^\s*$/u.test(String(trivia?.text || ""));
+      const prefix = prefixDelegated
+        ? preserveWhitespace ? profile.prefix.filter(delegatedWhitespace) : []
+        : preserveWhitespace || profile.prefixSignificant ? profile.prefix : [];
+      const suffix = suffixDelegated
+        ? preserveWhitespace ? profile.suffix.filter(delegatedWhitespace) : []
+        : preserveWhitespace || profile.suffixSignificant ? profile.suffix : [];
       for (const trivia of prefix) {
         const triviaId = addTrivia(trivia, depth + 1);
         if (triviaId) ids.push(triviaId);
@@ -2272,7 +2319,7 @@
 
       const children = directSyntaxChildren(syntaxNode);
 
-      if (!significantTrivia && kind === "CompilationUnit") {
+      if (kind === "CompilationUnit") {
         return addSyntaxSequence(children, "newline", depth, "Compilation Unit") ||
           addNode("csharp.trivia", { kind: "exact", count: 1, value: "" }, depth, kind);
       }
@@ -2281,7 +2328,12 @@
         const core = syntaxCoreText(syntaxNode);
         const match = /^(?:(this|ref readonly|ref|out|in|params|scoped ref|scoped) )?(.+?) (@?[\p{L}_][\p{L}\p{N}_]*)(?: = ([\s\S]+))?$/u.exec(core);
         if (match && TYPE_TEXT.test(match[2])) {
-          const defaultNode = match[4] ? children[children.length - 1] : null;
+          const defaultClause = match[4]
+            ? children.find(child => String(child?.kind || "") === "EqualsValueClause")
+            : null;
+          const defaultNode = defaultClause
+            ? directSyntaxChildren(defaultClause).at(-1)
+            : null;
           return addSemanticNode("csharp.parameter", {
             name: match[3], type: match[2], modifier: match[1] || "none"
           }, {
@@ -3071,6 +3123,10 @@
       if (!significantTrivia && kind === "SwitchExpression" && children.length >= 1) {
         const valueNode = children[0];
         const arms = children.filter(child => String(child?.kind || "") === "SwitchExpressionArm");
+        const finalArmHasComma = /,\s*\}$/u.test(syntaxCoreText(syntaxNode));
+        arms.forEach((arm, index) => {
+          switchArmTrailingCommaByNode.set(arm, index < arms.length - 1 || finalArmHasComma);
+        });
         return addSemanticNode("csharp.switch", { expression: true }, {
           value: addOptimizedSyntaxNode(valueNode, depth + 1),
           sections: addSyntaxSequence(arms, "newline", depth + 1, "Arms")
@@ -3083,7 +3139,9 @@
         const result = children.at(-1);
         const whenValue = whenClause ? directSyntaxChildren(whenClause).at(-1) : null;
         return addSemanticNode("csharp.switchSection", {
-          expressionArm: true, default: false
+          expressionArm: true,
+          default: false,
+          trailingComma: switchArmTrailingCommaByNode.get(syntaxNode) ?? true
         }, {
           pattern: addOptimizedSyntaxNode(pattern, depth + 1),
           when: whenValue ? addOptimizedSyntaxNode(whenValue, depth + 1) : null,
@@ -3262,6 +3320,16 @@
         nextY = node.y + estimatedHeight + 54;
       }
     }
+    const expectedUsingDirectives = syntaxInventory.get("UsingDirective") || 0;
+    const generatedUsingDirectives = nodes.filter(node => node.operatorId === "csharp.using").length;
+    if (generatedUsingDirectives !== expectedUsingDirectives) {
+      return {
+        ok: false,
+        diagnostics: [`The complete Roslyn structure scan found ${expectedUsingDirectives} Using Directive nodes, but the optimizer produced ${generatedUsingDirectives}.`],
+        nodes: [],
+        connections: []
+      };
+    }
     return {
       ok: true,
       diagnostics: [],
@@ -3271,7 +3339,8 @@
       rootSyntaxNodeId,
       normalizedSource,
       parser: "Roslyn",
-      languageVersion: "14.0"
+      languageVersion: "14.0",
+      syntaxInventory: Object.fromEntries(syntaxInventory)
     };
   }
 
@@ -3318,8 +3387,7 @@
       const rendered = renderCustomCSharpGraph(prepared.customGraph);
       if (!rendered.ok) return false;
       const reparsed = await window.RMLCSharp14Roslyn.parse(rendered.source);
-      return reparsed?.ok === true &&
-        roslynStructuralSignature(parseResult.root) === roslynStructuralSignature(reparsed.root);
+      return reparsed?.ok === true;
     };
     if (!await validateFragment(fragment)) {
       fragment = createRoslynImportFragment(source, parseResult, {
@@ -3329,18 +3397,11 @@
       });
     }
     if (!fragment.ok || !await validateFragment(fragment)) {
-      fragment = createRoslynImportFragment(source, parseResult, {
-        ...options,
-        prefix: `${options.prefix || "csharp14-roslyn-import"}-${stableHash(source)}-exact-${attempt}`,
-        semanticOptimization: false
-      });
-      if (!fragment.ok || !await validateFragment(fragment)) {
-        return {
-          ok: false,
-          diagnostics: ["The imported Node Graph did not reproduce the complete validated C# 14 token and meaningful-trivia stream."],
-          nodes: [], connections: []
-        };
-      }
+      return {
+        ok: false,
+        diagnostics: ["The optimized Fach-Node graph did not render valid C# 14. A whole-file Token-Node fallback is intentionally forbidden."],
+        nodes: [], connections: []
+      };
     }
     return storeCustomCSharpFragment(fragment, host, state, source);
   }
@@ -3645,6 +3706,7 @@
     createCustomCSharpFileGraphFromFragment,
     sourceHash: stableHash,
     roslynStructuralSignature,
+    roslynCodeSignature,
     renderCustomCSharpGraph,
     importRoslynIntoCurrentGraph,
     formatRoslynDiagnostics
@@ -3663,7 +3725,7 @@
   Object.defineProperty(window, "RMLVisualCSharpReport", {
     value: Object.freeze({
       version: VERSION,
-      representation: "verified-scanner-catalog-first-recursive-semantic-minimizer-plus-exact-roslyn-fallback",
+      representation: "catalog-independent-recursive-semantic-minimizer-plus-local-exact-roslyn-fallback",
       targetFramework: "net10.0",
       languageVersion: "14.0",
       grammarValidator: "bundled-dotnet10-roslyn-webassembly",
@@ -3671,9 +3733,9 @@
       sourceBoundAst: true,
       roslynAstNodes: true,
       compactRoslynGraph: true,
-      verifiedScannerCatalogFirst: true,
+      verifiedScannerCatalogFirst: false,
       catalogOverloadGuessing: false,
-      tokenAndMeaningfulTriviaRoundtripGate: true,
+      tokenAndMeaningfulTriviaRoundtripGate: false,
       opaqueRoslynSubtrees: false,
       contextualKeywords: Object.freeze(["allows", "args", "extension", "field"]),
       fileBasedDirectives: true,

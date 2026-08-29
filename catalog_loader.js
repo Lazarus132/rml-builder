@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const LOADER_VERSION = 39;
+  const LOADER_VERSION = 47;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
   const CATALOG_PATH = "/resonite_api_catalog.json";
@@ -22,15 +22,15 @@
     document.currentScript?.src ||
     window.location.href;
   const modNodesUrl = new URL(
-    "mod_nodes.js?v=48-runtime-node-families-v603f34",
+    "mod_nodes.js?v=51-single-source-catalog-v603f41",
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "visual_csharp.js?v=18-line-ending-safe-semantic-fallback-v603f34",
+    "visual_csharp.js?v=27-keep-semantic-graph-v603f49",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=31-custom-csharp-catalog-contract-v603f34",
+    "api_nodes.js?v=36-structural-catalog-contract-v603f43",
     scriptUrl
   ).href;
 
@@ -139,13 +139,7 @@
         declaredFingerprint: supplied,
         assemblies: raw?.assemblies || [],
         types: raw?.types || [],
-        enums: raw?.enums || [],
-        components: raw?.components || [],
-        materials: raw?.materials || [],
-        commonMaterials: raw?.commonMaterials || [],
-        meshes: raw?.meshes || [],
-        slotAttachOverloads:
-          raw?.slotAttachOverloads || []
+        enums: raw?.enums || []
       })
     );
 
@@ -162,19 +156,6 @@
             typeof value === "object"
         )
       : [];
-  }
-
-  function typeNamesByFlag(
-    raw,
-    flag
-  ) {
-    return catalogTypes(raw)
-      .filter(type =>
-        type[flag] === true
-      )
-      .map(type =>
-        type.fullName
-      );
   }
 
   function normalizeCatalog(
@@ -194,46 +175,42 @@
 
     const value = raw;
 
-    const components = uniqueSorted(
-      Array.isArray(value.components)
-        ? value.components
-        : typeNamesByFlag(
-            value,
-            "isAttachableComponent"
-          )
-    );
-    const materials = uniqueSorted(
-      Array.isArray(value.materials)
-        ? value.materials
-        : typeNamesByFlag(
-            value,
-            "isMaterial"
-          )
-    );
-    const commonMaterials =
-      uniqueSorted(
-        Array.isArray(
-          value.commonMaterials
-        )
-          ? value.commonMaterials
-          : typeNamesByFlag(
-              value,
-              "isCommonMaterial"
-            )
-      );
-    const meshes = uniqueSorted(
-      Array.isArray(value.meshes)
-        ? value.meshes
-        : typeNamesByFlag(
-            value,
-            "isMeshProvider"
-          )
-    );
+    const schemaVersion = Number(value.schemaVersion);
+    if (!Number.isInteger(schemaVersion) || schemaVersion < 1) {
+      throw new TypeError(`Resonite API catalog contract violation: schemaVersion '${String(value.schemaVersion ?? "<missing>")}' is not a positive integer.`);
+    }
 
+    const requiredTypeBooleanFields = [
+      "isComponent",
+      "isWorker",
+      "isAttachableComponent",
+      "isMaterial",
+      "isCommonMaterial",
+      "isMeshProvider",
+      "isTextureProvider",
+      "isAudioClipProvider",
+      "isCollider",
+      "isUiX"
+    ];
+    if (!Array.isArray(value.types)) {
+      throw new TypeError("Resonite API catalog contract violation: 'types' is not an array.");
+    }
+    value.types.forEach((type, index) => {
+      if (!type || typeof type !== "object" || Array.isArray(type)) {
+        throw new TypeError(`Resonite API catalog contract violation: types[${index}] is not an object.`);
+      }
+      if (typeof type.fullName !== "string" || !type.fullName.trim()) {
+        throw new TypeError(`Resonite API catalog contract violation: types[${index}].fullName is missing.`);
+      }
+      for (const field of requiredTypeBooleanFields) {
+        if (typeof type[field] !== "boolean") {
+          throw new TypeError(`Resonite API catalog contract violation: type '${type.fullName}' has no boolean '${field}' contract.`);
+        }
+      }
+    });
     return Object.freeze({
       ...value,
-      schemaVersion:
-        Number(value.schemaVersion) || 3,
+      schemaVersion,
       loaderVersion: LOADER_VERSION,
       catalogSource: source,
       catalogSourceUrl: sourceUrl,
@@ -248,18 +225,6 @@
         String(
           value.sourceAssembly ||
           "FrooxEngine.dll"
-        ),
-      components: Object.freeze(components),
-      materials: Object.freeze(materials),
-      commonMaterials: Object.freeze(commonMaterials),
-      meshes: Object.freeze(meshes),
-      slotAttachOverloads:
-        Object.freeze(
-          Array.isArray(
-            value.slotAttachOverloads
-          )
-            ? value.slotAttachOverloads
-            : []
         ),
       types: Object.freeze(
         catalogTypes(value)
@@ -627,8 +592,11 @@
       return "";
     }
 
+    const attachableComponentCount = Array.isArray(catalog.types)
+      ? catalog.types.filter(type => type?.isAttachableComponent === true).length
+      : 0;
     return `${formatStatusCount(
-      catalog.components?.length
+      attachableComponentCount
     )} attachable components · ${formatStatusCount(
       catalog.types?.length
     )} API types · ${formatStatusCount(
@@ -1334,26 +1302,41 @@
   }
 
   async function loadCatalog() {
-    
-    
-    
+    let live = null;
+    try {
+      live = await tryScannerCatalog();
+    } catch (error) {
+      console.debug("The live Resonite API scanner could not be reached during startup.", error);
+    }
+
+    if (live) {
+      try {
+        const normalized = normalizeCatalog(live.raw, "scanner", live.url);
+        scannerOnline = true;
+        activeScannerCatalogUrl = live.url;
+        await writeCachedLiveCatalog(live.raw, live.url);
+        return installCatalog(normalized);
+      } catch (error) {
+        console.warn("The live Resonite API catalog was rejected and was not installed.", error);
+      }
+    }
+
     const cached =
       await readCachedLiveCatalog();
 
     if (cached) {
-      scannerOnline = false;
-      activeScannerCatalogUrl =
-        loopbackScannerCatalogUrl(
-          cached.sourceUrl
-        );
-
-      return installCatalog(
-        normalizeCatalog(
+      try {
+        const normalized = normalizeCatalog(
           cached.catalog,
           "scanner-cache",
           cached.sourceUrl || ""
-        )
-      );
+        );
+        scannerOnline = false;
+        activeScannerCatalogUrl = loopbackScannerCatalogUrl(cached.sourceUrl);
+        return installCatalog(normalized);
+      } catch (error) {
+        console.warn("The cached Resonite API catalog was rejected and was not installed.", error);
+      }
     }
 
     scannerOnline = false;

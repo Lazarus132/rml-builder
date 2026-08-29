@@ -169,6 +169,33 @@ self.document = {
 };
 
 let runtimeReady = null;
+let customCSharpRuntimeReady = null;
+
+async function ensureCustomCSharpRuntime(definitions, typeDefinitions) {
+  if (customCSharpRuntimeReady) return customCSharpRuntimeReady;
+  customCSharpRuntimeReady = (async () => {
+    self.RMLResoniteApiCatalog = {
+      schemaVersion: 1,
+      catalogSource: "unavailable",
+      engineVersion: "unknown",
+      types: [],
+      enums: [],
+      assemblies: []
+    };
+    self.RMLFrooxComponentCatalog = self.RMLResoniteApiCatalog;
+    importScripts("node_graph.js?v=297-keep-semantic-graph-v603f49");
+    importScripts("visual_csharp.js?v=27-keep-semantic-graph-v603f49");
+    const registry = self.RMLModNodeRegistry;
+    if (!registry) throw new Error("The Custom C# worker registry is unavailable.");
+    for (const [typeId, definition] of Object.entries(typeDefinitions || {})) {
+      if (!registry.getTypeDefinitions?.()[typeId]) registry.registerType(typeId, definition);
+    }
+    for (const [operatorId, definition] of Object.entries(definitions || {})) {
+      if (!registry.getNodeDefinition?.(operatorId)) registry.registerNode(operatorId, definition);
+    }
+  })();
+  return customCSharpRuntimeReady;
+}
 
 async function ensureRuntime(catalog) {
   if (runtimeReady) {
@@ -181,11 +208,6 @@ async function ensureRuntime(catalog) {
         schemaVersion: 4,
         catalogSource: "unavailable",
         engineVersion: "unknown",
-        components: [],
-        materials: [],
-        commonMaterials: [],
-        meshes: [],
-        slotAttachOverloads: [],
         types: [],
         enums: [],
         assemblies: []
@@ -194,16 +216,16 @@ async function ensureRuntime(catalog) {
       self.RMLResoniteApiCatalog;
 
     importScripts(
-      "node_graph.js?v=282-runtime-node-families-v603f34"
+      "node_graph.js?v=297-keep-semantic-graph-v603f49"
     );
     importScripts(
-      "mod_nodes.js?v=45-runtime-node-families-v603f34"
+      "mod_nodes.js?v=51-single-source-catalog-v603f41"
     );
     importScripts(
-      "visual_csharp.js?v=18-line-ending-safe-semantic-fallback-v603f34"
+      "visual_csharp.js?v=27-keep-semantic-graph-v603f49"
     );
     importScripts(
-      "api_nodes.js?v=31-custom-csharp-catalog-contract-v603f34"
+      "api_nodes.js?v=36-structural-catalog-contract-v603f43"
     );
 
     if (
@@ -212,6 +234,17 @@ async function ensureRuntime(catalog) {
         "function"
     ) {
       await self.RMLApiNodeFactoryReady;
+    }
+
+    if (
+      Array.isArray(self.RMLResoniteApiCatalog?.types) &&
+      self.RMLResoniteApiCatalog.types.length > 0 &&
+      self.RMLApiNodeFactoryReport?.verificationPassed !== true
+    ) {
+      const details = Array.isArray(self.RMLApiNodeFactoryReport?.verificationErrors)
+        ? self.RMLApiNodeFactoryReport.verificationErrors.join("; ")
+        : "the API factory did not produce a verified contract report";
+      throw new Error(`Resonite API catalog verification failed: ${details}`);
     }
 
     if (
@@ -231,12 +264,26 @@ async function ensureRuntime(catalog) {
 self.addEventListener("message", event => {
   const request = event.data || {};
 
-  if (request.operation !== "build") {
+  if (!["build", "buildCustomCSharp"].includes(request.operation)) {
     return;
   }
 
   void (async () => {
     try {
+      if (request.operation === "buildCustomCSharp") {
+        await ensureCustomCSharpRuntime(request.catalogDefinitions, request.catalogTypeDefinitions);
+        const fragment = self.RMLVisualCSharp.createRoslynImportFragment(
+          String(request.source || ""),
+          request.parseResult,
+          {
+            ...(request.options || {}),
+            catalogDefinitions: request.catalogDefinitions || {},
+            catalogTypeDefinitions: request.catalogTypeDefinitions || {}
+          }
+        );
+        self.postMessage({ id: request.id, ok: fragment?.ok === true, result: fragment });
+        return;
+      }
       await ensureRuntime(request.catalog);
 
       const result =

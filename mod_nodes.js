@@ -155,11 +155,6 @@
       schemaVersion: 3,
       catalogSource: "unavailable",
       engineVersion: "unknown",
-      components: Object.freeze([]),
-      materials: Object.freeze([]),
-      commonMaterials: Object.freeze([]),
-      meshes: Object.freeze([]),
-      slotAttachOverloads: Object.freeze([]),
       types: Object.freeze([]),
       enums: Object.freeze([])
     });
@@ -3661,16 +3656,19 @@ private static void CreateGeneratedReversePatch(
       return "mesh";
     }
 
-    if (FROOX_MATERIAL_TYPE_SET.has(type)) {
+    const catalogType =
+      CATALOG_TYPE_BY_NAME.get(type);
+
+    if (
+      catalogType?.isMaterial === true ||
+      catalogType?.isCommonMaterial === true
+    ) {
       return graphMaterialType(type);
     }
 
-    if (FROOX_MESH_TYPE_SET.has(type)) {
+    if (catalogType?.isMeshProvider === true) {
       return graphMeshType(type);
     }
-
-    const catalogType =
-      CATALOG_TYPE_BY_NAME.get(type);
 
     if (catalogType?.isCollider === true) {
       return "collider";

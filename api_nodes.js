@@ -382,8 +382,31 @@
     const legacyAliasEntries = [];
     const rejectedGeneratedNodeIds = new Set();
     const verificationErrors = [];
+    const requiredTypeBooleanFields = [
+      "isComponent",
+      "isWorker",
+      "isAttachableComponent",
+      "isMaterial",
+      "isCommonMaterial",
+      "isMeshProvider",
+      "isTextureProvider",
+      "isAudioClipProvider",
+      "isCollider",
+      "isUiX"
+    ];
+    for (const [index, row] of typeRows.entries()) {
+      const typeName = String(row?.fullName || `types[${index}]`);
+      for (const field of requiredTypeBooleanFields) {
+        if (typeof row?.[field] !== "boolean") {
+          verificationErrors.push(`API catalog type '${typeName}' has no boolean '${field}' contract.`);
+        }
+      }
+    }
     const catalogSchemaVersion =
       Number(catalog.schemaVersion || 0);
+    if (!Number.isInteger(catalogSchemaVersion) || catalogSchemaVersion < 1) {
+      verificationErrors.push(`API catalog schemaVersion '${catalogSchemaVersion}' is not a positive integer.`);
+    }
     const engineVersion = String(
       catalog.engineVersion || "unknown"
     );
