@@ -10409,209 +10409,6 @@ private static string NormalConversionError<T>(object? value)
     return information;
   }
 
-  registerNode("csharp.expression", {
-    title: "C# Expression",
-    group: RAW_CSHARP_GROUP,
-    expertOnly: true,
-    symbol: "C#=",
-    description:
-      "Universal typed expression escape hatch. Starts with {A} and {B}; add more object inputs in the inspector. Placeholders {A}…{Z}, then {INPUT27}… plus {MOD}, {GRAPH}, {NAMESPACE} and {NODE} are replaced during export.",
-    configurableTypeVar: "T",
-    configurableTypes: COMMON_VALUE_TYPES,
-    defaultType: "object",
-    parameters: [
-      pCode(
-        "code",
-        "Expression",
-        "{A}",
-        "Enter one valid C# expression without a trailing semicolon.",
-        8
-      )
-    ],
-    inputs: [
-      port("a", "A", "object"),
-      port("b", "B", "object")
-    ],
-    variadicInputs: {
-      minimum: 2,
-      defaultCount: 2,
-      maximum: 64,
-      preserveAB: true,
-      template: port("a", "A", "object")
-    },
-    outputs: [
-      genericPort(
-        "result",
-        "Result",
-        "T",
-        "anyValue"
-      )
-    ],
-    codegenExpression(api) {
-      api.warning(
-        "C# Expression nodes are exported verbatim and cannot be fully type-checked by the browser."
-      );
-      const count = Math.max(
-        2,
-        Math.min(64, Number(api.node.parameters?.variadicInputCount) || 2)
-      );
-      const ids = Array.from({ length: count }, (_, index) =>
-        index < 26
-          ? String.fromCharCode(97 + index)
-          : `input${index + 1}`
-      );
-      const code = replaceInputPlaceholders(
-        api.node.parameters.code,
-        api,
-        ids
-      ).trim();
-      return code || api.csDefault(
-        api.node.parameters.valueType
-      );
-    }
-  });
-
-  registerNode("csharp.action", {
-    title: "C# Action",
-    group: RAW_CSHARP_GROUP,
-    expertOnly: true,
-    symbol: "C#;",
-    description:
-      "Universal statement escape hatch. Starts with {A} and {B}; add more object inputs in the inspector. {A}…{Z}, then {INPUT27}… are input expressions; {NEXT} calls Done.",
-    parameters: [
-      pCode(
-        "code",
-        "Statements",
-        "_display(FormatValue({A}));",
-        "Statements are inserted inside the generated impulse method.",
-        12
-      )
-    ],
-    inputs: [
-      port("call", "Call", "impulse"),
-      port("a", "A", "object"),
-      port("b", "B", "object")
-    ],
-    variadicInputs: {
-      minimum: 2,
-      defaultCount: 2,
-      maximum: 64,
-      preserved: 1,
-      template: port("a", "A", "object")
-    },
-    outputs: [port("done", "Done", "impulse")],
-    codegenAction(api) {
-      api.warning(
-        "C# Action nodes are exported verbatim and can call any referenced API."
-      );
-      const nextMethod = api.emit("done");
-      const next = nextMethod
-        ? `${nextMethod}();`
-        : "";
-      const count = Math.max(
-        2,
-        Math.min(64, Number(api.node.parameters?.variadicInputCount) || 2)
-      );
-      const ids = Array.from({ length: count }, (_, index) =>
-        index < 26
-          ? String.fromCharCode(97 + index)
-          : `input${index + 1}`
-      );
-      let code = replaceInputPlaceholders(
-        api.node.parameters.code,
-        api,
-        ids
-      );
-      const containedNext =
-        code.includes("{NEXT}");
-      code = replaceCodePlaceholders(
-        code,
-        api,
-        {
-          NEXT: next
-        }
-      ).trim();
-      if (!containedNext && next) {
-        code = `${code}${code ? "\n" : ""}${next}`;
-      }
-      return code;
-    }
-  });
-
-  registerNode("csharp.runtimeMember", {
-    title: "C# Graph Runtime Member",
-    group: RAW_CSHARP_GROUP,
-    expertOnly: true,
-    symbol: "MEM",
-    description:
-      "Adds fields, methods, nested types or properties directly inside the generated static NodeGraph class.",
-    parameters: [
-      pCode(
-        "code",
-        "Class member code",
-        "private static object? CustomState;",
-        "Do not include an outer class or namespace declaration.",
-        14
-      )
-    ],
-    codegenCollect(api) {
-      const code = replaceCodePlaceholders(
-        api.node.parameters.code,
-        api
-      ).trim();
-      if (code) {
-        api.addMember(
-          `${api.node.id}.rawRuntimeMember`,
-          code
-        );
-        api.warning(
-          "A C# Graph Runtime Member is included verbatim."
-        );
-      }
-    }
-  });
-
-  registerNode("csharp.mainMember", {
-    title: "C# Main Mod Member",
-    group: RAW_CSHARP_GROUP,
-    expertOnly: true,
-    symbol: "MOD",
-    description:
-      "Adds fields, helpers or nested types inside the generated public partial ResoniteMod class.",
-    parameters: [
-      pCode(
-        "code",
-        "Partial class member code",
-        "private static void CustomHelper()\n{\n}\n",
-        "Do not include an outer class or namespace declaration.",
-        16
-      )
-    ]
-  });
-
-  registerNode("csharp.additionalSource", {
-    title: "Additional C# Source File",
-    group: RAW_CSHARP_GROUP,
-    expertOnly: true,
-    symbol: ".CS",
-    description:
-      "Exports a complete additional source file. This makes arbitrary classes, services, exact API adapters and platform code possible.",
-    parameters: [
-      pText(
-        "fileName",
-        "File name",
-        "AdditionalRuntime.cs"
-      ),
-      pCode(
-        "content",
-        "Complete C# source",
-        "using System;\n\nnamespace {NAMESPACE};\n\ninternal static class AdditionalRuntime\n{\n}\n",
-        "The complete file is exported verbatim after placeholder replacement.",
-        20
-      )
-    ]
-  });
-
   registerNode("harmony.exactPatchSource", {
     title: "Harmony Exact Patch Source",
     group: RAW_CSHARP_GROUP,
@@ -10676,79 +10473,6 @@ private static string NormalConversionError<T>(object? value)
         "namespace",
         "Namespace",
         "System.Diagnostics"
-      )
-    ]
-  });
-
-  registerNode("csharp.assemblyReference", {
-    title: "Manual Assembly Reference",
-    group: RAW_CSHARP_GROUP,
-    expertOnly: true,
-    symbol: "DLL",
-    description:
-      "Expert fallback for an external assembly that no visual node can declare automatically.",
-    parameters: [
-      pText(
-        "include",
-        "Assembly include",
-        "MyLibrary"
-      ),
-      pText(
-        "hintPath",
-        "HintPath",
-        "$(ResonitePath)Libraries/MyLibrary.dll"
-      ),
-      pBool(
-        "copyLocal",
-        "Copy local",
-        false
-      )
-    ]
-  });
-
-  registerNode("csharp.packageReference", {
-    title: "Manual NuGet Package Reference",
-    group: RAW_CSHARP_GROUP,
-    expertOnly: true,
-    symbol: "NUGET",
-    description:
-      "Expert fallback for an external NuGet package that no visual node can declare automatically.",
-    parameters: [
-      pText(
-        "include",
-        "Package",
-        "Newtonsoft.Json"
-      ),
-      pText(
-        "version",
-        "Version",
-        "13.0.3"
-      ),
-      pText(
-        "privateAssets",
-        "PrivateAssets",
-        ""
-      ),
-      pText(
-        "includeAssets",
-        "IncludeAssets",
-        ""
-      )
-    ]
-  });
-
-  registerNode("csharp.frameworkReference", {
-    title: "Manual Framework Reference",
-    group: RAW_CSHARP_GROUP,
-    expertOnly: true,
-    symbol: "FX",
-    description:
-      "Expert fallback for a framework reference that no visual node can declare automatically.",
-    parameters: [
-      pText(
-        "include",
-        "Framework",
-        "Microsoft.AspNetCore.App"
       )
     ]
   });
@@ -11128,8 +10852,9 @@ private static string NormalConversionError<T>(object? value)
         nodes
           .filter(node =>
             node?.kind === "operator" &&
-            node.operatorId ===
-              "csharp.assemblyReference"
+            node.operatorId === "csharp.reference" &&
+            String(node.parameters?.projectId || "main") === "main" &&
+            String(node.parameters?.referenceKind || "assembly") === "assembly"
           )
           .map(node => ({
             include: String(
@@ -11139,7 +10864,7 @@ private static string NormalConversionError<T>(object? value)
               node.parameters?.hintPath || ""
             ).trim(),
             private:
-              node.parameters?.copyLocal ===
+              node.parameters?.private ===
               true
           }))
           .filter(reference =>
@@ -11150,8 +10875,9 @@ private static string NormalConversionError<T>(object? value)
         nodes
           .filter(node =>
             node?.kind === "operator" &&
-            node.operatorId ===
-              "csharp.packageReference"
+            node.operatorId === "csharp.reference" &&
+            String(node.parameters?.projectId || "main") === "main" &&
+            String(node.parameters?.referenceKind || "assembly") === "package"
           )
           .map(node => ({
             include: String(
@@ -11176,8 +10902,9 @@ private static string NormalConversionError<T>(object? value)
         nodes
           .filter(node =>
             node?.kind === "operator" &&
-            node.operatorId ===
-              "csharp.frameworkReference"
+            node.operatorId === "csharp.reference" &&
+            String(node.parameters?.projectId || "main") === "main" &&
+            String(node.parameters?.referenceKind || "assembly") === "framework"
           )
           .map(node =>
             String(
@@ -11195,13 +10922,15 @@ private static string NormalConversionError<T>(object? value)
         }
 
         const rawSource =
-          node.operatorId === "csharp.expression" ||
-          node.operatorId === "csharp.action" ||
-          node.operatorId === "csharp.runtimeMember" ||
-          node.operatorId === "csharp.mainMember"
-            ? node.parameters?.code
-            : node.operatorId === "csharp.additionalSource" ||
-                node.operatorId === "harmony.exactPatchSource" ||
+          node.operatorId === "csharp.file" && ["action", "expression", "runtimeMember", "mainMember"].includes(node.parameters?.mode)
+            ? node.operatorId === "csharp.file"
+              ? node.parameters?.mode === "expression"
+                ? node.parameters?.expressionCode
+                : ["runtimeMember", "mainMember"].includes(node.parameters?.mode)
+                  ? node.parameters?.memberCode
+                  : node.parameters?.actionCode
+              : node.parameters?.code
+            : node.operatorId === "harmony.exactPatchSource" ||
                 node.operatorId === "harmony.earlyPatchSource"
               ? node.parameters?.content
               : "";
@@ -11221,10 +10950,9 @@ private static string NormalConversionError<T>(object? value)
             node.operatorId ===
               "harmony.earlyPatchSource";
           const addUsings =
-            node.operatorId !== "csharp.additionalSource" &&
             node.operatorId !== "harmony.exactPatchSource" &&
             node.operatorId !== "harmony.earlyPatchSource" &&
-            node.operatorId !== "csharp.mainMember";
+            !(node.operatorId === "csharp.file" && node.parameters?.mode === "mainMember");
 
           rawDependencies =
             earlyPatchSource
@@ -11238,8 +10966,8 @@ private static string NormalConversionError<T>(object? value)
                 );
 
           if (
-            node.operatorId ===
-              "csharp.mainMember"
+            node.operatorId === "csharp.file" &&
+            node.parameters?.mode === "mainMember"
           ) {
             for (const namespaceName of
               rawDependencies.usings) {
@@ -11261,37 +10989,6 @@ private static string NormalConversionError<T>(object? value)
             break;
           }
 
-          case "csharp.assemblyReference":
-            api.addReference({
-              include:
-                node.parameters?.include,
-              hintPath:
-                node.parameters?.hintPath,
-              private:
-                node.parameters?.copyLocal ===
-                true
-            });
-            break;
-
-          case "csharp.packageReference":
-            api.addPackageReference({
-              include:
-                node.parameters?.include,
-              version:
-                node.parameters?.version,
-              privateAssets:
-                node.parameters?.privateAssets,
-              includeAssets:
-                node.parameters?.includeAssets
-            });
-            break;
-
-          case "csharp.frameworkReference":
-            api.addFrameworkReference(
-              node.parameters?.include
-            );
-            break;
-
           case "csharp.buildOptions":
             api.require(
               "allowUnsafeBlocks",
@@ -11304,33 +11001,11 @@ private static string NormalConversionError<T>(object? value)
             );
             break;
 
-          case "csharp.mainMember": {
-            const code = replaceCodePlaceholders(
-              node.parameters?.code,
-              {
-                ...api,
-                node,
-                definition:
-                  api.definitions?.[
-                    node.operatorId
-                  ]
-              }
-            ).trim();
-            if (code) {
-              mainMembers.push(code);
-              advancedCodeUsed = true;
-            }
-            break;
-          }
-
-          case "csharp.additionalSource": {
-            const fileName = String(
-              node.parameters?.fileName ||
-                "AdditionalRuntime.cs"
-            ).trim();
-            const content =
-              replaceCodePlaceholders(
-                node.parameters?.content,
+          case "csharp.file": {
+            const mode = node.parameters?.mode;
+            if (mode === "mainMember") {
+              const code = replaceCodePlaceholders(
+                node.parameters?.memberCode,
                 {
                   ...api,
                   node,
@@ -11339,12 +11014,14 @@ private static string NormalConversionError<T>(object? value)
                       node.operatorId
                     ]
                 }
-              );
-            api.addFile({
-              name: fileName,
-              content
-            });
-            advancedCodeUsed = true;
+              ).trim();
+              if (code) {
+                mainMembers.push(code);
+              }
+            }
+            if (["action", "expression", "runtimeMember", "mainMember"].includes(mode)) {
+              advancedCodeUsed = true;
+            }
             break;
           }
 
@@ -11462,12 +11139,6 @@ private static string NormalConversionError<T>(object? value)
             advancedCodeUsed = true;
             break;
           }
-
-          case "csharp.expression":
-          case "csharp.action":
-          case "csharp.runtimeMember":
-            advancedCodeUsed = true;
-            break;
         }
       }
 

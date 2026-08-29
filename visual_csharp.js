@@ -19,7 +19,7 @@
     getTypeDefinitions
   } = registry;
 
-  const VERSION = 18;
+  const VERSION = 21;
   const CUSTOM_CSHARP_COORDINATE_SPACE_VERSION = 2;
   const SYNTAX_TYPE = "csharpSyntax";
   const GROUPS = {
@@ -263,12 +263,15 @@
   });
 
   registerNode("csharp.file", {
-    title: "Custom C# File",
+    title: "Custom C#",
     group: GROUPS.project,
     symbol: ".CS",
+    expertOnly: true,
+    rawCSharpNode: true,
     customCSharpFile: true,
-    description: "A reusable C# source container. Its complete source stays persistently in this Runtime Graph node's Actions. Imported files synchronize changed source through Roslyn when opened; manually built file graphs remain graph-authoritative.",
+    description: "One Custom C# node for complete files, inline actions or expressions, and generated runtime/main-class members. Select the insertion context with Mode.",
     parameters: [
+      { ...select("mode", "Mode", ["file", "action", "expression", "runtimeMember", "mainMember"], "file", "Selects the exact generated C# insertion context."), affectsPorts: true, affectsNode: true },
       text("fileName", "File name", "VisualProgram.cs"),
       text("projectId", "Project Id", "main"),
       select("nullable", "Nullable", ["inherit", "enable", "disable", "annotations", "warnings"], "inherit"),
@@ -277,13 +280,159 @@
     ],
     inputs: [],
     resolveDefinition(node) {
+      const requestedMode = parameter(node, "mode", "file");
+      const mode = ["action", "expression", "runtimeMember", "mainMember"].includes(requestedMode) ? requestedMode : "file";
+      if (mode === "action") {
+        return {
+          title: "Custom C# · Action",
+          symbol: "C#;",
+          customCSharpFile: false,
+          parameters: [
+            { ...select("mode", "Mode", ["file", "action", "expression", "runtimeMember", "mainMember"], "action", "Selects the exact generated C# insertion context."), affectsPorts: true, affectsNode: true },
+            code("actionCode", "Statements", "_display(FormatValue({A}));", "Statements inserted into the generated impulse method. {A}…{Z}, then {INPUT27}… are input expressions; {NEXT} calls Done.", 12)
+          ],
+          inputs: [
+            port("call", "Call", "impulse"),
+            port("a", "A", "object"),
+            port("b", "B", "object")
+          ],
+          variadicInputs: {
+            minimum: 2,
+            defaultCount: 2,
+            maximum: 64,
+            preserved: 1,
+            template: port("a", "A", "object")
+          },
+          outputs: [port("done", "Done", "impulse")]
+        };
+      }
+      if (mode === "expression") {
+        return {
+          title: "Custom C# · Expression",
+          symbol: "C#ƒ",
+          customCSharpFile: false,
+          configurableTypeVar: "T",
+          defaultType: "object",
+          parameters: [
+            { ...select("mode", "Mode", ["file", "action", "expression", "runtimeMember", "mainMember"], "expression", "Selects the exact generated C# insertion context."), affectsPorts: true, affectsNode: true },
+            code("expressionCode", "Expression", "{A}", "One valid C# expression without a trailing semicolon. {A}…{Z}, then {INPUT27}… reference value inputs.", 8)
+          ],
+          inputs: [
+            port("a", "A", "object"),
+            port("b", "B", "object")
+          ],
+          variadicInputs: {
+            minimum: 2,
+            defaultCount: 2,
+            maximum: 64,
+            preserveAB: true,
+            template: port("a", "A", "object")
+          },
+          outputs: [genericPort("result", "Result", "T", "anyValue")]
+        };
+      }
+      if (mode === "runtimeMember" || mode === "mainMember") {
+        const runtimeMember = mode === "runtimeMember";
+        return {
+          title: runtimeMember ? "Custom C# · Runtime Member" : "Custom C# · Main Mod Member",
+          symbol: runtimeMember ? "MEM" : "MOD",
+          customCSharpFile: false,
+          parameters: [
+            { ...select("mode", "Mode", ["file", "action", "expression", "runtimeMember", "mainMember"], mode, "Selects the exact generated C# insertion context."), affectsPorts: true, affectsNode: true },
+            code(
+              "memberCode",
+              runtimeMember ? "NodeGraph class member" : "Main partial Mod class member",
+              runtimeMember ? "private static object? CustomState;" : "private static void CustomHelper()\n{\n}\n",
+              "Enter members only, without an outer class or namespace declaration.",
+              runtimeMember ? 14 : 16
+            )
+          ],
+          inputs: [],
+          outputs: []
+        };
+      }
       return {
+        title: "Custom C# · File",
+        symbol: ".CS",
+        customCSharpFile: true,
+        parameters: [
+          { ...select("mode", "Mode", ["file", "action", "expression", "runtimeMember", "mainMember"], "file", "Selects the exact generated C# insertion context."), affectsPorts: true, affectsNode: true },
+          text("fileName", "File name", "VisualProgram.cs"),
+          text("projectId", "Project Id", "main"),
+          select("nullable", "Nullable", ["inherit", "enable", "disable", "annotations", "warnings"], "inherit"),
+          bool("autoGeneratedHeader", "Generated header", true),
+          code("source", "C# 14 source", "", "Persistent complete source of this custom file. Open Node Graph parses changed source with bundled .NET 10 Roslyn.", 22)
+        ],
         inputs: node?.parameters?.legacyInlineContent === true
           ? [syntaxInput("content", "Legacy inline compilation unit")]
           : []
       };
     },
-    outputs: []
+    outputs: [],
+    codegenAction(api) {
+      const nextMethod = api.emit("done");
+      const next = nextMethod ? `${nextMethod}();` : "";
+      const count = Math.max(2, Math.min(64, Number(api.node.parameters?.variadicInputCount) || 2));
+      const ids = Array.from({ length: count }, (_, index) => index < 26
+        ? String.fromCharCode(97 + index)
+        : `input${index + 1}`);
+      const replacements = {
+        MOD: api.className,
+        GRAPH: api.graphClassName,
+        NAMESPACE: api.namespaceName,
+        NODE: api.identifier(api.node?.label || api.definition?.title || "Node"),
+        NEXT: next
+      };
+      ids.forEach(portId => {
+        replacements[portId.toUpperCase()] = api.input(portId).code;
+      });
+      let statements = String(parameter(api.node, "actionCode", ""));
+      const containedNext = statements.includes("{NEXT}");
+      for (const [name, value] of Object.entries(replacements)) {
+        statements = statements.replaceAll(`{${name}}`, String(value ?? ""));
+      }
+      statements = statements.trim();
+      if (!containedNext && next) statements = `${statements}${statements ? "\n" : ""}${next}`;
+      return statements;
+    },
+    codegenExpression(api) {
+      const count = Math.max(2, Math.min(64, Number(api.node.parameters?.variadicInputCount) || 2));
+      const ids = Array.from({ length: count }, (_, index) => index < 26
+        ? String.fromCharCode(97 + index)
+        : `input${index + 1}`);
+      const replacements = {
+        MOD: api.className,
+        GRAPH: api.graphClassName,
+        NAMESPACE: api.namespaceName,
+        NODE: api.identifier(api.node?.label || api.definition?.title || "Node")
+      };
+      ids.forEach(portId => {
+        replacements[portId.toUpperCase()] = api.input(portId).code;
+      });
+      let expression = String(parameter(api.node, "expressionCode", ""));
+      for (const [name, value] of Object.entries(replacements)) {
+        expression = expression.replaceAll(`{${name}}`, String(value ?? ""));
+      }
+      return expression.trim() || api.csDefault(api.node.parameters?.valueType || "object");
+    },
+    codegenCollect(api) {
+      if (parameter(api.node, "mode", "file") !== "runtimeMember") return;
+      const replacements = {
+        MOD: api.className,
+        GRAPH: api.graphClassName,
+        NAMESPACE: api.namespaceName,
+        NODE: api.identifier?.(api.node?.label || api.definition?.title || "Node")
+      };
+      let member = String(parameter(api.node, "memberCode", ""));
+      for (const [name, value] of Object.entries(replacements)) {
+        member = member.replaceAll(`{${name}}`, String(value ?? ""));
+      }
+      member = member.trim();
+      if (member) {
+        api.addMember(`${api.node.id}.customRuntimeMember`, member);
+        api.warning?.("A Custom C# Runtime Member is included verbatim.");
+      }
+    }
   });
 
   registerNode("csharp.customFileOutput", {
@@ -300,43 +449,39 @@
 
   registerNode("csharp.reference", {
     expertOnly: true,
-    title: "Assembly Reference",
+    rawCSharpNode: true,
+    title: "Reference",
     group: GROUPS.project,
     symbol: "DLL",
     parameters: [
+      { ...select("referenceKind", "Kind", ["assembly", "package", "framework"], "assembly", "Selects the project reference kind."), affectsNode: true },
       text("projectId", "Project Id", "main"),
       text("include", "Assembly", "Assembly.Name"),
       text("hintPath", "Hint path", ""),
       bool("private", "Copy local", false)
     ],
-    inputs: [], outputs: []
-  });
-
-  registerNode("csharp.packageReference", {
-    expertOnly: true,
-    title: "NuGet Package Reference",
-    group: GROUPS.project,
-    symbol: "NUGET",
-    parameters: [
-      text("projectId", "Project Id", "main"),
-      text("include", "Package", "Package.Name"),
-      text("version", "Version", "1.0.0"),
-      text("privateAssets", "PrivateAssets", ""),
-      text("includeAssets", "IncludeAssets", "")
-    ],
-    inputs: [], outputs: []
-  });
-
-  registerNode("csharp.frameworkReference", {
-    expertOnly: true,
-    title: "Framework Reference",
-    group: GROUPS.project,
-    symbol: "FX",
-    parameters: [
-      text("projectId", "Project Id", "main"),
-      text("include", "Framework", "Microsoft.AspNetCore.App")
-    ],
-    inputs: [], outputs: []
+    inputs: [], outputs: [],
+    resolveDefinition(node) {
+      const kind = ["package", "framework"].includes(parameter(node, "referenceKind", "assembly"))
+        ? parameter(node, "referenceKind", "assembly")
+        : "assembly";
+      const common = [
+        { ...select("referenceKind", "Kind", ["assembly", "package", "framework"], kind, "Selects the project reference kind."), affectsNode: true },
+        text("projectId", "Project Id", "main")
+      ];
+      if (kind === "package") return {
+        title: "Reference · NuGet Package", symbol: "NUGET",
+        parameters: [...common, text("include", "Package", "Package.Name"), text("version", "Version", "1.0.0"), text("privateAssets", "PrivateAssets", ""), text("includeAssets", "IncludeAssets", "")]
+      };
+      if (kind === "framework") return {
+        title: "Reference · Framework", symbol: "FX",
+        parameters: [...common, text("include", "Framework", "Microsoft.AspNetCore.App")]
+      };
+      return {
+        title: "Reference · Assembly", symbol: "DLL",
+        parameters: [...common, text("include", "Assembly", "Assembly.Name"), text("hintPath", "Hint path", ""), bool("private", "Copy local", false)]
+      };
+    }
   });
 
   registerSyntaxNode("csharp.sequence", {
@@ -1202,7 +1347,9 @@
 
       const renderMainNode = createSyntaxRenderer(nodes, incoming, true);
 
-      const fileNodes = nodes.filter(node => node?.operatorId === "csharp.file");
+      const fileNodes = nodes.filter(node =>
+        node?.operatorId === "csharp.file" && parameter(node, "mode", "file") === "file"
+      );
       const projectNodes = nodes.filter(node => node?.operatorId === "csharp.project");
       const projectById = new Map();
       for (const node of projectNodes) {
@@ -1221,16 +1368,16 @@
 
       const resources = type => nodes.filter(node => node?.operatorId === type);
       const resourceFor = (node, projectId) => String(parameter(node, "projectId", "main")).trim() === projectId;
-      const referencesFor = projectId => resources("csharp.reference").filter(node => resourceFor(node, projectId)).map(node => ({
+      const referencesFor = projectId => resources("csharp.reference").filter(node => resourceFor(node, projectId) && parameter(node, "referenceKind", "assembly") === "assembly").map(node => ({
         include: String(parameter(node, "include", "")).trim(),
         hintPath: String(parameter(node, "hintPath", "")).trim(),
         private: parameter(node, "private", false) === true
       })).filter(item => item.include);
-      const packagesFor = projectId => resources("csharp.packageReference").filter(node => resourceFor(node, projectId)).map(node => ({
+      const packagesFor = projectId => resources("csharp.reference").filter(node => resourceFor(node, projectId) && parameter(node, "referenceKind", "assembly") === "package").map(node => ({
         include: String(parameter(node, "include", "")).trim(), version: String(parameter(node, "version", "")).trim(),
         privateAssets: String(parameter(node, "privateAssets", "")).trim(), includeAssets: String(parameter(node, "includeAssets", "")).trim()
       })).filter(item => item.include && item.version);
-      const frameworksFor = projectId => resources("csharp.frameworkReference").filter(node => resourceFor(node, projectId)).map(node => String(parameter(node, "include", "")).trim()).filter(Boolean);
+      const frameworksFor = projectId => resources("csharp.reference").filter(node => resourceFor(node, projectId) && parameter(node, "referenceKind", "assembly") === "framework").map(node => String(parameter(node, "include", "")).trim()).filter(Boolean);
 
       const filesByProject = new Map();
       const customFileByIdentity = new Map();
@@ -1259,9 +1406,20 @@
         } else {
           connection = incoming.get(`${node.id}:content`) || null;
         }
-        const body = connection
+        let body = connection
           ? renderNode(connection.fromNode)
           : String(parameter(node, "source", ""));
+        if (parameter(node, "legacyTemplateSource", false) === true) {
+          const replacements = {
+            MOD: api.className,
+            GRAPH: api.graphClassName,
+            NAMESPACE: api.namespaceName,
+            NODE: api.identifier?.(node.label || "AdditionalSource")
+          };
+          for (const [name, value] of Object.entries(replacements)) {
+            body = body.replaceAll(`{${name}}`, String(value ?? ""));
+          }
+        }
         if (!body.trim()) {
           api.diagnostic(`Custom C# File '${fileName}' has neither generated node-graph code nor C# source text.`);
           continue;

@@ -183,8 +183,8 @@ async function ensureCustomCSharpRuntime(definitions, typeDefinitions) {
       assemblies: []
     };
     self.RMLFrooxComponentCatalog = self.RMLResoniteApiCatalog;
-    importScripts("node_graph.js?v=297-keep-semantic-graph-v603f49");
-    importScripts("visual_csharp.js?v=27-keep-semantic-graph-v603f49");
+    importScripts("node_graph.js?v=301-consolidated-custom-contracts-v603f53");
+    importScripts("visual_csharp.js?v=30-consolidated-custom-contracts-v603f53");
     const registry = self.RMLModNodeRegistry;
     if (!registry) throw new Error("The Custom C# worker registry is unavailable.");
     for (const [typeId, definition] of Object.entries(typeDefinitions || {})) {
@@ -216,13 +216,13 @@ async function ensureRuntime(catalog) {
       self.RMLResoniteApiCatalog;
 
     importScripts(
-      "node_graph.js?v=297-keep-semantic-graph-v603f49"
+      "node_graph.js?v=301-consolidated-custom-contracts-v603f53"
     );
     importScripts(
-      "mod_nodes.js?v=51-single-source-catalog-v603f41"
+      "mod_nodes.js?v=54-consolidated-custom-contracts-v603f53"
     );
     importScripts(
-      "visual_csharp.js?v=27-keep-semantic-graph-v603f49"
+      "visual_csharp.js?v=30-consolidated-custom-contracts-v603f53"
     );
     importScripts(
       "api_nodes.js?v=36-structural-catalog-contract-v603f43"

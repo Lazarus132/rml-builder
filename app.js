@@ -36,7 +36,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "keep-semantic-csharp-graph-20260829-v603f49";
+  "consolidated-custom-contracts-20260829-v603f53";
 
 function removeLegacyHelpHashFromAddress() {
   if (!/^#(?:info-|shortcut-)/i.test(window.location.hash)) {
@@ -969,7 +969,7 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "graph_codegen_worker.js?v=54-keep-semantic-graph-v603f49",
+      "graph_codegen_worker.js?v=58-consolidated-custom-contracts-v603f53",
       APP_SCRIPT_BASE_URL
     ),
     {
