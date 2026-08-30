@@ -194,13 +194,13 @@ async function ensureRuntime(catalog) {
       self.RMLResoniteApiCatalog;
 
     importScripts(
-      "node_graph.js?v=301-indexed-integrated-contract-import-v630"
+      "node_graph.js?v=307-atomic-project-epoch-v640"
     );
     importScripts(
       "mod_nodes.js?v=52-persistent-runtime-state-v622"
     );
     importScripts(
-      "visual_csharp.js?v=29-advanced-raw-csharp-graph-color-parity-v629"
+      "visual_csharp.js?v=30-unified-csharp-reference-v639"
     );
     importScripts(
       "api_nodes.js?v=36-null-safe-api-read-v622"

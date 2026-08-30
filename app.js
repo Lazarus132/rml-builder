@@ -36,7 +36,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "replacement-cancellation-origin-guard-20260830-v638";
+  "atomic-project-epoch-transaction-20260830-v640";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -238,6 +238,7 @@ const state = {
 };
 
 const elements = {};
+let projectApplicationEpoch = 1;
 
 let dragScrollActive = false;
 let dragPointerY = null;
@@ -929,14 +930,23 @@ function terminateGraphCodegenWorker() {
 function announceGraphCodegenSettlement(
   detail = {}
 ) {
+  const {
+    projectEpoch =
+      projectApplicationEpoch,
+    codegenProjectEpoch =
+      graphCodegenProjectEpoch,
+    ...settlement
+  } = detail;
   document.dispatchEvent(
     new CustomEvent(
       "rml-builder:graph-codegen-settled",
       {
         detail: {
           projectEpoch:
-            graphCodegenProjectEpoch,
-          ...detail
+            Number(projectEpoch) || 0,
+          codegenProjectEpoch:
+            Number(codegenProjectEpoch) || 0,
+          ...settlement
         }
       }
     )
@@ -981,13 +991,17 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "graph_codegen_worker.js?v=44-custom-csharp-background-build-v603f37",
+      "graph_codegen_worker.js?v=53-atomic-project-epoch-v640",
       APP_SCRIPT_BASE_URL
     ),
     {
       name: "rml-graph-codegen"
     }
   );
+  const workerProjectEpoch =
+    graphCodegenProjectEpoch;
+  const workerApplicationEpoch =
+    projectApplicationEpoch;
 
   worker.addEventListener(
     "message",
@@ -1002,6 +1016,10 @@ function ensureGraphCodegenWorker(catalog) {
         active.projectEpoch !==
           graphCodegenProjectEpoch
       ) {
+        return;
+      }
+
+      if (response.progress === true) {
         return;
       }
 
@@ -1024,6 +1042,10 @@ function ensureGraphCodegenWorker(catalog) {
       graphCodegenWorkerRunning = false;
 
       announceGraphCodegenSettlement({
+        projectEpoch:
+          active.applicationProjectEpoch,
+        codegenProjectEpoch:
+          active.projectEpoch,
         key: active.key,
         ok: response.ok === true
       });
@@ -1046,6 +1068,16 @@ function ensureGraphCodegenWorker(catalog) {
   worker.addEventListener(
     "error",
     event => {
+      if (
+        worker !==
+          graphCodegenWorker ||
+        workerProjectEpoch !==
+          graphCodegenProjectEpoch ||
+        workerApplicationEpoch !==
+          projectApplicationEpoch
+      ) {
+        return;
+      }
       graphCodegenWorkerLastError =
         new Error(
           event.message ||
@@ -1055,6 +1087,10 @@ function ensureGraphCodegenWorker(catalog) {
       graphCodegenWorkerRunning = false;
       terminateGraphCodegenWorker();
       announceGraphCodegenSettlement({
+        projectEpoch:
+          workerApplicationEpoch,
+        codegenProjectEpoch:
+          workerProjectEpoch,
         ok: false,
         error:
           graphCodegenWorkerLastError.message
@@ -1112,6 +1148,10 @@ async function pumpGraphCodegenWorkerQueue() {
     graphCodegenWorkerActiveBuild = null;
     graphCodegenWorkerRunning = false;
     announceGraphCodegenSettlement({
+      projectEpoch:
+        build.applicationProjectEpoch,
+      codegenProjectEpoch:
+        build.projectEpoch,
       key: build.key,
       ok: false,
       error:
@@ -1143,6 +1183,8 @@ function requestLargeGraphCodegen(
     key,
     projectEpoch:
       graphCodegenProjectEpoch,
+    applicationProjectEpoch:
+      projectApplicationEpoch,
     catalog,
     state:
       builderCodegenStateSnapshot(),
@@ -1154,10 +1196,20 @@ function requestLargeGraphCodegen(
 }
 
 function pendingLargeGraphContribution() {
-  const message =
-    graphCodegenWorkerLastError
-      ? `Background graph code generation failed: ${graphCodegenWorkerLastError.message}`
-      : "Large graph code generation is running in a background worker. Export becomes available automatically when it finishes.";
+  const rawErrorMessage = String(
+    graphCodegenWorkerLastError?.message ||
+    ""
+  )
+    .trim()
+    .replace(/[.!?]+$/, "");
+  const baseErrorMessage =
+    "Background graph code generation failed";
+  const message = graphCodegenWorkerLastError
+    ? rawErrorMessage &&
+      rawErrorMessage !== baseErrorMessage
+      ? `${baseErrorMessage}: ${rawErrorMessage}.`
+      : `${baseErrorMessage}.`
+    : "Large graph code generation is running in a background worker. Export becomes available automatically when it finishes.";
 
   return {
     active: true,
@@ -7958,6 +8010,8 @@ function applyProjectDocument(
     reason = "project-apply"
   } = {}
 ) {
+  const projectEpoch =
+    ++projectApplicationEpoch;
   recordPageState(
     "project.apply-before",
     {
@@ -7970,7 +8024,23 @@ function applyProjectDocument(
   );
   document.dispatchEvent(
     new CustomEvent(
-      "rml-builder:project-replacement"
+      "rml-builder:project-replacement",
+      {
+        detail: {
+          projectEpoch,
+          reason,
+          projectId:
+            String(project?.projectId || ""),
+          nodes:
+            project?.extensions
+              ?.typedNodeGraph
+              ?.nodes?.length || 0,
+          connections:
+            project?.extensions
+              ?.typedNodeGraph
+              ?.connections?.length || 0
+        }
+      }
     )
   );
   resetGraphCodegenForProjectReplacement();
@@ -8020,8 +8090,13 @@ function applyProjectDocument(
   );
   recordPageState(
     "project.apply-after",
-    { reason }
+    { reason, projectEpoch }
   );
+  window.RMLDynamicGraphHost
+    ?.synchronizeProjectState?.(
+      projectEpoch
+    );
+  return projectEpoch;
 }
 
 let projectDraftPersistIdleHandle = 0;
@@ -8677,21 +8752,23 @@ function applyLoadedProject(
       reason
     }
   );
-  applyProjectDocument(
-    project,
-    {
-      restoredPage,
-      reason
-    }
-  );
+  const projectEpoch =
+    applyProjectDocument(
+      project,
+      {
+        restoredPage,
+        reason
+      }
+    );
 
   if (!render) {
-    return;
+    return projectEpoch;
   }
 
   renderMetadata();
   renderPalette();
   renderAll();
+  return projectEpoch;
 }
 
 let initialExampleProjectLoadError = null;
@@ -18590,7 +18667,11 @@ function renderAll() {
       {
         detail: {
           itemCount:
-            currentFlattenedNodes().length
+            currentFlattenedNodes().length,
+          projectEpoch:
+            projectApplicationEpoch,
+          projectId:
+            String(state.projectId || "")
         }
       }
     )
@@ -24425,7 +24506,9 @@ function assertRuntimeGraphViewsIdentity(
 }
 
 function assertImportedGraphIdentity(
-  expectedGraph
+  expectedGraph,
+  expectedProjectEpoch =
+    projectApplicationEpoch
 ) {
   const host =
     window.RMLDynamicGraphHost;
@@ -24452,6 +24535,20 @@ function assertImportedGraphIdentity(
     )
       ? actualGraph.connections
       : [];
+  const actualProjectEpoch =
+    Number(
+      host?.getProjectEpoch?.()
+    ) || 0;
+
+  if (
+    Number(expectedProjectEpoch) > 0 &&
+    actualProjectEpoch !==
+      Number(expectedProjectEpoch)
+  ) {
+    throw new Error(
+      `The Runtime Graph belongs to stale project epoch ${actualProjectEpoch}; epoch ${Number(expectedProjectEpoch)} is required. The JSON was not loaded.`
+    );
+  }
 
   if (
     actualNodes.length !==
@@ -24513,8 +24610,8 @@ function assertImportedGraphIdentity(
 }
 
 function waitForGraphCodegenSettlement(
-  timeout,
-  message
+  expectedProjectEpoch =
+    projectApplicationEpoch
 ) {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -24525,7 +24622,6 @@ function waitForGraphCodegenSettlement(
     ) => {
       if (settled) return;
       settled = true;
-      window.clearTimeout(timer);
       document.removeEventListener(
         "rml-builder:graph-codegen-settled",
         handleSettled
@@ -24536,23 +24632,34 @@ function waitForGraphCodegenSettlement(
       );
       callback(value);
     };
-    const handleSettled = event =>
-      finish(resolve, event.detail || {});
-    const handleReplacement = () =>
+    const handleSettled = event => {
+      const detail =
+        event.detail || {};
+      if (
+        Number(expectedProjectEpoch) > 0 &&
+        Number(detail.projectEpoch) !==
+          Number(expectedProjectEpoch)
+      ) {
+        return;
+      }
+      finish(resolve, detail);
+    };
+    const handleReplacement = event => {
+      if (
+        Number(expectedProjectEpoch) > 0 &&
+        Number(
+          event?.detail?.projectEpoch
+        ) === Number(expectedProjectEpoch)
+      ) {
+        return;
+      }
       finish(
         reject,
         new Error(
           "The project changed while Runtime Graph code generation was running."
         )
       );
-    const timer = window.setTimeout(
-      () =>
-        finish(
-          reject,
-          new Error(message)
-        ),
-      timeout
-    );
+    };
 
     document.addEventListener(
       "rml-builder:graph-codegen-settled",
@@ -24569,9 +24676,9 @@ async function waitForImportedCodegen(
   expectedGraph,
   workSession,
   _catalogResult = null,
-  timeout = 120000
+  projectEpoch =
+    projectApplicationEpoch
 ) {
-  const started = performance.now();
   let contribution = null;
 
   while (true) {
@@ -24582,16 +24689,6 @@ async function waitForImportedCodegen(
       contribution?.pending !== true
     ) {
       break;
-    }
-
-    const remaining =
-      timeout -
-      (performance.now() - started);
-
-    if (remaining <= 0) {
-      throw new Error(
-        "Runtime Graph code generation did not complete within 120 seconds. The JSON was not loaded."
-      );
     }
 
     updateBuilderWork(
@@ -24608,8 +24705,7 @@ async function waitForImportedCodegen(
     );
 
     await waitForGraphCodegenSettlement(
-      remaining,
-      "Runtime Graph code generation did not complete within 120 seconds. The JSON was not loaded."
+      projectEpoch
     );
   }
 
@@ -24660,7 +24756,11 @@ function waitForImportedGraphUi(
   expectedNodes,
   expectedConnections,
   timeout = 30000,
-  { strict = false } = {}
+  {
+    strict = false,
+    projectEpoch =
+      projectApplicationEpoch
+  } = {}
 ) {
   const graph =
     state.extensions?.typedNodeGraph;
@@ -24685,6 +24785,9 @@ function waitForImportedGraphUi(
 
   return new Promise((resolve, reject) => {
     let settled = false;
+    let timer = 0;
+    const expectedProjectEpoch =
+      Number(projectEpoch) || 0;
 
     const finish = (
       timedOut,
@@ -24692,7 +24795,9 @@ function waitForImportedGraphUi(
     ) => {
       if (settled) return;
       settled = true;
-      window.clearTimeout(timer);
+      if (timer) {
+        window.clearTimeout(timer);
+      }
       document.removeEventListener(
         "rml-graph:render-complete",
         handleComplete
@@ -24700,6 +24805,10 @@ function waitForImportedGraphUi(
       document.removeEventListener(
         "rml-builder:rendered",
         handleBuilderRendered
+      );
+      document.removeEventListener(
+        "rml-builder:project-replacement",
+        handleReplacement
       );
       if (error) {
         reject(error);
@@ -24728,15 +24837,25 @@ function waitForImportedGraphUi(
         )
           ? hostGraph.connections.length
           : -1;
+      const hostProjectEpoch =
+        Number(
+          host?.getProjectEpoch?.()
+        ) || 0;
 
       return {
         matches:
           nodeCount ===
             Number(expectedNodes) &&
           connectionCount ===
-            Number(expectedConnections),
+            Number(expectedConnections) &&
+          (
+            expectedProjectEpoch <= 0 ||
+            hostProjectEpoch ===
+              expectedProjectEpoch
+          ),
         nodeCount,
         connectionCount,
+        hostProjectEpoch,
         graphViewActive:
           host
             ?.getPresentationState?.()
@@ -24747,7 +24866,19 @@ function waitForImportedGraphUi(
       };
     };
 
-    const handleBuilderRendered = () => {
+    const handleBuilderRendered = event => {
+      const renderedProjectEpoch =
+        Number(
+          event?.detail
+            ?.projectEpoch
+        ) || 0;
+      if (
+        expectedProjectEpoch > 0 &&
+        renderedProjectEpoch !==
+          expectedProjectEpoch
+      ) {
+        return;
+      }
       const current =
         hostStateMatches();
 
@@ -24766,7 +24897,7 @@ function waitForImportedGraphUi(
         finish(
           false,
           new Error(
-            `The Runtime Graph initialized a different project state: expected ${Number(expectedNodes).toLocaleString("de-DE")} nodes and ${Number(expectedConnections).toLocaleString("de-DE")} connections, but received ${Number(current.nodeCount).toLocaleString("de-DE")} and ${Number(current.connectionCount).toLocaleString("de-DE")}. The JSON was not loaded.`
+            `The Runtime Graph initialized a different project state: expected ${Number(expectedNodes).toLocaleString("de-DE")} nodes and ${Number(expectedConnections).toLocaleString("de-DE")} connections for project epoch ${expectedProjectEpoch}, but received ${Number(current.nodeCount).toLocaleString("de-DE")} and ${Number(current.connectionCount).toLocaleString("de-DE")} for epoch ${Number(current.hostProjectEpoch) || 0}. The JSON was not loaded.`
           )
         );
       }
@@ -24774,58 +24905,62 @@ function waitForImportedGraphUi(
 
     const handleComplete = event => {
       const detail = event.detail || {};
-      const current = hostStateMatches();
-      const eventNodeCount =
-        Number.isFinite(
-          Number(detail.rootNodes)
-        )
-          ? Number(detail.rootNodes)
-          : detail.scope ===
-              "custom-csharp-file"
-            ? -1
-            : Number(detail.nodes);
-      const eventConnectionCount =
-        Number.isFinite(
-          Number(detail.rootConnections)
-        )
-          ? Number(
-              detail.rootConnections
-            )
-          : detail.scope ===
-              "custom-csharp-file"
-            ? -1
-            : Number(
-                detail.connections
-              );
+      const renderedProjectEpoch =
+        Number(
+          detail.projectEpoch
+        ) || 0;
       if (
-        current.matches ||
-        (
-          Number.isFinite(eventNodeCount) &&
-          eventNodeCount ===
-            Number(expectedNodes) &&
-          Number.isFinite(
-            eventConnectionCount
-          ) &&
-          eventConnectionCount ===
-            Number(expectedConnections)
-        )
+        expectedProjectEpoch > 0 &&
+        renderedProjectEpoch !==
+          expectedProjectEpoch
       ) {
+        return;
+      }
+      const current = hostStateMatches();
+      if (current.matches) {
         finish(false);
       }
     };
-
-    const timer = window.setTimeout(
-      () =>
-        strict
-          ? finish(
-              true,
-              new Error(
-                `The Runtime Graph did not finish rendering within ${Math.round(timeout / 1000)} seconds. The JSON was not loaded.`
-              )
+    const handleReplacement = event => {
+      const replacementProjectEpoch =
+        Number(
+          event?.detail
+            ?.projectEpoch
+        ) || 0;
+      if (
+        expectedProjectEpoch > 0 &&
+        replacementProjectEpoch ===
+          expectedProjectEpoch
+      ) {
+        return;
+      }
+      return strict
+        ? finish(
+            false,
+            new Error(
+              "The project changed while the Runtime Graph was initializing."
             )
-          : finish(true),
-      timeout
-    );
+          )
+        : finish(false);
+    };
+
+    if (
+      Number.isFinite(Number(timeout)) &&
+      Number(timeout) > 0
+    ) {
+      timer = window.setTimeout(
+        () =>
+          strict
+            ? finish(
+                true,
+                new Error(
+                  `The Runtime Graph did not finish rendering within ${Math.round(Number(timeout) / 1000)} seconds. The JSON was not loaded.`
+                )
+              )
+            : finish(true),
+        Number(timeout)
+      );
+    }
 
     document.addEventListener(
       "rml-graph:render-complete",
@@ -24835,6 +24970,11 @@ function waitForImportedGraphUi(
       "rml-builder:rendered",
       handleBuilderRendered
     );
+    document.addEventListener(
+      "rml-builder:project-replacement",
+      handleReplacement
+    );
+
   });
 }
 
@@ -24909,10 +25049,11 @@ async function applyLoadedProjectWithFeedback(
         true
       );
 
-    applyLoadedProject(
-      project,
-      { render: false }
-    );
+    const importedProjectEpoch =
+      applyLoadedProject(
+        project,
+        { render: false }
+      );
     projectApplied = true;
 
     if (prerequisites.graph) {
@@ -24951,8 +25092,12 @@ async function applyLoadedProjectWithFeedback(
       waitForImportedGraphUi(
         expectedNodes,
         expectedConnections,
-        45000,
-        { strict: true }
+        null,
+        {
+          strict: true,
+          projectEpoch:
+            importedProjectEpoch
+        }
       );
 
     updateBuilderWork(
@@ -24986,7 +25131,8 @@ async function applyLoadedProjectWithFeedback(
       prerequisites.runtimeActive
     ) {
       assertImportedGraphIdentity(
-        prerequisites.graph
+        prerequisites.graph,
+        importedProjectEpoch
       );
     }
 
@@ -25017,7 +25163,8 @@ async function applyLoadedProjectWithFeedback(
       await waitForImportedCodegen(
         prerequisites.graph,
         session,
-        prerequisites.catalog
+        prerequisites.catalog,
+        importedProjectEpoch
       );
     } else if (
       !prerequisites.compatibilityMode
@@ -25077,16 +25224,17 @@ async function applyLoadedProjectWithFeedback(
       );
 
       try {
-        applyLoadedProject(
-          previousProject,
-          {
-            render: false,
-            reason:
-              "failed-import-rollback",
-            useJsonPageAssociation:
-              false
-          }
-        );
+        const rollbackProjectEpoch =
+          applyLoadedProject(
+            previousProject,
+            {
+              render: false,
+              reason:
+                "failed-import-rollback",
+              useJsonPageAssociation:
+                false
+            }
+          );
         renderMetadata();
         renderPalette();
         await paintBuilderUi();
@@ -25101,8 +25249,12 @@ async function applyLoadedProjectWithFeedback(
                   ?.length || 0,
                 previousGraph
                   .connections?.length || 0,
-                45000,
-                { strict: true }
+                null,
+                {
+                  strict: true,
+                  projectEpoch:
+                    rollbackProjectEpoch
+                }
               )
             : Promise.resolve({
                 ready: true,
@@ -25112,7 +25264,8 @@ async function applyLoadedProjectWithFeedback(
         await rollbackGraphReady;
         if (previousGraph?.active) {
           assertImportedGraphIdentity(
-            previousGraph
+            previousGraph,
+            rollbackProjectEpoch
           );
         }
         await paintBuilderUi();
@@ -30050,6 +30203,10 @@ function exposeBuilderBridge() {
       return normalizeBuilderPage(
         state.activePage
       );
+    },
+
+    getProjectEpoch() {
+      return projectApplicationEpoch;
     },
 
     setActivePage(

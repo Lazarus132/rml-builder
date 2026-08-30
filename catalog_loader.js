@@ -32,7 +32,7 @@
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "visual_csharp.js?v=29-advanced-raw-csharp-graph-color-parity-v629",
+    "visual_csharp.js?v=30-unified-csharp-reference-v639",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(

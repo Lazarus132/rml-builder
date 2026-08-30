@@ -1304,6 +1304,25 @@
   let customCSharpBuildRequestSequence = 0;
   let customCSharpRootOperation = false;
   let customCSharpProjectEpoch = 0;
+  let builderProjectEpoch = 0;
+
+  function requestProjectAnimationFrame(
+    callback
+  ) {
+    const projectEpoch =
+      builderProjectEpoch;
+    return window.requestAnimationFrame(
+      timestamp => {
+        if (
+          projectEpoch !==
+            builderProjectEpoch
+        ) {
+          return;
+        }
+        callback(timestamp);
+      }
+    );
+  }
   
   
   
@@ -1329,6 +1348,7 @@
   let persistSchedule = 0;
   let persistGeneratedOutputDirty = false;
   let generatedOutputRefreshQueued = false;
+  let generatedOutputRefreshEpoch = 0;
   let graphMessageTimer = 0;
   let graphNodeSearchQuery = "";
   let graphNodeSearchIndex = -1;
@@ -1364,6 +1384,7 @@
   let paletteClickSuppression = null;
   const consumedPalettePointerSources = new WeakSet();
   let packedSnapshotSyncScheduled = false;
+  let packedSnapshotSyncEpoch = 0;
   const nodeBodyScrollPositions =
     new Map();
   let nodeBodyWireRefreshFrame = 0;
@@ -1485,6 +1506,61 @@
     graphConnectionLookupSource = null;
     graphNodeLookupLength = -1;
     graphConnectionLookupLength = -1;
+  }
+
+  function cancelProjectScopedGraphWork() {
+    const cancelFrame = value => {
+      if (value) {
+        cancelAnimationFrame(value);
+      }
+      return 0;
+    };
+
+    runtimeBridgeRefreshFrame =
+      cancelFrame(runtimeBridgeRefreshFrame);
+    graphEditViewportFrame =
+      cancelFrame(graphEditViewportFrame);
+    autoPanFrame =
+      cancelFrame(autoPanFrame);
+    nodeBodyWireRefreshFrame =
+      cancelFrame(nodeBodyWireRefreshFrame);
+    graphWireRenderFrame =
+      cancelFrame(graphWireRenderFrame);
+    graphStructuralPaintFrame =
+      cancelFrame(graphStructuralPaintFrame);
+    graphStructuralCommitFrame =
+      cancelFrame(graphStructuralCommitFrame);
+    nodeResizeLimitRefreshFrame =
+      cancelFrame(nodeResizeLimitRefreshFrame);
+    graphScrollLayerVisualFrame =
+      cancelFrame(graphScrollLayerVisualFrame);
+    graphScrollLayerVisualFollowFrame =
+      cancelFrame(
+        graphScrollLayerVisualFollowFrame
+      );
+    graphRevealAnimationFrame =
+      cancelFrame(graphRevealAnimationFrame);
+    graphNodeVirtualizationFrame =
+      cancelFrame(graphNodeVirtualizationFrame);
+    graphInteractionMotionFrame =
+      cancelFrame(graphInteractionMotionFrame);
+
+    if (graphScrollLayerIndicatorTimer) {
+      clearTimeout(
+        graphScrollLayerIndicatorTimer
+      );
+      graphScrollLayerIndicatorTimer = 0;
+    }
+    if (graphMessageTimer) {
+      clearTimeout(graphMessageTimer);
+      graphMessageTimer = 0;
+    }
+
+    graphWireFullRenderPending = false;
+    graphWirePartialConnectionIds.clear();
+    graphPendingInteractionMotion = null;
+    packedSnapshotSyncScheduled = false;
+    packedSnapshotSyncEpoch = 0;
   }
 
   const graphSharedWheelClaims = (() => {
@@ -2942,7 +3018,17 @@
     pruneConnections();
     persistGraph(true);
     activateGraphMode();
-    requestAnimationFrame(() => requestAnimationFrame(() => {
+    const projectEpoch =
+      builderProjectEpoch;
+    requestProjectAnimationFrame(() => requestProjectAnimationFrame(() => {
+      if (
+        projectEpoch !==
+          builderProjectEpoch ||
+        customCSharpEditor?.fileNodeId !==
+          fileNodeId
+      ) {
+        return;
+      }
       if (graph.nodes.length <= 40) {
         centerGraph();
         return;
@@ -2977,7 +3063,16 @@
     return true;
   }
 
-  function handleProjectReplacement() {
+  function handleProjectReplacement(event) {
+    const replacementProjectEpoch =
+      Number(
+        event?.detail?.projectEpoch
+      ) || 0;
+    if (replacementProjectEpoch > 0) {
+      builderProjectEpoch =
+        replacementProjectEpoch;
+    }
+    cancelProjectScopedGraphWork();
     customCSharpProjectEpoch += 1;
     persistSchedule += 1;
     persistGeneratedOutputDirty = false;
@@ -3196,7 +3291,7 @@
     }
     const worker = new Worker(
       new URL(
-        "graph_codegen_worker.js?v=51-indexed-integrated-contract-import-v630",
+        "graph_codegen_worker.js?v=53-atomic-project-epoch-v640",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -5643,13 +5738,33 @@
   }
 
   function scheduleGeneratedOutputRefresh() {
-    if (generatedOutputRefreshQueued) {
+    const projectEpoch =
+      builderProjectEpoch;
+    if (
+      generatedOutputRefreshQueued &&
+      generatedOutputRefreshEpoch ===
+        projectEpoch
+    ) {
       return;
     }
 
     generatedOutputRefreshQueued = true;
+    generatedOutputRefreshEpoch =
+      projectEpoch;
     const run = () => {
+      if (
+        generatedOutputRefreshEpoch !==
+          projectEpoch
+      ) {
+        return;
+      }
       generatedOutputRefreshQueued = false;
+      if (
+        projectEpoch !==
+          builderProjectEpoch
+      ) {
+        return;
+      }
       bridge
         .requestGeneratedOutputRefresh
         ?.();
@@ -5664,13 +5779,17 @@
   ) {
     const schedule =
       ++persistSchedule;
+    const projectEpoch =
+      builderProjectEpoch;
     persistGeneratedOutputDirty =
       persistGeneratedOutputDirty ||
       refreshGeneratedOutput;
 
     const commit = () => {
       if (
-        schedule !== persistSchedule
+        schedule !== persistSchedule ||
+        projectEpoch !==
+          builderProjectEpoch
       ) {
         return;
       }
@@ -10055,7 +10174,7 @@
     }
 
     runtimeBridgeRefreshFrame =
-      requestAnimationFrame(() => {
+      requestProjectAnimationFrame(() => {
         runtimeBridgeRefreshFrame = 0;
         refreshDisplayValueNodes();
       });
@@ -18243,13 +18362,33 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       return;
     }
 
-    if (packedSnapshotSyncScheduled) {
+    const projectEpoch =
+      builderProjectEpoch;
+    if (
+      packedSnapshotSyncScheduled &&
+      packedSnapshotSyncEpoch ===
+        projectEpoch
+    ) {
       return;
     }
 
     packedSnapshotSyncScheduled = true;
+    packedSnapshotSyncEpoch =
+      projectEpoch;
     queueMicrotask(() => {
+      if (
+        packedSnapshotSyncEpoch !==
+          projectEpoch
+      ) {
+        return;
+      }
       packedSnapshotSyncScheduled = false;
+      if (
+        projectEpoch !==
+          builderProjectEpoch
+      ) {
+        return;
+      }
       synchronizePackedSnapshot(true);
     });
   }
@@ -18293,7 +18432,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     persistGraph(true);
     activateGraphMode();
 
-    requestAnimationFrame(() => {
+    requestProjectAnimationFrame(() => {
       centerGraph();
     });
 
@@ -18580,7 +18719,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     const savedScrollTop =
       graphPaletteUiState.scrollTop;
 
-    requestAnimationFrame(() => {
+    requestProjectAnimationFrame(() => {
       if (!scroll.isConnected) {
         return;
       }
@@ -18655,7 +18794,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       );
     }
 
-    requestAnimationFrame(() => {
+    requestProjectAnimationFrame(() => {
       renderGraphWires();
     });
   }
@@ -18780,7 +18919,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     }
 
     graphEditViewportFrame =
-      requestAnimationFrame(() => {
+      requestProjectAnimationFrame(() => {
         graphEditViewportFrame = 0;
 
         const viewport =
@@ -18924,10 +19063,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
   }
 
   function refreshGraphAfterEditModeChange() {
-    requestAnimationFrame(() => {
+    requestProjectAnimationFrame(() => {
       applyGraphPanelLayout();
 
-      requestAnimationFrame(() => {
+      requestProjectAnimationFrame(() => {
         renderGraphWires();
         scheduleGraphScrollLayerVisualRefresh();
       });
@@ -18989,7 +19128,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       const scrollY =
         graphEditModeScrollY;
 
-      requestAnimationFrame(() => {
+      requestProjectAnimationFrame(() => {
         window.scrollTo({
           left: 0,
           top: scrollY,
@@ -19465,7 +19604,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       restoreGraphPaletteScroll(
         scroll
       );
-      requestAnimationFrame(
+      requestProjectAnimationFrame(
         updateScrollIndicator
       );
     };
@@ -19996,7 +20135,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         }
 
         searchFrame =
-          requestAnimationFrame(() => {
+          requestProjectAnimationFrame(() => {
             searchFrame = 0;
             renderEntries();
           });
@@ -20229,7 +20368,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     renderGraphPalette();
 
     if (fitAfter) {
-      requestAnimationFrame(() => {
+      requestProjectAnimationFrame(() => {
         centerGraph();
       });
     }
@@ -21186,7 +21325,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     renderGraphPalette();
 
     if (fitAfter) {
-      requestAnimationFrame(() => {
+      requestProjectAnimationFrame(() => {
         centerGraph();
       });
     }
@@ -21539,7 +21678,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           const input = overlay.querySelector("input");
           if (input instanceof HTMLInputElement) {
             input.value = nodeSearchInput.value;
-            requestAnimationFrame(() => {
+            requestProjectAnimationFrame(() => {
               input.focus({ preventScroll: true });
               input.select();
             });
@@ -21726,7 +21865,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
               ) {
                 synchronizeRenderer();
               } else {
-                requestAnimationFrame(
+                requestProjectAnimationFrame(
                   synchronizeRenderer
                 );
               }
@@ -21979,7 +22118,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
           if (raw < 1) {
             graphRevealAnimationFrame =
-              requestAnimationFrame(
+              requestProjectAnimationFrame(
                 animateReveal
               );
           } else {
@@ -21989,7 +22128,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         };
 
         graphRevealAnimationFrame =
-          requestAnimationFrame(
+          requestProjectAnimationFrame(
             animateReveal
           );
 
@@ -23783,7 +23922,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     }
 
     graphScrollLayerVisualFrame =
-      requestAnimationFrame(
+      requestProjectAnimationFrame(
         positionGraphScrollLayerVisual
       );
   }
@@ -23841,14 +23980,14 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         performance.now() - startedAt < 1600
       ) {
         graphScrollLayerVisualFollowFrame =
-          requestAnimationFrame(tick);
+          requestProjectAnimationFrame(tick);
       } else {
         positionGraphScrollLayerVisual();
       }
     };
 
     graphScrollLayerVisualFollowFrame =
-      requestAnimationFrame(tick);
+      requestProjectAnimationFrame(tick);
   }
 
   function clearGraphScrollLayerSelection(
@@ -24721,9 +24860,19 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     if (graphWireRenderFrame) {
       return;
     }
+    const projectEpoch =
+      builderProjectEpoch;
     graphWireRenderFrame =
-      requestAnimationFrame(() => {
+      requestProjectAnimationFrame(() => {
         graphWireRenderFrame = 0;
+        if (
+          projectEpoch !==
+            builderProjectEpoch
+        ) {
+          graphWireFullRenderPending = false;
+          graphWirePartialConnectionIds.clear();
+          return;
+        }
         const full =
           graphWireFullRenderPending;
         const partial = [
@@ -24749,9 +24898,17 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       return;
     }
 
+    const projectEpoch =
+      builderProjectEpoch;
     nodeResizeLimitRefreshFrame =
-      requestAnimationFrame(() => {
+      requestProjectAnimationFrame(() => {
         nodeResizeLimitRefreshFrame = 0;
+        if (
+          projectEpoch !==
+            builderProjectEpoch
+        ) {
+          return;
+        }
         refreshRenderedNodeResizeLimits();
         scheduleGraphWireRender();
       });
@@ -24830,11 +24987,24 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
   }
 
   function scheduleNodeBodyOverflowSync(article) {
-    requestAnimationFrame(() => {
+    const projectEpoch =
+      builderProjectEpoch;
+    requestProjectAnimationFrame(() => {
+      if (
+        projectEpoch !==
+          builderProjectEpoch
+      ) {
+        return;
+      }
       syncNodeBodyOverflow(article);
-      requestAnimationFrame(() =>
-        syncNodeBodyOverflow(article)
-      );
+      requestProjectAnimationFrame(() => {
+        if (
+          projectEpoch ===
+            builderProjectEpoch
+        ) {
+          syncNodeBodyOverflow(article);
+        }
+      });
     });
   }
 
@@ -24861,9 +25031,16 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     updateSourceBadge();
     synchronizeRuntimeBridgeSubscription();
 
-    requestAnimationFrame(
-      refreshDisplayValueNodes
-    );
+    const projectEpoch =
+      builderProjectEpoch;
+    requestProjectAnimationFrame(() => {
+      if (
+        projectEpoch ===
+          builderProjectEpoch
+      ) {
+        refreshDisplayValueNodes();
+      }
+    });
 
     scheduleGraphScrollLayerVisualRefresh();
   }
@@ -26604,6 +26781,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     nodes,
     preserveExisting = false
   ) {
+    const projectEpoch =
+      builderProjectEpoch;
     if (!dom.nodesHost) {
       return;
     }
@@ -26723,7 +26902,13 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       synchronizeGpuOverviewNodes();
     }
 
-    requestAnimationFrame(() => {
+    requestProjectAnimationFrame(() => {
+      if (
+        projectEpoch !==
+          builderProjectEpoch
+      ) {
+        return;
+      }
       for (const node of nodes) {
         const article =
           dom.nodesHost?.querySelector(
@@ -26773,9 +26958,17 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       return;
     }
 
+    const projectEpoch =
+      builderProjectEpoch;
     graphNodeVirtualizationFrame =
-      requestAnimationFrame(() => {
+      requestProjectAnimationFrame(() => {
         graphNodeVirtualizationFrame = 0;
+        if (
+          projectEpoch !==
+            builderProjectEpoch
+        ) {
+          return;
+        }
         const nodes =
           desiredRenderedGraphNodes();
         const signature =
@@ -28052,7 +28245,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
             rootNodes:
               rootView?.nodes?.length || 0,
             rootConnections:
-              rootView?.connections?.length || 0
+              rootView?.connections?.length || 0,
+            projectEpoch:
+              builderProjectEpoch
           }
         }
       )
@@ -28711,12 +28906,26 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     
     
     
+    const projectEpoch =
+      builderProjectEpoch;
     graphStructuralPaintFrame =
-      requestAnimationFrame(() => {
+      requestProjectAnimationFrame(() => {
         graphStructuralPaintFrame = 0;
+        if (
+          projectEpoch !==
+            builderProjectEpoch
+        ) {
+          return;
+        }
         graphStructuralCommitFrame =
-          requestAnimationFrame(() => {
+          requestProjectAnimationFrame(() => {
             graphStructuralCommitFrame = 0;
+            if (
+              projectEpoch !==
+                builderProjectEpoch
+            ) {
+              return;
+            }
             pruneConnections();
             persistGraph(true);
             renderGraphNodesAndWires();
@@ -28904,7 +29113,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
   function installInspectorOverflowSearch(root) {
     if (!root || !dom.inspectorContent) return;
-    requestAnimationFrame(() => {
+    requestProjectAnimationFrame(() => {
       const host = dom.inspectorContent;
       const overflow = host.scrollHeight > host.clientHeight + 4;
       const existing = root.querySelector(":scope > .rml-graph-inspector-search");
@@ -29563,7 +29772,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         { capture: true, passive: true }
       );
 
-      requestAnimationFrame(() => {
+      requestProjectAnimationFrame(() => {
         positionPopup();
 
         if (
@@ -35025,7 +35234,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
     if (!autoPanFrame) {
       autoPanFrame =
-        requestAnimationFrame(
+        requestProjectAnimationFrame(
           runAutoPan
         );
     }
@@ -35143,7 +35352,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     }
 
     autoPanFrame =
-      requestAnimationFrame(
+      requestProjectAnimationFrame(
         runAutoPan
       );
   }
@@ -35244,7 +35453,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       return;
     }
     graphInteractionMotionFrame =
-      requestAnimationFrame(() => {
+      requestProjectAnimationFrame(() => {
         graphInteractionMotionFrame = 0;
         const motion =
           graphPendingInteractionMotion;
@@ -35654,9 +35863,26 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     }
   }
 
-  function handleBuilderRendered() {
+  function handleBuilderRendered(event) {
     if (!bridge) {
       return;
+    }
+
+    const renderedProjectEpoch =
+      Number(
+        event?.detail?.projectEpoch
+      ) || 0;
+    if (
+      renderedProjectEpoch > 0 &&
+      builderProjectEpoch > 0 &&
+      renderedProjectEpoch !==
+        builderProjectEpoch
+    ) {
+      return;
+    }
+    if (renderedProjectEpoch > 0) {
+      builderProjectEpoch =
+        renderedProjectEpoch;
     }
 
     const incoming =
@@ -35854,6 +36080,11 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     if (!bridge) {
       return false;
     }
+
+    builderProjectEpoch =
+      Number(
+        bridge.getProjectEpoch?.()
+      ) || 0;
 
     graphHostInitialized = true;
 
@@ -36106,14 +36337,14 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           }
 
           if (graph?.active) {
-            requestAnimationFrame(
+            requestProjectAnimationFrame(
               () =>
                 synchronizeRuntimeBridgeSubscription(
                   true
                 )
             );
           } else {
-            requestAnimationFrame(
+            requestProjectAnimationFrame(
               updateSourceBadge
             );
           }
@@ -36124,8 +36355,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
             "#settings-preview-dialog"
           )
         ) {
-          requestAnimationFrame(() => {
-            requestAnimationFrame(
+          requestProjectAnimationFrame(() => {
+            requestProjectAnimationFrame(
               refreshDisplayValueNodes
             );
           });
@@ -36142,8 +36373,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
             "#settings-preview-dialog"
           )
         ) {
-          requestAnimationFrame(() => {
-            requestAnimationFrame(
+          requestProjectAnimationFrame(() => {
+            requestProjectAnimationFrame(
               refreshDisplayValueNodes
             );
           });
@@ -38835,8 +39066,40 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
   Object.defineProperty(window, "RMLDynamicGraphHost", {
     value: Object.freeze({
-      version: 51,
+      version: 52,
       getState() { return graph; },
+      getProjectEpoch() {
+        return builderProjectEpoch;
+      },
+      synchronizeProjectState(
+        projectEpoch
+      ) {
+        const requestedProjectEpoch =
+          Number(projectEpoch) || 0;
+        const currentProjectEpoch =
+          Number(
+            bridge?.getProjectEpoch?.()
+          ) || 0;
+        if (
+          requestedProjectEpoch <= 0 ||
+          requestedProjectEpoch !==
+            currentProjectEpoch
+        ) {
+          return false;
+        }
+        builderProjectEpoch =
+          requestedProjectEpoch;
+        handleBuilderRendered({
+          detail: {
+            projectEpoch:
+              requestedProjectEpoch
+          }
+        });
+        return (
+          builderProjectEpoch ===
+            requestedProjectEpoch
+        );
+      },
       migrateLegacyOperatorsForImport(
         graphDocument
       ) {

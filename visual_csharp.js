@@ -19,7 +19,7 @@
     getTypeDefinitions
   } = registry;
 
-  const VERSION = 18;
+  const VERSION = 19;
   const CUSTOM_CSHARP_COORDINATE_SPACE_VERSION = 2;
   const SYNTAX_TYPE = "csharpSyntax";
   const GROUPS = {
@@ -564,48 +564,85 @@
     outputs: []
   });
 
-  registerNode("csharp.reference", {
-    expertOnly: true,
-    customCSharpNode: true,
-    title: "Assembly Reference",
-    group: GROUPS.project,
-    symbol: "DLL",
-    parameters: [
-      text("projectId", "Project Id", "main"),
+  const csharpReferenceKindParameter = () => ({
+    ...select(
+      "referenceKind",
+      "Reference type",
+      [
+        { value: "assembly", label: "Assembly" },
+        { value: "package", label: "NuGet Package" },
+        { value: "framework", label: "Framework" }
+      ],
+      "assembly",
+      "Changes which project reference this one C# Reference node emits."
+    ),
+    affectsPorts: true,
+    affectsNode: true,
+    commitImmediately: true
+  });
+
+  const csharpReferenceParameters = referenceKind => {
+    const common = [
+      csharpReferenceKindParameter(),
+      text("projectId", "Project Id", "main")
+    ];
+    if (referenceKind === "package") {
+      return [
+        ...common,
+        text("include", "Package", "Package.Name"),
+        text("version", "Version", "1.0.0"),
+        text("privateAssets", "PrivateAssets", ""),
+        text("includeAssets", "IncludeAssets", "")
+      ];
+    }
+    if (referenceKind === "framework") {
+      return [
+        ...common,
+        text("include", "Framework", "Microsoft.AspNetCore.App")
+      ];
+    }
+    return [
+      ...common,
       text("include", "Assembly", "Assembly.Name"),
       text("hintPath", "Hint path", ""),
       bool("private", "Copy local", false)
-    ],
-    inputs: [], outputs: []
-  });
+    ];
+  };
 
-  registerNode("csharp.packageReference", {
+  registerNode("csharp.reference", {
     expertOnly: true,
     customCSharpNode: true,
-    title: "NuGet Package Reference",
+    title: "C# Reference",
     group: GROUPS.project,
-    symbol: "NUGET",
-    parameters: [
-      text("projectId", "Project Id", "main"),
-      text("include", "Package", "Package.Name"),
-      text("version", "Version", "1.0.0"),
-      text("privateAssets", "PrivateAssets", ""),
-      text("includeAssets", "IncludeAssets", "")
-    ],
-    inputs: [], outputs: []
-  });
-
-  registerNode("csharp.frameworkReference", {
-    expertOnly: true,
-    customCSharpNode: true,
-    title: "Framework Reference",
-    group: GROUPS.project,
-    symbol: "FX",
-    parameters: [
-      text("projectId", "Project Id", "main"),
-      text("include", "Framework", "Microsoft.AspNetCore.App")
-    ],
-    inputs: [], outputs: []
+    symbol: "REF",
+    description: "One reference node with selectable Assembly, NuGet Package and Framework modes.",
+    parameters: csharpReferenceParameters("assembly"),
+    inputs: [],
+    outputs: [],
+    resolveDefinition(node) {
+      const referenceKind = String(
+        node?.parameters?.referenceKind || "assembly"
+      );
+      if (referenceKind === "package") {
+        return {
+          title: "Reference · NuGet Package",
+          symbol: "NUGET",
+          parameters: csharpReferenceParameters("package")
+        };
+      }
+      if (referenceKind === "framework") {
+        return {
+          title: "Reference · Framework",
+          symbol: "FX",
+          parameters: csharpReferenceParameters("framework")
+        };
+      }
+      return {
+        title: "Reference · Assembly",
+        symbol: "DLL",
+        parameters: csharpReferenceParameters("assembly")
+      };
+    }
   });
 
   registerSyntaxNode("csharp.sequence", {
@@ -1491,16 +1528,25 @@
 
       const resources = type => nodes.filter(node => node?.operatorId === type);
       const resourceFor = (node, projectId) => String(parameter(node, "projectId", "main")).trim() === projectId;
-      const referencesFor = projectId => resources("csharp.reference").filter(node => resourceFor(node, projectId)).map(node => ({
+      const referencesFor = projectId => resources("csharp.reference").filter(node =>
+        resourceFor(node, projectId) &&
+        String(parameter(node, "referenceKind", "assembly")) === "assembly"
+      ).map(node => ({
         include: String(parameter(node, "include", "")).trim(),
         hintPath: String(parameter(node, "hintPath", "")).trim(),
         private: parameter(node, "private", false) === true
       })).filter(item => item.include);
-      const packagesFor = projectId => resources("csharp.packageReference").filter(node => resourceFor(node, projectId)).map(node => ({
+      const packagesFor = projectId => resources("csharp.reference").filter(node =>
+        resourceFor(node, projectId) &&
+        String(parameter(node, "referenceKind", "assembly")) === "package"
+      ).map(node => ({
         include: String(parameter(node, "include", "")).trim(), version: String(parameter(node, "version", "")).trim(),
         privateAssets: String(parameter(node, "privateAssets", "")).trim(), includeAssets: String(parameter(node, "includeAssets", "")).trim()
       })).filter(item => item.include && item.version);
-      const frameworksFor = projectId => resources("csharp.frameworkReference").filter(node => resourceFor(node, projectId)).map(node => String(parameter(node, "include", "")).trim()).filter(Boolean);
+      const frameworksFor = projectId => resources("csharp.reference").filter(node =>
+        resourceFor(node, projectId) &&
+        String(parameter(node, "referenceKind", "assembly")) === "framework"
+      ).map(node => String(parameter(node, "include", "")).trim()).filter(Boolean);
 
       const filesByProject = new Map();
       const customFileByIdentity = new Map();
