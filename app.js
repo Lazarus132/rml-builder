@@ -36,7 +36,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "persistent-state-inline-iteration-20260830-v622";
+  "single-active-project-storage-20260830-v623";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -6579,6 +6579,39 @@ function rememberJsonPage(
   );
 }
 
+function retainOnlyJsonPage(
+  fingerprint,
+  page,
+  reason = "project-replacement"
+) {
+  const key = String(
+    fingerprint || ""
+  );
+  const normalized =
+    normalizeBuilderPage(page);
+  const store = readPageStateStore();
+
+  store.activePage = normalized;
+  store.jsonPages = key
+    ? {
+        [key]: {
+          page: normalized,
+          usedAt: Date.now()
+        }
+      }
+    : {};
+
+  return writePageStateStore(
+    store,
+    "marker.retain-current-json",
+    {
+      fingerprint: key,
+      page: normalized,
+      reason
+    }
+  );
+}
+
 function pageForJsonFingerprint(
   fingerprint
 ) {
@@ -7986,6 +8019,8 @@ let projectDraftPersistSchedule = 0;
 let projectDraftPersistRevision = 0;
 let pendingProjectDraftWrite = null;
 let projectDraftWriteRunning = false;
+let projectDraftFlushPromise =
+  Promise.resolve();
 
 function openProjectDraftDatabase() {
   return new Promise((resolve, reject) => {
@@ -8198,43 +8233,117 @@ async function updateLegacyLocalDraft(
   }
 }
 
-async function flushProjectDraftWrites() {
+function flushProjectDraftWrites() {
   if (projectDraftWriteRunning) {
-    return;
+    return projectDraftFlushPromise;
   }
 
   projectDraftWriteRunning = true;
+  projectDraftFlushPromise =
+    (async () => {
+      try {
+        while (pendingProjectDraftWrite) {
+          const current =
+            pendingProjectDraftWrite;
+          pendingProjectDraftWrite = null;
+
+          try {
+            await writeProjectDraftRecord(
+              current.project,
+              current.revision
+            );
+
+            if (
+              current.revision ===
+              projectDraftPersistRevision
+            ) {
+              await updateLegacyLocalDraft(
+                current.project
+              );
+            }
+          } catch (error) {
+            console.warn(
+              "Could not save the IndexedDB builder draft.",
+              error
+            );
+          }
+        }
+      } finally {
+        projectDraftWriteRunning = false;
+      }
+    })();
+
+  return projectDraftFlushPromise;
+}
+
+async function persistProjectDraftImmediately() {
+  if (
+    projectDraftPersistIdleHandle &&
+    typeof cancelIdleCallback ===
+      "function"
+  ) {
+    cancelIdleCallback(
+      projectDraftPersistIdleHandle
+    );
+    projectDraftPersistIdleHandle = 0;
+  }
+
+  projectDraftPersistSchedule += 1;
+  projectDraftPersistRevision += 1;
+  const revision =
+    projectDraftPersistRevision;
+
+  pendingProjectDraftWrite = {
+    revision,
+    project:
+      createProjectDocument(
+        false,
+        false
+      )
+  };
+
+  await flushProjectDraftWrites();
+}
+
+async function commitSuccessfulProjectStorage(
+  previousProjectId,
+  reason = "project-replacement"
+) {
+  const previousFingerprint =
+    projectIdentityFingerprint(
+      previousProjectId
+    );
+  const currentFingerprint =
+    projectIdentityFingerprint(
+      state.projectId
+    );
+
+  await persistProjectDraftImmediately();
+
+  if (
+    previousFingerprint ===
+    currentFingerprint
+  ) {
+    return false;
+  }
 
   try {
-    while (pendingProjectDraftWrite) {
-      const current =
-        pendingProjectDraftWrite;
-      pendingProjectDraftWrite = null;
-
-      try {
-        await writeProjectDraftRecord(
-          current.project,
-          current.revision
-        );
-
-        if (
-          current.revision ===
-          projectDraftPersistRevision
-        ) {
-          await updateLegacyLocalDraft(
-            current.project
-          );
-        }
-      } catch (error) {
-        console.warn(
-          "Could not save the IndexedDB builder draft.",
-          error
-        );
-      }
-    }
-  } finally {
-    projectDraftWriteRunning = false;
+    localStorage.removeItem(
+      ACTIVE_PREVIEW_STORAGE_KEY
+    );
+  } catch {
   }
+
+  settingsPreviewDraft = null;
+  settingsPreviewRuntimeMenu = null;
+  settingsPreviewPulseCounts = {};
+
+  retainOnlyJsonPage(
+    currentFingerprint,
+    state.activePage,
+    reason
+  );
+  return true;
 }
 
 function persist(immediate = false) {
@@ -23821,6 +23930,11 @@ async function applyLoadedProjectWithFeedback(
 
     updateGeneratedOutput();
 
+    await commitSuccessfulProjectStorage(
+      previousProject?.projectId,
+      `loaded:${displayName}`
+    );
+
     updateBuilderWork(
       session,
       {
@@ -26016,6 +26130,9 @@ async function loadExampleProject() {
 }
 
 async function newBlank() {
+  const previousProjectId =
+    state.projectId;
+
   if (builderHasActiveProject()) {
     closeProjectDialog();
     await paintBuilderUi();
@@ -26099,6 +26216,11 @@ async function newBlank() {
     );
     await paintBuilderUi();
     renderAll();
+
+    await commitSuccessfulProjectStorage(
+      previousProjectId,
+      "new-blank"
+    );
 
     updateBuilderWork(
       workSession,
