@@ -36,7 +36,9 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "consolidated-custom-contracts-20260829-v603f53";
+  "universal-missing-catalog-preflight-20260830-v616";
+const BUILDER_REPLACEMENT_RENDER_LIMIT =
+  200;
 
 function removeLegacyHelpHashFromAddress() {
   if (!/^#(?:info-|shortcut-)/i.test(window.location.hash)) {
@@ -969,7 +971,7 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "graph_codegen_worker.js?v=58-consolidated-custom-contracts-v603f53",
+      "graph_codegen_worker.js?v=44-custom-csharp-background-build-v603f37",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -7722,7 +7724,7 @@ function reconcilePackedGraphConfiguration(
   return project;
 }
 
-function parseProjectDocument(
+function assertProjectDocumentEnvelope(
   source
 ) {
   if (!isPlainObject(source)) {
@@ -7749,6 +7751,14 @@ function parseProjectDocument(
       `Project format version '${source.formatVersion}' is not supported.`
     );
   }
+}
+
+function parseProjectDocument(
+  source
+) {
+  assertProjectDocumentEnvelope(
+    source
+  );
 
   const metadataSource =
     isPlainObject(
@@ -8400,14 +8410,14 @@ async function parseProjectJsonFile(
   displayName = "JSON project"
 ) {
   try {
-    const response =
-      await projectIoRequest(
-        "parseFile",
-        { file }
+    const source =
+      await readProjectJsonFileSource(
+        file,
+        displayName
       );
     const project =
       parseProjectDocument(
-        response.value
+        source
       );
     Object.defineProperty(
       project,
@@ -8423,6 +8433,34 @@ async function parseProjectJsonFile(
       }
     );
     return project;
+  } catch (error) {
+    if (
+      error instanceof SyntaxError ||
+      error?.name === "SyntaxError"
+    ) {
+      throw new Error(
+        `${displayName} does not contain valid JSON.`
+      );
+    }
+
+    throw error;
+  }
+}
+
+async function readProjectJsonFileSource(
+  file,
+  displayName = "JSON project"
+) {
+  try {
+    const response =
+      await projectIoRequest(
+        "parseFile",
+        { file }
+      );
+    assertProjectDocumentEnvelope(
+      response.value
+    );
+    return response.value;
   } catch (error) {
     if (
       error instanceof SyntaxError ||
@@ -21650,6 +21688,7 @@ function setProjectFileStatus(
 let activeProjectLoadSession = 0;
 let activeBuilderWorkSession = 0;
 let builderWorkWatchdog = 0;
+let activeBuilderReplacementPrompt = 0;
 
 function nextBuilderVisualFrame() {
   if (
@@ -21793,6 +21832,495 @@ function updateBuilderWork(
   return true;
 }
 
+function resetBuilderReplacementUi() {
+  activeBuilderReplacementPrompt += 1;
+
+  if (elements.builderWorkReplacement) {
+    elements.builderWorkReplacement.hidden =
+      true;
+  }
+  if (elements.builderWorkReplacementSearch) {
+    elements.builderWorkReplacementSearch.value =
+      "";
+    elements.builderWorkReplacementSearch.oninput =
+      null;
+    elements.builderWorkReplacementSearch.onsearch =
+      null;
+  }
+  if (elements.builderWorkReplacementList) {
+    elements.builderWorkReplacementList
+      .replaceChildren();
+    elements.builderWorkReplacementList.onclick =
+      null;
+    elements.builderWorkReplacementList.ondblclick =
+      null;
+    elements.builderWorkReplacementList.onkeydown =
+      null;
+  }
+  if (elements.builderWorkReplacementSummary) {
+    elements.builderWorkReplacementSummary.textContent =
+      "";
+  }
+  if (elements.builderWorkReplacementCancel) {
+    elements.builderWorkReplacementCancel.onclick =
+      null;
+  }
+  if (elements.builderWorkReplacementConfirm) {
+    elements.builderWorkReplacementConfirm.onclick =
+      null;
+    elements.builderWorkReplacementConfirm.disabled =
+      false;
+  }
+  if (elements.builderWorkOverlay) {
+    delete elements.builderWorkOverlay.dataset.mode;
+    elements.builderWorkOverlay.setAttribute(
+      "role",
+      "status"
+    );
+    elements.builderWorkOverlay.setAttribute(
+      "aria-live",
+      "polite"
+    );
+    elements.builderWorkOverlay.setAttribute(
+      "aria-atomic",
+      "true"
+    );
+    elements.builderWorkOverlay.removeAttribute(
+      "aria-modal"
+    );
+  }
+}
+
+async function requestBuilderReplacementChoice(
+  workSession,
+  {
+    requirement,
+    candidates,
+    index = 0,
+    total = 1,
+    catalogResult = null,
+    nodeLabels = []
+  } = {}
+) {
+  if (
+    workSession !==
+      activeBuilderWorkSession ||
+    !elements.builderWorkReplacement ||
+    !elements.builderWorkReplacementSearch ||
+    !elements.builderWorkReplacementList ||
+    !elements.builderWorkReplacementConfirm ||
+    !elements.builderWorkReplacementCancel
+  ) {
+    throw new Error(
+      "The pre-import replacement dialog is unavailable. The JSON was not loaded."
+    );
+  }
+
+  const values =
+    Array.isArray(candidates)
+      ? candidates.filter(candidate =>
+          Boolean(
+            String(
+              candidate?.operatorId || ""
+            ).trim()
+          )
+        )
+      : [];
+
+  if (values.length === 0) {
+    throw new Error(
+      `No verified compatible replacement is available for '${String(requirement?.operatorId || "<unknown>")}'. The JSON was not loaded.`
+    );
+  }
+
+  window.clearTimeout(
+    builderWorkWatchdog
+  );
+  builderWorkWatchdog = 0;
+
+  const prompt =
+    ++activeBuilderReplacementPrompt;
+  const search =
+    elements.builderWorkReplacementSearch;
+  const list =
+    elements.builderWorkReplacementList;
+  const confirm =
+    elements.builderWorkReplacementConfirm;
+  const cancel =
+    elements.builderWorkReplacementCancel;
+  const summary =
+    elements.builderWorkReplacementSummary;
+  const operatorId = String(
+    requirement?.operatorId ||
+    "<unknown>"
+  );
+  const visibleLabels =
+    [...new Set(
+      (Array.isArray(nodeLabels)
+        ? nodeLabels
+        : [])
+        .map(label =>
+          String(label || "").trim()
+        )
+        .filter(Boolean)
+    )];
+  const nodeDescription =
+    visibleLabels.length > 0
+      ? visibleLabels.slice(0, 3).join(", ")
+      : operatorId;
+  const sourceDescription =
+    catalogResult?.live === true
+      ? "current Live catalog"
+      : "verified cached fallback";
+
+  updateBuilderWork(
+    workSession,
+    {
+      kicker:
+        `Replacement ${Math.min(index + 1, total)} of ${Math.max(1, total)}`,
+      title:
+        "Choose a replacement before import",
+      message:
+        `'${nodeDescription}' uses an unavailable API contract. Choose one compatible node from the ${sourceDescription}; the project is installed only after every replacement is confirmed.`,
+      detail:
+        `${values.length.toLocaleString("de-DE")} verified compatible candidate${values.length === 1 ? "" : "s"} for ${operatorId}. Node positions and complete stored wire routes remain unchanged.`,
+      progress:
+        50 +
+        Math.round(
+          4 *
+          Math.min(index, total) /
+          Math.max(1, total)
+        )
+    }
+  );
+
+  elements.builderWorkOverlay.dataset.mode =
+    "replacement";
+  elements.builderWorkOverlay.setAttribute(
+    "role",
+    "dialog"
+  );
+  elements.builderWorkOverlay.setAttribute(
+    "aria-modal",
+    "true"
+  );
+  elements.builderWorkOverlay.setAttribute(
+    "aria-live",
+    "off"
+  );
+  elements.builderWorkOverlay.setAttribute(
+    "aria-atomic",
+    "false"
+  );
+  elements.builderWorkReplacement.hidden =
+    false;
+  search.value = "";
+  let selectedOperatorId = "";
+  let visibleCandidates = [];
+
+  const selectCandidate = (
+    operatorId,
+    {
+      focus = false,
+      scroll = false
+    } = {}
+  ) => {
+    const selected =
+      visibleCandidates.find(candidate =>
+        candidate.operatorId ===
+          operatorId
+      );
+    selectedOperatorId =
+      selected?.operatorId || "";
+
+    for (const item of
+      list.querySelectorAll(
+        ".builder-work-replacement-item"
+      )) {
+      const active =
+        item.dataset.operatorId ===
+          selectedOperatorId;
+      item.setAttribute(
+        "aria-selected",
+        String(active)
+      );
+      item.tabIndex = active
+        ? 0
+        : -1;
+
+      if (active && focus) {
+        item.focus({
+          preventScroll: true
+        });
+      }
+      if (active && scroll) {
+        item.scrollIntoView({
+          block: "nearest"
+        });
+      }
+    }
+
+    confirm.disabled =
+      !selectedOperatorId;
+  };
+
+  const renderCandidates = () => {
+    const query = String(
+      search.value || ""
+    ).trim().toLocaleLowerCase();
+    const previous =
+      selectedOperatorId;
+    const matches = query
+      ? values.filter(candidate =>
+          `${candidate.title || ""} ${candidate.operatorId} ${candidate.group || ""} ${candidate.description || ""}`
+            .toLocaleLowerCase()
+            .includes(query)
+        )
+      : values;
+    visibleCandidates = matches.slice(
+      0,
+      BUILDER_REPLACEMENT_RENDER_LIMIT
+    );
+    const fragment =
+      document.createDocumentFragment();
+
+    for (const candidate of
+      visibleCandidates) {
+      const item =
+        document.createElement("button");
+      item.type = "button";
+      item.className =
+        "builder-work-replacement-item";
+      item.dataset.operatorId =
+        candidate.operatorId;
+      item.setAttribute(
+        "role",
+        "option"
+      );
+      item.setAttribute(
+        "aria-selected",
+        "false"
+      );
+
+      const symbol =
+        document.createElement("span");
+      symbol.className =
+        "builder-work-replacement-symbol";
+      symbol.textContent = String(
+        candidate.symbol || "API"
+      ).slice(0, 8);
+
+      const copy =
+        document.createElement("span");
+      copy.className =
+        "builder-work-replacement-copy";
+      const title =
+        document.createElement("strong");
+      title.textContent =
+        candidate.title ||
+        candidate.operatorId;
+      const group =
+        document.createElement("small");
+      group.textContent =
+        candidate.group ||
+        "Resonite API";
+      const identity =
+        document.createElement("small");
+      identity.textContent =
+        candidate.operatorId;
+      copy.append(
+        title,
+        group,
+        identity
+      );
+      item.append(
+        symbol,
+        copy
+      );
+      fragment.appendChild(item);
+    }
+
+    if (visibleCandidates.length === 0) {
+      const empty =
+        document.createElement("div");
+      empty.className =
+        "builder-work-replacement-empty";
+      empty.textContent =
+        "No compatible node matches this search.";
+      fragment.appendChild(empty);
+    }
+
+    list.setAttribute(
+      "aria-busy",
+      "true"
+    );
+    list.replaceChildren(fragment);
+    list.setAttribute(
+      "aria-busy",
+      "false"
+    );
+    if (
+      previous &&
+      visibleCandidates.some(candidate =>
+        candidate.operatorId === previous
+      )
+    ) {
+      selectedOperatorId = previous;
+    } else if (
+      visibleCandidates.length > 0
+    ) {
+      selectedOperatorId =
+        visibleCandidates[0]
+          .operatorId;
+    } else {
+      selectedOperatorId = "";
+    }
+
+    selectCandidate(
+      selectedOperatorId
+    );
+    summary.textContent =
+      matches.length >
+        visibleCandidates.length
+        ? `${matches.length.toLocaleString("de-DE")} matches · showing the first ${visibleCandidates.length.toLocaleString("de-DE")}. Refine the search to reach later entries.`
+        : `${matches.length.toLocaleString("de-DE")} matching candidate${matches.length === 1 ? "" : "s"} · source: ${sourceDescription}.`;
+  };
+
+  const choice = new Promise(
+    (resolve, reject) => {
+      let settled = false;
+      const finish = (
+        callback,
+        value
+      ) => {
+        if (
+          settled ||
+          prompt !==
+            activeBuilderReplacementPrompt
+        ) {
+          return;
+        }
+        settled = true;
+        document.removeEventListener(
+          "keydown",
+          onKeyDown,
+          true
+        );
+        resetBuilderReplacementUi();
+        callback(value);
+      };
+      const accept = () => {
+        const selected =
+          values.find(candidate =>
+            candidate.operatorId ===
+              selectedOperatorId
+          );
+        if (selected) {
+          finish(resolve, selected);
+        }
+      };
+      const rejectImport = () =>
+        finish(
+          reject,
+          new Error(
+            "Project import was cancelled before the required API replacement was confirmed. The JSON was not loaded."
+          )
+        );
+      const onKeyDown = event => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          rejectImport();
+        }
+      };
+
+      search.oninput =
+        renderCandidates;
+      search.onsearch =
+        renderCandidates;
+      list.onclick = event => {
+        const item =
+          event.target.closest(
+            ".builder-work-replacement-item"
+          );
+        if (item) {
+          selectCandidate(
+            item.dataset.operatorId,
+            { focus: true }
+          );
+        }
+      };
+      list.ondblclick = event => {
+        if (
+          event.target.closest(
+            ".builder-work-replacement-item"
+          )
+        ) {
+          accept();
+        }
+      };
+      list.onkeydown = event => {
+        if (
+          ![
+            "ArrowDown",
+            "ArrowUp",
+            "Home",
+            "End"
+          ].includes(event.key) ||
+          visibleCandidates.length === 0
+        ) {
+          return;
+        }
+        event.preventDefault();
+        const currentIndex =
+          Math.max(
+            0,
+            visibleCandidates.findIndex(
+              candidate =>
+                candidate.operatorId ===
+                  selectedOperatorId
+            )
+          );
+        const nextIndex =
+          event.key === "Home"
+            ? 0
+            : event.key === "End"
+              ? visibleCandidates.length - 1
+              : event.key === "ArrowDown"
+                ? Math.min(
+                    visibleCandidates.length - 1,
+                    currentIndex + 1
+                  )
+                : Math.max(
+                    0,
+                    currentIndex - 1
+                  );
+        selectCandidate(
+          visibleCandidates[nextIndex]
+            .operatorId,
+          {
+            focus: true,
+            scroll: true
+          }
+        );
+      };
+      confirm.onclick = accept;
+      cancel.onclick = rejectImport;
+      document.addEventListener(
+        "keydown",
+        onKeyDown,
+        true
+      );
+    }
+  );
+
+  renderCandidates();
+  await paintBuilderUi();
+  search.focus({
+    preventScroll: true
+  });
+  return choice;
+}
+
 function beginBuilderWork(options = {}) {
   activeBuilderWorkSession += 1;
   const session =
@@ -21801,6 +22329,8 @@ function beginBuilderWork(options = {}) {
   window.clearTimeout(
     builderWorkWatchdog
   );
+
+  resetBuilderReplacementUi();
 
   elements.builderWorkOverlay.hidden = false;
   document.body.classList.add(
@@ -21847,6 +22377,7 @@ function finishBuilderWork(session) {
     builderWorkWatchdog
   );
   builderWorkWatchdog = 0;
+  resetBuilderReplacementUi();
   elements.builderWorkOverlay.hidden = true;
   document.body.classList.remove(
     "rml-builder-work-active"
@@ -21938,6 +22469,9 @@ function projectRequiredCatalogNodes(
     Array.isArray(graph?.nodes)
       ? graph.nodes
       : [];
+  const definitions =
+    window.RMLModNodeRegistry
+      ?.getNodeDefinitions?.() || {};
   const requirements = new Map();
   const operatorByNodeId =
     new Map();
@@ -21946,8 +22480,33 @@ function projectRequiredCatalogNodes(
     const operatorId = String(
       node?.operatorId || ""
     ).trim();
+    const apiContract =
+      node?.apiContract &&
+      typeof node.apiContract === "object" &&
+      !Array.isArray(node.apiContract)
+        ? node.apiContract
+        : null;
+    const hasPortableApiIdentity =
+      Boolean(
+        String(apiContract?.ownerType || "").trim() &&
+        String(apiContract?.kind || "").trim()
+      );
+    const definition =
+      definitions[operatorId];
+    const missingCatalogObject =
+      node?.kind === "operator" &&
+      (
+        !definition ||
+        definition
+          .unavailableApiContract ===
+            true
+      );
 
-    if (!operatorId.startsWith("api.")) {
+    if (
+      !operatorId.startsWith("api.") &&
+      !hasPortableApiIdentity &&
+      !missingCatalogObject
+    ) {
       continue;
     }
 
@@ -21960,11 +22519,24 @@ function projectRequiredCatalogNodes(
       requirements.set(operatorId, {
         operatorId,
         apiContract:
-          node?.apiContract &&
-          typeof node.apiContract === "object" &&
-          !Array.isArray(node.apiContract)
-            ? clone(node.apiContract)
+          apiContract
+            ? clone(apiContract)
             : null,
+        missingCatalogObject,
+        catalogScope:
+          operatorId.startsWith("api.") ||
+          hasPortableApiIdentity
+            ? "api"
+            : "all",
+        nodeParameters:
+          node?.parameters &&
+          typeof node.parameters ===
+            "object" &&
+          !Array.isArray(
+            node.parameters
+          )
+            ? clone(node.parameters)
+            : {},
         inputPorts: new Set(),
         outputPorts: new Set()
       });
@@ -22015,6 +22587,15 @@ function projectRequiredCatalogNodes(
         requirement.operatorId,
       apiContract:
         requirement.apiContract,
+      missingCatalogObject:
+        requirement
+          .missingCatalogObject === true,
+      catalogScope:
+        requirement.catalogScope,
+      nodeParameters:
+        clone(
+          requirement.nodeParameters || {}
+        ),
       inputPorts:
         [...requirement.inputPorts]
           .filter(Boolean)
@@ -22065,7 +22646,11 @@ function promiseWithBuilderTimeout(
 
 async function ensureProjectRuntimePrerequisites(
   project,
-  workSession
+  workSession,
+  {
+    catalogOnly = false,
+    catalogPreflight = null
+  } = {}
 ) {
   const graph =
     projectTypedRuntimeGraph(
@@ -22079,6 +22664,31 @@ async function ensureProjectRuntimePrerequisites(
       runtimeActive: false
     };
   }
+
+  let requiredCatalogNodes =
+    Array.isArray(
+      catalogPreflight
+        ?.requiredCatalogNodes
+    )
+      ? catalogPreflight
+          .requiredCatalogNodes
+      : [];
+  let catalogResult =
+    catalogPreflight?.catalog || null;
+  let appliedCatalogMigrations =
+    structuredClone(
+      catalogPreflight
+        ?.appliedCatalogMigrations ||
+      {}
+    );
+  let appliedPortMigrations =
+    structuredClone(
+      catalogPreflight
+        ?.appliedPortMigrations ||
+      {}
+    );
+
+  if (!catalogPreflight) {
 
   updateBuilderWork(
     workSession,
@@ -22114,22 +22724,48 @@ async function ensureProjectRuntimePrerequisites(
     "The Runtime Graph modules did not become ready within 60 seconds. The JSON was not loaded."
   );
 
-  const requiredCatalogNodes =
+  const legacyMigration =
+    window.RMLDynamicGraphHost
+      ?.migrateLegacyOperatorsForImport?.(
+        graph
+      );
+
+  if (
+    Number(
+      legacyMigration
+        ?.migratedNodeCount || 0
+    ) > 0
+  ) {
+    updateBuilderWork(
+      workSession,
+      {
+        title:
+          "Upgraded known legacy node contracts…",
+        message:
+          `${Number(legacyMigration.migratedNodeCount).toLocaleString("de-DE")} node${Number(legacyMigration.migratedNodeCount) === 1 ? " was" : "s were"} mapped to their exact current catalog definitions before missing-node discovery.`,
+        detail:
+          "Only operator contracts, parameters and necessary port IDs were migrated; node placement and complete wire routing geometry remained unchanged.",
+        progress: 40
+      }
+    );
+    await paintBuilderUi();
+  }
+
+  requiredCatalogNodes =
     projectRequiredCatalogNodes(
       project
     );
-  let catalogResult = null;
 
   if (requiredCatalogNodes.length > 0) {
     updateBuilderWork(
       workSession,
       {
         title:
-          "Checking the cached API catalog…",
+          "Checking the Live API catalog…",
         message:
-          `This project uses ${requiredCatalogNodes.length.toLocaleString("de-DE")} catalog operator${requiredCatalogNodes.length === 1 ? "" : "s"}. Cached definitions, referenced ports and every required contract are being verified first.`,
+          `This project uses ${requiredCatalogNodes.length.toLocaleString("de-DE")} catalog operator${requiredCatalogNodes.length === 1 ? "" : "s"}. The current Live scanner catalog is being verified before any replacement is selected.`,
         detail:
-          "The live scanner is contacted only if the cache cannot resolve the complete project.",
+          "The cached catalog is used only if the bounded Live request cannot be completed.",
         progress: 44
       }
     );
@@ -22144,35 +22780,51 @@ async function ensureProjectRuntimePrerequisites(
         "function"
     ) {
       throw new Error(
-        "The live API catalog import gate is unavailable. The JSON was not loaded."
+        "The API catalog import gate is unavailable. The JSON was not loaded."
       );
-    }
-
-    catalogResult =
-      await promiseWithBuilderTimeout(
-        gate.ensureForImport({
+    } else try {
+      catalogResult =
+        await promiseWithBuilderTimeout(
+          gate.ensureForImport({
           requiredNodes:
             requiredCatalogNodes,
-          onLiveFallback({
-            missingCount = 0
-          } = {}) {
+          onLiveLookup() {
             updateBuilderWork(
               workSession,
               {
                 title:
-                  "Cached catalog is insufficient · checking Live…",
+                  "Checking Live replacement contracts…",
                 message:
-                  `The cache cannot verify ${Number(missingCount).toLocaleString("de-DE")} required API operator or port contract${Number(missingCount) === 1 ? "" : "s"}. One bounded live scanner pass is now mandatory.`,
+                  "The replacement resolver is querying the current scanner catalog and rebuilding its verified node factory when necessary.",
                 detail:
-                  "The current project remains unchanged until the Live catalog and rebuilt API node factory have been verified.",
+                  "The current project remains unchanged until the Live result has been verified.",
                 progress: 48
+              }
+            );
+          },
+          onCacheFallback() {
+            updateBuilderWork(
+              workSession,
+              {
+                title:
+                  "Live unavailable · checking cached fallback…",
+                message:
+                  "The bounded Live request failed. The last verified cached catalog is now being checked for the required replacement contracts.",
+                detail:
+                  "No cached replacement is used while a working Live catalog is available.",
+                progress: 49
               }
             );
           }
         }),
-        65000,
-        "The live Resonite API catalog did not become ready within 65 seconds. The JSON was not loaded."
+          65000,
+          "The live Resonite API catalog did not become ready within 65 seconds."
+        );
+    } catch (error) {
+      throw new Error(
+        `The Live-first API catalog check failed: ${String(error?.message || error)} The JSON was not loaded.`
       );
+    }
 
     const migrations =
       catalogResult?.migrations &&
@@ -22180,22 +22832,208 @@ async function ensureProjectRuntimePrerequisites(
       !Array.isArray(catalogResult.migrations)
         ? catalogResult.migrations
         : {};
+    const portMigrations =
+      catalogResult?.portMigrations &&
+      typeof catalogResult.portMigrations === "object" &&
+      !Array.isArray(catalogResult.portMigrations)
+        ? catalogResult.portMigrations
+        : {};
+    appliedCatalogMigrations = structuredClone(migrations);
+    appliedPortMigrations = structuredClone(portMigrations);
+    if (
+      Object.keys(migrations).length > 0 ||
+      Object.keys(portMigrations).length > 0
+    ) {
+      const replacementTransaction =
+        window.RMLDynamicGraphHost
+          ?.applyCatalogMigrationsPreservingGeometry;
 
-    for (const node of
-      Array.isArray(graph.nodes)
-        ? graph.nodes
-        : []) {
-      const migratedOperatorId = String(
-        migrations[
-          String(node?.operatorId || "")
-        ] || ""
-      ).trim();
-
-      if (migratedOperatorId) {
-        node.operatorId =
-          migratedOperatorId;
+      if (
+        typeof replacementTransaction !==
+          "function"
+      ) {
+        throw new Error(
+          "The atomic graph replacement transaction is unavailable. The JSON was not loaded."
+        );
       }
+
+      const transaction =
+        replacementTransaction(
+          graph,
+          migrations,
+          portMigrations
+        );
+      transaction.assertGeometry();
+      transaction.commit();
     }
+
+    const unresolvedRequirements =
+      Array.isArray(
+        catalogResult
+          ?.unresolvedRequirements
+      )
+        ? catalogResult
+            .unresolvedRequirements
+        : [];
+
+    if (unresolvedRequirements.length > 0) {
+      if (catalogResult?.available !== true) {
+        throw new Error(
+          "Neither the Live scanner nor its verified cached fallback could provide a usable API node factory. The JSON was not loaded."
+        );
+      }
+
+      const graphHost =
+        window.RMLDynamicGraphHost;
+      const candidateResolver =
+        graphHost
+          ?.compatibleImportReplacementCandidates;
+      const replacementTransaction =
+        graphHost
+          ?.applyCatalogMigrationsPreservingGeometry;
+
+      if (
+        typeof candidateResolver !==
+          "function" ||
+        typeof replacementTransaction !==
+          "function"
+      ) {
+        throw new Error(
+          "The pre-import API replacement resolver is unavailable. The JSON was not loaded."
+        );
+      }
+
+      const manualMigrations = {};
+      const manualPortMigrations = {};
+
+      for (
+        let index = 0;
+        index <
+          unresolvedRequirements.length;
+        index += 1
+      ) {
+        const requirement =
+          unresolvedRequirements[index];
+        const operatorId = String(
+          requirement?.operatorId || ""
+        );
+        const resolution =
+          candidateResolver(
+            requirement
+          );
+        const candidates =
+          Array.isArray(
+            resolution?.candidates
+          )
+            ? resolution.candidates
+            : [];
+
+        if (candidates.length === 0) {
+          throw new Error(
+            `The ${catalogResult.live === true ? "current Live catalog" : "verified cached fallback"} has no node with a uniquely provable compatible port contract for '${operatorId}'. The JSON was not loaded.`
+          );
+        }
+
+        const matchingNodes =
+          (Array.isArray(graph.nodes)
+            ? graph.nodes
+            : [])
+            .filter(node =>
+              node?.kind ===
+                "operator" &&
+              String(
+                node.operatorId || ""
+              ) === operatorId
+            );
+        const selected =
+          await requestBuilderReplacementChoice(
+            workSession,
+            {
+              requirement,
+              candidates,
+              index,
+              total:
+                unresolvedRequirements.length,
+              catalogResult,
+              nodeLabels:
+                matchingNodes.map(node =>
+                  node.label ||
+                  node.id ||
+                  operatorId
+                )
+            }
+          );
+
+        manualMigrations[operatorId] =
+          selected.operatorId;
+        manualPortMigrations[operatorId] = {
+          input:
+            structuredClone(
+              selected.inputMap || {}
+            ),
+          output:
+            structuredClone(
+              selected.outputMap || {}
+            )
+        };
+      }
+
+      const transaction =
+        replacementTransaction(
+          graph,
+          manualMigrations,
+          manualPortMigrations
+        );
+      transaction.assertGeometry();
+      transaction.commit();
+
+      Object.assign(
+        appliedCatalogMigrations,
+        manualMigrations
+      );
+      Object.assign(
+        appliedPortMigrations,
+        manualPortMigrations
+      );
+      catalogResult = Object.freeze({
+        ...catalogResult,
+        verified: true,
+        unresolved: 0,
+        unresolvedRequirements:
+          Object.freeze([]),
+        userConfirmedReplacements:
+          unresolvedRequirements.length,
+        migrations:
+          Object.freeze(
+            structuredClone(
+              appliedCatalogMigrations
+            )
+          ),
+        portMigrations:
+          Object.freeze(
+            structuredClone(
+              appliedPortMigrations
+            )
+          )
+      });
+    }
+  }
+
+  }
+
+  if (catalogOnly) {
+    return {
+      graph,
+      catalog: catalogResult,
+      runtimeActive:
+        graph.active === true,
+      compatibilityMode: false,
+      unresolvedNodeCount: 0,
+      requiredCatalogNodes,
+      appliedCatalogMigrations,
+      appliedPortMigrations,
+      catalogOnly: true
+    };
   }
 
   if (
@@ -22233,16 +23071,77 @@ async function ensureProjectRuntimePrerequisites(
           )
       }));
 
-  if (unavailable.length > 0) {
-    const visible =
-      unavailable.slice(0, 12);
-    const remainder =
-      unavailable.length - visible.length;
+  const unresolvedApiNodes =
+    (Array.isArray(graph.nodes)
+      ? graph.nodes
+      : [])
+      .filter(node =>
+        definitions[node?.operatorId]
+          ?.unavailableApiContract ===
+            true
+      )
+      .map(node => ({
+        nodeId:
+          String(node.id || ""),
+        operatorId:
+          String(
+            node.operatorId || ""
+          ),
+        stableContractId:
+          String(
+            node.apiContract
+              ?.stableContractId || ""
+          )
+      }));
+
+  if (
+    unavailable.length > 0 ||
+    unresolvedApiNodes.length > 0
+  ) {
+    const visible = [
+      ...unavailable.map(item =>
+        `'${item.operatorId}' on '${item.nodeId}'`
+      ),
+      ...unresolvedApiNodes.map(item =>
+        `'${item.operatorId}' on '${item.nodeId}'`
+      )
+    ].slice(0, 12);
+    const total =
+      unavailable.length +
+      unresolvedApiNodes.length;
 
     throw new Error(
-      `This JSON cannot be loaded because ${unavailable.length.toLocaleString("de-DE")} Runtime Graph node${unavailable.length === 1 ? "" : "s"} use unavailable operators: ${visible.map(item => `'${item.operatorId}' on '${item.nodeId}'`).join(", ")}${remainder > 0 ? ` and ${remainder.toLocaleString("de-DE")} more` : ""}.`
+      `The project still contains ${total.toLocaleString("de-DE")} unavailable operator${total === 1 ? "" : "s"} after the pre-import replacement phase: ${visible.join(", ")}${total > visible.length ? ` and ${(total - visible.length).toLocaleString("de-DE")} more` : ""}. The JSON was not loaded.`
     );
   }
+
+  const compatibilityEntry = {
+    schemaVersion: 1,
+    catalogRevision: String(
+      window.RMLResoniteApiCatalog?.contractRevision ||
+      window.RMLResoniteApiCatalog?.catalogFingerprint ||
+      "unavailable"
+    ),
+    operatorMigrations: appliedCatalogMigrations,
+    portMigrations: appliedPortMigrations,
+    unresolvedApiNodes,
+    status:
+      Object.keys(
+        appliedCatalogMigrations
+      ).length > 0
+        ? "migrated"
+        : "verified"
+  };
+  const compatibility = graph.apiCompatibility && typeof graph.apiCompatibility === "object"
+    ? graph.apiCompatibility
+    : { schemaVersion: 1, history: [] };
+  const history = Array.isArray(compatibility.history) ? compatibility.history : [];
+  const entryKey = JSON.stringify(compatibilityEntry);
+  if (!history.some(entry => JSON.stringify(entry) === entryKey)) history.push(compatibilityEntry);
+  graph.apiCompatibility = {
+    schemaVersion: 1,
+    history: history.slice(-32)
+  };
 
   const graphValidation =
     window.RMLTypedNodeGraphGenerator
@@ -22257,17 +23156,20 @@ async function ensureProjectRuntimePrerequisites(
           .filter(Boolean)
       : [];
 
-  if (graphValidationDiagnostics.length > 0) {
+  if (
+    graphValidationDiagnostics.length > 0
+  ) {
     throw new Error(
       `Runtime Graph validation failed: ${graphValidationDiagnostics.slice(0, 8).join(" | ")}${graphValidationDiagnostics.length > 8 ? ` | and ${graphValidationDiagnostics.length - 8} more` : ""}. The JSON was not loaded.`
     );
   }
-
   return {
     graph,
     catalog: catalogResult,
     runtimeActive:
-      graph.active === true
+      graph.active === true,
+    compatibilityMode: false,
+    unresolvedNodeCount: 0
   };
 }
 
@@ -22731,7 +23633,8 @@ async function applyLoadedProjectWithFeedback(
   project,
   {
     displayName = "project",
-    workSession = 0
+    workSession = 0,
+    prevalidatedPrerequisites = null
   } = {}
 ) {
   const session =
@@ -22768,7 +23671,13 @@ async function applyLoadedProjectWithFeedback(
     const prerequisites =
       await ensureProjectRuntimePrerequisites(
         project,
-        session
+        session,
+        prevalidatedPrerequisites
+          ? {
+              catalogPreflight:
+                prevalidatedPrerequisites
+            }
+          : {}
       );
 
     updateBuilderWork(
@@ -22876,25 +23785,34 @@ async function applyLoadedProjectWithFeedback(
       session,
       {
         title:
-          "Validating generated output…",
+          prerequisites.compatibilityMode
+            ? "Preserving unresolved graph paths…"
+            : "Validating generated output…",
         message:
-          "The import remains locked until the complete Runtime Graph contribution and every generated source check have finished.",
+          prerequisites.compatibilityMode
+            ? `${Number(prerequisites.unresolvedNodeCount || 0).toLocaleString("de-DE")} unresolved node${Number(prerequisites.unresolvedNodeCount || 0) === 1 ? " remains" : "s remain"} visible and editable. Their affected execution paths are disabled until a compatible replacement is selected.`
+            : "The import remains locked until the complete Runtime Graph contribution and every generated source check have finished.",
         detail:
-          "No background generator work is left behind after a successful import.",
+          prerequisites.compatibilityMode
+            ? "The project opens without waiting for code generation that cannot succeed while an Unavailable API node is present."
+            : "No background generator work is left behind after a successful import.",
         progress: 88
       }
     );
 
     if (
       prerequisites.graph &&
-      prerequisites.runtimeActive
+      prerequisites.runtimeActive &&
+      !prerequisites.compatibilityMode
     ) {
       await waitForImportedCodegen(
         prerequisites.graph,
         session,
         prerequisites.catalog
       );
-    } else {
+    } else if (
+      !prerequisites.compatibilityMode
+    ) {
       const diagnostics =
         getDiagnostics();
 
@@ -22914,9 +23832,11 @@ async function applyLoadedProjectWithFeedback(
         message:
           `Loaded ${displayName} successfully.`,
         detail:
-          prerequisites.catalog
+          prerequisites.compatibilityMode
+            ? `${Number(prerequisites.unresolvedNodeCount || 0).toLocaleString("de-DE")} unavailable node${Number(prerequisites.unresolvedNodeCount || 0) === 1 ? " was" : "s were"} preserved with all stored ports and connections. Search for a verified compatible replacement in each node's inspector. Export remains blocked only for affected execution paths.`
+            : prerequisites.catalog
             ?.cacheSatisfied === true
-            ? "The cache resolved every required operator and port; no live scanner request was made. The complete Runtime Graph model and generated sources are ready without opening its page. Export remains available and shows its API compatibility notice until Live verification."
+            ? "The bounded Live request could not be completed, so the verified cached fallback resolved the required contracts and confirmed replacements. The complete Runtime Graph model and generated sources are ready without opening its page."
             : prerequisites.graph
               ? "Catalog contracts, the complete Runtime Graph model, generated sources, dialogs and controls are all ready without requiring a page switch."
               : "Project data, dialogs and controls are all ready.",
@@ -23334,8 +24254,8 @@ async function loadProjectJsonFile(
 
     await paintBuilderUi();
 
-    const project =
-      await parseProjectJsonFile(
+    const projectSource =
+      await readProjectJsonFileSource(
         file,
         file.name
       );
@@ -23352,7 +24272,7 @@ async function loadProjectJsonFile(
       {
         progress: 28,
         stage:
-          "JSON structure validated successfully."
+          "JSON syntax and project envelope validated successfully."
       }
     );
 
@@ -23393,10 +24313,77 @@ async function loadProjectJsonFile(
       closeProjectDialog();
     }
 
-    await applyLoadedProjectWithFeedback(
-      project,
-      { displayName: file.name }
-    );
+    const workSession =
+      beginBuilderWork({
+        kicker:
+          "Pre-import compatibility check",
+        title:
+          "Checking API contracts before project construction…",
+        message:
+          "No imported graph, outline, generated source or project UI is built until every required API replacement has been resolved.",
+        detail:
+          "Only the JSON syntax and lightweight project envelope have been read so far.",
+        progress: 32,
+        timeout: 120000
+      });
+
+    try {
+      const prerequisites =
+        await ensureProjectRuntimePrerequisites(
+          projectSource,
+          workSession,
+          { catalogOnly: true }
+        );
+
+      updateBuilderWork(
+        workSession,
+        {
+          kicker:
+            "Project loading",
+          title:
+            "Constructing the validated project…",
+          message:
+            "Every API contract and replacement has been confirmed. The Configuration Outline and Runtime Graph can now be normalized.",
+          detail:
+            "This is the first construction pass for the imported project.",
+          progress: 54
+        }
+      );
+      await paintBuilderUi();
+
+      const project =
+        parseProjectDocument(
+          projectSource
+        );
+      Object.defineProperty(
+        project,
+        "__rmlJsonFingerprint",
+        {
+          value:
+            projectIdentityFingerprint(
+              project.projectId
+            ),
+          writable: false,
+          enumerable: false,
+          configurable: true
+        }
+      );
+
+      await applyLoadedProjectWithFeedback(
+        project,
+        {
+          displayName: file.name,
+          workSession,
+          prevalidatedPrerequisites:
+            prerequisites
+        }
+      );
+    } catch (error) {
+      finishBuilderWork(
+        workSession
+      );
+      throw error;
+    }
   } catch (error) {
     if (
       loadSession !==
@@ -27135,6 +28122,24 @@ function cacheElements() {
     ),
     builderWorkDetail: document.getElementById(
       "builder-work-detail"
+    ),
+    builderWorkReplacement: document.getElementById(
+      "builder-work-replacement"
+    ),
+    builderWorkReplacementSearch: document.getElementById(
+      "builder-work-replacement-search"
+    ),
+    builderWorkReplacementList: document.getElementById(
+      "builder-work-replacement-list"
+    ),
+    builderWorkReplacementSummary: document.getElementById(
+      "builder-work-replacement-summary"
+    ),
+    builderWorkReplacementCancel: document.getElementById(
+      "builder-work-replacement-cancel"
+    ),
+    builderWorkReplacementConfirm: document.getElementById(
+      "builder-work-replacement-confirm"
     ),
     builderMessageDialog: document.getElementById(
       "builder-message-dialog"

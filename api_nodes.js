@@ -1,9 +1,10 @@
 (() => {
   "use strict";
 
-  const FACTORY_VERSION = 17;
-  const API_VERIFICATION_SCHEMA_VERSION = 1;
+  const FACTORY_VERSION = 19;
+  const API_VERIFICATION_SCHEMA_VERSION = 2;
   const ADVANCED_GROUP = "Advanced / Raw C#";
+  const UNAVAILABLE_GROUP = "Unavailable API";
   const API_GROUPS = Object.freeze({
     types: "API · Types & Enums",
     constructors: "API · Constructors",
@@ -58,6 +59,213 @@
     ].join("|");
   }
 
+  function portablePortRole(kind, direction, port, parameters = []) {
+    const explicit = String(port?.role || port?.roleKey || "").trim();
+    if (explicit) return explicit;
+    const id = String(port?.id || "").trim();
+    const fixed = new Set([
+      "call", "done", "success", "exception", "target", "result", "value"
+    ]);
+    if (fixed.has(id)) return `${direction}:${id}`;
+    let match = /^arg(\d+)$/.exec(id);
+    if (match) return `parameter:${Number(match[1])}:input`;
+    match = /^out(\d+)$/.exec(id);
+    if (match) return `parameter:${Number(match[1])}:output`;
+    match = /^generic(\d+)$/.exec(id);
+    if (match) return `generic:${Number(match[1])}:input`;
+    const parameter = parameters.find(value =>
+      String(value?.name || "") === id
+    );
+    if (parameter) {
+      return `parameter:${Math.max(0, Number(parameter.position) || 0)}:${direction}`;
+    }
+    return `${String(kind || "api")}:${direction}:${id}`;
+  }
+
+  function stableContractId(contract) {
+    if (!contract || typeof contract !== "object") return "";
+    const supplied = String(contract.stableContractId || "").trim();
+    if (supplied) return supplied;
+    const ownerType = String(contract.ownerType || "")
+      .replace(/^global::/, "")
+      .replace(/\s+/g, "")
+      .replace(/&$/, "");
+    const kind = String(contract.kind || "").trim();
+    if (!ownerType || !kind) return "";
+    return `contract.${stableHash(JSON.stringify({
+      version: 1,
+      ownerType,
+      kind,
+      memberName: String(contract.memberName || ""),
+      isStatic: contract.isStatic === true,
+      genericArity: Math.max(0, Number(contract.genericArity) || 0)
+    }))}`;
+  }
+
+  function registerUnavailableApiOperator(operatorId, apiContract, required = {}) {
+    const id = String(operatorId || "").trim();
+    const registry = window.RMLModNodeRegistry;
+    if (!id || !registry) return "";
+
+    const hasApiContract =
+      apiContract &&
+      typeof apiContract === "object" &&
+      !Array.isArray(apiContract);
+    const contract = hasApiContract
+      ? structuredClone(apiContract)
+      : {};
+    contract.schemaVersion = 3;
+    contract.stableContractId = stableContractId(contract);
+    for (const [direction, key] of [["input", "inputPorts"], ["output", "outputPorts"]]) {
+      contract[key] = (Array.isArray(contract[key]) ? contract[key] : []).map(port => ({
+        ...port,
+        role: portablePortRole(contract.kind, direction, port, contract.parameters)
+      }));
+    }
+    const referencedInputs = Array.isArray(required.inputPorts)
+      ? required.inputPorts.map(String)
+      : [];
+    const referencedOutputs = Array.isArray(required.outputPorts)
+      ? required.outputPorts.map(String)
+      : [];
+    const existing = registry.getNodeDefinition?.(id);
+    if (existing?.unavailableApiContract === true) return id;
+    if (existing && !hasApiContract) return id;
+    if (existing?.catalogGenerated === true && existing.apiVerification) {
+      const available = existing.apiVerification;
+      const sameStableContract =
+        Boolean(stableContractId(contract)) &&
+        stableContractId(contract) === stableContractId(available);
+      const sameSemanticMember =
+        String(contract.kind || "") === String(available.kind || "") &&
+        String(contract.ownerType || "").replace(/^global::/, "") ===
+          String(available.ownerType || "").replace(/^global::/, "") &&
+        String(contract.memberName || "") === String(available.memberName || "") &&
+        contract.isStatic === available.isStatic &&
+        Math.max(0, Number(contract.genericArity) || 0) ===
+          Math.max(0, Number(available.genericArity) || 0);
+      const existingInputIds = new Set((existing.inputs || []).map(port => String(port?.id || "")));
+      const existingOutputIds = new Set((existing.outputs || []).map(port => String(port?.id || "")));
+      if (
+        (sameStableContract || sameSemanticMember) &&
+        referencedInputs.every(portId => existingInputIds.has(portId)) &&
+        referencedOutputs.every(portId => existingOutputIds.has(portId))
+      ) {
+        return id;
+      }
+    }
+
+    let registrationId = id;
+    if (existing) {
+      const collisionIdentity = JSON.stringify({
+        id,
+        stableContractId: contract.stableContractId,
+        inputPorts: referencedInputs,
+        outputPorts: referencedOutputs
+      });
+      registrationId =
+        `unavailable.preserved.${stableHash(collisionIdentity)}`;
+      const preserved =
+        registry.getNodeDefinition?.(
+          registrationId
+        );
+      if (preserved?.unavailableApiContract === true) {
+        return registrationId;
+      }
+      if (preserved) {
+        registrationId +=
+          `.${stableHash(collisionIdentity + "|collision")}`;
+      }
+    }
+    const makePorts = (direction, declared, referenced) => {
+      const rows = Array.isArray(declared) ? declared : [];
+      const byId = new Map(rows.map(port => [String(port?.id || ""), port]));
+      for (const portId of Array.isArray(referenced) ? referenced : []) {
+        if (!byId.has(String(portId))) {
+          const inferredType = ["call", "done", "true", "false", "reset"].includes(String(portId))
+            ? "impulse"
+            : String(portId) === "success"
+              ? "bool"
+              : String(portId) === "exception"
+                ? "exception"
+                : "object";
+          byId.set(String(portId), { id: String(portId), type: inferredType });
+        }
+      }
+      return [...byId.values()].filter(port => String(port?.id || "")).map(port => {
+        const requestedType = String(port?.type || "object");
+        let type = requestedType;
+        if (!registry.getTypeInformation?.(type)) {
+          if (type && type !== "T" && !port?.typeVar) {
+            registry.registerType?.(type, {
+              label: `Unavailable · ${type}`,
+              short: "API?",
+              color: "#ff6f91",
+              csType: "object",
+              defaultCs: "null!",
+              referenceType: true,
+              valueType: true,
+              globalGenericCandidate: false,
+              assignableTo: ["object"],
+              constraints: ["value", "reference"]
+            });
+          } else {
+            type = "object";
+          }
+        }
+        return registry.port(String(port.id), String(port.label || port.id), type, {
+          optional: port.optional === true,
+          unavailableApiPort: true,
+          semanticRole: portablePortRole(contract.kind, direction, port, contract.parameters)
+        });
+      });
+    };
+    const inputs = makePorts("input", contract.inputPorts, referencedInputs);
+    const outputs = makePorts("output", contract.outputPorts, referencedOutputs);
+    contract.inputPorts = inputs.map(port => ({
+      id: port.id,
+      type: port.type,
+      optional: port.optional === true,
+      role: port.semanticRole
+    }));
+    contract.outputPorts = outputs.map(port => ({
+      id: port.id,
+      type: port.type,
+      optional: port.optional === true,
+      role: port.semanticRole
+    }));
+    const displayName = [contract.ownerType, contract.memberName].filter(Boolean).join(".") || id;
+    const isApi = id.startsWith("api.");
+    registry.registerGroup?.(UNAVAILABLE_GROUP, { after: ADVANCED_GROUP });
+    const registered = registry.registerNode(registrationId, {
+      title: `${isApi ? "Unavailable API" : "Unavailable Operator"} · ${displayName}`,
+      group: UNAVAILABLE_GROUP,
+      symbol: "API?",
+      description: `The original ${isApi ? "API contract" : "node contract"} is preserved, but the current Builder has no safely equivalent operator. The project remains editable; only export of this unresolved runtime path is blocked.`,
+      hiddenFromPalette: true,
+      expertOnly: true,
+      unavailableApiContract: true,
+      preservedApiContract: contract,
+      inputs,
+      outputs,
+      parameters: [],
+      codegenCollect(api) {
+        api.diagnostic?.(`Unavailable API contract '${displayName}' (${id}) must be resolved before export.`);
+      },
+      codegenExpression(api) {
+        api.diagnostic?.(`Unavailable API contract '${displayName}' (${id}) must be resolved before export.`);
+        return api.csDefault?.(api.type || "object") || "default!";
+      },
+      codegenAction(api) {
+        api.diagnostic?.(`Unavailable API contract '${displayName}' (${id}) must be resolved before export.`);
+        return "";
+      }
+    });
+    return registered === false
+      ? ""
+      : registrationId;
+  }
+
   async function rebuildFactoryForCatalog(
     catalog
   ) {
@@ -76,51 +284,81 @@
       );
     }
 
-    const definitions =
-      registry.getNodeDefinitions();
-    const typeDefinitions =
-      registry.getTypeDefinitions?.() ||
-      null;
-    const valueTypes =
-      registry.getValueTypes?.() ||
-      null;
-    const previousCatalogDefinitions =
-      Object.entries(definitions)
-        .filter(([, definition]) =>
-          definition?.catalogGenerated ===
-            true
-        );
-    const previousTypeDefinitions =
-      typeDefinitions
-        ? Object.entries(typeDefinitions)
-        : [];
-    const previousValueTypes =
-      Array.isArray(valueTypes)
-        ? [...valueTypes]
-        : [];
-    const previousReport =
-      window.RMLApiNodeFactoryReport ||
-      null;
-    const previousFactoryVersion =
-      Number(
-        window.__RMLApiNodeFactoryVersion
-      ) || 0;
-    const previousLegacyOperatorResolver =
-      legacyOperatorResolver;
-
-    for (const [id] of
-      previousCatalogDefinitions) {
-      delete definitions[id];
-    }
+    const definitions = registry.getNodeDefinitions();
+    const typeDefinitions = registry.getTypeDefinitions?.() || {};
+    const valueTypes = registry.getValueTypes?.() || [];
+    const stagedDefinitions = Object.fromEntries(
+      Object.entries(definitions).filter(([, definition]) =>
+        definition?.catalogGenerated !== true &&
+        definition?.unavailableApiContract !== true
+      )
+    );
+    const stagedTypes = structuredClone(typeDefinitions);
+    const stagedValueTypes = [...valueTypes];
+    const stagedGroups = [];
+    const previousReport = window.RMLApiNodeFactoryReport || null;
+    const previousFactoryVersion = Number(window.__RMLApiNodeFactoryVersion) || 0;
+    const previousLegacyOperatorResolver = legacyOperatorResolver;
+    const stagingRegistry = {
+      ...registry,
+      registerGroup(name, options) {
+        stagedGroups.push([name, options]);
+      },
+      registerNode(id, definition) {
+        if (stagedDefinitions[id]) return false;
+        stagedDefinitions[id] = definition;
+        return true;
+      },
+      registerType(type, information = {}) {
+        const id = String(type || "").trim();
+        if (!id) throw new TypeError("Graph type id must be a non-empty string.");
+        const assemblyReferences = Array.isArray(information.assemblyReferences)
+          ? information.assemblyReferences.filter(reference =>
+              reference && typeof reference === "object" && String(reference.include || "").trim()
+            ).map(reference => ({
+              include: String(reference.include || "").trim(),
+              hintPath: String(reference.hintPath || "").trim(),
+              private: reference.private === true
+            }))
+          : [];
+        const assemblies = [...new Set([
+          ...(Array.isArray(information.assemblies) ? information.assemblies : []),
+          information.assembly
+        ].map(value => String(value || "").trim()).filter(Boolean))];
+        stagedTypes[id] = {
+          label: information.label || id,
+          short: information.short || id.slice(0, 4).toUpperCase(),
+          color: information.color || "#9da8b4",
+          ...information,
+          assemblies,
+          assemblyReferences
+        };
+        if (information.valueType === true &&
+            information.globalGenericCandidate !== false &&
+            !stagedValueTypes.includes(id)) {
+          stagedValueTypes.push(id);
+        }
+      },
+      getNodeDefinitions: () => stagedDefinitions,
+      getTypeDefinitions: () => stagedTypes,
+      getTypeInformation(type) {
+        const id =
+          typeof type === "string" && type.startsWith("enum:")
+            ? "enum"
+            : type || "generic";
+        return stagedTypes[id] || null;
+      },
+      getValueTypes: () => stagedValueTypes
+    };
 
     try {
-      window.__RMLApiNodeFactoryVersion =
-        FACTORY_VERSION;
-
       const report = await buildFactory(
-        registry,
-        catalog
+        stagingRegistry,
+        catalog,
+        false
       );
+      const stagedLegacyOperatorResolver = legacyOperatorResolver;
+      legacyOperatorResolver = previousLegacyOperatorResolver;
 
       if (
         !report ||
@@ -128,58 +366,42 @@
         apiCatalogIdentity(report) !==
           apiCatalogIdentity(catalog)
       ) {
+        const details = Array.isArray(report?.verificationErrors)
+          ? report.verificationErrors.slice(0, 12).join(" | ")
+          : "";
         throw new Error(
-          "The live API node factory did not produce a complete verified contract for the current catalog."
+          `The live API node factory did not produce a complete verified contract for the current catalog.${details ? ` ${details}` : ""}`
         );
       }
+
+      for (const id of Object.keys(definitions)) {
+        if (definitions[id]?.catalogGenerated === true) delete definitions[id];
+      }
+      for (const [id, definition] of Object.entries(stagedDefinitions)) {
+        if (definition?.catalogGenerated === true) {
+          if (definitions[id]?.unavailableApiContract === true) delete definitions[id];
+          definitions[id] = definition;
+        }
+      }
+      for (const id of Object.keys(typeDefinitions)) delete typeDefinitions[id];
+      Object.assign(typeDefinitions, stagedTypes);
+      valueTypes.splice(0, valueTypes.length, ...stagedValueTypes);
+      for (const [name, options] of stagedGroups) registry.registerGroup(name, options);
+      legacyOperatorResolver = stagedLegacyOperatorResolver;
+      window.__RMLApiNodeFactoryVersion = FACTORY_VERSION;
+      window.RMLApiNodeFactoryReport = report;
+      window.__RMLNodeDefinitionRevision =
+        (Number(window.__RMLNodeDefinitionRevision) || 0) + 1;
+      window.dispatchEvent(
+        new CustomEvent("rml-api-node-factory-ready", { detail: report })
+      );
 
       completeFactoryReady(report);
       return report;
     } catch (error) {
-      for (const [id, definition] of
-        Object.entries(definitions)) {
-        if (
-          definition?.catalogGenerated ===
-            true
-        ) {
-          delete definitions[id];
-        }
-      }
-
-      for (const [id, definition] of
-        previousCatalogDefinitions) {
-        definitions[id] = definition;
-      }
-
-      if (typeDefinitions) {
-        for (const id of
-          Object.keys(typeDefinitions)) {
-          delete typeDefinitions[id];
-        }
-        for (const [id, definition] of
-          previousTypeDefinitions) {
-          typeDefinitions[id] = definition;
-        }
-      }
-
-      if (Array.isArray(valueTypes)) {
-        valueTypes.splice(
-          0,
-          valueTypes.length,
-          ...previousValueTypes
-        );
-      }
-
-      window.__RMLApiNodeFactoryVersion =
-        previousFactoryVersion;
-      window.RMLApiNodeFactoryReport =
-        previousReport;
-      legacyOperatorResolver =
-        previousLegacyOperatorResolver;
-      window.__RMLNodeDefinitionRevision =
-        (Number(
-          window.__RMLNodeDefinitionRevision
-        ) || 0) + 1;
+      window.__RMLApiNodeFactoryVersion = previousFactoryVersion;
+      window.RMLApiNodeFactoryReport = previousReport;
+      legacyOperatorResolver = previousLegacyOperatorResolver;
 
       throw error;
     }
@@ -190,7 +412,7 @@
     "RMLApiNodeFactoryController",
     {
       value: Object.freeze({
-        version: 3,
+        version: 4,
         rebuild(catalog) {
           const previous =
             factoryBuildPromise;
@@ -239,6 +461,9 @@
             requiredNodes,
             catalog
           );
+        },
+        ensureUnavailableOperator(operatorId, apiContract, required) {
+          return registerUnavailableApiOperator(operatorId, apiContract, required);
         }
       }),
       writable: false,
@@ -344,7 +569,7 @@
     return factoryBuildPromise;
   }
 
-  async function buildFactory(registry, catalog) {
+  async function buildFactory(registry, catalog, publish = true) {
     const {
       port,
       registerType,
@@ -382,31 +607,8 @@
     const legacyAliasEntries = [];
     const rejectedGeneratedNodeIds = new Set();
     const verificationErrors = [];
-    const requiredTypeBooleanFields = [
-      "isComponent",
-      "isWorker",
-      "isAttachableComponent",
-      "isMaterial",
-      "isCommonMaterial",
-      "isMeshProvider",
-      "isTextureProvider",
-      "isAudioClipProvider",
-      "isCollider",
-      "isUiX"
-    ];
-    for (const [index, row] of typeRows.entries()) {
-      const typeName = String(row?.fullName || `types[${index}]`);
-      for (const field of requiredTypeBooleanFields) {
-        if (typeof row?.[field] !== "boolean") {
-          verificationErrors.push(`API catalog type '${typeName}' has no boolean '${field}' contract.`);
-        }
-      }
-    }
     const catalogSchemaVersion =
       Number(catalog.schemaVersion || 0);
-    if (!Number.isInteger(catalogSchemaVersion) || catalogSchemaVersion < 1) {
-      verificationErrors.push(`API catalog schemaVersion '${catalogSchemaVersion}' is not a positive integer.`);
-    }
     const engineVersion = String(
       catalog.engineVersion || "unknown"
     );
@@ -1046,6 +1248,8 @@
         },
         catalogGenerated: true,
         catalogType: csType,
+        apiStableContractId:
+          String(row.stableContractId || ""),
         apiMemberKind: "type",
         apiSignature: `typeof(${csType})`,
         apiParameters: [],
@@ -1370,13 +1574,22 @@
           (Array.isArray(requiredNodes)
             ? requiredNodes
             : [])
-            .filter(value =>
-              String(
+            .filter(value => {
+              const id = String(
                 typeof value === "string"
                   ? value
                   : value?.operatorId || ""
-              ).trim().startsWith("api.")
-            );
+              ).trim();
+              const contract =
+                typeof value === "string"
+                  ? null
+                  : value?.apiContract;
+              return id.startsWith("api.") ||
+                Boolean(
+                  String(contract?.ownerType || "").trim() &&
+                  String(contract?.kind || "").trim()
+                );
+            });
         const requiredIds = new Set(
           requirements
             .map(value =>
@@ -1386,16 +1599,14 @@
                   : value?.operatorId || ""
               ).trim()
             )
-            .filter(id =>
-              id.startsWith("api.") &&
-              !definitions[id]
-            )
+            .filter(Boolean)
         );
         const requested =
           requiredIds.size;
         let resolved = 0;
         let attempts = 0;
         const migrations = {};
+        const portMigrations = {};
         const unresolvedDetails = {};
 
         const normalizedContractType = value =>
@@ -1571,8 +1782,49 @@
               parameter.isOptional === true
             );
         };
+        const portRows = (contract, direction) => {
+          const key = direction === "input" ? "inputPorts" : "outputPorts";
+          return (Array.isArray(contract?.[key]) ? contract[key] : []).map(port => ({
+            ...port,
+            id: String(port?.id || ""),
+            type: String(port?.type || "object"),
+            role: portablePortRole(contract?.kind, direction, port, contract?.parameters)
+          }));
+        };
+        const requiredPortMigration = (requiredContract, availableContract, inputIds, outputIds) => {
+          const result = { input: {}, output: {} };
+          for (const [direction, requiredIds] of [["input", inputIds], ["output", outputIds]]) {
+            const oldRows = portRows(requiredContract, direction);
+            const newRows = portRows(availableContract, direction);
+            const newByRole = new Map();
+            for (const row of newRows) {
+              if (!newByRole.has(row.role)) newByRole.set(row.role, []);
+              newByRole.get(row.role).push(row);
+            }
+            for (const oldId of requiredIds) {
+              const oldRow = oldRows.find(row => row.id === oldId) || {
+                id: oldId,
+                type: "object",
+                role: portablePortRole(requiredContract?.kind, direction, { id: oldId }, requiredContract?.parameters)
+              };
+              const matches = newByRole.get(oldRow.role) || [];
+              if (matches.length !== 1) return null;
+              const replacement = matches[0];
+              if (
+                oldRow.type && replacement.type &&
+                oldRow.type !== "object" && replacement.type !== "object" &&
+                oldRow.type !== replacement.type
+              ) {
+                return null;
+              }
+              result[direction][oldId] = replacement.id;
+            }
+          }
+          return result;
+        };
         const semanticIndex = new Map();
         const semanticMemberIndex = new Map();
+        const stableContractIndex = new Map();
 
         for (const [id, definition] of
           Object.entries(definitions)) {
@@ -1600,6 +1852,11 @@
               semanticMemberIndex.set(memberKey, []);
             }
             semanticMemberIndex.get(memberKey).push(id);
+          }
+          const stableId = stableContractId(definition.apiVerification);
+          if (stableId) {
+            if (!stableContractIndex.has(stableId)) stableContractIndex.set(stableId, []);
+            stableContractIndex.get(stableId).push(id);
           }
         }
 
@@ -1630,9 +1887,20 @@
           const memberKey = semanticMemberKey(
             requiredContract
           );
+          const stableId = stableContractId(requiredContract);
+          const stableCandidates = stableId
+            ? stableContractIndex.get(stableId) || []
+            : [];
           const candidates =
             exactCandidates.length > 0
               ? exactCandidates
+              : stableCandidates.length > 0
+                ? stableCandidates.filter(candidateId =>
+                    semanticContractsCompatible(
+                      requiredContract,
+                      definitions[candidateId]?.apiVerification
+                    )
+                  )
               : (memberKey
                   ? semanticMemberIndex.get(
                       memberKey
@@ -1654,41 +1922,38 @@
               ? requirement.outputPorts.map(String)
               : []
           );
-          const compatible = candidates.filter(
+          const compatible = candidates.map(
             candidateId => {
               const candidate =
                 definitions[candidateId];
-              const availableInputs = new Set(
-                (candidate?.inputs || []).map(port =>
-                  String(port?.id || "")
-                )
+              const portMigration = requiredPortMigration(
+                requiredContract,
+                candidate?.apiVerification,
+                [...inputPorts],
+                [...outputPorts]
               );
-              const availableOutputs = new Set(
-                (candidate?.outputs || []).map(port =>
-                  String(port?.id || "")
-                )
-              );
-              return [...inputPorts].every(id =>
-                availableInputs.has(id)
-              ) && [...outputPorts].every(id =>
-                availableOutputs.has(id)
-              );
+              return portMigration ? { candidateId, portMigration } : null;
             }
-          );
+          ).filter(Boolean);
 
           if (
             compatible.length === 1 &&
-            registerLegacyAlias(
-              oldId,
-              {
-                canonicalId: compatible[0]
-              }
+            (
+              Boolean(definitions[oldId]) ||
+              registerLegacyAlias(
+                oldId,
+                {
+                  canonicalId: compatible[0].candidateId
+                }
+              )
             )
           ) {
             requiredIds.delete(oldId);
             resolved += 1;
             migrations[oldId] =
-              compatible[0];
+              compatible[0].candidateId;
+            portMigrations[oldId] =
+              compatible[0].portMigration;
           } else if (candidates.length > 0) {
             unresolvedDetails[oldId] =
               compatible.length > 1
@@ -1809,6 +2074,8 @@
             Object.freeze({
               ...migrations
             }),
+          portMigrations:
+            Object.freeze(structuredClone(portMigrations)),
           unresolvedDetails:
             Object.freeze({
               ...unresolvedDetails
@@ -1850,18 +2117,15 @@
       totalGeneratedNodes: generatedNodeIds.size
     });
 
-    window.RMLApiNodeFactoryReport = report;
-    window.__RMLNodeDefinitionRevision =
-      (Number(
-        window.__RMLNodeDefinitionRevision
-      ) || 0) + 1;
-
-    window.dispatchEvent(
-      new CustomEvent("rml-api-node-factory-ready", {
-        detail: report
-      })
-    );
-    console.info("RML API Node Factory ready.", report);
+    if (publish) {
+      window.RMLApiNodeFactoryReport = report;
+      window.__RMLNodeDefinitionRevision =
+        (Number(window.__RMLNodeDefinitionRevision) || 0) + 1;
+      window.dispatchEvent(
+        new CustomEvent("rml-api-node-factory-ready", { detail: report })
+      );
+      console.info("RML API Node Factory ready.", report);
+    }
 
     return report;
 
@@ -2062,14 +2326,6 @@
     }
 
     function registerGeneratedNode(id, definition) {
-      if (generatedNodeIds.has(id) || definitions[id]) {
-        rejectedGeneratedNodeIds.add(id);
-        verificationErrors.push(
-          `API node id '${id}' is duplicated or collides with an existing graph node.`
-        );
-        return false;
-      }
-
       if (!definition) {
         rejectedGeneratedNodeIds.add(id);
         return false;
@@ -2087,6 +2343,30 @@
         rejectedGeneratedNodeIds.add(id);
         verificationErrors.push(
           `API node '${id}' was rejected: ${verification.errors.join("; ")}`
+        );
+        return false;
+      }
+
+      const existing = definitions[id];
+      if (generatedNodeIds.has(id) || existing) {
+        const existingContract =
+          existing?.catalogGenerated === true
+            ? existing.apiVerification
+            : null;
+        const identical = Boolean(
+          existingContract &&
+          existingContract.contractFingerprint ===
+            verification.contract.contractFingerprint
+        );
+
+        if (identical) {
+          generatedNodeIds.add(id);
+          return true;
+        }
+
+        rejectedGeneratedNodeIds.add(id);
+        verificationErrors.push(
+          `API node id '${id}' represents two different contracts or collides with a non-catalog graph node.`
         );
         return false;
       }
@@ -2319,7 +2599,32 @@
           ) || 0
         ),
         runtimeBound:
-          definition?.runtimeBound === true
+          definition?.runtimeBound === true,
+        stableContractId:
+          String(
+            definition?.apiStableContractId ||
+            stableContractId({
+              ownerType,
+              kind,
+              memberName: String(definition?.catalogMember || ""),
+              isStatic: definition?.apiIsStatic === true,
+              genericArity: Math.max(0, Number(definition?.apiGenericArity) || 0)
+            })
+          ),
+        inputPorts: Object.freeze(inputs.map(specification => ({
+          id: String(specification?.id || ""),
+          type: String(specification?.type || "object"),
+          typeVar: String(specification?.typeVar || ""),
+          optional: specification?.optional === true,
+          role: portablePortRole(kind, "input", specification, parameters)
+        }))),
+        outputPorts: Object.freeze(outputs.map(specification => ({
+          id: String(specification?.id || ""),
+          type: String(specification?.type || "object"),
+          typeVar: String(specification?.typeVar || ""),
+          optional: specification?.optional === true,
+          role: portablePortRole(kind, "output", specification, parameters)
+        })))
       };
 
       return {
@@ -2416,6 +2721,8 @@
         outputs,
         catalogGenerated: true,
         catalogType: ownerCs,
+        apiStableContractId:
+          String(constructor.stableContractId || ""),
         apiMemberKind: "constructor",
         apiSignature:
           constructor.signature ||
@@ -2552,6 +2859,8 @@
         catalogGenerated: true,
         catalogType: ownerCs,
         catalogMember: method.name,
+        apiStableContractId:
+          String(method.stableContractId || ""),
         apiMemberKind: "method",
         apiSignature:
           method.signature ||
@@ -2630,6 +2939,8 @@
         catalogGenerated: true,
         catalogType: ownerCs,
         catalogMember: property.name,
+        apiStableContractId:
+          String(property.readContractId || ""),
         apiMemberKind: "property-get",
         apiSignature:
           `${ownerCs}.${property.name}[${indexes.map(apiParameterSignature).join(",")}] -> ${catalogExactType(property.type || valueCs)}`,
@@ -2687,6 +2998,8 @@
         catalogGenerated: true,
         catalogType: ownerCs,
         catalogMember: property.name,
+        apiStableContractId:
+          String(property.writeContractId || ""),
         apiMemberKind: "property-set",
         apiSignature:
           `${ownerCs}.${property.name}[${indexes.map(apiParameterSignature).join(",")}] <- ${catalogExactType(property.type || valueCs)}`,
@@ -2741,6 +3054,8 @@
         catalogGenerated: true,
         catalogType: ownerCs,
         catalogMember: field.name,
+        apiStableContractId:
+          String(field.readContractId || ""),
         apiMemberKind: "field-get",
         apiSignature:
           `${ownerCs}.${field.name} -> ${catalogExactType(field.type || valueCs)}`,
@@ -2790,6 +3105,8 @@
         catalogGenerated: true,
         catalogType: ownerCs,
         catalogMember: field.name,
+        apiStableContractId:
+          String(field.writeContractId || ""),
         apiMemberKind: "field-set",
         apiSignature:
           `${ownerCs}.${field.name} <- ${catalogExactType(field.type || valueCs)}`,
@@ -2832,6 +3149,8 @@
         catalogGenerated: true,
         catalogType: ownerCs,
         catalogMember: eventInfo.name,
+        apiStableContractId:
+          String(eventInfo.stableContractId || ""),
         apiMemberKind: "event",
         apiSignature:
           `${ownerCs}.${eventInfo.name}:${normalizeCsType(eventInfo.handlerType || "System.Delegate")}`,

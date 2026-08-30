@@ -169,33 +169,6 @@ self.document = {
 };
 
 let runtimeReady = null;
-let customCSharpRuntimeReady = null;
-
-async function ensureCustomCSharpRuntime(definitions, typeDefinitions) {
-  if (customCSharpRuntimeReady) return customCSharpRuntimeReady;
-  customCSharpRuntimeReady = (async () => {
-    self.RMLResoniteApiCatalog = {
-      schemaVersion: 1,
-      catalogSource: "unavailable",
-      engineVersion: "unknown",
-      types: [],
-      enums: [],
-      assemblies: []
-    };
-    self.RMLFrooxComponentCatalog = self.RMLResoniteApiCatalog;
-    importScripts("node_graph.js?v=301-consolidated-custom-contracts-v603f53");
-    importScripts("visual_csharp.js?v=30-consolidated-custom-contracts-v603f53");
-    const registry = self.RMLModNodeRegistry;
-    if (!registry) throw new Error("The Custom C# worker registry is unavailable.");
-    for (const [typeId, definition] of Object.entries(typeDefinitions || {})) {
-      if (!registry.getTypeDefinitions?.()[typeId]) registry.registerType(typeId, definition);
-    }
-    for (const [operatorId, definition] of Object.entries(definitions || {})) {
-      if (!registry.getNodeDefinition?.(operatorId)) registry.registerNode(operatorId, definition);
-    }
-  })();
-  return customCSharpRuntimeReady;
-}
 
 async function ensureRuntime(catalog) {
   if (runtimeReady) {
@@ -208,6 +181,11 @@ async function ensureRuntime(catalog) {
         schemaVersion: 4,
         catalogSource: "unavailable",
         engineVersion: "unknown",
+        components: [],
+        materials: [],
+        commonMaterials: [],
+        meshes: [],
+        slotAttachOverloads: [],
         types: [],
         enums: [],
         assemblies: []
@@ -216,16 +194,16 @@ async function ensureRuntime(catalog) {
       self.RMLResoniteApiCatalog;
 
     importScripts(
-      "node_graph.js?v=301-consolidated-custom-contracts-v603f53"
+      "node_graph.js?v=286-background-custom-csharp-build-v603f37"
     );
     importScripts(
-      "mod_nodes.js?v=54-consolidated-custom-contracts-v603f53"
+      "mod_nodes.js?v=47-runtime-node-families-v603f37"
     );
     importScripts(
-      "visual_csharp.js?v=30-consolidated-custom-contracts-v603f53"
+      "visual_csharp.js?v=22-background-custom-csharp-build-v603f37"
     );
     importScripts(
-      "api_nodes.js?v=36-structural-catalog-contract-v603f43"
+      "api_nodes.js?v=33-custom-csharp-catalog-contract-v603f37"
     );
 
     if (
@@ -234,17 +212,6 @@ async function ensureRuntime(catalog) {
         "function"
     ) {
       await self.RMLApiNodeFactoryReady;
-    }
-
-    if (
-      Array.isArray(self.RMLResoniteApiCatalog?.types) &&
-      self.RMLResoniteApiCatalog.types.length > 0 &&
-      self.RMLApiNodeFactoryReport?.verificationPassed !== true
-    ) {
-      const details = Array.isArray(self.RMLApiNodeFactoryReport?.verificationErrors)
-        ? self.RMLApiNodeFactoryReport.verificationErrors.join("; ")
-        : "the API factory did not produce a verified contract report";
-      throw new Error(`Resonite API catalog verification failed: ${details}`);
     }
 
     if (
@@ -264,27 +231,34 @@ async function ensureRuntime(catalog) {
 self.addEventListener("message", event => {
   const request = event.data || {};
 
-  if (!["build", "buildCustomCSharp"].includes(request.operation)) {
+  if (![
+    "build",
+    "buildCustomCSharp"
+  ].includes(request.operation)) {
     return;
   }
 
   void (async () => {
     try {
+      await ensureRuntime(request.catalog);
+
       if (request.operation === "buildCustomCSharp") {
-        await ensureCustomCSharpRuntime(request.catalogDefinitions, request.catalogTypeDefinitions);
-        const fragment = self.RMLVisualCSharp.createRoslynImportFragment(
+        const visualCSharp = self.RMLVisualCSharp;
+        const fragment = visualCSharp?.createRoslynImportFragment?.(
           String(request.source || ""),
           request.parseResult,
-          {
-            ...(request.options || {}),
-            catalogDefinitions: request.catalogDefinitions || {},
-            catalogTypeDefinitions: request.catalogTypeDefinitions || {}
-          }
+          request.options || {}
         );
-        self.postMessage({ id: request.id, ok: fragment?.ok === true, result: fragment });
+        self.postMessage({
+          id: request.id,
+          ok: fragment?.ok === true,
+          result: fragment,
+          error: fragment?.ok === true
+            ? null
+            : { name: "CustomCSharpBuildError", message: fragment?.diagnostics?.[0] || "The Custom C# graph could not be built." }
+        });
         return;
       }
-      await ensureRuntime(request.catalog);
 
       const result =
         self.RMLTypedNodeGraphGenerator.build({

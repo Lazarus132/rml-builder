@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta
       name="rml-builder-build"
-      content="consolidated-custom-contracts-20260829-v603f53">
+      content="universal-missing-catalog-preflight-20260830-v616">
     <meta
       name="description"
       content="Build complete typed ResoniteModLoader projects visually with automatic dependencies; optional Raw C# tools remain an expert fallback.">
@@ -16,7 +16,7 @@
         "RMLBuilderBuildId",
         {
           value:
-            "consolidated-custom-contracts-20260829-v603f53",
+            "universal-missing-catalog-preflight-20260830-v616",
           writable: false,
           enumerable: true,
           configurable: true
@@ -26,7 +26,143 @@
         .rmlBuilderBuild =
           window.RMLBuilderBuildId;
     </script>
-    <link rel="stylesheet" href="styles.css?v=267-catalog-first-custom-csharp-v603f34">
+    <link rel="stylesheet" href="styles.css?v=269-background-custom-csharp-build-v603f37">
+    <style>
+      .builder-work-replacement[hidden] {
+        display: none !important;
+      }
+
+      .builder-work-overlay[data-mode="replacement"] .builder-work-card {
+        width: min(720px, calc(100vw - 32px));
+        max-width: 720px;
+        max-height: calc(100dvh - 24px);
+        overflow: auto;
+      }
+
+      .builder-work-overlay[data-mode="replacement"] {
+        z-index: 2147483000 !important;
+        background: rgba(5, 8, 14, .96) !important;
+        backdrop-filter: blur(10px);
+      }
+
+      .builder-work-overlay[data-mode="replacement"] .builder-work-spinner {
+        display: none;
+      }
+
+      .builder-work-replacement {
+        display: grid;
+        gap: 12px;
+        min-width: 0;
+        width: 100%;
+      }
+
+      .builder-work-replacement label {
+        display: grid;
+        gap: 6px;
+      }
+
+      .builder-work-replacement input,
+      .builder-work-replacement-list {
+        box-sizing: border-box;
+        width: 100%;
+      }
+
+      .builder-work-replacement input {
+        font-size: 16px;
+      }
+
+      .builder-work-replacement-list {
+        display: grid;
+        gap: 8px;
+        max-height: min(48vh, 460px);
+        min-height: 180px;
+        overflow: auto;
+        padding: 8px;
+        border: 1px solid rgba(255, 255, 255, .16);
+        border-radius: 12px;
+        background: rgba(0, 0, 0, .2);
+        overscroll-behavior: contain;
+        scrollbar-gutter: stable;
+      }
+
+      .builder-work-replacement-item {
+        display: grid;
+        grid-template-columns: 46px minmax(0, 1fr);
+        gap: 12px;
+        align-items: center;
+        width: 100%;
+        min-height: 68px;
+        padding: 10px 12px;
+        border: 1px solid rgba(255, 255, 255, .12);
+        border-radius: 10px;
+        color: inherit;
+        background: rgba(255, 255, 255, .045);
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .builder-work-replacement-item:hover,
+      .builder-work-replacement-item:focus-visible {
+        border-color: rgba(116, 202, 255, .72);
+        background: rgba(116, 202, 255, .1);
+        outline: none;
+      }
+
+      .builder-work-replacement-item[aria-selected="true"] {
+        border-color: #74caff;
+        background: rgba(116, 202, 255, .18);
+        box-shadow: 0 0 0 1px rgba(116, 202, 255, .28) inset;
+      }
+
+      .builder-work-replacement-symbol {
+        display: grid;
+        place-items: center;
+        width: 44px;
+        height: 44px;
+        border-radius: 10px;
+        color: #f7fbff;
+        background: linear-gradient(145deg, rgba(116, 202, 255, .34), rgba(148, 102, 255, .28));
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: .04em;
+        overflow: hidden;
+      }
+
+      .builder-work-replacement-copy {
+        display: grid;
+        gap: 3px;
+        min-width: 0;
+      }
+
+      .builder-work-replacement-copy strong,
+      .builder-work-replacement-copy small {
+        overflow-wrap: anywhere;
+      }
+
+      .builder-work-replacement-copy small {
+        opacity: .76;
+      }
+
+      .builder-work-replacement-empty {
+        display: grid;
+        place-items: center;
+        min-height: 160px;
+        padding: 24px;
+        text-align: center;
+        opacity: .75;
+      }
+
+      .builder-work-replacement-summary {
+        overflow-wrap: anywhere;
+      }
+
+      .builder-work-replacement-actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 10px;
+      }
+    </style>
     <link rel="shortcut icon" href="./favicon.svg">
     <link rel="icon" href="./favicon.svg">
   </head>
@@ -583,17 +719,58 @@
         <small id="builder-work-detail" class="builder-work-detail">
           No project data is discarded while this is running.
         </small>
+        <div
+          id="builder-work-replacement"
+          class="builder-work-replacement"
+          hidden>
+          <label>
+            Search compatible catalog nodes
+            <input
+              id="builder-work-replacement-search"
+              type="search"
+              autocomplete="off"
+              placeholder="Search by node name or operator ID…">
+          </label>
+          <div>
+            <div id="builder-work-replacement-list-label">
+              Verified compatible replacements
+            </div>
+            <div
+              id="builder-work-replacement-list"
+              class="builder-work-replacement-list"
+              role="listbox"
+              aria-labelledby="builder-work-replacement-list-label"
+              aria-busy="false"></div>
+          </div>
+          <small
+            id="builder-work-replacement-summary"
+            class="builder-work-replacement-summary"></small>
+          <div class="builder-work-replacement-actions">
+            <button
+              id="builder-work-replacement-cancel"
+              class="button secondary"
+              type="button">
+              Cancel import
+            </button>
+            <button
+              id="builder-work-replacement-confirm"
+              class="button primary"
+              type="button">
+              Use selected replacement
+            </button>
+          </div>
+        </div>
       </section>
     </div>
 
     <script src="scroll_manager.js?v=31-hint-route-visibility-v258"></script>
     <script src="scroll_hierarchy.js?v=8"></script>
     <script src="csharp14_roslyn.js?v=4-normal-core-custom-csharp-v603"></script>
-    <script src="app.js?v=453-consolidated-custom-contracts-v603f53"></script>
-    <script src="catalog_loader.js?v=92-consolidated-custom-contracts-v603f53"></script>
+    <script src="app.js?v=449-universal-missing-catalog-preflight-v616"></script>
+    <script src="catalog_loader.js?v=90-universal-missing-catalog-preflight-v616"></script>
     <script src="runtime_bridge.js?v=3-event-driven-readiness-v412f1"></script>
     <script src="graph_gpu_renderer.js?v=11-source-comment-cleanup-v603f20"></script>
-    <script src="node_graph.js?v=301-consolidated-custom-contracts-v603f53"></script>
+    <script src="node_graph.js?v=293-universal-missing-catalog-preflight-v616"></script>
     <script src="dynamic_settings.js?v=24-inline-row-runtime-visibility-v178"></script>
 </body>
 </html>

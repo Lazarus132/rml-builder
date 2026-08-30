@@ -19,7 +19,7 @@
     getTypeDefinitions
   } = registry;
 
-  const VERSION = 21;
+  const VERSION = 22;
   const CUSTOM_CSHARP_COORDINATE_SPACE_VERSION = 2;
   const SYNTAX_TYPE = "csharpSyntax";
   const GROUPS = {
@@ -1286,7 +1286,6 @@
     collect(api) {
       const nodes = Array.isArray(api.nodes) ? api.nodes : api.graph?.nodes || [];
       const incoming = api.incoming instanceof Map ? api.incoming : new Map();
-      const nodeById = api.nodeById instanceof Map ? api.nodeById : new Map(nodes.map(node => [node.id, node]));
       let unsafeRequired = false;
 
       const createSyntaxRenderer = (localNodes, localIncoming, allowRuntimeValues) => {

@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const LOADER_VERSION = 50;
+  const LOADER_VERSION = 46;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
   const CATALOG_PATH = "/resonite_api_catalog.json";
@@ -22,15 +22,15 @@
     document.currentScript?.src ||
     window.location.href;
   const modNodesUrl = new URL(
-    "mod_nodes.js?v=54-consolidated-custom-contracts-v603f53",
+    "mod_nodes.js?v=51-consistent-custom-csharp-contract-v610",
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "visual_csharp.js?v=30-consolidated-custom-contracts-v603f53",
+    "visual_csharp.js?v=23-consistent-custom-csharp-contract-v610",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=36-structural-catalog-contract-v603f43",
+    "api_nodes.js?v=35-future-proof-project-contracts-v611",
     scriptUrl
   ).href;
 
@@ -124,28 +124,29 @@
     );
   }
 
-  function catalogFingerprint(raw) {
-    const supplied = String(
-      raw?.catalogFingerprint ||
-      raw?.assemblyFingerprint ||
-      ""
-    ).trim();
+  function canonicalCatalogJson(value) {
+    if (Array.isArray(value)) {
+      return `[${value.map(canonicalCatalogJson).join(",")}]`;
+    }
+    if (value && typeof value === "object") {
+      return `{${Object.keys(value).sort().map(key =>
+        `${JSON.stringify(key)}:${canonicalCatalogJson(value[key])}`
+      ).join(",")}}`;
+    }
+    return JSON.stringify(value);
+  }
 
-    const content = stableCatalogHash(
-      JSON.stringify({
+  function catalogFingerprint(raw) {
+    return stableCatalogHash(
+      canonicalCatalogJson({
         schemaVersion: raw?.schemaVersion || 0,
         engineVersion: raw?.engineVersion || "unknown",
         sourceAssembly: raw?.sourceAssembly || "FrooxEngine.dll",
-        declaredFingerprint: supplied,
         assemblies: raw?.assemblies || [],
         types: raw?.types || [],
-        enums: raw?.enums || []
+        enums: raw?.enums || [],
       })
     );
-
-    return supplied
-      ? `${supplied}:${content}`
-      : content;
   }
 
   function catalogTypes(raw) {
@@ -175,42 +176,14 @@
 
     const value = raw;
 
-    const schemaVersion = Number(value.schemaVersion);
-    if (!Number.isInteger(schemaVersion) || schemaVersion < 1) {
-      throw new TypeError(`Resonite API catalog contract violation: schemaVersion '${String(value.schemaVersion ?? "<missing>")}' is not a positive integer.`);
-    }
-
-    const requiredTypeBooleanFields = [
-      "isComponent",
-      "isWorker",
-      "isAttachableComponent",
-      "isMaterial",
-      "isCommonMaterial",
-      "isMeshProvider",
-      "isTextureProvider",
-      "isAudioClipProvider",
-      "isCollider",
-      "isUiX"
-    ];
-    if (!Array.isArray(value.types)) {
-      throw new TypeError("Resonite API catalog contract violation: 'types' is not an array.");
-    }
-    value.types.forEach((type, index) => {
-      if (!type || typeof type !== "object" || Array.isArray(type)) {
-        throw new TypeError(`Resonite API catalog contract violation: types[${index}] is not an object.`);
-      }
-      if (typeof type.fullName !== "string" || !type.fullName.trim()) {
-        throw new TypeError(`Resonite API catalog contract violation: types[${index}].fullName is missing.`);
-      }
-      for (const field of requiredTypeBooleanFields) {
-        if (typeof type[field] !== "boolean") {
-          throw new TypeError(`Resonite API catalog contract violation: type '${type.fullName}' has no boolean '${field}' contract.`);
-        }
-      }
-    });
     return Object.freeze({
       ...value,
-      schemaVersion,
+      schemaVersion:
+        Number(value.schemaVersion) || 3,
+      contractIdentityVersion:
+        Number(value.contractIdentityVersion) || 1,
+      contractRevision:
+        String(value.contractRevision || value.catalogFingerprint || catalogFingerprint(value)),
       loaderVersion: LOADER_VERSION,
       catalogSource: source,
       catalogSourceUrl: sourceUrl,
@@ -279,7 +252,8 @@
       parameters,
       returnType,
       isStatic,
-      genericArity = 0
+      genericArity = 0,
+      suppliedStableContractId = ""
     ) => {
       const parameterShape =
         (Array.isArray(parameters)
@@ -293,7 +267,6 @@
           catalogContractType(ownerType),
         memberName:
           String(memberName || ""),
-        parameterShape,
         isStatic: isStatic === true,
         genericArity: Math.max(
           0,
@@ -309,6 +282,11 @@
       });
       members.set(identity, {
         identity,
+        stableContractId:
+          String(
+            suppliedStableContractId ||
+            `contract.${stableCatalogHash(identity)}`
+          ),
         shape,
         kind,
         ownerType:
@@ -331,7 +309,8 @@
         [],
         owner,
         true,
-        0
+        0,
+        type.stableContractId
       );
       for (const constructor of
         type.constructors || []) {
@@ -342,7 +321,8 @@
           constructor?.parameters,
           owner,
           false,
-          0
+          0,
+          constructor?.stableContractId
         );
       }
       for (const method of
@@ -354,7 +334,8 @@
           method?.parameters,
           method?.returnType,
           method?.isStatic,
-          (method?.genericParameters || []).length
+          (method?.genericParameters || []).length,
+          method?.stableContractId
         );
       }
       for (const property of
@@ -367,7 +348,8 @@
             property.indexParameters,
             property.type,
             property.isStatic,
-            0
+            0,
+            property.readContractId
           );
         }
         if (property?.canWrite) {
@@ -385,7 +367,8 @@
             ],
             "System.Void",
             property.isStatic,
-            0
+            0,
+            property.writeContractId
           );
         }
       }
@@ -398,7 +381,8 @@
           [],
           field?.type,
           field?.isStatic,
-          0
+          0,
+          field?.readContractId
         );
         if (!field?.isReadOnly && !field?.isConst) {
           add(
@@ -408,7 +392,8 @@
             [{ position: 0, type: field?.type }],
             "System.Void",
             field?.isStatic,
-            0
+            0,
+            field?.writeContractId
           );
         }
       }
@@ -422,7 +407,8 @@
           eventInfo?.handlerType ||
             "System.Delegate",
           eventInfo?.isStatic,
-          0
+          0,
+          eventInfo?.stableContractId
         );
       }
     }
@@ -592,11 +578,10 @@
       return "";
     }
 
-    const attachableComponentCount = Array.isArray(catalog.types)
-      ? catalog.types.filter(type => type?.isAttachableComponent === true).length
-      : 0;
     return `${formatStatusCount(
-      attachableComponentCount
+      catalogTypes(catalog).filter(type =>
+        type.isAttachableComponent === true
+      ).length
     )} attachable components · ${formatStatusCount(
       catalog.types?.length
     )} API types · ${formatStatusCount(
@@ -870,11 +855,12 @@
   }
 
   async function probeConfiguredScannerUrl(
-    catalogUrl
+    catalogUrl,
+    timeoutMs = CATALOG_FETCH_TIMEOUT_MS
   ) {
     const raw = await fetchJson(
       catalogUrl,
-      CATALOG_FETCH_TIMEOUT_MS
+      timeoutMs
     );
 
     return {
@@ -960,45 +946,13 @@
     }
   }
 
-  function healthUrlFor(catalogUrl) {
-    try {
-      const url = new URL(
-        catalogUrl,
-        window.location.href
-      );
-      url.pathname = HEALTH_PATH;
-      url.search = "";
-      url.hash = "";
-      return url.href;
-    } catch {
-      return "";
-    }
-  }
-
   async function probeDirectScannerUrl(
-    catalogUrl
+    catalogUrl,
+    timeoutMs = BUILDER_PROBE_TIMEOUT_MS
   ) {
-    const healthUrl =
-      healthUrlFor(catalogUrl);
-
-    if (!healthUrl) {
-      return null;
-    }
-
-    const health = await fetchJson(
-      healthUrl,
-      BUILDER_PROBE_TIMEOUT_MS
-    );
-
-    if (
-      health.ok !== true ||
-      health.catalogReady !== true
-    ) {
-      return null;
-    }
-
     return probeConfiguredScannerUrl(
-      catalogUrl
+      catalogUrl,
+      timeoutMs
     );
   }
 
@@ -1008,19 +962,31 @@
     const urls = directScannerUrls(
       excludedUrls
     );
-    const results = await Promise.all(
-      urls.map(async url => {
-        try {
-          return await probeDirectScannerUrl(
-            url
-          );
-        } catch {
-          return null;
-        }
-      })
-    );
+    if (urls.length === 0) {
+      return null;
+    }
 
-    return results.find(Boolean) || null;
+    try {
+      return await Promise.any(
+        urls.map(async url => {
+          const result =
+            await probeDirectScannerUrl(
+              url,
+              BUILDER_PROBE_TIMEOUT_MS
+            );
+
+          if (!result) {
+            throw new Error(
+              "Scanner catalog is unavailable."
+            );
+          }
+
+          return result;
+        })
+      );
+    } catch {
+      return null;
+    }
   }
 
   async function probeBuilderScannerBridge() {
@@ -1087,18 +1053,54 @@
       );
 
     let live = null;
+    const attemptedUrls = new Set();
+    const probeKnownDirectUrl = async url => {
+      const candidate =
+        String(url || "").trim();
+
+      if (
+        !candidate ||
+        attemptedUrls.has(candidate)
+      ) {
+        return null;
+      }
+
+      attemptedUrls.add(candidate);
+
+      try {
+        return await probeDirectScannerUrl(
+          candidate,
+          BUILDER_PROBE_TIMEOUT_MS
+        );
+      } catch {
+        return null;
+      }
+    };
+
+    if (activeScannerCatalogUrl) {
+      live = await probeKnownDirectUrl(
+        activeScannerCatalogUrl
+      );
+      if (live) return live;
+    }
 
     if (configured) {
-      try {
-        live =
+      if (configuredLoopback) {
+        live = await probeKnownDirectUrl(
           configuredLoopback
-            ? await probeDirectScannerUrl(
-                configuredLoopback
-              )
-            : await probeConfiguredScannerUrl(
-                configured
-              );
-      } catch {
+        );
+      } else if (
+        !attemptedUrls.has(configured)
+      ) {
+        attemptedUrls.add(configured);
+        try {
+          live =
+            await probeConfiguredScannerUrl(
+              configured
+            );
+        } catch {
+          live = null;
+        }
       }
 
       if (live) {
@@ -1124,9 +1126,7 @@
     try {
       live =
         await probeDirectScannerRange(
-          configuredLoopback
-            ? [configuredLoopback]
-            : []
+          [...attemptedUrls]
         );
     } catch {
     }
@@ -1302,41 +1302,26 @@
   }
 
   async function loadCatalog() {
-    let live = null;
-    try {
-      live = await tryScannerCatalog();
-    } catch (error) {
-      console.debug("The live Resonite API scanner could not be reached during startup.", error);
-    }
-
-    if (live) {
-      try {
-        const normalized = normalizeCatalog(live.raw, "scanner", live.url);
-        scannerOnline = true;
-        activeScannerCatalogUrl = live.url;
-        await writeCachedLiveCatalog(live.raw, live.url);
-        return installCatalog(normalized);
-      } catch (error) {
-        console.warn("The live Resonite API catalog was rejected and was not installed.", error);
-      }
-    }
-
+    
+    
+    
     const cached =
       await readCachedLiveCatalog();
 
     if (cached) {
-      try {
-        const normalized = normalizeCatalog(
+      scannerOnline = false;
+      activeScannerCatalogUrl =
+        loopbackScannerCatalogUrl(
+          cached.sourceUrl
+        );
+
+      return installCatalog(
+        normalizeCatalog(
           cached.catalog,
           "scanner-cache",
           cached.sourceUrl || ""
-        );
-        scannerOnline = false;
-        activeScannerCatalogUrl = loopbackScannerCatalogUrl(cached.sourceUrl);
-        return installCatalog(normalized);
-      } catch (error) {
-        console.warn("The cached Resonite API catalog was rejected and was not installed.", error);
-      }
+        )
+      );
     }
 
     scannerOnline = false;
@@ -1578,7 +1563,6 @@
 
         if (!live) {
           scannerOnline = false;
-          activeScannerCatalogUrl = "";
           updateStatus(
             statusCatalog(),
             {
@@ -1611,7 +1595,9 @@
           nextIdentity !==
             currentIdentity;
 
-        installCatalog(normalized);
+        if (!current) {
+          installCatalog(normalized);
+        }
         try {
           if (!current) {
             await modNodesReady;
@@ -1679,13 +1665,9 @@
             );
           }
 
+          installCatalog(normalized);
+
         } catch (error) {
-          if (
-            current &&
-            catalogChanged
-          ) {
-            installCatalog(current);
-          }
           throw error;
         }
 
@@ -1699,7 +1681,6 @@
         .catch(error => {
           scannerChecking = false;
           scannerOnline = false;
-          activeScannerCatalogUrl = "";
 
           updateStatus(
             statusCatalog(),
@@ -1742,13 +1723,28 @@
       operatorId,
       inputPorts = [],
       outputPorts = [],
-      apiContract = null
+      apiContract = null,
+      missingCatalogObject = false,
+      catalogScope = "api",
+      nodeParameters = {}
     ) => {
       const id = String(
         operatorId || ""
       ).trim();
+      const hasPortableApiIdentity =
+        apiContract &&
+        typeof apiContract === "object" &&
+        !Array.isArray(apiContract) &&
+        Boolean(
+          String(apiContract.ownerType || "").trim() &&
+          String(apiContract.kind || "").trim()
+        );
 
-      if (!id.startsWith("api.")) {
+      if (
+        !id.startsWith("api.") &&
+        !hasPortableApiIdentity &&
+        missingCatalogObject !== true
+      ) {
         return;
       }
 
@@ -1761,6 +1757,24 @@
             !Array.isArray(apiContract)
               ? apiContract
               : null,
+          missingCatalogObject:
+            missingCatalogObject ===
+              true,
+          catalogScope:
+            catalogScope === "all"
+              ? "all"
+              : "api",
+          nodeParameters:
+            nodeParameters &&
+            typeof nodeParameters ===
+              "object" &&
+            !Array.isArray(
+              nodeParameters
+            )
+              ? structuredClone(
+                  nodeParameters
+                )
+              : {},
           inputPorts: new Set(),
           outputPorts: new Set()
         });
@@ -1815,7 +1829,10 @@
         value?.operatorId,
         value?.inputPorts,
         value?.outputPorts,
-        value?.apiContract
+        value?.apiContract,
+        value?.missingCatalogObject,
+        value?.catalogScope,
+        value?.nodeParameters
       );
     }
 
@@ -1825,6 +1842,16 @@
           requirement.operatorId,
         apiContract:
           requirement.apiContract,
+        missingCatalogObject:
+          requirement
+            .missingCatalogObject === true,
+        catalogScope:
+          requirement.catalogScope,
+        nodeParameters:
+          structuredClone(
+            requirement.nodeParameters ||
+            {}
+          ),
         inputPorts:
           [...requirement.inputPorts]
             .sort((left, right) =>
@@ -2025,6 +2052,219 @@
       : `${failure.operatorId} (${failure.reason})`;
   }
 
+  function notifyCatalogGate(
+    callback,
+    detail
+  ) {
+    if (typeof callback !== "function") {
+      return;
+    }
+
+    try {
+      callback(Object.freeze(detail));
+    } catch (error) {
+      console.debug(
+        "The catalog progress callback failed.",
+        error
+      );
+    }
+  }
+
+  async function activateCachedCatalogFallback() {
+    const current = statusCatalog();
+
+    if (current) {
+      return current;
+    }
+
+    const cached =
+      await readCachedLiveCatalog();
+
+    if (!cached) {
+      return null;
+    }
+
+    const normalized =
+      normalizeCatalog(
+        cached.catalog,
+        "scanner-cache",
+        cached.sourceUrl || ""
+      );
+
+    installCatalog(normalized);
+    await ensureApiNodesLoaded();
+
+    const controller =
+      window.RMLApiNodeFactoryController;
+
+    if (
+      !factoryMatchesCatalog(
+        normalized,
+        window.RMLApiNodeFactoryReport
+      )
+    ) {
+      if (
+        !controller ||
+        typeof controller.rebuild !==
+          "function"
+      ) {
+        return null;
+      }
+
+      await controller.rebuild(
+        normalized
+      );
+    }
+
+    return normalized;
+  }
+
+  async function ensureCatalogForReplacement(
+    options = {}
+  ) {
+    notifyCatalogGate(
+      options.onLiveLookup,
+      {
+        phase: "live",
+        message:
+          "Checking the current Live scanner catalog before resolving replacement nodes."
+      }
+    );
+
+    const activeCatalog =
+      statusCatalog();
+    const activeReport =
+      window.RMLApiNodeFactoryReport;
+    let connected = Boolean(
+      scannerOnline === true &&
+      activeCatalog
+        ?.catalogSource === "scanner" &&
+      activeReport
+        ?.liveCatalogVerified === true &&
+      factoryMatchesCatalog(
+        activeCatalog,
+        activeReport
+      )
+    );
+
+    if (!connected) {
+      connected =
+        await synchronizeScannerStatus({
+          showChecking: true,
+          reloadOnChange: false,
+          throwOnFailure: false
+        });
+    }
+
+    if (!connected) {
+      notifyCatalogGate(
+        options.onCacheFallback,
+        {
+          phase: "cache",
+          message:
+            "The Live scanner is unavailable. Falling back to the last cached catalog."
+        }
+      );
+    }
+
+    await modNodesReady;
+
+    let catalog = statusCatalog();
+
+    if (!connected && !catalog) {
+      catalog =
+        await activateCachedCatalogFallback();
+    }
+
+    if (!catalog) {
+      return Object.freeze({
+        available: false,
+        live: false,
+        cacheFallback: true,
+        liveAttempted: true,
+        source: "unavailable",
+        catalogFingerprint: "",
+        engineVersion: ""
+      });
+    }
+
+    await ensureApiNodesLoaded();
+
+    let report =
+      window.RMLApiNodeFactoryReport;
+
+    if (
+      !factoryMatchesCatalog(
+        catalog,
+        report
+      )
+    ) {
+      const controller =
+        window.RMLApiNodeFactoryController;
+
+      if (
+        !controller ||
+        typeof controller.rebuild !==
+          "function"
+      ) {
+        return Object.freeze({
+          available: false,
+          live: false,
+          cacheFallback: !connected,
+          liveAttempted: true,
+          source: String(
+            catalog.catalogSource ||
+            "unavailable"
+          ),
+          catalogFingerprint: String(
+            catalog.catalogFingerprint ||
+            ""
+          ),
+          engineVersion: String(
+            catalog.engineVersion || ""
+          )
+        });
+      }
+
+      await controller.rebuild(catalog);
+      report =
+        window.RMLApiNodeFactoryReport;
+    }
+
+    const factoryReady =
+      factoryMatchesCatalog(
+        catalog,
+        report
+      );
+    const live = Boolean(
+      connected &&
+      factoryReady &&
+      catalog.catalogSource ===
+        "scanner" &&
+      report?.liveCatalogVerified ===
+        true
+    );
+
+    return Object.freeze({
+      available: factoryReady,
+      live,
+      cacheFallback: !live,
+      liveAttempted: true,
+      source: live
+        ? "scanner"
+        : catalog.catalogSource ===
+            "scanner-cache"
+          ? "scanner-cache"
+          : "scanner-last-known",
+      catalogFingerprint: String(
+        catalog.catalogFingerprint || ""
+      ),
+      engineVersion: String(
+        catalog.engineVersion || ""
+      )
+    });
+  }
+
   async function ensureCatalogForImport(
     options = {}
   ) {
@@ -2038,6 +2278,7 @@
           requirement.operatorId
       );
     const migrations = {};
+    const portMigrations = {};
     const collectMigrations = report => {
       const values =
         report?.migrations;
@@ -2058,6 +2299,26 @@
           migrations[source] = target;
         }
       }
+      const portValues = report?.portMigrations;
+      if (portValues && typeof portValues === "object" && !Array.isArray(portValues)) {
+        for (const [from, mapping] of Object.entries(portValues)) {
+          if (!from || !mapping || typeof mapping !== "object") continue;
+          portMigrations[from] = structuredClone(mapping);
+        }
+      }
+      for (const requirement of requiredNodes) {
+        const originalId = String(requirement.operatorId || "");
+        const targetId = String(migrations[originalId] || "");
+        if (!targetId) continue;
+        const mapping = portMigrations[originalId] || {};
+        requirement.operatorId = targetId;
+        requirement.inputPorts = requirement.inputPorts.map(id =>
+          String(mapping.input?.[id] || id)
+        );
+        requirement.outputPorts = requirement.outputPorts.map(id =>
+          String(mapping.output?.[id] || id)
+        );
+      }
     };
 
     if (requiredNodeIds.length === 0) {
@@ -2065,6 +2326,10 @@
       return Object.freeze({
         required: false,
         verified: true,
+        available: true,
+        unresolved: 0,
+        unresolvedRequirements:
+          Object.freeze([]),
         requiredNodeIds:
           Object.freeze([]),
         catalogFingerprint: "",
@@ -2072,7 +2337,10 @@
       });
     }
 
-    await modNodesReady;
+    const replacementCatalog =
+      await ensureCatalogForReplacement(
+        options
+      );
 
     let catalog = statusCatalog();
     let report =
@@ -2115,16 +2383,61 @@
             );
     }
 
+    if (
+      missing.length > 0 &&
+      catalog &&
+      !factoryMatchesCatalog(
+        catalog,
+        report
+      )
+    ) {
+      const controller =
+        window.RMLApiNodeFactoryController;
+
+      if (
+        controller &&
+        typeof controller.rebuild ===
+          "function"
+      ) {
+        await controller.rebuild(catalog);
+        collectMigrations(
+          await reconcileLegacyRequiredApiNodes(
+            requiredNodes,
+            catalog
+          )
+        );
+        report =
+          window.RMLApiNodeFactoryReport;
+        missing =
+          factoryMatchesCatalog(
+            catalog,
+            report
+          )
+            ? missingRequiredApiNodes(
+                requiredNodes,
+                catalog,
+                report
+              )
+            : unresolvedRequiredApiNodes(
+                requiredNodes
+              );
+      }
+    }
+
     if (missing.length === 0) {
       return Object.freeze({
         required: true,
         verified: true,
+        available: true,
+        unresolved: 0,
+        unresolvedRequirements:
+          Object.freeze([]),
         live:
-          catalog.catalogSource ===
-            "scanner",
+          replacementCatalog.live ===
+            true,
         cacheSatisfied:
-          catalog.catalogSource ===
-            "scanner-cache",
+          replacementCatalog.cacheFallback ===
+            true,
         requiredNodeIds:
           Object.freeze([
             ...requiredNodeIds
@@ -2146,126 +2459,151 @@
           Object.freeze({
             ...migrations
           }),
-        liveFallbackAttempted: false
+        portMigrations:
+          Object.freeze(structuredClone(portMigrations)),
+        liveFallbackAttempted: true,
+        liveAttempted: true,
+        cacheFallback:
+          replacementCatalog.cacheFallback ===
+            true
       });
     }
 
-    if (
-      typeof options.onLiveFallback ===
-        "function"
-    ) {
-      try {
-        options.onLiveFallback(
-          Object.freeze({
-            missingCount:
-              missing.length,
-            missing:
-              Object.freeze(
-                missing.slice(0, 12)
-                  .map(failure =>
-                    requiredApiNodeFailureLabel(
-                      failure
-                    )
-                  )
+    const missingByOperator =
+      new Map(
+        missing.map(failure => [
+          String(
+            failure?.operatorId || ""
+          ),
+          failure
+        ])
+      );
+    const unresolvedRequirements =
+      requiredNodes
+        .filter(requirement =>
+          missingByOperator.has(
+            String(
+              requirement?.operatorId || ""
+            )
+          )
+        )
+        .map(requirement => ({
+          operatorId:
+            String(
+              requirement.operatorId || ""
+            ),
+          apiContract:
+            requirement.apiContract &&
+            typeof requirement.apiContract ===
+              "object" &&
+            !Array.isArray(
+              requirement.apiContract
+            )
+              ? structuredClone(
+                  requirement.apiContract
+                )
+              : null,
+          missingCatalogObject:
+            requirement
+              .missingCatalogObject ===
+                true,
+          catalogScope:
+            requirement.catalogScope ===
+              "all"
+              ? "all"
+              : "api",
+          nodeParameters:
+            requirement.nodeParameters &&
+            typeof requirement.nodeParameters ===
+              "object" &&
+            !Array.isArray(
+              requirement.nodeParameters
+            )
+              ? structuredClone(
+                  requirement
+                    .nodeParameters
+                )
+              : {},
+          inputPorts:
+            Object.freeze([
+              ...requirement.inputPorts
+            ]),
+          outputPorts:
+            Object.freeze([
+              ...requirement.outputPorts
+            ]),
+          failure:
+            Object.freeze({
+              ...missingByOperator.get(
+                String(
+                  requirement.operatorId || ""
+                )
               )
-          })
-        );
-      } catch (error) {
-        console.debug(
-          "The import progress callback failed.",
-          error
-        );
-      }
-    }
-
-    const connected =
-      await synchronizeScannerStatus({
-        showChecking: true,
-        reloadOnChange: false,
-        throwOnFailure: true
-      });
-
-    if (!connected) {
-      const visible =
-        missing.slice(0, 8)
-          .map(
-            requiredApiNodeFailureLabel
-          );
-      throw new Error(
-        `The cached Resonite API catalog cannot resolve ${missing.length.toLocaleString("de-DE")} required operator or port contract${missing.length === 1 ? "" : "s"} (${visible.join(", ")}${missing.length > visible.length ? ` and ${(missing.length - visible.length).toLocaleString("de-DE")} more` : ""}), and the live scanner is unavailable. The JSON was not loaded.`
-      );
-    }
-
-    await ensureApiNodesLoaded();
-    catalog = statusCatalog();
-    report =
-      window.RMLApiNodeFactoryReport;
-
-    if (
-      !factoryMatchesCatalog(
-        catalog,
-        report
-      ) ||
-      catalog?.catalogSource !==
-        "scanner" ||
-      report?.liveCatalogVerified !==
-        true
-    ) {
-      throw new Error(
-        "The live Resonite API catalog was reached, but its verified node factory did not become ready. The JSON was not loaded."
-      );
-    }
-
-    collectMigrations(
-      await reconcileLegacyRequiredApiNodes(
-      requiredNodes,
-      catalog
-      )
-    );
-    report =
-      window.RMLApiNodeFactoryReport;
-    missing =
-      missingRequiredApiNodes(
-        requiredNodes,
-        catalog,
-        report
-      );
-
-    if (missing.length > 0) {
-      const visible =
-        missing.slice(0, 12);
-      const remainder =
-        missing.length - visible.length;
-
-      throw new Error(
-        `This JSON cannot be loaded because the current live Resonite API catalog does not provide ${missing.length.toLocaleString("de-DE")} required operator or port contract${missing.length === 1 ? "" : "s"}: ${visible.map(requiredApiNodeFailureLabel).join(", ")}${remainder > 0 ? ` and ${remainder.toLocaleString("de-DE")} more` : ""}.`
-      );
-    }
+            })
+        }));
 
     return Object.freeze({
       required: true,
-      verified: true,
-      live: true,
-      cacheSatisfied: false,
+      verified: false,
+      available:
+        replacementCatalog.available ===
+          true,
+      live:
+        replacementCatalog.live === true,
+      cacheSatisfied:
+        replacementCatalog.cacheFallback ===
+          true,
       requiredNodeIds:
         Object.freeze([
           ...requiredNodeIds
         ]),
       catalogFingerprint:
         String(
-          catalog.catalogFingerprint ||
+          catalog?.catalogFingerprint ||
+          replacementCatalog
+            .catalogFingerprint ||
           ""
         ),
       engineVersion:
         String(
-          catalog.engineVersion || ""
+          catalog?.engineVersion ||
+          replacementCatalog
+            .engineVersion ||
+          ""
         ),
-      source: "scanner",
+      source:
+        String(
+          catalog?.catalogSource ||
+          replacementCatalog.source ||
+          "unavailable"
+        ),
       migrations:
         Object.freeze({
           ...migrations
         }),
-      liveFallbackAttempted: true
+      portMigrations:
+        Object.freeze(
+          structuredClone(
+            portMigrations
+          )
+        ),
+      unresolved:
+        unresolvedRequirements.length,
+      unresolvedRequirements:
+        Object.freeze(
+          unresolvedRequirements
+        ),
+      failureLabels:
+        Object.freeze(
+          missing.map(
+            requiredApiNodeFailureLabel
+          )
+        ),
+      liveFallbackAttempted: true,
+      liveAttempted: true,
+      cacheFallback:
+        replacementCatalog.cacheFallback ===
+          true
     });
   }
 
@@ -2405,13 +2743,17 @@
   catalogReady
     .then(() => {
       installManualScannerRefresh();
-
-      
-      
-      
-      
-      
-      
+      const synchronize = () => {
+        if (!document.hidden) {
+          void synchronizeScannerStatus();
+        }
+      };
+      window.addEventListener("focus", synchronize);
+      window.addEventListener("online", synchronize);
+      window.addEventListener("pageshow", synchronize);
+      document.addEventListener("visibilitychange", synchronize);
+      window.setInterval(synchronize, 5000);
+      synchronize();
     })
     .catch(() => {});
 
@@ -2440,11 +2782,13 @@
     "RMLCatalogImportGate",
     {
       value: Object.freeze({
-        version: 1,
+        version: 5,
         ensureForImport:
           ensureCatalogForImport,
         ensureLive:
-          ensureCatalogForImport
+          ensureCatalogForImport,
+        ensureForReplacement:
+          ensureCatalogForReplacement
       }),
       writable: false,
       enumerable: true,

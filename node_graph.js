@@ -13,7 +13,7 @@
     )
       ? RML_GRAPH_REQUESTED_TEST_STORAGE_SCOPE
       : "rml-configuration-builder-visual-test-default";
-  const GRAPH_SCHEMA_VERSION = 27;
+  const GRAPH_SCHEMA_VERSION = 30;
   const GRAPH_STAGE_WIDTH = 5200;
   const GRAPH_STAGE_HEIGHT = 3400;
   const GRAPH_MIN_ZOOM = 0.005;
@@ -42,11 +42,12 @@
   const GRAPH_FALLBACK_MAX_SVG_CONNECTIONS = 600;
   const GRAPH_EAGER_CONNECTION_TARGET_NODE_LIMIT = 180;
   const GRAPH_EAGER_CONNECTION_TARGET_WIRE_LIMIT = 400;
+  const GRAPH_SEARCHABLE_RENDER_LIMIT = 200;
   const GRAPH_INCREMENTAL_PRUNE_CONNECTION_LIMIT = 800;
   const GRAPH_GPU_OVERVIEW_ENTER_ZOOM = 0.20;
   const GRAPH_GPU_OVERVIEW_EXIT_ZOOM = 0.24;
   const GRAPH_NODE_VIRTUAL_OVERSCAN_PIXELS = 260;
-  const API_EXPORT_VERIFICATION_SCHEMA_VERSION = 1;
+  const API_EXPORT_VERIFICATION_SCHEMA_VERSION = 2;
 
   const VALUE_TYPES = [
     "bool",
@@ -1070,6 +1071,9 @@
   let bridge = null;
   let graph = null;
   let customCSharpEditor = null;
+  const customCSharpSourceSyncTimers = new Map();
+  const customCSharpBuildWorkers = new Map();
+  let customCSharpBuildRequestSequence = 0;
   let customCSharpRootOperation = false;
   
   
@@ -2570,6 +2574,10 @@
       sourceSignature: "",
       showAdvancedNodes: false,
       configSnapshot: null,
+      apiCompatibility: {
+        schemaVersion: 1,
+        history: []
+      },
       customCSharpFiles: {},
       nodes: [],
       connections: [],
@@ -2739,19 +2747,27 @@
     return true;
   }
 
-  function buildCustomCSharpFragmentOffThread(source, parseResult, options, heartbeat) {
+  function buildCustomCSharpFragmentInWorker(nodeId, source, parseResult, options) {
+    const previous = customCSharpBuildWorkers.get(nodeId);
+    if (previous) {
+      previous.worker.terminate();
+      previous.reject(new DOMException("A newer Custom C# synchronization replaced this build.", "AbortError"));
+    }
     const worker = new Worker(
-      new URL("graph_codegen_worker.js?v=58-consolidated-custom-contracts-v603f53", document.baseURI),
-      { name: "rml-custom-csharp-optimizer" }
+      new URL(
+        "graph_codegen_worker.js?v=44-custom-csharp-background-build-v603f37",
+        document.baseURI
+      ),
+      { name: "rml-custom-csharp-builder" }
     );
-    const requestId = `custom-csharp-${hashText(`${performance.now()}\0${source.length}`)}`;
+    const requestId = `custom-csharp-${++customCSharpBuildRequestSequence}`;
     return new Promise((resolve, reject) => {
-      const startedAt = performance.now();
-      const heartbeatTimer = window.setInterval(() => {
-        heartbeat?.((performance.now() - startedAt) / 1000);
-      }, 500);
+      const record = { worker, reject };
+      customCSharpBuildWorkers.set(nodeId, record);
       const finish = callback => value => {
-        window.clearInterval(heartbeatTimer);
+        if (customCSharpBuildWorkers.get(nodeId) === record) {
+          customCSharpBuildWorkers.delete(nodeId);
+        }
         worker.terminate();
         callback(value);
       };
@@ -2760,19 +2776,22 @@
       worker.addEventListener("message", event => {
         const response = event.data || {};
         if (response.id !== requestId) return;
-        if (response.ok === true && response.result?.ok === true) succeed(response.result);
-        else fail(new Error(response.result?.diagnostics?.[0] || response.error?.message || "The Custom C# optimizer worker failed."));
+        if (response.ok === true && response.result?.ok === true) {
+          succeed(response.result);
+        } else {
+          fail(new Error(response.error?.message || response.result?.diagnostics?.[0] || "The background Custom C# graph build failed."));
+        }
       });
-      worker.addEventListener("error", event => fail(new Error(event.message || "The Custom C# optimizer worker failed.")));
-      worker.addEventListener("messageerror", () => fail(new Error("The Custom C# optimizer worker returned unreadable data.")));
+      worker.addEventListener("error", event => {
+        fail(new Error(event.message || "The background Custom C# worker failed."));
+      });
       worker.postMessage({
         id: requestId,
         operation: "buildCustomCSharp",
+        catalog: window.RMLResoniteApiCatalog || window.RMLFrooxComponentCatalog || null,
         source,
         parseResult,
-        options,
-        catalogDefinitions: {},
-        catalogTypeDefinitions: {}
+        options
       });
     });
   }
@@ -2836,6 +2855,24 @@
       return false;
     }
 
+    try {
+      await window.RMLModNodesReady;
+    } catch {}
+
+    const currentCustomCSharpCatalogStamp = () => {
+      const report = window.RMLApiNodeFactoryReport;
+      const verified =
+        report?.verificationPassed === true &&
+        ["scanner", "scanner-cache"].includes(String(report?.catalogSource || ""));
+      return {
+        fingerprint: verified ? String(report.catalogFingerprint || "") : "",
+        engineVersion: verified ? String(report.engineVersion || "") : "",
+        source: verified ? String(report.catalogSource || "") : "",
+        definitionRevision: Number(window.__RMLNodeDefinitionRevision || 0)
+      };
+    };
+    const initialCatalogStamp = currentCustomCSharpCatalogStamp();
+
     const sourceHash =
       visualCSharp.sourceHash?.(source) ||
       hashText(source);
@@ -2843,7 +2880,11 @@
       existingGraph &&
       existingGraph.sourceEditedInInspector !== true &&
       existingGraph.sourceHash === sourceHash &&
-      Number(existingGraph.optimizerVersion || 0) === Number(visualCSharp.version || 0)
+      Number(existingGraph.optimizerVersion || 0) === Number(visualCSharp.version || 0) &&
+      String(existingGraph.catalogFingerprint || "") === initialCatalogStamp.fingerprint &&
+      String(existingGraph.catalogEngineVersion || "") === initialCatalogStamp.engineVersion &&
+      String(existingGraph.catalogSource || "") === initialCatalogStamp.source &&
+      Number(existingGraph.catalogDefinitionRevision || 0) === initialCatalogStamp.definitionRevision
     ) {
       existingGraph.sourceEditedInInspector = false;
       persistGraph(true);
@@ -2852,13 +2893,6 @@
 
     if (!quiet) showGraphMessage("Roslyn is synchronizing the persistent C# 14 source with its Node Graph…");
     try {
-      const yieldForProgress = message => new Promise(resolve => {
-        if (!quiet && message) showGraphMessage(message);
-        window.requestAnimationFrame(() => {
-          window.requestAnimationFrame(resolve);
-        });
-      });
-      await yieldForProgress("Roslyn is validating the persistent C# 14 source…");
       const parseResult = await roslyn.parse(source);
       const currentOwner = findGraphNode(ownerId);
       if (String(currentOwner?.parameters?.source || "") !== source) {
@@ -2874,47 +2908,98 @@
         projectId: String(owner.parameters?.projectId || "main"),
         nullable: owner.parameters?.nullable || "inherit",
         autoGeneratedHeader: owner.parameters?.autoGeneratedHeader === true,
-        prefix: `custom-csharp-sync-${hashText(`${ownerId}\0${source}`)}`,
-        disableCatalogNodes: true
+        prefix: `custom-csharp-sync-${hashText(`${ownerId}\0${source}`)}`
       };
-      await yieldForProgress("Building the smallest verified C# Node Graph off the UI thread…");
-      let fragment = await buildCustomCSharpFragmentOffThread(
-        source,
-        parseResult,
-        fragmentOptions,
-        seconds => !quiet && showGraphMessage(`Building the smallest verified C# Node Graph off the UI thread… ${seconds.toFixed(1)} s · page responsive`)
-      );
+      let fragment = await buildCustomCSharpFragmentInWorker(ownerId, source, parseResult, fragmentOptions);
       if (!fragment?.ok) throw new Error(fragment?.diagnostics?.[0] || "The Roslyn Node Graph synchronization failed.");
-      await yieldForProgress("Preparing and checking the optimized C# Node Graph…");
+      const selectedCatalogNodeIds = [...new Set(
+        fragment.nodes
+          .map(node => String(node?.operatorId || ""))
+          .filter(operatorId => operatorId.startsWith("api."))
+      )];
+      if (selectedCatalogNodeIds.length > 0) {
+        const gate = window.RMLCatalogImportGate?.ensureForImport;
+        if (typeof gate !== "function") {
+          fragment = await buildCustomCSharpFragmentInWorker(ownerId, source, parseResult, {
+            ...fragmentOptions,
+            prefix: `${fragmentOptions.prefix}-no-unverified-catalog`,
+            disableCatalogNodes: true
+          });
+        } else {
+          try {
+            await gate({ requiredNodeIds: selectedCatalogNodeIds });
+            fragment = await buildCustomCSharpFragmentInWorker(ownerId, source, parseResult, fragmentOptions);
+          } catch {
+            fragment = await buildCustomCSharpFragmentInWorker(ownerId, source, parseResult, {
+              ...fragmentOptions,
+              prefix: `${fragmentOptions.prefix}-catalog-unavailable`,
+              disableCatalogNodes: true
+            });
+          }
+        }
+        if (!fragment?.ok) throw new Error(fragment?.diagnostics?.[0] || "The verified catalog fallback graph could not be created.");
+      }
       let prepared = visualCSharp.createCustomCSharpFileGraphFromFragment(fragment);
       if (!prepared?.ok) throw new Error(prepared?.diagnostics?.[0] || "The Custom C# File graph could not be created.");
 
+      let preparedGraphValidationFailure = "";
       const validatePreparedGraph = async candidate => {
         const rendered = visualCSharp.renderCustomCSharpGraph(candidate.customGraph);
-        if (rendered?.ok !== true) return false;
+        if (rendered?.ok !== true) {
+          preparedGraphValidationFailure = rendered?.diagnostics?.[0] || "The visual graph renderer rejected the synchronized graph.";
+          return false;
+        }
         const validation = await roslyn.parse(rendered.source);
-        return validation?.ok === true;
+        if (validation?.ok !== true) {
+          preparedGraphValidationFailure = visualCSharp.formatRoslynDiagnostics?.(validation?.diagnostics)?.[0] || "Roslyn rejected the source rendered from the synchronized graph.";
+          return false;
+        }
+        const signature = visualCSharp.roslynStructuralSignature;
+        const matches = typeof signature !== "function" ||
+          signature(parseResult.root) === signature(validation.root);
+        preparedGraphValidationFailure = matches
+          ? ""
+          : "The rendered graph changed the Roslyn token or meaningful-trivia structure.";
+        return matches;
       };
       if (!await validatePreparedGraph(prepared)) {
-        throw new Error("The optimized Fach-Node graph did not render valid C# 14. The persistent source and previous graph were preserved; a whole-file Token-Node fallback is intentionally forbidden.");
+        fragment = await buildCustomCSharpFragmentInWorker(ownerId, source, parseResult, {
+          ...fragmentOptions,
+          prefix: `${fragmentOptions.prefix}-semantic`,
+          disableCatalogNodes: true
+        });
+        if (!fragment?.ok) throw new Error(fragment?.diagnostics?.[0] || "The catalog-independent semantic graph could not be created.");
+        prepared = visualCSharp.createCustomCSharpFileGraphFromFragment(fragment);
+      }
+      if (!prepared?.ok || !await validatePreparedGraph(prepared)) {
+        throw new Error(`The locally optimized Node Graph did not reproduce valid live-checked C# 14 source. ${preparedGraphValidationFailure || "The local subtree validator failed without a diagnostic."} The previous valid graph was preserved; it was not replaced by a whole-file Raw Roslyn graph.`);
+      }
+      if (String(findGraphNode(ownerId)?.parameters?.source || "") !== source) {
+        return false;
       }
 
       prepared.customGraph.sourceHash = sourceHash;
       prepared.customGraph.optimizerVersion = Number(visualCSharp.version || 0);
+      const finalCatalogStamp = currentCustomCSharpCatalogStamp();
+      prepared.customGraph.catalogFingerprint = finalCatalogStamp.fingerprint;
+      prepared.customGraph.catalogEngineVersion = finalCatalogStamp.engineVersion;
+      prepared.customGraph.catalogSource = finalCatalogStamp.source;
+      prepared.customGraph.catalogDefinitionRevision = finalCatalogStamp.definitionRevision;
       prepared.customGraph.importedSource = true;
       prepared.customGraph.sourceEditedInInspector = false;
       graph.customCSharpFiles[ownerId] = prepared.customGraph;
       persistGraph(true);
       if (!openAfterSync) return true;
-      await yieldForProgress("Opening and fitting the completed C# Node Graph…");
       const opened = openCustomCSharpFileGraph(ownerId);
       if (opened) {
         const synchronizedNodes = prepared.customGraph.nodes || [];
         const usingCount = synchronizedNodes.filter(node => node.operatorId === "csharp.using").length;
-        showGraphMessage(`Opened ${prepared.importedSyntaxNodeCount.toLocaleString()} editable C# nodes, including ${usingCount.toLocaleString()} Using Directive nodes.`, "success");
+        const catalogCount = synchronizedNodes.filter(node => String(node.operatorId || "").startsWith("api.")).length;
+        showGraphMessage(`Opened ${prepared.importedSyntaxNodeCount.toLocaleString()} editable C# nodes: ${usingCount.toLocaleString()} Using Directive and ${catalogCount.toLocaleString()} verified scanner API nodes.`, "success");
       }
       return opened;
     } catch (error) {
+      if (error?.name === "AbortError") return false;
       if (!quiet) showGraphMessage(error instanceof Error ? error.message : String(error), "error");
       return false;
     }
@@ -3189,6 +3274,336 @@
     return list;
   }
 
+  function replacementGeometrySignature(
+    graphDocument,
+    replacementNodeIds = []
+  ) {
+    const nodeIds = new Set(
+      (Array.isArray(replacementNodeIds)
+        ? replacementNodeIds
+        : [])
+        .map(value => String(value || ""))
+        .filter(Boolean)
+    );
+    const nodes =
+      (Array.isArray(graphDocument?.nodes)
+        ? graphDocument.nodes
+        : [])
+        .filter(node =>
+          nodeIds.size === 0 ||
+          nodeIds.has(String(node?.id || ""))
+        )
+        .map(node => ({
+          id: node.id,
+          x: node.x,
+          y: node.y,
+          width: node.width,
+          height: node.height
+        }));
+    const connections =
+      (Array.isArray(graphDocument?.connections)
+        ? graphDocument.connections
+        : [])
+        .map(connection => {
+          const {
+            fromPort: _fromPort,
+            toPort: _toPort,
+            ...routing
+          } = connection || {};
+          return routing;
+        });
+
+    return JSON.stringify({
+      nodes,
+      connections
+    });
+  }
+
+  function applyNodeReplacementsPreservingGeometry(
+    graphDocument,
+    replacements
+  ) {
+    if (
+      !graphDocument ||
+      !Array.isArray(graphDocument.nodes) ||
+      !Array.isArray(graphDocument.connections)
+    ) {
+      throw new TypeError(
+        "A replacement transaction requires a complete Runtime Graph document."
+      );
+    }
+
+    const requested =
+      Array.isArray(replacements)
+        ? replacements
+        : [];
+    const nodesById = new Map(
+      graphDocument.nodes.map(node => [
+        String(node?.id || ""),
+        node
+      ])
+    );
+    const prepared = [];
+    const usedNodeIds = new Set();
+
+    for (const replacement of requested) {
+      const nodeId = String(
+        replacement?.nodeId || ""
+      ).trim();
+      const operatorId = String(
+        replacement?.operatorId || ""
+      ).trim();
+      const node = nodesById.get(nodeId);
+
+      if (
+        !nodeId ||
+        !operatorId ||
+        !node ||
+        node.kind !== "operator" ||
+        usedNodeIds.has(nodeId)
+      ) {
+        throw new Error(
+          `The replacement transaction contains an invalid or duplicate node '${nodeId || "<unnamed>"}'.`
+        );
+      }
+
+      usedNodeIds.add(nodeId);
+      prepared.push({
+        node,
+        nodeId,
+        operatorId,
+        inputMap:
+          replacement?.inputMap &&
+          typeof replacement.inputMap === "object" &&
+          !Array.isArray(replacement.inputMap)
+            ? replacement.inputMap
+            : {},
+        outputMap:
+          replacement?.outputMap &&
+          typeof replacement.outputMap === "object" &&
+          !Array.isArray(replacement.outputMap)
+            ? replacement.outputMap
+            : {}
+      });
+    }
+
+    const replacementNodeIds =
+      prepared.map(value => value.nodeId);
+    const geometrySignature =
+      replacementGeometrySignature(
+        graphDocument,
+        replacementNodeIds
+      );
+    const originalNodes =
+      prepared.map(value => ({
+        node: value.node,
+        value: clone(value.node)
+      }));
+    const originalConnections =
+      graphDocument.connections.map(
+        connection => ({
+          connection,
+          value: clone(connection),
+          fromPort: connection.fromPort,
+          toPort: connection.toPort
+        })
+      );
+    const replacementByNodeId =
+      new Map(
+        prepared.map(value => [
+          value.nodeId,
+          value
+        ])
+      );
+    let active = true;
+
+    const rollback = () => {
+      if (!active) return false;
+
+      for (const original of
+        originalNodes) {
+        for (const key of
+          Object.keys(original.node)) {
+          delete original.node[key];
+        }
+        Object.assign(
+          original.node,
+          clone(original.value)
+        );
+      }
+      for (const original of
+        originalConnections) {
+        for (const key of
+          Object.keys(
+            original.connection
+          )) {
+          delete original.connection[key];
+        }
+        Object.assign(
+          original.connection,
+          clone(original.value)
+        );
+      }
+
+      active = false;
+      return true;
+    };
+    const assertGeometry = () => {
+      const current =
+        replacementGeometrySignature(
+          graphDocument,
+          replacementNodeIds
+        );
+
+      if (current !== geometrySignature) {
+        rollback();
+        throw new Error(
+          "Node replacement was rolled back because it changed node placement or stored wire routing geometry."
+        );
+      }
+
+      return true;
+    };
+
+    try {
+      for (const connection of
+        graphDocument.connections) {
+        const source =
+          replacementByNodeId.get(
+            String(
+              connection.fromNode || ""
+            )
+          );
+        const target =
+          replacementByNodeId.get(
+            String(
+              connection.toNode || ""
+            )
+          );
+
+        if (source) {
+          connection.fromPort = String(
+            source.outputMap[
+              connection.fromPort
+            ] || connection.fromPort || ""
+          );
+        }
+        if (target) {
+          connection.toPort = String(
+            target.inputMap[
+              connection.toPort
+            ] || connection.toPort || ""
+          );
+        }
+      }
+
+      for (const replacement of
+        prepared) {
+        replacement.node.operatorId =
+          replacement.operatorId;
+      }
+
+      assertGeometry();
+    } catch (error) {
+      rollback();
+      throw error;
+    }
+
+    return Object.freeze({
+      replacedNodeCount:
+        prepared.length,
+      remappedConnectionCount:
+        originalConnections.filter(
+          original =>
+            original.connection.fromPort !==
+              original.fromPort ||
+            original.connection.toPort !==
+              original.toPort
+        ).length,
+      geometrySignature,
+      assertGeometry,
+      rollback,
+      commit() {
+        assertGeometry();
+        active = false;
+        return true;
+      }
+    });
+  }
+
+  function applyCatalogMigrationsPreservingGeometry(
+    graphDocument,
+    migrations,
+    portMigrations
+  ) {
+    const operatorMigrations =
+      migrations &&
+      typeof migrations === "object" &&
+      !Array.isArray(migrations)
+        ? migrations
+        : {};
+    const portMaps =
+      portMigrations &&
+      typeof portMigrations === "object" &&
+      !Array.isArray(portMigrations)
+        ? portMigrations
+        : {};
+    const replacements = [];
+
+    for (const node of
+      Array.isArray(graphDocument?.nodes)
+        ? graphDocument.nodes
+        : []) {
+      const originalOperatorId =
+        String(node?.operatorId || "");
+      const migratedOperatorId = String(
+        operatorMigrations[
+          originalOperatorId
+        ] || ""
+      ).trim();
+      const portMap =
+        portMaps[
+          originalOperatorId
+        ];
+      const hasPortMigration = Boolean(
+        portMap &&
+        typeof portMap === "object" &&
+        !Array.isArray(portMap) &&
+        (
+          Object.keys(
+            portMap.input || {}
+          ).length > 0 ||
+          Object.keys(
+            portMap.output || {}
+          ).length > 0
+        )
+      );
+
+      if (
+        !migratedOperatorId &&
+        !hasPortMigration
+      ) {
+        continue;
+      }
+
+      replacements.push({
+        nodeId: node.id,
+        operatorId:
+          migratedOperatorId ||
+          originalOperatorId,
+        inputMap:
+          portMap?.input || {},
+        outputMap:
+          portMap?.output || {}
+      });
+    }
+
+    return applyNodeReplacementsPreservingGeometry(
+      graphDocument,
+      replacements
+    );
+  }
+
   function sanitizeGraphState(raw) {
     const result = defaultGraphState();
 
@@ -3226,6 +3641,20 @@
 
     result.showAdvancedNodes =
       raw.showAdvancedNodes === true;
+
+    const rawCompatibility =
+      raw.apiCompatibility &&
+      typeof raw.apiCompatibility === "object" &&
+      !Array.isArray(raw.apiCompatibility)
+        ? raw.apiCompatibility
+        : {};
+    result.apiCompatibility = {
+      schemaVersion: 1,
+      history: (Array.isArray(rawCompatibility.history) ? rawCompatibility.history : [])
+        .slice(-32)
+        .filter(entry => entry && typeof entry === "object" && !Array.isArray(entry))
+        .map(entry => clone(entry))
+    };
 
     if (
       raw.configSnapshot &&
@@ -3936,6 +4365,157 @@
     return result;
   }
 
+  function migrateLegacyOperatorsForImport(
+    graphDocument
+  ) {
+    if (
+      !graphDocument ||
+      !Array.isArray(graphDocument.nodes) ||
+      !Array.isArray(
+        graphDocument.connections
+      )
+    ) {
+      throw new TypeError(
+        "Legacy operator migration requires a complete Runtime Graph document."
+      );
+    }
+
+    const nodeIds =
+      graphDocument.nodes.map(node =>
+        String(node?.id || "")
+      );
+    const geometrySignature =
+      replacementGeometrySignature(
+        graphDocument,
+        nodeIds
+      );
+    const sanitized =
+      sanitizeGraphState(
+        graphDocument
+      );
+    const sanitizedNodes =
+      new Map(
+        sanitized.nodes.map(node => [
+          String(node?.id || ""),
+          node
+        ])
+      );
+    const sanitizedConnections =
+      new Map(
+        sanitized.connections.map(
+          connection => [
+            String(
+              connection?.id || ""
+            ),
+            connection
+          ]
+        )
+      );
+    const migrations = [];
+    let remappedConnectionCount = 0;
+
+    for (const node of
+      graphDocument.nodes) {
+      const migrated =
+        sanitizedNodes.get(
+          String(node?.id || "")
+        );
+      const previousOperatorId =
+        String(
+          node?.operatorId || ""
+        );
+      const nextOperatorId =
+        String(
+          migrated?.operatorId || ""
+        );
+
+      if (
+        node?.kind !== "operator" ||
+        !migrated ||
+        !nextOperatorId ||
+        previousOperatorId ===
+          nextOperatorId
+      ) {
+        continue;
+      }
+
+      node.operatorId =
+        nextOperatorId;
+      node.parameters =
+        clone(
+          migrated.parameters || {}
+        );
+      migrations.push({
+        nodeId:
+          String(node.id || ""),
+        from: previousOperatorId,
+        to: nextOperatorId
+      });
+    }
+
+    for (const connection of
+      graphDocument.connections) {
+      const migrated =
+        sanitizedConnections.get(
+          String(
+            connection?.id || ""
+          )
+        );
+
+      if (!migrated) {
+        continue;
+      }
+
+      const nextFromPort = String(
+        migrated.fromPort || ""
+      );
+      const nextToPort = String(
+        migrated.toPort || ""
+      );
+      if (
+        nextFromPort !==
+          String(
+            connection.fromPort || ""
+          ) ||
+        nextToPort !==
+          String(
+            connection.toPort || ""
+          )
+      ) {
+        connection.fromPort =
+          nextFromPort;
+        connection.toPort =
+          nextToPort;
+        remappedConnectionCount += 1;
+      }
+    }
+
+    if (
+      replacementGeometrySignature(
+        graphDocument,
+        nodeIds
+      ) !== geometrySignature
+    ) {
+      throw new Error(
+        "Legacy operator migration changed stored node or wire geometry. The JSON was not loaded."
+      );
+    }
+
+    return Object.freeze({
+      migratedNodeCount:
+        migrations.length,
+      remappedConnectionCount,
+      migrations:
+        Object.freeze(
+          migrations.map(value =>
+            Object.freeze({
+              ...value
+            })
+          )
+        )
+    });
+  }
+
   function portableApiContract(
     definition
   ) {
@@ -3953,18 +4533,29 @@
       return null;
     }
 
-    const normalizePort = port => ({
+    const contractInputPorts = new Map(
+      (Array.isArray(contract.inputPorts) ? contract.inputPorts : []).map(port => [String(port?.id || ""), port])
+    );
+    const contractOutputPorts = new Map(
+      (Array.isArray(contract.outputPorts) ? contract.outputPorts : []).map(port => [String(port?.id || ""), port])
+    );
+    const normalizePort = (port, direction) => ({
       id: String(port?.id || ""),
       type: String(port?.type || ""),
       typeVar: String(port?.typeVar || ""),
       generic:
         port?.generic === true,
       optional:
-        port?.optional === true
+        port?.optional === true,
+      role: String(
+        (direction === "input" ? contractInputPorts : contractOutputPorts)
+          .get(String(port?.id || ""))?.role ||
+        `${direction}:${String(port?.id || "")}`
+      )
     });
 
     return {
-      schemaVersion: 2,
+      schemaVersion: 3,
       kind: String(contract.kind || ""),
       ownerType: String(
         contract.ownerType || ""
@@ -3990,6 +4581,9 @@
       ),
       runtimeBound:
         contract.runtimeBound === true,
+      stableContractId: String(
+        contract.stableContractId || ""
+      ),
       canonicalOperatorId: String(
         definition.canonicalOperatorId ||
         contract.nodeId ||
@@ -3998,11 +4592,11 @@
       inputPorts:
         (Array.isArray(definition.inputs)
           ? definition.inputs
-          : []).map(normalizePort),
+          : []).map(port => normalizePort(port, "input")),
       outputPorts:
         (Array.isArray(definition.outputs)
           ? definition.outputs
-          : []).map(normalizePort)
+          : []).map(port => normalizePort(port, "output"))
     };
   }
 
@@ -4013,6 +4607,14 @@
       OPERATOR_DEFINITIONS[
         node?.operatorId
       ];
+
+    if (
+      definition?.unavailableApiContract === true &&
+      definition.preservedApiContract &&
+      typeof definition.preservedApiContract === "object"
+    ) {
+      return clone(definition.preservedApiContract);
+    }
 
     return portableApiContract(
       definition
@@ -9720,16 +10322,20 @@
     const warnings = [];
 
     for (const node of graph.nodes) {
+      const nodeDefinition = OPERATOR_DEFINITIONS[node?.operatorId];
       if (
         node?.kind !== "configuration" &&
         node?.operatorId !==
           "configuration.menuInstance" &&
-        !OPERATOR_DEFINITIONS[
-          node?.operatorId
-        ]
+        !nodeDefinition
       ) {
         diagnostics.push(
           `Node '${node?.label || node?.id || "<unnamed>"}' uses unavailable operator '${node?.operatorId || "<missing>"}'. It cannot be exported until that verified node definition is available.`
+        );
+      } else if (nodeDefinition?.unavailableApiContract === true) {
+        const preserved = nodeDefinition.preservedApiContract || node.apiContract || {};
+        diagnostics.push(
+          `Node '${node?.label || node?.id || "<unnamed>"}' preserves unavailable API '${[preserved.ownerType, preserved.memberName].filter(Boolean).join(".") || node?.operatorId}'. The graph remains editable, but this unresolved runtime path cannot be exported.`
         );
       }
     }
@@ -14641,37 +15247,6 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       .rml-graph-node.configuration {
         border-color: rgba(88, 191, 255, 0.62);
         background: rgba(16, 28, 39, 0.99);
-      }
-
-      .rml-graph-node.expert-node,
-      .rml-graph-node.raw-csharp {
-        border-color: rgba(255, 190, 82, 0.78);
-        background: rgba(34, 27, 18, 0.99);
-        box-shadow:
-          0 0 0 1px rgba(255, 190, 82, 0.1),
-          0 15px 42px rgba(0, 0, 0, 0.52);
-      }
-
-      .rml-graph-node.expert-node > .rml-graph-node-header,
-      .rml-graph-node.raw-csharp > .rml-graph-node-header {
-        border-bottom-color: rgba(255, 190, 82, 0.3);
-        background: linear-gradient(180deg, #3b2d1b, #211a12);
-      }
-
-      .rml-graph-node.expert-node .rml-graph-node-symbol,
-      .rml-graph-node.raw-csharp .rml-graph-node-symbol {
-        border-color: rgba(255, 209, 129, 0.58);
-        background: #191209;
-        color: #ffd181;
-        box-shadow: 0 0 12px rgba(255, 190, 82, 0.16);
-      }
-
-      .rml-graph-node.expert-node.selected,
-      .rml-graph-node.raw-csharp.selected {
-        border-color: #ffd181;
-        box-shadow:
-          0 0 0 2px rgba(255, 190, 82, 0.24),
-          0 17px 48px rgba(0, 0, 0, 0.58);
       }
 
       .rml-graph-node.selected {
@@ -24303,7 +24878,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     article.className =
       `rml-graph-node ${
         node.kind
-      }${mirrored ? " mirrored" : ""}${definition?.expertOnly === true ? " expert-node" : ""}${definition?.rawCSharpNode === true ? " raw-csharp" : ""}${
+      }${mirrored ? " mirrored" : ""}${
         graph.selectedNodeId ===
         node.id
           ? " selected"
@@ -27351,7 +27926,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     select,
     optionEntries,
     currentValue,
-    placeholder = "Search list…"
+    placeholder = "Search list…",
+    forceSearch = false
   ) {
     if (
       !select ||
@@ -27423,8 +27999,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       placeholder
     );
     search.hidden =
+      forceSearch !== true &&
       normalized.length <=
-      GRAPH_SEARCHABLE_LIST_THRESHOLD;
+        GRAPH_SEARCHABLE_LIST_THRESHOLD;
 
     const optionsHost =
       document.createElement("div");
@@ -27646,14 +28223,32 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     const choose = value => {
       const nextValue =
         String(value ?? "");
-
-      if (
-        !normalized.some(
+      const nextEntry =
+        normalized.find(
           entry =>
             entry.value === nextValue
+        );
+
+      if (!nextEntry) {
+        return;
+      }
+
+      if (
+        !Array.from(
+          select.options || []
+        ).some(option =>
+          option.value === nextValue
         )
       ) {
-        return;
+        const nativeOption =
+          document.createElement("option");
+        nativeOption.value =
+          nextEntry.value;
+        nativeOption.textContent =
+          nextEntry.text;
+        select.appendChild(
+          nativeOption
+        );
       }
 
       const changed =
@@ -27681,13 +28276,40 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           .toLowerCase();
       const value =
         selectedValue();
-      const matches = query
+      const allMatches = query
         ? normalized.filter(entry =>
             `${entry.text} ${entry.value}`
               .toLowerCase()
               .includes(query)
           )
         : normalized;
+      let matches = allMatches;
+
+      if (
+        allMatches.length >
+          GRAPH_SEARCHABLE_RENDER_LIMIT
+      ) {
+        matches = allMatches.slice(
+          0,
+          GRAPH_SEARCHABLE_RENDER_LIMIT
+        );
+        const selected =
+          allMatches.find(entry =>
+            entry.value === value
+          );
+
+        if (
+          selected &&
+          !matches.some(entry =>
+            entry.value ===
+              selected.value
+          )
+        ) {
+          matches[
+            matches.length - 1
+          ] = selected;
+        }
+      }
 
       optionsHost.replaceChildren();
       renderedButtons = [];
@@ -27820,6 +28442,21 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
         renderedButtons.push(option);
         optionsHost.appendChild(option);
+      }
+
+      if (
+        allMatches.length >
+          matches.length
+      ) {
+        const remaining =
+          document.createElement("div");
+        remaining.className =
+          "rml-graph-searchable-empty";
+        remaining.textContent =
+          `Showing ${matches.length.toLocaleString()} of ${allMatches.length.toLocaleString()} entries. Type to narrow the search.`;
+        optionsHost.appendChild(
+          remaining
+        );
       }
 
       positionPopup();
@@ -28194,6 +28831,485 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
   }
 
 
+  function compatibilityPortRole(
+    specification,
+    direction
+  ) {
+    const explicit =
+      String(
+        specification?.role ||
+        ""
+      ).trim();
+
+    if (explicit) {
+      return explicit;
+    }
+
+    const id =
+      String(
+        specification?.id ||
+        ""
+      ).trim();
+    const fixed = new Set([
+      "call",
+      "done",
+      "success",
+      "exception",
+      "target",
+      "result",
+      "value"
+    ]);
+
+    if (fixed.has(id)) {
+      return `${direction}:${id}`;
+    }
+
+    let match =
+      id.match(/^arg(\d+)$/);
+    if (match) {
+      return `parameter:${match[1]}:input`;
+    }
+
+    match = id.match(/^out(\d+)$/);
+    if (match) {
+      return `parameter:${match[1]}:output`;
+    }
+
+    match = id.match(/^generic(\d+)$/);
+    if (match) {
+      return `generic:${match[1]}:input`;
+    }
+
+    return `port:${id}:${direction}`;
+  }
+
+
+  function compatibilityContractPorts(
+    definition,
+    direction
+  ) {
+    const contract =
+      definition?.preservedApiContract ||
+      definition?.apiVerification ||
+      null;
+    const key =
+      direction === "input"
+        ? "inputPorts"
+        : "outputPorts";
+    const definitionPorts =
+      direction === "input"
+        ? definition?.inputs
+        : definition?.outputs;
+    const contractPorts =
+      Array.isArray(contract?.[key])
+        ? contract[key]
+        : [];
+    const byId = new Map(
+      contractPorts.map(port => [
+        String(port?.id || ""),
+        port
+      ])
+    );
+
+    return (
+      Array.isArray(definitionPorts)
+        ? definitionPorts
+        : []
+    ).map(port => {
+      const stored =
+        byId.get(
+          String(port?.id || "")
+        ) || {};
+
+      return {
+        ...port,
+        ...stored,
+        id: String(port?.id || stored?.id || ""),
+        type: String(port?.type || stored?.type || "object"),
+        role: compatibilityPortRole(
+          {
+            ...port,
+            ...stored
+          },
+          direction
+        ),
+        optional:
+          port?.optional === true ||
+          stored?.optional === true
+      };
+    });
+  }
+
+
+  function unavailableReplacementCandidates(
+    unavailableDefinition,
+    {
+      catalogGeneratedOnly = true,
+      requireResoniteCatalog = true,
+      candidateParameters = {}
+    } = {}
+  ) {
+    if (
+      unavailableDefinition?.unavailableApiContract !== true ||
+      (
+        requireResoniteCatalog &&
+        !window.RMLResoniteApiCatalog
+      )
+    ) {
+      return [];
+    }
+
+    const oldInputs =
+      compatibilityContractPorts(
+        unavailableDefinition,
+        "input"
+      );
+    const oldOutputs =
+      compatibilityContractPorts(
+        unavailableDefinition,
+        "output"
+      );
+    const candidates = [];
+
+    for (const [operatorId, candidate] of
+      Object.entries(
+        OPERATOR_DEFINITIONS
+      )) {
+      if (
+        (
+          catalogGeneratedOnly &&
+          candidate?.catalogGenerated !==
+            true
+        ) ||
+        candidate?.unavailableApiContract === true ||
+        candidate?.legacyCatalogAlias === true
+      ) {
+        continue;
+      }
+
+      const resolvedCandidate =
+        catalogGeneratedOnly
+          ? candidate
+          : resolveNodeDefinition({
+              kind: "operator",
+              operatorId,
+              parameters:
+                clone(
+                  candidateParameters ||
+                  {}
+                )
+            });
+
+      const candidateInputs =
+        compatibilityContractPorts(
+          resolvedCandidate,
+          "input"
+        );
+      const candidateOutputs =
+        compatibilityContractPorts(
+          resolvedCandidate,
+          "output"
+        );
+      const inputMap = {};
+      const outputMap = {};
+      const usedInputs = new Set();
+      const usedOutputs = new Set();
+
+      const matchPorts = (
+        oldPorts,
+        newPorts,
+        used,
+        target,
+        direction
+      ) => {
+        for (const oldPort of oldPorts) {
+          const matches =
+            newPorts.filter(newPort => {
+              if (
+                used.has(newPort.id) ||
+                newPort.role !== oldPort.role
+              ) {
+                return false;
+              }
+
+              return direction === "input"
+                ? connectionTypesCompatible(
+                    oldPort.type,
+                    newPort.type
+                  )
+                : connectionTypesCompatible(
+                    newPort.type,
+                    oldPort.type
+                  );
+            });
+
+          if (matches.length !== 1) {
+            return false;
+          }
+
+          used.add(matches[0].id);
+          target[oldPort.id] =
+            matches[0].id;
+        }
+
+        return true;
+      };
+
+      if (
+        !matchPorts(
+          oldInputs,
+          candidateInputs,
+          usedInputs,
+          inputMap,
+          "input"
+        ) ||
+        !matchPorts(
+          oldOutputs,
+          candidateOutputs,
+          usedOutputs,
+          outputMap,
+          "output"
+        ) ||
+        candidateInputs.some(port =>
+          !usedInputs.has(port.id) &&
+          port.optional !== true
+        )
+      ) {
+        continue;
+      }
+
+      candidates.push({
+        operatorId,
+        title:
+          String(
+            resolvedCandidate?.title ||
+            candidate.title ||
+            operatorId
+          ),
+        symbol:
+          String(
+            resolvedCandidate?.symbol ||
+            candidate.symbol ||
+            "API"
+          ),
+        group:
+          String(
+            resolvedCandidate?.group ||
+            candidate.group ||
+            "Resonite API"
+          ),
+        description:
+          String(
+            resolvedCandidate
+              ?.description ||
+            candidate.description || ""
+          ),
+        inputMap,
+        outputMap
+      });
+    }
+
+    return candidates.sort((left, right) =>
+      left.title.localeCompare(
+        right.title,
+        undefined,
+        { sensitivity: "base" }
+      )
+    );
+  }
+
+  function genericMissingCatalogDefinition(
+    requirement = {}
+  ) {
+    const contract =
+      requirement?.apiContract &&
+      typeof requirement.apiContract ===
+        "object" &&
+      !Array.isArray(
+        requirement.apiContract
+      )
+        ? clone(
+            requirement.apiContract
+          )
+        : {};
+    const buildPorts = direction => {
+      const key =
+        direction === "input"
+          ? "inputPorts"
+          : "outputPorts";
+      const referenced =
+        direction === "input"
+          ? requirement?.inputPorts
+          : requirement?.outputPorts;
+      const stored =
+        Array.isArray(contract[key])
+          ? contract[key]
+          : [];
+      const byId =
+        new Map(
+          stored
+            .filter(port =>
+              String(
+                port?.id || ""
+              )
+            )
+            .map(port => [
+              String(port.id),
+              clone(port)
+            ])
+        );
+
+      for (const value of
+        Array.isArray(referenced)
+          ? referenced
+          : []) {
+        const id = String(
+          value || ""
+        );
+        if (!id || byId.has(id)) {
+          continue;
+        }
+        const type =
+          [
+            "call",
+            "done",
+            "true",
+            "false",
+            "reset"
+          ].includes(id)
+            ? "impulse"
+            : id === "success"
+              ? "bool"
+              : id === "exception"
+                ? "exception"
+                : "object";
+        byId.set(id, {
+          id,
+          label: id,
+          type,
+          optional: false,
+          role:
+            compatibilityPortRole(
+              { id },
+              direction
+            )
+        });
+      }
+
+      return [...byId.values()]
+        .map(port => ({
+          ...port,
+          id:
+            String(port.id || ""),
+          type:
+            String(
+              port.type || "object"
+            ),
+          role:
+            String(
+              port.role ||
+              compatibilityPortRole(
+                port,
+                direction
+              )
+            )
+        }));
+    };
+    const inputs =
+      buildPorts("input");
+    const outputs =
+      buildPorts("output");
+
+    return {
+      unavailableApiContract: true,
+      preservedApiContract: {
+        ...contract,
+        inputPorts:
+          inputs.map(port => ({
+            ...port
+          })),
+        outputPorts:
+          outputs.map(port => ({
+            ...port
+          }))
+      },
+      inputs,
+      outputs
+    };
+  }
+
+  function compatibleImportReplacementCandidates(
+    requirement = {}
+  ) {
+    const operatorId = String(
+      requirement?.operatorId || ""
+    ).trim();
+    const allCatalogObjects =
+      requirement?.catalogScope ===
+        "all";
+    const controller =
+      window.RMLApiNodeFactoryController;
+    const unavailableOperatorId =
+      allCatalogObjects
+        ? ""
+        : controller
+            ?.ensureUnavailableOperator?.(
+              operatorId,
+              requirement?.apiContract,
+              requirement
+            ) || "";
+    const unavailableDefinition =
+      allCatalogObjects
+        ? genericMissingCatalogDefinition(
+            requirement
+          )
+        : OPERATOR_DEFINITIONS[
+            unavailableOperatorId
+          ];
+    const candidates =
+      unavailableReplacementCandidates(
+        unavailableDefinition,
+        {
+          catalogGeneratedOnly:
+            !allCatalogObjects,
+          requireResoniteCatalog:
+            !allCatalogObjects,
+          candidateParameters:
+            requirement
+              ?.nodeParameters || {}
+        }
+      ).map(candidate =>
+        Object.freeze({
+          operatorId:
+            candidate.operatorId,
+          title: candidate.title,
+          symbol: candidate.symbol,
+          group: candidate.group,
+          description:
+            candidate.description,
+          inputMap:
+            Object.freeze({
+              ...candidate.inputMap
+            }),
+          outputMap:
+            Object.freeze({
+              ...candidate.outputMap
+            })
+        })
+      );
+
+    return Object.freeze({
+      operatorId,
+      unavailableOperatorId:
+        String(
+          unavailableOperatorId || ""
+        ),
+      candidates:
+        Object.freeze(candidates)
+    });
+  }
+
+
   function nodeInspectorCard(node) {
     const definition =
       nodeDefinition(node);
@@ -28217,6 +29333,18 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       heading,
       description
     );
+
+    if (
+      definition?.unavailableApiContract === true
+    ) {
+      const notice =
+        document.createElement("p");
+      notice.className =
+        "rml-graph-unavailable-notice";
+      notice.textContent =
+        "This preserved node cannot execute with the current catalog. Replacement choices are intentionally available only before a JSON import is installed; this inspector never changes the node contract.";
+      card.appendChild(notice);
+    }
 
     if (
       definition?.displaysValue ||
@@ -28543,23 +29671,13 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         definition.customCSharpFile === true &&
         !customCSharpEditor
       ) {
-        const openButton = inspectorButton(
-          "Open Node Graph",
-          async () => {
-            openButton.disabled = true;
-            openButton.textContent = "Opening Node Graph…";
-            try {
-              await openCustomCSharpFileGraphSynced(node.id);
-            } finally {
-              if (openButton.isConnected) {
-                openButton.disabled = false;
-                openButton.textContent = "Open Node Graph";
-              }
-            }
-          },
-          "primary"
+        actions.appendChild(
+          inspectorButton(
+            "Open Node Graph",
+            () => openCustomCSharpFileGraphSynced(node.id),
+            "primary"
+          )
         );
-        actions.appendChild(openButton);
       }
       actions.appendChild(
         inspectorButton(
@@ -28583,7 +29701,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
     actions.appendChild(
       inspectorButton(
-        "Delete",
+        definition?.unavailableApiContract === true
+          ? "Discard unavailable node"
+          : "Delete",
         () => deleteGraphNode(node.id)
       )
     );
@@ -29114,6 +30234,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
       const update = () => {
         let value;
+        const dropdownChange =
+          kind === "bool" ||
+          kind === "select";
 
         if (kind === "bool") {
           value =
@@ -29178,25 +30301,38 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
               "warning"
             );
           }
-          renderGraphNodesAndWires();
         } else if (
           specification.affectsNode ===
-          true
+            true ||
+          dropdownChange
         ) {
           graphNodeDefinitionCache = new WeakMap();
           currentAnalysis = null;
-          renderGraphNodesAndWires();
-        }
-
-        if (specification.affectsPorts === true || specification.affectsNode === true) {
-          renderGraphInspector();
         }
 
         persistGraph(
           specification.commitImmediately ===
             true
         );
+
+        if (
+          specification.affectsPorts ===
+            true ||
+          specification.affectsNode ===
+            true ||
+          dropdownChange
+        ) {
+          renderGraphNodesAndWires();
+        }
+
         refreshDisplayValueNodes();
+
+        if (
+          dropdownChange &&
+          graph.selectedNodeId === node.id
+        ) {
+          renderGraphInspector();
+        }
       };
 
       control.addEventListener(
@@ -29206,6 +30342,31 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           : "input",
         update
       );
+
+      if (
+        definition.customCSharpFile === true &&
+        specification.key === "source" &&
+        !customCSharpEditor
+      ) {
+        const synchronizeSource = () => {
+          const pending = customCSharpSourceSyncTimers.get(node.id);
+          if (pending) window.clearTimeout(pending);
+          customCSharpSourceSyncTimers.delete(node.id);
+          void openCustomCSharpFileGraphSynced(node.id, {
+            openAfterSync: false,
+            quiet: true
+          });
+        };
+        control.addEventListener("input", () => {
+          const pending = customCSharpSourceSyncTimers.get(node.id);
+          if (pending) window.clearTimeout(pending);
+          customCSharpSourceSyncTimers.set(
+            node.id,
+            window.setTimeout(synchronizeSource, 450)
+          );
+        });
+        control.addEventListener("change", synchronizeSource);
+      }
 
       if (
         (kind === "bool" || kind === "select") &&
@@ -32987,12 +34148,23 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     return Boolean(
       value &&
       Array.isArray(value.nodes) &&
-      value.nodes.some(node =>
-        node?.kind === "operator" &&
-        String(
+      value.nodes.some(node => {
+        if (node?.kind !== "operator") {
+          return false;
+        }
+        const contract =
+          node.apiContract ||
+          OPERATOR_DEFINITIONS[
+            node.operatorId
+          ]?.preservedApiContract;
+        return String(
           node.operatorId || ""
-        ).startsWith("api.")
-      )
+        ).startsWith("api.") ||
+          Boolean(
+            String(contract?.ownerType || "").trim() &&
+            String(contract?.kind || "").trim()
+          );
+      })
     );
   }
 
@@ -35585,8 +36757,33 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
   Object.defineProperty(window, "RMLDynamicGraphHost", {
     value: Object.freeze({
-      version: 39,
+      version: 44,
       getState() { return graph; },
+      migrateLegacyOperatorsForImport(
+        graphDocument
+      ) {
+        return migrateLegacyOperatorsForImport(
+          graphDocument
+        );
+      },
+      compatibleImportReplacementCandidates(
+        requirement
+      ) {
+        return compatibleImportReplacementCandidates(
+          requirement
+        );
+      },
+      applyCatalogMigrationsPreservingGeometry(
+        graphDocument,
+        migrations,
+        portMigrations
+      ) {
+        return applyCatalogMigrationsPreservingGeometry(
+          graphDocument,
+          migrations,
+          portMigrations
+        );
+      },
       getRootState() {
         if (!customCSharpEditor) return graph;
         captureCustomCSharpEditorView();
