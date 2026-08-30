@@ -23,6 +23,10 @@ const ACTIVE_PAGE_STORAGE_KEY =
   `${ACTIVE_STORAGE_KEY}-active-page-v1`;
 const PROJECT_FORMAT = "rml-configuration-builder-project";
 const PROJECT_FORMAT_VERSION = 1;
+const SAVED_API_COMPOSITE_IMPORT_SCHEMA =
+  "rml-builder.saved-api-composites";
+const SAVED_API_COMPOSITE_IMPORT_MAX_BYTES =
+  32 * 1024 * 1024;
 const PROJECT_FILE_MAX_BYTES = 512 * 1024 * 1024;
 const PROJECT_TREE_MAX_DEPTH = 32;
 const PROJECT_TREE_MAX_ITEMS = 1000000;
@@ -36,7 +40,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "palette-parity-replacement-icons-20260830-v641";
+  "project-modal-only-composite-import-20260830-v645";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -744,21 +748,35 @@ let graphCodegenFingerprintValue = "";
 function largeGraphUsesBackgroundCodegen(
   extensionState
 ) {
+  const views =
+    projectRuntimeGraphViews(
+      extensionState
+    );
+  const nodeCount = views.reduce(
+    (total, view) =>
+      total +
+      (Array.isArray(view.graph.nodes)
+        ? view.graph.nodes.length
+        : 0),
+    0
+  );
+  const connectionCount = views.reduce(
+    (total, view) =>
+      total +
+      (Array.isArray(
+        view.graph.connections
+      )
+        ? view.graph.connections.length
+        : 0),
+    0
+  );
   return Boolean(
     extensionState &&
     (
-      (
-        Array.isArray(extensionState.nodes) &&
-        extensionState.nodes.length >
-          LARGE_GRAPH_BACKGROUND_CODEGEN_NODE_THRESHOLD
-      ) ||
-      (
-        Array.isArray(
-          extensionState.connections
-        ) &&
-        extensionState.connections.length >
-          LARGE_GRAPH_BACKGROUND_CODEGEN_CONNECTION_THRESHOLD
-      )
+      nodeCount >
+        LARGE_GRAPH_BACKGROUND_CODEGEN_NODE_THRESHOLD ||
+      connectionCount >
+        LARGE_GRAPH_BACKGROUND_CODEGEN_CONNECTION_THRESHOLD
     )
   );
 }
@@ -778,14 +796,20 @@ function largeGraphCodegenContentFingerprint(
 ) {
   const revision =
     Number(extensionState?.revision) || 0;
-  const nodes =
-    Array.isArray(extensionState?.nodes)
-      ? extensionState.nodes
-      : [];
-  const connections =
-    Array.isArray(extensionState?.connections)
-      ? extensionState.connections
-      : [];
+  const views =
+    projectRuntimeGraphViews(
+      extensionState
+    );
+  const nodes = views.flatMap(view =>
+    Array.isArray(view.graph.nodes)
+      ? view.graph.nodes
+      : []
+  );
+  const connections = views.flatMap(view =>
+    Array.isArray(view.graph.connections)
+      ? view.graph.connections
+      : []
+  );
 
   if (
     graphCodegenFingerprintSource ===
@@ -853,7 +877,27 @@ function largeGraphCodegenContentFingerprint(
     append(node?.label);
     append(
       JSON.stringify(
+        node?.apiContract || null
+      )
+    );
+    append(
+      JSON.stringify(
         node?.parameters || {}
+      )
+    );
+  }
+
+  for (const view of views) {
+    append(view.path);
+    const composite = view.graph;
+    append(
+      JSON.stringify(
+        composite?.boundaryPorts || []
+      )
+    );
+    append(
+      JSON.stringify(
+        composite?.branchRouting || {}
       )
     );
   }
@@ -890,13 +934,31 @@ function largeGraphCodegenKey(
     window.RMLFrooxComponentCatalog ||
     null;
 
+  const views =
+    projectRuntimeGraphViews(
+      extensionState
+    );
+  const totalNodes = views.reduce(
+    (total, view) =>
+      total +
+      (view.graph.nodes?.length || 0),
+    0
+  );
+  const totalConnections = views.reduce(
+    (total, view) =>
+      total +
+      (view.graph.connections?.length ||
+        0),
+    0
+  );
+
   return JSON.stringify({
     revision:
       Number(extensionState?.revision) || 0,
     nodes:
-      extensionState?.nodes?.length || 0,
+      totalNodes,
     connections:
-      extensionState?.connections?.length || 0,
+      totalConnections,
     content:
       largeGraphCodegenContentFingerprint(
         extensionState
@@ -991,7 +1053,7 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "graph_codegen_worker.js?v=54-palette-parity-v641",
+      "graph_codegen_worker.js?v=58-project-modal-only-composite-import-v645",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -7848,6 +7910,18 @@ function assertProjectDocumentEnvelope(
   }
 }
 
+function projectModalJsonDocumentKind(
+  source
+) {
+  return (
+    isPlainObject(source) &&
+    source.schema ===
+      SAVED_API_COMPOSITE_IMPORT_SCHEMA
+  )
+    ? "saved-api-composites"
+    : "project";
+}
+
 function parseProjectDocument(
   source
 ) {
@@ -8658,9 +8732,9 @@ async function parseProjectJsonFile(
   }
 }
 
-async function readProjectJsonFileSource(
+async function readJsonFileSource(
   file,
-  displayName = "JSON project"
+  displayName = "JSON document"
 ) {
   try {
     const response =
@@ -8668,9 +8742,6 @@ async function readProjectJsonFileSource(
         "parseFile",
         { file }
       );
-    assertProjectDocumentEnvelope(
-      response.value
-    );
     return response.value;
   } catch (error) {
     if (
@@ -8685,6 +8756,19 @@ async function readProjectJsonFileSource(
 
     throw error;
   }
+}
+
+async function readProjectJsonFileSource(
+  file,
+  displayName = "JSON project"
+) {
+  const source =
+    await readJsonFileSource(
+      file,
+      displayName
+    );
+  assertProjectDocumentEnvelope(source);
+  return source;
 }
 
 async function readExampleProjectDocument() {
@@ -22948,6 +23032,24 @@ function projectRuntimeGraphViews(
         `${path}/custom-csharp:${String(nestedOwnerId || "<unnamed>")}`
       );
     }
+
+    const apiComposites =
+      candidate.apiCompositeGraphs &&
+      typeof candidate.apiCompositeGraphs ===
+        "object" &&
+      !Array.isArray(
+        candidate.apiCompositeGraphs
+      )
+        ? candidate.apiCompositeGraphs
+        : {};
+    for (const [nestedOwnerId, compositeGraph] of
+      Object.entries(apiComposites)) {
+      append(
+        compositeGraph,
+        String(nestedOwnerId || ""),
+        `${path}/api-composite:${String(nestedOwnerId || "<unnamed>")}`
+      );
+    }
   };
 
   append(graph);
@@ -23297,6 +23399,179 @@ function validateProjectStructureForRepair(
         depth + 1
       );
     }
+
+    const apiComposites =
+      candidate.apiCompositeGraphs;
+    if (
+      apiComposites != null &&
+      (
+        typeof apiComposites !==
+          "object" ||
+        Array.isArray(apiComposites)
+      )
+    ) {
+      addIssue(
+        "invalid API Composite graph collection",
+        path
+      );
+      return;
+    }
+    for (const [ownerNodeId, compositeGraph] of
+      Object.entries(
+        apiComposites || {}
+      )) {
+      const owner = candidate.nodes.find(
+        node => node?.id === ownerNodeId
+      );
+      if (
+        !owner ||
+        owner.operatorId !==
+          "container.apiComposite"
+      ) {
+        addIssue(
+          "orphaned API Composite graphs",
+          `${path}:${ownerNodeId}`
+        );
+      }
+      const boundaries =
+        Array.isArray(
+          compositeGraph?.boundaryPorts
+        )
+          ? compositeGraph.boundaryPorts
+          : [];
+      const ownerBoundaries =
+        Array.isArray(
+          owner?.parameters
+            ?.boundaryPorts
+        )
+          ? owner.parameters.boundaryPorts
+          : [];
+      const boundaryIdentity = values =>
+        values.map(boundary => [
+          String(boundary?.id || ""),
+          String(
+            boundary?.direction || ""
+          ),
+          String(
+            boundary?.internalNodeId ||
+            ""
+          ),
+          String(
+            boundary?.internalPortId ||
+            ""
+          )
+        ]);
+      if (
+        JSON.stringify(
+          boundaryIdentity(boundaries)
+        ) !==
+        JSON.stringify(
+          boundaryIdentity(
+            ownerBoundaries
+          )
+        )
+      ) {
+        addIssue(
+          "divergent API Composite proxy contracts",
+          `${path}:${ownerNodeId}`
+        );
+      }
+      const internalNodeIds = new Set(
+        Array.isArray(compositeGraph?.nodes)
+          ? compositeGraph.nodes.map(node =>
+              String(node?.id || "")
+            )
+          : []
+      );
+      const proxyIds = new Set();
+      for (const boundary of boundaries) {
+        const proxyId = String(
+          boundary?.id || ""
+        );
+        if (
+          !proxyId ||
+          proxyIds.has(proxyId) ||
+          ![
+            "input",
+            "output"
+          ].includes(
+            boundary?.direction
+          ) ||
+          !internalNodeIds.has(
+            String(
+              boundary?.internalNodeId ||
+              ""
+            )
+          ) ||
+          !String(
+            boundary?.internalPortId ||
+            ""
+          )
+        ) {
+          addIssue(
+            "invalid API Composite boundary ports",
+            `${path}:${ownerNodeId}:${proxyId || "<unnamed>"}`
+          );
+        }
+        proxyIds.add(proxyId);
+      }
+      const combinedConnections = [
+        ...candidate.connections,
+        ...(
+          Array.isArray(
+            compositeGraph?.connections
+          )
+            ? compositeGraph.connections
+            : []
+        )
+      ];
+      const combinedById = new Map(
+        combinedConnections.map(
+          connection => [
+            String(
+              connection?.id || ""
+            ),
+            connection
+          ]
+        )
+      );
+      for (const [connectionId, branch] of
+        Object.entries(
+          compositeGraph?.branchRouting ||
+          {}
+        )) {
+        const parent = combinedById.get(
+          String(
+            branch?.connectionId || ""
+          )
+        );
+        const pointId = String(
+          branch?.pointId || ""
+        );
+        if (
+          !combinedById.has(connectionId) ||
+          !parent ||
+          !pointId ||
+          !(
+            Array.isArray(parent.points) &&
+            parent.points.some(point =>
+              String(point?.id || "") ===
+                pointId
+            )
+          )
+        ) {
+          addIssue(
+            "invalid API Composite branch routing",
+            `${path}:${ownerNodeId}:${connectionId}`
+          );
+        }
+      }
+      inspectGraph(
+        compositeGraph,
+        `${path}/api-composite:${ownerNodeId || "<unnamed>"}`,
+        depth + 1
+      );
+    }
   };
 
   inspectGraph(
@@ -23515,6 +23790,40 @@ function projectRequiredCatalogNodes(
               connection?.toPort || ""
             )
           );
+      }
+    }
+
+    for (const boundary of
+      Array.isArray(
+        view.graph.boundaryPorts
+      )
+        ? view.graph.boundaryPorts
+        : []) {
+      const operatorId =
+        operatorByNodeId.get(
+          String(
+            boundary?.internalNodeId ||
+            ""
+          )
+        );
+      const portId = String(
+        boundary?.internalPortId || ""
+      );
+      if (!operatorId || !portId) {
+        continue;
+      }
+      if (
+        boundary.direction === "input"
+      ) {
+        requirements
+          .get(operatorId)
+          ?.inputPorts.add(portId);
+      } else if (
+        boundary.direction === "output"
+      ) {
+        requirements
+          .get(operatorId)
+          ?.outputPorts.add(portId);
       }
     }
   }
@@ -24414,6 +24723,111 @@ async function ensureProjectRuntimePrerequisites(
   };
 }
 
+async function resolveSavedApiCompositeGraph(
+  graphDocument,
+  {
+    name = "Saved API Composite"
+  } = {}
+) {
+  if (
+    !graphDocument ||
+    typeof graphDocument !== "object" ||
+    Array.isArray(graphDocument) ||
+    !Array.isArray(graphDocument.nodes) ||
+    !Array.isArray(
+      graphDocument.connections
+    )
+  ) {
+    throw new TypeError(
+      "Saved API Composite catalog resolution requires a complete graph document."
+    );
+  }
+  const project = {
+    extensions: {
+      typedNodeGraph:
+        structuredClone(graphDocument)
+    }
+  };
+  const workSession = beginBuilderWork({
+    kicker:
+      "Saved API Composite compatibility",
+    title:
+      "Checking the current catalog contracts…",
+    message:
+      `Preparing '${String(name || "Saved API Composite")}' without changing the open project.`,
+    detail:
+      "The source fingerprint and cached catalog are checked first. Missing operator identities use the same explicit replacement dialog as project import.",
+    progress: 32,
+    timeout: 120000
+  });
+  try {
+    const result =
+      await ensureProjectRuntimePrerequisites(
+        project,
+        workSession,
+        { catalogOnly: true }
+      );
+    updateBuilderWork(
+      workSession,
+      {
+        kicker:
+          "Saved API Composite ready",
+        title:
+          "Catalog contracts verified…",
+        message:
+          "Every internal API node and exposed boundary port is compatible with the current catalog.",
+        detail:
+          "The open Runtime Graph has not been changed yet. The caller can now create an atomic instance with fresh identities.",
+        progress: 100
+      }
+    );
+    await paintBuilderUi();
+    finishBuilderWork(workSession);
+    return structuredClone(
+      result.graph ||
+      project.extensions.typedNodeGraph
+    );
+  } catch (error) {
+    finishBuilderWork(workSession);
+    const message = String(
+      error instanceof Error
+        ? error.message
+        : error
+    )
+      .replaceAll(
+        "The JSON was not loaded.",
+        "The Saved API Composite was not changed or inserted."
+      )
+      .replaceAll(
+        "project JSON",
+        "Saved API Composite JSON"
+      );
+    const resolvedError =
+      new Error(message);
+    resolvedError.code =
+      error?.code ||
+      "RML_SAVED_API_COMPOSITE_RESOLUTION_FAILED";
+    resolvedError.cancelSource =
+      error?.cancelSource;
+    throw resolvedError;
+  }
+}
+
+Object.defineProperty(
+  window,
+  "RMLSavedApiCompositeResolver",
+  {
+    value: Object.freeze({
+      version: 1,
+      resolveGraph:
+        resolveSavedApiCompositeGraph
+    }),
+    writable: false,
+    enumerable: true,
+    configurable: true
+  }
+);
+
 function assertImportedGraphDocumentIdentity(
   expectedGraph
 ) {
@@ -24434,6 +24848,12 @@ function assertRuntimeGraphViewsIdentity(
   const expectedViews =
     projectRuntimeGraphViews(
       expectedGraph
+    );
+  const exactCompositeGeometry =
+    expectedViews.some(view =>
+      view.path.includes(
+        "/api-composite:"
+      )
     );
   const actualViewsByPath = new Map(
     projectRuntimeGraphViews(
@@ -24506,6 +24926,76 @@ function assertRuntimeGraphViewsIdentity(
       failures.push(
         `${expectedView.path}: expected ${expectedNodes.length.toLocaleString("de-DE")}/${expectedConnections.length.toLocaleString("de-DE")}, stored ${actualNodes.length.toLocaleString("de-DE")}/${actualConnections.length.toLocaleString("de-DE")}; missing nodes ${missingNodeIds.slice(0, 6).join(", ") || "none"}; missing connections ${missingConnectionIds.slice(0, 6).join(", ") || "none"}`
       );
+    }
+    if (exactCompositeGeometry) {
+      const geometrySignature = value =>
+        JSON.stringify({
+          nodes: [...value.nodes]
+            .map(node => ({
+              id: String(node?.id || ""),
+              x: Number(node?.x),
+              y: Number(node?.y),
+              width:
+                node?.width == null
+                  ? null
+                  : Number(node.width),
+              height:
+                node?.height == null
+                  ? null
+                  : Number(node.height)
+            }))
+            .sort((left, right) =>
+              left.id.localeCompare(
+                right.id
+              )
+            ),
+          connections: [
+            ...value.connections
+          ]
+            .map(connection => ({
+              id: String(
+                connection?.id || ""
+              ),
+              fromNode: String(
+                connection?.fromNode ||
+                ""
+              ),
+              fromPort: String(
+                connection?.fromPort ||
+                ""
+              ),
+              toNode: String(
+                connection?.toNode || ""
+              ),
+              toPort: String(
+                connection?.toPort || ""
+              ),
+              points:
+                connection?.points || [],
+              branchFrom:
+                connection?.branchFrom ||
+                null
+            }))
+            .sort((left, right) =>
+              left.id.localeCompare(
+                right.id
+              )
+            ),
+          boundaryPorts:
+            value.boundaryPorts || [],
+          branchRouting:
+            value.branchRouting || {}
+        });
+      if (
+        geometrySignature(
+          expectedView.graph
+        ) !==
+        geometrySignature(actualView)
+      ) {
+        failures.push(
+          `${expectedView.path}: API Composite node placement, proxy mapping or stored wire routing changed`
+        );
+      }
     }
     actualViewsByPath.delete(
       expectedView.path
@@ -24701,6 +25191,25 @@ async function waitForImportedCodegen(
     projectApplicationEpoch
 ) {
   let contribution = null;
+  const graphViews =
+    projectRuntimeGraphViews(
+      expectedGraph
+    );
+  const expectedNodeCount =
+    graphViews.reduce(
+      (total, view) =>
+        total +
+        (view.graph.nodes?.length || 0),
+      0
+    );
+  const expectedConnectionCount =
+    graphViews.reduce(
+      (total, view) =>
+        total +
+        (view.graph.connections?.length ||
+          0),
+      0
+    );
 
   while (true) {
     contribution =
@@ -24720,7 +25229,7 @@ async function waitForImportedCodegen(
         message:
           "The background generator is building and validating every generated project file.",
         detail:
-          `${expectedGraph.nodes.length.toLocaleString("de-DE")} nodes · ${expectedGraph.connections.length.toLocaleString("de-DE")} connections`,
+          `${expectedNodeCount.toLocaleString("de-DE")} nodes · ${expectedConnectionCount.toLocaleString("de-DE")} connections including embedded graphs`,
         progress: 90
       }
     );
@@ -25617,6 +26126,7 @@ async function loadProjectJsonFile(
 
   const loadSession =
     ++activeProjectLoadSession;
+  let documentKind = "project";
 
   setProjectFileStatus(
     `Reading and validating ${file.name}…`
@@ -25643,7 +26153,7 @@ async function loadProjectJsonFile(
     await paintBuilderUi();
 
     const projectSource =
-      await readProjectJsonFileSource(
+      await readJsonFileSource(
         file,
         file.name
       );
@@ -25654,6 +26164,70 @@ async function loadProjectJsonFile(
     ) {
       return;
     }
+
+    documentKind =
+      projectModalJsonDocumentKind(
+        projectSource
+      );
+
+    if (
+      documentKind ===
+        "saved-api-composites"
+    ) {
+      setProjectLoadProgress(
+        true,
+        {
+          progress: 32,
+          stage:
+            "Saved API Composite JSON detected. Verifying its catalog contracts…"
+        }
+      );
+      closeProjectDialog();
+      setProjectLoadProgress(false);
+      await paintBuilderUi();
+
+      const host =
+        window.RMLDynamicGraphHost;
+      if (
+        file.size >
+          SAVED_API_COMPOSITE_IMPORT_MAX_BYTES
+      ) {
+        throw new Error(
+          "The Saved API Composite JSON is larger than 32 MiB."
+        );
+      }
+      if (
+        !host ||
+        typeof host.importSavedApiComposites !==
+          "function"
+      ) {
+        throw new Error(
+          "The Runtime Graph Composite library is not ready. Open the Runtime Graph once and retry the JSON import."
+        );
+      }
+
+      const imported =
+        await host.importSavedApiComposites(
+          projectSource
+        );
+      if (
+        loadSession !==
+          activeProjectLoadSession
+      ) {
+        return;
+      }
+
+      openProjectDialog();
+      setProjectFileStatus(
+        `Imported ${Number(imported?.length || 0).toLocaleString("de-DE")} Saved API Composite${imported?.length === 1 ? "" : "s"}. The open project was not changed.`,
+        "success"
+      );
+      return;
+    }
+
+    assertProjectDocumentEnvelope(
+      projectSource
+    );
 
     setProjectLoadProgress(
       true,
@@ -25794,7 +26368,10 @@ async function loadProjectJsonFile(
       );
     } else {
       console.warn(
-        "Could not load the builder project.",
+        documentKind ===
+          "saved-api-composites"
+          ? "Could not import the Saved API Composite JSON."
+          : "Could not load the builder project.",
         error
       );
     }
@@ -25807,7 +26384,7 @@ async function loadProjectJsonFile(
             error?.message ||
             "Project import cancelled."
           )
-        : `Could not load this project: ${
+        : `${documentKind === "saved-api-composites" ? "Could not import these Saved API Composites" : "Could not load this project"}: ${
             error instanceof Error
               ? error.message
               : "Invalid JSON file."

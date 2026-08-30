@@ -36,7 +36,7 @@
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=39-palette-parity-v641",
+    "api_nodes.js?v=43-project-modal-only-composite-import-v645",
     scriptUrl
   ).href;
 
