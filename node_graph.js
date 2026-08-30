@@ -1747,6 +1747,98 @@
     );
   }
 
+  function nodePaletteIconDescriptor(
+    definition = {}
+  ) {
+    const memberKind = String(
+      definition?.apiMemberKind || ""
+    );
+    const inputs = Array.isArray(
+      definition?.inputs
+    )
+      ? definition.inputs
+      : [];
+    const outputs = Array.isArray(
+      definition?.outputs
+    )
+      ? definition.outputs
+      : [];
+    const meaningfulPort = ports =>
+      ports.find(port => {
+        const type = String(
+          port?.type || ""
+        );
+        return (
+          type &&
+          type !== "impulse" &&
+          type !== "generic" &&
+          type !== "auto"
+        );
+      });
+    const semanticPort =
+      memberKind === "property-set" ||
+      memberKind === "field-set"
+        ? (
+            inputs.find(port =>
+              String(port?.id || "") ===
+                "value"
+            ) || meaningfulPort(inputs)
+          )
+        : meaningfulPort(outputs) ||
+          meaningfulPort(inputs);
+    const semanticType = String(
+      semanticPort?.type || ""
+    );
+    const semanticInformation =
+      semanticType
+        ? typeInfo(semanticType)
+        : null;
+    const customCSharp = Boolean(
+      definition?.customCSharpNode === true ||
+      definition?.customCSharpSyntaxNode === true ||
+      definition?.customCSharpSubgraphOnly === true ||
+      definition?.customCSharpCatalogNode === true
+    );
+    const expert =
+      definition?.expertOnly === true;
+    let symbol = String(
+      definition?.symbol || "?"
+    );
+
+    if (
+      memberKind === "enum"
+    ) {
+      symbol = "ENUM";
+    } else if (
+      memberKind === "type"
+    ) {
+      symbol = "TYPE";
+    }
+
+    const color =
+      customCSharp || expert
+        ? "#ffd181"
+        : memberKind &&
+            semanticInformation?.color
+          ? String(
+              semanticInformation.color
+            )
+          : "#8fdcff";
+
+    return Object.freeze({
+      symbol,
+      color,
+      tone:
+        customCSharp
+          ? "custom-csharp"
+          : expert
+            ? "expert"
+            : memberKind
+              ? `api-${memberKind}`
+              : "standard"
+    });
+  }
+
   const COLLECT_LIST_TYPE_PREFIX =
     "collectList:";
 
@@ -3291,7 +3383,7 @@
     }
     const worker = new Worker(
       new URL(
-        "graph_codegen_worker.js?v=53-atomic-project-epoch-v640",
+        "graph_codegen_worker.js?v=54-palette-parity-v641",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -15827,7 +15919,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       .rml-graph-palette-item.custom-csharp-node > span {
         border: 0;
         background: #0b1119;
-        color: #ffd181;
+        background: color-mix(in srgb, var(--rml-node-icon-color, #ffd181) 17%, #0b1119);
+        color: var(--rml-node-icon-color, #ffd181);
         box-shadow: none;
       }
 
@@ -15837,7 +15930,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       }
 
       .rml-graph-palette-item.expert > span {
-        color: #ffd181;
+        color: var(--rml-node-icon-color, #ffd181);
       }
 
       .rml-graph-palette-item:disabled {
@@ -15852,7 +15945,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         place-items: center;
         border-radius: 7px;
         background: #0b1119;
-        color: #8fdcff;
+        background: color-mix(in srgb, var(--rml-node-icon-color, #8fdcff) 17%, #0b1119);
+        color: var(--rml-node-icon-color, #8fdcff);
         font-family: Consolas, monospace;
         font-size: 10px;
         font-weight: 900;
@@ -16358,7 +16452,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         border: 1px solid rgba(102, 186, 235, 0.25);
         border-radius: 7px;
         background: #0c131b;
-        color: #9de0ff;
+        background: color-mix(in srgb, var(--rml-node-icon-color, #9de0ff) 17%, #0c131b);
+        color: var(--rml-node-icon-color, #9de0ff);
         font-family: Consolas, monospace;
         font-size: 10px;
         font-weight: 900;
@@ -19280,6 +19375,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     definition,
     isConfiguration = false
   ) {
+    const icon =
+      nodePaletteIconDescriptor(
+        definition
+      );
     const button =
       document.createElement(
         "button"
@@ -19322,7 +19421,13 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     const symbol =
       document.createElement("span");
     symbol.textContent =
-      definition.symbol;
+      icon.symbol;
+    symbol.dataset.iconTone =
+      icon.tone;
+    symbol.style.setProperty(
+      "--rml-node-icon-color",
+      icon.color
+    );
 
     const title =
       document.createElement("strong");
@@ -26026,6 +26131,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
   ) {
     const definition =
       nodeDefinition(node);
+    const paletteIcon =
+      nodePaletteIconDescriptor(
+        definition
+      );
     const hasSockets =
       definitionHasSockets(
         definition
@@ -26091,7 +26200,13 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     symbol.className =
       "rml-graph-node-symbol";
     symbol.textContent =
-      definition?.symbol || "?";
+      paletteIcon.symbol;
+    symbol.dataset.iconTone =
+      paletteIcon.tone;
+    symbol.style.setProperty(
+      "--rml-node-icon-color",
+      paletteIcon.color
+    );
 
     const title =
       document.createElement("div");
@@ -30553,6 +30668,11 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
               ?.description ||
             candidate.description || ""
           ),
+        paletteIcon:
+          nodePaletteIconDescriptor(
+            resolvedCandidate ||
+              candidate
+          ),
         inputMap,
         outputMap
       });
@@ -31222,6 +31342,11 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           resolvedCandidate?.description ||
           candidate?.description || ""
         ),
+        paletteIcon:
+          nodePaletteIconDescriptor(
+            resolvedCandidate ||
+              candidate
+          ),
         inputMap:
           inputMatch.mapping,
         outputMap:
@@ -31471,6 +31596,16 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           group: candidate.group,
           description:
             candidate.description,
+          paletteIcon:
+            Object.freeze({
+              ...(
+                candidate.paletteIcon ||
+                nodePaletteIconDescriptor({
+                  symbol:
+                    candidate.symbol
+                })
+              )
+            }),
           matchMode:
             String(
               candidate.matchMode ||
@@ -39066,10 +39201,33 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
   Object.defineProperty(window, "RMLDynamicGraphHost", {
     value: Object.freeze({
-      version: 52,
+      version: 53,
       getState() { return graph; },
       getProjectEpoch() {
         return builderProjectEpoch;
+      },
+      getNodePaletteIcon(
+        operatorId,
+        parameters = {}
+      ) {
+        const definition =
+          resolveNodeDefinition({
+            kind: "operator",
+            operatorId: String(
+              operatorId || ""
+            ),
+            parameters:
+              parameters &&
+              typeof parameters ===
+                "object"
+                ? clone(parameters)
+                : {}
+          });
+        return Object.freeze({
+          ...nodePaletteIconDescriptor(
+            definition
+          )
+        });
       },
       synchronizeProjectState(
         projectEpoch

@@ -1326,7 +1326,7 @@
       registerGeneratedNode(id, {
         title: `Type · ${displayTypeName(row)}`,
         group: groupForType(row, API_GROUPS.types),
-        symbol: "T",
+        symbol: "TYPE",
         description: `Exact System.Type constant for ${csType}.`,
         outputs: [port("value", "Type", "type")],
         codegenExpression() {
@@ -1380,7 +1380,7 @@
           { fullName: csType },
           API_GROUPS.types
         ),
-        symbol: "E",
+        symbol: "ENUM",
         description: `Typed constant for ${csType}.`,
         parameters: [{
           key: "value",

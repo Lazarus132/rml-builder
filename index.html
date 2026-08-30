@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta
       name="rml-builder-build"
-      content="atomic-project-epoch-transaction-20260830-v640">
+      content="palette-parity-replacement-icons-20260830-v641">
     <meta
       name="description"
       content="Build complete typed ResoniteModLoader projects visually with automatic dependencies; optional Raw C# tools remain an expert fallback.">
@@ -16,7 +16,7 @@
         "RMLBuilderBuildId",
         {
           value:
-            "atomic-project-epoch-transaction-20260830-v640",
+            "palette-parity-replacement-icons-20260830-v641",
           writable: false,
           enumerable: true,
           configurable: true
@@ -141,12 +141,13 @@
 
       .builder-work-replacement-item {
         display: grid;
-        grid-template-columns: 46px minmax(0, 1fr);
-        gap: 12px;
+        grid-template-columns: 38px minmax(0, 1fr);
+        gap: 10px;
         align-items: center;
         width: 100%;
-        min-height: 68px;
-        padding: 10px 12px;
+        height: 64px;
+        min-height: 64px;
+        padding: 7px 10px;
         border: 1px solid rgba(255, 255, 255, .12);
         border-radius: 10px;
         color: inherit;
@@ -171,30 +172,44 @@
       .builder-work-replacement-symbol {
         display: grid;
         place-items: center;
-        width: 44px;
-        height: 44px;
-        border-radius: 10px;
-        color: #f7fbff;
-        background: linear-gradient(145deg, rgba(116, 202, 255, .34), rgba(148, 102, 255, .28));
-        font-size: 12px;
-        font-weight: 800;
+        width: 34px;
+        height: 34px;
+        border: 1px solid rgba(143, 220, 255, .26);
+        border-color: color-mix(in srgb, var(--rml-node-icon-color, #8fdcff) 26%, transparent);
+        border-radius: 7px;
+        color: var(--rml-node-icon-color, #8fdcff);
+        background: #0b1119;
+        background: color-mix(in srgb, var(--rml-node-icon-color, #8fdcff) 17%, #0b1119);
+        font-family: Consolas, monospace;
+        font-size: 10px;
+        font-weight: 900;
         letter-spacing: .04em;
         overflow: hidden;
+        white-space: nowrap;
       }
 
       .builder-work-replacement-copy {
         display: grid;
-        gap: 3px;
+        gap: 2px;
         min-width: 0;
       }
 
       .builder-work-replacement-copy strong,
       .builder-work-replacement-copy small {
-        overflow-wrap: anywhere;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .builder-work-replacement-copy strong {
+        font-size: 14px;
+        line-height: 16px;
       }
 
       .builder-work-replacement-copy small {
         opacity: .76;
+        font-size: 10px;
+        line-height: 11px;
       }
 
       .builder-work-replacement-match {
@@ -838,11 +853,11 @@
     <script src="scroll_manager.js?v=31-hint-route-visibility-v258"></script>
     <script src="scroll_hierarchy.js?v=8"></script>
     <script src="csharp14_roslyn.js?v=4-normal-core-custom-csharp-v603"></script>
-    <script src="app.js?v=473-atomic-project-epoch-transaction-v640"></script>
-    <script src="catalog_loader.js?v=108-unified-csharp-reference-v639"></script>
+    <script src="app.js?v=474-palette-parity-replacement-icons-v641"></script>
+    <script src="catalog_loader.js?v=109-palette-parity-v641"></script>
     <script src="runtime_bridge.js?v=4-live-compatibility-v621"></script>
     <script src="graph_gpu_renderer.js?v=11-source-comment-cleanup-v603f20"></script>
-    <script src="node_graph.js?v=307-atomic-project-epoch-v640"></script>
+    <script src="node_graph.js?v=308-palette-parity-replacement-icons-v641"></script>
     <script src="dynamic_settings.js?v=24-inline-row-runtime-visibility-v178"></script>
 </body>
 </html>

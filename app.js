@@ -36,7 +36,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "atomic-project-epoch-transaction-20260830-v640";
+  "palette-parity-replacement-icons-20260830-v641";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -991,7 +991,7 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "graph_codegen_worker.js?v=53-atomic-project-epoch-v640",
+      "graph_codegen_worker.js?v=54-palette-parity-v641",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -22454,9 +22454,34 @@ async function requestBuilderReplacementChoice(
         document.createElement("span");
       symbol.className =
         "builder-work-replacement-symbol";
+      const paletteIcon =
+        candidate.paletteIcon &&
+        typeof candidate.paletteIcon ===
+          "object"
+          ? candidate.paletteIcon
+          : {
+              symbol:
+                candidate.symbol ||
+                "API",
+              color: "#8fdcff",
+              tone: "standard"
+            };
       symbol.textContent = String(
-        candidate.symbol || "API"
-      ).slice(0, 8);
+        paletteIcon.symbol ||
+        candidate.symbol ||
+        "API"
+      );
+      symbol.dataset.iconTone = String(
+        paletteIcon.tone ||
+        "standard"
+      );
+      symbol.style.setProperty(
+        "--rml-node-icon-color",
+        String(
+          paletteIcon.color ||
+          "#8fdcff"
+        )
+      );
 
       const copy =
         document.createElement("span");
@@ -22470,12 +22495,7 @@ async function requestBuilderReplacementChoice(
       const group =
         document.createElement("small");
       group.textContent =
-        candidate.group ||
-        "Resonite API";
-      const identity =
-        document.createElement("small");
-      identity.textContent =
-        candidate.operatorId;
+        `${candidate.group || "Resonite API"} · ${candidate.operatorId}`;
       const match =
         document.createElement("small");
       match.className =
@@ -22499,13 +22519,14 @@ async function requestBuilderReplacementChoice(
       copy.append(
         title,
         group,
-        identity,
         match
       );
       item.append(
         symbol,
         copy
       );
+      item.title =
+        `${candidate.title || candidate.operatorId}\n${candidate.group || "Resonite API"}\n${candidate.operatorId}\n${match.textContent}`;
       fragment.appendChild(item);
     }
 

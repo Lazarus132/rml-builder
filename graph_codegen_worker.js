@@ -194,7 +194,7 @@ async function ensureRuntime(catalog) {
       self.RMLResoniteApiCatalog;
 
     importScripts(
-      "node_graph.js?v=307-atomic-project-epoch-v640"
+      "node_graph.js?v=308-palette-parity-replacement-icons-v641"
     );
     importScripts(
       "mod_nodes.js?v=52-persistent-runtime-state-v622"
@@ -203,7 +203,7 @@ async function ensureRuntime(catalog) {
       "visual_csharp.js?v=30-unified-csharp-reference-v639"
     );
     importScripts(
-      "api_nodes.js?v=36-null-safe-api-read-v622"
+      "api_nodes.js?v=39-palette-parity-v641"
     );
 
     if (

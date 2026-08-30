@@ -36,7 +36,7 @@
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=38-deterministic-exact-contract-v637",
+    "api_nodes.js?v=39-palette-parity-v641",
     scriptUrl
   ).href;
 
