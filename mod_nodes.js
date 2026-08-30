@@ -2972,7 +2972,7 @@ private static void CreateGeneratedReversePatch(
   ) {
     const token = nodeToken(api);
     const field = `_${suffix}${token}`;
-    api.addRuntimeField(
+    api.addPersistentRuntimeField(
       `${api.node.id}.${suffix}`,
       field,
       csType,
@@ -4860,6 +4860,7 @@ private static T GraphUserMethodArgument<T>(int index)
       port("index", "Index", "int")
     ],
     codegenCollect(api) {
+      ensureStructuredFlowRuntime(api);
       addStatefulField(
         api,
         "loopIndex",
@@ -4872,9 +4873,10 @@ private static T GraphUserMethodArgument<T>(int index)
     },
     codegenAction(api) {
       const field = `_loopIndex${nodeToken(api)}`;
-      const body = api.emit("body");
+      const body =
+        api.inlineMethod(api.node.id, "body");
       const done = api.emit("completed");
-      return `for (${field} = 0; ${field} < Math.Max(0, ${api.input("count").code}); ${field}++)\n        {\n            ${body ? `${body}();` : "// No Body path."}\n        }${done ? `\n        ${done}();` : ""}`;
+      return `for (${field} = 0; ${field} < Math.Max(0, ${api.input("count").code}); ${field}++)\n        {\n            try\n            {\n                ${body ? `${body}();` : "// No Body path."}\n            }\n            catch (GraphContinueSignal)\n            {\n                continue;\n            }\n            catch (GraphBreakSignal)\n            {\n                break;\n            }\n        }${done ? `\n        ${done}();` : ""}`;
     }
   });
 
@@ -4912,6 +4914,7 @@ private static T GraphUserMethodArgument<T>(int index)
       }
     ],
     codegenCollect(api) {
+      ensureStructuredFlowRuntime(api);
       const itemSpec =
         api.definition.outputs.find(
           specification =>
@@ -5052,11 +5055,12 @@ private static T GraphCollectionItem<T>(object? value)
         `_forEachIndex${token}`;
       const rawItem =
         `_forEachRaw${token}`;
-      const body = api.emit("body");
+      const body =
+        api.inlineMethod(api.node.id, "body");
       const completed =
         api.emit("completed");
 
-      return `${indexField} = 0;\nforeach (object? ${rawItem} in GraphEnumerateCollection(${api.input("collection").code}))\n        {\n            ${itemField} = GraphCollectionItem<${itemCsType}>(${rawItem});\n            ${body ? `${body}();` : "// No Body path."}\n            ${indexField}++;\n        }${completed ? `\n        ${completed}();` : ""}`;
+      return `${indexField} = 0;\nforeach (object? ${rawItem} in GraphEnumerateCollection(${api.input("collection").code}))\n        {\n            ${itemField} = GraphCollectionItem<${itemCsType}>(${rawItem});\n            try\n            {\n                ${body ? `${body}();` : "// No Body path."}\n            }\n            catch (GraphContinueSignal)\n            {\n                ${indexField}++;\n                continue;\n            }\n            catch (GraphBreakSignal)\n            {\n                break;\n            }\n            ${indexField}++;\n        }${completed ? `\n        ${completed}();` : ""}`;
     },
     previewEvaluate({
       portId,

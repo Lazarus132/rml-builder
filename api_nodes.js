@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const FACTORY_VERSION = 19;
+  const FACTORY_VERSION = 20;
   const API_VERIFICATION_SCHEMA_VERSION = 2;
   const ADVANCED_GROUP = "Advanced / Raw C#";
   const UNAVAILABLE_GROUP = "Unavailable API";
@@ -2951,7 +2951,13 @@
         apiGenericArity: 0,
         apiSearchText: `${ownerCs} ${property.name} property get read ${valueCs}`,
         codegenExpression(api) {
-          return propertyAccessExpression(api, ownerCs, property, indexes);
+          return propertyReadExpression(
+            api,
+            ownerCs,
+            valueCs,
+            property,
+            indexes
+          );
         }
       };
     }
@@ -3066,10 +3072,17 @@
         apiGenericArity: 0,
         apiSearchText: `${ownerCs} ${field.name} field read get ${valueCs}`,
         codegenExpression(api) {
-          const host = field.isStatic
-            ? ownerCs
-            : `((${ownerCs})(${api.input("target").code}))`;
-          return `${host}.${escapeCSharpIdentifier(field.name)}`;
+          const access = host =>
+            `${host}.${escapeCSharpIdentifier(field.name)}`;
+
+          return field.isStatic
+            ? access(ownerCs)
+            : nullSafeInstanceReadExpression(
+                api,
+                ownerCs,
+                valueCs,
+                access
+              );
         }
       };
     }
@@ -3384,6 +3397,51 @@
         return `${host}[${indexValues.join(", ")}]`;
       }
       return `${host}.${escapeCSharpIdentifier(property.name)}`;
+    }
+
+    function nullSafeInstanceReadExpression(
+      api,
+      ownerCs,
+      valueCs,
+      memberAccess
+    ) {
+      const target =
+        api.input("target").code;
+      const local =
+        `_apiTarget${api.token(api.node.id)}`;
+
+      return `((${target}) is ${ownerCs} ${local} ? ${memberAccess(local)} : default(${valueCs})!)`;
+    }
+
+    function propertyReadExpression(
+      api,
+      ownerCs,
+      valueCs,
+      property,
+      indexes
+    ) {
+      const access = host => {
+        if (indexes.length > 0) {
+          const indexValues = indexes.map(
+            parameter =>
+              api.input(
+                `arg${parameter.position}`
+              ).code
+          );
+          return `${host}[${indexValues.join(", ")}]`;
+        }
+
+        return `${host}.${escapeCSharpIdentifier(property.name)}`;
+      };
+
+      return property.isStatic
+        ? access(ownerCs)
+        : nullSafeInstanceReadExpression(
+            api,
+            ownerCs,
+            valueCs,
+            access
+          );
     }
 
     function collectActionFields(api, descriptor) {

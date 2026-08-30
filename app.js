@@ -36,7 +36,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "universal-missing-catalog-preflight-20260830-v616";
+  "persistent-state-inline-iteration-20260830-v622";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -21971,7 +21971,7 @@ async function requestBuilderReplacementChoice(
   const sourceDescription =
     catalogResult?.live === true
       ? "current Live catalog"
-      : "verified cached fallback";
+      : "cached fallback";
 
   updateBuilderWork(
     workSession,
@@ -22761,11 +22761,11 @@ async function ensureProjectRuntimePrerequisites(
       workSession,
       {
         title:
-          "Checking the Live API catalog…",
+          "Checking the scanner's source fingerprint…",
         message:
-          `This project uses ${requiredCatalogNodes.length.toLocaleString("de-DE")} catalog operator${requiredCatalogNodes.length === 1 ? "" : "s"}. The current Live scanner catalog is being verified before any replacement is selected.`,
+          `This project uses ${requiredCatalogNodes.length.toLocaleString("de-DE")} catalog operator${requiredCatalogNodes.length === 1 ? "" : "s"}. The scanner fingerprint is being compared with the cache before any replacement is selected; scanner v1.7 uses the authoritative semantic contract, while older scanners remain available in compatibility mode.`,
         detail:
-          "The cached catalog is used only if the bounded Live request cannot be completed.",
+          "A matching source fingerprint reuses the Live-confirmed cache without downloading or rebuilding the catalog. A changed fingerprint downloads, verifies and replaces the cache exactly once.",
         progress: 44
       }
     );
@@ -22784,8 +22784,7 @@ async function ensureProjectRuntimePrerequisites(
       );
     } else try {
       catalogResult =
-        await promiseWithBuilderTimeout(
-          gate.ensureForImport({
+        await gate.ensureForImport({
           requiredNodes:
             requiredCatalogNodes,
           onLiveLookup() {
@@ -22793,11 +22792,11 @@ async function ensureProjectRuntimePrerequisites(
               workSession,
               {
                 title:
-                  "Checking Live replacement contracts…",
+                  "Comparing source and cached fingerprints…",
                 message:
-                  "The replacement resolver is querying the current scanner catalog and rebuilding its verified node factory when necessary.",
+                  "Only the scanner's small health response is checked first. The full catalog and API node factory are updated only if its source fingerprint changed.",
                 detail:
-                  "The current project remains unchanged until the Live result has been verified.",
+                  "The scanner fingerprint contract is validated before the current project is touched.",
                 progress: 48
               }
             );
@@ -22807,22 +22806,19 @@ async function ensureProjectRuntimePrerequisites(
               workSession,
               {
                 title:
-                  "Live unavailable · checking cached fallback…",
+                  "Live unavailable · activating cached fallback…",
                 message:
-                  "The bounded Live request failed. The last verified cached catalog is now being checked for the required replacement contracts.",
+                  "The single Live source-fingerprint check failed. The last available cached scanner catalog is being activated immediately.",
                 detail:
-                  "No cached replacement is used while a working Live catalog is available.",
+                  "No further Live retry delays this import.",
                 progress: 49
               }
             );
           }
-        }),
-          65000,
-          "The live Resonite API catalog did not become ready within 65 seconds."
-        );
+        });
     } catch (error) {
       throw new Error(
-        `The Live-first API catalog check failed: ${String(error?.message || error)} The JSON was not loaded.`
+        `The scanner source-fingerprint comparison and cached fallback failed: ${String(error?.message || error)} The JSON was not loaded.`
       );
     }
 
@@ -22879,7 +22875,7 @@ async function ensureProjectRuntimePrerequisites(
     if (unresolvedRequirements.length > 0) {
       if (catalogResult?.available !== true) {
         throw new Error(
-          "Neither the Live scanner nor its verified cached fallback could provide a usable API node factory. The JSON was not loaded."
+          "Neither the Live scanner nor its cached fallback could provide a usable API node factory. The JSON was not loaded."
         );
       }
 
@@ -22930,7 +22926,7 @@ async function ensureProjectRuntimePrerequisites(
 
         if (candidates.length === 0) {
           throw new Error(
-            `The ${catalogResult.live === true ? "current Live catalog" : "verified cached fallback"} has no node with a uniquely provable compatible port contract for '${operatorId}'. The JSON was not loaded.`
+            `The ${catalogResult.live === true ? "current Live catalog" : "cached fallback"} has no node with a uniquely provable compatible port contract for '${operatorId}'. The JSON was not loaded.`
           );
         }
 
@@ -23836,7 +23832,7 @@ async function applyLoadedProjectWithFeedback(
             ? `${Number(prerequisites.unresolvedNodeCount || 0).toLocaleString("de-DE")} unavailable node${Number(prerequisites.unresolvedNodeCount || 0) === 1 ? " was" : "s were"} preserved with all stored ports and connections. Search for a verified compatible replacement in each node's inspector. Export remains blocked only for affected execution paths.`
             : prerequisites.catalog
             ?.cacheSatisfied === true
-            ? "The bounded Live request could not be completed, so the verified cached fallback resolved the required contracts and confirmed replacements. The complete Runtime Graph model and generated sources are ready without opening its page."
+            ? "The single Live request could not be completed, so the cached fallback resolved the required contracts and confirmed replacements. The complete Runtime Graph model and generated sources are ready without opening its page."
             : prerequisites.graph
               ? "Catalog contracts, the complete Runtime Graph model, generated sources, dialogs and controls are all ready without requiring a page switch."
               : "Project data, dialogs and controls are all ready.",

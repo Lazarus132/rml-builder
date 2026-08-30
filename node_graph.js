@@ -10822,6 +10822,18 @@
 }`
         );
       },
+      addPersistentRuntimeField(
+        key,
+        fieldName,
+        csType,
+        defaultCode
+      ) {
+        addNamedBlock(
+          extensionFields,
+          key,
+`private static ${csType} ${fieldName} = ${defaultCode};`
+        );
+      },
       addMember(key, code) {
         addNamedBlock(
           extensionMembers,

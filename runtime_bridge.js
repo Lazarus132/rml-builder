@@ -9,6 +9,15 @@
   const PROBE_TIMEOUT_MS = 850;
   const SNAPSHOT_TIMEOUT_MS = 1600;
 
+  function isLiveScannerCatalogSource(
+    value
+  ) {
+    return (
+      value === "scanner" ||
+      value === "scanner-legacy"
+    );
+  }
+
   if (
     window.RMLRuntimeBridge?.version >=
     BRIDGE_VERSION
@@ -20,10 +29,14 @@
   let discoveredBaseUrl = "";
   let discoveryPromise = null;
   let discoveryEnabled =
-    window.RMLResoniteApiCatalog
-      ?.catalogSource === "scanner" ||
-    window.RMLFrooxComponentCatalog
-      ?.catalogSource === "scanner";
+    isLiveScannerCatalogSource(
+      window.RMLResoniteApiCatalog
+        ?.catalogSource
+    ) ||
+    isLiveScannerCatalogSource(
+      window.RMLFrooxComponentCatalog
+        ?.catalogSource
+    );
 
   function safeLocalStorageValue(key) {
     try {
@@ -50,10 +63,17 @@
   }
 
   function normalizeBaseUrl(value) {
+    const candidate =
+      String(value || "").trim();
+
+    if (!candidate) {
+      return "";
+    }
+
     try {
       const url =
         new URL(
-          value,
+          candidate,
           window.location.href
         );
 
@@ -1004,8 +1024,9 @@
         );
 
       const liveScanner =
-        event.detail?.catalogSource ===
-          "scanner";
+        isLiveScannerCatalogSource(
+          event.detail?.catalogSource
+        );
 
       if (base && liveScanner) {
         discoveryEnabled = true;
