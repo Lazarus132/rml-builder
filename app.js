@@ -36,7 +36,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "fast-irreparable-project-preflight-20260830-v634";
+  "replacement-cancellation-origin-guard-20260830-v638";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -22005,6 +22005,12 @@ function resetBuilderReplacementUi() {
   if (elements.builderWorkReplacementCancel) {
     elements.builderWorkReplacementCancel.onclick =
       null;
+    elements.builderWorkReplacementCancel.onpointerdown =
+      null;
+    elements.builderWorkReplacementCancel.onkeydown =
+      null;
+    elements.builderWorkReplacementCancel.onblur =
+      null;
   }
   if (elements.builderWorkReplacementConfirm) {
     elements.builderWorkReplacementConfirm.onclick =
@@ -22041,7 +22047,9 @@ async function requestBuilderReplacementChoice(
     total = 1,
     catalogResult = null,
     nodeLabels = [],
-    replacementQueue = []
+    replacementQueue = [],
+    initialOperatorId = "",
+    validationDiagnostics = []
   } = {}
 ) {
   if (
@@ -22116,6 +22124,14 @@ async function requestBuilderReplacementChoice(
     catalogResult?.live === true
       ? "current Live catalog"
       : "cached fallback";
+  const previousPlanDiagnostics =
+    (Array.isArray(validationDiagnostics)
+      ? validationDiagnostics
+      : [])
+      .map(value =>
+        String(value || "").trim()
+      )
+      .filter(Boolean);
 
   updateBuilderWork(
     workSession,
@@ -22125,9 +22141,13 @@ async function requestBuilderReplacementChoice(
       title:
         "Choose a replacement before import",
       message:
-        `'${nodeDescription}' uses an unavailable API contract. Choose one compatible node from the ${sourceDescription}; the project is installed only after every replacement is confirmed.`,
+        previousPlanDiagnostics.length > 0
+          ? `The previously selected replacement set is not type-safe. Review '${nodeDescription}' and explicitly confirm or change its replacement.`
+          : `'${nodeDescription}' uses an unavailable API contract. Choose one compatible node from the ${sourceDescription}; the project is installed only after every replacement is confirmed.`,
       detail:
-        `${values.length.toLocaleString("de-DE")} available replacement candidate${values.length === 1 ? "" : "s"} for ${operatorId}. The search is limited to this candidate set. Node positions and complete stored wire routes remain unchanged.`,
+        previousPlanDiagnostics.length > 0
+          ? `${previousPlanDiagnostics.slice(0, 3).join(" | ")}${previousPlanDiagnostics.length > 3 ? ` | and ${previousPlanDiagnostics.length - 3} more` : ""} No candidate is selected or changed automatically.`
+          : `${values.length.toLocaleString("de-DE")} available replacement candidate${values.length === 1 ? "" : "s"} for ${operatorId}. The search is limited to this candidate set. No candidate is selected automatically. Node positions and complete stored wire routes remain unchanged.`,
       progress:
         50 +
         Math.round(
@@ -22159,7 +22179,13 @@ async function requestBuilderReplacementChoice(
   elements.builderWorkReplacement.hidden =
     false;
   search.value = "";
-  let selectedOperatorId = "";
+  let selectedOperatorId =
+    values.some(candidate =>
+      candidate.operatorId ===
+        String(initialOperatorId || "")
+    )
+      ? String(initialOperatorId)
+      : "";
   let visibleCandidates = [];
 
   const renderReplacementQueue = () => {
@@ -22428,12 +22454,6 @@ async function requestBuilderReplacementChoice(
       )
     ) {
       selectedOperatorId = previous;
-    } else if (
-      visibleCandidates.length > 0
-    ) {
-      selectedOperatorId =
-        visibleCandidates[0]
-          .operatorId;
     } else {
       selectedOperatorId = "";
     }
@@ -22455,6 +22475,8 @@ async function requestBuilderReplacementChoice(
   const choice = new Promise(
     (resolve, reject) => {
       let settled = false;
+      let cancelPointerArmed = false;
+      let cancelKeyboardArmed = false;
       const finish = (
         callback,
         value
@@ -22485,17 +22507,23 @@ async function requestBuilderReplacementChoice(
           finish(resolve, selected);
         }
       };
-      const rejectImport = () =>
+      const rejectImport = source => {
+        const error = new Error(
+          `Project import was cancelled by the ${source} before the required API replacement was confirmed. The JSON was not loaded.`
+        );
+        error.code =
+          "RML_PROJECT_IMPORT_CANCELLED";
+        error.cancelSource = source;
         finish(
           reject,
-          new Error(
-            "Project import was cancelled before the required API replacement was confirmed. The JSON was not loaded."
-          )
+          error
         );
+      };
       const onKeyDown = event => {
         if (event.key === "Escape") {
           event.preventDefault();
-          rejectImport();
+          event.stopImmediatePropagation();
+          rejectImport("Escape key");
         }
       };
 
@@ -22538,13 +22566,10 @@ async function requestBuilderReplacementChoice(
         }
         event.preventDefault();
         const currentIndex =
-          Math.max(
-            0,
-            visibleCandidates.findIndex(
-              candidate =>
-                candidate.operatorId ===
-                  selectedOperatorId
-            )
+          visibleCandidates.findIndex(
+            candidate =>
+              candidate.operatorId ===
+                selectedOperatorId
           );
         const nextIndex =
           event.key === "Home"
@@ -22552,14 +22577,18 @@ async function requestBuilderReplacementChoice(
             : event.key === "End"
               ? visibleCandidates.length - 1
               : event.key === "ArrowDown"
-                ? Math.min(
-                    visibleCandidates.length - 1,
-                    currentIndex + 1
-                  )
-                : Math.max(
-                    0,
-                    currentIndex - 1
-                  );
+                ? currentIndex < 0
+                  ? 0
+                  : Math.min(
+                      visibleCandidates.length - 1,
+                      currentIndex + 1
+                    )
+                : currentIndex < 0
+                  ? visibleCandidates.length - 1
+                  : Math.max(
+                      0,
+                      currentIndex - 1
+                    );
         selectCandidate(
           visibleCandidates[nextIndex]
             .operatorId,
@@ -22570,7 +22599,47 @@ async function requestBuilderReplacementChoice(
         );
       };
       confirm.onclick = accept;
-      cancel.onclick = rejectImport;
+      cancel.onpointerdown = event => {
+        cancelPointerArmed =
+          event.isPrimary !== false &&
+          Number(event.button) === 0;
+      };
+      cancel.onkeydown = event => {
+        cancelKeyboardArmed =
+          event.key === "Enter" ||
+          event.key === " ";
+      };
+      cancel.onblur = () => {
+        cancelPointerArmed = false;
+        cancelKeyboardArmed = false;
+      };
+      cancel.onclick = event => {
+        const explicitlyActivated =
+          cancelPointerArmed ||
+          cancelKeyboardArmed ||
+          (
+            event.isTrusted === true &&
+            document.activeElement ===
+              cancel
+          );
+        cancelPointerArmed = false;
+        cancelKeyboardArmed = false;
+
+        if (!explicitlyActivated) {
+          updateBuilderWork(
+            workSession,
+            {
+              detail:
+                "An unconfirmed Cancel-button activation was ignored. Select a replacement, or activate Cancel import directly to stop loading."
+            }
+          );
+          return;
+        }
+
+        rejectImport(
+          "explicit Cancel import button"
+        );
+      };
       document.addEventListener(
         "keydown",
         onKeyDown,
@@ -23935,139 +24004,107 @@ async function ensureProjectRuntimePrerequisites(
         );
       }
 
-      updateBuilderWork(
-        workSession,
-        {
-          title:
-            "Proving complete replacement repairability…",
-          message:
-            `A single linear validation pass is testing the highest-ranked safe plan for all ${replacementQueue.length.toLocaleString("de-DE")} missing operator families.`,
-          detail:
-            "No C# is generated and no candidate combinations are searched. The temporary plan is rolled back before the first dialog.",
-          progress: 60
+      let selectedPlanDiagnostics = [];
+      let selectedPlanAccepted = false;
+
+      while (!selectedPlanAccepted) {
+        for (
+          let index = 0;
+          index < replacementQueue.length;
+          index += 1
+        ) {
+          const entry =
+            replacementQueue[index];
+          const {
+            requirement,
+            operatorId,
+            candidates,
+            nodeLabels
+          } = entry;
+
+          entry.status = "current";
+          const selected =
+            await requestBuilderReplacementChoice(
+              workSession,
+              {
+                requirement,
+                candidates,
+                index,
+                total:
+                  replacementQueue.length,
+                catalogResult,
+                nodeLabels,
+                replacementQueue,
+                initialOperatorId:
+                  entry.selectedOperatorId ||
+                  "",
+                validationDiagnostics:
+                  selectedPlanDiagnostics
+              }
+            );
+
+          manualMigrations[operatorId] =
+            selected.operatorId;
+          manualPortMigrations[operatorId] = {
+            input:
+              structuredClone(
+                selected.inputMap || {}
+              ),
+            output:
+              structuredClone(
+                selected.outputMap || {}
+              )
+          };
+          entry.status = "selected";
+          entry.selectedOperatorId =
+            selected.operatorId;
         }
-      );
-      await paintBuilderUi();
 
-      const proofMigrations = {};
-      const proofPortMigrations = {};
-      for (const entry of
-        replacementQueue) {
-        const candidate =
-          entry.candidates[0];
-        proofMigrations[
-          entry.operatorId
-        ] = candidate.operatorId;
-        proofPortMigrations[
-          entry.operatorId
-        ] = {
-          input:
-            structuredClone(
-              candidate.inputMap || {}
-            ),
-          output:
-            structuredClone(
-              candidate.outputMap || {}
-            )
-        };
-      }
-
-      const repairProof =
-        replacementTransaction(
-          graph,
-          proofMigrations,
-          proofPortMigrations
-        );
-      let repairProofDiagnostics = [];
-      try {
-        repairProof.assertGeometry();
-        repairProofDiagnostics =
-          validateRuntimeGraphViewsFast(
-            graph
+        const transaction =
+          replacementTransaction(
+            graph,
+            manualMigrations,
+            manualPortMigrations
           );
-      } finally {
-        repairProof.rollback();
-      }
-      if (
-        repairProofDiagnostics.length > 0
-      ) {
-        throw irreparableProjectJsonError(
-          "its best complete replacement plan still produces an invalid Runtime Graph. No replacement dialog was opened.",
-          repairProofDiagnostics
-        );
-      }
+        let geometryVerified = false;
+        try {
+          transaction.assertGeometry();
+          geometryVerified = true;
+          selectedPlanDiagnostics =
+            validateRuntimeGraphViewsFast(
+              graph
+            );
+          if (
+            selectedPlanDiagnostics.length ===
+              0
+          ) {
+            transaction.commit();
+            selectedPlanAccepted = true;
+          }
+        } finally {
+          if (!selectedPlanAccepted) {
+            transaction.rollback();
+          }
+        }
 
-      for (
-        let index = 0;
-        index < replacementQueue.length;
-        index += 1
-      ) {
-        const entry =
-          replacementQueue[index];
-        const {
-          requirement,
-          operatorId,
-          candidates,
-          nodeLabels
-        } = entry;
-
-        entry.status = "current";
-        const selected =
-          await requestBuilderReplacementChoice(
+        if (
+          geometryVerified &&
+          !selectedPlanAccepted
+        ) {
+          updateBuilderWork(
             workSession,
             {
-              requirement,
-              candidates,
-              index,
-              total:
-                replacementQueue.length,
-              catalogResult,
-              nodeLabels,
-              replacementQueue
+              title:
+                "Selected replacements need revision…",
+              message:
+                "The explicitly selected nodes do not form a type-safe complete Runtime Graph. Review the choices; nothing has been imported or changed automatically.",
+              detail:
+                `${selectedPlanDiagnostics.slice(0, 3).join(" | ")}${selectedPlanDiagnostics.length > 3 ? ` | and ${selectedPlanDiagnostics.length - 3} more` : ""}`,
+              progress: 61
             }
           );
-
-        manualMigrations[operatorId] =
-          selected.operatorId;
-        manualPortMigrations[operatorId] = {
-          input:
-            structuredClone(
-              selected.inputMap || {}
-            ),
-          output:
-            structuredClone(
-              selected.outputMap || {}
-            )
-        };
-        entry.status = "selected";
-        entry.selectedOperatorId =
-          selected.operatorId;
-      }
-
-      const transaction =
-        replacementTransaction(
-          graph,
-          manualMigrations,
-          manualPortMigrations
-        );
-      try {
-        transaction.assertGeometry();
-        const selectedPlanDiagnostics =
-          validateRuntimeGraphViewsFast(
-            graph
-          );
-        if (
-          selectedPlanDiagnostics.length > 0
-        ) {
-          throw irreparableProjectJsonError(
-            "the selected replacements do not form a valid complete Runtime Graph.",
-            selectedPlanDiagnostics
-          );
+          await paintBuilderUi();
         }
-        transaction.commit();
-      } catch (error) {
-        transaction.rollback();
-        throw error;
       }
 
       Object.assign(
@@ -25569,20 +25606,39 @@ async function loadProjectJsonFile(
       return;
     }
 
-    console.warn(
-      "Could not load the builder project.",
-      error
-    );
+    const importCancelled =
+      error?.code ===
+        "RML_PROJECT_IMPORT_CANCELLED";
+    if (importCancelled) {
+      console.info(
+        "Builder project import cancelled.",
+        {
+          source:
+            error.cancelSource ||
+            "explicit user action"
+        }
+      );
+    } else {
+      console.warn(
+        "Could not load the builder project.",
+        error
+      );
+    }
     if (!elements.projectDialog.open) {
       openProjectDialog();
     }
     setProjectFileStatus(
-      `Could not load this project: ${
-        error instanceof Error
-          ? error.message
-          : "Invalid JSON file."
-      }`,
-      "error"
+      importCancelled
+        ? String(
+            error?.message ||
+            "Project import cancelled."
+          )
+        : `Could not load this project: ${
+            error instanceof Error
+              ? error.message
+              : "Invalid JSON file."
+          }`,
+      importCancelled ? "" : "error"
     );
   } finally {
     if (

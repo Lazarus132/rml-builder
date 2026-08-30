@@ -36270,30 +36270,11 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     const report =
       window.RMLApiNodeFactoryReport ||
       null;
-    const catalogFingerprint = String(
-      catalog?.catalogFingerprint || ""
-    );
-    const reportFingerprint = String(
-      report?.catalogFingerprint || ""
-    );
-    const catalogSource = String(
-      catalog?.catalogSource || ""
-    );
-    const reportSource = String(
-      report?.catalogSource || ""
-    );
-    const factoryMatchesCatalog = Boolean(
-      report &&
-      (
-        !catalogFingerprint ||
-        catalogFingerprint ===
-          reportFingerprint
-      ) &&
-      (
-        !catalogSource ||
-        catalogSource === reportSource
-      )
-    );
+    const factoryMatchesCatalog =
+      catalogFactoryIdentityMatches(
+        catalog,
+        report
+      );
 
     return !graphUsesCatalogOperators(value) ||
       (
@@ -36302,6 +36283,40 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           value
         ).length === 0
       );
+  }
+
+  function catalogFactoryIdentityMatches(
+    catalog,
+    report
+  ) {
+    if (
+      !catalog ||
+      !report ||
+      report.verificationPassed !== true
+    ) {
+      return false;
+    }
+
+    const catalogFingerprint = String(
+      catalog.catalogFingerprint || ""
+    );
+    const reportFingerprint = String(
+      report.catalogFingerprint || ""
+    );
+    const catalogEngineVersion = String(
+      catalog.engineVersion || ""
+    );
+    const reportEngineVersion = String(
+      report.engineVersion || ""
+    );
+
+    return Boolean(
+      catalogFingerprint &&
+      catalogFingerprint ===
+        reportFingerprint &&
+      catalogEngineVersion ===
+        reportEngineVersion
+    );
   }
 
   function updateGraphCatalogReadiness(
@@ -38820,7 +38835,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
   Object.defineProperty(window, "RMLDynamicGraphHost", {
     value: Object.freeze({
-      version: 50,
+      version: 51,
       getState() { return graph; },
       migrateLegacyOperatorsForImport(
         graphDocument
@@ -38834,6 +38849,15 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       ) {
         return compatibleImportReplacementCandidates(
           requirement
+        );
+      },
+      catalogFactoryIdentityMatches(
+        catalog,
+        report
+      ) {
+        return catalogFactoryIdentityMatches(
+          catalog,
+          report
         );
       },
       getReplacementCandidateIndexStats() {

@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const LOADER_VERSION = 60;
+  const LOADER_VERSION = 61;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
   const CATALOG_PATH = "/resonite_api_catalog.json";
@@ -36,7 +36,7 @@
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=37-bounded-legacy-api-resolution-v632",
+    "api_nodes.js?v=38-deterministic-exact-contract-v637",
     scriptUrl
   ).href;
 

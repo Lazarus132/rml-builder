@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const FACTORY_VERSION = 21;
+  const FACTORY_VERSION = 22;
   const API_VERIFICATION_SCHEMA_VERSION = 2;
   const ADVANCED_GROUP = "Advanced / Raw C#";
   const UNAVAILABLE_GROUP = "Unavailable API";
@@ -102,6 +102,67 @@
     }))}`;
   }
 
+  function exactApiSemanticContractKey(contract) {
+    if (
+      !contract ||
+      typeof contract !== "object" ||
+      Array.isArray(contract)
+    ) {
+      return "";
+    }
+
+    const normalizeType = value =>
+      String(value || "System.Object")
+        .replace(/^global::/, "")
+        .replace(/\s+/g, "")
+        .replace(/&$/, "");
+    const ownerType = normalizeType(
+      contract.ownerType
+    );
+    const kind = String(
+      contract.kind || ""
+    ).trim();
+    if (!ownerType || !kind) {
+      return "";
+    }
+
+    return JSON.stringify({
+      kind,
+      ownerType,
+      memberName: String(
+        contract.memberName || ""
+      ),
+      parameters:
+        (Array.isArray(contract.parameters)
+          ? contract.parameters
+          : []).map((parameter, index) => ({
+          position: Math.max(
+            0,
+            Number(parameter?.position) || index
+          ),
+          type: normalizeType(parameter?.type),
+          isByRef:
+            parameter?.isByRef === true,
+          isOut:
+            parameter?.isOut === true,
+          isOptional:
+            parameter?.isOptional === true
+        })),
+      returnType: normalizeType(
+        contract.returnType ||
+        "System.Void"
+      ),
+      isStatic:
+        contract.isStatic === true,
+      genericArity: Math.max(
+        0,
+        Number(contract.genericArity) || 0
+      ),
+      runtimeBound:
+        contract.runtimeBound === true
+    });
+  }
+
   function registerUnavailableApiOperator(operatorId, apiContract, required = {}) {
     const id = String(operatorId || "").trim();
     const registry = window.RMLModNodeRegistry;
@@ -133,21 +194,22 @@
     if (existing && !hasApiContract) return id;
     if (existing?.catalogGenerated === true && existing.apiVerification) {
       const available = existing.apiVerification;
-      const sameStableContract =
-        Boolean(stableContractId(contract)) &&
-        stableContractId(contract) === stableContractId(available);
-      const sameSemanticMember =
-        String(contract.kind || "") === String(available.kind || "") &&
-        String(contract.ownerType || "").replace(/^global::/, "") ===
-          String(available.ownerType || "").replace(/^global::/, "") &&
-        String(contract.memberName || "") === String(available.memberName || "") &&
-        contract.isStatic === available.isStatic &&
-        Math.max(0, Number(contract.genericArity) || 0) ===
-          Math.max(0, Number(available.genericArity) || 0);
+      const sameExactContract =
+        Boolean(
+          exactApiSemanticContractKey(
+            contract
+          )
+        ) &&
+        exactApiSemanticContractKey(
+          contract
+        ) ===
+          exactApiSemanticContractKey(
+            available
+          );
       const existingInputIds = new Set((existing.inputs || []).map(port => String(port?.id || "")));
       const existingOutputIds = new Set((existing.outputs || []).map(port => String(port?.id || "")));
       if (
-        (sameStableContract || sameSemanticMember) &&
+        sameExactContract &&
         referencedInputs.every(portId => existingInputIds.has(portId)) &&
         referencedOutputs.every(portId => existingOutputIds.has(portId))
       ) {
@@ -1633,179 +1695,8 @@
         const portMigrations = {};
         const unresolvedDetails = {};
 
-        const normalizedContractType = value =>
-          normalizeCsType(
-            String(value || "")
-              .replace(/&$/, "")
-          );
-        const semanticContractKey = contract => {
-          if (
-            !contract ||
-            typeof contract !== "object" ||
-            Array.isArray(contract)
-          ) {
-            return "";
-          }
-
-          const ownerType =
-            normalizedContractType(
-              contract.ownerType
-            );
-          const kind = String(
-            contract.kind || ""
-          ).trim();
-
-          if (!ownerType || !kind) {
-            return "";
-          }
-
-          return JSON.stringify({
-            kind,
-            ownerType,
-            memberName: String(
-              contract.memberName || ""
-            ),
-            parameters:
-              (Array.isArray(contract.parameters)
-                ? contract.parameters
-                : []).map((parameter, index) => ({
-                  position: Math.max(
-                    0,
-                    Number(parameter?.position) || index
-                  ),
-                  type: normalizedContractType(
-                    parameter?.type
-                  ),
-                  isByRef:
-                    parameter?.isByRef === true,
-                  isOut:
-                    parameter?.isOut === true
-                })),
-            returnType:
-              normalizedContractType(
-                contract.returnType ||
-                "System.Void"
-              ),
-            isStatic:
-              contract.isStatic === true,
-            genericArity: Math.max(
-              0,
-              Number(contract.genericArity) || 0
-            )
-          });
-        };
-        const semanticMemberKey = contract => {
-          if (
-            !contract ||
-            typeof contract !== "object" ||
-            Array.isArray(contract)
-          ) {
-            return "";
-          }
-
-          const ownerType =
-            normalizedContractType(
-              contract.ownerType
-            );
-          const kind = String(
-            contract.kind || ""
-          ).trim();
-
-          if (!ownerType || !kind) {
-            return "";
-          }
-
-          return JSON.stringify({
-            kind,
-            ownerType,
-            memberName: String(
-              contract.memberName || ""
-            ),
-            returnType:
-              normalizedContractType(
-                contract.returnType ||
-                "System.Void"
-              ),
-            isStatic:
-              contract.isStatic === true,
-            genericArity: Math.max(
-              0,
-              Number(contract.genericArity) || 0
-            )
-          });
-        };
-        const semanticParameters = contract =>
-          (Array.isArray(contract?.parameters)
-            ? contract.parameters
-            : []).map((parameter, index) => ({
-              position: Math.max(
-                0,
-                Number(parameter?.position) || index
-              ),
-              type: normalizedContractType(
-                parameter?.type
-              ),
-              isByRef:
-                parameter?.isByRef === true,
-              isOut:
-                parameter?.isOut === true,
-              isOptional:
-                parameter?.isOptional === true
-            }));
-        const semanticContractsCompatible = (
-          required,
-          available
-        ) => {
-          if (
-            !semanticMemberKey(required) ||
-            semanticMemberKey(required) !==
-              semanticMemberKey(available)
-          ) {
-            return false;
-          }
-
-          const requiredParameters =
-            semanticParameters(required);
-          const availableParameters =
-            semanticParameters(available);
-
-          if (
-            requiredParameters.length >
-            availableParameters.length
-          ) {
-            return false;
-          }
-
-          for (
-            let index = 0;
-            index < requiredParameters.length;
-            index += 1
-          ) {
-            const requiredParameter =
-              requiredParameters[index];
-            const availableParameter =
-              availableParameters[index];
-
-            if (
-              requiredParameter.position !==
-                availableParameter.position ||
-              requiredParameter.type !==
-                availableParameter.type ||
-              requiredParameter.isByRef !==
-                availableParameter.isByRef ||
-              requiredParameter.isOut !==
-                availableParameter.isOut
-            ) {
-              return false;
-            }
-          }
-
-          return availableParameters
-            .slice(requiredParameters.length)
-            .every(parameter =>
-              parameter.isOptional === true
-            );
-        };
+        const semanticContractKey =
+          exactApiSemanticContractKey;
         const portRows = (contract, direction) => {
           const key = direction === "input" ? "inputPorts" : "outputPorts";
           return (Array.isArray(contract?.[key]) ? contract[key] : []).map(port => ({
@@ -1847,8 +1738,6 @@
           return result;
         };
         const semanticIndex = new Map();
-        const semanticMemberIndex = new Map();
-        const stableContractIndex = new Map();
 
         for (const [id, definition] of
           Object.entries(definitions)) {
@@ -1867,21 +1756,6 @@
             semanticIndex.set(key, []);
           }
           semanticIndex.get(key).push(id);
-
-          const memberKey = semanticMemberKey(
-            definition.apiVerification
-          );
-          if (memberKey) {
-            if (!semanticMemberIndex.has(memberKey)) {
-              semanticMemberIndex.set(memberKey, []);
-            }
-            semanticMemberIndex.get(memberKey).push(id);
-          }
-          const stableId = stableContractId(definition.apiVerification);
-          if (stableId) {
-            if (!stableContractIndex.has(stableId)) stableContractIndex.set(stableId, []);
-            stableContractIndex.get(stableId).push(id);
-          }
         }
 
         const normalizedLegacyName = value =>
@@ -2082,34 +1956,8 @@
           const exactCandidates = key
             ? semanticIndex.get(key) || []
             : [];
-          const memberKey = semanticMemberKey(
-            requiredContract
-          );
-          const stableId = stableContractId(requiredContract);
-          const stableCandidates = stableId
-            ? stableContractIndex.get(stableId) || []
-            : [];
           const candidates =
-            exactCandidates.length > 0
-              ? exactCandidates
-              : stableCandidates.length > 0
-                ? stableCandidates.filter(candidateId =>
-                    semanticContractsCompatible(
-                      requiredContract,
-                      definitions[candidateId]?.apiVerification
-                    )
-                  )
-              : (memberKey
-                  ? semanticMemberIndex.get(
-                      memberKey
-                    ) || []
-                  : []).filter(candidateId =>
-                    semanticContractsCompatible(
-                      requiredContract,
-                      definitions[candidateId]
-                        ?.apiVerification
-                    )
-                  );
+            exactCandidates;
           const inputPorts = new Set(
             Array.isArray(requirement?.inputPorts)
               ? requirement.inputPorts.map(String)
@@ -2155,11 +2003,11 @@
           } else if (candidates.length > 0) {
             unresolvedDetails[oldId] =
               compatible.length > 1
-                ? `semantic contract is ambiguous (${compatible.length} candidates)`
-                : "semantic member exists but its referenced port contract changed";
+                ? `exact semantic contract is ambiguous (${compatible.length} candidates)`
+                : "exact semantic contract exists but its referenced port contract changed";
           } else if (key) {
             unresolvedDetails[oldId] =
-              "no structurally identical API member exists in the current catalog";
+              "no exactly identical API contract exists in the current catalog; explicit replacement selection is required";
           }
         }
 
