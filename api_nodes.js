@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const FACTORY_VERSION = 20;
+  const FACTORY_VERSION = 21;
   const API_VERIFICATION_SCHEMA_VERSION = 2;
   const ADVANCED_GROUP = "Advanced / Raw C#";
   const UNAVAILABLE_GROUP = "Unavailable API";
@@ -472,7 +472,31 @@
     }
   );
 
+  let lastCooperativeYieldAt = 0;
+
   function yieldToBrowser() {
+    const now =
+      typeof window.performance?.now ===
+        "function"
+        ? window.performance.now()
+        : Date.now();
+
+    if (
+      lastCooperativeYieldAt > 0 &&
+      now - lastCooperativeYieldAt < 16
+    ) {
+      return Promise.resolve();
+    }
+
+    lastCooperativeYieldAt = now;
+    if (
+      window.scheduler &&
+      typeof window.scheduler.yield ===
+        "function"
+    ) {
+      return window.scheduler.yield();
+    }
+
     return new Promise(resolve => {
       if (
         typeof requestAnimationFrame ===
@@ -482,7 +506,7 @@
           resolve()
         );
       } else {
-        queueMicrotask(resolve);
+        window.setTimeout(resolve, 0);
       }
     });
   }
@@ -1860,6 +1884,180 @@
           }
         }
 
+        const normalizedLegacyName = value =>
+          String(value || "")
+            .trim()
+            .replace(
+              /^api\s*[·:|\-]\s*/i,
+              ""
+            )
+            .replace(
+              /^(?:get|set|new|construct)\s*[·:|\-]\s*/i,
+              ""
+            )
+            .replace(/\s+/g, "")
+            .toLocaleLowerCase();
+        const requirementById =
+          new Map(
+            requirements.map(requirement => [
+              String(
+                typeof requirement === "string"
+                  ? requirement
+                  : requirement?.operatorId || ""
+              ).trim(),
+              requirement
+            ])
+          );
+        const entryNames = entry => {
+          const definition =
+            definitions[
+              entry.canonicalId
+            ];
+          const owner = shortTypeName(
+            definition?.catalogType || ""
+          );
+          const member = String(
+            definition?.catalogMember || ""
+          ).trim();
+          return new Set(
+            [
+              definition?.title,
+              owner && member
+                ? `${owner}.${member}`
+                : ""
+            ]
+              .map(normalizedLegacyName)
+              .filter(Boolean)
+          );
+        };
+        const legacyPrefixes = [
+          ...new Set(
+            legacyAliasEntries.map(
+              entry => entry.prefix
+            )
+          )
+        ].sort((left, right) =>
+          right.length - left.length
+        );
+        const legacyEntryHintIndex =
+          new Map();
+        for (const entry of
+          legacyAliasEntries) {
+          for (const name of
+            entryNames(entry)) {
+            const key =
+              `${entry.prefix}|${name}`;
+            if (
+              !legacyEntryHintIndex.has(
+                key
+              )
+            ) {
+              legacyEntryHintIndex.set(
+                key,
+                []
+              );
+            }
+            legacyEntryHintIndex
+              .get(key)
+              .push(entry);
+          }
+        }
+        const hintedLegacyEntriesById =
+          new Map();
+        const exactReferencedPortsExist =
+          (oldId, entry) => {
+            const requirement =
+              requirementById.get(oldId);
+            const definition =
+              definitions[
+                entry.canonicalId
+              ];
+            if (!definition) {
+              return false;
+            }
+            const inputs = new Set(
+              (Array.isArray(
+                definition.inputs
+              )
+                ? definition.inputs
+                : []).map(port =>
+                  String(port?.id || "")
+                )
+            );
+            const outputs = new Set(
+              (Array.isArray(
+                definition.outputs
+              )
+                ? definition.outputs
+                : []).map(port =>
+                  String(port?.id || "")
+                )
+            );
+            return (
+              (Array.isArray(
+                requirement?.inputPorts
+              )
+                ? requirement.inputPorts
+                : []
+              ).every(portId =>
+                inputs.has(String(portId))
+              ) &&
+              (Array.isArray(
+                requirement?.outputPorts
+              )
+                ? requirement.outputPorts
+                : []
+              ).every(portId =>
+                outputs.has(String(portId))
+              )
+            );
+          };
+
+        for (const oldId of requiredIds) {
+          const requirement =
+            requirementById.get(oldId);
+          const labels =
+            typeof requirement === "string"
+              ? []
+              : Array.isArray(
+                    requirement?.nodeLabels
+                  )
+                ? requirement.nodeLabels
+                : [];
+          const hints = new Set(
+            labels
+              .map(normalizedLegacyName)
+              .filter(Boolean)
+          );
+          const prefix =
+            legacyPrefixes.find(value =>
+              oldId.startsWith(
+                value
+              )
+            ) || "";
+
+          if (!prefix || hints.size === 0) {
+            hintedLegacyEntriesById.set(
+              oldId,
+              []
+            );
+            continue;
+          }
+
+          hintedLegacyEntriesById.set(
+            oldId,
+            [
+              ...new Set(
+                [...hints].flatMap(hint =>
+                  legacyEntryHintIndex.get(
+                    `${prefix}|${hint}`
+                  ) || []
+                )
+              )
+            ]
+          );
+        }
+
         for (const requirement of
           requirements) {
           const oldId = String(
@@ -1979,17 +2177,30 @@
             break;
           }
 
+          const candidateEntries = [
+            ...new Set(
+              [...requiredIds].flatMap(id =>
+                hintedLegacyEntriesById.get(
+                  id
+                ) || []
+              )
+            )
+          ];
+
           for (const entry of
-            legacyAliasEntries) {
+            candidateEntries) {
             if (requiredIds.size === 0) {
               break;
             }
 
-            const relevant =
-              [...requiredIds].some(id =>
-                id.startsWith(entry.prefix)
+            const relevantIds =
+              [...requiredIds].filter(id =>
+                (
+                  hintedLegacyEntriesById
+                    .get(id) || []
+                ).includes(entry)
               );
-            if (!relevant) {
+            if (relevantIds.length === 0) {
               continue;
             }
 
@@ -2015,7 +2226,11 @@
               attempts += 1;
 
               if (
-                requiredIds.has(legacyId) &&
+                relevantIds.includes(legacyId) &&
+                exactReferencedPortsExist(
+                  legacyId,
+                  entry
+                ) &&
                 registerLegacyAlias(
                   legacyId,
                   entry
@@ -2029,6 +2244,13 @@
                   definitions[legacyId]
                     ?.canonicalOperatorId ||
                   legacyId;
+                if (
+                  relevantIds.every(id =>
+                    !requiredIds.has(id)
+                  )
+                ) {
+                  break;
+                }
               }
 
               if (attempts % 4096 === 0) {
@@ -2044,6 +2266,18 @@
 
           if (requiredIds.size > 0) {
             await yieldToBrowser();
+          }
+        }
+
+        for (const oldId of requiredIds) {
+          if (!unresolvedDetails[oldId]) {
+            unresolvedDetails[oldId] =
+              (
+                hintedLegacyEntriesById
+                  .get(oldId) || []
+              ).length > 0
+                ? "the exact legacy name was found, but its historical hash identity or referenced port contract did not match"
+                : "no portable API contract or exact stored API node name is available; manual catalog replacement is required";
           }
         }
 

@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const LOADER_VERSION = 57;
+  const LOADER_VERSION = 60;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
   const CATALOG_PATH = "/resonite_api_catalog.json";
@@ -10,8 +10,8 @@
     "/rml-scanner-status";
   const BUILDER_SCANNER_CATALOG_PATH =
     "/rml-scanner-catalog";
-  const BUILDER_PROBE_TIMEOUT_MS = 6000;
-  const CATALOG_FETCH_TIMEOUT_MS = 45000;
+  const BUILDER_PROBE_TIMEOUT_MS = 0;
+  const CATALOG_FETCH_TIMEOUT_MS = 0;
   const CACHE_DATABASE_NAME =
     "rml-resonite-api-catalog";
   const CACHE_DATABASE_VERSION = 1;
@@ -36,7 +36,7 @@
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=36-null-safe-api-read-v622",
+    "api_nodes.js?v=37-bounded-legacy-api-resolution-v632",
     scriptUrl
   ).href;
 
@@ -618,11 +618,44 @@
       window.RMLResoniteApiCatalog ||
       window.RMLFrooxComponentCatalog ||
       null;
+    const semanticIdentityMatches =
+      Boolean(
+        previous &&
+        catalogIdentity(previous) &&
+        catalogIdentity(previous) ===
+          catalogIdentity(catalog) &&
+        String(
+          previous.engineVersion || ""
+        ) ===
+          String(
+            catalog?.engineVersion || ""
+          )
+      );
     const compatibility = previous
-      ? compareApiCatalogs(
-          previous,
-          catalog
-        )
+      ? semanticIdentityMatches
+        ? Object.freeze({
+            compatible: true,
+            reusedFingerprint: true,
+            previousEngineVersion:
+              String(
+                previous.engineVersion ||
+                "unknown"
+              ),
+            currentEngineVersion:
+              String(
+                catalog?.engineVersion ||
+                "unknown"
+              ),
+            beforeCount: 0,
+            afterCount: 0,
+            added: Object.freeze([]),
+            removed: Object.freeze([]),
+            changed: Object.freeze([])
+          })
+        : compareApiCatalogs(
+            previous,
+            catalog
+          )
       : null;
 
     Object.defineProperty(
@@ -998,10 +1031,12 @@
     const controller =
       new AbortController();
     const timeout =
-      window.setTimeout(
-        () => controller.abort(),
-        timeoutMs
-      );
+      Number(timeoutMs) > 0
+        ? window.setTimeout(
+            () => controller.abort(),
+            Number(timeoutMs)
+          )
+        : 0;
 
     try {
       const response = await fetch(
@@ -1051,7 +1086,9 @@
 
       return value;
     } finally {
-      window.clearTimeout(timeout);
+      if (timeout) {
+        window.clearTimeout(timeout);
+      }
     }
   }
 
@@ -1225,26 +1262,36 @@
       return null;
     }
 
-    for (const url of urls) {
-      try {
-        return await probeDirectScannerUrl(
-          url,
-          BUILDER_PROBE_TIMEOUT_MS
-        );
-      } catch (error) {
-        if (
-          error?.rmlScannerEndpointReached ===
-            true
-        ) {
-          throw error;
-        }
+    try {
+      return await Promise.any(
+        urls.map(url =>
+          probeDirectScannerUrl(
+            url,
+            BUILDER_PROBE_TIMEOUT_MS
+          )
+        )
+      );
+    } catch (aggregate) {
+      const errors =
+        Array.isArray(aggregate?.errors)
+          ? aggregate.errors
+          : [];
+      const reached = errors.find(
+        error =>
+          error
+            ?.rmlScannerEndpointReached ===
+              true
+      );
+      if (reached) {
+        throw reached;
       }
+      return null;
     }
-
-    return null;
   }
 
-  async function probeBuilderScannerBridge() {
+  async function probeBuilderScannerBridge(
+    timeoutMs = BUILDER_PROBE_TIMEOUT_MS
+  ) {
     const statusUrl = builderBridgeUrl(
       BUILDER_SCANNER_STATUS_PATH
     );
@@ -1255,7 +1302,7 @@
 
     const status = await fetchJson(
       statusUrl,
-      BUILDER_PROBE_TIMEOUT_MS
+      timeoutMs
     );
     const scannerPort = Number(
       status.port
@@ -1317,49 +1364,11 @@
       };
     }
 
-    // Compatibility with an older local Builder bridge: it cannot expose the
-    // scanner's small health contract, so the proxied catalog is requested once.
-    const bridgeRaw = await fetchJson(
-      catalogBridgeUrl,
-      CATALOG_FETCH_TIMEOUT_MS
+    const error = new Error(
+      "The Builder bridge status does not expose a scanner fingerprint. A project import will not download the full catalog merely to discover one."
     );
-
-    if (
-      bridgeRaw.rmlScannerBridge === 1 &&
-      bridgeRaw.available === false
-    ) {
-      return null;
-    }
-
-    const raw =
-      bridgeCatalogPayload(bridgeRaw);
-    const rawContract =
-      scannerFingerprintContract(raw);
-    const rawLegacyFingerprint =
-      legacyScannerFingerprint(raw);
-
-    if (
-      !rawContract &&
-      !rawLegacyFingerprint
-    ) {
-      const error = new Error(
-        "Live scanner catalog provides neither the semantic fingerprint contract nor a compatible legacy scanner fingerprint."
-      );
-      error.rmlScannerEndpointReached = true;
-      throw error;
-    }
-
-    return {
-      raw,
-      fingerprint:
-        rawContract?.fingerprint ||
-        rawLegacyFingerprint,
-      legacy:
-        !rawContract,
-      url: scannerUrl,
-      catalogFetchUrl:
-        catalogBridgeUrl
-    };
+    error.rmlScannerEndpointReached = true;
+    throw error;
   }
 
   async function tryScannerCatalog(
@@ -1390,10 +1399,6 @@
       candidates.push(candidate);
     };
 
-    addCandidate(
-      activeScannerCatalogUrl
-    );
-
     if (configuredLoopback) {
       addCandidate(
         configuredLoopback
@@ -1401,6 +1406,10 @@
     } else if (configured) {
       addCandidate(configured);
     }
+
+    addCandidate(
+      activeScannerCatalogUrl
+    );
 
     addCandidate(
       loopbackScannerCatalogUrl(
@@ -1411,46 +1420,51 @@
       rememberedScannerCatalogUrl()
     );
 
+    const probes = [];
     for (const candidate of candidates) {
       attemptedUrls.add(candidate);
-
-      try {
-        return await probeConfiguredScannerUrl(
+      probes.push(
+        probeConfiguredScannerUrl(
           candidate,
           BUILDER_PROBE_TIMEOUT_MS
-        );
-      } catch (error) {
-        if (
-          error?.rmlScannerEndpointReached ===
-            true
-        ) {
-          console.warn(
-            "[RML API Catalog] Scanner reached, but not usable: " +
-            String(error?.message || error)
-          );
-          return null;
-        }
-      }
+        )
+      );
     }
 
     if (isLocalBuilderOrigin()) {
-      try {
-        const bridged =
-          await probeBuilderScannerBridge();
-
-        if (bridged) {
-          return bridged;
-        }
-      } catch (error) {
-        if (
-          error?.rmlScannerEndpointReached ===
-            true
-        ) {
-          console.warn(
-            "[RML API Catalog] Builder bridge reached a scanner, but it is not usable: " +
-            String(error?.message || error)
+      probes.push(
+        probeBuilderScannerBridge(
+          BUILDER_PROBE_TIMEOUT_MS
+        ).then(value => {
+          if (value) return value;
+          throw new Error(
+            "The Builder bridge has no active scanner."
           );
-          return null;
+        })
+      );
+    }
+
+    if (probes.length > 0) {
+      try {
+        return await Promise.any(probes);
+      } catch (aggregate) {
+        const errors =
+          Array.isArray(aggregate?.errors)
+            ? aggregate.errors
+            : [];
+        const reached = errors.find(
+          error =>
+            error
+              ?.rmlScannerEndpointReached ===
+                true
+        );
+        if (reached) {
+          console.warn(
+            "[RML API Catalog] A known scanner path was reached, but is not usable: " +
+            String(
+              reached?.message || reached
+            )
+          );
         }
       }
     }
@@ -1822,35 +1836,39 @@
     ).trim();
   }
 
-  function retagApiNodesForCatalog(
-    catalog
+  function promoteFactoryReportForCatalog(
+    catalog,
+    {
+      liveFingerprintVerified = false
+    } = {}
   ) {
     const report =
       window.RMLApiNodeFactoryReport;
-    const definitions =
-      window.RMLModNodeRegistry
-        ?.getNodeDefinitions?.();
 
     if (
       !report ||
-      typeof report !== "object" ||
-      !definitions ||
-      typeof definitions !== "object" ||
       report.verificationPassed !== true ||
-      String(report.catalogFingerprint || "") !==
-        String(catalog?.catalogFingerprint || "") ||
+      String(
+        report.catalogFingerprint || ""
+      ) !==
+        String(
+          catalog?.catalogFingerprint || ""
+        ) ||
       String(report.engineVersion || "") !==
         String(catalog?.engineVersion || "")
     ) {
       return false;
     }
 
-    const catalogSource = String(
-      catalog?.catalogSource || ""
-    );
+    const catalogSource =
+      liveFingerprintVerified
+        ? "scanner"
+        : String(
+            catalog?.catalogSource || ""
+          );
     const liveCatalogVerified =
+      liveFingerprintVerified ||
       catalogSource === "scanner";
-
     if (
       String(report.catalogSource || "") ===
         catalogSource &&
@@ -1860,74 +1878,24 @@
       return true;
     }
 
-    let retaggedCount = 0;
-
-    for (const definition of
-      Object.values(definitions)) {
-      const contract =
-        definition?.apiVerification;
-
-      if (
-        definition?.catalogGenerated !== true ||
-        !contract ||
-        typeof contract !== "object" ||
-        String(contract.catalogFingerprint || "") !==
-          String(catalog.catalogFingerprint || "") ||
-        String(contract.engineVersion || "") !==
-          String(catalog.engineVersion || "")
-      ) {
-        continue;
-      }
-
-      const {
-        contractFingerprint:
-          _previousContractFingerprint,
-        ...previousCore
-      } = contract;
-      const nextCore = {
-        ...previousCore,
-        catalogSource
-      };
-
-      definition.apiVerification =
-        Object.freeze({
-          ...nextCore,
-          contractFingerprint:
-            stableCatalogHash(
-              JSON.stringify(nextCore)
-            )
-        });
-      if (liveCatalogVerified) {
-        delete definition.hiddenFromPalette;
-        delete definition.catalogVerificationUnavailable;
-      }
-      retaggedCount += 1;
-    }
-
     const nextReport = Object.freeze({
       ...report,
       catalogSource,
-      liveCatalogVerified
+      liveCatalogVerified,
+      catalogDataSource:
+        String(
+          catalog?.catalogSource || ""
+        )
     });
-
     window.RMLApiNodeFactoryReport =
       nextReport;
-    window.__RMLNodeDefinitionRevision =
-      (Number(
-        window.__RMLNodeDefinitionRevision
-      ) || 0) + 1;
-
     window.dispatchEvent(
       new CustomEvent(
         "rml-api-node-factory-ready",
-        {
-          detail: nextReport
-        }
+        { detail: nextReport }
       )
     );
-
-    return retaggedCount > 0 ||
-      Number(report.totalGeneratedNodes) === 0;
+    return true;
   }
 
   async function ensureApiNodesLoaded() {
@@ -1952,6 +1920,21 @@
   async function activateCatalogAndFactory(
     catalog
   ) {
+    const existingReport =
+      window.RMLApiNodeFactoryReport;
+    if (
+      factoryMatchesCatalog(
+        catalog,
+        existingReport
+      )
+    ) {
+      installCatalog(catalog);
+      promoteFactoryReportForCatalog(
+        catalog
+      );
+      return existingReport;
+    }
+
     installCatalog(catalog);
     await modNodesReady;
     await ensureApiNodesLoaded();
@@ -1965,23 +1948,10 @@
         report
       )
     ) {
+      promoteFactoryReportForCatalog(
+        catalog
+      );
       return report;
-    }
-
-    if (
-      retagApiNodesForCatalog(catalog)
-    ) {
-      report =
-        window.RMLApiNodeFactoryReport;
-
-      if (
-        factoryMatchesCatalog(
-          catalog,
-          report
-        )
-      ) {
-        return report;
-      }
     }
 
     const controller =
@@ -2040,15 +2010,19 @@
           );
         }
 
-        const cached =
-          cachedCatalogRecord ||
-          await readCachedLiveCatalog();
+        const activeBeforeSync =
+          statusCatalog();
+        let cached =
+          cachedCatalogRecord;
         const live =
           await tryScannerCatalog({
             discoverPorts:
               options.discoverPorts ===
                 true ||
-              !cached
+              (
+                !cached &&
+                !activeBeforeSync
+              )
           });
 
         scannerChecking = false;
@@ -2083,52 +2057,59 @@
         activeScannerCatalogUrl =
           live.url;
 
-        const normalizedCached = cached
-          ? normalizeCatalog(
-              cached.catalog,
-              "scanner-cache",
-              cached.sourceUrl || ""
-            )
-          : null;
-        const liveCatalogSource =
-          live.legacy === true
-            ? "scanner-legacy"
-            : "scanner";
+        if (!cached) {
+          cached =
+            await readCachedLiveCatalog();
+        }
+
         const fingerprintMatchedCache =
           Boolean(
-            live.legacy !== true &&
-            normalizedCached &&
-            normalizedCached
-              .scannerFingerprintVerified ===
-                true &&
+            cached?.catalog &&
+            (
+              live.legacy === true
+                ? legacyCacheFingerprint(
+                    cached.catalog
+                  )
+                : scannerFingerprintContract(
+                    cached.catalog
+                  )?.fingerprint
+            ) &&
             String(live.fingerprint || "") ===
-              catalogIdentity(
-                normalizedCached
+              String(
+                cached.fingerprint || ""
               )
           );
+        notifyCatalogGate(
+          fingerprintMatchedCache
+            ? options.onFingerprintMatch
+            : options.onCatalogRefresh,
+          {
+            phase:
+              fingerprintMatchedCache
+                ? "fingerprint-match-cache"
+                : "catalog-refresh",
+            message:
+              fingerprintMatchedCache
+                ? "The scanner fingerprint matches the cached catalog. Reusing the existing catalog bytes."
+                : "The scanner fingerprint changed. Downloading and verifying the updated catalog once."
+          }
+        );
         const liveRaw =
           fingerprintMatchedCache
             ? null
             : await loadAndVerifyLiveCatalog(
                 live
               );
-        const confirmedCatalog =
-          fingerprintMatchedCache
-            ? normalizeCatalog(
-                cached.catalog,
-                liveCatalogSource,
-                live.url
-              )
-            : normalizeCatalog(
-                liveRaw,
-                liveCatalogSource,
-                live.url
-              );
-
-        await activateCatalogAndFactory(
-          confirmedCatalog
-        );
-
+        if (!fingerprintMatchedCache) {
+          notifyCatalogGate(
+            options.onCatalogCacheWrite,
+            {
+              phase: "catalog-cache-write",
+              message:
+                "The changed Live catalog finished downloading and passed fingerprint verification. Persisting it as the new cache snapshot now."
+            }
+          );
+        }
         const cacheUpdatedFromLive =
           !fingerprintMatchedCache
             ? await writeCachedLiveCatalog(
@@ -2136,6 +2117,58 @@
                 live.url
               )
             : false;
+        if (
+          !fingerprintMatchedCache &&
+          !cacheUpdatedFromLive
+        ) {
+          throw new Error(
+            "The changed Live catalog was verified, but its synchronized cache snapshot could not be persisted. The Builder did not activate the uncached Live payload."
+          );
+        }
+        const synchronizedRaw =
+          fingerprintMatchedCache
+            ? cached.catalog
+            : cachedCatalogRecord.catalog;
+        const activeCacheMatches =
+          Boolean(
+            activeBeforeSync &&
+            activeBeforeSync.catalogSource ===
+              "scanner-cache" &&
+            catalogIdentity(
+              activeBeforeSync
+            ) ===
+              String(
+                live.fingerprint || ""
+              )
+          );
+        const confirmedCatalog =
+          activeCacheMatches
+            ? activeBeforeSync
+            : normalizeCatalog(
+                synchronizedRaw,
+                "scanner-cache",
+                live.url
+              );
+
+        notifyCatalogGate(
+          options.onFactoryActivation,
+          {
+            phase: "factory",
+            message:
+              fingerprintMatchedCache
+                ? "Using the fingerprint-confirmed cached API contracts."
+                : "The changed Live catalog is cached. Activating API contracts exclusively from that synchronized cache."
+          }
+        );
+        await activateCatalogAndFactory(
+          confirmedCatalog
+        );
+        promoteFactoryReportForCatalog(
+          confirmedCatalog,
+          {
+            liveFingerprintVerified: true
+          }
+        );
 
         lastScannerFingerprintSync =
           Object.freeze({
@@ -2225,7 +2258,8 @@
       apiContract = null,
       missingCatalogObject = false,
       catalogScope = "api",
-      nodeParameters = {}
+      nodeParameters = {},
+      nodeLabels = []
     ) => {
       const id = String(
         operatorId || ""
@@ -2274,6 +2308,7 @@
                   nodeParameters
                 )
               : {},
+          nodeLabels: new Set(),
           inputPorts: new Set(),
           outputPorts: new Set()
         });
@@ -2281,6 +2316,20 @@
 
       const requirement =
         requirements.get(id);
+
+      for (const value of
+        Array.isArray(nodeLabels)
+          ? nodeLabels
+          : []) {
+        const label = String(
+          value || ""
+        ).trim();
+        if (label) {
+          requirement.nodeLabels.add(
+            label
+          );
+        }
+      }
 
       for (const portId of
         Array.isArray(inputPorts)
@@ -2331,7 +2380,8 @@
         value?.apiContract,
         value?.missingCatalogObject,
         value?.catalogScope,
-        value?.nodeParameters
+        value?.nodeParameters,
+        value?.nodeLabels
       );
     }
 
@@ -2351,6 +2401,11 @@
             requirement.nodeParameters ||
             {}
           ),
+        nodeLabels:
+          [...requirement.nodeLabels]
+            .sort((left, right) =>
+              left.localeCompare(right)
+            ),
         inputPorts:
           [...requirement.inputPorts]
             .sort((left, right) =>
@@ -2377,12 +2432,6 @@
       catalog &&
       report &&
       report.verificationPassed === true &&
-      String(
-        report.catalogSource || ""
-      ) ===
-        String(
-          catalog.catalogSource || ""
-        ) &&
       String(
         report.catalogFingerprint || ""
       ) ===
@@ -2416,12 +2465,6 @@
         definition?.catalogGenerated ===
           true &&
         contract &&
-        String(
-          contract.catalogSource || ""
-        ) ===
-          String(
-            report?.catalogSource || ""
-          ) &&
         String(contract.nodeId || "") ===
           id &&
         String(
@@ -2607,7 +2650,13 @@
     const connected =
       await synchronizeScannerStatus({
         showChecking: true,
-        throwOnFailure: false
+        throwOnFailure: false,
+        onFingerprintMatch:
+          options.onFingerprintMatch,
+        onCatalogRefresh:
+          options.onCatalogRefresh,
+        onFactoryActivation:
+          options.onFactoryActivation
       });
 
     if (!connected) {
@@ -2616,12 +2665,10 @@
         {
           phase: "cache",
           message:
-            "The single Live fingerprint check failed. Activating the last cached catalog immediately."
+            "The parallel checks of all known Live health paths failed. Activating the last cached catalog immediately."
         }
       );
     }
-
-    await modNodesReady;
 
     const catalog = connected
       ? statusCatalog()
@@ -2663,19 +2710,25 @@
     const live = Boolean(
       connected &&
       factoryReady &&
-      catalog.catalogSource ===
-        "scanner" &&
-      report?.liveCatalogVerified ===
-        true
+      window.RMLApiNodeFactoryReport
+        ?.liveCatalogVerified === true &&
+      String(
+        window.RMLApiNodeFactoryReport
+          ?.catalogFingerprint || ""
+      ) ===
+        String(
+          catalog.catalogFingerprint || ""
+        )
     );
 
     return Object.freeze({
       available: factoryReady,
       live,
       cacheFallback: !live,
+      catalogBackedByCache: true,
       liveAttempted: true,
       source: live
-        ? "scanner"
+        ? "scanner-verified-cache"
         : "scanner-cache",
       catalogFingerprint: String(
         catalog.catalogFingerprint || ""
@@ -2704,6 +2757,12 @@
       requiredNodes.map(
         requirement =>
           requirement.operatorId
+      );
+    const scannerResolvableNodes =
+      requiredNodes.filter(
+        requirement =>
+          requirement.catalogScope ===
+            "api"
       );
     const migrations = {};
     const portMigrations = {};
@@ -2770,6 +2829,20 @@
         options
       );
 
+    notifyCatalogGate(
+      options.onContractResolution,
+      {
+        phase: "required-contract-check",
+        title:
+          "Checking required catalog contracts…",
+        message:
+          `Checking ${requiredNodes.length} unique catalog operator contract${requiredNodes.length === 1 ? "" : "s"}; repeated node instances share this result.`,
+        detail:
+          "The API factory is ready. This phase checks only project-referenced operator IDs and ports.",
+        progress: 51.5
+      }
+    );
+
     let catalog = statusCatalog();
     let report =
       window.RMLApiNodeFactoryReport;
@@ -2788,10 +2861,23 @@
           );
 
     if (missing.length > 0) {
+      notifyCatalogGate(
+        options.onContractResolution,
+        {
+          phase: "legacy-contract-resolution",
+          title:
+            "Resolving historical API identities…",
+          message:
+            `Resolving ${scannerResolvableNodes.length} unresolved API contract${scannerResolvableNodes.length === 1 ? "" : "s"} by portable contract or exact stored API node name.`,
+          detail:
+            "There is no catalog-wide 2,048-position hash scan. Name hints narrow legacy verification to the exact matching member definitions; otherwise the replacement dialog opens.",
+          progress: 51.75
+        }
+      );
       collectMigrations(
         await reconcileLegacyRequiredApiNodes(
-        requiredNodes,
-        catalog
+          scannerResolvableNodes,
+          catalog
         )
       );
       report =
@@ -2830,7 +2916,7 @@
         await controller.rebuild(catalog);
         collectMigrations(
           await reconcileLegacyRequiredApiNodes(
-            requiredNodes,
+            scannerResolvableNodes,
             catalog
           )
         );
@@ -2959,6 +3045,14 @@
                     .nodeParameters
                 )
               : {},
+          nodeLabels:
+            Object.freeze([
+              ...(Array.isArray(
+                requirement.nodeLabels
+              )
+                ? requirement.nodeLabels
+                : [])
+            ]),
           inputPorts:
             Object.freeze([
               ...requirement.inputPorts
@@ -3225,7 +3319,7 @@
     "RMLCatalogImportGate",
     {
       value: Object.freeze({
-        version: 9,
+        version: 11,
         ensureForImport:
           ensureCatalogForImport,
         ensureLive:

@@ -36,7 +36,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "advanced-raw-csharp-graph-color-parity-20260830-v629";
+  "fast-irreparable-project-preflight-20260830-v634";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -394,16 +394,14 @@ function beginTypedNodeGraphModulesTracking() {
 
   typedNodeGraphModulesTrackingStarted = true;
 
-  const requiresCatalogFactory =
-    projectRequiredCatalogNodes({
-      extensions: state.extensions
-    }).length > 0;
-  const ready = requiresCatalogFactory
-    ? window.RMLModNodesReady
-    : window.RMLBaseModNodesReady ||
-      window.RMLModNodesReady;
+  const baseReady =
+    window.RMLBaseModNodesReady ||
+    window.RMLModNodesReady;
 
-  if (!ready || typeof ready.then !== "function") {
+  if (
+    !baseReady ||
+    typeof baseReady.then !== "function"
+  ) {
     typedNodeGraphModulesState =
       window.RMLTypedNodeGraphGenerator &&
       typeof window.RMLTypedNodeGraphGenerator.build === "function"
@@ -420,6 +418,18 @@ function beginTypedNodeGraphModulesTracking() {
     scheduleTypedNodeGraphOutputRefresh();
     return;
   }
+
+  const ready = Promise.resolve(
+    baseReady
+  ).then(() => {
+    const requiresCatalogFactory =
+      projectRequiredCatalogNodes({
+        extensions: state.extensions
+      }).length > 0;
+    return requiresCatalogFactory
+      ? window.RMLModNodesReady
+      : true;
+  });
 
   Promise.resolve(ready)
     .then(() => {
@@ -8450,6 +8460,21 @@ function exampleProjectUrl() {
   );
 }
 
+function invalidProjectJsonSyntaxError(
+  displayName,
+  cause
+) {
+  const detail = String(
+    cause?.message || ""
+  ).trim();
+  return irreparableProjectJsonError(
+    `${String(displayName || "The selected file")} contains invalid JSON syntax. Operator replacement cannot repair malformed JSON.`,
+    detail
+      ? [detail.slice(0, 320)]
+      : []
+  );
+}
+
 async function parseProjectJsonText(
   sourceText,
   displayName = "JSON project"
@@ -8505,8 +8530,9 @@ async function parseProjectJsonText(
       error instanceof SyntaxError ||
       error?.name === "SyntaxError"
     ) {
-      throw new Error(
-        `${displayName} does not contain valid JSON.`
+      throw invalidProjectJsonSyntaxError(
+        displayName,
+        error
       );
     }
 
@@ -8547,8 +8573,9 @@ async function parseProjectJsonFile(
       error instanceof SyntaxError ||
       error?.name === "SyntaxError"
     ) {
-      throw new Error(
-        `${displayName} does not contain valid JSON.`
+      throw invalidProjectJsonSyntaxError(
+        displayName,
+        error
       );
     }
 
@@ -8575,8 +8602,9 @@ async function readProjectJsonFileSource(
       error instanceof SyntaxError ||
       error?.name === "SyntaxError"
     ) {
-      throw new Error(
-        `${displayName} does not contain valid JSON.`
+      throw invalidProjectJsonSyntaxError(
+        displayName,
+        error
       );
     }
 
@@ -21966,6 +21994,10 @@ function resetBuilderReplacementUi() {
     elements.builderWorkReplacementList.onkeydown =
       null;
   }
+  if (elements.builderWorkReplacementQueue) {
+    elements.builderWorkReplacementQueue
+      .replaceChildren();
+  }
   if (elements.builderWorkReplacementSummary) {
     elements.builderWorkReplacementSummary.textContent =
       "";
@@ -22008,7 +22040,8 @@ async function requestBuilderReplacementChoice(
     index = 0,
     total = 1,
     catalogResult = null,
-    nodeLabels = []
+    nodeLabels = [],
+    replacementQueue = []
   } = {}
 ) {
   if (
@@ -22059,6 +22092,8 @@ async function requestBuilderReplacementChoice(
     elements.builderWorkReplacementCancel;
   const summary =
     elements.builderWorkReplacementSummary;
+  const queueHost =
+    elements.builderWorkReplacementQueue;
   const operatorId = String(
     requirement?.operatorId ||
     "<unknown>"
@@ -22092,7 +22127,7 @@ async function requestBuilderReplacementChoice(
       message:
         `'${nodeDescription}' uses an unavailable API contract. Choose one compatible node from the ${sourceDescription}; the project is installed only after every replacement is confirmed.`,
       detail:
-        `${values.length.toLocaleString("de-DE")} verified compatible candidate${values.length === 1 ? "" : "s"} for ${operatorId}. Node positions and complete stored wire routes remain unchanged.`,
+        `${values.length.toLocaleString("de-DE")} available replacement candidate${values.length === 1 ? "" : "s"} for ${operatorId}. The search is limited to this candidate set. Node positions and complete stored wire routes remain unchanged.`,
       progress:
         50 +
         Math.round(
@@ -22126,6 +22161,102 @@ async function requestBuilderReplacementChoice(
   search.value = "";
   let selectedOperatorId = "";
   let visibleCandidates = [];
+
+  const renderReplacementQueue = () => {
+    if (!queueHost) {
+      return;
+    }
+    const fragment =
+      document.createDocumentFragment();
+    for (const entry of
+      Array.isArray(replacementQueue)
+        ? replacementQueue
+        : []) {
+      const status = String(
+        entry?.status || "pending"
+      );
+      const row =
+        document.createElement("div");
+      row.className =
+        "builder-work-replacement-queue-item";
+      row.dataset.status = status;
+      row.setAttribute("role", "listitem");
+
+      const state =
+        document.createElement("span");
+      state.className =
+        "builder-work-replacement-queue-state";
+      state.textContent =
+        status === "selected"
+          ? "✓"
+          : status === "current"
+            ? "›"
+            : status === "unavailable"
+              ? "!"
+              : "·";
+      const name =
+        document.createElement("span");
+      name.className =
+        "builder-work-replacement-queue-name";
+      name.textContent = String(
+        entry?.operatorId || "<unknown>"
+      );
+      const count =
+        document.createElement("span");
+      count.className =
+        "builder-work-replacement-queue-count";
+      const instances = Math.max(
+        1,
+        Number(entry?.instanceCount) || 0
+      );
+      count.textContent =
+        `${instances.toLocaleString("de-DE")}×`;
+      row.append(state, name, count);
+      fragment.appendChild(row);
+    }
+    queueHost.replaceChildren(fragment);
+    queueHost
+      .querySelector(
+        '[data-status="current"]'
+      )
+      ?.scrollIntoView({
+        block: "nearest"
+      });
+  };
+
+  const updateReplacementSummary = () => {
+    if (!summary) {
+      return;
+    }
+    const selected =
+      values.find(candidate =>
+        candidate.operatorId ===
+          selectedOperatorId
+      );
+    const missingInputs =
+      Array.isArray(
+        selected?.unmappedRequiredInputs
+      )
+        ? selected.unmappedRequiredInputs
+        : [];
+    const matchCount =
+      visibleCandidates.length;
+    const base =
+      `${matchCount.toLocaleString("de-DE")} visible candidate${matchCount === 1 ? "" : "s"} · source: ${sourceDescription}.`;
+    if (!selected) {
+      summary.textContent = base;
+      return;
+    }
+    if (missingInputs.length > 0) {
+      summary.textContent =
+        `${base} The selected node adds ${missingInputs.length.toLocaleString("de-DE")} unconnected required input${missingInputs.length === 1 ? "" : "s"}: ${missingInputs.map(port => port.label || port.id).join(", ")}. Existing wires are preserved; configure these inputs after import.`;
+      return;
+    }
+    summary.textContent =
+      selected.matchMode === "strict"
+        ? `${base} Exact stored port contract.`
+        : `${base} Manual structural mapping; every existing connected port is mapped.`;
+  };
 
   const selectCandidate = (
     operatorId,
@@ -22171,6 +22302,7 @@ async function requestBuilderReplacementChoice(
 
     confirm.disabled =
       !selectedOperatorId;
+    updateReplacementSummary();
   };
 
   const renderCandidates = () => {
@@ -22237,10 +22369,31 @@ async function requestBuilderReplacementChoice(
         document.createElement("small");
       identity.textContent =
         candidate.operatorId;
+      const match =
+        document.createElement("small");
+      match.className =
+        "builder-work-replacement-match";
+      const missingInputs =
+        Array.isArray(
+          candidate.unmappedRequiredInputs
+        )
+          ? candidate
+              .unmappedRequiredInputs
+          : [];
+      match.dataset.warning = String(
+        missingInputs.length > 0
+      );
+      match.textContent =
+        candidate.matchMode === "strict"
+          ? "Exact port contract"
+          : missingInputs.length > 0
+            ? `Structural mapping · ${missingInputs.length} new input${missingInputs.length === 1 ? "" : "s"} to configure`
+            : "Structural mapping · all connected ports mapped";
       copy.append(
         title,
         group,
-        identity
+        identity,
+        match
       );
       item.append(
         symbol,
@@ -22288,11 +22441,15 @@ async function requestBuilderReplacementChoice(
     selectCandidate(
       selectedOperatorId
     );
-    summary.textContent =
+    if (
       matches.length >
         visibleCandidates.length
-        ? `${matches.length.toLocaleString("de-DE")} matches · showing the first ${visibleCandidates.length.toLocaleString("de-DE")}. Refine the search to reach later entries.`
-        : `${matches.length.toLocaleString("de-DE")} matching candidate${matches.length === 1 ? "" : "s"} · source: ${sourceDescription}.`;
+    ) {
+      summary.textContent =
+        `${matches.length.toLocaleString("de-DE")} matches · showing the first ${visibleCandidates.length.toLocaleString("de-DE")}. Refine the search to reach later entries.`;
+    } else {
+      updateReplacementSummary();
+    }
   };
 
   const choice = new Promise(
@@ -22422,6 +22579,7 @@ async function requestBuilderReplacementChoice(
     }
   );
 
+  renderReplacementQueue();
   renderCandidates();
   await paintBuilderUi();
   search.focus({
@@ -22626,6 +22784,406 @@ function projectRuntimeGraphViews(
   return views;
 }
 
+function irreparableProjectJsonError(
+  reason,
+  diagnostics = []
+) {
+  const details = [
+    ...new Set(
+      (Array.isArray(diagnostics)
+        ? diagnostics
+        : [diagnostics])
+        .map(value =>
+          String(value || "").trim()
+        )
+        .filter(Boolean)
+    )
+  ];
+  const suffix = details.length > 0
+    ? ` ${details.slice(0, 12).join(" | ")}${details.length > 12 ? ` | and ${details.length - 12} more` : ""}`
+    : "";
+  const error = new Error(
+    `Irreparable project JSON: ${String(reason || "the stored project structure is invalid.")}${suffix} Safe node replacement cannot reconstruct this project without losing or inventing graph behavior. The JSON was not loaded.`
+  );
+  error.code =
+    "RML_IRREPARABLE_PROJECT_JSON";
+  return error;
+}
+
+function validateProjectStructureForRepair(
+  project
+) {
+  const started = performance.now();
+  const issues = new Map();
+  const addIssue = (
+    category,
+    detail
+  ) => {
+    if (!issues.has(category)) {
+      issues.set(category, {
+        count: 0,
+        samples: []
+      });
+    }
+    const issue = issues.get(category);
+    issue.count += 1;
+    if (
+      issue.samples.length < 4 &&
+      detail
+    ) {
+      issue.samples.push(
+        String(detail)
+      );
+    }
+  };
+  const graph =
+    projectTypedRuntimeGraph(project);
+
+  if (!graph) {
+    return Object.freeze({
+      valid: true,
+      diagnostics: Object.freeze([]),
+      nodeCount: 0,
+      connectionCount: 0,
+      elapsedMilliseconds:
+        performance.now() - started
+    });
+  }
+
+  let nodeCount = 0;
+  let connectionCount = 0;
+  const visited = new Set();
+  const inspectGraph = (
+    candidate,
+    path,
+    depth
+  ) => {
+    if (
+      !candidate ||
+      typeof candidate !== "object" ||
+      Array.isArray(candidate)
+    ) {
+      addIssue(
+        "invalid graph records",
+        `${path}: graph object missing`
+      );
+      return;
+    }
+    if (visited.has(candidate)) {
+      addIssue(
+        "recursive graph records",
+        path
+      );
+      return;
+    }
+    if (depth > PROJECT_TREE_MAX_DEPTH) {
+      addIssue(
+        "graph nesting overflow",
+        path
+      );
+      return;
+    }
+    visited.add(candidate);
+
+    if (!Array.isArray(candidate.nodes)) {
+      addIssue(
+        "invalid node collections",
+        path
+      );
+      return;
+    }
+    if (!Array.isArray(candidate.connections)) {
+      addIssue(
+        "invalid connection collections",
+        path
+      );
+      return;
+    }
+
+    const nodeIds = new Set();
+    for (const node of candidate.nodes) {
+      nodeCount += 1;
+      if (
+        !node ||
+        typeof node !== "object" ||
+        Array.isArray(node)
+      ) {
+        addIssue(
+          "invalid node records",
+          path
+        );
+        continue;
+      }
+      const id = String(
+        node.id || ""
+      ).trim();
+      if (!id) {
+        addIssue(
+          "nodes without IDs",
+          path
+        );
+      } else if (nodeIds.has(id)) {
+        addIssue(
+          "duplicate node IDs",
+          `${path}:${id}`
+        );
+      } else {
+        nodeIds.add(id);
+      }
+      if (
+        node.kind !== "configuration" &&
+        node.kind !== "operator"
+      ) {
+        addIssue(
+          "invalid node kinds",
+          `${path}:${id || "<unnamed>"}`
+        );
+      }
+      if (
+        node.kind === "operator" &&
+        !String(
+          node.operatorId || ""
+        ).trim()
+      ) {
+        addIssue(
+          "operators without identities",
+          `${path}:${id || "<unnamed>"}`
+        );
+      }
+      if (
+        !Number.isFinite(Number(node.x)) ||
+        !Number.isFinite(Number(node.y))
+      ) {
+        addIssue(
+          "nodes without finite positions",
+          `${path}:${id || "<unnamed>"}`
+        );
+      }
+    }
+
+    const connectionIds = new Set();
+    const pointIdsByConnection =
+      new Map();
+    for (const connection of
+      candidate.connections) {
+      connectionCount += 1;
+      if (
+        !connection ||
+        typeof connection !== "object" ||
+        Array.isArray(connection)
+      ) {
+        addIssue(
+          "invalid connection records",
+          path
+        );
+        continue;
+      }
+      const id = String(
+        connection.id || ""
+      ).trim();
+      const fromNode = String(
+        connection.fromNode || ""
+      ).trim();
+      const toNode = String(
+        connection.toNode || ""
+      ).trim();
+      const fromPort = String(
+        connection.fromPort || ""
+      ).trim();
+      const toPort = String(
+        connection.toPort || ""
+      ).trim();
+      if (!id) {
+        addIssue(
+          "connections without IDs",
+          path
+        );
+      } else if (
+        connectionIds.has(id)
+      ) {
+        addIssue(
+          "duplicate connection IDs",
+          `${path}:${id}`
+        );
+      } else {
+        connectionIds.add(id);
+      }
+      if (
+        !nodeIds.has(fromNode) ||
+        !nodeIds.has(toNode)
+      ) {
+        addIssue(
+          "orphaned connections",
+          `${path}:${id || "<unnamed>"}`
+        );
+      }
+      if (!fromPort || !toPort) {
+        addIssue(
+          "connections without ports",
+          `${path}:${id || "<unnamed>"}`
+        );
+      }
+
+      const points =
+        connection.points == null
+          ? []
+          : connection.points;
+      if (!Array.isArray(points)) {
+        addIssue(
+          "invalid wire-point collections",
+          `${path}:${id || "<unnamed>"}`
+        );
+        continue;
+      }
+      const pointIds = new Set();
+      pointIdsByConnection.set(id, pointIds);
+      for (const point of points) {
+        const pointId = String(
+          point?.id || ""
+        ).trim();
+        if (
+          !point ||
+          typeof point !== "object" ||
+          Array.isArray(point) ||
+          !pointId ||
+          !Number.isFinite(
+            Number(point.x)
+          ) ||
+          !Number.isFinite(
+            Number(point.y)
+          )
+        ) {
+          addIssue(
+            "invalid wire points",
+            `${path}:${id || "<unnamed>"}`
+          );
+          continue;
+        }
+        if (pointIds.has(pointId)) {
+          addIssue(
+            "duplicate wire-point IDs",
+            `${path}:${id}:${pointId}`
+          );
+        }
+        pointIds.add(pointId);
+      }
+    }
+
+    for (const connection of
+      candidate.connections) {
+      const branch =
+        connection?.branchFrom;
+      if (branch == null) {
+        continue;
+      }
+      const connectionId = String(
+        branch?.connectionId || ""
+      ).trim();
+      const pointId = String(
+        branch?.pointId || ""
+      ).trim();
+      if (
+        !connectionId ||
+        !pointId ||
+        !connectionIds.has(connectionId) ||
+        !pointIdsByConnection
+          .get(connectionId)
+          ?.has(pointId)
+      ) {
+        addIssue(
+          "broken wire branches",
+          `${path}:${String(connection?.id || "<unnamed>")}`
+        );
+      }
+    }
+
+    const customFiles =
+      candidate.customCSharpFiles;
+    if (
+      customFiles != null &&
+      (
+        typeof customFiles !== "object" ||
+        Array.isArray(customFiles)
+      )
+    ) {
+      addIssue(
+        "invalid Custom C# graph collection",
+        path
+      );
+      return;
+    }
+    for (const [ownerNodeId, customGraph] of
+      Object.entries(customFiles || {})) {
+      if (!nodeIds.has(ownerNodeId)) {
+        addIssue(
+          "orphaned Custom C# graphs",
+          `${path}:${ownerNodeId}`
+        );
+      }
+      inspectGraph(
+        customGraph,
+        `${path}/custom-csharp:${ownerNodeId || "<unnamed>"}`,
+        depth + 1
+      );
+    }
+  };
+
+  inspectGraph(
+    graph,
+    "runtime-root",
+    0
+  );
+
+  const diagnostics = [...issues]
+    .map(([category, issue]) =>
+      `${issue.count.toLocaleString("de-DE")} ${category}${issue.samples.length > 0 ? ` (${issue.samples.join(", ")})` : ""}`
+    );
+  return Object.freeze({
+    valid: diagnostics.length === 0,
+    diagnostics:
+      Object.freeze(diagnostics),
+    nodeCount,
+    connectionCount,
+    elapsedMilliseconds:
+      performance.now() - started
+  });
+}
+
+function validateRuntimeGraphViewsFast(
+  graph
+) {
+  const validator =
+    window.RMLTypedNodeGraphGenerator
+      ?.validateDocument;
+  if (typeof validator !== "function") {
+    return [
+      "The Runtime Graph validator is unavailable."
+    ];
+  }
+
+  const diagnostics = [];
+  for (const view of
+    projectRuntimeGraphViews(graph)) {
+    const result = validator({
+      state: {
+        extensions: {
+          typedNodeGraph:
+            view.graph
+        }
+      }
+    });
+    for (const message of
+      Array.isArray(result?.diagnostics)
+        ? result.diagnostics
+        : []) {
+      diagnostics.push(
+        `${view.path}: ${String(message)}`
+      );
+    }
+  }
+  return [...new Set(diagnostics)];
+}
+
 function projectRequiredCatalogNodes(
   project
 ) {
@@ -22636,8 +23194,10 @@ function projectRequiredCatalogNodes(
 
   const graphViews =
     projectRuntimeGraphViews(graph);
+  const registry =
+    window.RMLModNodeRegistry;
   const definitions =
-    window.RMLModNodeRegistry
+    registry
       ?.getNodeDefinitions?.() || {};
   const requirements = new Map();
   for (const view of graphViews) {
@@ -22665,6 +23225,23 @@ function projectRequiredCatalogNodes(
         );
       const definition =
         definitions[operatorId];
+      const integratedNode =
+        typeof registry
+          ?.isIntegratedNode ===
+            "function"
+          ? registry.isIntegratedNode(
+              operatorId
+            )
+          : Boolean(
+              definition &&
+              definition
+                .catalogGenerated !== true &&
+              definition
+                .unavailableApiContract !==
+                  true &&
+              definition
+                .legacyCatalogAlias !== true
+            );
       const missingCatalogObject =
         node?.kind === "operator" &&
         (
@@ -22673,6 +23250,13 @@ function projectRequiredCatalogNodes(
             .unavailableApiContract ===
               true
         );
+
+      if (
+        integratedNode ||
+        node?.kind !== "operator"
+      ) {
+        continue;
+      }
 
       if (
         !operatorId.startsWith("api.") &&
@@ -22709,9 +23293,19 @@ function projectRequiredCatalogNodes(
             )
               ? clone(node.parameters)
               : {},
+          nodeLabels: new Set(),
           inputPorts: new Set(),
           outputPorts: new Set()
         });
+      }
+
+      const storedLabel = String(
+        node?.label || ""
+      ).trim();
+      if (storedLabel) {
+        requirements
+          .get(operatorId)
+          .nodeLabels.add(storedLabel);
       }
     }
 
@@ -22769,6 +23363,12 @@ function projectRequiredCatalogNodes(
         clone(
           requirement.nodeParameters || {}
         ),
+      nodeLabels:
+        [...requirement.nodeLabels]
+          .filter(Boolean)
+          .sort((left, right) =>
+            left.localeCompare(right)
+          ),
       inputPorts:
         [...requirement.inputPorts]
           .filter(Boolean)
@@ -22837,6 +23437,47 @@ async function ensureProjectRuntimePrerequisites(
       runtimeActive: false
     };
   }
+
+  updateBuilderWork(
+    workSession,
+    {
+      title:
+        "Checking whether the stored graph is repairable…",
+      message:
+        "Node, connection, wire-point and branch identities are being checked once before any catalog lookup or replacement dialog.",
+      detail:
+        "This is a linear structure pass. It does not generate C# and does not test replacement combinations.",
+      progress: 34
+    }
+  );
+  await paintBuilderUi();
+
+  const structuralRepairability =
+    catalogPreflight
+      ?.structuralRepairability ||
+    validateProjectStructureForRepair(
+      project
+    );
+  if (!structuralRepairability.valid) {
+    throw irreparableProjectJsonError(
+      "its graph structure is damaged and cannot be restored by replacing operators.",
+      structuralRepairability.diagnostics
+    );
+  }
+
+  updateBuilderWork(
+    workSession,
+    {
+      title:
+        "Stored graph structure is intact…",
+      message:
+        `${structuralRepairability.nodeCount.toLocaleString("de-DE")} nodes and ${structuralRepairability.connectionCount.toLocaleString("de-DE")} connections passed the repairability structure check.`,
+      detail:
+        `Completed in ${Math.max(0.1, structuralRepairability.elapsedMilliseconds).toLocaleString("de-DE", { maximumFractionDigits: 1 })} ms. Catalog contracts are checked next.`,
+      progress: 35
+    }
+  );
+  await paintBuilderUi();
 
   let requiredCatalogNodes =
     Array.isArray(
@@ -22967,10 +23608,104 @@ async function ensureProjectRuntimePrerequisites(
                 title:
                   "Comparing source and cached fingerprints…",
                 message:
-                  "Only the scanner's small health response is checked first. The full catalog and API node factory are updated only if its source fingerprint changed.",
+                  "All already known scanner and Builder-bridge health paths are checked concurrently. The first verified Live fingerprint wins.",
                 detail:
-                  "The scanner fingerprint contract is validated before the current project is touched.",
+                  "There is no serial URL wait. Port discovery remains manual, and the health phase never downloads the complete catalog.",
                 progress: 48
+              }
+            );
+          },
+          onFingerprintMatch(detail) {
+            updateBuilderWork(
+              workSession,
+              {
+                title:
+                  "Fingerprint matches · reusing catalog…",
+                message:
+                  String(
+                    detail?.message ||
+                    "The cached catalog is already current."
+                  ),
+                detail:
+                  "No catalog download or semantic full comparison is performed. An already matching factory is reused; only a not-yet-initialized factory may still finish once.",
+                progress: 49
+              }
+            );
+          },
+          onCatalogRefresh(detail) {
+            updateBuilderWork(
+              workSession,
+              {
+                title:
+                  "Catalog fingerprint changed · downloading update…",
+                message:
+                  String(
+                    detail?.message ||
+                    "Downloading the changed Live catalog."
+                  ),
+                detail:
+                  "This full transfer occurs only because the source fingerprint is different. There is no automatic time limit; the Builder remains here until the scanner transfer completes or reports an error.",
+                progress: 50
+              }
+            );
+          },
+          onCatalogCacheWrite(detail) {
+            updateBuilderWork(
+              workSession,
+              {
+                title:
+                  "Catalog downloaded · updating cache…",
+                message:
+                  String(
+                    detail?.message ||
+                    "The verified Live catalog is being persisted as the new cached snapshot."
+                  ),
+                detail:
+                  "The uncached Live payload is never activated. Import continues only after the synchronized cache snapshot has been written successfully.",
+                progress: 50.5
+              }
+            );
+          },
+          onFactoryActivation(detail) {
+            updateBuilderWork(
+              workSession,
+              {
+                title:
+                  "Preparing required API node contracts…",
+                message:
+                  String(
+                    detail?.message ||
+                    "The API node factory is completing the contracts needed by this import."
+                  ),
+                detail:
+                  "This phase is separate from scanner discovery and cannot trigger additional scanner probes.",
+                progress: 51
+              }
+            );
+          },
+          onContractResolution(detail) {
+            updateBuilderWork(
+              workSession,
+              {
+                title:
+                  String(
+                    detail?.title ||
+                    "Resolving required catalog contracts…"
+                  ),
+                message:
+                  String(
+                    detail?.message ||
+                    "The required project operators are being matched against the prepared catalog index."
+                  ),
+                detail:
+                  String(
+                    detail?.detail ||
+                    "Only unresolved operator families are checked; repeated node instances do not repeat this work."
+                  ),
+                progress:
+                  Number(
+                    detail?.progress
+                  ) || 51.5
               }
             );
           },
@@ -22981,9 +23716,9 @@ async function ensureProjectRuntimePrerequisites(
                 title:
                   "Live unavailable · activating cached fallback…",
                 message:
-                  "The single Live source-fingerprint check failed. The last available cached scanner catalog is being activated immediately.",
+                  "No known Live health path returned a usable fingerprint. The last available cached scanner catalog is being activated immediately.",
                 detail:
-                  "No further Live retry delays this import.",
+                  "No serial retry or port-range discovery delays this import.",
                 progress: 49
               }
             );
@@ -23074,7 +23809,40 @@ async function ensureProjectRuntimePrerequisites(
 
       const manualMigrations = {};
       const manualPortMigrations = {};
+      const matchingNodesByOperator =
+        new Map();
+      for (const view of
+        projectRuntimeGraphViews(graph)) {
+        for (const node of
+          Array.isArray(view.graph.nodes)
+            ? view.graph.nodes
+            : []) {
+          if (node?.kind !== "operator") {
+            continue;
+          }
+          const operatorId = String(
+            node.operatorId || ""
+          );
+          if (
+            !matchingNodesByOperator.has(
+              operatorId
+            )
+          ) {
+            matchingNodesByOperator.set(
+              operatorId,
+              []
+            );
+          }
+          matchingNodesByOperator
+            .get(operatorId)
+            .push({
+              node,
+              path: view.path
+            });
+        }
+      }
 
+      const replacementQueue = [];
       for (
         let index = 0;
         index <
@@ -23086,41 +23854,164 @@ async function ensureProjectRuntimePrerequisites(
         const operatorId = String(
           requirement?.operatorId || ""
         );
-        const resolution =
-          candidateResolver(
-            requirement
-          );
+        updateBuilderWork(
+          workSession,
+          {
+            title:
+              "Indexing compatible replacement contracts…",
+            message:
+              `Checking contract ${(index + 1).toLocaleString("de-DE")} of ${unresolvedRequirements.length.toLocaleString("de-DE")}: ${operatorId}`,
+            detail:
+              "The definition index is built once for this catalog fingerprint and reused for every repeated node instance.",
+            progress:
+              52 + Math.round(
+                8 * index /
+                Math.max(
+                  1,
+                  unresolvedRequirements.length
+                )
+              )
+          }
+        );
+        await paintBuilderUi();
+        let resolution = null;
+        let resolutionError = null;
+        try {
+          resolution =
+            candidateResolver(
+              requirement
+            );
+        } catch (error) {
+          resolutionError = error;
+        }
         const candidates =
           Array.isArray(
             resolution?.candidates
           )
             ? resolution.candidates
             : [];
-
-        if (candidates.length === 0) {
-          throw new Error(
-            `The ${catalogResult.live === true ? "current Live catalog" : "cached fallback"} has no node with a uniquely provable compatible port contract for '${operatorId}'. The JSON was not loaded.`
-          );
-        }
-
         const matchingNodes =
-          projectRuntimeGraphViews(graph)
-            .flatMap(view =>
-              (Array.isArray(view.graph.nodes)
-                ? view.graph.nodes
-                : [])
-                .filter(node =>
-                  node?.kind ===
-                    "operator" &&
-                  String(
-                    node.operatorId || ""
-                  ) === operatorId
-                )
-                .map(node => ({
-                  node,
-                  path: view.path
-                }))
-            );
+          matchingNodesByOperator.get(
+            operatorId
+          ) || [];
+        replacementQueue.push({
+          requirement,
+          operatorId,
+          candidates,
+          resolution,
+          resolutionError,
+          instanceCount:
+            matchingNodes.length,
+          nodeLabels:
+            matchingNodes.map(item =>
+              `${item.node.label || item.node.id || operatorId} (${item.path})`
+            ),
+          status:
+            candidates.length > 0
+              ? "pending"
+              : "unavailable"
+        });
+      }
+
+      const unresolvedWithoutCandidates =
+        replacementQueue.filter(entry =>
+          entry.candidates.length === 0
+        );
+      if (
+        unresolvedWithoutCandidates.length > 0
+      ) {
+        const details =
+          unresolvedWithoutCandidates
+            .map(entry => {
+              const reason = String(
+                entry.resolutionError
+                  ?.message || ""
+              ).trim();
+              return `'${entry.operatorId}' (${Math.max(1, entry.instanceCount).toLocaleString("de-DE")} node${entry.instanceCount === 1 ? "" : "s"})${reason ? `: ${reason}` : ""}`;
+            });
+        throw irreparableProjectJsonError(
+          `${unresolvedWithoutCandidates.length.toLocaleString("de-DE")} of ${replacementQueue.length.toLocaleString("de-DE")} missing operator families have no semantically proven replacement with a complete port contract. No replacement dialog was opened.`,
+          details
+        );
+      }
+
+      updateBuilderWork(
+        workSession,
+        {
+          title:
+            "Proving complete replacement repairability…",
+          message:
+            `A single linear validation pass is testing the highest-ranked safe plan for all ${replacementQueue.length.toLocaleString("de-DE")} missing operator families.`,
+          detail:
+            "No C# is generated and no candidate combinations are searched. The temporary plan is rolled back before the first dialog.",
+          progress: 60
+        }
+      );
+      await paintBuilderUi();
+
+      const proofMigrations = {};
+      const proofPortMigrations = {};
+      for (const entry of
+        replacementQueue) {
+        const candidate =
+          entry.candidates[0];
+        proofMigrations[
+          entry.operatorId
+        ] = candidate.operatorId;
+        proofPortMigrations[
+          entry.operatorId
+        ] = {
+          input:
+            structuredClone(
+              candidate.inputMap || {}
+            ),
+          output:
+            structuredClone(
+              candidate.outputMap || {}
+            )
+        };
+      }
+
+      const repairProof =
+        replacementTransaction(
+          graph,
+          proofMigrations,
+          proofPortMigrations
+        );
+      let repairProofDiagnostics = [];
+      try {
+        repairProof.assertGeometry();
+        repairProofDiagnostics =
+          validateRuntimeGraphViewsFast(
+            graph
+          );
+      } finally {
+        repairProof.rollback();
+      }
+      if (
+        repairProofDiagnostics.length > 0
+      ) {
+        throw irreparableProjectJsonError(
+          "its best complete replacement plan still produces an invalid Runtime Graph. No replacement dialog was opened.",
+          repairProofDiagnostics
+        );
+      }
+
+      for (
+        let index = 0;
+        index < replacementQueue.length;
+        index += 1
+      ) {
+        const entry =
+          replacementQueue[index];
+        const {
+          requirement,
+          operatorId,
+          candidates,
+          nodeLabels
+        } = entry;
+
+        entry.status = "current";
         const selected =
           await requestBuilderReplacementChoice(
             workSession,
@@ -23129,12 +24020,10 @@ async function ensureProjectRuntimePrerequisites(
               candidates,
               index,
               total:
-                unresolvedRequirements.length,
+                replacementQueue.length,
               catalogResult,
-              nodeLabels:
-                matchingNodes.map(item =>
-                  `${item.node.label || item.node.id || operatorId} (${item.path})`
-                )
+              nodeLabels,
+              replacementQueue
             }
           );
 
@@ -23150,6 +24039,9 @@ async function ensureProjectRuntimePrerequisites(
               selected.outputMap || {}
             )
         };
+        entry.status = "selected";
+        entry.selectedOperatorId =
+          selected.operatorId;
       }
 
       const transaction =
@@ -23158,8 +24050,25 @@ async function ensureProjectRuntimePrerequisites(
           manualMigrations,
           manualPortMigrations
         );
-      transaction.assertGeometry();
-      transaction.commit();
+      try {
+        transaction.assertGeometry();
+        const selectedPlanDiagnostics =
+          validateRuntimeGraphViewsFast(
+            graph
+          );
+        if (
+          selectedPlanDiagnostics.length > 0
+        ) {
+          throw irreparableProjectJsonError(
+            "the selected replacements do not form a valid complete Runtime Graph.",
+            selectedPlanDiagnostics
+          );
+        }
+        transaction.commit();
+      } catch (error) {
+        transaction.rollback();
+        throw error;
+      }
 
       Object.assign(
         appliedCatalogMigrations,
@@ -23206,6 +24115,7 @@ async function ensureProjectRuntimePrerequisites(
       requiredCatalogNodes,
       appliedCatalogMigrations,
       appliedPortMigrations,
+      structuralRepairability,
       catalogOnly: true
     };
   }
@@ -23325,6 +24235,15 @@ async function ensureProjectRuntimePrerequisites(
     schemaVersion: 1,
     history: history.slice(-32)
   };
+  const integratedNodeCompatibility =
+    window.RMLModNodeRegistry
+      ?.getIntegratedNodeContract?.();
+  if (integratedNodeCompatibility) {
+    graph.integratedNodeCompatibility =
+      structuredClone(
+        integratedNodeCompatibility
+      );
+  }
 
   const graphValidation =
     window.RMLTypedNodeGraphGenerator
@@ -24094,7 +25013,7 @@ async function applyLoadedProjectWithFeedback(
             ? `${Number(prerequisites.unresolvedNodeCount || 0).toLocaleString("de-DE")} unavailable node${Number(prerequisites.unresolvedNodeCount || 0) === 1 ? " was" : "s were"} preserved with all stored ports and connections. Search for a verified compatible replacement in each node's inspector. Export remains blocked only for affected execution paths.`
             : prerequisites.catalog
             ?.cacheSatisfied === true
-            ? "The single Live request could not be completed, so the cached fallback resolved the required contracts and confirmed replacements. The complete Runtime Graph model and generated sources are ready without opening its page."
+            ? "No known Live health path could be confirmed, so the cached fallback resolved the required contracts and confirmed replacements. The complete Runtime Graph model and generated sources are ready without opening its page."
             : prerequisites.graph
               ? "Catalog contracts, the complete Runtime Graph model, generated sources, dialogs and controls are all ready without requiring a page switch."
               : "Project data, dialogs and controls are all ready.",
@@ -25782,8 +26701,6 @@ function currentApiExportCompatibilityWarning() {
           ?.catalogGenerated === true &&
         contract &&
         typeof contract === "object" &&
-        contract.catalogSource ===
-          "scanner" &&
         String(contract.nodeId || "") ===
           String(node.operatorId) &&
         String(
@@ -28391,6 +29308,9 @@ function cacheElements() {
     ),
     builderWorkReplacement: document.getElementById(
       "builder-work-replacement"
+    ),
+    builderWorkReplacementQueue: document.getElementById(
+      "builder-work-replacement-queue"
     ),
     builderWorkReplacementSearch: document.getElementById(
       "builder-work-replacement-search"

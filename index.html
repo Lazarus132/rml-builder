@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta
       name="rml-builder-build"
-      content="advanced-raw-csharp-graph-color-parity-20260830-v629">
+      content="fast-irreparable-project-preflight-20260830-v634">
     <meta
       name="description"
       content="Build complete typed ResoniteModLoader projects visually with automatic dependencies; optional Raw C# tools remain an expert fallback.">
@@ -16,7 +16,7 @@
         "RMLBuilderBuildId",
         {
           value:
-            "advanced-raw-csharp-graph-color-parity-20260830-v629",
+            "fast-irreparable-project-preflight-20260830-v634",
           writable: false,
           enumerable: true,
           configurable: true
@@ -54,6 +54,60 @@
         gap: 12px;
         min-width: 0;
         width: 100%;
+      }
+
+      .builder-work-replacement-queue {
+        display: grid;
+        gap: 6px;
+        max-height: 132px;
+        overflow: auto;
+        padding: 8px;
+        border: 1px solid rgba(255, 255, 255, .12);
+        border-radius: 12px;
+        background: rgba(0, 0, 0, .16);
+        scrollbar-gutter: stable;
+      }
+
+      .builder-work-replacement-queue-item {
+        display: grid;
+        grid-template-columns: 18px minmax(0, 1fr) auto;
+        gap: 8px;
+        align-items: center;
+        min-width: 0;
+        padding: 5px 7px;
+        border-radius: 8px;
+        font-size: 12px;
+        background: rgba(255, 255, 255, .035);
+      }
+
+      .builder-work-replacement-queue-item[data-status="current"] {
+        color: #dff5ff;
+        background: rgba(116, 202, 255, .15);
+      }
+
+      .builder-work-replacement-queue-item[data-status="selected"] {
+        color: #d8ffe6;
+        background: rgba(94, 224, 143, .1);
+      }
+
+      .builder-work-replacement-queue-item[data-status="unavailable"] {
+        color: #ffd8d8;
+        background: rgba(255, 104, 104, .1);
+      }
+
+      .builder-work-replacement-queue-state {
+        font-weight: 800;
+        text-align: center;
+      }
+
+      .builder-work-replacement-queue-name {
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+
+      .builder-work-replacement-queue-count {
+        opacity: .72;
+        white-space: nowrap;
       }
 
       .builder-work-replacement label {
@@ -141,6 +195,14 @@
 
       .builder-work-replacement-copy small {
         opacity: .76;
+      }
+
+      .builder-work-replacement-match {
+        color: #bfe8ff;
+      }
+
+      .builder-work-replacement-match[data-warning="true"] {
+        color: #ffd28a;
       }
 
       .builder-work-replacement-empty {
@@ -723,6 +785,16 @@
           id="builder-work-replacement"
           class="builder-work-replacement"
           hidden>
+          <div>
+            <div id="builder-work-replacement-queue-label">
+              All missing node families
+            </div>
+            <div
+              id="builder-work-replacement-queue"
+              class="builder-work-replacement-queue"
+              role="list"
+              aria-labelledby="builder-work-replacement-queue-label"></div>
+          </div>
           <label>
             Search compatible catalog nodes
             <input
@@ -733,7 +805,7 @@
           </label>
           <div>
             <div id="builder-work-replacement-list-label">
-              Verified compatible replacements
+              Available replacement nodes
             </div>
             <div
               id="builder-work-replacement-list"
@@ -766,11 +838,11 @@
     <script src="scroll_manager.js?v=31-hint-route-visibility-v258"></script>
     <script src="scroll_hierarchy.js?v=8"></script>
     <script src="csharp14_roslyn.js?v=4-normal-core-custom-csharp-v603"></script>
-    <script src="app.js?v=462-advanced-raw-csharp-graph-color-parity-v629"></script>
-    <script src="catalog_loader.js?v=101-advanced-raw-csharp-graph-color-parity-v629"></script>
+    <script src="app.js?v=467-fast-irreparable-project-preflight-v634"></script>
+    <script src="catalog_loader.js?v=106-fast-irreparable-project-preflight-v634"></script>
     <script src="runtime_bridge.js?v=4-live-compatibility-v621"></script>
     <script src="graph_gpu_renderer.js?v=11-source-comment-cleanup-v603f20"></script>
-    <script src="node_graph.js?v=300-advanced-raw-csharp-graph-color-parity-v629"></script>
+    <script src="node_graph.js?v=303-fast-irreparable-project-preflight-v634"></script>
     <script src="dynamic_settings.js?v=24-inline-row-runtime-visibility-v178"></script>
 </body>
 </html>

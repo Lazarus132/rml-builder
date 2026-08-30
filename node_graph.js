@@ -13,7 +13,7 @@
     )
       ? RML_GRAPH_REQUESTED_TEST_STORAGE_SCOPE
       : "rml-configuration-builder-visual-test-default";
-  const GRAPH_SCHEMA_VERSION = 30;
+  const GRAPH_SCHEMA_VERSION = 31;
   const GRAPH_STAGE_WIDTH = 5200;
   const GRAPH_STAGE_HEIGHT = 3400;
   const GRAPH_MIN_ZOOM = 0.005;
@@ -48,6 +48,9 @@
   const GRAPH_GPU_OVERVIEW_EXIT_ZOOM = 0.24;
   const GRAPH_NODE_VIRTUAL_OVERSCAN_PIXELS = 260;
   const API_EXPORT_VERIFICATION_SCHEMA_VERSION = 2;
+  const INTEGRATED_NODE_CONTRACT_SCHEMA_VERSION = 1;
+  const INTEGRATED_NODE_CONTRACT_ALGORITHM =
+    "fnv1a64-semantic-integrated-nodes-v1";
 
   const VALUE_TYPES = [
     "bool",
@@ -839,6 +842,203 @@
   ];
 
   const GRAPH_CODEGEN_PLUGINS = [];
+  let integratedDefinitionRevision = 1;
+  let integratedNodeContractCache = null;
+
+  function stableIntegratedContractValue(
+    value
+  ) {
+    if (typeof value === "function") {
+      return String(value);
+    }
+    if (Array.isArray(value)) {
+      return value.map(
+        stableIntegratedContractValue
+      );
+    }
+    if (
+      value &&
+      typeof value === "object"
+    ) {
+      return Object.fromEntries(
+        Object.keys(value)
+          .sort((left, right) =>
+            left.localeCompare(right)
+          )
+          .map(key => [
+            key,
+            stableIntegratedContractValue(
+              value[key]
+            )
+          ])
+      );
+    }
+    return value ?? null;
+  }
+
+  function integratedDefinitionContract(
+    operatorId,
+    definition
+  ) {
+    const portContract = portValue => ({
+      id: String(portValue?.id || ""),
+      type: String(portValue?.type || ""),
+      typeVar: String(
+        portValue?.typeVar || ""
+      ),
+      constraint: String(
+        portValue?.constraint || ""
+      ),
+      role: String(portValue?.role || ""),
+      optional:
+        portValue?.optional === true,
+      generic:
+        portValue?.generic === true
+    });
+    const parameterContract = value => ({
+      key: String(value?.key || ""),
+      kind: String(value?.kind || ""),
+      default:
+        value?.default ?? null,
+      affectsPorts:
+        value?.affectsPorts === true,
+      affectsNode:
+        value?.affectsNode === true,
+      options:
+        Array.isArray(value?.options)
+          ? value.options.map(option => ({
+              value:
+                option?.value ?? null,
+              label:
+                String(
+                  option?.label || ""
+                )
+            }))
+          : []
+    });
+
+    return stableIntegratedContractValue({
+      operatorId,
+      inputs:
+        (Array.isArray(definition?.inputs)
+          ? definition.inputs
+          : []).map(portContract),
+      outputs:
+        (Array.isArray(definition?.outputs)
+          ? definition.outputs
+          : []).map(portContract),
+      parameters:
+        (Array.isArray(
+          definition?.parameters
+        )
+          ? definition.parameters
+          : []).map(parameterContract),
+      configurableTypeVar:
+        String(
+          definition?.configurableTypeVar ||
+          ""
+        ),
+      configurableTypes:
+        Array.isArray(
+          definition?.configurableTypes
+        )
+          ? definition.configurableTypes.map(
+              value => String(value || "")
+            )
+          : [],
+      variadicInputs:
+        definition?.variadicInputs || null,
+      variadicOutputs:
+        definition?.variadicOutputs || null,
+      resolveDefinition:
+        definition?.resolveDefinition || null,
+      codegenValue:
+        definition?.codegenValue || null,
+      codegenAction:
+        definition?.codegenAction || null,
+      codegenCollect:
+        definition?.codegenCollect || null,
+      syntaxRender:
+        definition?.syntaxRender || null
+    });
+  }
+
+  function integratedNodeContractHash(
+    text
+  ) {
+    let first = 0x811c9dc5;
+    let second = 0x9e3779b9;
+
+    for (
+      let index = 0;
+      index < text.length;
+      index += 1
+    ) {
+      const code = text.charCodeAt(index);
+      first ^= code;
+      first = Math.imul(
+        first,
+        0x01000193
+      ) >>> 0;
+      second ^= code + index;
+      second = Math.imul(
+        second,
+        0x85ebca6b
+      ) >>> 0;
+    }
+
+    return (
+      first.toString(16).padStart(8, "0") +
+      second.toString(16).padStart(8, "0")
+    );
+  }
+
+  function currentIntegratedNodeContract() {
+    if (
+      integratedNodeContractCache?.revision ===
+        integratedDefinitionRevision
+    ) {
+      return integratedNodeContractCache.value;
+    }
+
+    const definitions = Object.entries(
+      OPERATOR_DEFINITIONS
+    )
+      .filter(([, definition]) =>
+        definition?.catalogGenerated !== true &&
+        definition?.unavailableApiContract !== true &&
+        definition?.legacyCatalogAlias !== true
+      )
+      .sort(([left], [right]) =>
+        left.localeCompare(right)
+      )
+      .map(([operatorId, definition]) =>
+        integratedDefinitionContract(
+          operatorId,
+          definition
+        )
+      );
+    const fingerprint =
+      integratedNodeContractHash(
+        JSON.stringify(definitions)
+      );
+    const value = Object.freeze({
+      schemaVersion:
+        INTEGRATED_NODE_CONTRACT_SCHEMA_VERSION,
+      algorithm:
+        INTEGRATED_NODE_CONTRACT_ALGORITHM,
+      fingerprint,
+      definitionCount:
+        definitions.length
+    });
+
+    integratedNodeContractCache = {
+      revision:
+        integratedDefinitionRevision,
+      value
+    };
+    return value;
+  }
 
   function registerGraphType(
     type,
@@ -991,6 +1191,15 @@
     OPERATOR_DEFINITIONS[id] =
       definition;
 
+    if (
+      definition.catalogGenerated !== true &&
+      definition.unavailableApiContract !== true &&
+      definition.legacyCatalogAlias !== true
+    ) {
+      integratedDefinitionRevision += 1;
+      integratedNodeContractCache = null;
+    }
+
     const group =
       OPERATOR_DEFINITIONS[id].group;
 
@@ -1025,7 +1234,7 @@
     "RMLModNodeRegistry",
     {
       value: Object.freeze({
-        version: 7,
+        version: 8,
         port,
         genericPort,
         registerType:
@@ -1050,6 +1259,21 @@
         },
         getNodeDefinitions() {
           return OPERATOR_DEFINITIONS;
+        },
+        isIntegratedNode(operatorId) {
+          const definition =
+            OPERATOR_DEFINITIONS[
+              String(operatorId || "")
+            ];
+          return Boolean(
+            definition &&
+            definition.catalogGenerated !== true &&
+            definition.unavailableApiContract !== true &&
+            definition.legacyCatalogAlias !== true
+          );
+        },
+        getIntegratedNodeContract() {
+          return currentIntegratedNodeContract();
         },
         getTypeDefinitions() {
           return TYPE_INFO;
@@ -2583,6 +2807,7 @@
         schemaVersion: 1,
         history: []
       },
+      integratedNodeCompatibility: null,
       customCSharpFiles: {},
       nodes: [],
       connections: [],
@@ -2971,7 +3196,7 @@
     }
     const worker = new Worker(
       new URL(
-        "graph_codegen_worker.js?v=50-advanced-raw-csharp-graph-color-parity-v629",
+        "graph_codegen_worker.js?v=51-indexed-integrated-contract-import-v630",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -4216,6 +4441,48 @@
         .filter(entry => entry && typeof entry === "object" && !Array.isArray(entry))
         .map(entry => clone(entry))
     };
+    const rawIntegratedCompatibility =
+      raw.integratedNodeCompatibility &&
+      typeof raw.integratedNodeCompatibility ===
+        "object" &&
+      !Array.isArray(
+        raw.integratedNodeCompatibility
+      )
+        ? raw.integratedNodeCompatibility
+        : null;
+    result.integratedNodeCompatibility =
+      rawIntegratedCompatibility
+        ? {
+            schemaVersion: Math.max(
+              0,
+              Math.trunc(
+                finiteNumber(
+                  rawIntegratedCompatibility
+                    .schemaVersion,
+                  0
+                )
+              )
+            ),
+            algorithm: String(
+              rawIntegratedCompatibility
+                .algorithm || ""
+            ).slice(0, 160),
+            fingerprint: String(
+              rawIntegratedCompatibility
+                .fingerprint || ""
+            ).slice(0, 160),
+            definitionCount: Math.max(
+              0,
+              Math.trunc(
+                finiteNumber(
+                  rawIntegratedCompatibility
+                    .definitionCount,
+                  0
+                )
+              )
+            )
+          }
+        : null;
 
     if (
       raw.configSnapshot &&
@@ -5357,6 +5624,18 @@
       lastOpenPage: graph.lastOpenPage === "runtime-graph" ? "runtime-graph" : "configuration-outline",
       sourceSignature: graph.sourceSignature,
       showAdvancedNodes: graph.showAdvancedNodes === true,
+      apiCompatibility:
+        graph.apiCompatibility &&
+        typeof graph.apiCompatibility === "object"
+          ? clone(graph.apiCompatibility)
+          : {
+              schemaVersion: 1,
+              history: []
+            },
+      integratedNodeCompatibility:
+        clone(
+          currentIntegratedNodeContract()
+        ),
       configSnapshot: graph.configSnapshot ? clone(graph.configSnapshot) : null,
       customCSharpFiles,
       ...serializableGraphView(rootRuntimeGraphView())
@@ -29676,6 +29955,156 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     });
   }
 
+  let replacementCandidateIndexCache = null;
+  const replacementCandidateResultCache =
+    new Map();
+  let replacementCandidateIndexBuilds = 0;
+  let replacementCandidateCacheHits = 0;
+
+  function replacementCandidateIndex() {
+    const catalogFingerprint = String(
+      window.RMLResoniteApiCatalog
+        ?.catalogFingerprint || ""
+    );
+    const definitionRevision = Number(
+      window.__RMLNodeDefinitionRevision || 0
+    );
+    const key = [
+      integratedDefinitionRevision,
+      definitionRevision,
+      catalogFingerprint,
+      Object.keys(
+        OPERATOR_DEFINITIONS
+      ).length
+    ].join(":");
+
+    if (
+      replacementCandidateIndexCache?.key ===
+        key
+    ) {
+      return replacementCandidateIndexCache;
+    }
+
+    const staticDescriptors = [];
+    const dynamicEntries = [];
+    const descriptorsByRole = new Map();
+    const indexRole = (
+      descriptor,
+      direction,
+      ports
+    ) => {
+      const keys = new Set(
+        ports.map(port =>
+          `${direction}:${String(
+            port?.role || ""
+          )}`
+        )
+      );
+      for (const roleKey of keys) {
+        if (!descriptorsByRole.has(roleKey)) {
+          descriptorsByRole.set(
+            roleKey,
+            []
+          );
+        }
+        descriptorsByRole
+          .get(roleKey)
+          .push(descriptor);
+      }
+    };
+
+    for (const [operatorId, definition] of
+      Object.entries(
+        OPERATOR_DEFINITIONS
+      )) {
+      if (
+        definition?.unavailableApiContract === true ||
+        definition?.legacyCatalogAlias === true
+      ) {
+        continue;
+      }
+
+      if (
+        typeof definition?.resolveDefinition ===
+          "function"
+      ) {
+        dynamicEntries.push({
+          operatorId,
+          definition
+        });
+        continue;
+      }
+
+      const descriptor = {
+        operatorId,
+        definition,
+        resolvedDefinition: definition,
+        catalogGenerated:
+          definition?.catalogGenerated === true,
+        inputs:
+          compatibilityContractPorts(
+            definition,
+            "input"
+          ),
+        outputs:
+          compatibilityContractPorts(
+            definition,
+            "output"
+          )
+      };
+      staticDescriptors.push(descriptor);
+      indexRole(
+        descriptor,
+        "input",
+        descriptor.inputs
+      );
+      indexRole(
+        descriptor,
+        "output",
+        descriptor.outputs
+      );
+    }
+
+    replacementCandidateResultCache.clear();
+    replacementCandidateIndexBuilds += 1;
+    replacementCandidateIndexCache = {
+      key,
+      staticDescriptors,
+      dynamicEntries,
+      descriptorsByRole
+    };
+    return replacementCandidateIndexCache;
+  }
+
+  function replacementCandidateCacheKey(
+    indexKey,
+    oldInputs,
+    oldOutputs,
+    options
+  ) {
+    return JSON.stringify({
+      indexKey,
+      catalogGeneratedOnly:
+        options.catalogGeneratedOnly === true,
+      requireResoniteCatalog:
+        options.requireResoniteCatalog === true,
+      matchMode:
+        String(options.matchMode || "strict"),
+      candidateParameters:
+        stableIntegratedContractValue(
+          options.candidateParameters || {}
+        ),
+      inputs:
+        stableIntegratedContractValue(
+          oldInputs
+        ),
+      outputs:
+        stableIntegratedContractValue(
+          oldOutputs
+        )
+    });
+  }
+
 
   function unavailableReplacementCandidates(
     unavailableDefinition,
@@ -29705,47 +30134,122 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         unavailableDefinition,
         "output"
       );
+    const candidateIndex =
+      replacementCandidateIndex();
+    const cacheKey =
+      replacementCandidateCacheKey(
+        candidateIndex.key,
+        oldInputs,
+        oldOutputs,
+        {
+          catalogGeneratedOnly,
+          requireResoniteCatalog,
+          candidateParameters
+        }
+      );
+    const cachedCandidates =
+      replacementCandidateResultCache.get(
+        cacheKey
+      );
+    if (cachedCandidates) {
+      replacementCandidateCacheHits += 1;
+      return cachedCandidates.map(
+        candidate => ({
+          ...candidate,
+          inputMap: {
+            ...candidate.inputMap
+          },
+          outputMap: {
+            ...candidate.outputMap
+          }
+        })
+      );
+    }
     const candidates = [];
+    const requiredRoleKeys = [
+      ...oldInputs.map(port =>
+        `input:${String(
+          port?.role || ""
+        )}`
+      ),
+      ...oldOutputs.map(port =>
+        `output:${String(
+          port?.role || ""
+        )}`
+      )
+    ];
+    const indexedPools =
+      requiredRoleKeys
+        .map(roleKey =>
+          candidateIndex.descriptorsByRole
+            .get(roleKey) || []
+        )
+        .sort((left, right) =>
+          left.length - right.length
+        );
+    const staticPool =
+      indexedPools.length > 0
+        ? indexedPools[0]
+        : candidateIndex.staticDescriptors;
+    const descriptors = staticPool
+      .filter(descriptor =>
+        !catalogGeneratedOnly ||
+        descriptor.catalogGenerated === true
+      );
 
-    for (const [operatorId, candidate] of
-      Object.entries(
-        OPERATOR_DEFINITIONS
-      )) {
+    for (const entry of
+      candidateIndex.dynamicEntries) {
       if (
-        (
-          catalogGeneratedOnly &&
-          candidate?.catalogGenerated !==
-            true
-        ) ||
-        candidate?.unavailableApiContract === true ||
-        candidate?.legacyCatalogAlias === true
+        catalogGeneratedOnly &&
+        entry.definition
+          ?.catalogGenerated !== true
       ) {
         continue;
       }
+      const resolvedDefinition =
+        resolveNodeDefinition({
+          kind: "operator",
+          operatorId:
+            entry.operatorId,
+          parameters:
+            clone(
+              candidateParameters || {}
+            )
+        });
+      descriptors.push({
+        operatorId:
+          entry.operatorId,
+        definition:
+          entry.definition,
+        resolvedDefinition,
+        catalogGenerated:
+          entry.definition
+            ?.catalogGenerated === true,
+        inputs:
+          compatibilityContractPorts(
+            resolvedDefinition,
+            "input"
+          ),
+        outputs:
+          compatibilityContractPorts(
+            resolvedDefinition,
+            "output"
+          )
+      });
+    }
 
+    for (const descriptor of
+      descriptors) {
+      const operatorId =
+        descriptor.operatorId;
+      const candidate =
+        descriptor.definition;
       const resolvedCandidate =
-        catalogGeneratedOnly
-          ? candidate
-          : resolveNodeDefinition({
-              kind: "operator",
-              operatorId,
-              parameters:
-                clone(
-                  candidateParameters ||
-                  {}
-                )
-            });
-
+        descriptor.resolvedDefinition;
       const candidateInputs =
-        compatibilityContractPorts(
-          resolvedCandidate,
-          "input"
-        );
+        descriptor.inputs;
       const candidateOutputs =
-        compatibilityContractPorts(
-          resolvedCandidate,
-          "output"
-        );
+        descriptor.outputs;
       const inputMap = {};
       const outputMap = {};
       const usedInputs = new Set();
@@ -29845,13 +30349,724 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       });
     }
 
-    return candidates.sort((left, right) =>
+    const sortedCandidates =
+      candidates.sort((left, right) =>
       left.title.localeCompare(
         right.title,
         undefined,
         { sensitivity: "base" }
       )
     );
+    replacementCandidateResultCache.set(
+      cacheKey,
+      sortedCandidates.map(candidate => ({
+        ...candidate,
+        inputMap: {
+          ...candidate.inputMap
+        },
+        outputMap: {
+          ...candidate.outputMap
+        }
+      }))
+    );
+    if (
+      replacementCandidateResultCache.size >
+        64
+    ) {
+      replacementCandidateResultCache.delete(
+        replacementCandidateResultCache
+          .keys()
+          .next().value
+      );
+    }
+    return sortedCandidates;
+  }
+
+  function manualReplacementTokens(value) {
+    const words = String(value || "")
+      .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+      .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+      .toLocaleLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter(word =>
+        word.length > 1 &&
+        ![
+          "api",
+          "resonite",
+          "frooxengine",
+          "system",
+          "call",
+          "static",
+          "node"
+        ].includes(word)
+      );
+    const synonyms = Object.freeze({
+      add: ["attach", "create", "new", "insert"],
+      attach: ["add", "create"],
+      create: ["add", "attach", "new"],
+      destroy: ["delete", "remove"],
+      delete: ["destroy", "remove"],
+      find: ["get", "search", "lookup"],
+      get: ["find", "read"],
+      read: ["get"],
+      write: ["set"],
+      set: ["write"],
+      valid: ["check", "null", "exists"],
+      validity: ["valid", "check", "null"],
+      blendmode: ["blend", "mode"]
+    });
+    const result = new Set(words);
+    for (const word of words) {
+      for (const synonym of
+        Object.prototype.hasOwnProperty.call(
+          synonyms,
+          word
+        )
+          ? synonyms[word]
+          : []) {
+        result.add(synonym);
+      }
+    }
+    return result;
+  }
+
+  function manualReplacementIdentityProof(
+    requirement,
+    candidate
+  ) {
+    const sourceText = [
+      requirement?.operatorId,
+      ...(Array.isArray(
+        requirement?.nodeLabels
+      )
+        ? requirement.nodeLabels
+        : []),
+      requirement?.apiContract?.ownerType,
+      requirement?.apiContract?.memberName,
+      requirement?.apiContract?.kind
+    ].filter(Boolean).join(" ");
+    const candidateText = [
+      candidate?.operatorId,
+      candidate?.title,
+      candidate?.description,
+      candidate?.group,
+      candidate?.catalogType,
+      candidate?.catalogMember,
+      candidate?.apiSearchText,
+      candidate?.apiMemberKind
+    ].filter(Boolean).join(" ");
+    const sourceTokens =
+      manualReplacementTokens(
+        sourceText
+      );
+    const candidateTokens =
+      manualReplacementTokens(
+        candidateText
+      );
+    let matchedTokens = 0;
+    for (const token of sourceTokens) {
+      if (candidateTokens.has(token)) {
+        matchedTokens += 1;
+      }
+    }
+
+    const sourceLeaf = String(
+      requirement?.operatorId || ""
+    )
+      .split(".")
+      .pop()
+      .replace(
+        /(?:typed|constant)$/i,
+        ""
+      )
+      .replace(/[^a-z0-9]/gi, "")
+      .toLocaleLowerCase();
+    const candidateCompact =
+      candidateText
+        .replace(/[^a-z0-9]/gi, "")
+        .toLocaleLowerCase();
+    const exactOperationName = Boolean(
+      sourceLeaf.length >= 3 &&
+      candidateCompact.includes(
+        sourceLeaf
+      )
+    );
+
+    return Object.freeze({
+      matchedTokens,
+      exactOperationName,
+      score: matchedTokens * 240,
+      proven:
+        exactOperationName ||
+        matchedTokens >= 2
+    });
+  }
+
+  function manualReplacementPortFamily(
+    specification,
+    direction
+  ) {
+    const id = String(
+      specification?.id || ""
+    ).toLocaleLowerCase();
+    const role = String(
+      specification?.role || ""
+    ).toLocaleLowerCase();
+    const combined = `${id} ${role}`;
+
+    if (
+      [
+        "call",
+        "done",
+        "success",
+        "exception"
+      ].includes(id)
+    ) {
+      return id;
+    }
+    if (/generic:\d+/.test(role)) {
+      return "generic";
+    }
+    if (/parameter:\d+/.test(role)) {
+      return "parameter";
+    }
+    if (
+      /(?:^|\s|:)(?:target|parent|root|slot|component|owner|instance|object|source)(?:$|\s|:)/
+        .test(combined)
+    ) {
+      return direction === "input"
+        ? "target"
+        : "result";
+    }
+    if (
+      /(?:^|\s|:)(?:result|value|item|found|valid)(?:$|\s|:)/
+        .test(combined)
+    ) {
+      return direction === "output"
+        ? "result"
+        : "parameter";
+    }
+    return "parameter";
+  }
+
+  function manualReplacementTypesCompatible(
+    oldPort,
+    newPort,
+    direction
+  ) {
+    const oldType = String(
+      oldPort?.type || "object"
+    );
+    const newType = String(
+      newPort?.type || "object"
+    );
+    const oldImpulse =
+      oldType === "impulse";
+    const newImpulse =
+      newType === "impulse";
+
+    if (oldImpulse || newImpulse) {
+      return oldImpulse && newImpulse;
+    }
+    if (
+      oldType === "object" ||
+      newType === "object"
+    ) {
+      return true;
+    }
+
+    return direction === "input"
+      ? connectionTypesCompatible(
+          oldType,
+          newType
+        )
+      : connectionTypesCompatible(
+          newType,
+          oldType
+        );
+  }
+
+  function manualReplacementPortScore(
+    oldPort,
+    newPort,
+    direction
+  ) {
+    if (
+      !manualReplacementTypesCompatible(
+        oldPort,
+        newPort,
+        direction
+      )
+    ) {
+      return -1;
+    }
+
+    const oldId = String(
+      oldPort?.id || ""
+    ).toLocaleLowerCase();
+    const newId = String(
+      newPort?.id || ""
+    ).toLocaleLowerCase();
+    const oldRole = String(
+      oldPort?.role || ""
+    );
+    const newRole = String(
+      newPort?.role || ""
+    );
+    const oldFamily =
+      manualReplacementPortFamily(
+        oldPort,
+        direction
+      );
+    const newFamily =
+      manualReplacementPortFamily(
+        newPort,
+        direction
+      );
+    const fixedFlow = new Set([
+      "call",
+      "done",
+      "success",
+      "exception"
+    ]);
+
+    if (
+      fixedFlow.has(oldFamily) ||
+      fixedFlow.has(newFamily)
+    ) {
+      return oldFamily === newFamily
+        ? 500
+        : -1;
+    }
+
+    let score = 0;
+    if (oldId && oldId === newId) {
+      score += 420;
+    }
+    if (oldRole && oldRole === newRole) {
+      score += 360;
+    }
+    if (oldFamily === newFamily) {
+      score += 170;
+    } else if (
+      [oldFamily, newFamily]
+        .every(family =>
+          ["target", "parameter"].includes(
+            family
+          )
+        )
+    ) {
+      score += 45;
+    } else {
+      return -1;
+    }
+
+    const oldTokens =
+      manualReplacementTokens(
+        `${oldId} ${oldPort?.label || ""}`
+      );
+    const newTokens =
+      manualReplacementTokens(
+        `${newId} ${newPort?.label || ""}`
+      );
+    for (const token of oldTokens) {
+      if (newTokens.has(token)) {
+        score += 85;
+      }
+    }
+
+    const oldType = String(
+      oldPort?.type || "object"
+    );
+    const newType = String(
+      newPort?.type || "object"
+    );
+    if (
+      oldType !== "object" &&
+      oldType === newType
+    ) {
+      score += 110;
+    }
+    return score;
+  }
+
+  function manualReplacementPortMapping(
+    oldPorts,
+    newPorts,
+    direction
+  ) {
+    if (oldPorts.length > newPorts.length) {
+      return null;
+    }
+
+    const options = oldPorts.map(
+      oldPort => ({
+        oldPort,
+        matches: newPorts
+          .map(newPort => ({
+            newPort,
+            score:
+              manualReplacementPortScore(
+                oldPort,
+                newPort,
+                direction
+              )
+          }))
+          .filter(match =>
+            match.score >= 0
+          )
+          .sort((left, right) =>
+            right.score - left.score ||
+            String(left.newPort.id)
+              .localeCompare(
+                String(right.newPort.id)
+              )
+          )
+          .slice(0, 8)
+      })
+    ).sort((left, right) =>
+      left.matches.length -
+        right.matches.length
+    );
+
+    if (options.some(option =>
+      option.matches.length === 0
+    )) {
+      return null;
+    }
+
+    let best = null;
+    const visit = (
+      optionIndex,
+      used,
+      mapping,
+      score
+    ) => {
+      if (optionIndex >= options.length) {
+        if (!best || score > best.score) {
+          best = {
+            score,
+            mapping: {
+              ...mapping
+            },
+            used: new Set(used)
+          };
+        }
+        return;
+      }
+
+      const option = options[optionIndex];
+      for (const match of option.matches) {
+        const newId = String(
+          match.newPort.id || ""
+        );
+        if (used.has(newId)) {
+          continue;
+        }
+        used.add(newId);
+        mapping[
+          String(option.oldPort.id || "")
+        ] = newId;
+        visit(
+          optionIndex + 1,
+          used,
+          mapping,
+          score + match.score
+        );
+        delete mapping[
+          String(option.oldPort.id || "")
+        ];
+        used.delete(newId);
+      }
+    };
+    visit(0, new Set(), {}, 0);
+    return best;
+  }
+
+  function manualStructuralReplacementCandidates(
+    unavailableDefinition,
+    requirement,
+    {
+      catalogGeneratedOnly = true,
+      requireResoniteCatalog = true,
+      candidateParameters = {}
+    } = {}
+  ) {
+    if (
+      unavailableDefinition?.unavailableApiContract !== true ||
+      (
+        requireResoniteCatalog &&
+        !window.RMLResoniteApiCatalog
+      )
+    ) {
+      return [];
+    }
+
+    const oldInputs =
+      compatibilityContractPorts(
+        unavailableDefinition,
+        "input"
+      );
+    const oldOutputs =
+      compatibilityContractPorts(
+        unavailableDefinition,
+        "output"
+      );
+    const candidateIndex =
+      replacementCandidateIndex();
+    const cacheKey =
+      replacementCandidateCacheKey(
+        candidateIndex.key,
+        oldInputs,
+        oldOutputs,
+        {
+          catalogGeneratedOnly,
+          requireResoniteCatalog,
+          candidateParameters,
+          matchMode:
+            "manual-structural"
+        }
+      );
+    const cached =
+      replacementCandidateResultCache.get(
+        cacheKey
+      );
+    if (cached) {
+      replacementCandidateCacheHits += 1;
+      return cached.map(candidate => ({
+        ...candidate,
+        inputMap: {
+          ...candidate.inputMap
+        },
+        outputMap: {
+          ...candidate.outputMap
+        },
+        unmappedRequiredInputs: [
+          ...(candidate
+            .unmappedRequiredInputs || [])
+        ]
+      }));
+    }
+
+    const descriptors =
+      candidateIndex.staticDescriptors
+        .filter(descriptor =>
+          !catalogGeneratedOnly ||
+          descriptor.catalogGenerated ===
+            true
+        );
+    for (const entry of
+      candidateIndex.dynamicEntries) {
+      if (
+        catalogGeneratedOnly &&
+        entry.definition
+          ?.catalogGenerated !== true
+      ) {
+        continue;
+      }
+      const resolvedDefinition =
+        resolveNodeDefinition({
+          kind: "operator",
+          operatorId: entry.operatorId,
+          parameters:
+            clone(
+              candidateParameters || {}
+            )
+        });
+      descriptors.push({
+        operatorId: entry.operatorId,
+        definition: entry.definition,
+        resolvedDefinition,
+        catalogGenerated:
+          entry.definition
+            ?.catalogGenerated === true,
+        inputs:
+          compatibilityContractPorts(
+            resolvedDefinition,
+            "input"
+          ),
+        outputs:
+          compatibilityContractPorts(
+            resolvedDefinition,
+            "output"
+          )
+      });
+    }
+
+    const candidates = [];
+
+    for (const descriptor of
+      descriptors) {
+      const inputMatch =
+        manualReplacementPortMapping(
+          oldInputs,
+          descriptor.inputs,
+          "input"
+        );
+      if (!inputMatch) {
+        continue;
+      }
+      const outputMatch =
+        manualReplacementPortMapping(
+          oldOutputs,
+          descriptor.outputs,
+          "output"
+        );
+      if (!outputMatch) {
+        continue;
+      }
+
+      const candidate =
+        descriptor.definition;
+      const resolvedCandidate =
+        descriptor.resolvedDefinition;
+      const candidateText = [
+        descriptor.operatorId,
+        resolvedCandidate?.title,
+        candidate?.title,
+        resolvedCandidate?.description,
+        candidate?.description,
+        resolvedCandidate?.group,
+        candidate?.group,
+        candidate?.catalogType,
+        candidate?.catalogMember,
+        candidate?.apiSearchText,
+        candidate?.apiMemberKind
+      ].filter(Boolean).join(" ");
+      const identityProof =
+        manualReplacementIdentityProof(
+          requirement,
+          {
+            ...candidate,
+            ...resolvedCandidate,
+            operatorId:
+              descriptor.operatorId,
+            title:
+              resolvedCandidate?.title ||
+              candidate?.title,
+            description:
+              resolvedCandidate
+                ?.description ||
+              candidate?.description,
+            group:
+              resolvedCandidate?.group ||
+              candidate?.group
+          }
+        );
+      const identityScore =
+        identityProof.score;
+      const unmappedRequiredInputs =
+        descriptor.inputs
+          .filter(port =>
+            port.optional !== true &&
+            !inputMatch.used.has(
+              String(port.id || "")
+            )
+          )
+          .map(port => ({
+            id: String(port.id || ""),
+            label: String(
+              port.label || port.id || ""
+            ),
+            type: String(
+              port.type || "object"
+            )
+          }));
+      const score =
+        identityScore +
+        inputMatch.score +
+        outputMatch.score -
+        160 *
+          unmappedRequiredInputs.length -
+        5 * Math.max(
+          0,
+          descriptor.outputs.length -
+            oldOutputs.length
+        );
+
+      if (
+        !identityProof.proven ||
+        unmappedRequiredInputs.length > 0
+      ) {
+        continue;
+      }
+
+      candidates.push({
+        operatorId:
+          descriptor.operatorId,
+        title: String(
+          resolvedCandidate?.title ||
+          candidate?.title ||
+          descriptor.operatorId
+        ),
+        symbol: String(
+          resolvedCandidate?.symbol ||
+          candidate?.symbol ||
+          "API"
+        ),
+        group: String(
+          resolvedCandidate?.group ||
+          candidate?.group ||
+          "Resonite API"
+        ),
+        description: String(
+          resolvedCandidate?.description ||
+          candidate?.description || ""
+        ),
+        inputMap:
+          inputMatch.mapping,
+        outputMap:
+          outputMatch.mapping,
+        matchMode:
+          "manual-structural",
+        identityScore,
+        identityMatchedTokens:
+          identityProof.matchedTokens,
+        exactOperationName:
+          identityProof
+            .exactOperationName,
+        score,
+        unmappedRequiredInputs
+      });
+    }
+
+    const sorted = candidates
+      .sort((left, right) =>
+        right.score - left.score ||
+        left.unmappedRequiredInputs.length -
+          right.unmappedRequiredInputs.length ||
+        left.title.localeCompare(
+          right.title,
+          undefined,
+          { sensitivity: "base" }
+        )
+      );
+    replacementCandidateResultCache.set(
+      cacheKey,
+      sorted.map(candidate => ({
+        ...candidate,
+        inputMap: {
+          ...candidate.inputMap
+        },
+        outputMap: {
+          ...candidate.outputMap
+        },
+        unmappedRequiredInputs: [
+          ...candidate
+            .unmappedRequiredInputs
+        ]
+      }))
+    );
+    if (
+      replacementCandidateResultCache.size >
+        64
+    ) {
+      replacementCandidateResultCache.delete(
+        replacementCandidateResultCache
+          .keys().next().value
+      );
+    }
+    return sorted;
   }
 
   function genericMissingCatalogDefinition(
@@ -30002,19 +31217,43 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         : OPERATOR_DEFINITIONS[
             unavailableOperatorId
           ];
-    const candidates =
+    let candidates =
       unavailableReplacementCandidates(
         unavailableDefinition,
         {
-          catalogGeneratedOnly:
-            !allCatalogObjects,
-          requireResoniteCatalog:
-            !allCatalogObjects,
+          catalogGeneratedOnly: true,
+          requireResoniteCatalog: true,
           candidateParameters:
             requirement
               ?.nodeParameters || {}
         }
-      ).map(candidate =>
+      );
+    let matchMode = "strict";
+    if (allCatalogObjects) {
+      candidates = candidates.filter(
+        candidate =>
+          manualReplacementIdentityProof(
+            requirement,
+            candidate
+          ).proven
+      );
+    }
+    if (candidates.length === 0) {
+      candidates =
+        manualStructuralReplacementCandidates(
+          unavailableDefinition,
+          requirement,
+          {
+            catalogGeneratedOnly: true,
+            requireResoniteCatalog: true,
+            candidateParameters:
+              requirement
+                ?.nodeParameters || {}
+          }
+        );
+      matchMode = "manual-structural";
+    }
+    candidates = candidates.map(candidate =>
         Object.freeze({
           operatorId:
             candidate.operatorId,
@@ -30023,6 +31262,28 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           group: candidate.group,
           description:
             candidate.description,
+          matchMode:
+            String(
+              candidate.matchMode ||
+              matchMode
+            ),
+          score:
+            Number(candidate.score) || 0,
+          unmappedRequiredInputs:
+            Object.freeze(
+              (Array.isArray(
+                candidate
+                  .unmappedRequiredInputs
+              )
+                ? candidate
+                    .unmappedRequiredInputs
+                : [])
+                .map(port =>
+                  Object.freeze({
+                    ...port
+                  })
+                )
+            ),
           inputMap:
             Object.freeze({
               ...candidate.inputMap
@@ -30040,6 +31301,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         String(
           unavailableOperatorId || ""
         ),
+      matchMode,
       candidates:
         Object.freeze(candidates)
     });
@@ -37558,7 +38820,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
   Object.defineProperty(window, "RMLDynamicGraphHost", {
     value: Object.freeze({
-      version: 47,
+      version: 50,
       getState() { return graph; },
       migrateLegacyOperatorsForImport(
         graphDocument
@@ -37573,6 +38835,28 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         return compatibleImportReplacementCandidates(
           requirement
         );
+      },
+      getReplacementCandidateIndexStats() {
+        return Object.freeze({
+          indexBuilds:
+            replacementCandidateIndexBuilds,
+          cacheHits:
+            replacementCandidateCacheHits,
+          cachedContracts:
+            replacementCandidateResultCache
+              .size,
+          indexedStaticDefinitions:
+            replacementCandidateIndexCache
+              ?.staticDescriptors?.length ||
+            0,
+          indexedDynamicDefinitions:
+            replacementCandidateIndexCache
+              ?.dynamicEntries?.length ||
+            0,
+          indexKey:
+            replacementCandidateIndexCache
+              ?.key || ""
+        });
       },
       applyCatalogMigrationsPreservingGeometry(
         graphDocument,
