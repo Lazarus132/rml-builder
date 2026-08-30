@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const LOADER_VERSION = 51;
+  const LOADER_VERSION = 57;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
   const CATALOG_PATH = "/resonite_api_catalog.json";
@@ -32,7 +32,7 @@
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "visual_csharp.js?v=23-consistent-custom-csharp-contract-v610",
+    "visual_csharp.js?v=29-advanced-raw-csharp-graph-color-parity-v629",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(

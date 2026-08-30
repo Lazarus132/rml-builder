@@ -194,16 +194,16 @@ async function ensureRuntime(catalog) {
       self.RMLResoniteApiCatalog;
 
     importScripts(
-      "node_graph.js?v=286-background-custom-csharp-build-v603f37"
+      "node_graph.js?v=300-advanced-raw-csharp-graph-color-parity-v629"
     );
     importScripts(
-      "mod_nodes.js?v=47-runtime-node-families-v603f37"
+      "mod_nodes.js?v=52-persistent-runtime-state-v622"
     );
     importScripts(
-      "visual_csharp.js?v=22-background-custom-csharp-build-v603f37"
+      "visual_csharp.js?v=29-advanced-raw-csharp-graph-color-parity-v629"
     );
     importScripts(
-      "api_nodes.js?v=33-custom-csharp-catalog-contract-v603f37"
+      "api_nodes.js?v=36-null-safe-api-read-v622"
     );
 
     if (
@@ -240,15 +240,33 @@ self.addEventListener("message", event => {
 
   void (async () => {
     try {
+      self.postMessage({
+        id: request.id,
+        progress: true,
+        message:
+          "Worker: loading Custom C# node modules…"
+      });
       await ensureRuntime(request.catalog);
 
       if (request.operation === "buildCustomCSharp") {
+        self.postMessage({
+          id: request.id,
+          progress: true,
+          message:
+            "Worker: building optimized syntax graph…"
+        });
         const visualCSharp = self.RMLVisualCSharp;
         const fragment = visualCSharp?.createRoslynImportFragment?.(
           String(request.source || ""),
           request.parseResult,
           request.options || {}
         );
+        self.postMessage({
+          id: request.id,
+          progress: true,
+          message:
+            "Worker: finalizing optimized syntax graph…"
+        });
         self.postMessage({
           id: request.id,
           ok: fragment?.ok === true,

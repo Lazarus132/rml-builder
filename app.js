@@ -36,7 +36,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "single-active-project-storage-20260830-v623";
+  "advanced-raw-csharp-graph-color-parity-20260830-v629";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -22566,6 +22566,66 @@ function projectTypedRuntimeGraph(
       : null;
 }
 
+function projectRuntimeGraphViews(
+  graph
+) {
+  if (
+    !graph ||
+    typeof graph !== "object" ||
+    Array.isArray(graph)
+  ) {
+    return [];
+  }
+
+  const views = [];
+  const visited = new Set();
+  const append = (
+    candidate,
+    ownerNodeId = "",
+    path = "runtime-root"
+  ) => {
+    if (
+      !candidate ||
+      typeof candidate !== "object" ||
+      Array.isArray(candidate) ||
+      visited.has(candidate) ||
+      !Array.isArray(candidate.nodes) ||
+      !Array.isArray(candidate.connections)
+    ) {
+      return;
+    }
+
+    visited.add(candidate);
+    views.push({
+      ownerNodeId,
+      path,
+      graph: candidate
+    });
+
+    const customFiles =
+      candidate.customCSharpFiles &&
+      typeof candidate.customCSharpFiles === "object" &&
+      !Array.isArray(
+        candidate.customCSharpFiles
+      )
+        ? candidate.customCSharpFiles
+        : {};
+
+    for (const [nestedOwnerId, customGraph] of
+      Object.entries(customFiles)) {
+      append(
+        customGraph,
+        String(nestedOwnerId || ""),
+        `${path}/custom-csharp:${String(nestedOwnerId || "<unnamed>")}`
+      );
+    }
+  };
+
+  append(graph);
+
+  return views;
+}
+
 function projectRequiredCatalogNodes(
   project
 ) {
@@ -22574,119 +22634,123 @@ function projectRequiredCatalogNodes(
       project
     );
 
-  const nodes =
-    Array.isArray(graph?.nodes)
-      ? graph.nodes
-      : [];
+  const graphViews =
+    projectRuntimeGraphViews(graph);
   const definitions =
     window.RMLModNodeRegistry
       ?.getNodeDefinitions?.() || {};
   const requirements = new Map();
-  const operatorByNodeId =
-    new Map();
+  for (const view of graphViews) {
+    const operatorByNodeId = new Map();
+    const nodes = Array.isArray(
+      view.graph.nodes
+    )
+      ? view.graph.nodes
+      : [];
 
-  for (const node of nodes) {
-    const operatorId = String(
-      node?.operatorId || ""
-    ).trim();
-    const apiContract =
-      node?.apiContract &&
-      typeof node.apiContract === "object" &&
-      !Array.isArray(node.apiContract)
-        ? node.apiContract
-        : null;
-    const hasPortableApiIdentity =
-      Boolean(
-        String(apiContract?.ownerType || "").trim() &&
-        String(apiContract?.kind || "").trim()
-      );
-    const definition =
-      definitions[operatorId];
-    const missingCatalogObject =
-      node?.kind === "operator" &&
-      (
-        !definition ||
-        definition
-          .unavailableApiContract ===
-            true
+    for (const node of nodes) {
+      const operatorId = String(
+        node?.operatorId || ""
+      ).trim();
+      const apiContract =
+        node?.apiContract &&
+        typeof node.apiContract === "object" &&
+        !Array.isArray(node.apiContract)
+          ? node.apiContract
+          : null;
+      const hasPortableApiIdentity =
+        Boolean(
+          String(apiContract?.ownerType || "").trim() &&
+          String(apiContract?.kind || "").trim()
+        );
+      const definition =
+        definitions[operatorId];
+      const missingCatalogObject =
+        node?.kind === "operator" &&
+        (
+          !definition ||
+          definition
+            .unavailableApiContract ===
+              true
+        );
+
+      if (
+        !operatorId.startsWith("api.") &&
+        !hasPortableApiIdentity &&
+        !missingCatalogObject
+      ) {
+        continue;
+      }
+
+      operatorByNodeId.set(
+        String(node.id || ""),
+        operatorId
       );
 
-    if (
-      !operatorId.startsWith("api.") &&
-      !hasPortableApiIdentity &&
-      !missingCatalogObject
-    ) {
-      continue;
+      if (!requirements.has(operatorId)) {
+        requirements.set(operatorId, {
+          operatorId,
+          apiContract:
+            apiContract
+              ? clone(apiContract)
+              : null,
+          missingCatalogObject,
+          catalogScope:
+            operatorId.startsWith("api.") ||
+            hasPortableApiIdentity
+              ? "api"
+              : "all",
+          nodeParameters:
+            node?.parameters &&
+            typeof node.parameters ===
+              "object" &&
+            !Array.isArray(
+              node.parameters
+            )
+              ? clone(node.parameters)
+              : {},
+          inputPorts: new Set(),
+          outputPorts: new Set()
+        });
+      }
     }
 
-    operatorByNodeId.set(
-      String(node.id || ""),
-      operatorId
-    );
-
-    if (!requirements.has(operatorId)) {
-      requirements.set(operatorId, {
-        operatorId,
-        apiContract:
-          apiContract
-            ? clone(apiContract)
-            : null,
-        missingCatalogObject,
-        catalogScope:
-          operatorId.startsWith("api.") ||
-          hasPortableApiIdentity
-            ? "api"
-            : "all",
-        nodeParameters:
-          node?.parameters &&
-          typeof node.parameters ===
-            "object" &&
-          !Array.isArray(
-            node.parameters
-          )
-            ? clone(node.parameters)
-            : {},
-        inputPorts: new Set(),
-        outputPorts: new Set()
-      });
-    }
-  }
-
-  for (const connection of
-    Array.isArray(graph?.connections)
-      ? graph.connections
-      : []) {
-    const sourceOperator =
-      operatorByNodeId.get(
-        String(
-          connection?.fromNode || ""
-        )
-      );
-    const targetOperator =
-      operatorByNodeId.get(
-        String(
-          connection?.toNode || ""
-        )
-      );
-
-    if (sourceOperator) {
-      requirements
-        .get(sourceOperator)
-        .outputPorts.add(
+    for (const connection of
+      Array.isArray(view.graph.connections)
+        ? view.graph.connections
+        : []) {
+      const sourceOperator =
+        operatorByNodeId.get(
           String(
-            connection?.fromPort || ""
+            connection?.fromNode || ""
           )
         );
-    }
-
-    if (targetOperator) {
-      requirements
-        .get(targetOperator)
-        .inputPorts.add(
+      const targetOperator =
+        operatorByNodeId.get(
           String(
-            connection?.toPort || ""
+            connection?.toNode || ""
           )
         );
+
+      if (sourceOperator) {
+        requirements
+          .get(sourceOperator)
+          .outputPorts.add(
+            String(
+              connection?.fromPort || ""
+            )
+          );
+      }
+
+      if (targetOperator) {
+        requirements
+          .get(targetOperator)
+          .inputPorts.add(
+            String(
+              connection?.toPort || ""
+            )
+          );
+      }
     }
   }
 
@@ -23040,15 +23104,22 @@ async function ensureProjectRuntimePrerequisites(
         }
 
         const matchingNodes =
-          (Array.isArray(graph.nodes)
-            ? graph.nodes
-            : [])
-            .filter(node =>
-              node?.kind ===
-                "operator" &&
-              String(
-                node.operatorId || ""
-              ) === operatorId
+          projectRuntimeGraphViews(graph)
+            .flatMap(view =>
+              (Array.isArray(view.graph.nodes)
+                ? view.graph.nodes
+                : [])
+                .filter(node =>
+                  node?.kind ===
+                    "operator" &&
+                  String(
+                    node.operatorId || ""
+                  ) === operatorId
+                )
+                .map(node => ({
+                  node,
+                  path: view.path
+                }))
             );
         const selected =
           await requestBuilderReplacementChoice(
@@ -23061,10 +23132,8 @@ async function ensureProjectRuntimePrerequisites(
                 unresolvedRequirements.length,
               catalogResult,
               nodeLabels:
-                matchingNodes.map(node =>
-                  node.label ||
-                  node.id ||
-                  operatorId
+                matchingNodes.map(item =>
+                  `${item.node.label || item.node.id || operatorId} (${item.path})`
                 )
             }
           );
@@ -23156,47 +23225,56 @@ async function ensureProjectRuntimePrerequisites(
   const definitions =
     window.RMLModNodeRegistry
       ?.getNodeDefinitions?.() || {};
+  const graphNodes =
+    projectRuntimeGraphViews(graph)
+      .flatMap(view =>
+        (Array.isArray(view.graph.nodes)
+          ? view.graph.nodes
+          : [])
+          .map(node => ({
+            node,
+            path: view.path
+          }))
+      );
   const unavailable =
-    (Array.isArray(graph.nodes)
-      ? graph.nodes
-      : [])
-      .filter(node =>
-        node?.kind === "operator" &&
+    graphNodes
+      .filter(item =>
+        item.node?.kind === "operator" &&
         !definitions[
-          node.operatorId
+          item.node.operatorId
         ]
       )
-      .map(node => ({
+      .map(item => ({
         nodeId:
-          String(node.id || "<unnamed>"),
+          String(item.node.id || "<unnamed>"),
         operatorId:
           String(
-            node.operatorId ||
+            item.node.operatorId ||
             "<missing>"
-          )
+          ),
+        path: item.path
       }));
 
   const unresolvedApiNodes =
-    (Array.isArray(graph.nodes)
-      ? graph.nodes
-      : [])
-      .filter(node =>
-        definitions[node?.operatorId]
+    graphNodes
+      .filter(item =>
+        definitions[item.node?.operatorId]
           ?.unavailableApiContract ===
             true
       )
-      .map(node => ({
+      .map(item => ({
         nodeId:
-          String(node.id || ""),
+          String(item.node.id || ""),
         operatorId:
           String(
-            node.operatorId || ""
+            item.node.operatorId || ""
           ),
         stableContractId:
           String(
-            node.apiContract
+            item.node.apiContract
               ?.stableContractId || ""
-          )
+          ),
+        path: item.path
       }));
 
   if (
@@ -23205,10 +23283,10 @@ async function ensureProjectRuntimePrerequisites(
   ) {
     const visible = [
       ...unavailable.map(item =>
-        `'${item.operatorId}' on '${item.nodeId}'`
+        `'${item.operatorId}' on '${item.nodeId}' (${item.path})`
       ),
       ...unresolvedApiNodes.map(item =>
-        `'${item.operatorId}' on '${item.nodeId}'`
+        `'${item.operatorId}' on '${item.nodeId}' (${item.path})`
       )
     ].slice(0, 12);
     const total =
@@ -23283,65 +23361,109 @@ function assertImportedGraphDocumentIdentity(
 ) {
   const actualGraph =
     projectTypedRuntimeGraph(state);
-  const expectedNodes =
-    Array.isArray(expectedGraph?.nodes)
-      ? expectedGraph.nodes
-      : [];
-  const expectedConnections =
-    Array.isArray(
-      expectedGraph?.connections
-    )
-      ? expectedGraph.connections
-      : [];
-  const actualNodes =
-    Array.isArray(actualGraph?.nodes)
-      ? actualGraph.nodes
-      : [];
-  const actualConnections =
-    Array.isArray(
-      actualGraph?.connections
-    )
-      ? actualGraph.connections
-      : [];
-  const actualNodeIds = new Set(
-    actualNodes.map(node =>
-      String(node?.id || "")
-    )
+  assertRuntimeGraphViewsIdentity(
+    expectedGraph,
+    actualGraph,
+    "The imported Runtime Graph document was not preserved exactly"
   );
-  const actualConnectionIds = new Set(
-    actualConnections.map(connection =>
-      String(connection?.id || "")
-    )
+}
+
+function assertRuntimeGraphViewsIdentity(
+  expectedGraph,
+  actualGraph,
+  message
+) {
+  const expectedViews =
+    projectRuntimeGraphViews(
+      expectedGraph
+    );
+  const actualViewsByPath = new Map(
+    projectRuntimeGraphViews(
+      actualGraph
+    ).map(view => [
+      view.path,
+      view.graph
+    ])
   );
-  const missingNodeIds =
-    expectedNodes
-      .map(node =>
+  const failures = [];
+
+  for (const expectedView of
+    expectedViews) {
+    const actualView =
+      actualViewsByPath.get(
+        expectedView.path
+      );
+    if (!actualView) {
+      failures.push(
+        `${expectedView.path}: graph missing`
+      );
+      continue;
+    }
+
+    const expectedNodes =
+      expectedView.graph.nodes;
+    const expectedConnections =
+      expectedView.graph.connections;
+    const actualNodes =
+      actualView.nodes;
+    const actualConnections =
+      actualView.connections;
+    const actualNodeIds = new Set(
+      actualNodes.map(node =>
         String(node?.id || "")
       )
-      .filter(id =>
-        !actualNodeIds.has(id)
-      );
-  const missingConnectionIds =
-    expectedConnections
-      .map(connection =>
-        String(
-          connection?.id || ""
-        )
+    );
+    const actualConnectionIds = new Set(
+      actualConnections.map(connection =>
+        String(connection?.id || "")
       )
-      .filter(id =>
-        !actualConnectionIds.has(id)
-      );
+    );
+    const missingNodeIds =
+      expectedNodes
+        .map(node =>
+          String(node?.id || "")
+        )
+        .filter(id =>
+          !actualNodeIds.has(id)
+        );
+    const missingConnectionIds =
+      expectedConnections
+        .map(connection =>
+          String(
+            connection?.id || ""
+          )
+        )
+        .filter(id =>
+          !actualConnectionIds.has(id)
+        );
 
-  if (
-    actualNodes.length !==
-      expectedNodes.length ||
-    actualConnections.length !==
-      expectedConnections.length ||
-    missingNodeIds.length > 0 ||
-    missingConnectionIds.length > 0
-  ) {
+    if (
+      actualNodes.length !==
+        expectedNodes.length ||
+      actualConnections.length !==
+        expectedConnections.length ||
+      missingNodeIds.length > 0 ||
+      missingConnectionIds.length > 0
+    ) {
+      failures.push(
+        `${expectedView.path}: expected ${expectedNodes.length.toLocaleString("de-DE")}/${expectedConnections.length.toLocaleString("de-DE")}, stored ${actualNodes.length.toLocaleString("de-DE")}/${actualConnections.length.toLocaleString("de-DE")}; missing nodes ${missingNodeIds.slice(0, 6).join(", ") || "none"}; missing connections ${missingConnectionIds.slice(0, 6).join(", ") || "none"}`
+      );
+    }
+    actualViewsByPath.delete(
+      expectedView.path
+    );
+  }
+
+  for (const path of
+    actualViewsByPath.keys()) {
+    failures.push(
+      `${path}: unexpected graph`
+    );
+  }
+
+  if (failures.length > 0) {
     throw new Error(
-      `The imported Runtime Graph document was not preserved exactly: expected ${expectedNodes.length.toLocaleString("de-DE")} nodes and ${expectedConnections.length.toLocaleString("de-DE")} connections, but stored ${actualNodes.length.toLocaleString("de-DE")} and ${actualConnections.length.toLocaleString("de-DE")}. Missing nodes: ${missingNodeIds.slice(0, 8).join(", ") || "none"}; missing connections: ${missingConnectionIds.slice(0, 8).join(", ") || "none"}. The JSON was not loaded.`
+      `${message}: ${failures.slice(0, 8).join("; ")}. The JSON was not loaded.`
     );
   }
 }
@@ -23349,9 +23471,11 @@ function assertImportedGraphDocumentIdentity(
 function assertImportedGraphIdentity(
   expectedGraph
 ) {
+  const host =
+    window.RMLDynamicGraphHost;
   const actualGraph =
-    window.RMLDynamicGraphHost
-      ?.getState?.();
+    host?.getRootState?.() ||
+    host?.getState?.();
   const expectedNodes =
     Array.isArray(expectedGraph?.nodes)
       ? expectedGraph.nodes
@@ -23424,6 +23548,12 @@ function assertImportedGraphIdentity(
       `The Runtime Graph changed imported identities during initialization. Missing nodes: ${missingNodeIds.slice(0, 8).join(", ") || "none"}; missing connections: ${missingConnectionIds.slice(0, 8).join(", ") || "none"}. The JSON was not loaded.`
     );
   }
+
+  assertRuntimeGraphViewsIdentity(
+    expectedGraph,
+    actualGraph,
+    "The Runtime Graph changed an embedded Custom C# graph during initialization"
+  );
 }
 
 function waitForGraphCodegenSettlement(
@@ -23630,6 +23760,7 @@ function waitForImportedGraphUi(
       const host =
         window.RMLDynamicGraphHost;
       const hostGraph =
+        host?.getRootState?.() ||
         host?.getState?.();
       const nodeCount =
         Array.isArray(hostGraph?.nodes)
@@ -23687,26 +23818,43 @@ function waitForImportedGraphUi(
 
     const handleComplete = event => {
       const detail = event.detail || {};
+      const current = hostStateMatches();
+      const eventNodeCount =
+        Number.isFinite(
+          Number(detail.rootNodes)
+        )
+          ? Number(detail.rootNodes)
+          : detail.scope ===
+              "custom-csharp-file"
+            ? -1
+            : Number(detail.nodes);
+      const eventConnectionCount =
+        Number.isFinite(
+          Number(detail.rootConnections)
+        )
+          ? Number(
+              detail.rootConnections
+            )
+          : detail.scope ===
+              "custom-csharp-file"
+            ? -1
+            : Number(
+                detail.connections
+              );
       if (
-        Number.isFinite(
-          Number(detail.nodes)
-        ) &&
-        Number(detail.nodes) ===
-          Number(expectedNodes) &&
-        Number.isFinite(
-          Number(detail.connections)
-        ) &&
-        Number(detail.connections) ===
-          Number(expectedConnections)
+        current.matches ||
+        (
+          Number.isFinite(eventNodeCount) &&
+          eventNodeCount ===
+            Number(expectedNodes) &&
+          Number.isFinite(
+            eventConnectionCount
+          ) &&
+          eventConnectionCount ===
+            Number(expectedConnections)
+        )
       ) {
         finish(false);
-      } else if (strict) {
-        finish(
-          false,
-          new Error(
-            `The Runtime Graph rendered a different project state: expected ${Number(expectedNodes).toLocaleString("de-DE")} nodes and ${Number(expectedConnections).toLocaleString("de-DE")} connections, but received ${Number(detail.nodes || 0).toLocaleString("de-DE")} and ${Number(detail.connections || 0).toLocaleString("de-DE")}. The JSON was not loaded.`
-          )
-        );
       }
     };
 
