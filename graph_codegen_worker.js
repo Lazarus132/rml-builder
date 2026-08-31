@@ -194,13 +194,13 @@ async function ensureRuntime(catalog) {
       self.RMLResoniteApiCatalog;
 
     importScripts(
-      "node_graph.js?v=327-real-textarea-search-selection-v660"
+      "node_graph.js?v=342-single-hybrid-custom-csharp-composite-v675"
     );
     importScripts(
       "mod_nodes.js?v=52-persistent-runtime-state-v622"
     );
     importScripts(
-      "visual_csharp.js?v=38-real-textarea-search-selection-v660"
+      "visual_csharp.js?v=53-single-hybrid-custom-csharp-composite-v675"
     );
     importScripts(
       "api_nodes.js?v=47-mobile-focus-scroll-stability-v649"

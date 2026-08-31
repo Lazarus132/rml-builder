@@ -246,6 +246,7 @@
   registerNode("csharp.project", {
     expertOnly: true,
     customCSharpNode: true,
+    apiCompositeCustomCSharp: true,
     title: "C# Project",
     group: GROUPS.project,
     symbol: "CSPROJ",
@@ -472,6 +473,7 @@
       symbol: "C#",
       expertOnly: false,
       customCSharpNode: true,
+      apiCompositeCustomCSharp: true,
       customCSharpFile: false,
       customCSharpLegacyRuntimeNode: true
     };
@@ -611,6 +613,7 @@
     group: GROUPS.project,
     symbol: "C#",
     customCSharpNode: true,
+    apiCompositeCustomCSharp: true,
     customCSharpFile: true,
     description: "One Custom C# node with selectable File, Action, Expression, Runtime Graph Member and Main Mod Member modes. File mode owns the reusable visual C# source graph.",
     parameters: customCSharpAllParameters(),
@@ -627,6 +630,7 @@
         group: GROUPS.project,
         expertOnly: false,
         customCSharpNode: true,
+        apiCompositeCustomCSharp: true,
         customCSharpFile: true,
         customCSharpLegacyRuntimeNode: false,
         description: "A reusable C# source container. Its complete source stays persistently in this Runtime Graph node's Actions. Imported files synchronize changed source through Roslyn when opened; manually built file graphs remain graph-authoritative.",
@@ -700,6 +704,7 @@
   registerNode("csharp.reference", {
     expertOnly: true,
     customCSharpNode: true,
+    apiCompositeCustomCSharp: true,
     title: "C# Reference",
     group: GROUPS.project,
     symbol: "REF",

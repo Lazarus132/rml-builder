@@ -83,6 +83,65 @@
     )
   });
 
+  const DIAGNOSTIC_SOURCE_STORAGE_KEY =
+    "rml-detached-editor-diagnostic-source-v1";
+  const RML_GRAPH_NODE_DRAG_TYPE =
+    "application/x-rml-graph-node";
+  let diagnosticClockEpoch = 0;
+  const nextDiagnosticClock = () => {
+    diagnosticClockEpoch = Math.max(
+      Date.now(),
+      diagnosticClockEpoch + 1
+    );
+    return new Date(
+      diagnosticClockEpoch
+    ).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      fractionalSecondDigits: 3
+    });
+  };
+  const normalizedDiagnosticSource = value =>
+    /^builder$/i.test(String(value || ""))
+      ? "Builder"
+      : "Roslyn";
+  const outputDiagnosticSource = value =>
+    /roslyn/i.test(String(value || ""))
+      ? "Roslyn"
+      : "Builder";
+  const normalizedDiagnostics = values => {
+    const groups = {
+      Builder: [],
+      Roslyn: []
+    };
+    const append = (source, entries) => {
+      const target = groups[normalizedDiagnosticSource(source)];
+      for (const entry of Array.isArray(entries) ? entries : []) {
+        const message = String(
+          entry?.message || entry || ""
+        );
+        if (message && !target.includes(message)) {
+          target.push(message);
+        }
+      }
+    };
+    if (Array.isArray(values)) {
+      for (const entry of values) {
+        append(
+          entry && typeof entry === "object"
+            ? entry.source
+            : "Roslyn",
+          [entry]
+        );
+      }
+    } else if (values && typeof values === "object") {
+      append("Builder", values.Builder || values.builder);
+      append("Roslyn", values.Roslyn || values.roslyn);
+    }
+    return groups;
+  };
+
   const STYLE_TEXT = `
     :root { color-scheme: dark; --editor-font-size: 16px; --editor-line-height: 24px; --rml-workbench-background: #181818; --rml-code-background: #000000; --rml-gutter-background: #000000; --rml-panel-background: #181818; --rml-overlay-background: #252526; --rml-status-background: #68217a; --rml-selection-background: #264f78; --rml-code-text: #ffffff; --rml-ui-text: #cccccc; --rml-gutter-text: #858585; --rml-status-text: #ffffff; --rml-accent: #b789ff; }
     * { box-sizing: border-box; }
@@ -93,6 +152,8 @@
     .editor-header-actions { display: flex; align-items: center; margin-left: auto; padding-inline: 4px; }
     .editor-header-actions button { display: inline-grid; place-items: center; width: 36px; min-width: 36px; height: 36px; padding: 8px; border: 0; border-radius: 4px; background: transparent; color: var(--rml-ui-text); cursor: pointer; }
     .editor-header-actions button:hover { background: var(--rml-overlay-background); color: var(--rml-code-text); }
+    .editor-header-actions button[aria-pressed="true"] { background: var(--rml-selection-background); color: var(--rml-code-text); box-shadow: inset 0 -2px var(--rml-accent); }
+    .editor-header-actions button[aria-pressed="true"]:hover { background: color-mix(in srgb, var(--rml-selection-background) 82%, var(--rml-accent)); }
     .editor-header-actions svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
     .editor-shell { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr); min-width: 0; min-height: 0; overflow: hidden; background: #1f1f1f; }
     .line-gutter { min-width: 58px; min-height: 0; overflow: hidden; border-right: 1px solid #292929; background: var(--rml-gutter-background); color: var(--rml-gutter-text); user-select: none; }
@@ -105,6 +166,8 @@
     textarea::-webkit-scrollbar-thumb { min-width: 44px; min-height: 44px; border: 2px solid var(--rml-code-background); border-radius: 999px; background: var(--rml-accent); }
     textarea::-webkit-scrollbar-thumb:hover { filter: brightness(1.15); }
     textarea:focus { box-shadow: inset 0 0 0 1px var(--rml-accent); }
+    .editor-shell.node-drop-active { box-shadow: inset 0 0 0 2px var(--rml-accent), inset 0 0 34px color-mix(in srgb, var(--rml-accent) 20%, transparent); }
+    .editor-shell.node-drop-active textarea { cursor: copy; }
     .find-widget { position: absolute; z-index: 4; top: 0; right: 18px; display: grid; grid-template-columns: minmax(180px, 310px) auto; gap: 5px 7px; width: min(620px, calc(100% - 78px)); padding: 6px; border: 1px solid #454545; border-top: 0; border-radius: 0 0 4px 4px; background: var(--rml-overlay-background); box-shadow: 0 4px 12px rgba(0, 0, 0, .42); color: var(--rml-ui-text); }
     .find-widget[hidden] { display: none; }
     .find-widget [hidden] { display: none !important; }
@@ -124,6 +187,13 @@
     .settings-overlay { position: fixed; z-index: 8; top: calc(36px + env(safe-area-inset-top)); right: 4px; width: min(300px, calc(100vw - 16px)); max-height: calc(100dvh - 44px - env(safe-area-inset-top)); padding: 10px; overflow: auto; border: 1px solid #454545; border-radius: 0 0 5px 5px; background: var(--rml-overlay-background); box-shadow: 0 7px 22px rgba(0, 0, 0, .52); color: var(--rml-ui-text); }
     .settings-overlay[hidden] { display: none; }
     .settings-overlay h2 { margin: 0 0 9px; color: var(--rml-ui-text); font-size: 12px; font-weight: 600; }
+    .settings-overlay h2:not(:first-child) { margin-top: 14px; }
+    .settings-source { display: grid; gap: 6px; }
+    .settings-source > span { color: var(--rml-ui-text); font-size: 12px; }
+    .settings-source-toggle { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
+    .settings-source-toggle button { min-height: 30px; border: 1px solid #454545; border-radius: 3px; background: #333333; color: var(--rml-ui-text); font: 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; cursor: pointer; }
+    .settings-source-toggle button:hover { background: #3a3d41; }
+    .settings-source-toggle button[aria-pressed="true"] { border-color: var(--rml-accent); background: var(--rml-selection-background); color: var(--rml-code-text); }
     .settings-colors { display: grid; gap: 7px; }
     .settings-color { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 86px; align-items: center; gap: 10px; min-height: 28px; padding: 2px 4px; border-radius: 3px; color: var(--rml-ui-text); font-size: 12px; cursor: pointer; }
     .settings-color:hover, .settings-color:focus-within { background: var(--rml-selection-background); color: var(--rml-code-text); }
@@ -168,6 +238,7 @@
       .find-replace-actions button { flex: 1 1 auto; }
       .settings-overlay { top: calc(44px + env(safe-area-inset-top)); right: 8px; width: calc(100vw - 16px); }
       .settings-picker-popover { top: calc(52px + env(safe-area-inset-top)); right: 8px; left: 8px; width: auto; max-height: calc(100dvh - 68px - env(safe-area-inset-top)); }
+      .settings-source-toggle button { min-height: 44px; font-size: 14px; }
       .settings-color { min-height: 44px; font-size: 14px; }
       .debug-tabs button { min-height: 44px; padding-inline: 12px; }
       .debug-view { font-size: 13px; }
@@ -296,11 +367,62 @@
       "Find and replace (Ctrl+H / Command+Option+F)",
       '<path d="M4 7h11M12 4l3 3-3 3M20 17H9M12 14l-3 3 3 3"></path>'
     );
+    for (const button of [showFind, showReplace]) {
+      button.setAttribute("aria-pressed", "false");
+      button.setAttribute("aria-expanded", "false");
+    }
     const showSettings = createHeaderButton(
       "Settings Overlay",
       '<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.1A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.1A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.1A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.12.38.34.72.64 1 .3.27.68.4 1.06.4h.1v4h-.1c-.38 0-.76.13-1.06.4-.3.28-.52.62-.64 1Z"></path>'
     );
-    headerActions.append(showFind, showReplace, showSettings);
+    const embedded =
+      options.presentationMode === "inline";
+    let pageAreasHidden =
+      options.pageAreasHidden === true;
+    const pageAreasIcon = hidden =>
+      hidden
+        ? '<path d="M4 9h5V4M20 9h-5V4M4 15h5v5M20 15h-5v5"></path>'
+        : '<path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"></path>';
+    const togglePageAreas = createHeaderButton(
+      "",
+      pageAreasIcon(pageAreasHidden)
+    );
+    const synchronizePageAreasButton = () => {
+      const label = pageAreasHidden
+        ? "Show the normal page areas above and below the Runtime Graph"
+        : "Hide only the page areas above and below the Runtime Graph";
+      togglePageAreas.title = label;
+      togglePageAreas.setAttribute(
+        "aria-label",
+        label
+      );
+      togglePageAreas.setAttribute(
+        "aria-pressed",
+        String(pageAreasHidden)
+      );
+      togglePageAreas.innerHTML =
+        `<svg viewBox="0 0 24 24" aria-hidden="true">${pageAreasIcon(pageAreasHidden)}</svg>`;
+    };
+    synchronizePageAreasButton();
+    const togglePresentation = createHeaderButton(
+      embedded
+        ? "Open editor as floating overlay"
+        : "Return editor to Builder",
+      embedded
+        ? '<path d="M14 4h6v6M20 4l-9 9"></path><path d="M18 13v6H5V6h6"></path>'
+        : '<path d="M10 5H5v14h14v-5"></path><path d="M20 4l-9 9M14 4h6v6"></path>'
+    );
+    headerActions.append(
+      showFind,
+      showReplace,
+      showSettings
+    );
+    if (embedded) {
+      headerActions.append(
+        togglePageAreas,
+        togglePresentation
+      );
+    }
     header.append(heading, headerActions);
 
     const editorShell = popupDocument.createElement("main");
@@ -324,10 +446,13 @@
     editorContent.appendChild(textarea);
 
     const findWidget = popupDocument.createElement("section");
+    findWidget.id = "rml-custom-csharp-find-widget";
     findWidget.className = "find-widget";
     findWidget.hidden = true;
     findWidget.setAttribute("role", "search");
     findWidget.setAttribute("aria-label", "Find and replace");
+    showFind.setAttribute("aria-controls", findWidget.id);
+    showReplace.setAttribute("aria-controls", findWidget.id);
     const findFields = popupDocument.createElement("div");
     findFields.className = "find-fields";
     const findInputRow = popupDocument.createElement("div");
@@ -396,10 +521,75 @@
     );
 
     let appearanceState = normalizedAppearance(options.appearance);
+    let diagnosticSource = normalizedDiagnosticSource(
+      options.diagnosticSource ||
+        (() => {
+          try {
+            return popup.localStorage.getItem(
+              DIAGNOSTIC_SOURCE_STORAGE_KEY
+            );
+          } catch {
+            return "Roslyn";
+          }
+        })()
+    );
     const settingsOverlay = popupDocument.createElement("section");
     settingsOverlay.className = "settings-overlay";
     settingsOverlay.hidden = true;
     settingsOverlay.setAttribute("aria-label", "Editor Settings Overlay");
+    const diagnosticSettingsTitle = popupDocument.createElement("h2");
+    diagnosticSettingsTitle.textContent = "Debug & Problems";
+    const diagnosticSourceSetting = popupDocument.createElement("div");
+    diagnosticSourceSetting.className = "settings-source";
+    const diagnosticSourceLabel = popupDocument.createElement("span");
+    diagnosticSourceLabel.textContent = "Output source";
+    const diagnosticSourceToggle = popupDocument.createElement("div");
+    diagnosticSourceToggle.className = "settings-source-toggle";
+    diagnosticSourceToggle.setAttribute("role", "group");
+    diagnosticSourceToggle.setAttribute(
+      "aria-label",
+      "Debug and problems output source"
+    );
+    const diagnosticSourceButtons = new Map();
+    const synchronizeDiagnosticSourceControls = () => {
+      for (const [source, button] of diagnosticSourceButtons) {
+        button.setAttribute(
+          "aria-pressed",
+          source === diagnosticSource ? "true" : "false"
+        );
+      }
+    };
+    const commitDiagnosticSource = source => {
+      diagnosticSource = normalizedDiagnosticSource(source);
+      synchronizeDiagnosticSourceControls();
+      try {
+        popup.localStorage.setItem(
+          DIAGNOSTIC_SOURCE_STORAGE_KEY,
+          diagnosticSource
+        );
+      } catch {}
+      renderDebugEntries();
+      renderDiagnostics();
+    };
+    for (const source of ["Builder", "Roslyn"]) {
+      const button = popupDocument.createElement("button");
+      button.type = "button";
+      button.textContent = source;
+      button.setAttribute(
+        "aria-label",
+        `${source} debug and problems output`
+      );
+      button.addEventListener("click", () => {
+        commitDiagnosticSource(source);
+      });
+      diagnosticSourceButtons.set(source, button);
+      diagnosticSourceToggle.appendChild(button);
+    }
+    synchronizeDiagnosticSourceControls();
+    diagnosticSourceSetting.append(
+      diagnosticSourceLabel,
+      diagnosticSourceToggle
+    );
     const settingsTitle = popupDocument.createElement("h2");
     settingsTitle.textContent = "Editor Colors";
     const settingsColors = popupDocument.createElement("div");
@@ -509,7 +699,13 @@
       appearanceControls.set(key, { input, line, trigger });
     }
     synchronizeAppearanceControls();
-    settingsOverlay.append(settingsTitle, settingsColors, pickerPopover);
+    settingsOverlay.append(
+      diagnosticSettingsTitle,
+      diagnosticSourceSetting,
+      settingsTitle,
+      settingsColors,
+      pickerPopover
+    );
 
     const statusBar = popupDocument.createElement("footer");
     const statusMessage = popupDocument.createElement("output");
@@ -583,12 +779,24 @@
     );
 
     const outputEntries = [];
-    let diagnostics = [];
-    const renderEntries = (viewId, entries) => {
+    let diagnostics = normalizedDiagnostics(options.diagnostics);
+    let diagnosticSnapshotTime =
+      nextDiagnosticClock();
+    const renderEntries = (
+      viewId,
+      entries,
+      requiredSource = ""
+    ) => {
       const view = views.get(viewId);
       if (!view) return;
+      const visibleEntries = requiredSource
+        ? entries.filter(
+            entry =>
+              entry.sourceGroup === requiredSource
+          )
+        : entries;
       view.replaceChildren();
-      if (!entries.length) {
+      if (!visibleEntries.length) {
         const empty = popupDocument.createElement("span");
         empty.className = "debug-empty";
         empty.textContent =
@@ -598,10 +806,11 @@
         view.appendChild(empty);
         return;
       }
-      for (const entry of entries) {
+      for (const entry of visibleEntries) {
         const row = popupDocument.createElement("div");
         row.className = "debug-entry";
         row.dataset.tone = String(entry.tone || "info");
+        row.dataset.source = entry.sourceGroup;
         const time = popupDocument.createElement("time");
         time.textContent = String(entry.time || "");
         const source = popupDocument.createElement("b");
@@ -613,78 +822,91 @@
       }
       view.scrollTop = view.scrollHeight;
     };
+    const renderDebugEntries = () => {
+      const view = views.get("debug");
+      if (view) {
+        view.dataset.source = diagnosticSource;
+      }
+      const sourceDiagnostics =
+        diagnostics[diagnosticSource] || [];
+      renderEntries(
+        "debug",
+        sourceDiagnostics.map(message => ({
+          time: diagnosticSnapshotTime,
+          source: diagnosticSource,
+          sourceGroup: diagnosticSource,
+          message,
+          tone: "error"
+        })),
+        diagnosticSource
+      );
+    };
     const renderDiagnostics = () => {
       const view = views.get("problems");
       if (!view) return;
+      view.dataset.source = diagnosticSource;
       view.replaceChildren();
-      if (!diagnostics.length) {
+      const visibleDiagnostics =
+        diagnostics[diagnosticSource] || [];
+      if (!visibleDiagnostics.length) {
         const empty = popupDocument.createElement("span");
         empty.className = "debug-empty";
-        empty.textContent = "No problems detected.";
+        empty.textContent =
+          `No ${diagnosticSource} problems detected.`;
         view.appendChild(empty);
       } else {
-        for (const diagnostic of diagnostics) {
+        for (const diagnostic of visibleDiagnostics) {
           const row = popupDocument.createElement("div");
           row.className = "problem";
+          row.dataset.source = diagnosticSource;
           row.textContent = String(diagnostic);
           view.appendChild(row);
         }
       }
       const count = tabs.get("problems")?.querySelector("output");
       if (count) {
-        count.textContent = String(diagnostics.length);
+        count.textContent = String(visibleDiagnostics.length);
         count.setAttribute(
           "aria-label",
-          `${diagnostics.length} problem${diagnostics.length === 1 ? "" : "s"}`
+          `${visibleDiagnostics.length} ${diagnosticSource} problem${visibleDiagnostics.length === 1 ? "" : "s"}`
         );
       }
     };
     const appendOutput = entry => {
-      const normalized = {
+      const normalized = Object.freeze({
         time: String(
           entry?.time ||
-            new Date().toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-              second: "2-digit"
-            })
+            nextDiagnosticClock()
         ),
         source: String(entry?.source || "Builder"),
+        sourceGroup: outputDiagnosticSource(
+          entry?.source || "Builder"
+        ),
         message: String(entry?.message || ""),
         tone: String(entry?.tone || "info")
-      };
+      });
       if (!normalized.message) return;
-      const previous = outputEntries.at(-1);
-      if (
-        previous?.message === normalized.message &&
-        previous?.source === normalized.source &&
-        previous?.tone === normalized.tone
-      ) {
-        return;
+      const repeatedIndex =
+        outputEntries.findLastIndex(previous =>
+          previous?.message === normalized.message &&
+          previous?.source === normalized.source &&
+          previous?.tone === normalized.tone
+        );
+      if (repeatedIndex >= 0) {
+        outputEntries.splice(
+          repeatedIndex,
+          1
+        );
       }
       outputEntries.push(normalized);
       if (outputEntries.length > 500) outputEntries.shift();
       renderEntries("output", outputEntries);
-      renderEntries(
-        "debug",
-        outputEntries.filter(item =>
-          /roslyn|worker|builder|catalog|codegen|editor/i.test(item.source)
-        )
-      );
     };
     for (const entry of Array.isArray(options.output) ? options.output : []) {
       appendOutput(entry);
     }
-    diagnostics = Array.isArray(options.diagnostics)
-      ? options.diagnostics.map(String)
-      : [];
     renderEntries("output", outputEntries);
-    renderEntries(
-      "debug",
-      outputEntries.filter(item =>
-        /roslyn|worker|builder|catalog|codegen|editor/i.test(item.source)
-      )
-    );
+    renderDebugEntries();
     renderDiagnostics();
 
     const refreshLineNumbers = () => {
@@ -719,6 +941,59 @@
       if (!findWidget.hidden) {
         refreshMatches(textarea.selectionStart);
       }
+    };
+    const insertNodeSnippet = snippetValue => {
+      const snippet = String(
+        snippetValue?.snippet ??
+        snippetValue ??
+        ""
+      );
+      if (!snippet) return false;
+      const start = Math.max(
+        0,
+        Number(textarea.selectionStart) || 0
+      );
+      const end = Math.max(
+        start,
+        Number(textarea.selectionEnd) || start
+      );
+      const before = textarea.value.slice(0, start);
+      const after = textarea.value.slice(end);
+      const prefix =
+        before &&
+        !before.endsWith("\n") &&
+        !/^\s/.test(snippet)
+          ? "\n"
+          : "";
+      const suffix =
+        after &&
+        !after.startsWith("\n") &&
+        !/\s$/.test(snippet)
+          ? "\n"
+          : "";
+      const inserted =
+        `${prefix}${snippet}${suffix}`;
+      textarea.value =
+        before + inserted + after;
+      const cursor =
+        before.length + inserted.length;
+      textarea.setSelectionRange(
+        cursor,
+        cursor,
+        "forward"
+      );
+      commit();
+      statusMessage.textContent = String(
+        snippetValue?.status ||
+        "Node inserted and synchronized with Builder"
+      );
+      statusMessage.dataset.tone = "info";
+      try {
+        textarea.focus({ preventScroll: true });
+      } catch {
+        textarea.focus();
+      }
+      return true;
     };
 
     let replaceMode = false;
@@ -875,15 +1150,50 @@
         findMatches.length;
       revealActiveMatch(true);
     };
+    const synchronizeSettingsToggleButton = () => {
+      const open = !settingsOverlay.hidden;
+      showSettings.setAttribute(
+        "aria-expanded",
+        String(open)
+      );
+      showSettings.setAttribute(
+        "aria-pressed",
+        String(open)
+      );
+    };
+    const synchronizeFindToggleButtons = () => {
+      const widgetOpen = !findWidget.hidden;
+      const findActive =
+        widgetOpen && !replaceMode;
+      const replaceActive =
+        widgetOpen && replaceMode;
+      showFind.setAttribute(
+        "aria-pressed",
+        String(findActive)
+      );
+      showFind.setAttribute(
+        "aria-expanded",
+        String(findActive)
+      );
+      showReplace.setAttribute(
+        "aria-pressed",
+        String(replaceActive)
+      );
+      showReplace.setAttribute(
+        "aria-expanded",
+        String(replaceActive)
+      );
+    };
     const openFind = (withReplace = false) => {
       settingsOverlay.hidden = true;
-      showSettings.setAttribute("aria-expanded", "false");
+      synchronizeSettingsToggleButton();
       closeAppearancePicker();
       replaceMode = withReplace;
       findWidget.hidden = false;
       replaceInputRow.hidden = !replaceMode;
       replaceCurrent.hidden = !replaceMode;
       replaceAll.hidden = !replaceMode;
+      synchronizeFindToggleButtons();
       const selection = textarea.value.slice(
         textarea.selectionStart,
         textarea.selectionEnd
@@ -905,7 +1215,18 @@
     };
     const closeFind = () => {
       findWidget.hidden = true;
+      synchronizeFindToggleButtons();
       textarea.focus();
+    };
+    const toggleFind = withReplace => {
+      if (
+        !findWidget.hidden &&
+        replaceMode === withReplace
+      ) {
+        closeFind();
+        return;
+      }
+      openFind(withReplace);
     };
     const expandedReplacement = (replacement, match, source) => {
       if (!optionEnabled(regularExpression)) {
@@ -1010,17 +1331,15 @@
     replaceAll.addEventListener("click", () => {
       replaceEveryMatch();
     });
-    showFind.addEventListener("click", () => openFind(false));
-    showReplace.addEventListener("click", () => openFind(true));
-    showSettings.setAttribute("aria-expanded", "false");
+    showFind.addEventListener("click", () => toggleFind(false));
+    showReplace.addEventListener("click", () => toggleFind(true));
+    synchronizeFindToggleButtons();
+    synchronizeSettingsToggleButton();
     showSettings.addEventListener("click", event => {
       event.stopPropagation();
       const open = settingsOverlay.hidden;
       settingsOverlay.hidden = !open;
-      showSettings.setAttribute(
-        "aria-expanded",
-        open ? "true" : "false"
-      );
+      synchronizeSettingsToggleButton();
       if (!open) {
         closeAppearancePicker();
       }
@@ -1034,10 +1353,19 @@
     popupDocument.addEventListener("click", () => {
       if (!settingsOverlay.hidden) {
         settingsOverlay.hidden = true;
-        showSettings.setAttribute("aria-expanded", "false");
+        synchronizeSettingsToggleButton();
         closeAppearancePicker();
       }
     });
+    popupDocument.addEventListener(
+      "pointerdown",
+      () => options.onRequestForeground?.(),
+      true
+    );
+    popup.addEventListener(
+      "focus",
+      () => options.onRequestForeground?.()
+    );
     findInput.addEventListener("keydown", event => {
       if (event.key === "Enter") {
         event.preventDefault();
@@ -1076,7 +1404,7 @@
         if (!settingsOverlay.hidden) {
           event.preventDefault();
           settingsOverlay.hidden = true;
-          showSettings.setAttribute("aria-expanded", "false");
+          synchronizeSettingsToggleButton();
           closeAppearancePicker();
         } else if (!findWidget.hidden) {
           event.preventDefault();
@@ -1091,6 +1419,140 @@
       composing = false;
       commit();
     });
+    const indentSelection = (
+      width,
+      remove = false
+    ) => {
+      const source = textarea.value;
+      const start = Math.max(
+        0,
+        Number(textarea.selectionStart) || 0
+      );
+      const end = Math.max(
+        start,
+        Number(textarea.selectionEnd) || start
+      );
+      const indentation = " ".repeat(
+        Math.max(1, width)
+      );
+      if (start === end) {
+        if (remove) {
+          const lineStart =
+            source.lastIndexOf("\n", start - 1) + 1;
+          const available =
+            source.slice(lineStart, start)
+              .match(/\s*$/)?.[0] || "";
+          const count = Math.min(
+            indentation.length,
+            available.replace(/[^ ]/g, "").length
+          );
+          if (count === 0) return false;
+          textarea.value =
+            source.slice(0, start - count) +
+            source.slice(start);
+          textarea.setSelectionRange(
+            start - count,
+            start - count,
+            "forward"
+          );
+        } else {
+          textarea.value =
+            source.slice(0, start) +
+            indentation +
+            source.slice(end);
+          textarea.setSelectionRange(
+            start + indentation.length,
+            start + indentation.length,
+            "forward"
+          );
+        }
+        commit();
+        return true;
+      }
+
+      const lineStart =
+        source.lastIndexOf("\n", start - 1) + 1;
+      const effectiveEnd =
+        end > start &&
+        source[end - 1] === "\n"
+          ? end - 1
+          : end;
+      const nextLineBreak =
+        source.indexOf("\n", effectiveEnd);
+      const blockEnd =
+        nextLineBreak < 0
+          ? source.length
+          : nextLineBreak;
+      const lines = source
+        .slice(lineStart, blockEnd)
+        .split("\n");
+      const deltas = [];
+      const transformed = lines.map(line => {
+        if (!remove) {
+          deltas.push(indentation.length);
+          return indentation + line;
+        }
+        const match = line.match(
+          new RegExp(`^ {1,${indentation.length}}`)
+        );
+        const count = match?.[0]?.length ||
+          (line.startsWith("\t") ? 1 : 0);
+        deltas.push(-count);
+        return line.slice(count);
+      });
+      const totalDelta = deltas.reduce(
+        (sum, value) => sum + value,
+        0
+      );
+      const firstDelta = deltas[0] || 0;
+      textarea.value =
+        source.slice(0, lineStart) +
+        transformed.join("\n") +
+        source.slice(blockEnd);
+      textarea.setSelectionRange(
+        Math.max(
+          lineStart,
+          start + firstDelta
+        ),
+        Math.max(
+          lineStart,
+          end + totalDelta
+        ),
+        "forward"
+      );
+      commit();
+      return true;
+    };
+    textarea.addEventListener(
+      "keydown",
+      event => {
+        if (
+          event.key === "Tab" &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          !event.altKey
+        ) {
+          event.preventDefault();
+          indentSelection(
+            4,
+            event.shiftKey === true
+          );
+          return;
+        }
+        if (
+          event.key === " " &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          !event.altKey &&
+          !event.shiftKey &&
+          textarea.selectionEnd >
+            textarea.selectionStart
+        ) {
+          event.preventDefault();
+          indentSelection(1);
+        }
+      }
+    );
     textarea.addEventListener("input", () => {
       if (!composing) {
         commit();
@@ -1107,10 +1569,107 @@
         options.onBlur?.();
       }
     });
+    if (options.enableNodeDrop === true) {
+      const carriesGraphNode = dataTransfer =>
+        Array.from(
+          dataTransfer?.types || []
+        ).includes(RML_GRAPH_NODE_DRAG_TYPE);
+      textarea.addEventListener(
+        "dragenter",
+        event => {
+          if (!carriesGraphNode(event.dataTransfer)) return;
+          event.preventDefault();
+          editorShell.classList.add(
+            "node-drop-active"
+          );
+        }
+      );
+      textarea.addEventListener(
+        "dragover",
+        event => {
+          if (!carriesGraphNode(event.dataTransfer)) return;
+          event.preventDefault();
+          if (event.dataTransfer) {
+            event.dataTransfer.dropEffect = "copy";
+          }
+          editorShell.classList.add(
+            "node-drop-active"
+          );
+        }
+      );
+      textarea.addEventListener(
+        "dragleave",
+        event => {
+          if (
+            event.relatedTarget &&
+            editorShell.contains(
+              event.relatedTarget
+            )
+          ) {
+            return;
+          }
+          editorShell.classList.remove(
+            "node-drop-active"
+          );
+        }
+      );
+      textarea.addEventListener(
+        "drop",
+        event => {
+          if (!carriesGraphNode(event.dataTransfer)) return;
+          event.preventDefault();
+          editorShell.classList.remove(
+            "node-drop-active"
+          );
+          let payload = null;
+          try {
+            payload = JSON.parse(
+              event.dataTransfer.getData(
+                RML_GRAPH_NODE_DRAG_TYPE
+              ) || "null"
+            );
+          } catch {
+            payload = null;
+          }
+          const resolved =
+            options.onNodeDrop?.(payload);
+          if (!insertNodeSnippet(resolved)) {
+            statusMessage.textContent =
+              "This node cannot be represented in the current C# field.";
+            statusMessage.dataset.tone =
+              "error";
+          }
+        }
+      );
+    }
+
+    togglePresentation.addEventListener("click", () => {
+      options.onTogglePresentation?.();
+    });
+    togglePageAreas.addEventListener("click", () => {
+      const requested = !pageAreasHidden;
+      const committed =
+        options.onTogglePageAreas?.(requested);
+      pageAreasHidden =
+        typeof committed === "boolean"
+          ? committed
+          : requested;
+      synchronizePageAreasButton();
+    });
 
     const record = Object.freeze({
       popup,
       textarea,
+      presentationMode:
+        embedded
+          ? "inline"
+          : String(
+              options.presentationMode ||
+              "overlay"
+            ),
+      getValue() {
+        return textarea.value;
+      },
       setValue(value) {
         const next = String(value || "");
         if (textarea.value !== next) {
@@ -1147,14 +1706,22 @@
       },
       appendOutput,
       setDiagnostics(values) {
-        diagnostics = Array.isArray(values)
-          ? values.map(value =>
-              typeof value === "string"
-                ? value
-                : String(value?.message || value)
-            )
-          : [];
+        diagnostics = normalizedDiagnostics(values);
+        diagnosticSnapshotTime =
+          nextDiagnosticClock();
+        renderDebugEntries();
         renderDiagnostics();
+      },
+      setDiagnosticSource(source) {
+        commitDiagnosticSource(source);
+      },
+      setPageAreasHidden(hidden) {
+        pageAreasHidden = hidden === true;
+        synchronizePageAreasButton();
+      },
+      insertNodeSnippet,
+      bringToFront() {
+        popup.focus();
       },
       focus() {
         popup.focus();
@@ -1185,7 +1752,7 @@
     "RMLCustomCSharpDetachedEditor",
     {
       value: Object.freeze({
-        version: 7,
+        version: 12,
         mount
       }),
       writable: false,

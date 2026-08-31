@@ -40,7 +40,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "real-textarea-search-selection-20260831-v660";
+  "single-hybrid-custom-csharp-composite-20260831-v675";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -1166,7 +1166,7 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "graph_codegen_worker.js?v=73-real-textarea-search-selection-v660",
+      "graph_codegen_worker.js?v=88-single-hybrid-custom-csharp-composite-v675",
       APP_SCRIPT_BASE_URL
     ),
     {

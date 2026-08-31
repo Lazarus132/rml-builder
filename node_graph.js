@@ -346,6 +346,70 @@
         );
   }
 
+  function customCSharpFilesForNodes(
+    nodes,
+    sourceFiles
+  ) {
+    const ownerIds = new Set(
+      (Array.isArray(nodes) ? nodes : [])
+        .filter(node =>
+          node?.kind === "operator" &&
+          node.operatorId === "csharp.file"
+        )
+        .map(node => String(node.id || ""))
+        .filter(Boolean)
+    );
+    const source =
+      sourceFiles &&
+      typeof sourceFiles === "object" &&
+      !Array.isArray(sourceFiles)
+        ? sourceFiles
+        : {};
+    const result = {};
+    for (const ownerId of ownerIds) {
+      if (
+        source[ownerId] &&
+        typeof source[ownerId] === "object" &&
+        !Array.isArray(source[ownerId])
+      ) {
+        result[ownerId] = clone(
+          source[ownerId]
+        );
+      }
+    }
+    return result;
+  }
+
+  function mergeCustomCSharpFileRegistry(
+    target,
+    source
+  ) {
+    const result =
+      target &&
+      typeof target === "object" &&
+      !Array.isArray(target)
+        ? target
+        : {};
+    if (
+      !source ||
+      typeof source !== "object" ||
+      Array.isArray(source)
+    ) {
+      return result;
+    }
+    for (const [ownerId, customGraph] of
+      Object.entries(source)) {
+      if (
+        customGraph &&
+        typeof customGraph === "object" &&
+        !Array.isArray(customGraph)
+      ) {
+        result[ownerId] = clone(customGraph);
+      }
+    }
+    return result;
+  }
+
   function apiCompositeInternalDefinitionAllowed(
     definition
   ) {
@@ -358,10 +422,20 @@
     }
     if (
       definition.apiCompositeContainer === true ||
-      definition.customCSharpNode === true ||
       definition.customCSharpSyntaxNode === true ||
       definition.customCSharpSubgraphOnly === true ||
       definition.customCSharpCatalogNode === true
+    ) {
+      return false;
+    }
+    if (
+      definition.apiCompositeCustomCSharp ===
+        true
+    ) {
+      return true;
+    }
+    if (
+      definition.customCSharpNode === true
     ) {
       return false;
     }
@@ -411,6 +485,31 @@
     return apiCompositeInternalDefinitionAllowed(
       definition
     );
+  }
+
+  function apiCompositeVerifiedCatalogNode(
+    node
+  ) {
+    const definition =
+      OPERATOR_DEFINITIONS[
+        node?.operatorId
+      ];
+    return Boolean(
+      node?.kind === "operator" &&
+      definition?.catalogGenerated === true &&
+      definition?.unavailableApiContract !==
+        true &&
+      portableApiContractForNode(node)
+    );
+  }
+
+  function apiCompositeHasVerifiedCatalogNode(
+    nodes
+  ) {
+    return (Array.isArray(nodes) ? nodes : [])
+      .some(
+        apiCompositeVerifiedCatalogNode
+      );
   }
 
   const OPERATOR_DEFINITIONS = {
@@ -1486,6 +1585,10 @@
   const customCSharpLiveDiagnosticTimers = new Map();
   const customCSharpLiveDiagnosticRevisions = new Map();
   const customCSharpDetachedEditors = new Map();
+  const customCSharpEditorDraftValues = new Map();
+  let customCSharpInlineEditorKey = "";
+  let customCSharpActiveEditorKey = "";
+  let customCSharpEditorOverlayZ = 2147482200;
   let customCSharpDetachedEditorModulePromise = null;
   const customCSharpBuildWorkers = new Map();
   const customCSharpSynchronizations = new Set();
@@ -1498,6 +1601,7 @@
   let customCSharpBuildRequestSequence = 0;
   let customCSharpRootOperation = false;
   let customCSharpProjectEpoch = 0;
+  let customCSharpDiagnosticClockEpoch = 0;
   let builderProjectEpoch = 0;
 
   function requestProjectAnimationFrame(
@@ -3325,11 +3429,88 @@
     };
   }
 
+  function closeEmbeddedEditorForGraphReplacement() {
+    const editorKey =
+      customCSharpInlineEditorKey;
+    const record = editorKey
+      ? customCSharpDetachedEditors.get(
+          editorKey
+        )
+      : null;
+    const previousPresentation =
+      customCSharpEditorRecordActive(record)
+        ? {
+            consumed: false,
+            nodeId: record.nodeId,
+            parameterKey:
+              record.parameterKey,
+            specification:
+              record.specification,
+            value:
+              record.getValue?.() || ""
+          }
+        : null;
+    if (editorKey) {
+      if (
+        record
+      ) {
+        closeCustomCSharpEditorRecord(
+          editorKey
+        );
+      } else {
+        restoreGraphAfterCustomCSharpInlineEditor(
+          editorKey
+        );
+      }
+    }
+    return previousPresentation;
+  }
+
+  function restorePreviousEmbeddedEditor(
+    presentation
+  ) {
+    if (
+      !presentation ||
+      presentation.consumed === true ||
+      !graph
+    ) {
+      return false;
+    }
+    presentation.consumed = true;
+    const node = graph.nodes?.find(
+      candidate =>
+        candidate?.id ===
+        presentation.nodeId
+    );
+    if (!node) {
+      return false;
+    }
+    openCustomCSharpDetachedEditor(
+      node,
+      presentation.specification || {
+        key:
+          presentation.parameterKey ||
+          "code",
+        label: "Custom C#"
+      },
+      {
+        value: String(
+          presentation.value || ""
+        )
+      }
+    );
+    return true;
+  }
+
   function openCustomCSharpFileGraph(fileNodeId) {
-    if (!graph || customCSharpEditor) return false;
+    if (!graph || customCSharpEditor) {
+      return false;
+    }
     const fileNode = findGraphNode(fileNodeId);
     const definition = fileNode ? nodeDefinition(fileNode) : null;
     if (!fileNode || definition?.customCSharpFile !== true) return false;
+    const previousPresentation =
+      closeEmbeddedEditorForGraphReplacement();
 
     graph.customCSharpFiles = graph.customCSharpFiles && typeof graph.customCSharpFiles === "object"
       ? graph.customCSharpFiles
@@ -3342,6 +3523,7 @@
     customCSharpEditor = {
       fileNodeId,
       fileName: String(fileNode.parameters?.fileName || "Custom C# File"),
+      previousPresentation,
       mainView: graphViewFrom(graph)
     };
     applyGraphView(graphViewFrom(customGraph));
@@ -3381,7 +3563,11 @@
 
   function closeCustomCSharpFileGraph() {
     if (!customCSharpEditor || !graph) return false;
+    closeEmbeddedEditorForGraphReplacement();
     const fileName = customCSharpEditor.fileName;
+    const previousPresentation =
+      customCSharpEditor.previousPresentation ||
+      null;
     captureCustomCSharpEditorView();
     const mainView = customCSharpEditor.mainView;
     customCSharpEditor = null;
@@ -3390,7 +3576,10 @@
     pruneConnections();
     persistGraph(true);
     activateGraphMode();
-    showGraphMessage(`Returned from ${fileName} to the Runtime Graph.`, "success");
+    showGraphMessage(`Returned from ${fileName} to the previous graph.`, "success");
+    restorePreviousEmbeddedEditor(
+      previousPresentation
+    );
     return true;
   }
 
@@ -3720,6 +3909,9 @@
               clone(sourceBoundaries)
           }
         },
+        customCSharpFiles: clone(
+          source.customCSharpFiles || {}
+        ),
         nodes: [owner],
         connections: [],
         viewport: {
@@ -3752,7 +3944,13 @@
       composite.connections.length !==
         source.connections.length ||
       boundaries.length !==
-        sourceBoundaries.length
+        sourceBoundaries.length ||
+      Object.keys(
+        composite.customCSharpFiles || {}
+      ).length !==
+        Object.keys(
+          source.customCSharpFiles || {}
+        ).length
     ) {
       throw new Error(
         "The saved API Composite contains invalid, duplicate or unsupported nodes, connections or boundary ports. Nothing was imported."
@@ -3833,6 +4031,9 @@
         boundaryPorts: clone(boundaries),
         branchRouting: clone(
           composite.branchRouting || {}
+        ),
+        customCSharpFiles: clone(
+          composite.customCSharpFiles || {}
         ),
         nodes: composite.nodes.map(node =>
           clone(node)
@@ -4233,7 +4434,9 @@
     ) {
       return true;
     }
-    return record.composite.nodes.every(node => {
+    return graphOperatorNodesIncludingCustomCSharp(
+      record.composite
+    ).every(node => {
       const definition =
         OPERATOR_DEFINITIONS[
           node.operatorId
@@ -4243,8 +4446,16 @@
         definition?.unavailableApiContract !== true &&
         !node.apiContract
       ) {
-        return apiCompositeInternalDefinitionAllowed(
-          definition
+        return Boolean(
+          apiCompositeInternalDefinitionAllowed(
+            definition
+          ) ||
+          definition?.customCSharpSyntaxNode ===
+            true ||
+          definition?.customCSharpSubgraphOnly ===
+            true ||
+          definition?.customCSharpCatalogNode ===
+            true
         );
       }
       const currentContract =
@@ -4286,7 +4497,9 @@
         apiCompositeGraphs: {
           [ownerId]: composite
         },
-        customCSharpFiles: {},
+        customCSharpFiles: clone(
+          composite.customCSharpFiles || {}
+        ),
         nodes: [{
           id: ownerId,
           kind: "operator",
@@ -4881,6 +5094,11 @@
       version: 1,
       boundaryPorts: boundaries,
       branchRouting,
+      customCSharpFiles:
+        customCSharpFilesForNodes(
+          graph.nodes,
+          graph.customCSharpFiles
+        ),
       ...graphViewFrom(graph)
     };
     graph.apiCompositeGraphs[ownerId] =
@@ -4921,6 +5139,16 @@
     ) {
       return false;
     }
+    graph.customCSharpFiles =
+      mergeCustomCSharpFileRegistry(
+        mergeCustomCSharpFileRegistry(
+          {},
+          composite.customCSharpFiles
+        ),
+        graph.customCSharpFiles
+      );
+    const previousPresentation =
+      closeEmbeddedEditorForGraphReplacement();
 
     apiCompositeEditor = {
       containerNodeId,
@@ -4938,6 +5166,7 @@
         added: 0,
         removed: 0
       },
+      previousPresentation,
       mainView: graphViewFrom(graph)
     };
     applyGraphView(
@@ -4961,7 +5190,22 @@
     if (!apiCompositeEditor || !graph) {
       return false;
     }
+    if (
+      !apiCompositeHasVerifiedCatalogNode(
+        graph.nodes
+      )
+    ) {
+      showGraphMessage(
+        "The internal API & Logic Graph must keep at least one verified catalog API node before it can be closed.",
+        "error"
+      );
+      return false;
+    }
+    closeEmbeddedEditorForGraphReplacement();
     const title = apiCompositeEditor.title;
+    const previousPresentation =
+      apiCompositeEditor.previousPresentation ||
+      null;
     captureApiCompositeEditorView();
     const boundaryUpdate = {
       ...(apiCompositeEditor.boundaryUpdate || {
@@ -4980,8 +5224,11 @@
     persistGraph(true);
     activateGraphMode();
     showGraphMessage(
-      `Returned from ${title} to the Runtime Graph.${boundaryUpdate.added > 0 ? ` ${boundaryUpdate.added.toLocaleString("de-DE")} new outer port${boundaryUpdate.added === 1 ? " was" : "s were"} added automatically.` : ""}${boundaryUpdate.removed > 0 ? ` ${boundaryUpdate.removed.toLocaleString("de-DE")} unused automatic port${boundaryUpdate.removed === 1 ? " was" : "s were"} removed.` : ""}`,
+      `Returned from ${title} to the previous graph.${boundaryUpdate.added > 0 ? ` ${boundaryUpdate.added.toLocaleString("de-DE")} new outer port${boundaryUpdate.added === 1 ? " was" : "s were"} added automatically.` : ""}${boundaryUpdate.removed > 0 ? ` ${boundaryUpdate.removed.toLocaleString("de-DE")} unused automatic port${boundaryUpdate.removed === 1 ? " was" : "s were"} removed.` : ""}`,
       "success"
+    );
+    restorePreviousEmbeddedEditor(
+      previousPresentation
     );
     return true;
   }
@@ -5087,6 +5334,7 @@
       new Map();
     const branchRouting = {};
     const internalConnections = [];
+    const customCSharpFiles = {};
 
     for (const containerId of
       containerIds) {
@@ -5141,7 +5389,15 @@
           composite.branchRouting || {}
         )
       );
+      mergeCustomCSharpFileRegistry(
+        customCSharpFiles,
+        composite.customCSharpFiles
+      );
     }
+    mergeCustomCSharpFileRegistry(
+      customCSharpFiles,
+      source.customCSharpFiles
+    );
 
     const connections = source.connections
       .map(connection => {
@@ -5214,6 +5470,7 @@
     return {
       ...source,
       apiCompositeGraphs: {},
+      customCSharpFiles,
       nodes,
       connections,
       selectedNodeId: null,
@@ -5284,13 +5541,11 @@
       );
       return false;
     }
-    const catalogNodeCount =
-      selectedNodes.filter(node =>
-        nodeDefinition(node)
-          ?.catalogGenerated === true &&
-        portableApiContractForNode(node)
-      ).length;
-    if (catalogNodeCount === 0) {
+    if (
+      !apiCompositeHasVerifiedCatalogNode(
+        selectedNodes
+      )
+    ) {
       showGraphMessage(
         "An API Composite must contain at least one verified catalog API node.",
         "error"
@@ -5488,6 +5743,11 @@
       boundaryPorts:
         clone(boundaries),
       branchRouting,
+      customCSharpFiles:
+        customCSharpFilesForNodes(
+          selectedNodes,
+          graph.customCSharpFiles
+        ),
       nodes: selectedNodes.map(node =>
         clone(node)
       ),
@@ -5784,6 +6044,14 @@
     const unpackedComposites = {
       ...(graph.apiCompositeGraphs || {})
     };
+    graph.customCSharpFiles =
+      mergeCustomCSharpFileRegistry(
+        mergeCustomCSharpFileRegistry(
+          {},
+          composite.customCSharpFiles
+        ),
+        graph.customCSharpFiles
+      );
     delete unpackedComposites[
       containerNodeId
     ];
@@ -5859,6 +6127,11 @@
         "Select a complete API Composite before saving or exporting it."
       );
     }
+    composite.customCSharpFiles =
+      customCSharpFilesForNodes(
+        composite.nodes,
+        graph.customCSharpFiles
+      );
     const identity =
       currentApiCompositeCatalogIdentity();
     const name = String(
@@ -6760,6 +7033,161 @@
     return id;
   }
 
+  function remapSavedCompositeCustomCSharpGraph(
+    source,
+    identities
+  ) {
+    const customGraph = clone(
+      source || {}
+    );
+    const nodeIdMap = new Map();
+    for (const node of
+      Array.isArray(customGraph.nodes)
+        ? customGraph.nodes
+        : []) {
+      nodeIdMap.set(
+        node.id,
+        uniqueSavedCompositeGraphId(
+          "custom-csharp-node",
+          identities.nodeIds
+        )
+      );
+    }
+    const connectionIdMap = new Map();
+    const pointIdMaps = new Map();
+    for (const connection of
+      Array.isArray(customGraph.connections)
+        ? customGraph.connections
+        : []) {
+      connectionIdMap.set(
+        connection.id,
+        uniqueSavedCompositeGraphId(
+          "custom-csharp-connection",
+          identities.connectionIds
+        )
+      );
+      const pointMap = new Map();
+      for (const point of
+        connection.points || []) {
+        pointMap.set(
+          point.id,
+          makeId("custom-csharp-point")
+        );
+      }
+      pointIdMaps.set(
+        connection.id,
+        pointMap
+      );
+    }
+    customGraph.nodes =
+      (customGraph.nodes || []).map(
+        node => ({
+          ...node,
+          id: nodeIdMap.get(node.id)
+        })
+      );
+    customGraph.connections =
+      (customGraph.connections || []).map(
+        connection => ({
+          ...connection,
+          id: connectionIdMap.get(
+            connection.id
+          ),
+          fromNode: nodeIdMap.get(
+            connection.fromNode
+          ),
+          toNode: nodeIdMap.get(
+            connection.toNode
+          ),
+          points: (connection.points || [])
+            .map(point => ({
+              ...point,
+              id: pointIdMaps
+                .get(connection.id)
+                ?.get(point.id)
+            })),
+          branchFrom:
+            connection.branchFrom
+              ? {
+                  connectionId:
+                    connectionIdMap.get(
+                      connection.branchFrom
+                        .connectionId
+                    ) || "",
+                  pointId:
+                    pointIdMaps
+                      .get(
+                        connection.branchFrom
+                          .connectionId
+                      )
+                      ?.get(
+                        connection.branchFrom
+                          .pointId
+                      ) || ""
+                }
+              : null
+        })
+      );
+    customGraph.outputNodeId =
+      nodeIdMap.get(
+        customGraph.outputNodeId
+      ) || "";
+    customGraph.rootSyntaxNodeId =
+      nodeIdMap.get(
+        customGraph.rootSyntaxNodeId
+      ) || "";
+    customGraph.directSourceNodeId =
+      nodeIdMap.get(
+        customGraph.directSourceNodeId
+      ) || "";
+    customGraph.selectedNodeId =
+      nodeIdMap.get(
+        customGraph.selectedNodeId
+      ) || null;
+    customGraph.selectedNodeIds =
+      (customGraph.selectedNodeIds || [])
+        .map(id => nodeIdMap.get(id))
+        .filter(Boolean);
+    customGraph.selectedConnectionId =
+      connectionIdMap.get(
+        customGraph.selectedConnectionId
+      ) || null;
+    const selectedWirePoint =
+      customGraph.selectedWirePoint;
+    customGraph.selectedWirePoint =
+      selectedWirePoint &&
+      connectionIdMap.has(
+        selectedWirePoint.connectionId
+      )
+        ? {
+            connectionId:
+              connectionIdMap.get(
+                selectedWirePoint.connectionId
+              ),
+            pointId:
+              pointIdMaps
+                .get(
+                  selectedWirePoint.connectionId
+                )
+                ?.get(
+                  selectedWirePoint.pointId
+                ) || ""
+          }
+        : null;
+    customGraph.nextSequence = Math.max(
+      1,
+      Math.trunc(
+        finiteNumber(
+          customGraph.nextSequence,
+          customGraph.nodes.length +
+            customGraph.connections.length +
+            1
+        )
+      )
+    );
+    return customGraph;
+  }
+
   function remapSavedApiCompositeInstance(
     record,
     containerId,
@@ -6891,6 +7319,23 @@
         };
       }
     }
+    const customCSharpFiles = {};
+    for (const [ownerId, customGraph] of
+      Object.entries(
+        record.composite
+          .customCSharpFiles || {}
+      )) {
+      const remappedOwnerId =
+        nodeIdMap.get(ownerId);
+      if (!remappedOwnerId) {
+        continue;
+      }
+      customCSharpFiles[remappedOwnerId] =
+        remapSavedCompositeCustomCSharpGraph(
+          customGraph,
+          identities
+        );
+    }
     const position = findOpenNodePosition(
       x,
       y,
@@ -6928,6 +7373,7 @@
         record.resolvedEngineVersion,
       boundaryPorts: boundaries,
       branchRouting,
+      customCSharpFiles,
       nodes,
       connections,
       viewport: clone(
@@ -7064,6 +7510,10 @@
           [containerId]:
             instance.composite
         },
+        customCSharpFiles: clone(
+          instance.composite
+            .customCSharpFiles || {}
+        ),
         nodes: [instance.container],
         connections: [],
         viewport: {
@@ -7103,6 +7553,12 @@
         ...(graph.apiCompositeGraphs || {}),
         [containerId]: instance.composite
       };
+      graph.customCSharpFiles =
+        mergeCustomCSharpFileRegistry(
+          graph.customCSharpFiles,
+          instance.composite
+            .customCSharpFiles
+        );
       graph.nextSequence +=
         instance.composite.nodes.length +
         instance.composite.connections.length +
@@ -7224,6 +7680,8 @@
       editor?.close?.();
     }
     customCSharpDetachedEditors.clear();
+    customCSharpEditorDraftValues.clear();
+    customCSharpActiveEditorKey = "";
     graphInspectorRenderedSelectionKey = "";
 
     for (const controller of
@@ -7249,6 +7707,7 @@
     customCSharpSynchronizationStatus.clear();
     customCSharpDiagnostics.clear();
     customCSharpDebugOutput.clear();
+    customCSharpDiagnosticClockEpoch = 0;
     customCSharpSynchronizationControllers.clear();
     customCSharpSynchronizationTasks.clear();
     customCSharpForegroundSynchronizationTokens.clear();
@@ -7319,11 +7778,19 @@
         ""
     ).trim();
     if (!id || !normalizedMessage) return;
+    customCSharpDiagnosticClockEpoch =
+      Math.max(
+        Date.now(),
+        customCSharpDiagnosticClockEpoch + 1
+      );
     const entry = Object.freeze({
-      time: new Date().toLocaleTimeString([], {
+      time: new Date(
+        customCSharpDiagnosticClockEpoch
+      ).toLocaleTimeString([], {
         hour: "2-digit",
         minute: "2-digit",
-        second: "2-digit"
+        second: "2-digit",
+        fractionalSecondDigits: 3
       }),
       source:
         String(source || "").trim() ||
@@ -7335,23 +7802,25 @@
     });
     const entries =
       customCSharpDebugOutput.get(id) || [];
-    const previous = entries.at(-1);
-    if (
-      previous?.message !== entry.message ||
-      previous?.source !== entry.source ||
-      previous?.tone !== entry.tone
-    ) {
-      entries.push(entry);
-      if (entries.length > 500) {
-        entries.splice(0, entries.length - 500);
-      }
-      customCSharpDebugOutput.set(id, entries);
+    const repeatedIndex =
+      entries.findLastIndex(previous =>
+        previous?.message === entry.message &&
+        previous?.source === entry.source &&
+        previous?.tone === entry.tone
+      );
+    if (repeatedIndex >= 0) {
+      entries.splice(repeatedIndex, 1);
     }
+    entries.push(entry);
+    if (entries.length > 500) {
+      entries.splice(0, entries.length - 500);
+    }
+    customCSharpDebugOutput.set(id, entries);
     for (const editor of
       customCSharpDetachedEditors.values()) {
       if (
         editor?.nodeId === id &&
-        editor.popup?.closed === false &&
+        customCSharpEditorRecordActive(editor) &&
         typeof editor.appendOutput === "function"
       ) {
         editor.appendOutput(entry);
@@ -7359,13 +7828,18 @@
     }
   }
 
-  function setCustomCSharpDiagnostics(
-    nodeId,
+  function customCSharpDiagnosticSourceGroup(
+    source
+  ) {
+    return /roslyn/i.test(String(source || ""))
+      ? "Roslyn"
+      : "Builder";
+  }
+
+  function normalizedCustomCSharpDiagnostics(
     diagnostics
   ) {
-    const id = String(nodeId || "");
-    if (!id) return;
-    const normalized = [
+    return [
       ...new Set(
         (Array.isArray(diagnostics)
           ? diagnostics
@@ -7382,11 +7856,31 @@
           .filter(Boolean)
       )
     ];
-    if (normalized.length > 0) {
-      customCSharpDiagnostics.set(
-        id,
-        normalized
-      );
+  }
+
+  function commitCustomCSharpDiagnostics(
+    nodeId,
+    groupedDiagnostics
+  ) {
+    const id = String(nodeId || "");
+    if (!id) return;
+    const grouped = Object.freeze({
+      Builder: Object.freeze([
+        ...(Array.isArray(groupedDiagnostics?.Builder)
+          ? groupedDiagnostics.Builder
+          : [])
+      ]),
+      Roslyn: Object.freeze([
+        ...(Array.isArray(groupedDiagnostics?.Roslyn)
+          ? groupedDiagnostics.Roslyn
+          : [])
+      ])
+    });
+    if (
+      grouped.Builder.length > 0 ||
+      grouped.Roslyn.length > 0
+    ) {
+      customCSharpDiagnostics.set(id, grouped);
     } else {
       customCSharpDiagnostics.delete(id);
     }
@@ -7394,12 +7888,66 @@
       customCSharpDetachedEditors.values()) {
       if (
         editor?.nodeId === id &&
-        editor.popup?.closed === false &&
+        customCSharpEditorRecordActive(editor) &&
         typeof editor.setDiagnostics === "function"
       ) {
-        editor.setDiagnostics(normalized);
+        editor.setDiagnostics(grouped);
       }
     }
+  }
+
+  function setCustomCSharpDiagnostics(
+    nodeId,
+    diagnostics,
+    options = {}
+  ) {
+    const id = String(nodeId || "");
+    if (!id) return;
+    const normalized =
+      normalizedCustomCSharpDiagnostics(diagnostics);
+    const previous =
+      customCSharpDiagnostics.get(id);
+    const grouped = Array.isArray(previous)
+      ? {
+          Builder: [],
+          Roslyn: [...previous]
+        }
+      : {
+          Builder: Array.isArray(previous?.Builder)
+            ? [...previous.Builder]
+            : [],
+          Roslyn: Array.isArray(previous?.Roslyn)
+            ? [...previous.Roslyn]
+            : []
+        };
+    const hasExplicitSource =
+      Object.prototype.hasOwnProperty.call(
+        options,
+        "source"
+      );
+    if (!hasExplicitSource && normalized.length === 0) {
+      grouped.Builder = [];
+      grouped.Roslyn = [];
+    } else {
+      grouped[
+        customCSharpDiagnosticSourceGroup(
+          options.source
+        )
+      ] = normalized;
+    }
+    commitCustomCSharpDiagnostics(id, grouped);
+  }
+
+  function setCustomCSharpLiveDiagnosticSnapshot(
+    nodeId,
+    diagnostics
+  ) {
+    const normalized =
+      normalizedCustomCSharpDiagnostics(diagnostics);
+    commitCustomCSharpDiagnostics(nodeId, {
+      Builder: normalized.slice(0, 1),
+      Roslyn: normalized
+    });
   }
 
   function customCSharpLiveValidationEnvelope(
@@ -7531,7 +8079,7 @@
     node,
     specification,
     value,
-    delay = 160
+    delay = 0
   ) {
     const parameterKey = String(
       specification?.key || "code"
@@ -7558,6 +8106,10 @@
       key,
       revision
     );
+    setCustomCSharpLiveDiagnosticSnapshot(
+      nodeId,
+      []
+    );
     const source = String(value || "");
     const projectEpoch = customCSharpProjectEpoch;
     const timer = window.setTimeout(() => {
@@ -7575,7 +8127,7 @@
           ) {
             return;
           }
-          setCustomCSharpDiagnostics(
+          setCustomCSharpLiveDiagnosticSnapshot(
             nodeId,
             diagnostics
           );
@@ -7588,7 +8140,7 @@
           ) {
             return;
           }
-          setCustomCSharpDiagnostics(
+          setCustomCSharpLiveDiagnosticSnapshot(
             nodeId,
             [
               `Roslyn live diagnostics failed: ${error instanceof Error ? error.message : String(error)}`
@@ -7631,7 +8183,7 @@
       customCSharpDetachedEditors.values()) {
       if (
         editor?.nodeId === id &&
-        editor.popup?.closed === false &&
+        customCSharpEditorRecordActive(editor) &&
         typeof editor.setStatus === "function"
       ) {
         editor.setStatus({
@@ -7824,7 +8376,7 @@
     }
     const worker = new Worker(
       new URL(
-        "graph_codegen_worker.js?v=73-real-textarea-search-selection-v660",
+        "graph_codegen_worker.js?v=88-single-hybrid-custom-csharp-composite-v675",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -7886,7 +8438,8 @@
             .filter(Boolean);
           setCustomCSharpDiagnostics(
             nodeId,
-            diagnostics
+            diagnostics,
+            { source: "Builder" }
           );
           appendCustomCSharpDebugOutput(
             nodeId,
@@ -7919,7 +8472,8 @@
           nodeId,
           location
             ? [message, location]
-            : [message]
+            : [message],
+          { source: "Builder" }
         );
         appendCustomCSharpDebugOutput(
           nodeId,
@@ -8275,7 +8829,7 @@
       }
       if (parseResult?.ok !== true) {
         const messages = visualCSharp.formatRoslynDiagnostics?.(parseResult?.diagnostics) || [];
-        setCustomCSharpDiagnostics(
+        setCustomCSharpLiveDiagnosticSnapshot(
           ownerId,
           messages.length > 0
             ? messages
@@ -8378,7 +8932,8 @@
           );
           setCustomCSharpDiagnostics(
             ownerId,
-            messages
+            messages,
+            { source: "Builder" }
           );
           for (const message of messages) {
             appendCustomCSharpDebugOutput(
@@ -8409,7 +8964,8 @@
             ownerId,
             messages.length > 0
               ? messages
-              : [preparedGraphValidationFailure]
+              : [preparedGraphValidationFailure],
+            { source: "Roslyn" }
           );
           for (const message of
             messages.length > 0
@@ -8435,7 +8991,8 @@
         if (!matches) {
           setCustomCSharpDiagnostics(
             ownerId,
-            [preparedGraphValidationFailure]
+            [preparedGraphValidationFailure],
+            { source: "Roslyn" }
           );
           appendCustomCSharpDebugOutput(
             ownerId,
@@ -8507,12 +9064,11 @@
         error instanceof Error
           ? error.message
           : String(error);
-      if (!customCSharpDiagnostics.has(ownerId)) {
-        setCustomCSharpDiagnostics(
-          ownerId,
-          [message]
-        );
-      }
+      setCustomCSharpDiagnostics(
+        ownerId,
+        [message],
+        { source: "Builder" }
+      );
       appendCustomCSharpDebugOutput(
         ownerId,
         message,
@@ -8542,24 +9098,46 @@
     ) {
       return callback();
     }
+    const frames = [];
     if (customCSharpEditor) {
       captureCustomCSharpEditorView();
-    } else {
-      captureApiCompositeEditorView();
+      frames.push({
+        editor: customCSharpEditor,
+        nestedView: graphViewFrom(graph)
+      });
+      applyGraphView(
+        customCSharpEditor.mainView
+      );
+      resetGraphRenderCaches();
     }
-    const nestedView = graphViewFrom(graph);
-    const editor =
-      customCSharpEditor ||
-      apiCompositeEditor;
+    if (apiCompositeEditor) {
+      captureApiCompositeEditorView();
+      frames.push({
+        editor: apiCompositeEditor,
+        nestedView: graphViewFrom(graph)
+      });
+      applyGraphView(
+        apiCompositeEditor.mainView
+      );
+      resetGraphRenderCaches();
+    }
     customCSharpRootOperation = true;
-    applyGraphView(editor.mainView);
-    resetGraphRenderCaches();
     try {
       return callback();
     } finally {
-      editor.mainView = graphViewFrom(graph);
-      applyGraphView(nestedView);
-      resetGraphRenderCaches();
+      for (
+        let index = frames.length - 1;
+        index >= 0;
+        index -= 1
+      ) {
+        const frame = frames[index];
+        frame.editor.mainView =
+          graphViewFrom(graph);
+        applyGraphView(
+          frame.nestedView
+        );
+        resetGraphRenderCaches();
+      }
       customCSharpRootOperation = false;
     }
   }
@@ -10053,15 +10631,57 @@
     );
 
     const rawCustomCSharpFiles =
-      raw.customCSharpFiles &&
-      typeof raw.customCSharpFiles === "object" &&
-      !Array.isArray(raw.customCSharpFiles)
-        ? raw.customCSharpFiles
-        : {};
-    const customFileOwnerIds = new Set(
+      mergeCustomCSharpFileRegistry(
+        {},
+        raw.customCSharpFiles
+      );
+    const customFileOwners = new Map(
       result.nodes
-        .filter(node => node.kind === "operator" && node.operatorId === "csharp.file")
-        .map(node => node.id)
+        .filter(node =>
+          node.kind === "operator" &&
+          node.operatorId === "csharp.file"
+        )
+        .map(node => [node.id, node])
+    );
+    const rawCompositeSourcesForCustomCSharp =
+      raw.apiCompositeGraphs &&
+      typeof raw.apiCompositeGraphs ===
+        "object" &&
+      !Array.isArray(
+        raw.apiCompositeGraphs
+      )
+        ? raw.apiCompositeGraphs
+        : {};
+    for (const compositeSource of
+      Object.values(
+        rawCompositeSourcesForCustomCSharp
+      )) {
+      for (const node of
+        Array.isArray(compositeSource?.nodes)
+          ? compositeSource.nodes
+          : []) {
+        if (
+          node?.kind === "operator" &&
+          node.operatorId === "csharp.file"
+        ) {
+          customFileOwners.set(
+            node.id,
+            node
+          );
+        }
+      }
+      mergeCustomCSharpFileRegistry(
+        rawCustomCSharpFiles,
+        compositeSource
+          ?.customCSharpFiles
+      );
+    }
+    mergeCustomCSharpFileRegistry(
+      rawCustomCSharpFiles,
+      raw.customCSharpFiles
+    );
+    const customFileOwnerIds = new Set(
+      customFileOwners.keys()
     );
 
     for (const [ownerId, source] of Object.entries(rawCustomCSharpFiles)) {
@@ -10073,7 +10693,9 @@
       ) {
         continue;
       }
-      const owner = result.nodes.find(node => node.id === ownerId);
+      const owner =
+        customFileOwners.get(ownerId) ||
+        null;
       const legacyDirectSource = Array.isArray(source.nodes)
         ? source.nodes.find(node => node?.operatorId === "csharp.directSource")
         : null;
@@ -10464,8 +11086,53 @@
           ).slice(0, 160),
         boundaryPorts: boundaries,
         branchRouting,
+        customCSharpFiles:
+          customCSharpFilesForNodes(
+            sanitizedView.nodes,
+            result.customCSharpFiles
+          ),
         ...graphViewFrom(sanitizedView)
       };
+    }
+
+    const validCustomCSharpOwnerIds =
+      new Set(
+        result.nodes
+          .filter(node =>
+            node.kind === "operator" &&
+            node.operatorId ===
+              "csharp.file"
+          )
+          .map(node => node.id)
+      );
+    for (const composite of Object.values(
+      result.apiCompositeGraphs
+    )) {
+      for (const node of
+        composite.nodes || []) {
+        if (
+          node.kind === "operator" &&
+          node.operatorId ===
+            "csharp.file"
+        ) {
+          validCustomCSharpOwnerIds.add(
+            node.id
+          );
+        }
+      }
+    }
+    for (const ownerId of Object.keys(
+      result.customCSharpFiles
+    )) {
+      if (
+        !validCustomCSharpOwnerIds.has(
+          ownerId
+        )
+      ) {
+        delete result.customCSharpFiles[
+          ownerId
+        ];
+      }
     }
 
     return result;
@@ -10830,46 +11497,95 @@
     };
   }
 
-  function graphSerializableState() {
-    captureCustomCSharpEditorView();
-    captureApiCompositeEditorView();
-    const customCSharpFiles = {};
-    for (const [ownerId, customGraph] of Object.entries(graph.customCSharpFiles || {})) {
-      customCSharpFiles[ownerId] = {
+  function serializableCustomCSharpFiles(
+    sourceFiles
+  ) {
+    const result = {};
+    for (const [ownerId, customGraph] of
+      Object.entries(sourceFiles || {})) {
+      result[ownerId] = {
         version: 1,
-        fileName: String(customGraph?.fileName || "VisualProgram.cs"),
-        projectId: String(customGraph?.projectId || "main"),
-        parser: String(customGraph?.parser || "Visual C#"),
-        languageVersion: String(customGraph?.languageVersion || "14.0"),
-        optimizerVersion: Math.max(0, Math.trunc(finiteNumber(customGraph?.optimizerVersion, 0))),
-        catalogFingerprint:
-          String(customGraph?.catalogFingerprint || ""),
-        catalogEngineVersion:
-          String(customGraph?.catalogEngineVersion || ""),
-        catalogSource:
-          String(customGraph?.catalogSource || ""),
+        fileName: String(
+          customGraph?.fileName ||
+          "VisualProgram.cs"
+        ),
+        projectId: String(
+          customGraph?.projectId || "main"
+        ),
+        parser: String(
+          customGraph?.parser || "Visual C#"
+        ),
+        languageVersion: String(
+          customGraph?.languageVersion ||
+          "14.0"
+        ),
+        optimizerVersion: Math.max(
+          0,
+          Math.trunc(
+            finiteNumber(
+              customGraph?.optimizerVersion,
+              0
+            )
+          )
+        ),
+        catalogFingerprint: String(
+          customGraph?.catalogFingerprint ||
+          ""
+        ),
+        catalogEngineVersion: String(
+          customGraph
+            ?.catalogEngineVersion || ""
+        ),
+        catalogSource: String(
+          customGraph?.catalogSource || ""
+        ),
         catalogDefinitionRevision:
           Math.max(
             0,
             Math.trunc(
               finiteNumber(
-                customGraph?.catalogDefinitionRevision,
+                customGraph
+                  ?.catalogDefinitionRevision,
                 0
               )
             )
           ),
-        importedSource: customGraph?.importedSource === true,
+        importedSource:
+          customGraph?.importedSource ===
+          true,
         sourceEditedInInspector:
-          customGraph?.sourceEditedInInspector === true,
+          customGraph
+            ?.sourceEditedInInspector ===
+          true,
         coordinateSpaceVersion:
           CUSTOM_CSHARP_COORDINATE_SPACE_VERSION,
-        sourceHash: String(customGraph?.sourceHash || ""),
-        outputNodeId: String(customGraph?.outputNodeId || ""),
-        rootSyntaxNodeId: String(customGraph?.rootSyntaxNodeId || ""),
-        directSourceNodeId: String(customGraph?.directSourceNodeId || ""),
+        sourceHash: String(
+          customGraph?.sourceHash || ""
+        ),
+        outputNodeId: String(
+          customGraph?.outputNodeId || ""
+        ),
+        rootSyntaxNodeId: String(
+          customGraph?.rootSyntaxNodeId ||
+          ""
+        ),
+        directSourceNodeId: String(
+          customGraph?.directSourceNodeId ||
+          ""
+        ),
         ...serializableGraphView(customGraph)
       };
     }
+    return result;
+  }
+
+  function graphSerializableState() {
+    captureCustomCSharpEditorView();
+    captureApiCompositeEditorView();
+    const customCSharpFiles =
+      serializableCustomCSharpFiles(
+        graph.customCSharpFiles
+      );
     const apiCompositeGraphs = {};
     for (const [ownerId, composite] of
       Object.entries(
@@ -10900,6 +11616,13 @@
         branchRouting:
           clone(
             composite?.branchRouting || {}
+          ),
+        customCSharpFiles:
+          serializableCustomCSharpFiles(
+            customCSharpFilesForNodes(
+              composite?.nodes,
+              graph.customCSharpFiles
+            )
           ),
         ...serializableGraphView(
           composite
@@ -20854,6 +21577,130 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         background-size: auto !important;
       }
 
+      .rml-custom-csharp-inline-editor {
+        display: block;
+        width: 100%;
+        height: 100%;
+        min-height: 0;
+        border: 0;
+        background: #181818;
+      }
+
+      .rml-custom-csharp-editor-overlay {
+        position: fixed;
+        z-index: 2147482200;
+        top: 64px;
+        left: max(16px, calc(100vw - min(1040px, 78vw) - 24px));
+        display: grid;
+        grid-template-rows: 38px minmax(0, 1fr);
+        width: min(1040px, 78vw);
+        height: min(760px, calc(100dvh - 88px));
+        min-width: 360px;
+        min-height: 220px;
+        overflow: hidden;
+        resize: both;
+        border: 1px solid rgba(183, 137, 255, 0.72);
+        border-radius: 7px;
+        background: #181818;
+        box-shadow: 0 18px 58px rgba(0, 0, 0, 0.72), 0 0 0 1px rgba(0, 0, 0, 0.7);
+      }
+
+      .rml-custom-csharp-overlay-titlebar {
+        display: flex;
+        align-items: center;
+        min-width: 0;
+        padding-left: 12px;
+        border-bottom: 1px solid #2b2b2b;
+        background: linear-gradient(180deg, #2b2533, #211d27);
+        color: #e7d9ff;
+        user-select: none;
+        cursor: move;
+        touch-action: none;
+      }
+
+      .rml-custom-csharp-overlay-titlebar > strong {
+        min-width: 0;
+        overflow: hidden;
+        font: 600 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .rml-custom-csharp-overlay-window-actions {
+        display: flex;
+        align-self: stretch;
+        margin-left: auto;
+      }
+
+      .rml-custom-csharp-overlay-window-actions button {
+        display: grid;
+        place-items: center;
+        width: 42px;
+        min-width: 42px;
+        height: 100%;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: #d8cce6;
+        font: 17px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        cursor: pointer;
+      }
+
+      .rml-custom-csharp-overlay-window-actions button:hover {
+        background: rgba(255, 255, 255, 0.1);
+        color: #ffffff;
+      }
+
+      .rml-custom-csharp-overlay-window-actions button:last-child:hover {
+        background: #c42b1c;
+      }
+
+      .rml-custom-csharp-overlay-frame {
+        display: block;
+        width: 100%;
+        height: 100%;
+        min-width: 0;
+        min-height: 0;
+        border: 0;
+        background: #181818;
+      }
+
+      .rml-custom-csharp-editor-overlay.minimized {
+        grid-template-rows: 38px;
+        height: 38px !important;
+        min-height: 38px;
+        resize: none;
+      }
+
+      .rml-custom-csharp-editor-overlay.minimized .rml-custom-csharp-overlay-frame {
+        display: none;
+      }
+
+      .rml-custom-csharp-editor-overlay.maximized {
+        inset: 8px !important;
+        width: auto !important;
+        height: auto !important;
+        max-width: none;
+        max-height: none;
+        resize: none;
+      }
+
+      @media (max-width: 780px), (pointer: coarse) {
+        .rml-custom-csharp-editor-overlay {
+          top: 8px;
+          left: 8px;
+          width: calc(100vw - 16px);
+          height: calc(100dvh - 16px);
+          min-width: 0;
+          min-height: 180px;
+        }
+
+        .rml-custom-csharp-overlay-window-actions button {
+          width: 46px;
+          min-width: 46px;
+        }
+      }
+
       body.rml-node-graph-mode #inspector-content {
         min-height: 0;
       }
@@ -23243,13 +24090,35 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         }
 
         body.rml-node-graph-mode .rml-graph-socket {
-          width: 20px;
-          height: 20px;
+          width: 14px !important;
+          min-width: 14px !important;
+          max-width: 14px !important;
+          height: 14px !important;
+          min-height: 14px !important;
+          max-height: 14px !important;
+          padding: 0 !important;
+          flex: 0 0 14px;
+        }
+
+        body.rml-node-graph-mode .rml-graph-socket::before {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          width: 24px;
+          height: 24px;
+          background: transparent;
+          content: "";
+          transform: translate(-50%, -50%);
         }
 
         body.rml-node-graph-mode .rml-graph-socket.shape-diamond {
-          width: 18px;
-          height: 18px;
+          width: 12px !important;
+          min-width: 12px !important;
+          max-width: 12px !important;
+          height: 12px !important;
+          min-height: 12px !important;
+          max-height: 12px !important;
+          flex-basis: 12px;
         }
 
         body.rml-node-graph-mode .rml-graph-wire-hit {
@@ -23391,6 +24260,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       return;
     }
 
+    const inlineEditorActive =
+      Boolean(customCSharpInlineEditorKey);
     const active = Boolean(
       graph?.active &&
       runtimeGraphViewActive
@@ -23425,13 +24296,15 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       );
 
     dom.packButton.innerHTML =
-      catalogLoading
-        ? `<span class="brand-mark rml-pack-brand-mark rml-runtime-graph-loader rml-runtime-graph-spinner" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">Loading Runtime Graph…</span>`
-        : catalogFailed
+      inlineEditorActive
+        ? `<svg class="rml-pack-back-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5 M10 7l-5 5 5 5"></path></svg><span class="top-action-label">Back to Previous Graph</span>`
+        : catalogLoading
+          ? `<span class="brand-mark rml-pack-brand-mark rml-runtime-graph-loader rml-runtime-graph-spinner" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">Loading Runtime Graph…</span>`
+          : catalogFailed
           ? `<span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">${hostFailed ? "Runtime Graph unavailable" : "Repair Runtime Graph…"}</span>`
           : customCSharpEditor ||
             apiCompositeEditor
-            ? `<svg class="rml-pack-back-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5 M10 7l-5 5 5 5"></path></svg><span class="top-action-label">Back to Runtime Graph</span>`
+            ? `<svg class="rml-pack-back-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5 M10 7l-5 5 5 5"></path></svg><span class="top-action-label">Back to Previous Graph</span>`
           : active
             ? `<svg class="rml-pack-back-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5 M10 7l-5 5 5 5"></path></svg><span class="top-action-label">Back to Outline</span>`
             : graph?.active
@@ -23440,15 +24313,17 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
     dom.packButton.setAttribute(
       "aria-label",
-      catalogLoading
-        ? "Runtime Graph is loading"
-        : catalogFailed
+      inlineEditorActive
+        ? "Close embedded editor and return to the previous graph"
+        : catalogLoading
+          ? "Runtime Graph is loading"
+          : catalogFailed
           ? hostFailed
             ? "Runtime Graph is unavailable"
             : "Review catalog replacements for the Runtime Graph"
           : customCSharpEditor ||
             apiCompositeEditor
-            ? "Back to Runtime Graph"
+            ? "Back to previous graph"
           : active
             ? "Back to Configuration Outline"
             : graph?.active
@@ -23456,7 +24331,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
               : "Pack into Node"
     );
 
-    if (catalogLoading) {
+    if (
+      catalogLoading &&
+      !inlineEditorActive
+    ) {
       dom.packButton.setAttribute(
         "aria-busy",
         "true"
@@ -23468,11 +24346,13 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     }
 
     dom.packButton.dataset.runtimeReadiness =
-      catalogLoading
-        ? "loading"
-        : catalogFailed
-          ? "failed"
-          : "ready";
+      inlineEditorActive
+        ? "ready"
+        : catalogLoading
+          ? "loading"
+          : catalogFailed
+            ? "failed"
+            : "ready";
 
     dom.packButton.dataset.helpTone =
       "runtime";
@@ -23490,7 +24370,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
     setGraphButtonAvailability(
       dom.packButton,
-      !(
+      inlineEditorActive || !(
         !hostLoading &&
         !hostFailed &&
         sourceNodes.length === 0 &&
@@ -23500,7 +24380,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     );
 
     dom.packButton.dataset.help =
-      catalogLoading
+      inlineEditorActive
+        ? "Close the embedded Custom C# editor and return to the graph that it replaced."
+        : catalogLoading
         ? hostLoading
           ? "The Runtime Graph control is ready. The locally restored project state is still being connected to it."
           : graphCatalogReadinessMessage ||
@@ -23516,6 +24398,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
             "Click to review deterministic replacements for incompatible API nodes, including nodes inside placed API Composites."
         : sourceNodes.length === 0
         ? "Add at least one Configuration Outline item before opening the Typed Runtime Graph."
+        : customCSharpEditor ||
+          apiCompositeEditor
+          ? "Return to the immediately previous main view. This return entry is consumed once, so navigation cannot form a cycle."
         : active
           ? "Return to the Configuration Outline. The packed graph is preserved."
           : graph?.active
@@ -23685,6 +24570,12 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
   }
 
   function togglePackedNodeMode() {
+    if (customCSharpInlineEditorKey) {
+      closeEmbeddedEditorForGraphReplacement();
+      updatePackButton();
+      return;
+    }
+
     if (
       graphHostError ||
       !graphHostInitialized ||
@@ -24557,11 +25448,21 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
   }
 
   function updateGraphEditModeButton() {
+    const active = graphEditModeActive();
+    for (const editor of
+      customCSharpDetachedEditors.values()) {
+      if (
+        customCSharpEditorRecordActive(editor) &&
+        typeof editor.setPageAreasHidden ===
+          "function"
+      ) {
+        editor.setPageAreasHidden(active);
+      }
+    }
     if (!dom.editModeButton) {
       return;
     }
 
-    const active = graphEditModeActive();
     const label =
       active
         ? "Exit Edit Mode"
@@ -27488,6 +28389,16 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       !graph.active ||
       !runtimeGraphViewActive ||
       !dom.builderCanvas
+    ) {
+      return;
+    }
+    if (
+      customCSharpInlineEditorKey &&
+      customCSharpEditorRecordActive(
+        customCSharpDetachedEditors.get(
+          customCSharpInlineEditorKey
+        )
+      )
     ) {
       return;
     }
@@ -34963,6 +35874,20 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     }
 
     if (apiCompositeEditor) {
+      if (
+        apiCompositeVerifiedCatalogNode(
+          node
+        ) &&
+        graph.nodes.filter(
+          apiCompositeVerifiedCatalogNode
+        ).length <= 1
+      ) {
+        showGraphMessage(
+          "This is the last verified catalog API node in the Composite and cannot be deleted.",
+          "error"
+        );
+        return;
+      }
       const ownerId =
         apiCompositeEditor.containerNodeId;
       const boundaries =
@@ -34986,14 +35911,33 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       }
     }
 
+    const deletedEditorNodeIds = new Set([
+      nodeId
+    ]);
+    if (
+      node.operatorId ===
+        "container.apiComposite"
+    ) {
+      for (const ownerId of Object.keys(
+        graph.apiCompositeGraphs?.[nodeId]
+          ?.customCSharpFiles || {}
+      )) {
+        deletedEditorNodeIds.add(ownerId);
+      }
+    }
     for (const [editorKey, detachedEditor] of
       customCSharpDetachedEditors) {
-      if (detachedEditor?.nodeId !== nodeId) {
+      if (
+        !deletedEditorNodeIds.has(
+          detachedEditor?.nodeId
+        )
+      ) {
         continue;
       }
       if (
-        detachedEditor.popup?.closed ===
-          false
+        customCSharpEditorRecordActive(
+          detachedEditor
+        )
       ) {
         detachedEditor.close?.();
       }
@@ -35016,6 +35960,15 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         "container.apiComposite" &&
       graph.apiCompositeGraphs
     ) {
+      const removedComposite =
+        graph.apiCompositeGraphs[nodeId];
+      for (const ownerId of Object.keys(
+        removedComposite?.customCSharpFiles || {}
+      )) {
+        delete graph.customCSharpFiles?.[
+          ownerId
+        ];
+      }
       delete graph.apiCompositeGraphs[
         nodeId
       ];
@@ -35301,10 +36254,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           )
         );
       const includesCatalogNode =
-        selectedNodes.some(node =>
-          nodeDefinition(node)
-            ?.catalogGenerated === true &&
-          portableApiContractForNode(node)
+        apiCompositeHasVerifiedCatalogNode(
+          selectedNodes
         );
       copy.textContent =
         allCompositeNodes &&
@@ -38745,6 +39696,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       text: "#ffffff",
       caret: "#ffffff"
     });
+  const CUSTOM_CSHARP_CODE_NODE_ATTRIBUTE =
+    "data-rml-custom-csharp-code-node";
+  const CUSTOM_CSHARP_CODE_PARAMETER_ATTRIBUTE =
+    "data-rml-custom-csharp-code-parameter";
 
   function normalizedCustomCSharpEditorColor(
     value,
@@ -38901,7 +39856,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     node
   ) {
     const selector =
-      `[data-rml-custom-csharp-code-node="${CSS.escape(node.id)}"]`;
+      `[${CUSTOM_CSHARP_CODE_NODE_ATTRIBUTE}="${CSS.escape(node.id)}"]`;
     dom.inspectorContent
       ?.querySelectorAll(selector)
       .forEach(control =>
@@ -38914,7 +39869,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       customCSharpDetachedEditors.values()) {
       if (
         detached?.nodeId === node.id &&
-        detached.popup?.closed === false &&
+        customCSharpEditorRecordActive(detached) &&
         typeof detached.setAppearance ===
           "function"
       ) {
@@ -38930,6 +39885,24 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     parameterKey
   ) {
     return `${String(nodeId || "")}\u0000${String(parameterKey || "code")}`;
+  }
+
+  function customCSharpEditorRecordActive(
+    editor
+  ) {
+    if (!editor) return false;
+    if (
+      editor.mode === "inline" ||
+      editor.mode === "overlay"
+    ) {
+      return Boolean(
+        editor.frame?.isConnected &&
+        (editor.mode !== "overlay" ||
+          editor.overlay?.isConnected) &&
+        editor.popup?.closed !== true
+      );
+    }
+    return editor.popup?.closed === false;
   }
 
   function loadCustomCSharpDetachedEditorModule() {
@@ -38952,7 +39925,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         const script =
           document.createElement("script");
         script.src = new URL(
-          "custom_csharp_editor.js?v=7-real-textarea-search-selection-v660",
+          "custom_csharp_editor.js?v=22-single-hybrid-custom-csharp-composite-v675",
           document.baseURI
         ).href;
         script.async = true;
@@ -38994,78 +39967,1370 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     return customCSharpDetachedEditorModulePromise;
   }
 
-  function openCustomCSharpDetachedEditor(
-    node,
-    specification,
-    codeControl,
-    commitCode
+  function customCSharpEditorNode(
+    nodeId
   ) {
-    const parameterKey =
-      String(
-        specification?.key || "code"
+    return (
+      customCSharpEditorNodeCandidates(
+        nodeId
+      )[0] || null
+    );
+  }
+
+  function customCSharpEditorNodeCandidates(
+    nodeId
+  ) {
+    const id = String(nodeId || "");
+    const candidates = [];
+    const seen = new Set();
+    const add = candidate => {
+      if (
+        !candidate ||
+        seen.has(candidate)
+      ) {
+        return;
+      }
+      seen.add(candidate);
+      candidates.push(candidate);
+    };
+    add(
+      graph?.nodes?.find(
+        candidate => candidate?.id === id
+      )
+    );
+    add(
+      customCSharpEditor?.mainView?.nodes?.find(
+        candidate => candidate?.id === id
+      )
+    );
+    add(
+      apiCompositeEditor?.mainView?.nodes?.find(
+        candidate => candidate?.id === id
+      )
+    );
+    for (const composite of Object.values(
+      graph?.apiCompositeGraphs || {}
+    )) {
+      add(
+        composite?.nodes?.find(
+          candidate =>
+            candidate?.id === id
+        )
       );
+    }
+    return candidates;
+  }
+
+  function rememberCustomCSharpEditorDraft(
+    nodeId,
+    parameterKey,
+    value
+  ) {
+    const key = customCSharpDetachedEditorKey(
+      nodeId,
+      parameterKey
+    );
+    const next = String(value ?? "");
+    customCSharpEditorDraftValues.set(
+      key,
+      next
+    );
+    return next;
+  }
+
+  function customCSharpEditorCurrentValue(
+    nodeId,
+    parameterKey,
+    fallback = ""
+  ) {
     const editorKey =
       customCSharpDetachedEditorKey(
-        node.id,
+        nodeId,
         parameterKey
       );
-    const existing =
-      customCSharpDetachedEditors.get(
+    if (
+      customCSharpEditorDraftValues.has(
+        editorKey
+      )
+    ) {
+      return customCSharpEditorDraftValues.get(
         editorKey
       );
-    if (
-      existing?.popup?.closed === false
-    ) {
-      existing.setValue?.(
-        String(codeControl.value || "")
-      );
-      existing.setAppearance?.(
-        customCSharpEditorAppearance(node)
-      );
-      existing.focus?.();
-      return;
     }
-
-    const popup = window.open(
-      "",
-      `rml-custom-csharp-${hashText(editorKey)}`,
-      "popup=yes,width=1040,height=760,resizable=yes,scrollbars=yes"
+    const node = customCSharpEditorNode(nodeId);
+    return String(
+      node?.parameters?.[parameterKey] ??
+        fallback ??
+        ""
     );
-    if (!popup) {
-      showGraphMessage(
-        "The separate code editor was blocked by the browser. Allow pop-ups for this Builder and try again.",
-        "error"
+  }
+
+  function synchronizeCustomCSharpInspectorValue(
+    nodeId,
+    parameterKey,
+    value
+  ) {
+    const controls = dom.inspectorContent?.querySelectorAll(
+      `[${CUSTOM_CSHARP_CODE_NODE_ATTRIBUTE}="${CSS.escape(String(nodeId || ""))}"]` +
+      `[${CUSTOM_CSHARP_CODE_PARAMETER_ATTRIBUTE}="${CSS.escape(String(parameterKey || "code"))}"]`
+    ) || [];
+    for (const control of controls) {
+      if (
+        !(control instanceof HTMLTextAreaElement) ||
+        control.value === value
+      ) {
+        continue;
+      }
+      const selectionStart =
+        control.selectionStart;
+      const selectionEnd =
+        control.selectionEnd;
+      const selectionDirection =
+        control.selectionDirection ||
+        "forward";
+      control.value = value;
+      if (
+        document.activeElement === control &&
+        Number.isFinite(selectionStart) &&
+        Number.isFinite(selectionEnd)
+      ) {
+        const maximum = control.value.length;
+        control.setSelectionRange(
+          Math.min(selectionStart, maximum),
+          Math.min(selectionEnd, maximum),
+          selectionDirection
+        );
+      }
+    }
+  }
+
+  function commitCustomCSharpEditorValue(
+    nodeId,
+    specification,
+    value
+  ) {
+    const parameterKey = String(
+      specification?.key || "code"
+    );
+    const next = rememberCustomCSharpEditorDraft(
+      nodeId,
+      parameterKey,
+      value
+    );
+    const nodes =
+      customCSharpEditorNodeCandidates(nodeId);
+    if (nodes.length === 0) return false;
+    for (const candidate of nodes) {
+      candidate.parameters =
+        candidate.parameters &&
+        typeof candidate.parameters === "object"
+          ? candidate.parameters
+          : {};
+      candidate.parameters[parameterKey] = next;
+    }
+    const node = nodes[0];
+    synchronizeCustomCSharpInspectorValue(
+      node.id,
+      parameterKey,
+      next
+    );
+    scheduleCustomCSharpLiveDiagnostics(
+      node,
+      specification,
+      next
+    );
+    if (
+      parameterKey === "source" &&
+      nodeDefinition(node)?.customCSharpFile === true &&
+      !customCSharpEditor
+    ) {
+      graph.customCSharpFiles =
+        graph.customCSharpFiles &&
+        typeof graph.customCSharpFiles === "object"
+          ? graph.customCSharpFiles
+          : {};
+      const customGraph =
+        graph.customCSharpFiles[node.id] ||
+        createEmptyCustomCSharpFileGraph(node);
+      customGraph.sourceEditedInInspector = true;
+      customGraph.sourceHash = "";
+      graph.customCSharpFiles[node.id] = customGraph;
+      updateCustomCSharpSynchronizationControl(node.id);
+    }
+    persistGraph(
+      specification?.commitImmediately === true
+    );
+    refreshDisplayValueNodes();
+    return true;
+  }
+
+  function clearGraphCanvasForCustomCSharpEditor() {
+    cancelInteraction(false);
+    if (graphNodeVirtualizationFrame) {
+      cancelAnimationFrame(
+        graphNodeVirtualizationFrame
       );
+      graphNodeVirtualizationFrame = 0;
+    }
+    if (graphWireRenderFrame) {
+      cancelAnimationFrame(
+        graphWireRenderFrame
+      );
+      graphWireRenderFrame = 0;
+    }
+    graphWireFullRenderPending = false;
+    graphWirePartialConnectionIds.clear();
+    graphHybridRenderer?.dispose?.();
+    graphHybridRenderer = null;
+    graphNodeVirtualizationSignature = "";
+    dom.builderCanvas?.replaceChildren();
+    dom.root = null;
+    dom.toolbar = null;
+    dom.viewport = null;
+    dom.stage = null;
+    dom.wires = null;
+    dom.nodesHost = null;
+    dom.gpuCanvas = null;
+    dom.toast = null;
+    dom.sourceBadge = null;
+    dom.editModeButton = null;
+  }
+
+  function createCustomCSharpInlineFrame(
+    editorKey,
+    title
+  ) {
+    customCSharpInlineEditorKey = editorKey;
+    clearGraphCanvasForCustomCSharpEditor();
+    const frame = document.createElement("iframe");
+    frame.className =
+      "rml-custom-csharp-inline-editor";
+    frame.src = "about:blank";
+    frame.title = String(
+      title || "Custom C# code editor"
+    );
+    frame.setAttribute(
+      "aria-label",
+      frame.title
+    );
+    frame.setAttribute("scrolling", "no");
+    dom.builderCanvas?.appendChild(frame);
+    if (dom.canvasTitle) {
+      dom.canvasTitle.innerHTML =
+        "<small>Custom C#</small> Embedded code editor";
+    }
+    if (dom.activeContainerName) {
+      dom.activeContainerName.textContent =
+        "Editor · synchronized with node";
+    }
+    updatePackButton();
+    return frame;
+  }
+
+  function bringCustomCSharpOverlayToFront(
+    overlay
+  ) {
+    if (!overlay?.isConnected) return;
+    if (
+      customCSharpEditorOverlayZ >=
+      2147482950
+    ) {
+      customCSharpEditorOverlayZ =
+        2147482200;
+      const overlays = [
+        ...document.querySelectorAll(
+          ".rml-custom-csharp-editor-overlay"
+        )
+      ].sort(
+        (left, right) =>
+          (Number(left.style.zIndex) || 0) -
+          (Number(right.style.zIndex) || 0)
+      );
+      for (const candidate of overlays) {
+        customCSharpEditorOverlayZ += 1;
+        candidate.style.zIndex = String(
+          customCSharpEditorOverlayZ
+        );
+      }
+    }
+    customCSharpEditorOverlayZ += 1;
+    overlay.style.zIndex = String(
+      customCSharpEditorOverlayZ
+    );
+  }
+
+  function createCustomCSharpOverlayFrame(
+    editorKey,
+    title
+  ) {
+    const overlay =
+      document.createElement("section");
+    overlay.className =
+      "rml-custom-csharp-editor-overlay";
+    overlay.dataset.editorKey =
+      hashText(editorKey);
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute(
+      "aria-label",
+      String(title || "Custom C# code editor")
+    );
+
+    const titlebar =
+      document.createElement("div");
+    titlebar.className =
+      "rml-custom-csharp-overlay-titlebar";
+    const heading =
+      document.createElement("strong");
+    heading.textContent = String(
+      title || "Custom C# code editor"
+    );
+    const actions =
+      document.createElement("div");
+    actions.className =
+      "rml-custom-csharp-overlay-window-actions";
+    const windowButton = (
+      label,
+      text,
+      handler
+    ) => {
+      const button =
+        document.createElement("button");
+      button.type = "button";
+      button.textContent = text;
+      button.title = label;
+      button.setAttribute(
+        "aria-label",
+        label
+      );
+      button.addEventListener(
+        "click",
+        event => {
+          event.stopPropagation();
+          handler(button);
+        }
+      );
+      return button;
+    };
+    const returnToEditor = windowButton(
+      "Return to embedded editor",
+      "↩",
+      () =>
+        moveCustomCSharpEditorToInline(
+          editorKey
+        )
+    );
+    const minimize = windowButton(
+      "Minimize editor overlay",
+      "—",
+      button => {
+        const minimized =
+          overlay.classList.toggle(
+            "minimized"
+          );
+        if (minimized) {
+          overlay.classList.remove(
+            "maximized"
+          );
+          maximize.textContent = "□";
+          maximize.setAttribute(
+            "aria-label",
+            "Maximize editor overlay"
+          );
+          maximize.title =
+            "Maximize editor overlay";
+        }
+        button.setAttribute(
+          "aria-label",
+          minimized
+            ? "Restore editor overlay"
+            : "Minimize editor overlay"
+        );
+        button.title =
+          button.getAttribute("aria-label");
+        bringCustomCSharpOverlayToFront(
+          overlay
+        );
+      }
+    );
+    const maximize = windowButton(
+      "Maximize editor overlay",
+      "□",
+      button => {
+        overlay.classList.remove(
+          "minimized"
+        );
+        minimize.setAttribute(
+          "aria-label",
+          "Minimize editor overlay"
+        );
+        minimize.title =
+          "Minimize editor overlay";
+        const maximized =
+          overlay.classList.toggle(
+            "maximized"
+          );
+        button.textContent =
+          maximized ? "❐" : "□";
+        button.setAttribute(
+          "aria-label",
+          maximized
+            ? "Restore editor overlay"
+            : "Maximize editor overlay"
+        );
+        button.title =
+          button.getAttribute("aria-label");
+        bringCustomCSharpOverlayToFront(
+          overlay
+        );
+      }
+    );
+    const close = windowButton(
+      "Close editor overlay",
+      "×",
+      () =>
+        closeCustomCSharpEditorRecord(
+          editorKey
+        )
+    );
+    actions.append(
+      returnToEditor,
+      minimize,
+      maximize,
+      close
+    );
+    titlebar.append(
+      heading,
+      actions
+    );
+
+    const frame =
+      document.createElement("iframe");
+    frame.className =
+      "rml-custom-csharp-overlay-frame";
+    frame.src = "about:blank";
+    frame.title = String(
+      title || "Custom C# code editor"
+    );
+    frame.setAttribute(
+      "aria-label",
+      frame.title
+    );
+    frame.setAttribute("scrolling", "no");
+    overlay.append(
+      titlebar,
+      frame
+    );
+    document.body.appendChild(overlay);
+    bringCustomCSharpOverlayToFront(
+      overlay
+    );
+
+    let drag = null;
+    titlebar.addEventListener(
+      "pointerdown",
+      event => {
+        if (
+          event.button !== 0 ||
+          event.target?.closest?.("button") ||
+          overlay.classList.contains(
+            "maximized"
+          )
+        ) {
+          return;
+        }
+        const rectangle =
+          overlay.getBoundingClientRect();
+        drag = {
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+          left: rectangle.left,
+          top: rectangle.top
+        };
+        bringCustomCSharpOverlayToFront(
+          overlay
+        );
+        try {
+          titlebar.setPointerCapture?.(
+            event.pointerId
+          );
+        } catch {
+          // Pointer capture is optional in embedded browsers.
+        }
+        event.preventDefault();
+      }
+    );
+    titlebar.addEventListener(
+      "pointermove",
+      event => {
+        if (
+          !drag ||
+          drag.pointerId !== event.pointerId
+        ) {
+          return;
+        }
+        const rectangle =
+          overlay.getBoundingClientRect();
+        const left = clamp(
+          drag.left +
+            event.clientX - drag.startX,
+          0,
+          Math.max(
+            0,
+            window.innerWidth -
+              Math.min(80, rectangle.width)
+          )
+        );
+        const top = clamp(
+          drag.top +
+            event.clientY - drag.startY,
+          0,
+          Math.max(
+            0,
+            window.innerHeight - 38
+          )
+        );
+        overlay.style.left = `${left}px`;
+        overlay.style.top = `${top}px`;
+        event.preventDefault();
+      }
+    );
+    const finishDrag = event => {
+      if (
+        !drag ||
+        drag.pointerId !== event.pointerId
+      ) {
+        return;
+      }
+      drag = null;
+      try {
+        titlebar.releasePointerCapture?.(
+          event.pointerId
+        );
+      } catch {
+        // The pointer may already have been released.
+      }
+    };
+    titlebar.addEventListener(
+      "pointerup",
+      finishDrag
+    );
+    titlebar.addEventListener(
+      "pointercancel",
+      finishDrag
+    );
+    titlebar.addEventListener(
+      "dblclick",
+      event => {
+        if (!event.target?.closest?.("button")) {
+          maximize.click();
+        }
+      }
+    );
+    overlay.addEventListener(
+      "pointerdown",
+      () =>
+        bringCustomCSharpOverlayToFront(
+          overlay
+        ),
+      true
+    );
+
+    return { overlay, frame };
+  }
+
+  function restoreGraphAfterCustomCSharpInlineEditor(
+    editorKey
+  ) {
+    if (customCSharpInlineEditorKey !== editorKey) {
       return;
     }
+    customCSharpInlineEditorKey = "";
+    if (dom.canvasTitle) {
+      dom.canvasTitle.innerHTML =
+        customCSharpEditor
+          ? "<small>File graph</small> Custom C# File"
+          : apiCompositeEditor
+            ? "<small>Composite graph</small> API &amp; Logic structure"
+            : "<small>Step 3</small> Typed runtime graph";
+    }
+    if (dom.activeContainerName) {
+      dom.activeContainerName.textContent =
+        customCSharpEditor
+          ? `Isolated · ${customCSharpEditor.fileName}`
+          : apiCompositeEditor
+            ? `Composite · ${apiCompositeEditor.title}`
+            : "Exact type matching";
+    }
+    if (
+      graph?.active &&
+      runtimeGraphViewActive &&
+      dom.builderCanvas
+    ) {
+      renderGraphCanvas();
+    }
+    updatePackButton();
+  }
 
-    popup.document.title =
-      `${String(specification?.label || "Custom C#")} · Code editor`;
-    popup.document.body.replaceChildren();
+  function closeCustomCSharpEditorRecord(
+    editorKey,
+    { restoreGraph = true } = {}
+  ) {
+    const record =
+      customCSharpDetachedEditors.get(editorKey);
+    if (!record) return;
+    customCSharpDetachedEditors.delete(editorKey);
+    if (
+      customCSharpActiveEditorKey === editorKey
+    ) {
+      customCSharpActiveEditorKey = "";
+    }
+    customCSharpEditorDraftValues.delete(
+      editorKey
+    );
+    cancelCustomCSharpLiveDiagnostics(
+      record.nodeId,
+      record.parameterKey
+    );
+    if (record.mode === "inline") {
+      record.frame?.remove();
+      if (restoreGraph) {
+        restoreGraphAfterCustomCSharpInlineEditor(
+          editorKey
+        );
+      } else if (
+        customCSharpInlineEditorKey === editorKey
+      ) {
+        customCSharpInlineEditorKey = "";
+      }
+      return;
+    }
+    if (record.mode === "overlay") {
+      record.overlay?.remove();
+      return;
+    }
+    if (record.popup?.closed === false) {
+      record.popup.close();
+    }
+  }
+
+  function prepareCustomCSharpEditorHost(
+    hostWindow,
+    title
+  ) {
+    hostWindow.document.title = title;
+    hostWindow.document.body.replaceChildren();
     const loading =
-      popup.document.createElement("p");
+      hostWindow.document.createElement("p");
     loading.textContent =
       "Loading Custom C# editor…";
     loading.style.cssText =
       "margin:0;padding:20px;background:#181818;color:#cccccc;font:13px system-ui,sans-serif;min-height:100vh";
-    popup.document.body.appendChild(loading);
+    hostWindow.document.body.appendChild(loading);
+  }
 
-    const pendingRecord = {
-      popup,
-      nodeId: node.id,
+  function customCSharpNodeDropType(
+    value,
+    fallback = "object"
+  ) {
+    const type = String(
+      value || fallback
+    )
+      .trim()
+      .replace(/^global::/, "")
+      .replace(/&$/, "")
+      .replace(/\+/g, ".");
+    if (!type || /[`!]/.test(type)) {
+      return fallback;
+    }
+    return type;
+  }
+
+  function customCSharpNodeDropQualifiedType(
+    value,
+    fallback = "object"
+  ) {
+    const type = customCSharpNodeDropType(
+      value,
+      fallback
+    );
+    if (
+      type === "object" ||
+      type === "void" ||
+      /^[a-z][A-Za-z0-9_?]*$/.test(type)
+    ) {
+      return type;
+    }
+    return `global::${type}`;
+  }
+
+  function customCSharpNodeDropDefault(
+    value
+  ) {
+    const type = customCSharpNodeDropQualifiedType(
+      value
+    );
+    return `default(${type})`;
+  }
+
+  function customCSharpApiNodeDropRepresentation(
+    definition
+  ) {
+    const contract =
+      definition?.apiVerification;
+    if (
+      definition?.catalogGenerated !== true ||
+      !contract ||
+      typeof contract !== "object"
+    ) {
+      return null;
+    }
+    const kind = String(
+      contract.kind ||
+      definition.apiMemberKind ||
+      "method"
+    );
+    const owner =
+      customCSharpNodeDropQualifiedType(
+        contract.ownerType ||
+          definition.catalogType,
+        "object"
+      );
+    const member = String(
+      contract.memberName ||
+        definition.catalogMember ||
+        "Member"
+    );
+    const parameters = Array.isArray(
+      contract.parameters
+    )
+      ? contract.parameters
+      : [];
+    const argumentsList = parameters.map(
+      (parameter, index) => {
+        const name = graphCsIdentifier(
+          parameter?.name ||
+            `argument${index + 1}`,
+          `Argument${index + 1}`
+        );
+        if (parameter?.isOut === true) {
+          return `/* ${name} */ out _`;
+        }
+        const value = customCSharpNodeDropDefault(
+          parameter?.elementType ||
+            parameter?.type ||
+            "object"
+        );
+        if (parameter?.isByRef === true) {
+          const type =
+            customCSharpNodeDropQualifiedType(
+              parameter?.elementType ||
+                parameter?.type ||
+                "object"
+            );
+          return `/* ref ${name} */ ref global::System.Runtime.CompilerServices.Unsafe.NullRef<${type}>()`;
+        }
+        return `/* ${name} */ ${value}`;
+      }
+    );
+    const target = contract.isStatic === true
+      ? owner
+      : `default(${owner})!`;
+    const returnType =
+      customCSharpNodeDropQualifiedType(
+        contract.returnType ||
+          (kind === "constructor"
+            ? contract.ownerType
+            : "void"),
+        kind === "constructor"
+          ? owner
+          : "void"
+      );
+    const callArguments =
+      argumentsList.join(", ");
+    let expression = "";
+    let statement = "";
+
+    if (kind === "type") {
+      expression = `typeof(${owner})`;
+    } else if (kind === "constructor") {
+      expression =
+        `new ${owner}(${callArguments})`;
+    } else if (kind === "property-get") {
+      expression = parameters.length
+        ? `${target}[${callArguments}]`
+        : `${target}.${member}`;
+    } else if (kind === "property-set") {
+      const value = argumentsList.at(-1) ||
+        customCSharpNodeDropDefault("object");
+      const indexes = argumentsList.slice(
+        0,
+        -1
+      );
+      statement = indexes.length
+        ? `${target}[${indexes.join(", ")}] = ${value};`
+        : `${target}.${member} = ${value};`;
+    } else if (kind === "field-get") {
+      expression = `${target}.${member}`;
+    } else if (kind === "field-set") {
+      statement =
+        `${target}.${member} = ${argumentsList[0] || customCSharpNodeDropDefault(contract.returnType)};`;
+    } else if (kind === "event") {
+      statement =
+        `${target}.${member} += ${customCSharpNodeDropDefault(contract.returnType)}!;`;
+    } else {
+      expression =
+        `${target}.${member}(${callArguments})`;
+      if (
+        returnType === "void" ||
+        returnType === "global::System.Void"
+      ) {
+        statement = `${expression};`;
+        expression = "";
+      }
+    }
+
+    return {
+      expression,
+      statement,
+      returnType,
+      signature:
+        `${customCSharpNodeDropType(contract.ownerType)}.${member}`
+    };
+  }
+
+  function customCSharpNodeDropPortType(
+    definition,
+    node,
+    direction,
+    portId,
+    fallback = "object"
+  ) {
+    const ports = direction === "input"
+      ? definition?.inputs
+      : definition?.outputs;
+    const specification =
+      (Array.isArray(ports) ? ports : [])
+        .find(port => port?.id === portId) ||
+      (Array.isArray(ports) ? ports : [])
+        .find(port => port?.type !== "impulse");
+    const configured = String(
+      node?.parameters?.valueType || ""
+    );
+    const type =
+      specification?.type ||
+      (
+        specification?.typeVar &&
+        configured &&
+        configured !== "auto"
+          ? configured
+          : fallback
+      );
+    return customCSharpNodeDropQualifiedType(
+      type,
+      fallback
+    );
+  }
+
+  function customCSharpSyntaxNodeDropRepresentation(
+    definition,
+    node
+  ) {
+    if (
+      typeof definition?.syntaxRender !==
+      "function"
+    ) {
+      return null;
+    }
+    const renderNode = node || {
+      id: "dropped-csharp-node",
+      operatorId: "",
+      parameters: {}
+    };
+    const input = id => {
+      const specification =
+        definition.inputs?.find(
+          port => port?.id === id
+        );
+      if (
+        specification?.type ===
+          "csharpSyntax"
+      ) {
+        return "";
+      }
+      const type =
+        customCSharpNodeDropPortType(
+          definition,
+          renderNode,
+          "input",
+          id
+        );
+      return `/* ${graphCsIdentifier(specification?.label || id, "Value")} */ default(${type})`;
+    };
+    const context = {
+      node: renderNode,
+      title:
+        definition.title ||
+        renderNode.operatorId ||
+        "C# node",
+      input,
+      graphValue: input,
+      variadic: () =>
+        (definition.inputs || []).map(
+          port => input(port.id)
+        ),
+      diagnostic() {},
+      requireUnsafe() {}
+    };
+    try {
+      const rendered = String(
+        definition.syntaxRender(context) || ""
+      ).trim();
+      return rendered
+        ? {
+            expression: rendered,
+            statement: "",
+            returnType: "object",
+            exactSyntax: true
+          }
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function customCSharpBuiltInNodeDropRepresentation(
+    operatorId,
+    definition,
+    node
+  ) {
+    const renderNode = node || {
+      id: "dropped-builder-node",
+      operatorId,
+      parameters: {}
+    };
+    const valueType =
+      customCSharpNodeDropPortType(
+        definition,
+        renderNode,
+        "output",
+        "",
+        /^(?:math\.|cast\.)/.test(operatorId)
+          ? "double"
+          : "object"
+      );
+    const input = (
+      id,
+      fallback = valueType
+    ) => {
+      const type =
+        customCSharpNodeDropPortType(
+          definition,
+          renderNode,
+          "input",
+          id,
+          fallback
+        );
+      const label =
+        definition.inputs?.find(
+          port => port?.id === id
+        )?.label || id;
+      return `/* ${graphCsIdentifier(label, "Value")} */ default(${type})`;
+    };
+    const variadic = () => {
+      const ids =
+        definition?.variadicInputs
+          ? variadicInputIds(renderNode)
+          : (definition?.inputs || [])
+              .filter(port =>
+                port?.type !== "impulse"
+              )
+              .map(port => port.id);
+      return ids.map(id => input(id));
+    };
+    let expression = "";
+    let statement = "";
+    let returnType = valueType;
+
+    switch (operatorId) {
+      case "constant.number": {
+        const type = String(
+          renderNode.parameters?.valueType ||
+            "float"
+        );
+        returnType =
+          customCSharpNodeDropQualifiedType(
+            type === "auto" ? "float" : type
+          );
+        expression = graphCsNumberLiteral(
+          renderNode.parameters?.value ?? 0,
+          type === "auto" ? "float" : type
+        );
+        break;
+      }
+      case "constant.bool":
+        returnType = "bool";
+        expression =
+          renderNode.parameters?.value === true
+            ? "true"
+            : "false";
+        break;
+      case "constant.string":
+        returnType = "string";
+        expression =
+          `"${graphCsEscapeString(renderNode.parameters?.value || "")}"`;
+        break;
+      case "constant.color":
+        returnType = "colorX";
+        expression = graphCsColorLiteral(
+          renderNode.parameters?.value,
+          renderNode.parameters?.colorProfile,
+          renderNode.parameters?.colorStrength
+        );
+        break;
+      case "constant.typedDefault":
+        returnType =
+          customCSharpNodeDropQualifiedType(
+            renderNode.parameters?.valueType ||
+              valueType
+          );
+        expression = `default(${returnType})`;
+        break;
+      case "math.add":
+        expression = `(${variadic().join(" + ")})`;
+        break;
+      case "math.subtract":
+        expression =
+          `(${input("a")} - ${input("b")})`;
+        break;
+      case "math.multiply":
+        expression = `(${variadic().join(" * ")})`;
+        break;
+      case "math.divide":
+        expression =
+          `(${input("a")} / ${input("b")})`;
+        break;
+      case "math.minimum":
+      case "math.maximum": {
+        const method =
+          operatorId === "math.minimum"
+            ? "Min"
+            : "Max";
+        expression = variadic().reduce(
+          (left, right) =>
+            left
+              ? `global::System.Math.${method}(${left}, ${right})`
+              : right,
+          ""
+        );
+        break;
+      }
+      case "math.clamp":
+        expression =
+          `global::System.Math.Clamp(${input("value")}, ${input("min")}, ${input("max")})`;
+        break;
+      case "math.negate":
+        expression = `(-${input("value")})`;
+        break;
+      case "math.absolute":
+        expression =
+          `global::System.Math.Abs(${input("value")})`;
+        break;
+      case "math.lerp":
+        expression =
+          `(${input("a")} + (${input("b")} - ${input("a")}) * ${input("t", "float")})`;
+        break;
+      case "logic.and":
+        returnType = "bool";
+        expression = `(${variadic().join(" && ")})`;
+        break;
+      case "logic.or":
+        returnType = "bool";
+        expression = `(${variadic().join(" || ")})`;
+        break;
+      case "logic.not":
+        returnType = "bool";
+        expression =
+          `(!${input("value", "bool")})`;
+        break;
+      case "logic.equal":
+        returnType = "bool";
+        expression =
+          `global::System.Collections.Generic.EqualityComparer<object>.Default.Equals(${input("a", "object")}, ${input("b", "object")})`;
+        break;
+      case "logic.greater":
+      case "logic.less":
+        returnType = "bool";
+        expression =
+          `(${input("a", "double")} ${operatorId === "logic.greater" ? ">" : "<"} ${input("b", "double")})`;
+        break;
+      case "logic.select":
+        expression =
+          `(${input("condition", "bool")} ? ${input("true")} : ${input("false")})`;
+        break;
+      case "cast.doubleToFloat":
+        returnType = "float";
+        expression =
+          `((float)${input("value", "double")})`;
+        break;
+      case "cast.floatToInt":
+        returnType = "int";
+        expression =
+          `((int)${input("value", "float")})`;
+        break;
+      case "cast.toString":
+        returnType = "string";
+        expression =
+          `global::System.Convert.ToString(${input("value", "object")}) ?? string.Empty`;
+        break;
+      case "resonite.valueRelay":
+      case "resonite.displayValue":
+        expression = input("value");
+        break;
+      case "flow.branch":
+        returnType = "void";
+        statement =
+          `if (${input("condition", "bool")})\n{\n    // True path\n}\nelse\n{\n    // False path\n}`;
+        break;
+      case "flow.gate":
+        returnType = "void";
+        statement =
+          `if (${input("open", "bool")})\n{\n    // Passed path\n}`;
+        break;
+      default: {
+        const simpleApi = {
+          node: renderNode,
+          definition,
+          type: valueType,
+          className: "GeneratedMod",
+          graphClassName: "GeneratedNodeGraph",
+          namespaceName: "GeneratedNamespace",
+          input: id => ({
+            code: input(id),
+            type: valueType
+          }),
+          emit: () => "",
+          token: graphCsMethodToken,
+          identifier: graphCsIdentifier,
+          escapeString: graphCsEscapeString,
+          csType: graphCsType,
+          csDefault: graphCsDefault,
+          addField() {},
+          addMember() {},
+          addUsing() {},
+          require() {},
+          diagnostic() {}
+        };
+        try {
+          if (
+            typeof definition?.codegenExpression ===
+              "function"
+          ) {
+            expression = String(
+              definition.codegenExpression(
+                simpleApi
+              ) || ""
+            );
+          } else if (
+            typeof definition?.codegenAction ===
+              "function"
+          ) {
+            returnType = "void";
+            statement = String(
+              definition.codegenAction(
+                simpleApi
+              ) || ""
+            );
+          }
+        } catch {
+          expression = "";
+          statement = "";
+        }
+        break;
+      }
+    }
+
+    if (!expression && !statement) {
+      const valueOutput =
+        definition?.outputs?.find(
+          port => port?.type !== "impulse"
+        );
+      if (valueOutput) {
+        returnType =
+          customCSharpNodeDropPortType(
+            definition,
+            renderNode,
+            "output",
+            valueOutput.id
+          );
+        expression = `default(${returnType})`;
+      } else {
+        returnType = "void";
+        statement =
+          "// TODO: connect the Builder node inputs and continuation here.";
+      }
+    }
+    return {
+      expression,
+      statement,
+      returnType,
+      exactSyntax: false
+    };
+  }
+
+  function customCSharpNodeDropSnippet(
+    payload,
+    specification,
+    resolvedDefinition = null,
+    resolvedNode = null
+  ) {
+    const operatorId = String(
+      payload?.operatorId || ""
+    );
+    if (!operatorId) return null;
+    const definition =
+      resolvedDefinition ||
+      OPERATOR_DEFINITIONS[operatorId];
+    if (!definition) return null;
+    const title = String(
+      definition.title ||
+        payload?.title ||
+        operatorId
+    );
+    const methodName =
+      `Node_${graphCsIdentifier(title, "Node")}`;
+    const parameterKey = String(
+      specification?.key || "code"
+    );
+    const api =
+      customCSharpApiNodeDropRepresentation(
+        definition
+      );
+    const syntax = !api
+      ? customCSharpSyntaxNodeDropRepresentation(
+          definition,
+          resolvedNode
+        )
+      : null;
+    const builtIn = !api && !syntax
+      ? customCSharpBuiltInNodeDropRepresentation(
+          operatorId,
+          definition,
+          resolvedNode
+        )
+      : null;
+    const representation =
+      api || syntax || builtIn;
+    const comment =
+      `// Builder node: ${title} (${operatorId})`;
+    let snippet = "";
+
+    if (representation) {
+      if (representation.exactSyntax) {
+        snippet =
+          `${comment}\n${representation.expression}`;
+      } else if (parameterKey === "expressionCode") {
+        snippet = representation.expression ||
+          `default(object) /* ${graphCsEscapeString(title)} is an action node */`;
+      } else if (parameterKey === "actionCode") {
+        const action = representation.statement ||
+          `_ = ${representation.expression};`;
+        snippet = `${comment}\n${action}`;
+      } else {
+        const returnsVoid =
+          representation.returnType === "void" ||
+          representation.returnType ===
+            "global::System.Void" ||
+          Boolean(representation.statement);
+        snippet = returnsVoid
+          ? `${comment}\nprivate static void ${methodName}()\n{\n${String(representation.statement || `${representation.expression};`).split("\n").map(line => `    ${line}`).join("\n")}\n}`
+          : `${comment}\nprivate static ${representation.returnType} ${methodName}()\n{\n    return ${representation.expression};\n}`;
+      }
+    } else {
+      if (parameterKey === "expressionCode") {
+        snippet = `default(object) /* TODO: map ${graphCsEscapeString(title)} */`;
+      } else if (parameterKey === "actionCode") {
+        snippet =
+          `${comment}\n// TODO: map this node action.\n{NEXT}`;
+      } else {
+        snippet =
+          `${comment}\nprivate static object? ${methodName}()\n{\n    // TODO: map this node's runtime inputs.\n    return default;\n}`;
+      }
+    }
+
+    return {
+      snippet,
+      status:
+        `${title} was inserted as C# at the cursor.`
+    };
+  }
+
+  function mountCustomCSharpEditorPresentation({
+    nodeId,
+    specification,
+    mode,
+    hostWindow,
+    frame = null,
+    overlay = null,
+    initialValue = ""
+  }) {
+    const parameterKey = String(
+      specification?.key || "code"
+    );
+    const editorKey =
+      customCSharpDetachedEditorKey(
+        nodeId,
+        parameterKey
+      );
+    rememberCustomCSharpEditorDraft(
+      nodeId,
       parameterKey,
+      initialValue
+    );
+    const title =
+      `${String(specification?.label || "Custom C#")} · Code editor`;
+    prepareCustomCSharpEditorHost(
+      hostWindow,
+      title
+    );
+    const pendingRecord = {
+      editorKey,
+      popup: hostWindow,
+      frame,
+      overlay,
+      mode,
+      nodeId,
+      parameterKey,
+      specification,
+      getValue() {
+        return customCSharpEditorCurrentValue(
+          nodeId,
+          parameterKey,
+          initialValue
+        );
+      },
       setValue() {},
       setAppearance() {},
       setStatus() {},
       appendOutput() {},
       setDiagnostics() {},
-      focus() {
-        popup.focus();
+      setPageAreasHidden() {},
+      insertNodeSnippet() {
+        return false;
       },
-      close() {
-        if (!popup.closed) {
-          popup.close();
-        }
+      focus() {
+        customCSharpActiveEditorKey =
+          editorKey;
+        bringCustomCSharpOverlayToFront(
+          overlay
+        );
+        hostWindow.focus?.();
+      },
+      close(options) {
+        closeCustomCSharpEditorRecord(
+          editorKey,
+          options
+        );
       }
     };
     customCSharpDetachedEditors.set(
@@ -39076,31 +41341,41 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     void loadCustomCSharpDetachedEditorModule()
       .then(editorModule => {
         if (
-          popup.closed ||
+          hostWindow.closed ||
+          (mode === "inline" ||
+            mode === "overlay") &&
+            !frame?.isConnected ||
           customCSharpDetachedEditors.get(
             editorKey
           ) !== pendingRecord
         ) {
           return;
         }
-
+        const node = customCSharpEditorNode(nodeId);
+        if (!node) {
+          throw new Error(
+            "The Custom C# node no longer exists."
+          );
+        }
         let record = null;
         const mounted = editorModule.mount({
-          popup,
+          popup: hostWindow,
+          presentationMode: mode,
+          pageAreasHidden:
+            graphEditModeActive(),
           language:
-            document.documentElement.lang ||
-            "en",
-          documentTitle:
-            `${String(specification?.label || "Custom C#")} · Code editor`,
+            document.documentElement.lang || "en",
+          documentTitle: title,
           tabTitle:
             `${node.label || nodeDefinition(node)?.title || "Custom C#"} · ${String(specification?.label || parameterKey)}`,
-          ariaLabel:
-            String(
-              specification?.label ||
-              "C# 14 source"
-            ),
-          value:
-            String(codeControl.value || ""),
+          ariaLabel: String(
+            specification?.label || "C# 14 source"
+          ),
+          value: customCSharpEditorCurrentValue(
+            nodeId,
+            parameterKey,
+            initialValue
+          ),
           appearance:
             customCSharpEditorAppearance(node),
           styleUrls: Array.from(
@@ -39173,98 +41448,70 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           },
           status:
             customCSharpSynchronizationStatus.get(
-              node.id
-            ) ||
-            "Synchronized with Builder",
+              nodeId
+            ) || "Synchronized with Builder",
           output:
-            customCSharpDebugOutput.get(
-              node.id
-            ) || [],
+            customCSharpDebugOutput.get(nodeId) || [],
           diagnostics:
-            customCSharpDiagnostics.get(
-              node.id
-            ) || [],
+            customCSharpDiagnostics.get(nodeId) || [],
+          enableNodeDrop: true,
+          onNodeDrop(payload) {
+            return customCSharpNodeDropSnippet(
+              payload,
+              specification
+            );
+          },
+          onRequestForeground() {
+            customCSharpActiveEditorKey =
+              editorKey;
+            bringCustomCSharpOverlayToFront(
+              overlay
+            );
+          },
           onAppearanceChange(appearance) {
-            node.parameters.codeWorkbenchBackgroundColor =
-              normalizedCustomCSharpEditorColor(
-                appearance?.workbench,
-                CUSTOM_CSHARP_EDITOR_COLORS.workbench
-              );
-            node.parameters.codeBoxBackgroundColor =
-              normalizedCustomCSharpEditorColor(
-                appearance?.background,
-                CUSTOM_CSHARP_EDITOR_COLORS.background
-              );
-            node.parameters.codeGutterBackgroundColor =
-              normalizedCustomCSharpEditorColor(
-                appearance?.gutter,
-                CUSTOM_CSHARP_EDITOR_COLORS.gutter
-              );
-            node.parameters.codePanelBackgroundColor =
-              normalizedCustomCSharpEditorColor(
-                appearance?.panel,
-                CUSTOM_CSHARP_EDITOR_COLORS.panel
-              );
-            node.parameters.codeOverlayBackgroundColor =
-              normalizedCustomCSharpEditorColor(
-                appearance?.overlay,
-                CUSTOM_CSHARP_EDITOR_COLORS.overlay
-              );
-            node.parameters.codeStatusBackgroundColor =
-              normalizedCustomCSharpEditorColor(
-                appearance?.status,
-                CUSTOM_CSHARP_EDITOR_COLORS.status
-              );
-            node.parameters.codeSelectionBackgroundColor =
-              normalizedCustomCSharpEditorColor(
-                appearance?.selection,
-                CUSTOM_CSHARP_EDITOR_COLORS.selection
-              );
-            node.parameters.codeBoxTextColor =
-              normalizedCustomCSharpEditorColor(
-                appearance?.text,
-                CUSTOM_CSHARP_EDITOR_COLORS.text
-              );
-            node.parameters.codeInterfaceTextColor =
-              normalizedCustomCSharpEditorColor(
-                appearance?.uiText,
-                CUSTOM_CSHARP_EDITOR_COLORS.uiText
-              );
-            node.parameters.codeGutterTextColor =
-              normalizedCustomCSharpEditorColor(
-                appearance?.gutterText,
-                CUSTOM_CSHARP_EDITOR_COLORS.gutterText
-              );
-            node.parameters.codeStatusTextColor =
-              normalizedCustomCSharpEditorColor(
-                appearance?.statusText,
-                CUSTOM_CSHARP_EDITOR_COLORS.statusText
-              );
-            node.parameters.codeAccentColor =
-              normalizedCustomCSharpEditorColor(
-                appearance?.accent,
-                CUSTOM_CSHARP_EDITOR_COLORS.accent
-              );
-            node.parameters.codeBoxCaretColor =
-              normalizedCustomCSharpEditorColor(
-                appearance?.caret,
-                CUSTOM_CSHARP_EDITOR_COLORS.caret
-              );
+            const liveNode =
+              customCSharpEditorNode(nodeId);
+            if (!liveNode) return;
+            for (const [key, sourceKey] of [
+              ["codeWorkbenchBackgroundColor", "workbench"],
+              ["codeBoxBackgroundColor", "background"],
+              ["codeGutterBackgroundColor", "gutter"],
+              ["codePanelBackgroundColor", "panel"],
+              ["codeOverlayBackgroundColor", "overlay"],
+              ["codeStatusBackgroundColor", "status"],
+              ["codeSelectionBackgroundColor", "selection"],
+              ["codeBoxTextColor", "text"],
+              ["codeInterfaceTextColor", "uiText"],
+              ["codeGutterTextColor", "gutterText"],
+              ["codeStatusTextColor", "statusText"],
+              ["codeAccentColor", "accent"],
+              ["codeBoxCaretColor", "caret"]
+            ]) {
+              liveNode.parameters[key] =
+                normalizedCustomCSharpEditorColor(
+                  appearance?.[sourceKey],
+                  CUSTOM_CSHARP_EDITOR_COLORS[sourceKey]
+                );
+            }
             persistGraph(true);
-            refreshCustomCSharpEditorAppearance(node);
+            refreshCustomCSharpEditorAppearance(
+              liveNode
+            );
           },
           onInput(value) {
-            codeControl.value =
-              String(value || "");
-            commitCode();
+            commitCustomCSharpEditorValue(
+              nodeId,
+              specification,
+              value
+            );
           },
           onBlur() {
+            const liveNode =
+              customCSharpEditorNode(nodeId);
             if (
-              findGraphNode(node.id) !==
-                node ||
-              specification?.key !==
-                "source" ||
-              nodeDefinition(node)
+              !liveNode ||
+              specification?.key !== "source" ||
+              nodeDefinition(liveNode)
                 ?.customCSharpFile !== true ||
               customCSharpEditor
             ) {
@@ -39272,7 +41519,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
             }
             queueMicrotask(() => {
               void openCustomCSharpFileGraphSynced(
-                node.id,
+                nodeId,
                 {
                   openAfterSync: false,
                   quiet: true
@@ -39280,44 +41527,94 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
               );
             });
           },
-          onClosed() {
-            cancelCustomCSharpLiveDiagnostics(
-              node.id,
-              parameterKey
-            );
-            if (
-              record &&
-              customCSharpDetachedEditors.get(
+          onTogglePresentation() {
+            if (mode === "inline") {
+              moveCustomCSharpEditorToOverlay(
                 editorKey
-              ) === record
-            ) {
-              customCSharpDetachedEditors.delete(
+              );
+            } else {
+              moveCustomCSharpEditorToInline(
                 editorKey
               );
             }
+          },
+          onTogglePageAreas(hidden) {
+            return setGraphEditMode(hidden);
+          },
+          onClosed() {
+            const current =
+              customCSharpDetachedEditors.get(
+                editorKey
+              );
+            if (
+              !current ||
+              current.popup !== hostWindow
+            ) {
+              return;
+            }
+            customCSharpDetachedEditors.delete(
+              editorKey
+            );
+            if (
+              customCSharpActiveEditorKey ===
+              editorKey
+            ) {
+              customCSharpActiveEditorKey = "";
+            }
+            customCSharpEditorDraftValues.delete(
+              editorKey
+            );
+            cancelCustomCSharpLiveDiagnostics(
+              nodeId,
+              parameterKey
+            );
+            if (mode === "inline") {
+              restoreGraphAfterCustomCSharpInlineEditor(
+                editorKey
+              );
+            } else if (mode === "overlay") {
+              overlay?.remove();
+            }
           }
         });
-
         if (!mounted) {
           throw new Error(
-            "The detached Custom C# editor could not initialize its window."
+            "The Custom C# editor could not initialize its host."
           );
         }
-
         record = {
           ...mounted,
-          nodeId: node.id,
-          parameterKey
+          editorKey,
+          popup: hostWindow,
+          frame,
+          overlay,
+          mode,
+          nodeId,
+          parameterKey,
+          specification,
+          focus() {
+            customCSharpActiveEditorKey =
+              editorKey;
+            bringCustomCSharpOverlayToFront(
+              overlay
+            );
+            mounted.focus?.();
+          },
+          close(options) {
+            closeCustomCSharpEditorRecord(
+              editorKey,
+              options
+            );
+          }
         };
         customCSharpDetachedEditors.set(
           editorKey,
           record
         );
-        scheduleCustomCSharpLiveDiagnostics(
-          node,
+        commitCustomCSharpEditorValue(
+          nodeId,
           specification,
-          String(codeControl.value || ""),
-          0
+          record.getValue()
         );
       })
       .catch(error => {
@@ -39329,9 +41626,19 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           customCSharpDetachedEditors.delete(
             editorKey
           );
+          customCSharpEditorDraftValues.delete(
+            editorKey
+          );
         }
-        if (!popup.closed) {
-          popup.close();
+        if (mode === "inline") {
+          frame?.remove();
+          restoreGraphAfterCustomCSharpInlineEditor(
+            editorKey
+          );
+        } else if (mode === "overlay") {
+          overlay?.remove();
+        } else if (!hostWindow.closed) {
+          hostWindow.close();
         }
         showGraphMessage(
           error instanceof Error
@@ -39340,6 +41647,158 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           "error"
         );
       });
+  }
+
+  function moveCustomCSharpEditorToOverlay(
+    editorKey
+  ) {
+    const existing =
+      customCSharpDetachedEditors.get(editorKey);
+    if (
+      !customCSharpEditorRecordActive(existing) ||
+      existing.mode !== "inline"
+    ) {
+      return false;
+    }
+    const value = existing.getValue?.() || "";
+    commitCustomCSharpEditorValue(
+      existing.nodeId,
+      existing.specification,
+      value
+    );
+    const { overlay, frame } =
+      createCustomCSharpOverlayFrame(
+        editorKey,
+        `${String(existing.specification?.label || "Custom C#")} · Code editor`
+      );
+    mountCustomCSharpEditorPresentation({
+      nodeId: existing.nodeId,
+      specification: existing.specification,
+      mode: "overlay",
+      hostWindow: frame.contentWindow,
+      frame,
+      overlay,
+      initialValue: value
+    });
+    existing.frame?.remove();
+    restoreGraphAfterCustomCSharpInlineEditor(
+      editorKey
+    );
+    return true;
+  }
+
+  function moveCustomCSharpEditorToInline(
+    editorKey
+  ) {
+    const existing =
+      customCSharpDetachedEditors.get(editorKey);
+    if (
+      !customCSharpEditorRecordActive(existing) ||
+      existing.mode !== "overlay" ||
+      !dom.builderCanvas
+    ) {
+      return false;
+    }
+    if (
+      customCSharpInlineEditorKey &&
+      customCSharpInlineEditorKey !== editorKey
+    ) {
+      closeCustomCSharpEditorRecord(
+        customCSharpInlineEditorKey,
+        { restoreGraph: false }
+      );
+    }
+    const value = existing.getValue?.() || "";
+    commitCustomCSharpEditorValue(
+      existing.nodeId,
+      existing.specification,
+      value
+    );
+    const liveNode =
+      customCSharpEditorNode(existing.nodeId);
+    if (liveNode === findGraphNode(existing.nodeId)) {
+      graph.selectedNodeId = existing.nodeId;
+      graph.selectedNodeIds = [existing.nodeId];
+      graph.selectedConnectionId = null;
+      clearSelectedWirePoint();
+      renderGraphInspector({ force: true });
+    }
+    const frame = createCustomCSharpInlineFrame(
+      editorKey,
+      `${String(existing.specification?.label || "Custom C#")} · Code editor`
+    );
+    mountCustomCSharpEditorPresentation({
+      nodeId: existing.nodeId,
+      specification: existing.specification,
+      mode: "inline",
+      hostWindow: frame.contentWindow,
+      frame,
+      initialValue: value
+    });
+    existing.overlay?.remove();
+    return true;
+  }
+
+  function openCustomCSharpDetachedEditor(
+    node,
+    specification,
+    codeControl
+  ) {
+    const parameterKey = String(
+      specification?.key || "code"
+    );
+    const editorKey =
+      customCSharpDetachedEditorKey(
+        node.id,
+        parameterKey
+      );
+    const existing =
+      customCSharpDetachedEditors.get(editorKey);
+    if (customCSharpEditorRecordActive(existing)) {
+      existing.setValue?.(
+        customCSharpEditorCurrentValue(
+          node.id,
+          parameterKey,
+          codeControl?.value
+        )
+      );
+      existing.setAppearance?.(
+        customCSharpEditorAppearance(node)
+      );
+      existing.focus?.();
+      return;
+    }
+    if (existing) {
+      customCSharpDetachedEditors.delete(
+        editorKey
+      );
+    }
+    if (
+      customCSharpInlineEditorKey &&
+      customCSharpInlineEditorKey !== editorKey
+    ) {
+      closeCustomCSharpEditorRecord(
+        customCSharpInlineEditorKey,
+        { restoreGraph: false }
+      );
+    }
+    const frame = createCustomCSharpInlineFrame(
+      editorKey,
+      `${String(specification?.label || "Custom C#")} · Code editor`
+    );
+    mountCustomCSharpEditorPresentation({
+      nodeId: node.id,
+      specification,
+      mode: "inline",
+      hostWindow: frame.contentWindow,
+      frame,
+      initialValue:
+        customCSharpEditorCurrentValue(
+          node.id,
+          parameterKey,
+          codeControl?.value
+        )
+    });
   }
   function appendParameterControl(
     card,
@@ -39593,12 +42052,24 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         specification.key === "source" &&
         !customCSharpEditor;
       if (customCSharpCodeControl) {
-        control.dataset
-          .rmlCustomCSharpCodeNode =
-            node.id;
-        control.dataset
-          .rmlCustomCSharpCodeParameter =
-            specification.key;
+        const editorBoundValue =
+          customCSharpEditorCurrentValue(
+            node.id,
+            specification.key,
+            control.value
+          );
+        node.parameters[
+          specification.key
+        ] = editorBoundValue;
+        control.value = editorBoundValue;
+        control.setAttribute(
+          CUSTOM_CSHARP_CODE_NODE_ATTRIBUTE,
+          String(node.id)
+        );
+        control.setAttribute(
+          CUSTOM_CSHARP_CODE_PARAMETER_ATTRIBUTE,
+          String(specification.key)
+        );
         applyCustomCSharpEditorAppearance(
           control,
           node
@@ -39672,12 +42143,24 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
               )
             );
           if (
-            detached?.popup?.closed === false &&
+            customCSharpEditorRecordActive(detached) &&
             typeof detached.setValue ===
               "function"
           ) {
+            rememberCustomCSharpEditorDraft(
+              node.id,
+              specification.key,
+              value
+            );
             detached.setValue(
               String(value)
+            );
+          } else {
+            customCSharpEditorDraftValues.delete(
+              customCSharpDetachedEditorKey(
+                node.id,
+                specification.key
+              )
             );
           }
           scheduleCustomCSharpLiveDiagnostics(
@@ -39857,20 +42340,19 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       if (customCSharpCodeControl) {
         const openDetached =
           inspectorButton(
-            "Open code editor in new window",
+            "Open code editor",
             event => {
               event?.preventDefault?.();
               event?.stopPropagation?.();
               openCustomCSharpDetachedEditor(
                 node,
                 specification,
-                control,
-                update
+                control
               );
             }
           );
         openDetached.title =
-          `Open ${String(specification.label || specification.key)} in a separate synchronized editor window.`;
+          `Open ${String(specification.label || specification.key)} here instead of the graph. The editor can then be moved to a separate synchronized window.`;
         const contextualActions =
           document.createElement("div");
         contextualActions.className =
@@ -39890,6 +42372,13 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     const svg = paths =>
       `<svg viewBox="0 0 24 24" aria-hidden="true">${paths}</svg>`;
 
+    if (
+      label.includes("open code editor")
+    ) {
+      return svg(
+        `<path d="M8 6 3 12l5 6M16 6l5 6-5 6M14 4l-4 16"></path>`
+      );
+    }
     if (
       label.includes("new window")
     ) {
@@ -41172,6 +43661,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       return;
     }
 
+    customCSharpActiveEditorKey = "";
+
     if (
       event.target.closest(
         ".rml-graph-node, .rml-graph-wire-hit, .rml-graph-wire-point"
@@ -41282,6 +43773,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     if (!node) {
       return;
     }
+
+    customCSharpActiveEditorKey = "";
 
     event.preventDefault();
     event.stopPropagation();
@@ -41423,6 +43916,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     if (event.button !== 0) {
       return;
     }
+
+    customCSharpActiveEditorKey = "";
 
     event.preventDefault();
     event.stopPropagation();
@@ -42444,6 +44939,40 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     );
   }
 
+  function customCSharpEditorDropTargetAt(
+    clientX,
+    clientY
+  ) {
+    const target =
+      document.elementFromPoint(
+        clientX,
+        clientY
+      );
+    const editor = [
+      ...customCSharpDetachedEditors.values()
+    ].find(candidate =>
+      customCSharpEditorRecordActive(candidate) &&
+      candidate.frame?.isConnected &&
+      target === candidate.frame
+    );
+    return { target, editor };
+  }
+
+  function activeCustomCSharpDropEditor() {
+    if (!customCSharpActiveEditorKey) {
+      return null;
+    }
+    const editor =
+      customCSharpDetachedEditors.get(
+        customCSharpActiveEditorKey
+      );
+    if (!customCSharpEditorRecordActive(editor)) {
+      customCSharpActiveEditorKey = "";
+      return null;
+    }
+    return editor;
+  }
+
   function finishPaletteDrag(
     commit,
     clientX,
@@ -42494,6 +45023,48 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     }
 
     if (!wasDragging) {
+      const editorDropTarget = !guided
+        ? activeCustomCSharpDropEditor()
+        : null;
+      if (editorDropTarget) {
+        const resolved =
+          customCSharpNodeDropSnippet(
+            {
+              version: 1,
+              operatorId:
+                interaction.operatorId,
+              title:
+                interaction.definition?.title ||
+                ""
+            },
+            editorDropTarget.specification,
+            interaction.definition
+          );
+        if (
+          resolved &&
+          editorDropTarget.insertNodeSnippet?.(
+            resolved
+          )
+        ) {
+          customCSharpActiveEditorKey =
+            editorDropTarget.editorKey || "";
+          bringCustomCSharpOverlayToFront(
+            editorDropTarget.overlay
+          );
+          paletteDragSuppressClickUntil =
+            performance.now() + 300;
+          showGraphMessage(
+            `${interaction.definition?.title || "Node"} inserted into the active C# editor.`,
+            "success"
+          );
+          return;
+        }
+        showGraphMessage(
+          "The active code editor is still loading. Try again in a moment.",
+          "error"
+        );
+        return;
+      }
       addPaletteNodeAtCenter(
         interaction.operatorId,
         interaction.isConfiguration
@@ -42512,11 +45083,63 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       return;
     }
 
-    const target =
-      document.elementFromPoint(
-        clientX,
-        clientY
+    const {
+      target,
+      editor: editorDropTarget
+    } = customCSharpEditorDropTargetAt(
+      clientX,
+      clientY
+    );
+    if (editorDropTarget) {
+      const resolved =
+        customCSharpNodeDropSnippet(
+          {
+            version: 1,
+            operatorId:
+              interaction.operatorId,
+            title:
+              interaction.definition?.title ||
+              ""
+          },
+          editorDropTarget.specification,
+          interaction.definition
+        );
+      if (
+        resolved &&
+        editorDropTarget.insertNodeSnippet?.(
+          resolved
+        )
+      ) {
+        customCSharpActiveEditorKey =
+          editorDropTarget.editorKey || "";
+        bringCustomCSharpOverlayToFront(
+          editorDropTarget.overlay
+        );
+        paletteDragSuppressClickUntil =
+          performance.now() + 300;
+        if (guided) {
+          lastGuidedPaletteDropState = {
+            ok: true,
+            reason: "palette-node-inserted-as-csharp",
+            operatorId:
+              interaction.operatorId,
+            pointerId:
+              interaction.pointerId,
+            wasDragging: true
+          };
+        }
+        showGraphMessage(
+          `${interaction.definition?.title || "Node"} inserted into the C# editor.`,
+          "success"
+        );
+        return;
+      }
+      showGraphMessage(
+        "The code editor is still loading. Try the drop again in a moment.",
+        "error"
       );
+      return;
+    }
 
     const viewportRectangle =
       dom.viewport?.getBoundingClientRect?.();
@@ -43002,14 +45625,94 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       activeInteraction.kind ===
       "node"
     ) {
+      const nodeInteraction =
+        activeInteraction;
       const node =
         findGraphNode(
-          activeInteraction.nodeId
+          nodeInteraction.nodeId
         );
+
+      const editorDropTarget =
+        nodeInteraction.dragging
+          ? customCSharpEditorDropTargetAt(
+              event.clientX,
+              event.clientY
+            ).editor
+          : null;
+      if (node && editorDropTarget) {
+        const definition =
+          nodeDefinition(node);
+        const resolved =
+          customCSharpNodeDropSnippet(
+            {
+              version: 1,
+              operatorId:
+                node.operatorId,
+              title:
+                node.label ||
+                definition?.title ||
+                "Node"
+            },
+            editorDropTarget.specification,
+            definition,
+            node
+          );
+        if (
+          resolved &&
+          editorDropTarget.insertNodeSnippet?.(
+            resolved
+          )
+        ) {
+          customCSharpActiveEditorKey =
+            editorDropTarget.editorKey || "";
+          node.x = nodeInteraction.originalX;
+          node.y = nodeInteraction.originalY;
+          const element =
+            dom.nodesHost?.querySelector(
+              `[data-graph-node-id="${CSS.escape(node.id)}"]`
+            );
+          if (element) {
+            element.style.left =
+              `${node.x}px`;
+            element.style.top =
+              `${node.y}px`;
+            cacheGraphNodeGeometry(
+              node,
+              element
+            );
+          }
+          const connectionIds =
+            nodeInteraction.connectionIds;
+          activeInteraction = null;
+          stopAutoPan();
+          scheduleGraphWireRender(
+            connectionIds
+          );
+          bringCustomCSharpOverlayToFront(
+            editorDropTarget.overlay
+          );
+          renderGraphInspector();
+          showGraphMessage(
+            `${node.label || definition?.title || "Node"} inserted into the C# editor.`,
+            "success"
+          );
+          return;
+        }
+        node.x = nodeInteraction.originalX;
+        node.y = nodeInteraction.originalY;
+        activeInteraction = null;
+        stopAutoPan();
+        renderGraphNodesAndWires();
+        showGraphMessage(
+          "The code editor is still loading. Try the drop again in a moment.",
+          "error"
+        );
+        return;
+      }
 
       if (
         node &&
-        activeInteraction.dragging
+        nodeInteraction.dragging
       ) {
         node.x =
           Math.round(
@@ -43035,7 +45738,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       }
 
       const connectionIds =
-        activeInteraction.connectionIds;
+        nodeInteraction.connectionIds;
       activeInteraction = null;
       stopAutoPan();
       persistGraphView();

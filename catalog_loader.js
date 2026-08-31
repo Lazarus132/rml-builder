@@ -32,7 +32,7 @@
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "visual_csharp.js?v=38-real-textarea-search-selection-v660",
+    "visual_csharp.js?v=53-single-hybrid-custom-csharp-composite-v675",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
