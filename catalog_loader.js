@@ -36,7 +36,7 @@
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=45-catalog-reconciled-saved-composites-v647",
+    "api_nodes.js?v=47-mobile-focus-scroll-stability-v649",
     scriptUrl
   ).href;
 

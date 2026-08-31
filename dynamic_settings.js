@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = 8;
+  const VERSION = 9;
   const IMPULSE_BUTTON_VALUE_TYPE =
     "button";
   const KINDS = Object.freeze({
@@ -19,6 +19,7 @@
   let bootEventBound = false;
   let observer = null;
   let inspectorRendering = false;
+  let dynamicInspectorRenderDeferred = false;
   let runtimeBridgeUnsubscribe = null;
   let runtimeBridgeSubscribedChannel = "";
   let runtimeUiRefreshQueued = false;
@@ -262,12 +263,16 @@
     );
   }
 
-  function requestRefresh() {
+  function requestRefresh(options = {}) {
+    const refreshInspector =
+      options.refreshInspector !== false;
     try { saveState?.(); } catch {}
 
     if (!graphViewActive()) {
       try { renderOutline?.(); } catch {}
-      try { renderInspector?.(); } catch {}
+      if (refreshInspector) {
+        try { renderInspector?.(); } catch {}
+      }
       try { renderPreview?.(); } catch {}
     }
 
@@ -370,6 +375,45 @@
     return label;
   }
 
+  function dynamicInspectorHasActiveEditor(host) {
+    const active = document.activeElement;
+    return Boolean(
+      host instanceof HTMLElement &&
+      active instanceof HTMLElement &&
+      host.contains(active) &&
+      active.matches(
+        "input, textarea, select, [contenteditable='true']"
+      )
+    );
+  }
+
+  function installDynamicInspectorFocusGuard(host) {
+    if (
+      !(host instanceof HTMLElement) ||
+      host.dataset
+        .rmlDynamicFocusGuard === "true"
+    ) {
+      return;
+    }
+    host.dataset.rmlDynamicFocusGuard =
+      "true";
+    host.addEventListener(
+      "focusout",
+      () => {
+        queueMicrotask(() => {
+          if (
+            !dynamicInspectorRenderDeferred ||
+            dynamicInspectorHasActiveEditor(host)
+          ) {
+            return;
+          }
+          dynamicInspectorRenderDeferred = false;
+          renderDynamicInspector(true);
+        });
+      }
+    );
+  }
+
   function renderDynamicInspector(force = false) {
     if (inspectorRendering || graphViewActive()) return false;
     const node = selectedNode();
@@ -377,6 +421,14 @@
 
     const host = document.getElementById("inspector-content");
     if (!host) return false;
+    installDynamicInspectorFocusGuard(host);
+    if (
+      host.dataset.rmlDynamicInspectorId === String(node.id) &&
+      dynamicInspectorHasActiveEditor(host)
+    ) {
+      dynamicInspectorRenderDeferred = true;
+      return true;
+    }
     if (
       !force &&
       host.dataset.rmlDynamicInspectorId === String(node.id) &&
@@ -385,6 +437,7 @@
       return true;
     }
     inspectorRendering = true;
+    dynamicInspectorRenderDeferred = false;
     host.replaceChildren();
     host.dataset.rmlDynamicInspectorId = String(node.id);
     const inspectorBody = document.createElement("div");
@@ -408,7 +461,7 @@
     name.addEventListener("input", () => {
       node.keyName = name.value;
       node._rmlDynamicLabelCustomized = true;
-      requestRefresh();
+      requestRefresh({ refreshInspector: false });
     });
     inspectorBody.appendChild(field("Menu label", name));
 
@@ -417,7 +470,7 @@
     description.rows = 3;
     description.addEventListener("input", () => {
       node.description = description.value;
-      requestRefresh();
+      requestRefresh({ refreshInspector: false });
     });
     inspectorBody.appendChild(field("Description", description));
 
@@ -437,7 +490,7 @@
         () => {
           node.dynamicLabelMonitorId =
             labels.value;
-          requestRefresh();
+          requestRefresh({ refreshInspector: false });
         }
       );
 
@@ -458,7 +511,7 @@
         () => {
           node.dynamicValueMonitorId =
             values.value;
-          requestRefresh();
+          requestRefresh({ refreshInspector: false });
         }
       );
 
@@ -489,7 +542,7 @@
       empty.checked = node.dynamicAllowEmpty === true;
       empty.addEventListener("change", () => {
         node.dynamicAllowEmpty = empty.checked;
-        requestRefresh();
+        requestRefresh({ refreshInspector: false });
       });
       inspectorBody.appendChild(field("Allow empty selection", empty));
 
@@ -567,7 +620,7 @@
             () => {
               node.defaultValue =
                 fallback.value;
-              requestRefresh();
+              requestRefresh({ refreshInspector: false });
             }
           );
 
@@ -605,7 +658,7 @@
           () => {
             node.defaultValue =
               fallback.value;
-            requestRefresh();
+            requestRefresh({ refreshInspector: false });
           }
         );
 
@@ -623,7 +676,7 @@
       buttonLabel.value = node.dynamicButtonLabel || "Run";
       buttonLabel.addEventListener("input", () => {
         node.dynamicButtonLabel = buttonLabel.value;
-        requestRefresh();
+        requestRefresh({ refreshInspector: false });
       });
       inspectorBody.appendChild(field("Action label", buttonLabel));
     }
@@ -632,7 +685,7 @@
       const states = monitorSelect(node.dynamicStateMonitorId);
       states.addEventListener("change", () => {
         node.dynamicStateMonitorId = states.value;
-        requestRefresh();
+        requestRefresh({ refreshInspector: false });
       });
       inspectorBody.appendChild(field("Boolean states collection", states));
     }

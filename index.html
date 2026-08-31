@@ -2,10 +2,12 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
     <meta
       name="rml-builder-build"
-      content="catalog-reconciled-saved-composites-20260830-v647">
+      content="mobile-focus-scroll-stability-20260831-v649">
     <meta
       name="description"
       content="Build complete typed ResoniteModLoader projects visually with automatic dependencies; optional Raw C# tools remain an expert fallback.">
@@ -16,7 +18,7 @@
         "RMLBuilderBuildId",
         {
           value:
-            "catalog-reconciled-saved-composites-20260830-v647",
+            "mobile-focus-scroll-stability-20260831-v649",
           writable: false,
           enumerable: true,
           configurable: true
@@ -238,6 +240,112 @@
         flex-wrap: wrap;
         justify-content: flex-end;
         gap: 10px;
+      }
+
+      html {
+        -webkit-text-size-adjust: 100%;
+        text-size-adjust: 100%;
+      }
+
+      @media (hover: none), (pointer: coarse), (max-width: 780px) {
+        input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([hidden]):not([readonly]),
+        textarea:not([hidden]):not([readonly]),
+        select:not([hidden]),
+        [contenteditable="true"] {
+          font-size: 16px !important;
+        }
+
+        input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([hidden]),
+        select:not([hidden]),
+        textarea:not([hidden]),
+        button:not([hidden]),
+        .button,
+        dialog button,
+        [role="button"] {
+          min-height: 44px;
+        }
+
+        button,
+        input,
+        select,
+        textarea,
+        [role="button"] {
+          touch-action: manipulation;
+        }
+
+        .workspace,
+        #palette-content,
+        #builder-canvas,
+        #inspector-content,
+        .builder-work-card,
+        .builder-work-replacement-queue,
+        .builder-work-replacement-list,
+        .project-dialog-body,
+        .export-dialog-body,
+        .rml-preview-content,
+        .rml-preview-settings,
+        .information-content,
+        #rml-setup-assistant,
+        [data-rml-scroll-layer],
+        pre {
+          -webkit-overflow-scrolling: touch;
+          scrollbar-width: auto;
+          scrollbar-color: rgba(166, 111, 255, .92) rgba(30, 23, 43, .78);
+        }
+
+        .workspace::-webkit-scrollbar,
+        #palette-content::-webkit-scrollbar,
+        #builder-canvas::-webkit-scrollbar,
+        #inspector-content::-webkit-scrollbar,
+        .builder-work-card::-webkit-scrollbar,
+        .builder-work-replacement-queue::-webkit-scrollbar,
+        .builder-work-replacement-list::-webkit-scrollbar,
+        .project-dialog-body::-webkit-scrollbar,
+        .export-dialog-body::-webkit-scrollbar,
+        .rml-preview-content::-webkit-scrollbar,
+        .rml-preview-settings::-webkit-scrollbar,
+        .information-content::-webkit-scrollbar,
+        #rml-setup-assistant::-webkit-scrollbar,
+        [data-rml-scroll-layer]::-webkit-scrollbar,
+        pre::-webkit-scrollbar {
+          width: 10px;
+          height: 10px;
+        }
+
+        .workspace::-webkit-scrollbar-thumb,
+        #palette-content::-webkit-scrollbar-thumb,
+        #builder-canvas::-webkit-scrollbar-thumb,
+        #inspector-content::-webkit-scrollbar-thumb,
+        .builder-work-card::-webkit-scrollbar-thumb,
+        .builder-work-replacement-queue::-webkit-scrollbar-thumb,
+        .builder-work-replacement-list::-webkit-scrollbar-thumb,
+        .project-dialog-body::-webkit-scrollbar-thumb,
+        .export-dialog-body::-webkit-scrollbar-thumb,
+        .rml-preview-content::-webkit-scrollbar-thumb,
+        .rml-preview-settings::-webkit-scrollbar-thumb,
+        .information-content::-webkit-scrollbar-thumb,
+        #rml-setup-assistant::-webkit-scrollbar-thumb,
+        [data-rml-scroll-layer]::-webkit-scrollbar-thumb,
+        pre::-webkit-scrollbar-thumb {
+          min-width: 44px;
+          min-height: 44px;
+          border: 2px solid rgba(30, 23, 43, .78);
+          border-radius: 999px;
+          background: rgba(166, 111, 255, .92);
+        }
+
+        .builder-work-overlay,
+        dialog[open] {
+          padding-top: max(12px, env(safe-area-inset-top));
+          padding-right: max(12px, env(safe-area-inset-right));
+          padding-bottom: max(12px, env(safe-area-inset-bottom));
+          padding-left: max(12px, env(safe-area-inset-left));
+        }
+
+        .builder-work-card,
+        dialog[open] > * {
+          max-height: calc(var(--rml-mobile-viewport-height, 100dvh) - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+        }
       }
     </style>
     <link rel="shortcut icon" href="./favicon.svg">
@@ -850,14 +958,14 @@
       </section>
     </div>
 
-    <script src="scroll_manager.js?v=31-hint-route-visibility-v258"></script>
+    <script src="scroll_manager.js?v=32-mobile-viewport-focus-v649"></script>
     <script src="scroll_hierarchy.js?v=8"></script>
     <script src="csharp14_roslyn.js?v=4-normal-core-custom-csharp-v603"></script>
-    <script src="app.js?v=480-catalog-reconciled-saved-composites-v647"></script>
-    <script src="catalog_loader.js?v=115-catalog-reconciled-saved-composites-v647"></script>
+    <script src="app.js?v=482-mobile-focus-scroll-stability-v649"></script>
+    <script src="catalog_loader.js?v=117-mobile-focus-scroll-stability-v649"></script>
     <script src="runtime_bridge.js?v=4-live-compatibility-v621"></script>
     <script src="graph_gpu_renderer.js?v=11-source-comment-cleanup-v603f20"></script>
-    <script src="node_graph.js?v=314-catalog-reconciled-saved-composites-v647"></script>
-    <script src="dynamic_settings.js?v=24-inline-row-runtime-visibility-v178"></script>
+    <script src="node_graph.js?v=316-mobile-focus-scroll-stability-v649"></script>
+    <script src="dynamic_settings.js?v=25-mobile-focus-stability-v649"></script>
 </body>
 </html>

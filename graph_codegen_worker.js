@@ -194,7 +194,7 @@ async function ensureRuntime(catalog) {
       self.RMLResoniteApiCatalog;
 
     importScripts(
-      "node_graph.js?v=314-catalog-reconciled-saved-composites-v647"
+      "node_graph.js?v=316-mobile-focus-scroll-stability-v649"
     );
     importScripts(
       "mod_nodes.js?v=52-persistent-runtime-state-v622"
@@ -203,7 +203,7 @@ async function ensureRuntime(catalog) {
       "visual_csharp.js?v=30-unified-csharp-reference-v639"
     );
     importScripts(
-      "api_nodes.js?v=45-catalog-reconciled-saved-composites-v647"
+      "api_nodes.js?v=47-mobile-focus-scroll-stability-v649"
     );
 
     if (

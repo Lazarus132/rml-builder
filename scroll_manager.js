@@ -6,6 +6,8 @@
   const handlers = [];
   const revealProviders = [];
   let installed = false;
+  let mobileViewportFrame = 0;
+  let mobileFocusRevealFrame = 0;
 
   function sortHandlers() {
     handlers.sort((a, b) => b.priority - a.priority || a.order - b.order);
@@ -418,9 +420,118 @@
     });
   }
 
+  function mobileEditableControl(element) {
+    return Boolean(
+      element instanceof HTMLElement &&
+      element.matches(
+        "input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']):not([type='file']):not([type='button']):not([type='submit']):not([type='reset']), textarea, select, [contenteditable='true']"
+      )
+    );
+  }
+
+  function updateMobileViewportMetrics() {
+    mobileViewportFrame = 0;
+    const viewport = window.visualViewport;
+    const width = Math.max(
+      1,
+      viewport?.width ||
+        window.innerWidth ||
+        document.documentElement.clientWidth ||
+        1
+    );
+    const height = Math.max(
+      1,
+      viewport?.height ||
+        window.innerHeight ||
+        document.documentElement.clientHeight ||
+        1
+    );
+    const rootStyle =
+      document.documentElement.style;
+    rootStyle.setProperty(
+      "--rml-mobile-viewport-width",
+      `${Math.round(width)}px`
+    );
+    rootStyle.setProperty(
+      "--rml-mobile-viewport-height",
+      `${Math.round(height)}px`
+    );
+    rootStyle.setProperty(
+      "--rml-mobile-viewport-left",
+      `${Math.round(viewport?.offsetLeft || 0)}px`
+    );
+    rootStyle.setProperty(
+      "--rml-mobile-viewport-top",
+      `${Math.round(viewport?.offsetTop || 0)}px`
+    );
+  }
+
+  function revealFocusedMobileEditor() {
+    mobileFocusRevealFrame = 0;
+    const active = document.activeElement;
+    if (!mobileEditableControl(active)) {
+      return;
+    }
+    revealElement(active, {
+      behavior: "auto",
+      margin: 16,
+      reason: "mobile-keyboard"
+    });
+  }
+
+  function scheduleMobileViewportRefresh(
+    revealFocused = true
+  ) {
+    if (!mobileViewportFrame) {
+      mobileViewportFrame =
+        window.requestAnimationFrame(
+          updateMobileViewportMetrics
+        );
+    }
+    if (
+      revealFocused &&
+      !mobileFocusRevealFrame
+    ) {
+      mobileFocusRevealFrame =
+        window.requestAnimationFrame(
+          revealFocusedMobileEditor
+        );
+    }
+  }
+
+  function installMobileViewportSupport() {
+    const viewport = window.visualViewport;
+    updateMobileViewportMetrics();
+
+    window.addEventListener(
+      "resize",
+      () => scheduleMobileViewportRefresh(),
+      { passive: true }
+    );
+    viewport?.addEventListener(
+      "resize",
+      () => scheduleMobileViewportRefresh(),
+      { passive: true }
+    );
+    viewport?.addEventListener(
+      "scroll",
+      () => scheduleMobileViewportRefresh(false),
+      { passive: true }
+    );
+    document.addEventListener(
+      "focusin",
+      event => {
+        if (mobileEditableControl(event.target)) {
+          scheduleMobileViewportRefresh(true);
+        }
+      },
+      true
+    );
+  }
+
   Object.defineProperty(window, "RMLScrollManager", {
     value: Object.freeze({
-      version: 7,
+      version: 8,
       registerWheelHandler,
       unregisterWheelHandler,
       createCyclicWheelStepper,
@@ -444,4 +555,6 @@
     enumerable: false,
     configurable: true
   });
+
+  installMobileViewportSupport();
 })();

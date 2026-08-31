@@ -1383,6 +1383,7 @@
 
   let bridge = null;
   let graph = null;
+  let graphInspectorRenderDeferred = false;
   let customCSharpEditor = null;
   let apiCompositeEditor = null;
   let apiCompositeRootOperation = false;
@@ -1498,6 +1499,7 @@
     scrollTop: 0,
     groups: Object.create(null)
   };
+  let graphPaletteIndicatorCleanup = null;
   let autoPanFrame = 0;
   let autoPanState = null;
   let guidedInteractionAutoPanSuppressed = false;
@@ -6913,12 +6915,53 @@
       id,
       status
     );
-    if (
-      graph?.selectedNodeId === id &&
-      runtimeGraphViewActive
-    ) {
-      renderGraphInspector();
+    updateCustomCSharpSynchronizationControl(id);
+  }
+
+  function updateCustomCSharpSynchronizationControl(
+    nodeId
+  ) {
+    const id = String(nodeId || "");
+    if (!id || !dom.inspectorContent) {
+      return;
     }
+
+    const button =
+      dom.inspectorContent.querySelector(
+        `[data-rml-custom-csharp-node-id="${CSS.escape(id)}"]`
+      );
+    if (!(button instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    const node = graph?.nodes?.find(
+      candidate => candidate?.id === id
+    );
+    if (!node) {
+      return;
+    }
+
+    const synchronizing =
+      customCSharpSynchronizations.has(id);
+    button.textContent = synchronizing
+      ? "Abbrechen"
+      : customCSharpFileNeedsOptimization(node)
+        ? "Optimize & Open Node Graph"
+        : "Open Node Graph";
+    button.classList.toggle(
+      "rml-custom-csharp-cancel",
+      synchronizing
+    );
+    button.setAttribute(
+      "aria-label",
+      synchronizing
+        ? "Cancel Custom C# generation"
+        : "Open Custom C# Node Graph"
+    );
+    button.setAttribute(
+      "aria-busy",
+      synchronizing ? "true" : "false"
+    );
   }
 
   function updateCustomCSharpSynchronizationToast(
@@ -7050,7 +7093,7 @@
     }
     const worker = new Worker(
       new URL(
-        "graph_codegen_worker.js?v=60-catalog-reconciled-saved-composites-v647",
+        "graph_codegen_worker.js?v=62-mobile-focus-scroll-stability-v649",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -21932,6 +21975,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-palette-scroll,
         body.rml-node-graph-mode.rml-graph-edit-mode #inspector-content,
         body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-code-input,
+        body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-node-body,
+        body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-searchable-options,
         body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-toolbar {
           scrollbar-width: auto;
           scrollbar-color: rgba(166, 111, 255, 0.88) rgba(30, 23, 43, 0.78);
@@ -21941,6 +21986,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-palette-scroll::-webkit-scrollbar,
         body.rml-node-graph-mode.rml-graph-edit-mode #inspector-content::-webkit-scrollbar,
         body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-code-input::-webkit-scrollbar,
+        body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-node-body::-webkit-scrollbar,
+        body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-searchable-options::-webkit-scrollbar,
         body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-toolbar::-webkit-scrollbar {
           width: 9px;
           height: 9px;
@@ -21950,6 +21997,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-palette-scroll::-webkit-scrollbar-track,
         body.rml-node-graph-mode.rml-graph-edit-mode #inspector-content::-webkit-scrollbar-track,
         body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-code-input::-webkit-scrollbar-track,
+        body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-node-body::-webkit-scrollbar-track,
+        body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-searchable-options::-webkit-scrollbar-track,
         body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-toolbar::-webkit-scrollbar-track {
           background: rgba(30, 23, 43, 0.78);
         }
@@ -21958,8 +22007,11 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-palette-scroll::-webkit-scrollbar-thumb,
         body.rml-node-graph-mode.rml-graph-edit-mode #inspector-content::-webkit-scrollbar-thumb,
         body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-code-input::-webkit-scrollbar-thumb,
+        body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-node-body::-webkit-scrollbar-thumb,
+        body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-searchable-options::-webkit-scrollbar-thumb,
         body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-toolbar::-webkit-scrollbar-thumb {
-          min-height: 34px;
+          min-width: 44px;
+          min-height: 44px;
           border: 2px solid rgba(30, 23, 43, 0.78);
           border-radius: 999px;
           background: rgba(166, 111, 255, 0.88);
@@ -22063,9 +22115,90 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         }
 
         body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-icon-button {
-          width: 32px;
-          min-width: 32px;
-          flex-basis: 32px;
+          width: 44px;
+          min-width: 44px;
+          min-height: 44px !important;
+          flex-basis: 44px;
+        }
+
+        body.rml-node-graph-mode .rml-graph-code-input,
+        body.rml-node-graph-mode .rml-graph-inspector-card input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+        body.rml-node-graph-mode .rml-graph-inspector-card textarea,
+        body.rml-node-graph-mode .rml-graph-inspector-card select,
+        body.rml-node-graph-mode .rml-graph-searchable-search {
+          font-size: 16px !important;
+        }
+
+        body.rml-node-graph-mode .rml-graph-inspector-card input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+        body.rml-node-graph-mode .rml-graph-inspector-card select,
+        body.rml-node-graph-mode .rml-graph-inspector-actions .button,
+        body.rml-node-graph-mode .rml-graph-searchable-search,
+        body.rml-node-graph-mode .rml-graph-palette-more {
+          min-height: 44px;
+        }
+
+        body.rml-node-graph-mode .rml-graph-palette-item,
+        body.rml-node-graph-mode .rml-graph-palette-group > summary,
+        body.rml-node-graph-mode .rml-graph-searchable-option {
+          min-height: 44px;
+        }
+
+        body.rml-node-graph-mode .rml-saved-api-composite-actions {
+          grid-template-columns: repeat(2, 44px);
+        }
+
+        body.rml-node-graph-mode .rml-saved-api-composite-actions > button {
+          width: 44px;
+          min-width: 44px;
+          min-height: 44px;
+        }
+
+        body.rml-node-graph-mode .rml-graph-palette-scroll-indicator {
+          right: 1px;
+          width: 8px;
+        }
+
+        body.rml-node-graph-mode .rml-graph-palette-scroll-indicator > span {
+          width: 8px;
+          min-height: 44px;
+        }
+
+        body.rml-node-graph-mode .rml-graph-node-flip,
+        body.rml-node-graph-mode .rml-graph-node-delete {
+          width: 44px;
+          height: 44px;
+          min-height: 44px;
+        }
+
+        body.rml-node-graph-mode .rml-graph-socket {
+          width: 20px;
+          height: 20px;
+        }
+
+        body.rml-node-graph-mode .rml-graph-socket.shape-diamond {
+          width: 18px;
+          height: 18px;
+        }
+
+        body.rml-node-graph-mode .rml-graph-wire-hit {
+          stroke-width: 30;
+        }
+
+        body.rml-node-graph-mode .rml-graph-node-resize-handle.width {
+          right: -9px;
+          width: 18px;
+        }
+
+        body.rml-node-graph-mode .rml-graph-node-resize-handle.height {
+          bottom: -9px;
+          height: 18px;
+        }
+
+        body.rml-node-graph-mode .rml-graph-node-resize-handle.both {
+          right: -9px;
+          bottom: -9px;
+          width: 24px;
+          height: 24px;
         }
       }
     `;
@@ -23554,6 +23687,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
   function deactivateGraphMode() {
     runtimeGraphViewActive = false;
+    graphPaletteIndicatorCleanup?.();
+    graphPaletteIndicatorCleanup = null;
     setGraphEditMode(false);
     captureGraphPaletteUiState();
     persistGraphPaletteUiState();
@@ -23956,6 +24091,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       return;
     }
 
+    graphPaletteIndicatorCleanup?.();
+    graphPaletteIndicatorCleanup = null;
+
     loadGraphPaletteUiState();
     captureGraphPaletteUiState();
 
@@ -24035,7 +24173,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       scroll,
       scrollIndicator
     );
+    let scrollIndicatorFrame = 0;
     const updateScrollIndicator = () => {
+      scrollIndicatorFrame = 0;
       const viewportHeight =
         scroll.clientHeight;
       const contentHeight =
@@ -24057,10 +24197,19 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       if (!visible) {
         return;
       }
-      const thumbHeight = Math.max(
-        34,
+      const minimumThumbHeight =
+        window.matchMedia(
+          "(pointer: coarse), (max-width: 780px)"
+        ).matches
+          ? 44
+          : 34;
+      const thumbHeight = Math.min(
+        trackHeight,
+        Math.max(
+          minimumThumbHeight,
         trackHeight * viewportHeight /
           contentHeight
+        )
       );
       const thumbRange = Math.max(
         0,
@@ -24075,6 +24224,17 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       scrollThumb.style.transform =
         `translateY(${offset}px)`;
     };
+    const scheduleScrollIndicatorUpdate = () => {
+      if (scrollIndicatorFrame) {
+        return;
+      }
+      scrollIndicatorFrame =
+        requestProjectAnimationFrame(
+          updateScrollIndicator
+        );
+    };
+    const indicatorAbort =
+      new AbortController();
     scroll.addEventListener(
       "scroll",
       () => {
@@ -24087,10 +24247,69 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
             )
         );
         persistGraphPaletteUiState();
-        updateScrollIndicator();
+        scheduleScrollIndicatorUpdate();
       },
-      { passive: true }
+      {
+        passive: true,
+        signal: indicatorAbort.signal
+      }
     );
+
+    const indicatorResizeObserver =
+      typeof ResizeObserver === "function"
+        ? new ResizeObserver(
+            scheduleScrollIndicatorUpdate
+          )
+        : null;
+    indicatorResizeObserver?.observe(scroll);
+    indicatorResizeObserver?.observe(
+      scrollShell
+    );
+
+    const indicatorMutationObserver =
+      new MutationObserver(
+        scheduleScrollIndicatorUpdate
+      );
+    indicatorMutationObserver.observe(
+      scroll,
+      {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["open", "hidden"]
+      }
+    );
+
+    window.addEventListener(
+      "resize",
+      scheduleScrollIndicatorUpdate,
+      { signal: indicatorAbort.signal }
+    );
+    window.visualViewport?.addEventListener(
+      "resize",
+      scheduleScrollIndicatorUpdate,
+      { signal: indicatorAbort.signal }
+    );
+    window.visualViewport?.addEventListener(
+      "scroll",
+      scheduleScrollIndicatorUpdate,
+      {
+        passive: true,
+        signal: indicatorAbort.signal
+      }
+    );
+
+    graphPaletteIndicatorCleanup = () => {
+      indicatorAbort.abort();
+      indicatorResizeObserver?.disconnect();
+      indicatorMutationObserver.disconnect();
+      if (scrollIndicatorFrame) {
+        cancelAnimationFrame(
+          scrollIndicatorFrame
+        );
+        scrollIndicatorFrame = 0;
+      }
+    };
 
 
 
@@ -26608,8 +26827,14 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     );
     const viewportPanActive =
       activeInteraction?.kind === "pan";
+    const liveNodeVirtualizationRequired =
+      graphHybridActive() ||
+      fallbackGraphVirtualizationActive();
     if (
-      !viewportPanActive &&
+      (
+        !viewportPanActive ||
+        liveNodeVirtualizationRequired
+      ) &&
       (
         !overview ||
         overview !== previousOverview
@@ -33752,7 +33977,67 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     }
   }
 
-  function renderGraphInspector() {
+  function graphInspectorHasActiveEditor() {
+    const active = document.activeElement;
+    if (
+      !(active instanceof HTMLElement) ||
+      !dom.inspectorContent?.contains(active)
+    ) {
+      return false;
+    }
+
+    if (active instanceof HTMLTextAreaElement) {
+      return true;
+    }
+    if (active.isContentEditable) {
+      return true;
+    }
+    if (!(active instanceof HTMLInputElement)) {
+      return false;
+    }
+
+    return ![
+      "button",
+      "checkbox",
+      "color",
+      "file",
+      "hidden",
+      "radio",
+      "range",
+      "reset",
+      "submit"
+    ].includes(active.type);
+  }
+
+  function installGraphInspectorFocusGuard() {
+    const host = dom.inspectorContent;
+    if (
+      !host ||
+      host.dataset
+        .rmlGraphFocusGuard === "true"
+    ) {
+      return;
+    }
+    host.dataset.rmlGraphFocusGuard =
+      "true";
+    host.addEventListener(
+      "focusout",
+      () => {
+        queueMicrotask(() => {
+          if (
+            !graphInspectorRenderDeferred ||
+            graphInspectorHasActiveEditor()
+          ) {
+            return;
+          }
+          graphInspectorRenderDeferred = false;
+          renderGraphInspector({ force: true });
+        });
+      }
+    );
+  }
+
+  function renderGraphInspector(options = {}) {
     if (
       !graph.active ||
       !runtimeGraphViewActive ||
@@ -33760,6 +34045,17 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     ) {
       return;
     }
+
+    installGraphInspectorFocusGuard();
+    if (
+      options.force !== true &&
+      graphInspectorHasActiveEditor()
+    ) {
+      graphInspectorRenderDeferred = true;
+      return;
+    }
+
+    graphInspectorRenderDeferred = false;
 
     dom.inspectorContent.replaceChildren();
 
@@ -36802,17 +37098,26 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
             : customCSharpFileNeedsOptimization(node)
               ? "Optimize & Open Node Graph"
               : "Open Node Graph",
-          synchronizing
-            ? () =>
-                cancelCustomCSharpSynchronization(
-                  node.id
-                )
-            : () =>
-                openCustomCSharpFileGraphSynced(
-                  node.id
-                ),
+          () => {
+            if (
+              customCSharpSynchronizations.has(
+                node.id
+              )
+            ) {
+              cancelCustomCSharpSynchronization(
+                node.id
+              );
+              return;
+            }
+            void openCustomCSharpFileGraphSynced(
+              node.id
+            );
+          },
           "primary"
         );
+        openButton.dataset
+          .rmlCustomCSharpNodeId =
+            node.id;
         openButton.classList.toggle(
           "rml-custom-csharp-cancel",
           synchronizing
@@ -36824,6 +37129,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
             : "Open Custom C# Node Graph"
         );
         actions.appendChild(openButton);
+        updateCustomCSharpSynchronizationControl(
+          node.id
+        );
       }
       if (
         definition.apiCompositeContainer !==
@@ -37334,6 +37642,15 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         control.spellcheck =
           specification.spellcheck ===
           true;
+        control.autocomplete = "off";
+        control.setAttribute(
+          "autocapitalize",
+          kind === "code" ? "off" : "sentences"
+        );
+        control.setAttribute(
+          "autocorrect",
+          kind === "code" ? "off" : "on"
+        );
         control.classList.toggle(
           "rml-graph-code-input",
           kind === "code" ||
@@ -37358,6 +37675,13 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         control.spellcheck =
           specification.spellcheck ===
           true;
+        if (
+          control.type === "text" ||
+          control.type === "search" ||
+          control.type === "url"
+        ) {
+          control.autocomplete = "off";
+        }
         control.classList.toggle(
           "rml-graph-code-input",
           specification.monospace ===
@@ -37428,6 +37752,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           customGraph.sourceEditedInInspector = true;
           customGraph.sourceHash = "";
           graph.customCSharpFiles[node.id] = customGraph;
+          updateCustomCSharpSynchronizationControl(
+            node.id
+          );
         }
 
         if (
@@ -37499,24 +37826,32 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         specification.key === "source" &&
         !customCSharpEditor
       ) {
+        let composing = false;
         const synchronizeSource = () => {
           const pending = customCSharpSourceSyncTimers.get(node.id);
           if (pending) window.clearTimeout(pending);
           customCSharpSourceSyncTimers.delete(node.id);
+          if (
+            composing ||
+            document.activeElement === control
+          ) {
+            return;
+          }
           void openCustomCSharpFileGraphSynced(node.id, {
             openAfterSync: false,
             quiet: true
           });
         };
-        control.addEventListener("input", () => {
-          const pending = customCSharpSourceSyncTimers.get(node.id);
-          if (pending) window.clearTimeout(pending);
-          customCSharpSourceSyncTimers.set(
-            node.id,
-            window.setTimeout(synchronizeSource, 450)
-          );
+        control.addEventListener("compositionstart", () => {
+          composing = true;
         });
-        control.addEventListener("change", synchronizeSource);
+        control.addEventListener("compositionend", () => {
+          composing = false;
+        });
+        control.addEventListener(
+          "blur",
+          () => queueMicrotask(synchronizeSource)
+        );
       }
 
       if (

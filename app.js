@@ -40,7 +40,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "catalog-reconciled-saved-composites-20260830-v647";
+  "mobile-focus-scroll-stability-20260831-v649";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -255,6 +255,8 @@ let settingsPreviewRuntimeMenu = null;
 let settingsPreviewPulseCounts = {};
 let settingsPreviewColorSession = null;
 let settingsPreviewStatusTimer = null;
+let settingsPreviewRenderDeferred = false;
+let outlineInspectorRenderDeferred = false;
 let activeDraggedNodeId = null;
 let activeDraggedOptionId = null;
 let activeDraggedOptionControllerId = null;
@@ -1053,7 +1055,7 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "graph_codegen_worker.js?v=60-catalog-reconciled-saved-composites-v647",
+      "graph_codegen_worker.js?v=62-mobile-focus-scroll-stability-v649",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -17415,7 +17417,75 @@ function bindInspectorInteractions() {
   });
 }
 
-function renderInspector() {
+function outlineInspectorHasActiveEditor() {
+  const active = document.activeElement;
+  if (
+    !(active instanceof HTMLElement) ||
+    !elements.inspectorContent
+      ?.contains(active)
+  ) {
+    return false;
+  }
+  if (active instanceof HTMLTextAreaElement) {
+    return true;
+  }
+  if (active.isContentEditable) {
+    return true;
+  }
+  if (!(active instanceof HTMLInputElement)) {
+    return false;
+  }
+  return ![
+    "button",
+    "checkbox",
+    "color",
+    "file",
+    "hidden",
+    "radio",
+    "range",
+    "reset",
+    "submit"
+  ].includes(active.type);
+}
+
+function installOutlineInspectorFocusGuard() {
+  const host = elements.inspectorContent;
+  if (
+    !host ||
+    host.dataset
+      .rmlOutlineFocusGuard === "true"
+  ) {
+    return;
+  }
+  host.dataset.rmlOutlineFocusGuard =
+    "true";
+  host.addEventListener(
+    "focusout",
+    () => {
+      queueMicrotask(() => {
+        if (
+          !outlineInspectorRenderDeferred ||
+          outlineInspectorHasActiveEditor()
+        ) {
+          return;
+        }
+        outlineInspectorRenderDeferred = false;
+        renderInspector({ force: true });
+      });
+    }
+  );
+}
+
+function renderInspector(options = {}) {
+  installOutlineInspectorFocusGuard();
+  if (
+    options.force !== true &&
+    outlineInspectorHasActiveEditor()
+  ) {
+    outlineInspectorRenderDeferred = true;
+    return;
+  }
+  outlineInspectorRenderDeferred = false;
   const node = state.selectedId
     ? findNode(state.nodes, state.selectedId)
     : null;
@@ -20014,10 +20084,32 @@ function renderSettingsPreviewFooter() {
   }
 }
 
-function renderSettingsPreview() {
+function settingsPreviewHasActiveEditor() {
+  const active = document.activeElement;
+  return Boolean(
+    active instanceof HTMLElement &&
+    elements.settingsPreviewContent
+      ?.contains(active) &&
+    active.matches(
+      "input, textarea, select, [contenteditable='true']"
+    )
+  );
+}
+
+function renderSettingsPreview(options = {}) {
   if (!settingsPreviewDraft) {
     return;
   }
+
+  if (
+    options.force !== true &&
+    settingsPreviewHasActiveEditor()
+  ) {
+    settingsPreviewRenderDeferred = true;
+    return;
+  }
+
+  settingsPreviewRenderDeferred = false;
 
   const colorNode =
     settingsPreviewColorSession
@@ -34208,6 +34300,20 @@ async function initialize() {
   elements.settingsPreviewContent.addEventListener(
     "input",
     handleSettingsPreviewInput
+  );
+  elements.settingsPreviewContent.addEventListener(
+    "focusout",
+    () => {
+      queueMicrotask(() => {
+        if (
+          !settingsPreviewRenderDeferred ||
+          settingsPreviewHasActiveEditor()
+        ) {
+          return;
+        }
+        renderSettingsPreview({ force: true });
+      });
+    }
   );
   elements.settingsPreviewSavePanel.addEventListener(
     "click",
