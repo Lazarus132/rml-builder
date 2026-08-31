@@ -40,7 +40,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "native-separate-editor-window-20260831-v682";
+  "special-loader-environment-help-20260831-v684";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -1166,7 +1166,7 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "graph_codegen_worker.js?v=95-native-separate-editor-window-v682",
+      "graph_codegen_worker.js?v=97-special-loader-environment-help-v684",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -29279,7 +29279,7 @@ function setInformationPage(pageName) {
     return;
   }
 
-  const targetName = ["general", "technical", "shortcuts", "nodes"].includes(pageName)
+  const targetName = ["general", "technical", "environment", "shortcuts", "nodes"].includes(pageName)
     ? pageName
     : "general";
 
@@ -29384,8 +29384,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "help_template.html?v=69-native-separate-editor-window-v682",
-    "help_template.js?v=69-native-separate-editor-window-v682",
+    "help_template.html?v=71-special-loader-environment-help-v684",
+    "help_template.js?v=71-special-loader-environment-help-v684",
     "help-template",
     "RMLHelpTemplateMarkup"
   )

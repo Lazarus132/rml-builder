@@ -43,6 +43,18 @@
           <button
             class="information-page-tab"
             type="button"
+            data-information-page-target="environment"
+            aria-selected="false"
+            data-help="Operating-system tools, browser requirements and .NET 10 setup.">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="3" y="4" width="18" height="13" rx="2"></rect>
+              <path d="M8 21h8M12 17v4"></path>
+            </svg>
+            <span>Environment</span>
+          </button>
+          <button
+            class="information-page-tab"
+            type="button"
             data-information-page-target="shortcuts"
             aria-selected="false"
             data-help="Keyboard shortcuts and navigation controls.">
@@ -560,8 +572,8 @@
                   graph sockets or main-mod configuration state. It can only target
                   assemblies already available before <code>rml_mods</code> are loaded;
                   patches for another normal mod belong in the main mod phase. Automatic
-                  discovery of the early DLL requires the matching custom ResoniteModLoader
-                  build containing the generated-library marker support.
+                  discovery of the early DLL requires the matching special Builder-compatible
+                  Mod Loader build containing the generated-library marker support.
                 </p>
                 <p>
                   Low-level HarmonyLib nodes produced by the API scanner are kept under
@@ -595,6 +607,262 @@
                   appear in the main Runtime Graph or directly in an API &amp; Logic Graph.
                   The Nodes page marks every restricted node and builds the complete fixed
                   registry reference at runtime, including palette-hidden helpers.
+                </p>
+              </section>
+            </article>
+          </div>
+        </section>
+
+
+        <section class="information-page" data-information-page="environment" hidden>
+          <div class="information-layout information-shortcuts-layout">
+            <nav class="information-nav" aria-label="Environment sections">
+              <button type="button" data-information-section-target="environment-overview">Required vs optional</button>
+              <button type="button" data-information-section-target="environment-runtime">Run generated mods</button>
+              <button type="button" data-information-section-target="environment-dotnet">Build generated mods</button>
+              <button type="button" data-information-section-target="environment-catalog">Live API catalog</button>
+              <button type="button" data-information-section-target="environment-tools">Optional tools</button>
+              <button type="button" data-information-section-target="environment-windows">Windows</button>
+              <button type="button" data-information-section-target="environment-macos">macOS</button>
+              <button type="button" data-information-section-target="environment-linux">Linux</button>
+              <button type="button" data-information-section-target="environment-browser">Browser</button>
+            </nav>
+            <article class="information-content">
+              <section id="environment-overview" class="information-section">
+                <span class="information-kicker">Builder environment</span>
+                <h3>Required, conditionally required and optional</h3>
+                <p>
+                  The web Builder, the generated project toolchain and the Resonite runtime
+                  are separate layers. Install only the layer needed for the intended task.
+                </p>
+                <div class="shortcut-grid">
+                  <div>
+                    <kbd>Required</kbd>
+                    <span>To run a compiled Builder mod: a compatible 64-bit Resonite installation, the special Builder-compatible Mod Loader and dependencies supplied by the Builder author, and the generated mod DLL plus its exported library dependencies.</span>
+                  </div>
+                  <div>
+                    <kbd>Build</kbd>
+                    <span>Additionally required to compile a Builder export: the .NET 10 SDK and access to the matching Resonite and special-loader reference assemblies selected by the generated project.</span>
+                  </div>
+                  <div>
+                    <kbd>Conditional</kbd>
+                    <span>The live Scanner is required only when a project imports, validates or exports version-derived Resonite, FrooxEngine or Harmony API catalog nodes.</span>
+                  </div>
+                  <div>
+                    <kbd>Optional</kbd>
+                    <span>Window-pinning utilities, Git and an external IDE can improve the workflow but are not required by the generated mod.</span>
+                  </div>
+                </div>
+              </section>
+
+              <section id="environment-runtime" class="information-section">
+                <span class="information-kicker">Required to use generated mods</span>
+                <h3>Resonite, the private Builder loader and exported DLLs</h3>
+                <p>
+                  Install a compatible 64-bit copy of
+                  <a href="https://store.steampowered.com/app/2519830/Resonite/" target="_blank" rel="noopener noreferrer">Resonite</a>.
+                  The officially published minimum desktop requirements currently start at
+                  Windows 10, a dual-core CPU, 8 GB RAM, a GTX 750-class GPU, DirectX 11,
+                  broadband internet and 2 GB free storage; VR needs additional headroom.
+                </p>
+                <p>
+                  Use only the exact special Builder-compatible Mod Loader package supplied
+                  privately by the Builder author through a Discord Direct Message. Install
+                  every dependency included with that package and use its supplied launch
+                  configuration. Do <strong>not</strong> replace or update it with the public
+                  standard loader, Resolute or another generic mod manager; those versions can
+                  be incompatible with Builder-generated functionality.
+                </p>
+                <p>
+                  Place the generated mod assembly in <code>rml_mods</code>, and place exported
+                  non-framework dependency assemblies in <code>rml_libs</code>. Start Resonite
+                  and verify the special loader and mod entries in the Resonite logs. Loader
+                  updates must come from the Builder author through the same private Discord
+                  Direct Message distribution path.
+                </p>
+                <p>
+                  The special loader already provides its own settings page. An external
+                  settings mod such as ResoniteModSettings is not required and must not be
+                  assumed compatible unless the Builder author's documentation explicitly
+                  confirms the exact combination.
+                </p>
+                <p>
+                  Someone who only installs an already compiled mod does <strong>not</strong>
+                  need the .NET SDK, a source-code editor, Git, the Builder Scanner or a
+                  window-pinning utility. There is intentionally no public loader download
+                  link here because the Builder requires its privately supplied version.
+                </p>
+              </section>
+
+              <section id="environment-dotnet" class="information-section">
+                <span class="information-kicker">Required to compile Builder exports</span>
+                <h3>Install the .NET 10 SDK and resolve game references</h3>
+                <p>
+                  Building an exported <code>net10.0</code> project locally requires the
+                  <strong>.NET 10 SDK</strong>. The runtime alone can execute compatible
+                  applications but cannot compile the generated project. Installing the SDK
+                  also installs its matching runtime, so a separate runtime installation is
+                  normally unnecessary.
+                </p>
+                <div class="shortcut-grid">
+                  <div>
+                    <kbd>Windows</kbd>
+                    <span>Run <code>winget install Microsoft.DotNet.SDK.10</code>, or use the <a href="https://learn.microsoft.com/dotnet/core/install/windows" target="_blank" rel="noopener noreferrer">official Windows instructions</a>.</span>
+                  </div>
+                  <div>
+                    <kbd>macOS</kbd>
+                    <span>Use the Microsoft installer matching Apple silicon (Arm64) or Intel (x64): <a href="https://learn.microsoft.com/dotnet/core/install/macos" target="_blank" rel="noopener noreferrer">Install .NET on macOS</a>.</span>
+                  </div>
+                  <div>
+                    <kbd>Linux</kbd>
+                    <span>Use the package instructions for the installed distribution: <a href="https://learn.microsoft.com/dotnet/core/install/linux" target="_blank" rel="noopener noreferrer">Install .NET on Linux</a>.</span>
+                  </div>
+                  <div>
+                    <kbd>Verify</kbd>
+                    <span>Open a new terminal and run <code>dotnet --list-sdks</code>. At least one line must begin with <code>10.0.</code>; use <code>dotnet --info</code> when diagnosing architecture or path problems.</span>
+                  </div>
+                </div>
+                <p>
+                  Direct installers for all supported systems and architectures are also
+                  available on the <a href="https://dotnet.microsoft.com/download/dotnet/10.0" target="_blank" rel="noopener noreferrer">official .NET 10 download page</a>.
+                </p>
+                <p>
+                  The generated project must also resolve the Resonite, FrooxEngine,
+                  Elements.Core and special Builder-compatible Mod Loader assemblies it
+                  references. Keep the
+                  generated project beside the exported <code>rml_mods</code> and
+                  <code>rml_libs</code> structure, or set its documented
+                  <code>ResonitePath</code> override to the correct local installation before
+                  running <code>dotnet build</code>.
+                </p>
+              </section>
+
+              <section id="environment-catalog" class="information-section">
+                <span class="information-kicker">Conditionally required</span>
+                <h3>Use the live Scanner for version-derived API nodes</h3>
+                <p>
+                  The fixed Builder nodes, Configuration Outline, Custom C# editing and
+                  projects without catalog-derived API nodes do not require a Scanner.
+                  A live compatible Scanner becomes mandatory when the project uses the
+                  generated Resonite, FrooxEngine or Harmony API catalog: the Builder verifies
+                  the running installation's semantic catalog and fingerprint before import,
+                  replacement or export. A cached catalog is useful for display but is not a
+                  substitute for live verification when those API contracts must be emitted.
+                </p>
+                <p>
+                  Start the Scanner supplied for the Builder environment, keep its local
+                  health endpoint reachable, and wait for the Builder's catalog source to show
+                  a verified live state. Do not expose the Scanner port to the internet; it is
+                  a local development companion rather than a public service.
+                </p>
+              </section>
+
+              <section id="environment-tools" class="information-section">
+                <span class="information-kicker">Optional workflow tools</span>
+                <h3>Install only what improves the chosen workflow</h3>
+                <div class="shortcut-grid">
+                  <div>
+                    <kbd>Source</kbd>
+                    <span><a href="https://git-scm.com/downloads" target="_blank" rel="noopener noreferrer">Git</a> is recommended for version history and sharing generated projects, but exported DLLs do not depend on it.</span>
+                  </div>
+                  <div>
+                    <kbd>Editor</kbd>
+                    <span><a href="https://code.visualstudio.com/Download" target="_blank" rel="noopener noreferrer">Visual Studio Code</a>, <a href="https://visualstudio.microsoft.com/downloads/" target="_blank" rel="noopener noreferrer">Visual Studio</a> or <a href="https://www.jetbrains.com/rider/download/" target="_blank" rel="noopener noreferrer">JetBrains Rider</a> can inspect and debug generated C#; the Builder's own editor remains sufficient for graph and Custom C# editing.</span>
+                  </div>
+                  <div>
+                    <kbd>Windows</kbd>
+                    <span>Microsoft PowerToys can pin the separate code editor system-wide. The Builder Overlay provides the no-install alternative.</span>
+                  </div>
+                  <div>
+                    <kbd>macOS/Linux</kbd>
+                    <span>Use the platform-specific window tools documented below only when the separate editor must remain above other applications.</span>
+                  </div>
+                </div>
+              </section>
+
+              <section id="environment-windows" class="information-section">
+                <span class="information-kicker">Windows 10 / 11</span>
+                <h3>Pin the separate editor with PowerToys</h3>
+                <p>
+                  Microsoft PowerToys provides the system-level Always On Top function.
+                  Focus the separate editor and press <kbd>Win</kbd> + <kbd>Ctrl</kbd> +
+                  <kbd>T</kbd>. Press the same shortcut again to unpin it. The optional border,
+                  sound and shortcut can be changed in PowerToys settings.
+                </p>
+                <p>
+                  <a href="https://learn.microsoft.com/windows/powertoys/always-on-top" target="_blank" rel="noopener noreferrer">Microsoft PowerToys · Always On Top</a>
+                </p>
+              </section>
+
+              <section id="environment-macos" class="information-section">
+                <span class="information-kicker">macOS</span>
+                <h3>Use Overlay, Split View or optional window pinning</h3>
+                <p>
+                  macOS has no universal built-in Always On Top switch for arbitrary browser
+                  windows. Use the Builder Overlay for guaranteed in-tab priority, or place
+                  the Builder and separate editor side by side with
+                  <a href="https://support.apple.com/guide/mac-help/use-apps-in-split-view-mchl4fbe2921/mac" target="_blank" rel="noopener noreferrer">Apple Split View</a>.
+                </p>
+                <p>
+                  Users who specifically need system-wide pinning can evaluate a third-party
+                  window utility such as
+                  <a href="https://apps.apple.com/app/windowpin-window-top/id6739672480?mt=12" target="_blank" rel="noopener noreferrer">WindowPin on the Mac App Store</a>.
+                  This is optional third-party software, not a Builder dependency.
+                </p>
+                <p>
+                  The web Builder and the .NET 10 SDK can be used on macOS for authoring and
+                  compilation. Running the resulting mod still requires an operating system,
+                  Resonite installation and mod-loader combination supported by those runtime
+                  projects; a window utility does not change that runtime compatibility.
+                </p>
+              </section>
+
+              <section id="environment-linux" class="information-section">
+                <span class="information-kicker">Linux desktops</span>
+                <h3>Use the desktop environment's window rule</h3>
+                <p>
+                  On KDE Plasma, use <strong>Keep Above</strong> from the window menu or create
+                  a KWin rule for the editor window. KDE documents the corresponding
+                  <a href="https://docs.kde.org/stable_kf6/en/kwin/kcontrol/windowspecific/attributes.html" target="_blank" rel="noopener noreferrer">Keep above window attribute</a>.
+                </p>
+                <p>
+                  GNOME users can use the desktop's available window action or the optional
+                  <a href="https://extensions.gnome.org/extension/6619/window-on-top/" target="_blank" rel="noopener noreferrer">Window on Top GNOME extension</a>.
+                  Under X11, <code>wmctrl -r :ACTIVE: -b toggle,above</code> can toggle the
+                  active EWMH-compatible window. Under Wayland the compositor controls this
+                  capability, so KDE/GNOME window actions are preferable to X11 commands.
+                </p>
+                <p>
+                  The Builder and .NET 10 SDK are cross-platform, but running Resonite and
+                  the special Builder-compatible Mod Loader on Linux must follow the private
+                  package's compatibility notes and the selected Steam compatibility setup.
+                  Verify the loader logs before treating a generated mod failure as a Builder
+                  failure.
+                </p>
+              </section>
+
+              <section id="environment-browser" class="information-section">
+                <span class="information-kicker">Chrome, Edge, Firefox & Safari</span>
+                <h3>Allow pop-ups for Separate Window</h3>
+                <p>
+                  Use a current Chrome, Edge, Firefox or Safari release with JavaScript,
+                  WebAssembly, browser storage and file downloads enabled. These capabilities
+                  are required for the complete Builder workflow; pop-up permission is needed
+                  only for Separate Window.
+                </p>
+                <p>
+                  Separate Window uses a normal browser popup. If nothing opens, allow pop-ups
+                  for the Builder site and try again. The editor does not request
+                  Picture-in-Picture, simulate maximization or draw a second set of native
+                  window controls. Search, diagnostics, settings, node insertion and the small
+                  Inspector code field remain synchronized in Embedded, Overlay and Separate
+                  Window modes.
+                </p>
+                <p>
+                  Browser and operating-system window behavior can differ. Overlay remains the
+                  portable fallback whenever pop-ups, multiple displays or desktop pinning are
+                  unavailable; Separate Window remains the practical choice for placing the
+                  editor on a second display.
                 </p>
               </section>
             </article>
