@@ -143,18 +143,33 @@
   };
 
   const STYLE_TEXT = `
-    :root { color-scheme: dark; --editor-font-size: 16px; --editor-line-height: 24px; --rml-workbench-background: #181818; --rml-code-background: #000000; --rml-gutter-background: #000000; --rml-panel-background: #181818; --rml-overlay-background: #252526; --rml-status-background: #68217a; --rml-selection-background: #264f78; --rml-code-text: #ffffff; --rml-ui-text: #cccccc; --rml-gutter-text: #858585; --rml-status-text: #ffffff; --rml-accent: #b789ff; }
+    :root { color-scheme: dark; --editor-font-size: 16px; --editor-line-height: 24px; --rml-workbench-background: #181818; --rml-code-background: #000000; --rml-gutter-background: #000000; --rml-panel-background: #181818; --rml-overlay-background: #252526; --rml-status-background: #68217a; --rml-selection-background: #264f78; --rml-code-text: #ffffff; --rml-ui-text: #cccccc; --rml-gutter-text: #858585; --rml-status-text: #ffffff; --rml-accent: #b789ff; --line: #45414f; --line-strong: #665d75; --panel-deep: #121019; --text: #e8e3ef; --muted: #9790a2; --accent-dark: #a476ff; --accent-soft: rgba(164, 118, 255, .16); }
     * { box-sizing: border-box; }
     html, body { width: 100%; min-height: 100%; margin: 0; }
     body { display: grid; grid-template-rows: auto minmax(0, 1fr) minmax(132px, 24vh) auto; height: 100dvh; overflow: hidden; background: var(--rml-workbench-background); color: var(--rml-ui-text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     header { display: flex; align-items: stretch; min-width: 0; min-height: calc(36px + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top); background: var(--rml-workbench-background); border-bottom: 1px solid #2b2b2b; }
     header strong { display: flex; align-items: center; min-width: 0; max-width: min(520px, 75vw); padding: 0 14px; overflow: hidden; border-top: 1px solid var(--rml-accent); border-right: 1px solid #2b2b2b; background: var(--rml-workbench-background); color: var(--rml-ui-text); font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
     .editor-header-actions { display: flex; align-items: center; margin-left: auto; padding-inline: 4px; }
-    .editor-header-actions button { display: inline-grid; place-items: center; width: 36px; min-width: 36px; height: 36px; padding: 8px; border: 0; border-radius: 4px; background: transparent; color: var(--rml-ui-text); cursor: pointer; }
-    .editor-header-actions button:hover { background: var(--rml-overlay-background); color: var(--rml-code-text); }
-    .editor-header-actions button[aria-pressed="true"] { background: var(--rml-selection-background); color: var(--rml-code-text); box-shadow: inset 0 -2px var(--rml-accent); }
-    .editor-header-actions button[aria-pressed="true"]:hover { background: color-mix(in srgb, var(--rml-selection-background) 82%, var(--rml-accent)); }
+    .editor-header-actions > button { display: inline-grid; place-items: center; width: 36px; min-width: 36px; height: 36px; padding: 8px; border: 0; border-radius: 4px; background: transparent; color: var(--rml-ui-text); cursor: pointer; }
+    .editor-header-actions > button:hover { background: var(--rml-overlay-background); color: var(--rml-code-text); }
+    .editor-header-actions > button[aria-pressed="true"] { background: var(--rml-selection-background); color: var(--rml-code-text); box-shadow: inset 0 -2px var(--rml-accent); }
+    .editor-header-actions > button[aria-pressed="true"]:hover { background: color-mix(in srgb, var(--rml-selection-background) 82%, var(--rml-accent)); }
     .editor-header-actions svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+    .editor-presentation-picker { width: 164px; min-width: 132px; margin-inline: 4px; }
+    .rml-graph-searchable-select { position: relative; display: block; width: 100%; min-width: 0; }
+    .rml-graph-searchable-native-select { position: absolute !important; width: 1px !important; height: 1px !important; min-height: 0 !important; margin: -1px !important; padding: 0 !important; overflow: hidden !important; clip: rect(0 0 0 0) !important; -webkit-clip-path: inset(50%) !important; clip-path: inset(50%) !important; border: 0 !important; white-space: nowrap !important; pointer-events: none !important; }
+    .rml-graph-searchable-trigger { position: relative; display: flex; width: 100%; min-width: 0; min-height: 35px; align-items: center; gap: 8px; padding: 8px 34px 8px 10px; border: 1px solid var(--line); border-radius: 7px; outline: none; background: var(--panel-deep); color: var(--text); font-size: 11px; font-weight: 520; line-height: 1.2; text-align: left; cursor: pointer; }
+    .rml-graph-searchable-trigger:hover { border-color: var(--line-strong); background: #12101a; }
+    .rml-graph-searchable-trigger:focus-visible, .rml-graph-searchable-select.open .rml-graph-searchable-trigger { border-color: var(--accent-dark); box-shadow: 0 0 0 3px var(--accent-soft); }
+    .rml-graph-searchable-trigger::after { position: absolute; top: 50%; right: 11px; width: 7px; height: 7px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); content: ""; transform: translateY(-67%) rotate(45deg); transition: transform 120ms ease, border-color 120ms ease; pointer-events: none; }
+    .rml-graph-searchable-select.open .rml-graph-searchable-trigger::after { border-color: #d0bbff; transform: translateY(-30%) rotate(225deg); }
+    .rml-graph-searchable-trigger-text { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .rml-graph-searchable-popup { position: fixed; z-index: 100000; display: grid; min-width: 180px; max-width: min(560px, calc(100vw - 16px)); gap: 6px; padding: 7px; border: 1px solid var(--line-strong); border-radius: 9px; background: linear-gradient(180deg, rgba(24, 22, 34, .995), rgba(13, 12, 19, .995)); box-shadow: 0 18px 48px rgba(0, 0, 0, .58), inset 0 1px rgba(255, 255, 255, .035); }
+    .rml-graph-searchable-popup[hidden] { display: none; }
+    .rml-graph-searchable-options { display: grid; max-height: min(280px, 46vh); gap: 3px; overflow-y: auto; overscroll-behavior: contain; padding: 1px; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+    .rml-graph-searchable-option { display: block; width: 100%; min-height: 30px; padding: 7px 9px; overflow: hidden; border: 1px solid transparent; border-radius: 6px; background: transparent; color: #d9d4e8; font-size: 10px; font-weight: 520; line-height: 1.25; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+    .rml-graph-searchable-option:hover, .rml-graph-searchable-option:focus-visible { border-color: rgba(164, 118, 255, .38); outline: none; background: rgba(164, 118, 255, .10); color: #f2edff; }
+    .rml-graph-searchable-option:disabled { opacity: .55; cursor: wait; }
     .editor-shell { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr); min-width: 0; min-height: 0; overflow: hidden; background: #1f1f1f; }
     .line-gutter { min-width: 58px; min-height: 0; overflow: hidden; border-right: 1px solid #292929; background: var(--rml-gutter-background); color: var(--rml-gutter-text); user-select: none; }
     .line-gutter pre { margin: 0; padding: 14px 10px 14px 6px; font: var(--editor-font-size)/var(--editor-line-height) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; text-align: right; white-space: pre; will-change: transform; }
@@ -185,6 +200,7 @@
     .find-match-count { align-self: center; min-width: 56px; color: #a9a9a9; font-size: 11px; text-align: right; white-space: nowrap; }
     .find-match-count.error { color: #f48771; }
     .settings-overlay { position: fixed; z-index: 8; top: calc(36px + env(safe-area-inset-top)); right: 4px; width: min(300px, calc(100vw - 16px)); max-height: calc(100dvh - 44px - env(safe-area-inset-top)); padding: 10px; overflow: auto; border: 1px solid #454545; border-radius: 0 0 5px 5px; background: var(--rml-overlay-background); box-shadow: 0 7px 22px rgba(0, 0, 0, .52); color: var(--rml-ui-text); }
+    body.separate-window-editor .settings-overlay { top: calc(74px + env(safe-area-inset-top)); max-height: calc(100dvh - 82px - env(safe-area-inset-top)); }
     .settings-overlay[hidden] { display: none; }
     .settings-overlay h2 { margin: 0 0 9px; color: var(--rml-ui-text); font-size: 12px; font-weight: 600; }
     .settings-overlay h2:not(:first-child) { margin-top: 14px; }
@@ -201,6 +217,7 @@
     .settings-color input[type="color"] { position: fixed; left: -10000px; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; pointer-events: none; }
     .settings-color-line { display: block; height: 4px; border: 1px solid rgba(255, 255, 255, .32); border-radius: 999px; box-shadow: 0 0 0 1px rgba(0, 0, 0, .42); pointer-events: none; }
     .settings-picker-popover { position: fixed; z-index: 9; top: calc(44px + env(safe-area-inset-top)); right: 308px; width: min(390px, calc(100vw - 324px)); max-height: calc(100dvh - 60px - env(safe-area-inset-top)); padding: 8px; overflow: auto; border: 1px solid #454545; border-radius: 5px; background: var(--rml-overlay-background); box-shadow: 0 9px 28px rgba(0, 0, 0, .58); }
+    body.separate-window-editor .settings-picker-popover { top: calc(82px + env(safe-area-inset-top)); max-height: calc(100dvh - 98px - env(safe-area-inset-top)); }
     .settings-picker-popover[hidden] { display: none; }
     .settings-picker-popover .rml-detached-editor-color-picker { margin: 0; }
     .debug-panel { display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; min-height: 0; border-top: 1px solid #2b2b2b; background: var(--rml-panel-background); }
@@ -227,7 +244,9 @@
     @media (hover: none), (pointer: coarse), (max-width: 780px) {
       :root { --editor-font-size: 17px; --editor-line-height: 25.5px; }
       body { grid-template-rows: auto minmax(0, 1fr) minmax(150px, 28vh) auto; }
-      .editor-header-actions button { width: 44px; min-width: 44px; height: 44px; }
+      .editor-header-actions > button { width: 44px; min-width: 44px; height: 44px; }
+      .editor-presentation-picker { width: 132px; margin-inline: 3px; }
+      .editor-presentation-picker .rml-graph-searchable-trigger { min-height: 40px; font-size: 12px; }
       .line-gutter { min-width: 52px; }
       .find-widget { right: 8px; width: calc(100% - 60px); grid-template-columns: minmax(0, 1fr); }
       .find-input-row input { height: 42px; font-size: 17px; }
@@ -375,8 +394,16 @@
       "Settings Overlay",
       '<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.1A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.1A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.1A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.12.38.34.72.64 1 .3.27.68.4 1.06.4h.1v4h-.1c-.38 0-.76.13-1.06.4-.3.28-.52.62-.64 1Z"></path>'
     );
+    const presentationMode =
+      ["inline", "overlay", "external"].includes(
+        String(options.presentationMode || "")
+      )
+        ? String(options.presentationMode)
+        : "inline";
     const embedded =
-      options.presentationMode === "inline";
+      presentationMode === "inline";
+    const separateWindow =
+      presentationMode === "external";
     let pageAreasHidden =
       options.pageAreasHidden === true;
     const pageAreasIcon = hidden =>
@@ -404,14 +431,311 @@
         `<svg viewBox="0 0 24 24" aria-hidden="true">${pageAreasIcon(pageAreasHidden)}</svg>`;
     };
     synchronizePageAreasButton();
-    const togglePresentation = createHeaderButton(
-      embedded
-        ? "Open editor as floating overlay"
-        : "Return editor to Builder",
-      embedded
-        ? '<path d="M14 4h6v6M20 4l-9 9"></path><path d="M18 13v6H5V6h6"></path>'
-        : '<path d="M10 5H5v14h14v-5"></path><path d="M20 4l-9 9M14 4h6v6"></path>'
+    const popupReturnToEmbedded = createHeaderButton(
+      "Return to embedded editor",
+      '<path d="M9 7 4 12l5 5"></path><path d="M4 12h10a6 6 0 0 1 6 6"></path>'
     );
+    popupReturnToEmbedded.addEventListener(
+      "click",
+      () => {
+        void options.onRequestPresentation?.("inline");
+      }
+    );
+    const presentationPicker =
+      popupDocument.createElement("div");
+    presentationPicker.className =
+      "editor-presentation-picker";
+    presentationPicker.title =
+      "Choose how the Custom C# code editor is displayed";
+    const presentationSelect =
+      popupDocument.createElement("select");
+    presentationSelect.setAttribute(
+      "aria-label",
+      "Open embedded code editor as"
+    );
+    for (const [value, label] of [
+      ["overlay", "Overlay"],
+      ["external", "Separate Window"]
+    ]) {
+      const option =
+        popupDocument.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      presentationSelect.appendChild(option);
+    }
+    presentationSelect.selectedIndex = -1;
+    presentationSelect.value = "";
+    presentationPicker.appendChild(
+      presentationSelect
+    );
+
+    const createPresentationDropdown = () => {
+      const wrapper =
+        popupDocument.createElement("div");
+      wrapper.className =
+        "rml-graph-searchable-select rml-universal-custom-select";
+      presentationPicker.replaceChildren(wrapper);
+      wrapper.appendChild(presentationSelect);
+      presentationSelect.classList.add(
+        "rml-graph-searchable-native-select"
+      );
+      presentationSelect.tabIndex = -1;
+      presentationSelect.setAttribute(
+        "aria-hidden",
+        "true"
+      );
+
+      const trigger =
+        popupDocument.createElement("button");
+      trigger.type = "button";
+      trigger.className =
+        "rml-graph-searchable-trigger rml-universal-select-trigger";
+      trigger.setAttribute(
+        "aria-label",
+        "Choose code editor presentation"
+      );
+      trigger.setAttribute("aria-haspopup", "listbox");
+      trigger.setAttribute("aria-expanded", "false");
+      const triggerText =
+        popupDocument.createElement("span");
+      triggerText.className =
+        "rml-graph-searchable-trigger-text";
+      triggerText.textContent = "Open as…";
+      trigger.appendChild(triggerText);
+      wrapper.appendChild(trigger);
+
+      const menu =
+        popupDocument.createElement("div");
+      menu.className =
+        "rml-graph-searchable-popup rml-universal-select-popup";
+      menu.hidden = true;
+      const optionsHost =
+        popupDocument.createElement("div");
+      optionsHost.className =
+        "rml-graph-searchable-options";
+      optionsHost.setAttribute("role", "listbox");
+      optionsHost.setAttribute(
+        "aria-label",
+        "Code editor presentation targets"
+      );
+      menu.appendChild(optionsHost);
+
+      let opened = false;
+      let busy = false;
+      const optionButtons = [];
+
+      const positionMenu = () => {
+        if (!opened) return;
+        const rect = trigger.getBoundingClientRect();
+        const viewport = popup.visualViewport;
+        const viewportLeft = viewport?.offsetLeft || 0;
+        const viewportTop = viewport?.offsetTop || 0;
+        const viewportWidth = viewport?.width || popup.innerWidth;
+        const viewportHeight = viewport?.height || popup.innerHeight;
+        const margin = 8;
+        const gap = 5;
+        const width = Math.min(
+          Math.max(rect.width, 180),
+          Math.max(160, viewportWidth - margin * 2)
+        );
+        menu.style.width = `${Math.round(width)}px`;
+        menu.style.maxWidth =
+          `${Math.max(160, viewportWidth - margin * 2)}px`;
+        const left = Math.min(
+          viewportLeft + viewportWidth - width - margin,
+          Math.max(viewportLeft + margin, rect.left)
+        );
+        const measuredHeight =
+          menu.getBoundingClientRect().height || 84;
+        const below =
+          viewportTop + viewportHeight - rect.bottom - margin - gap;
+        const above =
+          rect.top - viewportTop - margin - gap;
+        const top = measuredHeight > below && above > below
+          ? rect.top - measuredHeight - gap
+          : rect.bottom + gap;
+        menu.style.left = `${Math.round(left)}px`;
+        menu.style.top = `${Math.round(Math.max(
+          viewportTop + margin,
+          Math.min(
+            viewportTop + viewportHeight - measuredHeight - margin,
+            top
+          )
+        ))}px`;
+      };
+
+      const close = (restoreFocus = false) => {
+        if (!opened) return;
+        opened = false;
+        wrapper.classList.remove("open");
+        trigger.setAttribute("aria-expanded", "false");
+        menu.hidden = true;
+        menu.remove();
+        popup.removeEventListener("resize", positionMenu);
+        popup.visualViewport?.removeEventListener(
+          "resize",
+          positionMenu
+        );
+        if (restoreFocus) {
+          trigger.focus({ preventScroll: true });
+        }
+      };
+
+      const setBusy = value => {
+        busy = value === true;
+        presentationSelect.disabled = busy;
+        trigger.disabled = busy;
+        for (const button of optionButtons) {
+          button.disabled = busy;
+        }
+      };
+
+      const request = requested => {
+        if (
+          busy ||
+          !["overlay", "external"].includes(requested)
+        ) {
+          return;
+        }
+        close(false);
+        setBusy(true);
+        Promise.resolve(
+          options.onRequestPresentation?.(requested)
+        )
+          .then(committed => {
+            if (committed === false) {
+              presentationSelect.selectedIndex = -1;
+              presentationSelect.value = "";
+              setBusy(false);
+              trigger.focus({ preventScroll: true });
+            }
+          })
+          .catch(() => {
+            presentationSelect.selectedIndex = -1;
+            presentationSelect.value = "";
+            setBusy(false);
+            trigger.focus({ preventScroll: true });
+          });
+      };
+
+      for (const option of presentationSelect.options) {
+        const button =
+          popupDocument.createElement("button");
+        button.type = "button";
+        button.className =
+          "rml-graph-searchable-option";
+        button.textContent = option.textContent;
+        button.dataset.value = option.value;
+        button.setAttribute("role", "option");
+        button.setAttribute("aria-selected", "false");
+        button.addEventListener("click", () => {
+          presentationSelect.value = option.value;
+          request(option.value);
+        });
+        optionsHost.appendChild(button);
+        optionButtons.push(button);
+      }
+
+      const open = () => {
+        if (opened || busy) return;
+        opened = true;
+        wrapper.classList.add("open");
+        trigger.setAttribute("aria-expanded", "true");
+        menu.hidden = false;
+        popupDocument.body.appendChild(menu);
+        positionMenu();
+        popup.addEventListener("resize", positionMenu);
+        popup.visualViewport?.addEventListener(
+          "resize",
+          positionMenu
+        );
+        optionButtons[0]?.focus({ preventScroll: true });
+      };
+
+      const moveFocus = delta => {
+        const current = optionButtons.indexOf(
+          popupDocument.activeElement
+        );
+        const index = current < 0
+          ? 0
+          : Math.max(
+              0,
+              Math.min(optionButtons.length - 1, current + delta)
+            );
+        optionButtons[index]?.focus({ preventScroll: true });
+      };
+
+      trigger.addEventListener("click", event => {
+        event.stopPropagation();
+        opened ? close(true) : open();
+      });
+      trigger.addEventListener("keydown", event => {
+        if (
+          event.key === "ArrowDown" ||
+          event.key === "ArrowUp" ||
+          event.key === "Enter" ||
+          event.key === " "
+        ) {
+          event.preventDefault();
+          if (!opened) open();
+          if (event.key === "ArrowUp") {
+            optionButtons.at(-1)?.focus({ preventScroll: true });
+          }
+        }
+      });
+      optionsHost.addEventListener("keydown", event => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          close(true);
+        } else if (event.key === "ArrowDown") {
+          event.preventDefault();
+          moveFocus(1);
+        } else if (event.key === "ArrowUp") {
+          event.preventDefault();
+          moveFocus(-1);
+        } else if (event.key === "Home") {
+          event.preventDefault();
+          optionButtons[0]?.focus({ preventScroll: true });
+        } else if (event.key === "End") {
+          event.preventDefault();
+          optionButtons.at(-1)?.focus({ preventScroll: true });
+        }
+      });
+      popupDocument.addEventListener(
+        "pointerdown",
+        event => {
+          if (
+            opened &&
+            !wrapper.contains(event.target) &&
+            !menu.contains(event.target)
+          ) {
+            close(false);
+          }
+        },
+        true
+      );
+      presentationSelect.addEventListener("change", () => {
+        request(presentationSelect.value);
+      });
+
+      return {
+        close,
+        isOpen: () => opened,
+        trigger,
+        optionButtons
+      };
+    };
+    const presentationDropdown = embedded
+      ? createPresentationDropdown()
+      : {
+          close() {},
+          isOpen: () => false
+        };
+    if (separateWindow) {
+      headerActions.append(
+        popupReturnToEmbedded
+      );
+    }
     headerActions.append(
       showFind,
       showReplace,
@@ -420,7 +744,7 @@
     if (embedded) {
       headerActions.append(
         togglePageAreas,
-        togglePresentation
+        presentationPicker
       );
     }
     header.append(heading, headerActions);
@@ -440,6 +764,28 @@
     textarea.setAttribute("autocapitalize", "off");
     textarea.setAttribute("autocorrect", "off");
     textarea.setAttribute("aria-label", String(options.ariaLabel || "C# 14 source"));
+    const initialSelectionStart = Math.max(
+      0,
+      Math.min(
+        textarea.value.length,
+        Number(options.initialSelection?.start) || 0
+      )
+    );
+    const initialSelectionEnd = Math.max(
+      initialSelectionStart,
+      Math.min(
+        textarea.value.length,
+        Number(options.initialSelection?.end) ||
+          initialSelectionStart
+      )
+    );
+    textarea.setSelectionRange(
+      initialSelectionStart,
+      initialSelectionEnd,
+      options.initialSelection?.direction === "backward"
+        ? "backward"
+        : "forward"
+    );
 
     const editorContent = popupDocument.createElement("div");
     editorContent.className = "editor-content";
@@ -1185,6 +1531,7 @@
       );
     };
     const openFind = (withReplace = false) => {
+      presentationDropdown.close(false);
       settingsOverlay.hidden = true;
       synchronizeSettingsToggleButton();
       closeAppearancePicker();
@@ -1337,6 +1684,7 @@
     synchronizeSettingsToggleButton();
     showSettings.addEventListener("click", event => {
       event.stopPropagation();
+      presentationDropdown.close(false);
       const open = settingsOverlay.hidden;
       settingsOverlay.hidden = !open;
       synchronizeSettingsToggleButton();
@@ -1351,6 +1699,7 @@
       event.stopPropagation();
     });
     popupDocument.addEventListener("click", () => {
+      presentationDropdown.close(false);
       if (!settingsOverlay.hidden) {
         settingsOverlay.hidden = true;
         synchronizeSettingsToggleButton();
@@ -1401,7 +1750,10 @@
         return;
       }
       if (event.key === "Escape") {
-        if (!settingsOverlay.hidden) {
+        if (presentationDropdown.isOpen()) {
+          event.preventDefault();
+          presentationDropdown.close(true);
+        } else if (!settingsOverlay.hidden) {
           event.preventDefault();
           settingsOverlay.hidden = true;
           synchronizeSettingsToggleButton();
@@ -1643,9 +1995,6 @@
       );
     }
 
-    togglePresentation.addEventListener("click", () => {
-      options.onTogglePresentation?.();
-    });
     togglePageAreas.addEventListener("click", () => {
       const requested = !pageAreasHidden;
       const committed =
@@ -1660,13 +2009,7 @@
     const record = Object.freeze({
       popup,
       textarea,
-      presentationMode:
-        embedded
-          ? "inline"
-          : String(
-              options.presentationMode ||
-              "overlay"
-            ),
+      presentationMode,
       getValue() {
         return textarea.value;
       },
@@ -1739,10 +2082,31 @@
       refresh
     });
 
-    popup.addEventListener("beforeunload", () => {
+    let closedNotified = false;
+    const notifyClosed = () => {
+      if (closedNotified) return;
+      closedNotified = true;
       options.onClosed?.(record);
-    }, { once: true });
+    };
+    popup.addEventListener(
+      "beforeunload",
+      notifyClosed,
+      { once: true }
+    );
+    popup.addEventListener(
+      "pagehide",
+      notifyClosed,
+      { once: true }
+    );
 
+    textarea.scrollTop = Math.max(
+      0,
+      Number(options.initialScroll?.top) || 0
+    );
+    textarea.scrollLeft = Math.max(
+      0,
+      Number(options.initialScroll?.left) || 0
+    );
     record.focus();
     return record;
   }
@@ -1752,7 +2116,7 @@
     "RMLCustomCSharpDetachedEditor",
     {
       value: Object.freeze({
-        version: 12,
+        version: 18,
         mount
       }),
       writable: false,

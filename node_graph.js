@@ -1073,7 +1073,7 @@
       hiddenFromPalette: true,
       apiCompositeContainer: true,
       description:
-        "A stable visual container for verified catalog API nodes combined with supported logic/value/flow nodes. Internal contracts, exposed ports and routing are expanded deterministically for validation and code generation.",
+        "A stable visual container for verified catalog API nodes combined with supported logic/value/flow nodes and owned Custom C#, C# Project or C# Reference nodes. Internal contracts, Custom C# File Graphs, exposed ports and routing are preserved and expanded deterministically for validation, save/import, unpacking and code generation.",
       resolveDefinition(node) {
         const boundaries = Array.isArray(
           node?.parameters?.boundaryPorts
@@ -8376,7 +8376,7 @@
     }
     const worker = new Worker(
       new URL(
-        "graph_codegen_worker.js?v=88-single-hybrid-custom-csharp-composite-v675",
+        "graph_codegen_worker.js?v=95-native-separate-editor-window-v682",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -21653,6 +21653,17 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
       .rml-custom-csharp-overlay-window-actions button:last-child:hover {
         background: #c42b1c;
+      }
+
+      .rml-custom-csharp-overlay-window-actions svg {
+        width: 16px;
+        height: 16px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.8;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        pointer-events: none;
       }
 
       .rml-custom-csharp-overlay-frame {
@@ -39925,7 +39936,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         const script =
           document.createElement("script");
         script.src = new URL(
-          "custom_csharp_editor.js?v=22-single-hybrid-custom-csharp-composite-v675",
+          "custom_csharp_editor.js?v=29-native-separate-editor-window-v682",
           document.baseURI
         ).href;
         script.async = true;
@@ -40288,15 +40299,32 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       document.createElement("div");
     actions.className =
       "rml-custom-csharp-overlay-window-actions";
+    const windowIcon = paths =>
+      `<svg viewBox="0 0 24 24" aria-hidden="true">${paths}</svg>`;
+    const returnIcon = windowIcon(
+      '<path d="M9 7 4 12l5 5"></path><path d="M4 12h10a6 6 0 0 1 6 6"></path>'
+    );
+    const minimizeIcon = windowIcon(
+      '<path d="M6 16h12"></path>'
+    );
+    const maximizeIcon = windowIcon(
+      '<rect x="6" y="6" width="12" height="12" rx="1"></rect>'
+    );
+    const restoreIcon = windowIcon(
+      '<path d="M9 8V6h9v9h-2"></path><rect x="6" y="9" width="9" height="9" rx="1"></rect>'
+    );
+    const closeIcon = windowIcon(
+      '<path d="m7 7 10 10M17 7 7 17"></path>'
+    );
     const windowButton = (
       label,
-      text,
+      icon,
       handler
     ) => {
       const button =
         document.createElement("button");
       button.type = "button";
-      button.textContent = text;
+      button.innerHTML = icon;
       button.title = label;
       button.setAttribute(
         "aria-label",
@@ -40313,7 +40341,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     };
     const returnToEditor = windowButton(
       "Return to embedded editor",
-      "↩",
+      returnIcon,
       () =>
         moveCustomCSharpEditorToInline(
           editorKey
@@ -40321,7 +40349,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     );
     const minimize = windowButton(
       "Minimize editor overlay",
-      "—",
+      minimizeIcon,
       button => {
         const minimized =
           overlay.classList.toggle(
@@ -40331,7 +40359,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           overlay.classList.remove(
             "maximized"
           );
-          maximize.textContent = "□";
+          maximize.innerHTML = maximizeIcon;
           maximize.setAttribute(
             "aria-label",
             "Maximize editor overlay"
@@ -40354,7 +40382,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     );
     const maximize = windowButton(
       "Maximize editor overlay",
-      "□",
+      maximizeIcon,
       button => {
         overlay.classList.remove(
           "minimized"
@@ -40369,8 +40397,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           overlay.classList.toggle(
             "maximized"
           );
-        button.textContent =
-          maximized ? "❐" : "□";
+        button.innerHTML =
+          maximized ? restoreIcon : maximizeIcon;
         button.setAttribute(
           "aria-label",
           maximized
@@ -40386,7 +40414,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     );
     const close = windowButton(
       "Close editor overlay",
-      "×",
+      closeIcon,
       () =>
         closeCustomCSharpEditorRecord(
           editorKey
@@ -40627,6 +40655,72 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     loading.style.cssText =
       "margin:0;padding:20px;background:#181818;color:#cccccc;font:13px system-ui,sans-serif;min-height:100vh";
     hostWindow.document.body.appendChild(loading);
+  }
+
+  async function createCustomCSharpExternalHost(
+    editorKey,
+    title
+  ) {
+    const sourceScreen = window.screen || {};
+    const availableLeft =
+      Number(sourceScreen.availLeft) || 0;
+    const availableTop =
+      Number(sourceScreen.availTop) || 0;
+    const availableWidth = Math.max(
+      640,
+      Number(sourceScreen.availWidth) || 1440
+    );
+    const availableHeight = Math.max(
+      480,
+      Number(sourceScreen.availHeight) || 900
+    );
+    const popupWidth =
+      Math.min(1040, availableWidth);
+    const popupHeight =
+      Math.min(760, availableHeight);
+    const popupLeft =
+      availableLeft +
+      Math.max(0, (availableWidth - popupWidth) / 2);
+    const popupTop =
+      availableTop +
+      Math.max(0, (availableHeight - popupHeight) / 2);
+    const popupFeatures = [
+      "popup=yes",
+      `left=${Math.round(popupLeft)}`,
+      `top=${Math.round(popupTop)}`,
+      `width=${Math.round(popupWidth)}`,
+      `height=${Math.round(popupHeight)}`,
+      "resizable=yes",
+      "scrollbars=no",
+      "toolbar=no",
+      "location=no",
+      "menubar=no",
+      "status=no"
+    ].join(",");
+    const popupName =
+      `rml-custom-csharp-${hashText(editorKey)}`;
+    let hostWindow = null;
+    try {
+      hostWindow = window.open(
+        "",
+        popupName,
+        popupFeatures
+      );
+    } catch {
+      // The blocked-window message below is the actionable result.
+    }
+    if (!hostWindow) {
+      showGraphMessage(
+        "The native separate code-editor window was blocked. Allow pop-ups for this Builder and try again.",
+        "error"
+      );
+      return null;
+    }
+    hostWindow.document.title = String(
+      title || "Custom C# code editor"
+    );
+    hostWindow.focus?.();
+    return { hostWindow };
   }
 
   function customCSharpNodeDropType(
@@ -41272,6 +41366,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     hostWindow,
     frame = null,
     overlay = null,
+    editorState = null,
     initialValue = ""
   }) {
     const parameterKey = String(
@@ -41361,6 +41456,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         const mounted = editorModule.mount({
           popup: hostWindow,
           presentationMode: mode,
+          initialSelection:
+            editorState?.selection || null,
+          initialScroll:
+            editorState?.scroll || null,
           pageAreasHidden:
             graphEditModeActive(),
           language:
@@ -41467,6 +41566,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
             bringCustomCSharpOverlayToFront(
               overlay
             );
+            if (mode === "external") {
+              hostWindow.focus?.();
+            }
           },
           onAppearanceChange(appearance) {
             const liveNode =
@@ -41527,16 +41629,13 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
               );
             });
           },
-          onTogglePresentation() {
-            if (mode === "inline") {
-              moveCustomCSharpEditorToOverlay(
-                editorKey
-              );
-            } else {
-              moveCustomCSharpEditorToInline(
-                editorKey
-              );
-            }
+          onRequestPresentation(
+            requestedMode
+          ) {
+            return moveCustomCSharpEditorToMode(
+              editorKey,
+              requestedMode
+            );
           },
           onTogglePageAreas(hidden) {
             return setGraphEditMode(hidden);
@@ -41649,57 +41748,102 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       });
   }
 
-  function moveCustomCSharpEditorToOverlay(
+  function disposeCustomCSharpPresentation(
+    record,
     editorKey
   ) {
-    const existing =
-      customCSharpDetachedEditors.get(editorKey);
+    if (record?.mode === "inline") {
+      record.frame?.remove();
+      restoreGraphAfterCustomCSharpInlineEditor(
+        editorKey
+      );
+      return;
+    }
+    if (record?.mode === "overlay") {
+      record.overlay?.remove();
+      return;
+    }
+    if (record?.popup?.closed === false) {
+      record.popup.close();
+    }
+  }
+
+  function customCSharpEditorViewState(record) {
+    const textarea = record?.textarea;
+    if (!textarea) return null;
+    return {
+      selection: {
+        start:
+          Number(textarea.selectionStart) || 0,
+        end:
+          Number(textarea.selectionEnd) || 0,
+        direction:
+          String(textarea.selectionDirection || "forward")
+      },
+      scroll: {
+        top: Number(textarea.scrollTop) || 0,
+        left: Number(textarea.scrollLeft) || 0
+      }
+    };
+  }
+
+  async function moveCustomCSharpEditorToMode(
+    editorKey,
+    requestedMode
+  ) {
+    const targetMode = String(
+      requestedMode || ""
+    );
     if (
-      !customCSharpEditorRecordActive(existing) ||
-      existing.mode !== "inline"
+      !["inline", "overlay", "external"].includes(
+        targetMode
+      )
     ) {
       return false;
     }
-    const value = existing.getValue?.() || "";
-    commitCustomCSharpEditorValue(
-      existing.nodeId,
-      existing.specification,
-      value
-    );
-    const { overlay, frame } =
-      createCustomCSharpOverlayFrame(
-        editorKey,
-        `${String(existing.specification?.label || "Custom C#")} · Code editor`
-      );
-    mountCustomCSharpEditorPresentation({
-      nodeId: existing.nodeId,
-      specification: existing.specification,
-      mode: "overlay",
-      hostWindow: frame.contentWindow,
-      frame,
-      overlay,
-      initialValue: value
-    });
-    existing.frame?.remove();
-    restoreGraphAfterCustomCSharpInlineEditor(
-      editorKey
-    );
-    return true;
-  }
-
-  function moveCustomCSharpEditorToInline(
-    editorKey
-  ) {
     const existing =
       customCSharpDetachedEditors.get(editorKey);
     if (
-      !customCSharpEditorRecordActive(existing) ||
-      existing.mode !== "overlay" ||
+      !customCSharpEditorRecordActive(existing)
+    ) {
+      return false;
+    }
+    if (existing.mode === targetMode) {
+      existing.focus?.();
+      return true;
+    }
+    if (
+      targetMode === "inline" &&
       !dom.builderCanvas
     ) {
       return false;
     }
+
+    const title =
+      `${String(existing.specification?.label || "Custom C#")} · Code editor`;
+    let externalHost = null;
+    if (targetMode === "external") {
+      externalHost =
+        await createCustomCSharpExternalHost(
+          editorKey,
+          title
+        );
+      if (!externalHost) return false;
+      if (
+        customCSharpDetachedEditors.get(
+          editorKey
+        ) !== existing ||
+        !customCSharpEditorRecordActive(
+          existing
+        )
+      ) {
+        externalHost.hostWindow.close?.();
+        return false;
+      }
+    }
+
     if (
+      targetMode === "inline" &&
       customCSharpInlineEditorKey &&
       customCSharpInlineEditorKey !== editorKey
     ) {
@@ -41708,35 +41852,98 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         { restoreGraph: false }
       );
     }
+
     const value = existing.getValue?.() || "";
+    const editorState =
+      customCSharpEditorViewState(existing);
     commitCustomCSharpEditorValue(
       existing.nodeId,
       existing.specification,
       value
     );
-    const liveNode =
-      customCSharpEditorNode(existing.nodeId);
-    if (liveNode === findGraphNode(existing.nodeId)) {
-      graph.selectedNodeId = existing.nodeId;
-      graph.selectedNodeIds = [existing.nodeId];
-      graph.selectedConnectionId = null;
-      clearSelectedWirePoint();
-      renderGraphInspector({ force: true });
+
+    let frame = null;
+    let overlay = null;
+    let hostWindow = null;
+    if (targetMode === "inline") {
+      const liveNode =
+        customCSharpEditorNode(existing.nodeId);
+      if (
+        liveNode === findGraphNode(existing.nodeId)
+      ) {
+        graph.selectedNodeId = existing.nodeId;
+        graph.selectedNodeIds = [existing.nodeId];
+        graph.selectedConnectionId = null;
+        clearSelectedWirePoint();
+        renderGraphInspector({ force: true });
+      }
+      frame = createCustomCSharpInlineFrame(
+        editorKey,
+        title
+      );
+      hostWindow = frame.contentWindow;
+    } else if (targetMode === "overlay") {
+      const overlayPresentation =
+        createCustomCSharpOverlayFrame(
+          editorKey,
+          title
+        );
+      overlay = overlayPresentation.overlay;
+      frame = overlayPresentation.frame;
+      hostWindow = frame.contentWindow;
+    } else {
+      hostWindow = externalHost.hostWindow;
     }
-    const frame = createCustomCSharpInlineFrame(
-      editorKey,
-      `${String(existing.specification?.label || "Custom C#")} · Code editor`
-    );
+
     mountCustomCSharpEditorPresentation({
       nodeId: existing.nodeId,
       specification: existing.specification,
-      mode: "inline",
-      hostWindow: frame.contentWindow,
+      mode: targetMode,
+      hostWindow,
       frame,
+      overlay,
+      editorState,
       initialValue: value
     });
-    existing.overlay?.remove();
+    disposeCustomCSharpPresentation(
+      existing,
+      editorKey
+    );
+
+    if (targetMode === "external") {
+      showGraphMessage(
+        "Custom C# editor opened in a native separate browser window. Use its operating-system title bar to minimize, maximize, restore or close it.",
+        "success"
+      );
+    }
     return true;
+  }
+
+  function moveCustomCSharpEditorToOverlay(
+    editorKey
+  ) {
+    return moveCustomCSharpEditorToMode(
+      editorKey,
+      "overlay"
+    );
+  }
+
+  function moveCustomCSharpEditorToExternal(
+    editorKey
+  ) {
+    return moveCustomCSharpEditorToMode(
+      editorKey,
+      "external"
+    );
+  }
+
+  function moveCustomCSharpEditorToInline(
+    editorKey
+  ) {
+    return moveCustomCSharpEditorToMode(
+      editorKey,
+      "inline"
+    );
   }
 
   function openCustomCSharpDetachedEditor(

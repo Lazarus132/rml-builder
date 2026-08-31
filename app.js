@@ -40,7 +40,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "single-hybrid-custom-csharp-composite-20260831-v675";
+  "native-separate-editor-window-20260831-v682";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -1166,7 +1166,7 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "graph_codegen_worker.js?v=88-single-hybrid-custom-csharp-composite-v675",
+      "graph_codegen_worker.js?v=95-native-separate-editor-window-v682",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -28516,6 +28516,22 @@ function informationNodeCard(operatorId, definition) {
     heading.appendChild(badge);
   }
 
+  if (definition.apiCompositeCustomCSharp === true) {
+    const badge = document.createElement("span");
+    badge.className = "information-node-badge composite";
+    badge.textContent = "Runtime + API & Logic";
+    badge.title = "This Custom C# node is available both in the main Runtime Graph and inside an API Composite's internal API & Logic Graph.";
+    heading.appendChild(badge);
+  }
+
+  if (operatorId === "csharp.file") {
+    const badge = document.createElement("span");
+    badge.className = "information-node-badge hybrid";
+    badge.textContent = "One hybrid node · 5 modes";
+    badge.title = "Mode switches this single node between File, Action, Expression, Runtime Graph Member and Main Mod Member without adding redundant palette entries.";
+    heading.appendChild(badge);
+  }
+
   const id = document.createElement("small");
   id.textContent = operatorId;
   const description = document.createElement("p");
@@ -28708,7 +28724,7 @@ function renderInformationNodeReference() {
   standardIntro.className = "information-node-tier-note standard";
   standardIntro.innerHTML = `
     <strong>Typed / normal nodes</strong>
-    <span>These are the preferred building blocks. They use the graph's typed sockets, compatibility checks and generated runtime helpers so invalid combinations are rejected wherever the builder can determine that safely.</span>`;
+    <span>These are the preferred building blocks. They use the graph's typed sockets, compatibility checks and generated runtime helpers so invalid combinations are rejected wherever the builder can determine that safely. Custom C# is listed once as a hybrid five-mode node and is also supported inside API & Logic Graphs.</span>`;
   fragment.appendChild(standardIntro);
 
   const configurationGroup = document.createElement("section");
@@ -28787,7 +28803,7 @@ function renderInformationNodeReference() {
     {
       advanced: true,
       description:
-        "Expert fallbacks for exact C#, reflection, manual dependency declarations and build/project overrides. They are documented even when a node is hidden from the normal palette."
+        "Expert fallbacks for exact C#, reflection, manual dependency declarations and build/project overrides. C# Project and C# Reference work in both the Runtime Graph and API & Logic Graph; syntax nodes remain isolated above. Every fixed node is documented even when hidden from the normal palette."
     }
   );
 
@@ -29368,8 +29384,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "help_template.html?v=62-section-buttons-v603f13",
-    "help_template.js?v=62-section-buttons-v603f13",
+    "help_template.html?v=69-native-separate-editor-window-v682",
+    "help_template.js?v=69-native-separate-editor-window-v682",
     "help-template",
     "RMLHelpTemplateMarkup"
   )
