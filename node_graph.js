@@ -1426,6 +1426,9 @@
   let graphCatalogGateSettled = false;
   let graphCatalogGateError = null;
   let lastGraphCatalogRefreshRevision = -1;
+  let openGraphCatalogReconciliationPromise = null;
+  let openGraphCatalogReconciliationRequestedKey = "";
+  let openGraphCatalogReconciliationCompletedKey = "";
   let graphHostInitialized = false;
   let graphBaseModulesReady = false;
   let graphHostError = null;
@@ -1477,6 +1480,14 @@
   let savedApiCompositeLibraryPersistent = true;
   const savedApiCompositeTemplates = new Map();
   const savedApiCompositeOperations = new Set();
+  const savedApiCompositeCompatibilityIssues =
+    new Map();
+  let savedApiCompositeReconciliationPromise =
+    null;
+  let savedApiCompositeReconciliationRequestedKey =
+    "";
+  let savedApiCompositeReconciliationCompletedKey =
+    "";
   const savedApiCompositeSearchTextCache =
     new WeakMap();
   let graphLeftPanelCollapsed = false;
@@ -3410,6 +3421,29 @@
     return value;
   }
 
+  function savedApiCompositeContentKey(
+    record
+  ) {
+    const composite = clone(
+      record?.composite || {}
+    );
+    delete composite
+      .createdCatalogFingerprint;
+    delete composite
+      .createdEngineVersion;
+    return JSON.stringify(
+      savedApiCompositeCanonicalValue({
+        name: String(
+          record?.name || ""
+        ),
+        description: String(
+          record?.description || ""
+        ),
+        composite
+      })
+    );
+  }
+
   function savedApiContractSemanticKey(
     contract
   ) {
@@ -3660,6 +3694,24 @@
       updatedAt: String(
         raw.updatedAt || now
       ).slice(0, 80),
+      compatibilityIssueFingerprint:
+        String(
+          raw.compatibilityIssueFingerprint ||
+          ""
+        ).slice(0, 256),
+      compatibilityIssueEngineVersion:
+        String(
+          raw.compatibilityIssueEngineVersion ||
+          ""
+        ).slice(0, 160),
+      compatibilityIssueReason:
+        String(
+          raw.compatibilityIssueReason || ""
+        ).slice(0, 1000),
+      compatibilityIssueCheckedAt:
+        String(
+          raw.compatibilityIssueCheckedAt || ""
+        ).slice(0, 80),
       resolvedCatalogFingerprint: String(
         raw.resolvedCatalogFingerprint ||
         raw.sourceCatalogFingerprint ||
@@ -3871,6 +3923,7 @@
         })
         .then(records => {
           savedApiCompositeTemplates.clear();
+          savedApiCompositeCompatibilityIssues.clear();
           for (const raw of records) {
             try {
               const record =
@@ -3881,6 +3934,14 @@
                 record.id,
                 record
               );
+              if (
+                record.compatibilityIssueReason
+              ) {
+                savedApiCompositeCompatibilityIssues.set(
+                  record.id,
+                  record.compatibilityIssueReason
+                );
+              }
             } catch (error) {
               console.warn(
                 "An invalid Saved API Composite was ignored.",
@@ -3935,9 +3996,98 @@
         record.id,
         record
       );
+      if (record.compatibilityIssueReason) {
+        savedApiCompositeCompatibilityIssues.set(
+          record.id,
+          record.compatibilityIssueReason
+        );
+      } else {
+        savedApiCompositeCompatibilityIssues.delete(
+          record.id
+        );
+      }
     }
     savedApiCompositeLibraryLoaded = true;
     return normalized;
+  }
+
+  async function applySavedApiCompositeReconciliation(
+    updates,
+    deletionIds
+  ) {
+    const normalizedUpdates =
+      updates.map(record =>
+        sanitizeSavedApiCompositeRecord(
+          record
+        )
+      );
+    const normalizedDeletionIds = [
+      ...new Set(
+        deletionIds.map(value =>
+          String(value || "")
+        ).filter(Boolean)
+      )
+    ];
+    if (
+      normalizedUpdates.length === 0 &&
+      normalizedDeletionIds.length === 0
+    ) {
+      return {
+        updates: [],
+        deletionIds: []
+      };
+    }
+    const database =
+      await savedApiCompositeDatabase();
+    if (!database) {
+      throw new Error(
+        "Persistent browser storage is unavailable. Saved API Composite catalog reconciliation was not committed."
+      );
+    }
+    await savedApiCompositeTransaction(
+      database,
+      "readwrite",
+      store => {
+        for (const record of
+          normalizedUpdates) {
+          store.put(clone(record));
+        }
+        for (const id of
+          normalizedDeletionIds) {
+          store.delete(id);
+        }
+      }
+    );
+    for (const record of
+      normalizedUpdates) {
+      savedApiCompositeTemplates.set(
+        record.id,
+        record
+      );
+      if (record.compatibilityIssueReason) {
+        savedApiCompositeCompatibilityIssues.set(
+          record.id,
+          record.compatibilityIssueReason
+        );
+      } else {
+        savedApiCompositeCompatibilityIssues.delete(
+          record.id
+        );
+      }
+    }
+    for (const id of
+      normalizedDeletionIds) {
+      savedApiCompositeTemplates.delete(id);
+      savedApiCompositeCompatibilityIssues.delete(
+        id
+      );
+    }
+    savedApiCompositeLibraryLoaded = true;
+    return {
+      updates: normalizedUpdates,
+      deletionIds:
+        normalizedDeletionIds
+    };
   }
 
   async function deleteSavedApiCompositeRecord(
@@ -3959,6 +4109,9 @@
       store => store.delete(id)
     );
     savedApiCompositeTemplates.delete(id);
+    savedApiCompositeCompatibilityIssues.delete(
+      id
+    );
     return true;
   }
 
@@ -4158,6 +4311,25 @@
             identity.engineVersion
         }
       };
+      changed = true;
+    }
+    if (
+      resolved.compatibilityIssueFingerprint ||
+      resolved.compatibilityIssueEngineVersion ||
+      resolved.compatibilityIssueReason ||
+      resolved.compatibilityIssueCheckedAt
+    ) {
+      resolved =
+        sanitizeSavedApiCompositeRecord({
+          ...resolved,
+          compatibilityIssueFingerprint:
+            "",
+          compatibilityIssueEngineVersion:
+            "",
+          compatibilityIssueReason: "",
+          compatibilityIssueCheckedAt:
+            ""
+        });
       changed = true;
     }
     if (persistResolved && changed) {
@@ -5504,12 +5676,19 @@
     }
     let totalNodes = 0;
     let totalConnections = 0;
+    const importedIds = new Set();
     const records = sources.map(source => {
       const record =
         sanitizeSavedApiCompositeRecord(
           source,
-          { preserveId: false }
+          { preserveId: true }
         );
+      if (importedIds.has(record.id)) {
+        throw new Error(
+          `Saved API Composite JSON contains duplicate template identity '${record.id}'. Nothing was imported.`
+        );
+      }
+      importedIds.add(record.id);
       totalNodes +=
         record.composite.nodes.length;
       totalConnections +=
@@ -5529,6 +5708,433 @@
     return records;
   }
 
+  async function confirmSavedApiCompositeUpdate(
+    existing,
+    incoming,
+    {
+      source = "import"
+    } = {}
+  ) {
+    const confirm =
+      window.RMLBuilderDialog?.confirm;
+    if (typeof confirm !== "function") {
+      return false;
+    }
+    return Boolean(
+      await confirm({
+        tone: "warning",
+        kicker:
+          source === "catalog"
+            ? "Saved API Composite catalog update"
+            : "Saved API Composite update",
+        title:
+          `Update '${existing.name}'?`,
+        message:
+          source === "catalog"
+            ? "The verified catalog requires a real content change in this individual Composite. Its saved library template is updated only after your confirmation. Other saved Composites are checked independently."
+            : "The imported Composite has the same persistent identity, but its saved content changed. The existing library template is updated only after your confirmation.",
+        details:
+          `Existing: ${existing.composite.nodes.length.toLocaleString("de-DE")} nodes and ${existing.composite.connections.length.toLocaleString("de-DE")} connections. Imported: ${incoming.composite.nodes.length.toLocaleString("de-DE")} nodes and ${incoming.composite.connections.length.toLocaleString("de-DE")} connections. Existing graph instances remain unchanged.`,
+        confirmLabel:
+          "Update Composite",
+        cancelLabel:
+          source === "catalog"
+            ? "Keep Unavailable"
+            : "Discard Imported Change"
+      })
+    );
+  }
+
+  function savedApiCompositeCatalogKey() {
+    if (!apiCompositeCatalogAvailable()) {
+      return "";
+    }
+    const identity =
+      currentApiCompositeCatalogIdentity();
+    return identity.fingerprint
+      ? `${identity.fingerprint}\u0000${identity.engineVersion}`
+      : "";
+  }
+
+  function savedApiCompositeIssueRecord(
+    record,
+    identity,
+    reason
+  ) {
+    return sanitizeSavedApiCompositeRecord({
+      ...record,
+      compatibilityIssueFingerprint:
+        identity.fingerprint,
+      compatibilityIssueEngineVersion:
+        identity.engineVersion,
+      compatibilityIssueReason:
+        String(
+          reason ||
+          "The current catalog could not verify this Saved API Composite."
+        ).slice(0, 1000),
+      compatibilityIssueCheckedAt:
+        new Date().toISOString()
+    });
+  }
+
+  function savedApiCompositeResolutionCancelled(
+    error
+  ) {
+    return Boolean(
+      error?.code ===
+        "RML_PROJECT_IMPORT_CANCELLED" ||
+      error?.cancelSource
+    );
+  }
+
+  async function confirmIncompatibleSavedApiCompositeDeletion(
+    record,
+    error
+  ) {
+    const confirm =
+      window.RMLBuilderDialog?.confirm;
+    if (typeof confirm !== "function") {
+      return false;
+    }
+    const reason = String(
+      error instanceof Error
+        ? error.message
+        : error
+    ).trim();
+    return Boolean(
+      await confirm({
+        tone: "danger",
+        kicker:
+          "Incompatible Saved API Composite",
+        title:
+          `Delete '${record.name}'?`,
+        message:
+          "This individual Composite could not be made compatible with the current verified catalog. Deletion affects only the saved library template; existing graph instances remain unchanged.",
+        details:
+          reason.slice(0, 800),
+        confirmLabel:
+          "Delete Saved Composite",
+        cancelLabel:
+          "Keep Unavailable"
+      })
+    );
+  }
+
+  async function reconcileSavedApiCompositeLibraryForCatalog(
+    catalogKey
+  ) {
+    await loadSavedApiCompositeLibrary();
+    if (
+      !catalogKey ||
+      catalogKey !==
+        savedApiCompositeCatalogKey()
+    ) {
+      return {
+        stale: true,
+        catalogKey
+      };
+    }
+    const identity =
+      currentApiCompositeCatalogIdentity();
+    const updates = [];
+    const deletionIds = [];
+    const summary = {
+      verified: 0,
+      refreshed: 0,
+      updated: 0,
+      unavailable: 0,
+      deleted: 0
+    };
+    const records = [
+      ...savedApiCompositeTemplates.values()
+    ];
+    for (const existing of records) {
+      if (
+        catalogKey !==
+          savedApiCompositeCatalogKey()
+      ) {
+        return {
+          stale: true,
+          catalogKey
+        };
+      }
+      if (
+        existing.compatibilityIssueFingerprint ===
+          identity.fingerprint &&
+        existing.compatibilityIssueEngineVersion ===
+          identity.engineVersion &&
+        existing.compatibilityIssueReason
+      ) {
+        savedApiCompositeCompatibilityIssues.set(
+          existing.id,
+          existing.compatibilityIssueReason
+        );
+        summary.unavailable += 1;
+        continue;
+      }
+      if (
+        existing.resolvedCatalogFingerprint ===
+          identity.fingerprint &&
+        existing.resolvedEngineVersion ===
+          identity.engineVersion
+      ) {
+        savedApiCompositeCompatibilityIssues.delete(
+          existing.id
+        );
+        summary.verified += 1;
+        continue;
+      }
+      try {
+        const resolved =
+          await resolveSavedApiCompositeForCurrentCatalog(
+            existing,
+            {
+              persistResolved: false,
+              allowFingerprintShortcut:
+                false
+            }
+          );
+        const contentChanged =
+          savedApiCompositeContentKey(
+            existing
+          ) !==
+          savedApiCompositeContentKey(
+            resolved
+          );
+        if (
+          contentChanged &&
+          !(await confirmSavedApiCompositeUpdate(
+            existing,
+            resolved,
+            { source: "catalog" }
+          ))
+        ) {
+          const issue =
+            savedApiCompositeIssueRecord(
+              existing,
+              identity,
+              "A compatible catalog replacement was found, but its library-template update was not confirmed."
+            );
+          updates.push(issue);
+          savedApiCompositeCompatibilityIssues.set(
+            existing.id,
+            issue.compatibilityIssueReason
+          );
+          summary.unavailable += 1;
+          continue;
+        }
+        const compatible =
+          sanitizeSavedApiCompositeRecord({
+            ...resolved,
+            id: existing.id,
+            createdAt:
+              existing.createdAt,
+            updatedAt: contentChanged
+              ? new Date().toISOString()
+              : existing.updatedAt,
+            compatibilityIssueFingerprint:
+              "",
+            compatibilityIssueEngineVersion:
+              "",
+            compatibilityIssueReason: "",
+            compatibilityIssueCheckedAt:
+              ""
+          });
+        updates.push(compatible);
+        savedApiCompositeCompatibilityIssues.delete(
+          existing.id
+        );
+        if (contentChanged) {
+          summary.updated += 1;
+        } else {
+          summary.refreshed += 1;
+        }
+      } catch (error) {
+        const cancelled =
+          savedApiCompositeResolutionCancelled(
+            error
+          );
+        const shouldDelete =
+          !cancelled &&
+          await confirmIncompatibleSavedApiCompositeDeletion(
+            existing,
+            error
+          );
+        if (shouldDelete) {
+          deletionIds.push(existing.id);
+          savedApiCompositeCompatibilityIssues.delete(
+            existing.id
+          );
+          summary.deleted += 1;
+          continue;
+        }
+        const issue =
+          savedApiCompositeIssueRecord(
+            existing,
+            identity,
+            cancelled
+              ? "Catalog replacement was cancelled. Click the saved Composite to retry, or delete it with its × button."
+              : error
+        );
+        updates.push(issue);
+        savedApiCompositeCompatibilityIssues.set(
+          existing.id,
+          issue.compatibilityIssueReason
+        );
+        summary.unavailable += 1;
+      }
+    }
+    if (
+      catalogKey !==
+        savedApiCompositeCatalogKey()
+    ) {
+      return {
+        stale: true,
+        catalogKey
+      };
+    }
+    await applySavedApiCompositeReconciliation(
+      updates,
+      deletionIds
+    );
+    renderGraphPalette();
+    if (graph?.active) {
+      renderGraphInspector();
+    }
+    if (
+      graph?.active &&
+      runtimeGraphViewActive &&
+      (
+        summary.updated > 0 ||
+        summary.unavailable > 0 ||
+        summary.deleted > 0
+      )
+    ) {
+      showGraphMessage(
+        `Saved API Composites checked individually: ${summary.verified.toLocaleString("de-DE")} unchanged, ${summary.refreshed.toLocaleString("de-DE")} catalog-refreshed, ${summary.updated.toLocaleString("de-DE")} updated, ${summary.unavailable.toLocaleString("de-DE")} unavailable and ${summary.deleted.toLocaleString("de-DE")} deleted.`,
+        summary.unavailable > 0
+          ? "error"
+          : "success"
+      );
+    }
+    return {
+      stale: false,
+      catalogKey,
+      ...summary
+    };
+  }
+
+  function scheduleSavedApiCompositeCatalogReconciliation() {
+    const catalogKey =
+      savedApiCompositeCatalogKey();
+    if (!catalogKey) {
+      return Promise.resolve(null);
+    }
+    if (
+      !savedApiCompositeReconciliationPromise &&
+      savedApiCompositeReconciliationCompletedKey ===
+        catalogKey
+    ) {
+      return Promise.resolve(null);
+    }
+    savedApiCompositeReconciliationRequestedKey =
+      catalogKey;
+    if (
+      savedApiCompositeOperations.has(
+        "import"
+      ) ||
+      savedApiCompositeOperations.has(
+        "open-graph-catalog-reconciliation"
+      ) ||
+      openGraphCatalogReconciliationPromise
+    ) {
+      return Promise.resolve(null);
+    }
+    if (
+      savedApiCompositeReconciliationPromise
+    ) {
+      return savedApiCompositeReconciliationPromise;
+    }
+    savedApiCompositeOperations.add(
+      "catalog-reconciliation"
+    );
+    savedApiCompositeReconciliationPromise =
+      (async () => {
+        let result = null;
+        while (
+          savedApiCompositeReconciliationRequestedKey &&
+          savedApiCompositeReconciliationRequestedKey !==
+            savedApiCompositeReconciliationCompletedKey
+        ) {
+          const requestedKey =
+            savedApiCompositeReconciliationRequestedKey;
+          savedApiCompositeReconciliationRequestedKey =
+            "";
+          result =
+            await reconcileSavedApiCompositeLibraryForCatalog(
+              requestedKey
+            );
+          if (
+            result?.stale !== true &&
+            requestedKey ===
+              savedApiCompositeCatalogKey()
+          ) {
+            savedApiCompositeReconciliationCompletedKey =
+              requestedKey;
+          } else {
+            const currentKey =
+              savedApiCompositeCatalogKey();
+            if (
+              currentKey &&
+              currentKey !==
+                savedApiCompositeReconciliationCompletedKey
+            ) {
+              savedApiCompositeReconciliationRequestedKey =
+                currentKey;
+            }
+          }
+        }
+        return result;
+      })()
+        .catch(error => {
+          savedApiCompositeCompatibilityIssues.clear();
+          for (const record of
+            savedApiCompositeTemplates.values()) {
+            if (
+              record.compatibilityIssueReason
+            ) {
+              savedApiCompositeCompatibilityIssues.set(
+                record.id,
+                record.compatibilityIssueReason
+              );
+            }
+          }
+          console.warn(
+            "Saved API Composite catalog reconciliation failed without changing unrelated templates.",
+            error
+          );
+          return null;
+        })
+        .finally(() => {
+          savedApiCompositeOperations.delete(
+            "catalog-reconciliation"
+          );
+          savedApiCompositeReconciliationPromise =
+            null;
+          renderGraphPalette();
+          if (
+            savedApiCompositeReconciliationRequestedKey &&
+            savedApiCompositeReconciliationRequestedKey !==
+              savedApiCompositeReconciliationCompletedKey
+          ) {
+            queueMicrotask(() => {
+              void scheduleSavedApiCompositeCatalogReconciliation();
+            });
+          }
+        });
+    return savedApiCompositeReconciliationPromise;
+  }
+
   async function importSavedApiCompositePayload(
     payload
   ) {
@@ -5546,11 +6152,30 @@
         "A Saved API Composite import is already in progress."
       );
     }
+    if (openGraphCatalogReconciliationPromise) {
+      await openGraphCatalogReconciliationPromise;
+    }
+    if (savedApiCompositeReconciliationPromise) {
+      await savedApiCompositeReconciliationPromise;
+    }
+    if (
+      savedApiCompositeOperations.has(
+        "catalog-reconciliation"
+      ) ||
+      savedApiCompositeOperations.has(
+        "open-graph-catalog-reconciliation"
+      )
+    ) {
+      throw new Error(
+        "Saved API Composites or placed Runtime Graph instances are currently being checked against the updated catalog. Retry the import after this catalog reconciliation has completed."
+      );
+    }
     savedApiCompositeOperations.add(
       "import"
     );
     renderGraphPalette();
     try {
+      await loadSavedApiCompositeLibrary();
       const records =
         savedApiCompositeRecordsFromJson(
           payload
@@ -5567,12 +6192,126 @@
           )
         );
       }
-      const stored =
-        await persistSavedApiCompositeRecords(
-          resolved
+      const knownById = new Map(
+        savedApiCompositeTemplates
+      );
+      const knownByContent = new Map();
+      for (const existing of
+        savedApiCompositeTemplates.values()) {
+        const contentKey =
+          savedApiCompositeContentKey(
+            existing
+          );
+        if (!knownByContent.has(contentKey)) {
+          knownByContent.set(
+            contentKey,
+            existing
+          );
+        }
+      }
+      const pending = [];
+      const summary = {
+        added: 0,
+        updated: 0,
+        unchanged: 0,
+        discarded: 0
+      };
+      for (const incoming of resolved) {
+        const contentKey =
+          savedApiCompositeContentKey(
+            incoming
+          );
+        const existing =
+          knownById.get(incoming.id) ||
+          null;
+        if (!existing) {
+          if (
+            knownByContent.has(contentKey)
+          ) {
+            summary.unchanged += 1;
+            continue;
+          }
+          pending.push(incoming);
+          knownById.set(
+            incoming.id,
+            incoming
+          );
+          knownByContent.set(
+            contentKey,
+            incoming
+          );
+          summary.added += 1;
+          continue;
+        }
+
+        const existingContentKey =
+          savedApiCompositeContentKey(
+            existing
+          );
+        if (
+          existingContentKey ===
+            contentKey
+        ) {
+          summary.unchanged += 1;
+          continue;
+        }
+        const confirmed =
+          await confirmSavedApiCompositeUpdate(
+            existing,
+            incoming
+          );
+        if (!confirmed) {
+          summary.discarded += 1;
+          continue;
+        }
+
+        const updated =
+          sanitizeSavedApiCompositeRecord({
+            ...incoming,
+            id: existing.id,
+            createdAt:
+              existing.createdAt,
+            updatedAt:
+              new Date().toISOString()
+          });
+        pending.push(updated);
+        knownById.set(updated.id, updated);
+        if (
+          knownByContent.get(
+            existingContentKey
+          )?.id === existing.id
+        ) {
+          knownByContent.delete(
+            existingContentKey
+          );
+        }
+        knownByContent.set(
+          savedApiCompositeContentKey(
+            updated
+          ),
+          updated
         );
+        summary.updated += 1;
+      }
+      const stored = pending.length > 0
+        ? await persistSavedApiCompositeRecords(
+            pending
+          )
+        : [];
+      Object.defineProperty(
+        stored,
+        "summary",
+        {
+          value: Object.freeze({
+            ...summary
+          }),
+          writable: false,
+          enumerable: false,
+          configurable: false
+        }
+      );
       showGraphMessage(
-        `${stored.length.toLocaleString("de-DE")} Saved API Composite${stored.length === 1 ? "" : "s"} imported.`,
+        `Saved API Composite import completed: ${summary.added.toLocaleString("de-DE")} new, ${summary.updated.toLocaleString("de-DE")} updated, ${summary.unchanged.toLocaleString("de-DE")} unchanged and ${summary.discarded.toLocaleString("de-DE")} discarded.`,
         "success"
       );
       return stored;
@@ -5581,6 +6320,7 @@
         "import"
       );
       renderGraphPalette();
+      void scheduleSavedApiCompositeCatalogReconciliation();
     }
   }
 
@@ -5886,6 +6626,23 @@
       return null;
     }
     if (
+      savedApiCompositeOperations.has(
+        "import"
+      ) ||
+      savedApiCompositeOperations.has(
+        "catalog-reconciliation"
+      ) ||
+      savedApiCompositeOperations.has(
+        "open-graph-catalog-reconciliation"
+      )
+    ) {
+      showGraphMessage(
+        "Saved API Composites are currently being updated or imported. Retry after that atomic operation has completed.",
+        "error"
+      );
+      return null;
+    }
+    if (
       savedApiCompositeOperations.has(id)
     ) {
       return null;
@@ -6063,6 +6820,10 @@
       builderProjectEpoch =
         replacementProjectEpoch;
     }
+    openGraphCatalogReconciliationRequestedKey =
+      "";
+    openGraphCatalogReconciliationCompletedKey =
+      "";
     cancelProjectScopedGraphWork();
     customCSharpProjectEpoch += 1;
     persistSchedule += 1;
@@ -6289,7 +7050,7 @@
     }
     const worker = new Worker(
       new URL(
-        "graph_codegen_worker.js?v=58-project-modal-only-composite-import-v645",
+        "graph_codegen_worker.js?v=60-catalog-reconciled-saved-composites-v647",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -19254,6 +20015,21 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         background: rgba(58, 47, 30, 0.84);
       }
 
+      .rml-saved-api-composite-item.compatibility-unavailable {
+        border-color: rgba(255, 116, 116, 0.62);
+        background: rgba(58, 27, 31, 0.82);
+      }
+
+      .rml-saved-api-composite-item.compatibility-unavailable:hover:not(:disabled) {
+        border-color: rgba(255, 145, 127, 0.88);
+        background: rgba(72, 31, 36, 0.94);
+      }
+
+      .rml-saved-api-composite-item.compatibility-unavailable > small {
+        color: #ff9b89;
+        font-weight: 800;
+      }
+
       .rml-saved-api-composite-actions {
         display: grid;
         grid-template-columns: repeat(2, 27px);
@@ -21447,7 +22223,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       catalogLoading
         ? `<span class="brand-mark rml-pack-brand-mark rml-runtime-graph-loader rml-runtime-graph-spinner" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">Loading Runtime Graph…</span>`
         : catalogFailed
-          ? `<span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">Runtime Graph unavailable</span>`
+          ? `<span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">${hostFailed ? "Runtime Graph unavailable" : "Repair Runtime Graph…"}</span>`
           : customCSharpEditor ||
             apiCompositeEditor
             ? `<svg class="rml-pack-back-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5 M10 7l-5 5 5 5"></path></svg><span class="top-action-label">Back to Runtime Graph</span>`
@@ -21462,7 +22238,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       catalogLoading
         ? "Runtime Graph is loading"
         : catalogFailed
-          ? "Runtime Graph is unavailable"
+          ? hostFailed
+            ? "Runtime Graph is unavailable"
+            : "Review catalog replacements for the Runtime Graph"
           : customCSharpEditor ||
             apiCompositeEditor
             ? "Back to Runtime Graph"
@@ -21523,9 +22301,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
                 graphHostError instanceof Error
                   ? graphHostError.message
                   : String(graphHostError)
-              }`
+            }`
             : graphCatalogReadinessMessage ||
-            "The Runtime Graph cannot be opened because required API node definitions are unavailable."
+            "Click to review deterministic replacements for incompatible API nodes, including nodes inside placed API Composites."
         : sourceNodes.length === 0
         ? "Add at least one Configuration Outline item before opening the Typed Runtime Graph."
         : active
@@ -21729,6 +22507,15 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       graphUsesCatalogOperators() &&
       graphCatalogReadiness !== "ready"
     ) {
+      if (
+        graphCatalogReadiness === "failed" &&
+        apiCompositeCatalogAvailable()
+      ) {
+        void scheduleOpenGraphCatalogReconciliation({
+          force: true
+        });
+        return;
+      }
       showGraphMessage(
         graphCatalogReadinessMessage ||
           (graphCatalogReadiness === "pending"
@@ -22986,13 +23773,33 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       "rml-saved-api-composite-row";
     const button =
       document.createElement("button");
+    const compatibilityIssue =
+      savedApiCompositeCompatibilityIssues.get(
+        record.id
+      ) || "";
+    const libraryBusy =
+      savedApiCompositeOperations.has(
+        "import"
+      ) ||
+      savedApiCompositeOperations.has(
+        "catalog-reconciliation"
+      ) ||
+      savedApiCompositeOperations.has(
+        "open-graph-catalog-reconciliation"
+      );
     button.className =
       "rml-graph-palette-item rml-saved-api-composite-item";
+    if (compatibilityIssue) {
+      button.classList.add(
+        "compatibility-unavailable"
+      );
+    }
     button.type = "button";
     button.dataset.savedApiCompositeId =
       record.id;
     button.disabled =
       !apiCompositeCatalogAvailable() ||
+      libraryBusy ||
       savedApiCompositeOperations.has(
         record.id
       );
@@ -23016,13 +23823,19 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     title.textContent = record.name;
     const add =
       document.createElement("small");
-    add.textContent = button.disabled
-      ? "·"
-      : "＋";
+    add.textContent = compatibilityIssue
+      ? "!"
+      : button.disabled
+        ? "·"
+        : "＋";
     button.append(symbol, title, add);
-    button.title = button.disabled
-      ? "A verified live or synchronized cached API catalog is required."
-      : definition.description;
+    button.title = compatibilityIssue
+      ? `${compatibilityIssue} Click to retry this Composite against the current catalog; use × to delete only its saved template.`
+      : !apiCompositeCatalogAvailable()
+        ? "A verified live or synchronized cached API catalog is required."
+        : libraryBusy
+          ? "Saved API Composites are being checked individually against the current catalog."
+          : definition.description;
 
     button.addEventListener(
       "click",
@@ -23136,7 +23949,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
   function renderGraphPalette() {
     if (
-      !graph.active ||
+      !graph?.active ||
       !runtimeGraphViewActive ||
       !dom.paletteContent
     ) {
@@ -40032,6 +40845,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       !activeInteraction
     ) {
       graph = sanitizeGraphState(incoming);
+      openGraphCatalogReconciliationCompletedKey =
+        "";
       graph.lastOpenPage =
         savedPresentationPage();
       
@@ -40049,6 +40864,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       } else {
         persistGraph(true);
       }
+      void scheduleOpenGraphCatalogReconciliation()
+        .finally(() => {
+          void scheduleSavedApiCompositeCatalogReconciliation();
+        });
     }
 
     cacheDom();
@@ -40244,6 +41063,20 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       graph.active === true &&
       savedPresentationPage() === "runtime-graph" &&
       graphCatalogReadiness === "ready";
+    if (
+      graph.active === true &&
+      graphUsesCatalogOperators(graph) &&
+      apiCompositeCatalogAvailable() &&
+      !graphHasCurrentCatalogFingerprint(
+        graph,
+        currentApiCompositeCatalogIdentity()
+      )
+    ) {
+      graphCatalogReadiness = "pending";
+      graphCatalogReadinessMessage =
+        "Checking the restored Runtime Graph and every placed API Composite against the current catalog…";
+      runtimeGraphViewActive = false;
+    }
     resetGraphRenderCaches();
 
     loadGraphPaletteUiState();
@@ -40256,6 +41089,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           renderGraphPalette();
           renderGraphInspector();
         }
+        void scheduleOpenGraphCatalogReconciliation()
+          .finally(() => {
+            void scheduleSavedApiCompositeCatalogReconciliation();
+          });
       });
 
     window.addEventListener(
@@ -40299,6 +41136,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     ensurePackButton();
     loadGraphPanelLayout();
     ensureGraphPanelToggles();
+    void scheduleOpenGraphCatalogReconciliation()
+      .finally(() => {
+        void scheduleSavedApiCompositeCatalogReconciliation();
+      });
 
     document.addEventListener(
       "rml-builder:rendered",
@@ -40674,6 +41515,595 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       );
   }
 
+  function graphCatalogContractIssues(
+    value = graph
+  ) {
+    const issues = [];
+    const visited = new Set();
+    const append = (
+      candidate,
+      path = "runtime-root",
+      insideApiComposite = false
+    ) => {
+      if (
+        !candidate ||
+        typeof candidate !== "object" ||
+        Array.isArray(candidate) ||
+        visited.has(candidate) ||
+        !Array.isArray(candidate.nodes)
+      ) {
+        return;
+      }
+      visited.add(candidate);
+      for (const node of candidate.nodes) {
+        if (node?.kind !== "operator") {
+          continue;
+        }
+        const operatorId = String(
+          node.operatorId || ""
+        );
+        const definition =
+          OPERATOR_DEFINITIONS[
+            operatorId
+          ];
+        const storedContract =
+          node.apiContract &&
+          typeof node.apiContract ===
+            "object" &&
+          !Array.isArray(node.apiContract)
+            ? node.apiContract
+            : null;
+        const currentContract =
+          portableApiContract(
+            definition
+          );
+        const catalogNode =
+          operatorId.startsWith("api.") ||
+          definition?.catalogGenerated ===
+            true ||
+          Boolean(storedContract);
+        if (!catalogNode) {
+          continue;
+        }
+        if (
+          definition?.catalogGenerated !==
+            true ||
+          !storedContract ||
+          !currentContract ||
+          savedApiContractSemanticKey(
+            storedContract
+          ) !==
+            savedApiContractSemanticKey(
+              currentContract
+            )
+        ) {
+          issues.push({
+            nodeId: String(node.id || ""),
+            operatorId,
+            path,
+            insideApiComposite
+          });
+        }
+      }
+      const customFiles =
+        candidate.customCSharpFiles &&
+        typeof candidate.customCSharpFiles ===
+          "object" &&
+        !Array.isArray(
+          candidate.customCSharpFiles
+        )
+          ? candidate.customCSharpFiles
+          : {};
+      for (const [ownerId, customGraph] of
+        Object.entries(customFiles)) {
+        append(
+          customGraph,
+          `${path}/custom-csharp:${String(ownerId || "<unnamed>")}`,
+          insideApiComposite
+        );
+      }
+      const composites =
+        candidate.apiCompositeGraphs &&
+        typeof candidate.apiCompositeGraphs ===
+          "object" &&
+        !Array.isArray(
+          candidate.apiCompositeGraphs
+        )
+          ? candidate.apiCompositeGraphs
+          : {};
+      for (const [ownerId, composite] of
+        Object.entries(composites)) {
+        append(
+          composite,
+          `${path}/api-composite:${String(ownerId || "<unnamed>")}`,
+          true
+        );
+      }
+    };
+    append(value);
+    return issues;
+  }
+
+  function runtimeGraphCatalogGeometrySignature(
+    value
+  ) {
+    const views = [];
+    const visited = new Set();
+    const append = (
+      candidate,
+      path = "runtime-root"
+    ) => {
+      if (
+        !candidate ||
+        typeof candidate !== "object" ||
+        Array.isArray(candidate) ||
+        visited.has(candidate) ||
+        !Array.isArray(candidate.nodes) ||
+        !Array.isArray(
+          candidate.connections
+        )
+      ) {
+        return;
+      }
+      visited.add(candidate);
+      views.push({
+        path,
+        nodes: candidate.nodes.map(node => ({
+          id: String(node?.id || ""),
+          x: finiteNumber(node?.x, 0),
+          y: finiteNumber(node?.y, 0),
+          width:
+            node?.width == null
+              ? null
+              : finiteNumber(node.width, 0),
+          height:
+            node?.height == null
+              ? null
+              : finiteNumber(node.height, 0)
+        })),
+        connections:
+          candidate.connections.map(
+            connection => {
+              const {
+                fromPort: _fromPort,
+                toPort: _toPort,
+                ...routing
+              } = connection || {};
+              return clone(routing);
+            }
+          )
+      });
+      for (const [ownerId, customGraph] of
+        Object.entries(
+          candidate.customCSharpFiles || {}
+        )) {
+        append(
+          customGraph,
+          `${path}/custom-csharp:${String(ownerId || "<unnamed>")}`
+        );
+      }
+      for (const [ownerId, composite] of
+        Object.entries(
+          candidate.apiCompositeGraphs || {}
+        )) {
+        append(
+          composite,
+          `${path}/api-composite:${String(ownerId || "<unnamed>")}`
+        );
+      }
+    };
+    append(value);
+    return JSON.stringify(views);
+  }
+
+  function graphHasCurrentCatalogFingerprint(
+    value,
+    identity
+  ) {
+    return Boolean(
+      identity.fingerprint &&
+      Array.isArray(
+        value?.apiCompatibility?.history
+      ) &&
+      value.apiCompatibility.history.some(
+        entry =>
+          String(
+            entry?.catalogFingerprint ||
+            ""
+          ) === identity.fingerprint &&
+          String(
+            entry?.engineVersion || ""
+          ) === identity.engineVersion &&
+          ["verified", "migrated"]
+            .includes(
+              String(entry?.status || "")
+            )
+      )
+    );
+  }
+
+  function stampGraphCurrentCatalogFingerprint(
+    value,
+    identity
+  ) {
+    const history = Array.isArray(
+      value?.apiCompatibility?.history
+    )
+      ? value.apiCompatibility.history
+          .map(entry => clone(entry))
+      : [];
+    if (
+      !graphHasCurrentCatalogFingerprint(
+        value,
+        identity
+      )
+    ) {
+      history.push({
+        schemaVersion: 1,
+        catalogFingerprint:
+          identity.fingerprint,
+        engineVersion:
+          identity.engineVersion,
+        catalogRevision: String(
+          window.RMLResoniteApiCatalog
+            ?.contractRevision ||
+          identity.fingerprint
+        ),
+        operatorMigrations: {},
+        portMigrations: {},
+        unresolvedApiNodes: [],
+        status: "verified"
+      });
+    }
+    value.apiCompatibility = {
+      schemaVersion: 1,
+      history: history.slice(-32)
+    };
+    const visited = new Set();
+    const stampComposites = candidate => {
+      if (
+        !candidate ||
+        typeof candidate !== "object" ||
+        visited.has(candidate)
+      ) {
+        return;
+      }
+      visited.add(candidate);
+      for (const nested of Object.values(
+        candidate.customCSharpFiles || {}
+      )) {
+        stampComposites(nested);
+      }
+      for (const composite of Object.values(
+        candidate.apiCompositeGraphs || {}
+      )) {
+        composite.createdCatalogFingerprint =
+          identity.fingerprint;
+        composite.createdEngineVersion =
+          identity.engineVersion;
+        stampComposites(composite);
+      }
+    };
+    stampComposites(value);
+    return value;
+  }
+
+  async function confirmOpenGraphCatalogUpdate(
+    issues
+  ) {
+    const confirm =
+      window.RMLBuilderDialog?.confirm;
+    if (typeof confirm !== "function") {
+      return false;
+    }
+    const compositeCount =
+      issues.filter(
+        issue => issue.insideApiComposite
+      ).length;
+    return Boolean(
+      await confirm({
+        tone: "warning",
+        kicker:
+          "Runtime Graph catalog update",
+        title:
+          "Apply compatible API replacements?",
+        message:
+          "The current catalog requires real operator or port changes in the open Runtime Graph. The resolved copy is applied only after this confirmation.",
+        details:
+          `${issues.length.toLocaleString("de-DE")} incompatible catalog node${issues.length === 1 ? "" : "s"} were resolved, including ${compositeCount.toLocaleString("de-DE")} inside placed API Composite${compositeCount === 1 ? "" : "s"}. Node positions and all stored wire-routing geometry must remain identical; otherwise the update is rejected atomically.`,
+        confirmLabel:
+          "Update Runtime Graph",
+        cancelLabel:
+          "Keep Current Graph"
+      })
+    );
+  }
+
+  async function reconcileOpenGraphForCatalog(
+    catalogKey
+  ) {
+    if (
+      !graph?.active ||
+      !graphUsesCatalogOperators(graph)
+    ) {
+      return {
+        stale: false,
+        skipped: true,
+        catalogKey
+      };
+    }
+    if (
+      !catalogKey ||
+      catalogKey !==
+        savedApiCompositeCatalogKey()
+    ) {
+      return {
+        stale: true,
+        catalogKey
+      };
+    }
+    const identity =
+      currentApiCompositeCatalogIdentity();
+    if (
+      graphHasCurrentCatalogFingerprint(
+        graph,
+        identity
+      ) &&
+      missingGraphCatalogOperatorIds(
+        graph
+      ).length === 0
+    ) {
+      updateGraphCatalogReadiness();
+      return {
+        stale: false,
+        verified: true,
+        catalogKey
+      };
+    }
+    const issues =
+      graphCatalogContractIssues(graph);
+    if (issues.length === 0) {
+      stampGraphCurrentCatalogFingerprint(
+        graph,
+        identity
+      );
+      persistGraph(true, false);
+      updateGraphCatalogReadiness();
+      restoreSavedPresentationIfReady();
+      return {
+        stale: false,
+        metadataRefreshed: true,
+        catalogKey
+      };
+    }
+
+    const resolver =
+      window.RMLSavedApiCompositeResolver
+        ?.resolveGraph;
+    if (typeof resolver !== "function") {
+      throw new Error(
+        "The deterministic catalog replacement resolver is unavailable."
+      );
+    }
+    const sourceGraph = graph;
+    const sourceProjectEpoch =
+      builderProjectEpoch;
+    const sourceSnapshot =
+      JSON.stringify(clone(sourceGraph));
+    const sourceGeometry =
+      runtimeGraphCatalogGeometrySignature(
+        sourceGraph
+      );
+    const resolvedGraph = await resolver(
+      clone(sourceGraph),
+      {
+        name:
+          "Current Runtime Graph and placed API Composites",
+        context:
+          "open-runtime-graph"
+      }
+    );
+    if (
+      catalogKey !==
+        savedApiCompositeCatalogKey()
+    ) {
+      return {
+        stale: true,
+        catalogKey
+      };
+    }
+    if (
+      graph !== sourceGraph ||
+      builderProjectEpoch !==
+        sourceProjectEpoch ||
+      JSON.stringify(clone(graph)) !==
+        sourceSnapshot
+    ) {
+      throw new Error(
+        "The project changed while catalog replacements were being prepared. The resolved copy was discarded."
+      );
+    }
+    const candidate =
+      sanitizeGraphState(resolvedGraph);
+    candidate.lastOpenPage =
+      sourceGraph.lastOpenPage;
+    if (
+      runtimeGraphCatalogGeometrySignature(
+        candidate
+      ) !== sourceGeometry
+    ) {
+      throw new Error(
+        "The resolved catalog update changed node placement, node identity or stored wire-routing geometry. The current graph was preserved unchanged."
+      );
+    }
+    const remainingIssues =
+      graphCatalogContractIssues(candidate);
+    if (remainingIssues.length > 0) {
+      throw new Error(
+        `The resolved graph still contains ${remainingIssues.length.toLocaleString("de-DE")} incompatible catalog node${remainingIssues.length === 1 ? "" : "s"}. The current graph was preserved unchanged.`
+      );
+    }
+    if (
+      !(await confirmOpenGraphCatalogUpdate(
+        issues
+      ))
+    ) {
+      graphCatalogReadiness = "failed";
+      graphCatalogReadinessMessage =
+        "The compatible catalog update was not applied. Click the Runtime Graph button to review the replacements again.";
+      updatePackButton();
+      return {
+        stale: false,
+        declined: true,
+        catalogKey
+      };
+    }
+    if (
+      graph !== sourceGraph ||
+      builderProjectEpoch !==
+        sourceProjectEpoch ||
+      JSON.stringify(clone(graph)) !==
+        sourceSnapshot
+    ) {
+      throw new Error(
+        "The project changed before the catalog update could be committed. The resolved copy was discarded."
+      );
+    }
+    stampGraphCurrentCatalogFingerprint(
+      candidate,
+      identity
+    );
+    graph = candidate;
+    currentAnalysis = null;
+    graphNodeDefinitionCache =
+      new WeakMap();
+    resetGraphRenderCaches();
+    pruneConnections();
+    persistGraph(true);
+    updateGraphCatalogReadiness();
+    restoreSavedPresentationIfReady();
+    if (runtimeGraphViewActive) {
+      renderGraphNodesAndWires();
+      renderGraphInspector();
+      renderGraphPalette();
+    }
+    showGraphMessage(
+      `Updated ${issues.length.toLocaleString("de-DE")} catalog node${issues.length === 1 ? "" : "s"}, including ${issues.filter(issue => issue.insideApiComposite).length.toLocaleString("de-DE")} inside placed API Composites. Node placement and wire routing were preserved.`,
+      "success"
+    );
+    return {
+      stale: false,
+      updated: true,
+      issueCount: issues.length,
+      catalogKey
+    };
+  }
+
+  function scheduleOpenGraphCatalogReconciliation(
+    { force = false } = {}
+  ) {
+    const catalogKey =
+      savedApiCompositeCatalogKey();
+    if (
+      !catalogKey ||
+      !graph?.active ||
+      !graphUsesCatalogOperators(graph)
+    ) {
+      return Promise.resolve(null);
+    }
+    if (force === true) {
+      openGraphCatalogReconciliationCompletedKey =
+        "";
+    }
+    openGraphCatalogReconciliationRequestedKey =
+      catalogKey;
+    if (
+      openGraphCatalogReconciliationPromise
+    ) {
+      return openGraphCatalogReconciliationPromise;
+    }
+    if (
+      !force &&
+      openGraphCatalogReconciliationCompletedKey ===
+        catalogKey
+    ) {
+      return Promise.resolve(null);
+    }
+    if (savedApiCompositeReconciliationPromise) {
+      return savedApiCompositeReconciliationPromise
+        .then(() =>
+          scheduleOpenGraphCatalogReconciliation({
+            force
+          })
+        );
+    }
+    savedApiCompositeOperations.add(
+      "open-graph-catalog-reconciliation"
+    );
+    graphCatalogReadiness = "pending";
+    graphCatalogReadinessMessage =
+      "Checking the open Runtime Graph and every placed API Composite against the updated catalog…";
+    updatePackButton();
+    openGraphCatalogReconciliationPromise =
+      reconcileOpenGraphForCatalog(
+        catalogKey
+      )
+        .then(result => {
+          if (
+            result?.stale !== true &&
+            catalogKey ===
+              savedApiCompositeCatalogKey()
+          ) {
+            openGraphCatalogReconciliationCompletedKey =
+              catalogKey;
+          }
+          return result;
+        })
+        .catch(error => {
+          graphCatalogReadiness = "failed";
+          graphCatalogReadinessMessage =
+            `${error instanceof Error ? error.message : String(error)} Click the Runtime Graph button to retry the deterministic replacement flow.`;
+          updatePackButton();
+          openGraphCatalogReconciliationCompletedKey =
+            catalogKey;
+          console.warn(
+            "The open Runtime Graph catalog update was not committed.",
+            error
+          );
+          return {
+            stale: false,
+            failed: true,
+            catalogKey,
+            reason:
+              error instanceof Error
+                ? error.message
+                : String(error)
+          };
+        })
+        .finally(() => {
+          savedApiCompositeOperations.delete(
+            "open-graph-catalog-reconciliation"
+          );
+          openGraphCatalogReconciliationPromise =
+            null;
+          const currentKey =
+            savedApiCompositeCatalogKey();
+          if (
+            currentKey &&
+            currentKey !== catalogKey
+          ) {
+            queueMicrotask(() => {
+              void scheduleOpenGraphCatalogReconciliation({
+                force: true
+              });
+            });
+          } else {
+            void scheduleSavedApiCompositeCatalogReconciliation();
+          }
+        });
+    return openGraphCatalogReconciliationPromise;
+  }
+
   function catalogFactoryIdentityMatches(
     catalog,
     report
@@ -40770,6 +42200,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     graphCatalogGateError = null;
 
     if (!updateGraphCatalogReadiness()) {
+      void scheduleOpenGraphCatalogReconciliation()
+        .finally(() => {
+          void scheduleSavedApiCompositeCatalogReconciliation();
+        });
       return;
     }
 
@@ -40792,6 +42226,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     
     
     restoreSavedPresentationIfReady();
+    void scheduleOpenGraphCatalogReconciliation()
+      .finally(() => {
+        void scheduleSavedApiCompositeCatalogReconciliation();
+      });
   }
 
   function handleGraphCatalogLoaded() {
@@ -40994,6 +42432,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           
           
           restoreSavedPresentationIfReady();
+          void scheduleOpenGraphCatalogReconciliation()
+            .finally(() => {
+              void scheduleSavedApiCompositeCatalogReconciliation();
+            });
         }
       })
       .catch(error => {
@@ -43233,7 +44675,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
   Object.defineProperty(window, "RMLDynamicGraphHost", {
     value: Object.freeze({
-      version: 56,
+      version: 58,
       getState() { return graph; },
       getProjectEpoch() {
         return builderProjectEpoch;
@@ -43450,6 +44892,43 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
               Object.freeze(clone(record))
             )
         );
+      },
+      getSavedApiCompositeCompatibilityIssues() {
+        return Object.freeze(
+          [...savedApiCompositeCompatibilityIssues]
+            .map(([id, reason]) =>
+              Object.freeze({
+                id,
+                reason
+              })
+            )
+        );
+      },
+      reconcileSavedApiComposites(
+        { force = false } = {}
+      ) {
+        if (force === true) {
+          savedApiCompositeReconciliationCompletedKey =
+            "";
+        }
+        return scheduleSavedApiCompositeCatalogReconciliation();
+      },
+      getOpenGraphCatalogIssues() {
+        return Object.freeze(
+          graphCatalogContractIssues(graph)
+            .map(issue =>
+              Object.freeze({
+                ...issue
+              })
+            )
+        );
+      },
+      reconcileOpenGraphCatalog(
+        { force = false } = {}
+      ) {
+        return scheduleOpenGraphCatalogReconciliation({
+          force: force === true
+        });
       },
       sanitizeSavedApiComposite(
         record,

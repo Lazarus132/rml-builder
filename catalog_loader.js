@@ -36,7 +36,7 @@
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=43-project-modal-only-composite-import-v645",
+    "api_nodes.js?v=45-catalog-reconciled-saved-composites-v647",
     scriptUrl
   ).href;
 

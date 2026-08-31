@@ -40,7 +40,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "project-modal-only-composite-import-20260830-v645";
+  "catalog-reconciled-saved-composites-20260830-v647";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -1053,7 +1053,7 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "graph_codegen_worker.js?v=58-project-modal-only-composite-import-v645",
+      "graph_codegen_worker.js?v=60-catalog-reconciled-saved-composites-v647",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -24658,6 +24658,14 @@ async function ensureProjectRuntimePrerequisites(
 
   const compatibilityEntry = {
     schemaVersion: 1,
+    catalogFingerprint: String(
+      window.RMLResoniteApiCatalog
+        ?.catalogFingerprint || ""
+    ),
+    engineVersion: String(
+      window.RMLResoniteApiCatalog
+        ?.engineVersion || ""
+    ),
     catalogRevision: String(
       window.RMLResoniteApiCatalog?.contractRevision ||
       window.RMLResoniteApiCatalog?.catalogFingerprint ||
@@ -24726,9 +24734,12 @@ async function ensureProjectRuntimePrerequisites(
 async function resolveSavedApiCompositeGraph(
   graphDocument,
   {
-    name = "Saved API Composite"
+    name = "Saved API Composite",
+    context = "saved-composite"
   } = {}
 ) {
+  const openGraph =
+    context === "open-runtime-graph";
   if (
     !graphDocument ||
     typeof graphDocument !== "object" ||
@@ -24750,13 +24761,15 @@ async function resolveSavedApiCompositeGraph(
   };
   const workSession = beginBuilderWork({
     kicker:
-      "Saved API Composite compatibility",
+      openGraph
+        ? "Runtime Graph compatibility"
+        : "Saved API Composite compatibility",
     title:
       "Checking the current catalog contracts…",
     message:
       `Preparing '${String(name || "Saved API Composite")}' without changing the open project.`,
     detail:
-      "The source fingerprint and cached catalog are checked first. Missing operator identities use the same explicit replacement dialog as project import.",
+      "The source fingerprint and cached catalog are checked first. Missing operator identities use this same explicit replacement dialog for project import, open graphs and Saved API Composites.",
     progress: 32,
     timeout: 120000
   });
@@ -24771,13 +24784,17 @@ async function resolveSavedApiCompositeGraph(
       workSession,
       {
         kicker:
-          "Saved API Composite ready",
+          openGraph
+            ? "Runtime Graph replacements ready"
+            : "Saved API Composite ready",
         title:
           "Catalog contracts verified…",
         message:
           "Every internal API node and exposed boundary port is compatible with the current catalog.",
         detail:
-          "The open Runtime Graph has not been changed yet. The caller can now create an atomic instance with fresh identities.",
+          openGraph
+            ? "The open Runtime Graph has not been changed yet. The resolved copy now awaits the graph-level atomic confirmation."
+            : "The open Runtime Graph has not been changed yet. The caller can now create an atomic instance with fresh identities.",
         progress: 100
       }
     );
@@ -24796,11 +24813,15 @@ async function resolveSavedApiCompositeGraph(
     )
       .replaceAll(
         "The JSON was not loaded.",
-        "The Saved API Composite was not changed or inserted."
+        openGraph
+          ? "The open Runtime Graph was preserved unchanged."
+          : "The Saved API Composite was not changed or inserted."
       )
       .replaceAll(
         "project JSON",
-        "Saved API Composite JSON"
+        openGraph
+          ? "open Runtime Graph"
+          : "Saved API Composite JSON"
       );
     const resolvedError =
       new Error(message);
@@ -26218,8 +26239,12 @@ async function loadProjectJsonFile(
       }
 
       openProjectDialog();
+      const importSummary =
+        imported?.summary || null;
       setProjectFileStatus(
-        `Imported ${Number(imported?.length || 0).toLocaleString("de-DE")} Saved API Composite${imported?.length === 1 ? "" : "s"}. The open project was not changed.`,
+        importSummary
+          ? `Composite import completed: ${Number(importSummary.added || 0).toLocaleString("de-DE")} new, ${Number(importSummary.updated || 0).toLocaleString("de-DE")} updated, ${Number(importSummary.unchanged || 0).toLocaleString("de-DE")} unchanged and ${Number(importSummary.discarded || 0).toLocaleString("de-DE")} discarded. The open project was not changed.`
+          : `Imported ${Number(imported?.length || 0).toLocaleString("de-DE")} Saved API Composite${imported?.length === 1 ? "" : "s"}. The open project was not changed.`,
         "success"
       );
       return;
