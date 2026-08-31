@@ -7,7 +7,7 @@
       content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
     <meta
       name="rml-builder-build"
-      content="mobile-focus-scroll-stability-20260831-v649">
+      content="real-textarea-search-selection-20260831-v660">
     <meta
       name="description"
       content="Build complete typed ResoniteModLoader projects visually with automatic dependencies; optional Raw C# tools remain an expert fallback.">
@@ -18,7 +18,7 @@
         "RMLBuilderBuildId",
         {
           value:
-            "mobile-focus-scroll-stability-20260831-v649",
+            "real-textarea-search-selection-20260831-v660",
           writable: false,
           enumerable: true,
           configurable: true
@@ -242,6 +242,15 @@
         gap: 10px;
       }
 
+      .rml-graph-code-editor-actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 8px;
+        min-height: 38px;
+        margin: -5px 1px 4px 0;
+      }
+
       html {
         -webkit-text-size-adjust: 100%;
         text-size-adjust: 100%;
@@ -253,6 +262,13 @@
         select:not([hidden]),
         [contenteditable="true"] {
           font-size: 16px !important;
+        }
+
+        .rml-graph-code-input {
+          font-size: 17px !important;
+          line-height: 1.5 !important;
+          -webkit-text-size-adjust: 100%;
+          text-size-adjust: 100%;
         }
 
         input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([hidden]),
@@ -961,11 +977,11 @@
     <script src="scroll_manager.js?v=32-mobile-viewport-focus-v649"></script>
     <script src="scroll_hierarchy.js?v=8"></script>
     <script src="csharp14_roslyn.js?v=4-normal-core-custom-csharp-v603"></script>
-    <script src="app.js?v=482-mobile-focus-scroll-stability-v649"></script>
-    <script src="catalog_loader.js?v=117-mobile-focus-scroll-stability-v649"></script>
+    <script src="app.js?v=493-real-textarea-search-selection-v660"></script>
+    <script src="catalog_loader.js?v=125-real-textarea-search-selection-v660"></script>
     <script src="runtime_bridge.js?v=4-live-compatibility-v621"></script>
     <script src="graph_gpu_renderer.js?v=11-source-comment-cleanup-v603f20"></script>
-    <script src="node_graph.js?v=316-mobile-focus-scroll-stability-v649"></script>
+    <script src="node_graph.js?v=327-real-textarea-search-selection-v660"></script>
     <script src="dynamic_settings.js?v=25-mobile-focus-stability-v649"></script>
 </body>
 </html>

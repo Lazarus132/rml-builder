@@ -40,9 +40,120 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "mobile-focus-scroll-stability-20260831-v649";
+  "real-textarea-search-selection-20260831-v660";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
+
+let alwaysClickableButtonFeedbackTimer = 0;
+
+function showAlwaysClickableButtonFeedback(
+  message
+) {
+  let feedback = document.getElementById(
+    "rml-button-action-feedback"
+  );
+  if (!feedback) {
+    feedback = document.createElement("div");
+    feedback.id =
+      "rml-button-action-feedback";
+    feedback.setAttribute("role", "status");
+    feedback.setAttribute(
+      "aria-live",
+      "polite"
+    );
+    feedback.style.cssText =
+      "position:fixed;left:50%;bottom:max(18px,env(safe-area-inset-bottom));transform:translateX(-50%);z-index:2147483647;max-width:min(680px,calc(100vw - 28px));padding:10px 14px;border:1px solid rgba(183,137,255,.75);border-radius:9px;background:#181818;color:#fff;box-shadow:0 10px 32px rgba(0,0,0,.48);font:600 12px/1.45 system-ui,sans-serif;text-align:center;pointer-events:none";
+    document.body.appendChild(feedback);
+  }
+  feedback.textContent = String(
+    message ||
+      "This action is not available in the current state."
+  );
+  feedback.hidden = false;
+  window.clearTimeout(
+    alwaysClickableButtonFeedbackTimer
+  );
+  alwaysClickableButtonFeedbackTimer =
+    window.setTimeout(() => {
+      feedback.hidden = true;
+    }, 3600);
+}
+
+function setAlwaysClickableButtonAvailability(
+  button,
+  available,
+  reason = ""
+) {
+  if (
+    !button ||
+    String(button.tagName || "") !==
+      "BUTTON"
+  ) {
+    return;
+  }
+  const enabled = available === true;
+  button.disabled = false;
+  button.setAttribute(
+    "aria-disabled",
+    String(!enabled)
+  );
+  button.classList.toggle(
+    "rml-action-unavailable",
+    !enabled
+  );
+  if (!enabled) {
+    button.dataset.unavailableReason =
+      String(
+        reason ||
+          button.title ||
+          "This action is not available in the current state."
+      );
+  } else {
+    delete button.dataset.unavailableReason;
+  }
+}
+
+function alwaysClickableButtonAvailable(
+  button
+) {
+  return Boolean(
+    button &&
+    button.getAttribute(
+      "aria-disabled"
+    ) !== "true"
+  );
+}
+
+Object.defineProperty(
+  window,
+  "RMLAlwaysClickableButtons",
+  {
+    value: Object.freeze({
+      set:
+        setAlwaysClickableButtonAvailability
+    }),
+    writable: false,
+    enumerable: true,
+    configurable: true
+  }
+);
+
+document.addEventListener(
+  "click",
+  event => {
+    const button = event.target?.closest?.(
+      'button[aria-disabled="true"]'
+    );
+    if (!button) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    showAlwaysClickableButtonFeedback(
+      button.dataset.unavailableReason ||
+        button.title
+    );
+  },
+  true
+);
 
 function removeLegacyHelpHashFromAddress() {
   if (!/^#(?:info-|shortcut-)/i.test(window.location.hash)) {
@@ -1055,7 +1166,7 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "graph_codegen_worker.js?v=62-mobile-focus-scroll-stability-v649",
+      "graph_codegen_worker.js?v=73-real-textarea-search-selection-v660",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -16559,9 +16670,14 @@ function updateCustomColorPicker(
         "selected",
         buttonProfile === profile
       );
-      button.disabled =
-        buttonProfile === "srgb" &&
-        strength > 1.000001;
+      setAlwaysClickableButtonAvailability(
+        button,
+        !(
+          buttonProfile === "srgb" &&
+          strength > 1.000001
+        ),
+        "sRGB is available at strength 1. Reduce the HDR strength before switching this color to sRGB."
+      );
     });
 }
 
@@ -17698,7 +17814,13 @@ function ensureUniversalCustomSelect(select) {
     const text = entry?.text || "Select…";
     triggerText.textContent = text;
     trigger.title = text;
-    trigger.disabled = select.disabled || entries.length === 0;
+    setAlwaysClickableButtonAvailability(
+      trigger,
+      !select.disabled && entries.length > 0,
+      entries.length === 0
+        ? "There are no options available for this selection."
+        : "This selection is currently locked by its owning setting."
+    );
   };
 
   const positionPopup = () => {
@@ -17857,7 +17979,11 @@ function ensureUniversalCustomSelect(select) {
       button.className = "rml-graph-searchable-option";
       button.textContent = entry.text;
       button.dataset.value = entry.value;
-      button.disabled = entry.disabled;
+      setAlwaysClickableButtonAvailability(
+        button,
+        entry.disabled !== true,
+        `The option '${entry.text}' is not available in the current state.`
+      );
       button.setAttribute("role", "option");
       button.setAttribute(
         "aria-selected",
@@ -18196,8 +18322,11 @@ function ensureGeneratedArtifactCustomSelect(select) {
 
     triggerText.textContent = text;
     trigger.title = text;
-    trigger.disabled =
-      entries.length === 0;
+    setAlwaysClickableButtonAvailability(
+      trigger,
+      entries.length > 0,
+      "No generated project file is available yet."
+    );
   };
 
   const positionPopup = () => {
@@ -18786,8 +18915,11 @@ function updateGeneratedOutput() {
     elements.downloadCode
   ].forEach(button => {
     if (button) {
-      button.disabled =
-        errors.length > 0;
+      setAlwaysClickableButtonAvailability(
+        button,
+        errors.length === 0,
+        "Fix the listed diagnostics before copying or downloading generated code."
+      );
     }
   });
 
@@ -20594,9 +20726,14 @@ function refreshSettingsPreviewColorVisuals() {
         "selected",
         buttonProfile === session.profile
       );
-      button.disabled =
-        buttonProfile === "srgb" &&
-        session.strength > 1.000001;
+      setAlwaysClickableButtonAvailability(
+        button,
+        !(
+          buttonProfile === "srgb" &&
+          session.strength > 1.000001
+        ),
+        "sRGB is available at strength 1. Reduce the HDR strength before switching this preview color to sRGB."
+      );
     });
 
   root
@@ -22272,8 +22409,10 @@ function resetBuilderReplacementUi() {
   if (elements.builderWorkReplacementConfirm) {
     elements.builderWorkReplacementConfirm.onclick =
       null;
-    elements.builderWorkReplacementConfirm.disabled =
-      false;
+    setAlwaysClickableButtonAvailability(
+      elements.builderWorkReplacementConfirm,
+      true
+    );
   }
   if (elements.builderWorkOverlay) {
     delete elements.builderWorkOverlay.dataset.mode;
@@ -22583,8 +22722,11 @@ async function requestBuilderReplacementChoice(
       }
     }
 
-    confirm.disabled =
-      !selectedOperatorId;
+    setAlwaysClickableButtonAvailability(
+      confirm,
+      Boolean(selectedOperatorId),
+      "Select one compatible replacement node before confirming."
+    );
     updateReplacementSummary();
   };
 
@@ -27486,13 +27628,22 @@ function updateExportCopyButtonState(
     });
 
   if (elements.exportCopySelectedFile) {
-    elements.exportCopySelectedFile.disabled =
+    const unavailable =
       hasDiagnostics ||
       !artifact ||
       (
         artifact.requiresResonitePath &&
         !pathAvailable
       );
+    setAlwaysClickableButtonAvailability(
+      elements.exportCopySelectedFile,
+      !unavailable,
+      hasDiagnostics
+        ? "Fix the listed diagnostics before copying this generated file."
+        : !artifact
+          ? "Select a generated file before copying."
+          : "Enter the required Resonite installation path before copying this generated file."
+    );
     elements.exportCopySelectedFile.textContent =
       artifact
         ? `Copy ${artifact.fileName}`
@@ -27528,8 +27679,16 @@ async function validateGeneratedCSharp14Files(files) {
 
 function setExportValidationFailure(error) {
   const message = error instanceof Error ? error.message : String(error);
-  elements.exportDownloadSelected.disabled = true;
-  elements.exportCopySelectedFile.disabled = true;
+  setAlwaysClickableButtonAvailability(
+    elements.exportDownloadSelected,
+    false,
+    message
+  );
+  setAlwaysClickableButtonAvailability(
+    elements.exportCopySelectedFile,
+    false,
+    message
+  );
   elements.exportDownloadHint.textContent = message;
   elements.exportDownloadHint.classList.add("error");
 }
@@ -27542,7 +27701,9 @@ async function copySelectedExportArtifact(
 
   if (
     !artifact ||
-    button.disabled ||
+    !alwaysClickableButtonAvailable(
+      button
+    ) ||
     getDiagnostics().length > 0
   ) {
     return;
@@ -27551,7 +27712,11 @@ async function copySelectedExportArtifact(
   const originalLabel = button.textContent;
   let failed = false;
   try {
-    button.disabled = true;
+    setAlwaysClickableButtonAvailability(
+      button,
+      false,
+      "This generated file is already being validated for copying."
+    );
     button.textContent = "Validating C# 14…";
     elements.exportDownloadHint.classList.remove("error");
     const complete = buildSelectedExportFiles(true, false);
@@ -27781,10 +27946,17 @@ function updateExportDialog() {
     "aria-invalid",
     String(projectPathMissing)
   );
-  elements.exportDownloadSelected.disabled =
-    hasDiagnostics ||
-    !hasSelection ||
-    projectPathMissing;
+  setAlwaysClickableButtonAvailability(
+    elements.exportDownloadSelected,
+    !hasDiagnostics &&
+      hasSelection &&
+      !projectPathMissing,
+    hasDiagnostics
+      ? "Fix the listed diagnostics before downloading the generated package."
+      : !hasSelection
+        ? "Select at least one generated file group before downloading."
+        : "Enter the required Resonite installation path before downloading."
+  );
 
   const platformNotes = {
     windows:
@@ -27940,8 +28112,16 @@ async function openExportDialog() {
   elements.exportProjectSummary.replaceChildren();
   elements.exportGeneratedFiles.innerHTML =
     '<div class="rml-inline-dialog-loading">Preparing the exact generated package…</div>';
-  elements.exportCopySelectedFile.disabled = true;
-  elements.exportDownloadSelected.disabled = true;
+  setAlwaysClickableButtonAvailability(
+    elements.exportCopySelectedFile,
+    false,
+    "The generated files are still being prepared."
+  );
+  setAlwaysClickableButtonAvailability(
+    elements.exportDownloadSelected,
+    false,
+    "The generated package is still being prepared."
+  );
 
   if (typeof elements.exportDialog.showModal === "function") {
     elements.exportDialog.showModal();
@@ -27978,8 +28158,16 @@ async function openExportDialog() {
     );
     elements.exportGeneratedFiles.innerHTML =
       '<div class="rml-inline-dialog-loading">The export summary could not be prepared. Close this dialog and review Diagnostics.</div>';
-    elements.exportCopySelectedFile.disabled = true;
-    elements.exportDownloadSelected.disabled = true;
+    setAlwaysClickableButtonAvailability(
+      elements.exportCopySelectedFile,
+      false,
+      "The export summary could not be prepared. Review Diagnostics and retry."
+    );
+    setAlwaysClickableButtonAvailability(
+      elements.exportDownloadSelected,
+      false,
+      "The export summary could not be prepared. Review Diagnostics and retry."
+    );
   } finally {
     elements.exportDialog.classList.remove(
       "rml-dialog-loading"
@@ -28013,8 +28201,9 @@ async function downloadSelectedExport() {
   syncExportOptions();
 
   if (
-    elements.exportDownloadSelected
-      .disabled ||
+    !alwaysClickableButtonAvailable(
+      elements.exportDownloadSelected
+    ) ||
     getDiagnostics().length > 0
   ) {
     return;
@@ -28023,7 +28212,11 @@ async function downloadSelectedExport() {
   const baseName =
     generatedBaseName();
   const originalLabel = elements.exportDownloadSelected.textContent;
-  elements.exportDownloadSelected.disabled = true;
+  setAlwaysClickableButtonAvailability(
+    elements.exportDownloadSelected,
+    false,
+    "The generated package is already being validated."
+  );
   elements.exportDownloadSelected.textContent = "Validating C# 14…";
   elements.exportDownloadHint.classList.remove("error");
   let result;
@@ -35545,8 +35738,11 @@ function rmlRuntimeDisplayInspector() {
           selected.runtimeDisplayStacked
             ? "Move this value up"
             : "Move this value left";
-        up.disabled =
-          index === 0;
+        setAlwaysClickableButtonAvailability(
+          up,
+          index > 0,
+          "This value is already first in the display order."
+        );
         up.addEventListener(
           "click",
           () => move(-1)
@@ -35563,9 +35759,12 @@ function rmlRuntimeDisplayInspector() {
           selected.runtimeDisplayStacked
             ? "Move this value down"
             : "Move this value right";
-        down.disabled =
-          index ===
-          orderedBindings.length - 1;
+        setAlwaysClickableButtonAvailability(
+          down,
+          index <
+            orderedBindings.length - 1,
+          "This value is already last in the display order."
+        );
         down.addEventListener(
           "click",
           () => move(1)
@@ -35726,7 +35925,10 @@ function rmlRuntimeDisplayUpdatePaletteAvailability() {
     return;
   }
 
-  button.disabled = false;
+  setAlwaysClickableButtonAvailability(
+    button,
+    true
+  );
   button.title =
     "Add a read-only RML menu display. After packing, connect its Start-node output to the RML Menu input of one or more Display Value nodes. Multiple values stay side by side in one row by default; Properties can reorder them or intentionally stack them vertically.";
   button.dataset.help =
