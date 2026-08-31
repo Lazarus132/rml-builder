@@ -170,6 +170,16 @@
                   entry is consumed once so repeated transitions cannot form a navigation loop.
                 </p>
                 <p>
+                  A responsive graph hierarchy trail remains visible above the graph and the
+                  embedded code editor. It shows every active level from Runtime Graph through
+                  API &amp; Logic and Custom C# File contexts to the current editor. The current
+                  level is highlighted; click any existing ancestor to return directly while
+                  all skipped child graphs are saved and closed in order. Missing graph owners,
+                  invalid API Composites and navigation cycles are never bypassed. On narrow
+                  screens the complete trail scrolls horizontally and keeps the active level
+                  in view.
+                </p>
+                <p>
                   The Generated file selector is available in both Configuration Outline
                   and Typed Runtime Graph. Both views expose the same live generated
                   project manifest, but keep independent selections: the Outline defaults

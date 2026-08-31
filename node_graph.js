@@ -1956,6 +1956,7 @@
     activeContainerName: null,
     inspectorContent: null,
     root: null,
+    navigationTrail: null,
     toolbar: null,
     viewport: null,
     stage: null,
@@ -3561,7 +3562,9 @@
     return true;
   }
 
-  function closeCustomCSharpFileGraph() {
+  function closeCustomCSharpFileGraph({
+    restorePreviousPresentation = true
+  } = {}) {
     if (!customCSharpEditor || !graph) return false;
     closeEmbeddedEditorForGraphReplacement();
     const fileName = customCSharpEditor.fileName;
@@ -3577,9 +3580,11 @@
     persistGraph(true);
     activateGraphMode();
     showGraphMessage(`Returned from ${fileName} to the previous graph.`, "success");
-    restorePreviousEmbeddedEditor(
-      previousPresentation
-    );
+    if (restorePreviousPresentation) {
+      restorePreviousEmbeddedEditor(
+        previousPresentation
+      );
+    }
     return true;
   }
 
@@ -5112,6 +5117,359 @@
       graphViewFrom(graph);
   }
 
+  function graphNavigationLevelExists(
+    level
+  ) {
+    if (!graph?.active || !level) {
+      return false;
+    }
+
+    if (level.kind === "runtime") {
+      return true;
+    }
+
+    if (level.kind === "api-composite") {
+      return Boolean(
+        apiCompositeEditor &&
+        apiCompositeEditor.containerNodeId ===
+          level.ownerId &&
+        apiCompositeEditor.mainView?.nodes?.some(
+          node => node?.id === level.ownerId
+        ) &&
+        graph.apiCompositeGraphs?.[
+          level.ownerId
+        ]
+      );
+    }
+
+    if (level.kind === "custom-csharp-file") {
+      return Boolean(
+        customCSharpEditor &&
+        customCSharpEditor.fileNodeId ===
+          level.ownerId &&
+        customCSharpEditor.mainView?.nodes?.some(
+          node => node?.id === level.ownerId
+        ) &&
+        graph.customCSharpFiles?.[
+          level.ownerId
+        ]
+      );
+    }
+
+    if (level.kind === "code-editor") {
+      if (level.pending === true) {
+        return true;
+      }
+      return customCSharpEditorRecordActive(
+        customCSharpDetachedEditors.get(
+          level.editorKey
+        )
+      );
+    }
+
+    return false;
+  }
+
+  function graphNavigationLevels({
+    inlineEditorKey = "",
+    inlineEditorTitle = ""
+  } = {}) {
+    const levels = [
+      {
+        id: "runtime-graph",
+        kind: "runtime",
+        typeLabel: "Root",
+        label: "Runtime Graph",
+        ownerId: ""
+      }
+    ];
+
+    if (apiCompositeEditor) {
+      levels.push({
+        id:
+          `api-composite:${apiCompositeEditor.containerNodeId}`,
+        kind: "api-composite",
+        typeLabel: "API & Logic",
+        label:
+          String(
+            apiCompositeEditor.title ||
+            "API Composite"
+          ),
+        ownerId:
+          apiCompositeEditor.containerNodeId
+      });
+    }
+
+    if (customCSharpEditor) {
+      levels.push({
+        id:
+          `custom-csharp-file:${customCSharpEditor.fileNodeId}`,
+        kind: "custom-csharp-file",
+        typeLabel: "Custom C# File",
+        label:
+          String(
+            customCSharpEditor.fileName ||
+            "Custom C# File"
+          ),
+        ownerId:
+          customCSharpEditor.fileNodeId
+      });
+    }
+
+    const editorKey = String(
+      inlineEditorKey ||
+      customCSharpInlineEditorKey ||
+      ""
+    );
+    if (editorKey) {
+      const record =
+        customCSharpDetachedEditors.get(
+          editorKey
+        );
+      const node = record
+        ? customCSharpEditorNode(
+            record.nodeId
+          )
+        : null;
+      const title = String(
+        node?.label ||
+        (node
+          ? nodeDefinition(node)?.title
+          : "") ||
+        record?.specification?.label ||
+        inlineEditorTitle ||
+        "Code Editor"
+      ).replace(
+        /\s*·\s*Code editor\s*$/i,
+        ""
+      );
+      levels.push({
+        id: `code-editor:${editorKey}`,
+        kind: "code-editor",
+        typeLabel: "Code Editor",
+        label: title,
+        editorKey,
+        pending: !record
+      });
+    }
+
+    return levels.map(
+      (level, index) => ({
+        ...level,
+        index,
+        exists:
+          graphNavigationLevelExists(
+            level
+          ),
+        current:
+          index === levels.length - 1
+      })
+    );
+  }
+
+  function graphNavigationPathText(
+    options = {}
+  ) {
+    return graphNavigationLevels(options)
+      .map(level => level.label)
+      .join(" › ");
+  }
+
+  function navigateToGraphNavigationLevel(
+    targetId
+  ) {
+    const initialLevels =
+      graphNavigationLevels();
+    const target = initialLevels.find(
+      level => level.id === targetId
+    );
+    if (
+      !target ||
+      !target.exists ||
+      target.current
+    ) {
+      return false;
+    }
+
+    for (let guard = 0; guard < 32; guard += 1) {
+      const levels =
+        graphNavigationLevels();
+      const targetIndex =
+        levels.findIndex(
+          level => level.id === targetId
+        );
+      if (targetIndex < 0) {
+        showGraphMessage(
+          "That graph level no longer exists. The current graph was preserved.",
+          "error"
+        );
+        return false;
+      }
+      if (targetIndex === levels.length - 1) {
+        showGraphMessage(
+          `Opened graph level ${targetIndex + 1}: ${levels[targetIndex].label}.`,
+          "success"
+        );
+        return true;
+      }
+
+      if (customCSharpInlineEditorKey) {
+        const editorKey =
+          customCSharpInlineEditorKey;
+        const record =
+          customCSharpDetachedEditors.get(
+            editorKey
+          );
+        if (record) {
+          closeCustomCSharpEditorRecord(
+            editorKey
+          );
+        } else {
+          restoreGraphAfterCustomCSharpInlineEditor(
+            editorKey
+          );
+        }
+        continue;
+      }
+
+      if (customCSharpEditor) {
+        if (!closeCustomCSharpFileGraph({
+          restorePreviousPresentation: false
+        })) {
+          return false;
+        }
+        continue;
+      }
+
+      if (apiCompositeEditor) {
+        if (!closeApiCompositeGraph({
+          restorePreviousPresentation: false
+        })) {
+          return false;
+        }
+        continue;
+      }
+
+      break;
+    }
+
+    showGraphMessage(
+      "The requested graph level could not be reached without creating a navigation cycle.",
+      "error"
+    );
+    return false;
+  }
+
+  function createGraphNavigationTrail(
+    options = {}
+  ) {
+    const levels =
+      graphNavigationLevels(options);
+    const navigation =
+      document.createElement("nav");
+    navigation.className =
+      "rml-graph-navigation";
+    navigation.setAttribute(
+      "aria-label",
+      "Current graph hierarchy"
+    );
+    navigation.title =
+      graphNavigationPathText(options);
+
+    const list =
+      document.createElement("div");
+    list.className =
+      "rml-graph-navigation-levels";
+
+    levels.forEach((level, index) => {
+      if (index > 0) {
+        const separator =
+          document.createElement("span");
+        separator.className =
+          "rml-graph-navigation-separator";
+        separator.textContent = "›";
+        separator.setAttribute(
+          "aria-hidden",
+          "true"
+        );
+        list.appendChild(separator);
+      }
+
+      const element =
+        document.createElement(
+          level.current
+            ? "span"
+            : "button"
+        );
+      element.className =
+        "rml-graph-navigation-level";
+      element.dataset.graphNavigationKind =
+        level.kind;
+      element.title =
+        `${level.typeLabel} · ${level.label}`;
+
+      const typeLabel =
+        document.createElement("small");
+      typeLabel.textContent =
+        level.typeLabel;
+      const label =
+        document.createElement("strong");
+      label.textContent = level.label;
+      element.append(
+        typeLabel,
+        label
+      );
+
+      if (level.current) {
+        element.classList.add("current");
+        element.setAttribute(
+          "aria-current",
+          "page"
+        );
+      } else {
+        element.type = "button";
+        element.disabled = !level.exists;
+        element.setAttribute(
+          "aria-label",
+          `Open level ${index + 1}: ${level.label}`
+        );
+        element.addEventListener(
+          "click",
+          () =>
+            navigateToGraphNavigationLevel(
+              level.id
+            )
+        );
+      }
+
+      list.appendChild(element);
+    });
+
+    const depth =
+      document.createElement("span");
+    depth.className =
+      "rml-graph-navigation-depth";
+    depth.textContent =
+      `Level ${levels.length}`;
+    depth.title =
+      `Current graph level ${levels.length} of ${levels.length}`;
+    depth.setAttribute(
+      "aria-label",
+      depth.title
+    );
+
+    navigation.append(
+      list,
+      depth
+    );
+
+    requestProjectAnimationFrame(() => {
+      list.scrollLeft = list.scrollWidth;
+    });
+
+    return navigation;
+  }
+
   function openApiCompositeGraph(
     containerNodeId
   ) {
@@ -5186,7 +5544,9 @@
     return true;
   }
 
-  function closeApiCompositeGraph() {
+  function closeApiCompositeGraph({
+    restorePreviousPresentation = true
+  } = {}) {
     if (!apiCompositeEditor || !graph) {
       return false;
     }
@@ -5227,9 +5587,11 @@
       `Returned from ${title} to the previous graph.${boundaryUpdate.added > 0 ? ` ${boundaryUpdate.added.toLocaleString("de-DE")} new outer port${boundaryUpdate.added === 1 ? " was" : "s were"} added automatically.` : ""}${boundaryUpdate.removed > 0 ? ` ${boundaryUpdate.removed.toLocaleString("de-DE")} unused automatic port${boundaryUpdate.removed === 1 ? " was" : "s were"} removed.` : ""}`,
       "success"
     );
-    restorePreviousEmbeddedEditor(
-      previousPresentation
-    );
+    if (restorePreviousPresentation) {
+      restorePreviousEmbeddedEditor(
+        previousPresentation
+      );
+    }
     return true;
   }
 
@@ -8376,7 +8738,7 @@
     }
     const worker = new Worker(
       new URL(
-        "graph_codegen_worker.js?v=97-special-loader-environment-help-v684",
+        "graph_codegen_worker.js?v=98-graph-hierarchy-navigation-v685",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -21586,6 +21948,17 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         background: #181818;
       }
 
+      .rml-custom-csharp-inline-shell {
+        display: grid;
+        width: 100%;
+        height: 100%;
+        min-width: 0;
+        min-height: 0;
+        grid-template-rows: 42px minmax(0, 1fr);
+        overflow: hidden;
+        background: #090b12;
+      }
+
       .rml-custom-csharp-editor-overlay {
         position: fixed;
         z-index: 2147482200;
@@ -22079,11 +22452,216 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         min-width: 0;
         height: 100%;
         min-height: 0;
-        grid-template-rows: 46px minmax(0, 1fr);
+        grid-template-rows: 42px 46px minmax(0, 1fr);
         overflow: hidden;
         contain: inline-size paint;
         background: #090b12;
         color: #f4f7fa;
+      }
+
+      .rml-graph-navigation {
+        position: relative;
+        z-index: 44;
+        display: flex;
+        width: 100%;
+        min-width: 0;
+        min-height: 0;
+        align-items: stretch;
+        overflow: hidden;
+        border-bottom: 1px solid #293241;
+        background:
+          linear-gradient(
+            90deg,
+            rgba(18, 23, 33, 0.99),
+            rgba(13, 17, 24, 0.99)
+          );
+        color: #cbd5df;
+      }
+
+      .rml-graph-navigation-levels {
+        display: flex;
+        min-width: 0;
+        flex: 1 1 auto;
+        align-items: center;
+        gap: 5px;
+        padding: 4px 7px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        overscroll-behavior-x: contain;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(158, 111, 230, 0.68) transparent;
+        touch-action: pan-x;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      .rml-graph-navigation-levels::-webkit-scrollbar {
+        height: 4px;
+      }
+
+      .rml-graph-navigation-levels::-webkit-scrollbar-track {
+        background: transparent;
+      }
+
+      .rml-graph-navigation-levels::-webkit-scrollbar-thumb {
+        border-radius: 999px;
+        background: rgba(158, 111, 230, 0.68);
+      }
+
+      .rml-graph-navigation-level {
+        display: grid;
+        min-width: 96px;
+        max-width: min(260px, 32vw);
+        min-height: 32px;
+        flex: 0 0 auto;
+        align-content: center;
+        gap: 0;
+        padding: 3px 10px;
+        overflow: hidden;
+        border: 1px solid #344050;
+        border-radius: 7px;
+        background: rgba(24, 31, 42, 0.94);
+        color: #bfcbd7;
+        font: inherit;
+        text-align: left;
+        box-shadow: inset 0 1px rgba(255, 255, 255, 0.025);
+      }
+
+      button.rml-graph-navigation-level {
+        cursor: pointer;
+      }
+
+      button.rml-graph-navigation-level:hover,
+      button.rml-graph-navigation-level:focus-visible {
+        border-color: #7f59ad;
+        background: rgba(45, 35, 62, 0.98);
+        color: #f1e6ff;
+        outline: none;
+      }
+
+      button.rml-graph-navigation-level:disabled {
+        opacity: 0.46;
+        cursor: not-allowed;
+      }
+
+      .rml-graph-navigation-level.current {
+        border-color: rgba(185, 130, 255, 0.76);
+        background:
+          linear-gradient(
+            145deg,
+            rgba(77, 47, 111, 0.96),
+            rgba(39, 29, 57, 0.98)
+          );
+        color: #ffffff;
+        box-shadow:
+          inset 0 1px rgba(255, 255, 255, 0.06),
+          0 0 0 1px rgba(163, 103, 235, 0.11);
+      }
+
+      .rml-graph-navigation-level small,
+      .rml-graph-navigation-level strong {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .rml-graph-navigation-level small {
+        color: #8796a7;
+        font-size: 7px;
+        font-weight: 760;
+        letter-spacing: 0.075em;
+        line-height: 1.05;
+        text-transform: uppercase;
+      }
+
+      .rml-graph-navigation-level.current small {
+        color: #d6b5ff;
+      }
+
+      .rml-graph-navigation-level[data-graph-navigation-kind="runtime"] small {
+        color: #88cfff;
+      }
+
+      .rml-graph-navigation-level[data-graph-navigation-kind="api-composite"] small {
+        color: #87e3c2;
+      }
+
+      .rml-graph-navigation-level[data-graph-navigation-kind="custom-csharp-file"] small {
+        color: #ffd181;
+      }
+
+      .rml-graph-navigation-level[data-graph-navigation-kind="code-editor"] small {
+        color: #d6b5ff;
+      }
+
+      .rml-graph-navigation-level strong {
+        font-size: 9px;
+        font-weight: 780;
+        line-height: 1.25;
+      }
+
+      .rml-graph-navigation-separator {
+        flex: 0 0 auto;
+        color: #6f7c8b;
+        font-size: 18px;
+        line-height: 1;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+
+      .rml-graph-navigation-depth {
+        display: grid;
+        min-width: 62px;
+        flex: 0 0 auto;
+        place-items: center;
+        padding: 0 9px;
+        border-left: 1px solid #303a48;
+        background: rgba(11, 15, 22, 0.98);
+        color: #a895c3;
+        font-size: 8px;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        white-space: nowrap;
+      }
+
+      @media (max-width: 780px) {
+        .rml-graph-root {
+          grid-template-rows: 52px 46px minmax(0, 1fr);
+        }
+
+        .rml-custom-csharp-inline-shell {
+          grid-template-rows: 52px minmax(0, 1fr);
+        }
+
+        .rml-graph-navigation-levels {
+          gap: 4px;
+          padding: 4px 6px;
+        }
+
+        .rml-graph-navigation-level {
+          min-width: 112px;
+          max-width: min(190px, 58vw);
+          min-height: 44px;
+          padding: 5px 10px;
+        }
+
+        .rml-graph-navigation-level small {
+          font-size: 7px;
+        }
+
+        .rml-graph-navigation-level strong {
+          font-size: 10px;
+        }
+
+        .rml-graph-navigation-depth {
+          min-width: 58px;
+          padding-inline: 7px;
+          font-size: 8px;
+        }
+
+        .rml-graph-search-overlay {
+          padding-top: 114px;
+        }
       }
 
       .rml-graph-toolbar {
@@ -22158,7 +22736,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         inset: 0;
         display: grid;
         place-items: start center;
-        padding: 58px 10px 10px;
+        padding: 104px 10px 10px;
         background: rgba(4, 5, 9, 0.72);
         -webkit-backdrop-filter: blur(5px);
         backdrop-filter: blur(5px);
@@ -25732,6 +26310,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     graphNodeVirtualizationSignature = "";
 
     dom.root = null;
+    dom.navigationTrail = null;
     dom.toolbar = null;
     dom.viewport = null;
     dom.stage = null;
@@ -28752,13 +29331,19 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     const toast =
       ensureGraphViewportToast();
 
+    const navigationTrail =
+      createGraphNavigationTrail();
+
     root.append(
+      navigationTrail,
       toolbar,
       viewport
     );
     dom.builderCanvas.appendChild(root);
 
     dom.root = root;
+    dom.navigationTrail =
+      navigationTrail;
     dom.toolbar = toolbar;
     dom.viewport = viewport;
     dom.stage = stage;
@@ -39936,7 +40521,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         const script =
           document.createElement("script");
         script.src = new URL(
-          "custom_csharp_editor.js?v=31-special-loader-environment-help-v684",
+          "custom_csharp_editor.js?v=32-graph-hierarchy-navigation-v685",
           document.baseURI
         ).href;
         script.async = true;
@@ -40196,6 +40781,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     graphNodeVirtualizationSignature = "";
     dom.builderCanvas?.replaceChildren();
     dom.root = null;
+    dom.navigationTrail = null;
     dom.toolbar = null;
     dom.viewport = null;
     dom.stage = null;
@@ -40225,7 +40811,22 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       frame.title
     );
     frame.setAttribute("scrolling", "no");
-    dom.builderCanvas?.appendChild(frame);
+    const shell =
+      document.createElement("div");
+    shell.className =
+      "rml-custom-csharp-inline-shell";
+    const navigationTrail =
+      createGraphNavigationTrail({
+        inlineEditorKey: editorKey,
+        inlineEditorTitle: title
+      });
+    shell.append(
+      navigationTrail,
+      frame
+    );
+    dom.builderCanvas?.appendChild(shell);
+    dom.navigationTrail =
+      navigationTrail;
     if (dom.canvasTitle) {
       dom.canvasTitle.innerHTML =
         "<small>Custom C#</small> Embedded code editor";

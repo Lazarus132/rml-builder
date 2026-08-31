@@ -32,7 +32,7 @@
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "visual_csharp.js?v=62-special-loader-environment-help-v684",
+    "visual_csharp.js?v=63-graph-hierarchy-navigation-v685",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
