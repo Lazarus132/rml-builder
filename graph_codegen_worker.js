@@ -194,16 +194,16 @@ async function ensureRuntime(catalog) {
       self.RMLResoniteApiCatalog;
 
     importScripts(
-      "node_graph.js?v=362-harmony-only-reload-capability-v696"
+      "node_graph.js?v=371-composite-inspector-fingerprint-actions-v705"
     );
     importScripts(
-      "mod_nodes.js?v=55-harmony-only-reload-capability-v696"
+      "mod_nodes.js?v=61-composite-inspector-fingerprint-actions-v705"
     );
     importScripts(
-      "visual_csharp.js?v=73-harmony-only-reload-capability-v696"
+      "visual_csharp.js?v=77-composite-inspector-fingerprint-actions-v705"
     );
     importScripts(
-      "api_nodes.js?v=51-harmony-only-reload-capability-v696"
+      "api_nodes.js?v=55-composite-inspector-fingerprint-actions-v705"
     );
 
     if (

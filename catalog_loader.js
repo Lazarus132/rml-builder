@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const LOADER_VERSION = 61;
+  const LOADER_VERSION = 65;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
   const CATALOG_PATH = "/resonite_api_catalog.json";
@@ -28,15 +28,15 @@
     document.currentScript?.src ||
     window.location.href;
   const modNodesUrl = new URL(
-    "mod_nodes.js?v=55-harmony-only-reload-capability-v696",
+    "mod_nodes.js?v=61-composite-inspector-fingerprint-actions-v705",
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "visual_csharp.js?v=73-harmony-only-reload-capability-v696",
+    "visual_csharp.js?v=77-composite-inspector-fingerprint-actions-v705",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=51-harmony-only-reload-capability-v696",
+    "api_nodes.js?v=55-composite-inspector-fingerprint-actions-v705",
     scriptUrl
   ).href;
 
@@ -112,21 +112,8 @@
   }
 
   function stableCatalogHash(value) {
-    const text = String(value || "");
-    let first = 0x811c9dc5;
-    let second = 0x9e3779b9;
-
-    for (let index = 0; index < text.length; index += 1) {
-      const code = text.charCodeAt(index);
-      first ^= code;
-      first = Math.imul(first, 0x01000193) >>> 0;
-      second ^= code + index;
-      second = Math.imul(second, 0x85ebca6b) >>> 0;
-    }
-
-    return (
-      first.toString(16).padStart(8, "0") +
-      second.toString(16).padStart(8, "0")
+    return window.RMLCrypto.stableHash64(
+      value
     );
   }
 

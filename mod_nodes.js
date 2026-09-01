@@ -2751,7 +2751,10 @@ private static async Task WaitForAnyGraphTask(params Task[] tasks)
   }
 
   function ensureHarmonyRuntime(api) {
+    api.require("usesHarmony", true);
+    api.require("runtimeReloadUnsafe", true);
     ensureReflectionRuntime(api);
+    api.addUsing("System.Threading");
     api.addUsing("HarmonyLib");
     api.addReference({
       include: "0Harmony",
@@ -2764,6 +2767,39 @@ private static async Task WaitForAnyGraphTask(params Task[] tasks)
       `private static readonly Harmony _graphHarmony = new("${api.escapeString(
         `${api.namespaceName}.${api.className}.GeneratedGraph`
       )}");`
+    );
+    api.addField(
+      "universal.harmony.shutdownState",
+      "private static int _graphHarmonyShutdownStarted;"
+    );
+    api.addMember(
+      "universal.harmony.shutdown",
+      String.raw`
+private static void ShutdownGraphHarmony()
+{
+    if (Interlocked.Exchange(
+            ref _graphHarmonyShutdownStarted,
+            1) != 0)
+    {
+        return;
+    }
+
+    try
+    {
+        _graphHarmony.UnpatchAll(
+            _graphHarmony.Id);
+    }
+    catch
+    {
+    }
+}
+`
+    );
+    api.addInitialize(
+      "AppDomain.CurrentDomain.ProcessExit += (_, _) => ShutdownGraphHarmony();"
+    );
+    api.addRuntimeDrain(
+      "ShutdownGraphHarmony();"
     );
     api.addMember("universal.harmony.context", String.raw`
 internal sealed class PatchContext
@@ -5550,7 +5586,6 @@ private static T GraphCollectionItemAt<T>(
         true
       );
       ensureEventRuntime(api);
-      ensureHarmonyRuntime(api);
       api.addUsing("System.Threading");
       api.addField(
         "universal.lifecycle.shutdownState",
@@ -5603,14 +5638,6 @@ private static T GraphCollectionItemAt<T>(
         {
         }
 
-        try
-        {
-            _graphHarmony.UnpatchAll(
-                _graphHarmony.Id);
-        }
-        catch
-        {
-        }
     }
 }`
       );
@@ -5719,13 +5746,16 @@ private static T GraphCollectionItemAt<T>(
       );
       api.addMember(
         `${api.node.id}.startTimer`,
-        `private static void StartTimer${token}(int interval)\n{\n    int safeInterval = Math.Max(1, interval);\n    ${field}?.Dispose();\n    ${field} = new Timer(_ => ${emit ? `${emit}()` : "{ }"}, null, safeInterval, safeInterval);\n}`
+        `private static void StopTimer${token}()\n{\n    Timer? timer = Interlocked.Exchange(ref ${field}, null);\n    if (timer is null)\n    {\n        return;\n    }\n\n    TrackGraphTask(timer.DisposeAsync().AsTask());\n}\n\nprivate static void StartTimer${token}(int interval)\n{\n    int safeInterval = Math.Max(1, interval);\n    StopTimer${token}();\n    ${field} = new Timer(_ => ${emit ? `${emit}()` : "{ }"}, null, safeInterval, safeInterval);\n}`
+      );
+      api.addRuntimeDrain(
+        `StopTimer${token}();`
       );
     },
     codegenAction(api) {
       const token = nodeToken(api);
       if (api.connection.toPort === "stop") {
-        return `_timer${token}?.Dispose();\n        _timer${token} = null;`;
+        return `StopTimer${token}();`;
       }
       return `StartTimer${token}(${api.input("interval").code});`;
     }
@@ -10396,6 +10426,11 @@ private static string NormalConversionError<T>(object? value)
     );
 
     if (information.usesHarmony) {
+      api.require("usesHarmony", true);
+      api.require(
+        "runtimeReloadUnsafe",
+        true
+      );
       api.addReference({
         include: "0Harmony",
         hintPath:
@@ -11079,6 +11114,10 @@ private static string NormalConversionError<T>(object? value)
 
           case "harmony.earlyPatchSource": {
             api.require(
+              "usesHarmony",
+              true
+            );
+            api.require(
               "runtimeReloadUnsafe",
               true
             );
@@ -11287,36 +11326,12 @@ private static string NormalConversionError<T>(object? value)
           ]?.harmonyApiNode === true
         );
 
-      const scannedHarmonyPatchApiNodes =
-        scannedHarmonyApiNodes.filter(node => {
-          const definition =
-            api.definitions?.[
-              node.operatorId
-            ];
-          const memberName = String(
-            definition?.catalogMember ||
-            node.apiContract?.memberName ||
-            ""
-          ).trim().toLowerCase();
-          return [
-            "patch",
-            "patchall",
-            "patchcategory",
-            "patchbycategory"
-          ].includes(memberName);
-        });
-
-      if (
-        scannedHarmonyPatchApiNodes
-          .length > 0
-      ) {
+      if (scannedHarmonyApiNodes.length > 0) {
+        api.require("usesHarmony", true);
         api.require(
           "runtimeReloadUnsafe",
           true
         );
-      }
-
-      if (scannedHarmonyApiNodes.length > 0) {
         api.addReference({
           include: "0Harmony",
           hintPath:

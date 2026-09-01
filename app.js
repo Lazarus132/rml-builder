@@ -40,7 +40,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "harmony-only-reload-capability-20260901-v696";
+  "composite-inspector-fingerprint-actions-20260901-v705";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -1166,7 +1166,7 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "graph_codegen_worker.js?v=108-harmony-only-reload-capability-v696",
+      "graph_codegen_worker.js?v=117-composite-inspector-fingerprint-actions-v705",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -4298,6 +4298,48 @@ function reactionIncludesSaved(reaction) {
   return reaction === "saved" || reaction === "startup-saved";
 }
 
+function isHarmonyAssemblyReference(
+  reference
+) {
+  if (
+    !reference ||
+    typeof reference !== "object"
+  ) {
+    return false;
+  }
+
+  const include = String(
+    reference.include || ""
+  ).trim();
+  const hintPath = String(
+    reference.hintPath || ""
+  ).trim();
+
+  return (
+    include.toLowerCase() ===
+      "0harmony" ||
+    /(?:^|[\\/])0harmony\.dll$/i.test(
+      hintPath
+    )
+  );
+}
+
+function graphRequirementsUseHarmony(
+  requirements
+) {
+  return Boolean(
+    requirements?.usesHarmony === true ||
+    (
+      Array.isArray(
+        requirements?.references
+      ) &&
+      requirements.references.some(
+        isHarmonyAssemblyReference
+      )
+    )
+  );
+}
+
 function getTypedNodeGraphContribution() {
   const extensionState =
     isPlainObject(state.extensions)
@@ -4584,7 +4626,10 @@ function generateCode() {
   const runtimeReloadUnsafe =
     graphContribution?.requirements
       ?.runtimeReloadUnsafe ===
-    true;
+      true ||
+    graphRequirementsUseHarmony(
+      graphContribution?.requirements
+    );
   const supportsRuntimeReload =
     usesModUnloadLifecycle &&
     !runtimeReloadUnsafe;
@@ -26487,11 +26532,22 @@ async function loadProjectJsonFile(
       openProjectDialog();
       const importSummary =
         imported?.summary || null;
+      const replacedInstances = Number(
+        importSummary?.instancesReplaced || 0
+      );
+      const replacementErrors = Number(
+        importSummary?.instanceUpdateErrors || 0
+      );
+      const linkedByName = Number(
+        importSummary?.instancesLinkedByName || 0
+      );
       setProjectFileStatus(
         importSummary
-          ? `Composite import completed: ${Number(importSummary.added || 0).toLocaleString("de-DE")} new, ${Number(importSummary.updated || 0).toLocaleString("de-DE")} updated, ${Number(importSummary.unchanged || 0).toLocaleString("de-DE")} unchanged and ${Number(importSummary.discarded || 0).toLocaleString("de-DE")} discarded. The open project was not changed.`
+          ? `Composite import completed: ${Number(importSummary.added || 0).toLocaleString("de-DE")} new, ${Number(importSummary.updated || 0).toLocaleString("de-DE")} updated, ${Number(importSummary.unchanged || 0).toLocaleString("de-DE")} unchanged and ${Number(importSummary.discarded || 0).toLocaleString("de-DE")} discarded.${replacedInstances > 0 ? ` ${replacedInstances.toLocaleString("de-DE")} placed instance${replacedInstances === 1 ? " was" : "s were"} replaced.${linkedByName > 0 ? ` ${linkedByName.toLocaleString("de-DE")} matched by exact normalized name and received the imported fingerprint.` : ""}` : " The open project was not changed."}${replacementErrors > 0 ? ` ${replacementErrors.toLocaleString("de-DE")} graph replacement${replacementErrors === 1 ? " failed" : "s failed"} atomically.` : ""}`
           : `Imported ${Number(imported?.length || 0).toLocaleString("de-DE")} Saved API Composite${imported?.length === 1 ? "" : "s"}. The open project was not changed.`,
-        "success"
+        replacementErrors > 0
+          ? "warning"
+          : "success"
       );
       return;
     }
@@ -29396,8 +29452,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "help_template.html?v=82-harmony-only-reload-capability-v696",
-    "help_template.js?v=82-harmony-only-reload-capability-v696",
+    "help_template.html?v=89-composite-inspector-fingerprint-actions-v705",
+    "help_template.js?v=89-composite-inspector-fingerprint-actions-v705",
     "help-template",
     "RMLHelpTemplateMarkup"
   )

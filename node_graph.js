@@ -1681,6 +1681,10 @@
     20000;
   const SAVED_API_COMPOSITE_MAX_CONNECTIONS =
     50000;
+  const SAVED_API_COMPOSITE_LEGACY_FINGERPRINT =
+    Symbol(
+      "saved-api-composite-legacy-fingerprint"
+    );
   let savedApiCompositeDatabasePromise = null;
   let savedApiCompositeLoadPromise = null;
   let savedApiCompositeLibraryLoaded = false;
@@ -3721,26 +3725,302 @@
     return value;
   }
 
+  function savedApiCompositeNameKey(value) {
+    return window.RMLCrypto.normalizeName(
+      value
+    );
+  }
+
+  function savedApiCompositeNodeNameKeys(
+    node,
+    composite
+  ) {
+    return new Set(
+      [
+        node?.parameters?.title,
+        node?.label,
+        composite?.title
+      ]
+        .map(savedApiCompositeNameKey)
+        .filter(Boolean)
+    );
+  }
+
+  function savedApiCompositeNodeMatchesName(
+    node,
+    composite,
+    name
+  ) {
+    const nameKey =
+      savedApiCompositeNameKey(name);
+    return Boolean(
+      nameKey &&
+      savedApiCompositeNodeNameKeys(
+        node,
+        composite
+      ).has(nameKey)
+    );
+  }
+
+  function savedApiCompositeFingerprintHash(
+    value
+  ) {
+    return window.RMLCrypto.fingerprint(
+      "rml-api-composite-v1",
+      value
+    );
+  }
+
+  function savedApiCompositeCanonicalGraphView(
+    source
+  ) {
+    const graphView = source || {};
+    const nodeIdMap = new Map(
+      (graphView.nodes || []).map(
+        (node, index) => [
+          String(node?.id || ""),
+          `node-${index}`
+        ]
+      )
+    );
+    const connectionIdMap = new Map();
+    const pointIdMaps = new Map();
+    for (const [index, connection] of
+      (graphView.connections || []).entries()) {
+      const connectionId = String(
+        connection?.id || ""
+      );
+      connectionIdMap.set(
+        connectionId,
+        `connection-${index}`
+      );
+      pointIdMaps.set(
+        connectionId,
+        new Map(
+          (connection?.points || []).map(
+            (point, pointIndex) => [
+              String(point?.id || ""),
+              `point-${index}-${pointIndex}`
+            ]
+          )
+        )
+      );
+    }
+    const canonicalBranchReference =
+      branch => {
+        if (!branch) return null;
+        const sourceConnectionId = String(
+          branch.connectionId || ""
+        );
+        return {
+          connectionId:
+            connectionIdMap.get(
+              sourceConnectionId
+            ) || sourceConnectionId,
+          pointId:
+            pointIdMaps
+              .get(sourceConnectionId)
+              ?.get(
+                String(branch.pointId || "")
+              ) || String(branch.pointId || "")
+        };
+      };
+    return {
+      nodes: (graphView.nodes || []).map(
+        (node, index) => ({
+          ...clone(node),
+          id: `node-${index}`
+        })
+      ),
+      connections:
+        (graphView.connections || []).map(
+          (connection, index) => ({
+            ...clone(connection),
+            id: `connection-${index}`,
+            fromNode:
+              nodeIdMap.get(
+                String(
+                  connection?.fromNode || ""
+                )
+              ) || String(
+                connection?.fromNode || ""
+              ),
+            toNode:
+              nodeIdMap.get(
+                String(
+                  connection?.toNode || ""
+                )
+              ) || String(
+                connection?.toNode || ""
+              ),
+            points:
+              (connection?.points || []).map(
+                (point, pointIndex) => ({
+                  ...clone(point),
+                  id:
+                    `point-${index}-${pointIndex}`
+                })
+              ),
+            branchFrom:
+              canonicalBranchReference(
+                connection?.branchFrom
+              )
+          })
+        ),
+      identities: {
+        nodeIdMap,
+        connectionIdMap,
+        pointIdMaps
+      }
+    };
+  }
+
+  function savedApiCompositeFingerprint(
+    name,
+    sourceComposite,
+    portLayoutFallback = "standard"
+  ) {
+    const composite = sourceComposite || {};
+    const canonical =
+      savedApiCompositeCanonicalGraphView(
+        composite
+      );
+    const {
+      nodeIdMap,
+      connectionIdMap,
+      pointIdMaps
+    } = canonical.identities;
+    const customCSharpFiles = {};
+    for (const [ownerId, customGraph] of
+      Object.entries(
+        composite.customCSharpFiles || {}
+      )) {
+      const canonicalOwnerId =
+        nodeIdMap.get(String(ownerId)) ||
+        String(ownerId);
+      const canonicalCustomGraph =
+        savedApiCompositeCanonicalGraphView(
+          customGraph
+        );
+      const customNodeIds =
+        canonicalCustomGraph.identities
+          .nodeIdMap;
+      delete canonicalCustomGraph.identities;
+      const customContent = clone(
+        customGraph || {}
+      );
+      for (const key of [
+        "viewport",
+        "selectedNodeId",
+        "selectedNodeIds",
+        "selectedConnectionId",
+        "selectedWirePoint",
+        "nextSequence",
+        "catalogFingerprint",
+        "catalogEngineVersion",
+        "catalogSource",
+        "catalogDefinitionRevision",
+        "contentFingerprint"
+      ]) {
+        delete customContent[key];
+      }
+      customContent.outputNodeId =
+        customNodeIds.get(
+          String(
+            customGraph?.outputNodeId || ""
+          )
+        ) || "";
+      customContent.rootSyntaxNodeId =
+        customNodeIds.get(
+          String(
+            customGraph?.rootSyntaxNodeId ||
+            ""
+          )
+        ) || "";
+      customContent.directSourceNodeId =
+        customNodeIds.get(
+          String(
+            customGraph?.directSourceNodeId ||
+            ""
+          )
+        ) || "";
+      customContent.nodes =
+        canonicalCustomGraph.nodes;
+      customContent.connections =
+        canonicalCustomGraph.connections;
+      customCSharpFiles[canonicalOwnerId] =
+        customContent;
+    }
+    const branchRouting = {};
+    for (const [connectionId, branch] of
+      Object.entries(
+        composite.branchRouting || {}
+      )) {
+      const sourceParentId = String(
+        branch?.connectionId || ""
+      );
+      branchRouting[
+        connectionIdMap.get(connectionId) ||
+        connectionId
+      ] = {
+        connectionId:
+          connectionIdMap.get(
+            sourceParentId
+          ) || sourceParentId,
+        pointId:
+          pointIdMaps
+            .get(sourceParentId)
+            ?.get(
+              String(branch?.pointId || "")
+            ) || String(branch?.pointId || "")
+      };
+    }
+    const value = {
+      name: savedApiCompositeNameKey(name),
+      portLayout:
+        composite.portLayout === "mirrored" ||
+        composite.portLayout === "standard"
+          ? composite.portLayout
+          : portLayoutFallback === "mirrored"
+            ? "mirrored"
+            : "standard",
+      boundaryPorts:
+        apiCompositeBoundaryRecords(
+          composite.boundaryPorts
+        ).map(boundary => ({
+          ...clone(boundary),
+          internalNodeId:
+            nodeIdMap.get(
+              String(
+                boundary.internalNodeId || ""
+              )
+            ) || String(
+              boundary.internalNodeId || ""
+            )
+        })),
+      branchRouting,
+      customCSharpFiles,
+      nodes: canonical.nodes,
+      connections:
+        canonical.connections
+    };
+    return savedApiCompositeFingerprintHash(
+      JSON.stringify(
+        savedApiCompositeCanonicalValue(value)
+      )
+    );
+  }
+
   function savedApiCompositeContentKey(
     record
   ) {
-    const composite = clone(
-      record?.composite || {}
-    );
-    delete composite
-      .createdCatalogFingerprint;
-    delete composite
-      .createdEngineVersion;
-    return JSON.stringify(
-      savedApiCompositeCanonicalValue({
-        name: String(
-          record?.name || ""
-        ),
-        description: String(
-          record?.description || ""
-        ),
-        composite
-      })
+    return String(
+      record?.contentFingerprint ||
+      savedApiCompositeFingerprint(
+        record?.name || "",
+        record?.composite || {},
+        "standard"
+      )
     );
   }
 
@@ -3883,6 +4163,11 @@
       fallbackName
     ).trim().slice(0, 120) ||
       fallbackName;
+    const portLayout =
+      source.portLayout === "mirrored" ||
+      source.portLayout === "standard"
+        ? source.portLayout
+        : "";
     const owner = {
       id: ownerId,
       kind: "operator",
@@ -3899,7 +4184,8 @@
           source.nodes.length,
         boundaryPorts:
           clone(sourceBoundaries),
-        portLayout: "standard"
+        portLayout:
+          portLayout || "standard"
       }
     };
     const sanitizedRoot =
@@ -3978,7 +4264,7 @@
       String(raw.id || "").trim()
         ? String(raw.id).trim().slice(0, 180)
         : savedApiCompositeIdentifier();
-    return {
+    const result = {
       schemaVersion:
         SAVED_API_COMPOSITE_SCHEMA_VERSION,
       id,
@@ -4025,6 +4311,9 @@
       composite: {
         version: 1,
         title,
+        ...(portLayout
+          ? { portLayout }
+          : {}),
         createdCatalogFingerprint: String(
           composite.createdCatalogFingerprint ||
           ""
@@ -4085,6 +4374,17 @@
         )
       }
     };
+    const contentFingerprint =
+      savedApiCompositeFingerprint(
+        title,
+        result.composite,
+        "standard"
+      );
+    result.contentFingerprint =
+      contentFingerprint;
+    result.composite.contentFingerprint =
+      contentFingerprint;
+    return result;
   }
 
   function savedApiCompositeDatabase() {
@@ -4521,7 +4821,11 @@
               composite.nodes.length,
             boundaryPorts:
               clone(boundaries),
-            portLayout: "standard"
+            portLayout:
+              composite.portLayout ===
+                "mirrored"
+                ? "mirrored"
+                : "standard"
           }
         }],
         connections: [],
@@ -4916,6 +5220,66 @@
         : ""
     );
     return result.added > 0;
+  }
+
+  function apiCompositeNodeHasExposablePorts(
+    nodeId
+  ) {
+    if (!apiCompositeEditor) return false;
+    const ownerId =
+      apiCompositeEditor.containerNodeId;
+    const composite =
+      graph.apiCompositeGraphs?.[ownerId];
+    const node = findGraphNode(nodeId);
+    const definition = node
+      ? nodeDefinition(node)
+      : null;
+    if (
+      !composite ||
+      !node ||
+      !apiCompositeInternalDefinitionAllowed(
+        definition
+      )
+    ) {
+      return false;
+    }
+    const exposedEndpoints = new Set(
+      apiCompositeBoundaryRecords(
+        composite.boundaryPorts
+      ).map(
+        apiCompositeBoundaryEndpointKey
+      )
+    );
+    for (const direction of [
+      "input",
+      "output"
+    ]) {
+      const ports =
+        direction === "input"
+          ? definition.inputs || []
+          : definition.outputs || [];
+      for (const specification of ports) {
+        const endpoint = {
+          direction,
+          internalNodeId: node.id,
+          internalPortId:
+            specification.id
+        };
+        if (
+          !exposedEndpoints.has(
+            apiCompositeBoundaryEndpointKey(
+              endpoint
+            )
+          ) &&
+          !apiCompositePortHasInternalWire(
+            endpoint
+          )
+        ) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   function captureApiCompositeEditorView() {
@@ -5550,7 +5914,10 @@
     if (!apiCompositeEditor || !graph) {
       return false;
     }
+    const emptyComposite =
+      graph.nodes.length === 0;
     if (
+      !emptyComposite &&
       !apiCompositeHasVerifiedCatalogNode(
         graph.nodes
       )
@@ -5584,8 +5951,12 @@
     persistGraph(true);
     activateGraphMode();
     showGraphMessage(
-      `Returned from ${title} to the previous graph.${boundaryUpdate.added > 0 ? ` ${boundaryUpdate.added.toLocaleString("de-DE")} new outer port${boundaryUpdate.added === 1 ? " was" : "s were"} added automatically.` : ""}${boundaryUpdate.removed > 0 ? ` ${boundaryUpdate.removed.toLocaleString("de-DE")} unused automatic port${boundaryUpdate.removed === 1 ? " was" : "s were"} removed.` : ""}`,
-      "success"
+      emptyComposite
+        ? `Returned from ${title} to the previous graph. The empty Composite remains editable, but it cannot be saved or exported until it contains a verified catalog API node again.`
+        : `Returned from ${title} to the previous graph.${boundaryUpdate.added > 0 ? ` ${boundaryUpdate.added.toLocaleString("de-DE")} new outer port${boundaryUpdate.added === 1 ? " was" : "s were"} added automatically.` : ""}${boundaryUpdate.removed > 0 ? ` ${boundaryUpdate.removed.toLocaleString("de-DE")} unused automatic port${boundaryUpdate.removed === 1 ? " was" : "s were"} removed.` : ""}`,
+      emptyComposite
+        ? "warning"
+        : "success"
     );
     if (restorePreviousPresentation) {
       restorePreviousEmbeddedEditor(
@@ -6520,6 +6891,11 @@
       composite: {
         ...clone(composite),
         title: name,
+        portLayout:
+          owner.parameters?.portLayout ===
+            "mirrored"
+            ? "mirrored"
+            : "standard",
         createdCatalogFingerprint:
           identity.fingerprint,
         createdEngineVersion:
@@ -6579,6 +6955,25 @@
       stored.id;
     owner.parameters.savedApiCompositeUpdatedAt =
       stored.updatedAt;
+    owner.parameters.apiCompositeFingerprint =
+      stored.contentFingerprint;
+    const ownedComposite =
+      graph.apiCompositeGraphs?.[
+        containerNodeId
+      ];
+    if (ownedComposite) {
+      ownedComposite.contentFingerprint =
+        stored.contentFingerprint;
+      ownedComposite.fingerprintNameKey =
+        savedApiCompositeNameKey(
+          stored.name
+        );
+      ownedComposite.fingerprintPortLayout =
+        owner.parameters.portLayout ===
+          "mirrored"
+          ? "mirrored"
+          : "standard";
+    }
     persistGraph(true);
     renderGraphPalette();
     renderGraphInspector();
@@ -6693,11 +7088,29 @@
     let totalConnections = 0;
     const importedIds = new Set();
     const records = sources.map(source => {
+      const fingerprintWasMissing =
+        !String(
+          source?.contentFingerprint ||
+          source?.composite
+            ?.contentFingerprint ||
+          ""
+        ).trim();
       const record =
         sanitizeSavedApiCompositeRecord(
           source,
           { preserveId: true }
         );
+      if (fingerprintWasMissing) {
+        Object.defineProperty(
+          record,
+          SAVED_API_COMPOSITE_LEGACY_FINGERPRINT,
+          {
+            value: true,
+            enumerable: false,
+            configurable: false
+          }
+        );
+      }
       if (importedIds.has(record.id)) {
         throw new Error(
           `Saved API Composite JSON contains duplicate template identity '${record.id}'. Nothing was imported.`
@@ -6727,7 +7140,10 @@
     existing,
     incoming,
     {
-      source = "import"
+      source = "import",
+      matchedByName = false,
+      legacyFingerprint = false,
+      duplicateCount = 0
     } = {}
   ) {
     const confirm =
@@ -6741,15 +7157,23 @@
         kicker:
           source === "catalog"
             ? "Saved API Composite catalog update"
+            : legacyFingerprint
+              ? "Legacy Composite fingerprint"
+            : matchedByName
+              ? "Exact Composite name matched"
             : "Saved API Composite update",
         title:
           `Update '${existing.name}'?`,
         message:
           source === "catalog"
             ? "The verified catalog requires a real content change in this individual Composite. Its saved library template is updated only after your confirmation. Other saved Composites are checked independently."
+            : legacyFingerprint
+              ? "This imported Composite has no stored content fingerprint. Its normalized name matches an existing Composite, so it must be offered once as an update. Accepting writes the generated fingerprint into the saved template and matching graph instances."
+            : matchedByName
+              ? "The imported Composite has a different persistent identity, but its normalized name exactly matches one existing Saved Composite. Update that existing template instead of creating a duplicate?"
             : "The imported Composite has the same persistent identity, but its saved content changed. The existing library template is updated only after your confirmation.",
         details:
-          `Existing: ${existing.composite.nodes.length.toLocaleString("de-DE")} nodes and ${existing.composite.connections.length.toLocaleString("de-DE")} connections. Imported: ${incoming.composite.nodes.length.toLocaleString("de-DE")} nodes and ${incoming.composite.connections.length.toLocaleString("de-DE")} connections. Existing graph instances remain unchanged.`,
+          `Existing: ${existing.composite.nodes.length.toLocaleString("de-DE")} nodes and ${existing.composite.connections.length.toLocaleString("de-DE")} connections. Imported: ${incoming.composite.nodes.length.toLocaleString("de-DE")} nodes and ${incoming.composite.connections.length.toLocaleString("de-DE")} connections.${matchedByName ? ` Existing identity: ${existing.id}. Imported identity: ${incoming.id}.` : ""}${legacyFingerprint ? ` Generated fingerprint: ${incoming.contentFingerprint}.` : ""}${duplicateCount > 0 ? ` ${duplicateCount.toLocaleString("de-DE")} duplicate Saved Composite entr${duplicateCount === 1 ? "y" : "ies"} with this exact normalized name will be consolidated into the retained identity.` : ""} After the library update, matching placed graph instances are offered for replacement separately.`,
         confirmLabel:
           "Update Composite",
         cancelLabel:
@@ -7197,15 +7621,30 @@
         );
       const resolved = [];
       for (const record of records) {
-        resolved.push(
+        const resolvedRecord =
           await resolveSavedApiCompositeForCurrentCatalog(
             record,
             {
               allowFingerprintShortcut:
                 false
             }
-          )
-        );
+          );
+        if (
+          record[
+            SAVED_API_COMPOSITE_LEGACY_FINGERPRINT
+          ] === true
+        ) {
+          Object.defineProperty(
+            resolvedRecord,
+            SAVED_API_COMPOSITE_LEGACY_FINGERPRINT,
+            {
+              value: true,
+              enumerable: false,
+              configurable: false
+            }
+          );
+        }
+        resolved.push(resolvedRecord);
       }
       const knownById = new Map(
         savedApiCompositeTemplates
@@ -7225,25 +7664,117 @@
         }
       }
       const pending = [];
+      const deletionIds = new Set();
+      const instanceUpdatePlans = [];
       const summary = {
         added: 0,
         updated: 0,
         unchanged: 0,
-        discarded: 0
+        discarded: 0,
+        graphOnly: 0,
+        duplicatesConsolidated: 0
       };
       for (const incoming of resolved) {
+        const legacyFingerprint =
+          incoming[
+            SAVED_API_COMPOSITE_LEGACY_FINGERPRINT
+          ] === true;
         const contentKey =
           savedApiCompositeContentKey(
             incoming
           );
-        const existing =
+        const graphMatches =
+          savedApiCompositeInstancesByName(
+            incoming.name
+          );
+        const graphInstanceIds =
+          graphMatches.map(node =>
+            node.id
+          );
+        const nameKey =
+          savedApiCompositeNameKey(
+            incoming.name
+          );
+        const nameMatches = [
+          ...knownById.values()
+        ].filter(record =>
+          savedApiCompositeNameKey(
+            record.name
+          ) === nameKey
+        );
+        const existingById =
           knownById.get(incoming.id) ||
           null;
+        const linkedIds = new Set(
+          graphMatches
+            .map(node =>
+              String(
+                node.parameters
+                  ?.savedApiCompositeId ||
+                ""
+              )
+            )
+            .filter(Boolean)
+        );
+        let existing =
+          existingById ||
+          nameMatches.find(record =>
+            linkedIds.has(record.id)
+          ) ||
+          [...nameMatches].sort(
+            (left, right) =>
+              String(left.createdAt || "")
+                .localeCompare(
+                  String(
+                    right.createdAt || ""
+                  )
+                ) ||
+              String(left.id).localeCompare(
+                String(right.id)
+              )
+          )[0] ||
+          null;
+        let matchedByName = Boolean(
+          existing &&
+          existing.id !== incoming.id
+        );
+        const duplicateMatches =
+          existing
+            ? nameMatches.filter(
+                record =>
+                  record.id !== existing.id
+              )
+            : [];
         if (!existing) {
+          const contentMatch =
+            knownByContent.get(
+              contentKey
+            ) || null;
           if (
-            knownByContent.has(contentKey)
+            contentMatch &&
+            !legacyFingerprint
           ) {
             summary.unchanged += 1;
+            if (graphInstanceIds.length > 0) {
+              instanceUpdatePlans.push({
+                record: contentMatch,
+                instanceIds:
+                  graphInstanceIds,
+                linkToSaved: true
+              });
+            }
+            continue;
+          }
+        }
+        if (!existing) {
+          if (graphInstanceIds.length > 0) {
+            summary.graphOnly += 1;
+            instanceUpdatePlans.push({
+              record: incoming,
+              instanceIds:
+                graphInstanceIds,
+              linkToSaved: false
+            });
             continue;
           }
           pending.push(incoming);
@@ -7264,16 +7795,32 @@
             existing
           );
         if (
+          !legacyFingerprint &&
           existingContentKey ===
-            contentKey
+            contentKey &&
+          duplicateMatches.length === 0
         ) {
           summary.unchanged += 1;
+          if (graphInstanceIds.length > 0) {
+            instanceUpdatePlans.push({
+              record: existing,
+              instanceIds:
+                graphInstanceIds,
+              linkToSaved: true
+            });
+          }
           continue;
         }
         const confirmed =
           await confirmSavedApiCompositeUpdate(
             existing,
-            incoming
+            incoming,
+            {
+              matchedByName,
+              legacyFingerprint,
+              duplicateCount:
+                duplicateMatches.length
+            }
           );
         if (!confirmed) {
           summary.discarded += 1;
@@ -7289,7 +7836,40 @@
             updatedAt:
               new Date().toISOString()
           });
+        if (legacyFingerprint) {
+          Object.defineProperty(
+            updated,
+            SAVED_API_COMPOSITE_LEGACY_FINGERPRINT,
+            {
+              value: true,
+              enumerable: false,
+              configurable: false
+            }
+          );
+        }
         pending.push(updated);
+        for (const duplicate of
+          duplicateMatches) {
+          if (!deletionIds.has(duplicate.id)) {
+            deletionIds.add(duplicate.id);
+            summary.duplicatesConsolidated +=
+              1;
+          }
+          knownById.delete(duplicate.id);
+          const duplicateContentKey =
+            savedApiCompositeContentKey(
+              duplicate
+            );
+          if (
+            knownByContent.get(
+              duplicateContentKey
+            )?.id === duplicate.id
+          ) {
+            knownByContent.delete(
+              duplicateContentKey
+            );
+          }
+        }
         knownById.set(updated.id, updated);
         if (
           knownByContent.get(
@@ -7307,12 +7887,87 @@
           updated
         );
         summary.updated += 1;
+        if (graphInstanceIds.length > 0) {
+          instanceUpdatePlans.push({
+            record: updated,
+            instanceIds:
+              graphInstanceIds,
+            linkToSaved: true
+          });
+        }
       }
-      const stored = pending.length > 0
-        ? await persistSavedApiCompositeRecords(
-            pending
-          )
-        : [];
+      const committed =
+        pending.length > 0 ||
+        deletionIds.size > 0
+          ? await applySavedApiCompositeReconciliation(
+              pending,
+              [...deletionIds]
+            )
+          : {
+              updates: [],
+              deletionIds: []
+            };
+      const stored = committed.updates;
+      summary.instancesReplaced = 0;
+      summary.instanceUpdatesDeclined = 0;
+      summary.instanceUpdatesSkippedOpen = 0;
+      summary.instanceUpdateErrors = 0;
+      summary.disconnectedWires = 0;
+      const uniqueInstanceUpdatePlans = [
+        ...new Map(
+          instanceUpdatePlans.map(plan => [
+            `${plan.record.id}\u0000${plan.linkToSaved ? "saved" : "graph-only"}`,
+            plan
+          ])
+        ).values()
+      ];
+      summary.instancesLinkedByName = 0;
+      for (const plan of
+        uniqueInstanceUpdatePlans) {
+        const record = plan.record;
+        if (
+          matchingSavedApiCompositeInstances(
+            record,
+            plan.instanceIds,
+            { staleOnly: true }
+          ).length === 0
+        ) {
+          continue;
+        }
+        try {
+          const replacement =
+            await applySavedApiCompositeVersion(
+              record,
+              {
+                source: "import",
+                instanceIds:
+                  plan.instanceIds,
+                linkToSaved:
+                  plan.linkToSaved
+              }
+            );
+          summary.instancesReplaced +=
+            replacement.replaced || 0;
+          summary.instanceUpdatesSkippedOpen +=
+            replacement.skippedOpen || 0;
+          summary.disconnectedWires +=
+            replacement.disconnectedWires || 0;
+          summary.instancesLinkedByName +=
+            replacement.linkedByName || 0;
+          if (replacement.cancelled) {
+            summary.instanceUpdatesDeclined +=
+              1;
+          }
+        } catch (error) {
+          summary.instanceUpdateErrors += 1;
+          showGraphMessage(
+            error instanceof Error
+              ? error.message
+              : String(error),
+            "error"
+          );
+        }
+      }
       Object.defineProperty(
         stored,
         "summary",
@@ -7326,8 +7981,10 @@
         }
       );
       showGraphMessage(
-        `Saved API Composite import completed: ${summary.added.toLocaleString("de-DE")} new, ${summary.updated.toLocaleString("de-DE")} updated, ${summary.unchanged.toLocaleString("de-DE")} unchanged and ${summary.discarded.toLocaleString("de-DE")} discarded.`,
-        "success"
+        `Saved API Composite import completed: ${summary.added.toLocaleString("de-DE")} new, ${summary.updated.toLocaleString("de-DE")} updated, ${summary.unchanged.toLocaleString("de-DE")} unchanged and ${summary.discarded.toLocaleString("de-DE")} discarded.${summary.graphOnly > 0 ? ` ${summary.graphOnly.toLocaleString("de-DE")} import${summary.graphOnly === 1 ? " was" : "s were"} graph-only and did not create a Saved Composite.` : ""}${summary.duplicatesConsolidated > 0 ? ` ${summary.duplicatesConsolidated.toLocaleString("de-DE")} duplicate Saved Composite entr${summary.duplicatesConsolidated === 1 ? "y was" : "ies were"} consolidated.` : ""}${summary.instancesReplaced > 0 ? ` ${summary.instancesReplaced.toLocaleString("de-DE")} placed instance${summary.instancesReplaced === 1 ? " was" : "s were"} replaced.${summary.instancesLinkedByName > 0 ? ` ${summary.instancesLinkedByName.toLocaleString("de-DE")} matched by exact normalized name and received the imported fingerprint.` : ""}` : ""}${summary.instanceUpdateErrors > 0 ? ` ${summary.instanceUpdateErrors.toLocaleString("de-DE")} graph replacement${summary.instanceUpdateErrors === 1 ? " failed" : "s failed"} without changing those instances.` : ""}`,
+        summary.instanceUpdateErrors > 0
+          ? "warning"
+          : "success"
       );
       return stored;
     } finally {
@@ -7719,16 +8376,33 @@
         memberCount: nodes.length,
         boundaryPorts:
           clone(boundaries),
-        portLayout: "standard",
+        portLayout:
+          record.composite.portLayout ===
+            "mirrored"
+            ? "mirrored"
+            : "standard",
         savedApiCompositeId:
           record.id,
         savedApiCompositeUpdatedAt:
-          record.updatedAt
+          record.updatedAt,
+        apiCompositeFingerprint:
+          record.contentFingerprint
       }
     };
     const composite = {
       version: 1,
       title: record.name,
+      contentFingerprint:
+        record.contentFingerprint,
+      fingerprintNameKey:
+        savedApiCompositeNameKey(
+          record.name
+        ),
+      fingerprintPortLayout:
+        record.composite.portLayout ===
+          "mirrored"
+          ? "mirrored"
+          : "standard",
       createdCatalogFingerprint:
         record.resolvedCatalogFingerprint,
       createdEngineVersion:
@@ -7785,6 +8459,817 @@
       }
     }
     return { container, composite };
+  }
+
+  function savedApiCompositeBoundaryTypeCompatible(
+    previous,
+    replacement
+  ) {
+    if (
+      previous?.direction !==
+        replacement?.direction
+    ) {
+      return false;
+    }
+    const previousType = String(
+      previous?.type || ""
+    );
+    const replacementType = String(
+      replacement?.type || ""
+    );
+    if (
+      previousType &&
+      replacementType
+    ) {
+      const activeCustomEditor =
+        customCSharpEditor;
+      try {
+        customCSharpEditor = null;
+        return previous.direction === "input"
+          ? connectionTypesCompatible(
+              previousType,
+              replacementType
+            )
+          : connectionTypesCompatible(
+              replacementType,
+              previousType
+            );
+      } finally {
+        customCSharpEditor =
+          activeCustomEditor;
+      }
+    }
+    return (
+      String(previous?.typeVar || "") ===
+        String(replacement?.typeVar || "") &&
+      String(
+        previous?.constraint || "value"
+      ) ===
+        String(
+          replacement?.constraint ||
+          "value"
+        )
+    );
+  }
+
+  function savedApiCompositeBoundaryLabelKey(
+    boundary
+  ) {
+    return [
+      String(boundary?.direction || ""),
+      String(boundary?.label || "")
+        .trim()
+        .replace(/\s+/g, " ")
+        .toLocaleLowerCase(),
+      String(boundary?.type || ""),
+      String(boundary?.typeVar || ""),
+      String(
+        boundary?.constraint || "value"
+      )
+    ].join("\u0000");
+  }
+
+  function mapSavedApiCompositeBoundaries(
+    previousBoundaries,
+    replacementBoundaries
+  ) {
+    const previous =
+      apiCompositeBoundaryRecords(
+        previousBoundaries
+      );
+    const replacement =
+      apiCompositeBoundaryRecords(
+        replacementBoundaries
+      );
+    const result = new Map();
+    const usedReplacementIds = new Set();
+    const assign = (
+      previousBoundary,
+      replacementBoundary
+    ) => {
+      if (
+        !previousBoundary ||
+        !replacementBoundary ||
+        usedReplacementIds.has(
+          replacementBoundary.id
+        ) ||
+        !savedApiCompositeBoundaryTypeCompatible(
+          previousBoundary,
+          replacementBoundary
+        )
+      ) {
+        return false;
+      }
+      result.set(
+        `${previousBoundary.direction}\u0000${previousBoundary.id}`,
+        replacementBoundary.id
+      );
+      usedReplacementIds.add(
+        replacementBoundary.id
+      );
+      return true;
+    };
+
+    for (const previousBoundary of previous) {
+      assign(
+        previousBoundary,
+        replacement.find(candidate =>
+          candidate.direction ===
+            previousBoundary.direction &&
+          candidate.id ===
+            previousBoundary.id
+        )
+      );
+    }
+
+    for (const previousBoundary of previous) {
+      const key =
+        `${previousBoundary.direction}\u0000${previousBoundary.id}`;
+      if (result.has(key)) continue;
+      const labelKey =
+        savedApiCompositeBoundaryLabelKey(
+          previousBoundary
+        );
+      const matches = replacement.filter(
+        candidate =>
+          !usedReplacementIds.has(
+            candidate.id
+          ) &&
+          savedApiCompositeBoundaryLabelKey(
+            candidate
+          ) === labelKey &&
+          savedApiCompositeBoundaryTypeCompatible(
+            previousBoundary,
+            candidate
+          )
+      );
+      if (matches.length === 1) {
+        assign(
+          previousBoundary,
+          matches[0]
+        );
+      }
+    }
+
+    for (const previousBoundary of previous) {
+      const key =
+        `${previousBoundary.direction}\u0000${previousBoundary.id}`;
+      if (result.has(key)) continue;
+      const compatible = replacement.filter(
+        candidate =>
+          !usedReplacementIds.has(
+            candidate.id
+          ) &&
+          savedApiCompositeBoundaryTypeCompatible(
+            previousBoundary,
+            candidate
+          )
+      );
+      if (compatible.length === 1) {
+        assign(
+          previousBoundary,
+          compatible[0]
+        );
+      }
+    }
+    return result;
+  }
+
+  function matchingSavedApiCompositeInstances(
+    record,
+    instanceIds = null,
+    {
+      staleOnly = false
+    } = {}
+  ) {
+    const allowedIds =
+      Array.isArray(instanceIds)
+        ? new Set(
+            instanceIds.map(value =>
+              String(value || "")
+            )
+          )
+        : null;
+    return rootRuntimeGraphView().nodes
+      .filter(node => {
+        if (
+          node?.operatorId !==
+            "container.apiComposite" ||
+          (allowedIds &&
+            !allowedIds.has(node.id))
+        ) {
+          return false;
+        }
+        const linkedId = String(
+          node.parameters
+            ?.savedApiCompositeId || ""
+        );
+        const composite =
+          graph.apiCompositeGraphs?.[
+            node.id
+          ];
+        if (!composite) return false;
+        const nodeName = String(
+          node.parameters?.title ||
+          node.label ||
+          composite.title ||
+          ""
+        );
+        const linkedById =
+          linkedId === record.id;
+        const linkedByName =
+          !linkedById &&
+          savedApiCompositeNodeMatchesName(
+            node,
+            composite,
+            record.name
+          );
+        if (!linkedById && !linkedByName) {
+          return false;
+        }
+        if (!staleOnly) return true;
+        const currentFingerprintValue =
+          String(
+            composite.contentFingerprint ||
+            node.parameters
+              ?.apiCompositeFingerprint ||
+            ""
+          );
+        if (
+          record[
+            SAVED_API_COMPOSITE_LEGACY_FINGERPRINT
+          ] === true ||
+          !currentFingerprintValue
+        ) {
+          return true;
+        }
+        const portLayout =
+          node.parameters?.portLayout ===
+            "mirrored"
+            ? "mirrored"
+            : "standard";
+        const currentNameKey =
+          savedApiCompositeNameKey(
+            nodeName
+          );
+        const storedFingerprintIsCurrent =
+          currentFingerprintValue &&
+          composite.fingerprintNameKey ===
+            currentNameKey &&
+          composite.fingerprintPortLayout ===
+            portLayout &&
+          apiCompositeEditor
+            ?.containerNodeId !== node.id;
+        const currentFingerprint = String(
+          storedFingerprintIsCurrent
+            ? currentFingerprintValue
+            : savedApiCompositeFingerprint(
+                nodeName,
+                composite,
+                portLayout
+              )
+        );
+        const incomingFingerprint =
+          Object.hasOwn(
+            record.composite,
+            "portLayout"
+          )
+            ? String(
+                record.contentFingerprint ||
+                savedApiCompositeFingerprint(
+                  record.name,
+                  record.composite,
+                  portLayout
+                )
+              )
+            : savedApiCompositeFingerprint(
+                record.name,
+                record.composite,
+                portLayout
+              );
+        return (
+          currentFingerprint !==
+          incomingFingerprint
+        );
+      });
+  }
+
+  function savedApiCompositeInstancesByName(
+    name,
+    instanceIds = null
+  ) {
+    const allowedIds =
+      Array.isArray(instanceIds)
+        ? new Set(
+            instanceIds.map(value =>
+              String(value || "")
+            )
+          )
+        : null;
+    return rootRuntimeGraphView().nodes
+      .filter(node => {
+        if (
+          node?.operatorId !==
+            "container.apiComposite" ||
+          (allowedIds &&
+            !allowedIds.has(node.id))
+        ) {
+          return false;
+        }
+        const composite =
+          graph.apiCompositeGraphs?.[
+            node.id
+          ];
+        return Boolean(
+          composite &&
+          savedApiCompositeNodeMatchesName(
+            node,
+            composite,
+            name
+          )
+        );
+      });
+  }
+
+  function savedApiCompositeReplacementImpact(
+    record,
+    instances
+  ) {
+    const rootView =
+      rootRuntimeGraphView();
+    const connectedWireIds = new Set();
+    const disconnectedWireIds = new Set();
+    for (const owner of instances) {
+      const previousComposite =
+        graph.apiCompositeGraphs?.[
+          owner.id
+        ];
+      const boundaryMap =
+        mapSavedApiCompositeBoundaries(
+          previousComposite?.boundaryPorts ||
+            owner.parameters
+              ?.boundaryPorts,
+          record.composite.boundaryPorts
+        );
+      for (const connection of
+        rootView.connections) {
+        let touchesOwner = false;
+        let compatible = true;
+        if (
+          connection.fromNode === owner.id
+        ) {
+          touchesOwner = true;
+          compatible =
+            compatible &&
+            boundaryMap.has(
+              `output\u0000${connection.fromPort}`
+            );
+        }
+        if (
+          connection.toNode === owner.id
+        ) {
+          touchesOwner = true;
+          compatible =
+            compatible &&
+            boundaryMap.has(
+              `input\u0000${connection.toPort}`
+            );
+        }
+        if (touchesOwner) {
+          connectedWireIds.add(
+            connection.id
+          );
+          if (!compatible) {
+            disconnectedWireIds.add(
+              connection.id
+            );
+          }
+        }
+      }
+    }
+    return {
+      connectedWires:
+        connectedWireIds.size,
+      disconnectedWires:
+        disconnectedWireIds.size
+    };
+  }
+
+  function commitRootRuntimeGraphView(view) {
+    const target =
+      apiCompositeEditor?.mainView ||
+      customCSharpEditor?.mainView ||
+      null;
+    if (target) {
+      Object.assign(
+        target,
+        graphViewFrom(view)
+      );
+    } else {
+      applyGraphView(
+        graphViewFrom(view)
+      );
+    }
+  }
+
+  function replaceSavedApiCompositeInstances(
+    record,
+    instances,
+    {
+      linkToSaved = true
+    } = {}
+  ) {
+    const rootView =
+      rootRuntimeGraphView();
+    const activeCompositeOwnerId =
+      apiCompositeEditor
+        ?.containerNodeId || "";
+    const replacesActiveComposite =
+      instances.some(owner =>
+        owner.id === activeCompositeOwnerId
+      );
+    const candidateNodes =
+      rootView.nodes.map(node =>
+        clone(node)
+      );
+    let candidateConnections =
+      rootView.connections.map(
+        connection => clone(connection)
+      );
+    const candidateComposites = {
+      ...(graph.apiCompositeGraphs || {})
+    };
+    const candidateCustomCSharpFiles =
+      clone(
+        graph.customCSharpFiles || {}
+      );
+    let disconnectedWires = 0;
+
+    for (const sourceOwner of instances) {
+      const ownerIndex =
+        candidateNodes.findIndex(
+          node => node.id === sourceOwner.id
+        );
+      const previousComposite =
+        candidateComposites[
+          sourceOwner.id
+        ];
+      if (
+        ownerIndex < 0 ||
+        !previousComposite
+      ) {
+        throw new Error(
+          `Placed Composite '${sourceOwner.label || sourceOwner.id}' no longer has a complete owned graph. Nothing was replaced.`
+        );
+      }
+      const boundaryMap =
+        mapSavedApiCompositeBoundaries(
+          previousComposite.boundaryPorts ||
+            sourceOwner.parameters
+              ?.boundaryPorts,
+          record.composite.boundaryPorts
+        );
+      candidateConnections =
+        candidateConnections.filter(
+          connection => {
+            if (
+              connection.fromNode ===
+                sourceOwner.id
+            ) {
+              const replacementPort =
+                boundaryMap.get(
+                  `output\u0000${connection.fromPort}`
+                );
+              if (!replacementPort) {
+                disconnectedWires += 1;
+                return false;
+              }
+              connection.fromPort =
+                replacementPort;
+            }
+            if (
+              connection.toNode ===
+                sourceOwner.id
+            ) {
+              const replacementPort =
+                boundaryMap.get(
+                  `input\u0000${connection.toPort}`
+                );
+              if (!replacementPort) {
+                disconnectedWires += 1;
+                return false;
+              }
+              connection.toPort =
+                replacementPort;
+            }
+            return true;
+          }
+        );
+
+      const replacement =
+        remapSavedApiCompositeInstance(
+          record,
+          sourceOwner.id,
+          sourceOwner.x,
+          sourceOwner.y
+        );
+      replacement.container.x =
+        sourceOwner.x;
+      replacement.container.y =
+        sourceOwner.y;
+      replacement.container.width =
+        sourceOwner.width ?? null;
+      replacement.container.height =
+        sourceOwner.height ?? null;
+      const effectivePortLayout =
+        Object.hasOwn(
+          record.composite,
+          "portLayout"
+        )
+          ? record.composite.portLayout ===
+              "mirrored"
+            ? "mirrored"
+            : "standard"
+          : sourceOwner.parameters
+                ?.portLayout === "mirrored"
+            ? "mirrored"
+            : "standard";
+      const effectiveFingerprint =
+        savedApiCompositeFingerprint(
+          record.name,
+          record.composite,
+          effectivePortLayout
+        );
+      replacement.container.parameters.portLayout =
+        effectivePortLayout;
+      replacement.container.parameters.apiCompositeFingerprint =
+        effectiveFingerprint;
+      if (!linkToSaved) {
+        delete replacement.container
+          .parameters
+          .savedApiCompositeId;
+        delete replacement.container
+          .parameters
+          .savedApiCompositeUpdatedAt;
+      }
+      replacement.composite.contentFingerprint =
+        effectiveFingerprint;
+      replacement.composite.fingerprintNameKey =
+        savedApiCompositeNameKey(
+          record.name
+        );
+      replacement.composite.fingerprintPortLayout =
+        effectivePortLayout;
+      candidateNodes[ownerIndex] =
+        replacement.container;
+      for (const ownerId of Object.keys(
+        previousComposite
+          .customCSharpFiles || {}
+      )) {
+        delete candidateCustomCSharpFiles[
+          ownerId
+        ];
+      }
+      mergeCustomCSharpFileRegistry(
+        candidateCustomCSharpFiles,
+        replacement.composite
+          .customCSharpFiles
+      );
+      candidateComposites[
+        sourceOwner.id
+      ] = replacement.composite;
+    }
+
+    normalizeConnectionRouting(
+      candidateConnections
+    );
+    const candidateRoot = {
+      ...graph,
+      apiCompositeGraphs:
+        candidateComposites,
+      customCSharpFiles:
+        candidateCustomCSharpFiles,
+      ...graphViewFrom({
+        ...rootView,
+        nodes: candidateNodes,
+        connections:
+          candidateConnections
+      })
+    };
+    const expanded =
+      expandApiCompositeGraphDocument(
+        candidateRoot
+      );
+    const previousGraph = graph;
+    const previousCustomCSharpEditor =
+      customCSharpEditor;
+    let analysis;
+    try {
+      graph = expanded;
+      customCSharpEditor = null;
+      graphNodeDefinitionCache =
+        new WeakMap();
+      analysis = analyzeConnections(
+        expanded.connections
+      );
+    } finally {
+      graph = previousGraph;
+      customCSharpEditor =
+        previousCustomCSharpEditor;
+      graphNodeDefinitionCache =
+        new WeakMap();
+    }
+    if (!analysis?.valid) {
+      throw new Error(
+        analysis?.reason ||
+        "The Saved API Composite update would make the Runtime Graph invalid. Nothing was replaced."
+      );
+    }
+
+    graph.apiCompositeGraphs =
+      candidateComposites;
+    graph.customCSharpFiles =
+      candidateCustomCSharpFiles;
+    commitRootRuntimeGraphView(
+      candidateRoot
+    );
+    if (
+      replacesActiveComposite &&
+      apiCompositeEditor
+    ) {
+      const activeComposite =
+        candidateComposites[
+          activeCompositeOwnerId
+        ];
+      if (!activeComposite) {
+        throw new Error(
+          "The open API Composite replacement lost its owned graph. Nothing was replaced."
+        );
+      }
+      apiCompositeEditor.title =
+        record.name;
+      apiCompositeEditor.initialNodeIds =
+        new Set(
+          activeComposite.nodes.map(
+            node => node.id
+          )
+        );
+      apiCompositeEditor.boundaryUpdate = {
+        added: 0,
+        removed: 0
+      };
+      applyGraphView(
+        graphViewFrom(activeComposite)
+      );
+    }
+    currentAnalysis = null;
+    resetGraphRenderCaches();
+    persistGraph(true);
+    renderGraphNodesAndWires();
+    renderGraphInspector();
+    return {
+      replaced: instances.length,
+      disconnectedWires
+    };
+  }
+
+  async function applySavedApiCompositeVersion(
+    record,
+    {
+      instanceIds = null,
+      source = "library",
+      linkToSaved = true
+    } = {}
+  ) {
+    const matching =
+      matchingSavedApiCompositeInstances(
+        record,
+        instanceIds,
+        {
+          staleOnly: true
+        }
+      );
+    const activeOwnerId =
+      apiCompositeEditor
+        ?.containerNodeId || "";
+    const replaceable = matching.filter(
+      owner =>
+        source === "import" ||
+        owner.id !== activeOwnerId
+    );
+    const skippedOpen =
+      matching.length -
+      replaceable.length;
+    const linkedByName =
+      replaceable.filter(owner =>
+        String(
+          owner.parameters
+            ?.savedApiCompositeId || ""
+        ) !== record.id
+      ).length;
+    const legacyFingerprint =
+      record[
+        SAVED_API_COMPOSITE_LEGACY_FINGERPRINT
+      ] === true;
+    const requiresFingerprintMigration =
+      legacyFingerprint ||
+      replaceable.some(owner => {
+        const composite =
+          graph.apiCompositeGraphs?.[
+            owner.id
+          ];
+        return !String(
+          composite?.contentFingerprint ||
+          owner.parameters
+            ?.apiCompositeFingerprint ||
+          ""
+        );
+      });
+    if (replaceable.length === 0) {
+      showGraphMessage(
+        skippedOpen > 0
+          ? "Return from the open Composite first, then update it from the matching Saved Composite in the Node Library."
+          : "No matching placed Composite instance was found in the Runtime Graph.",
+        skippedOpen > 0
+          ? "warning"
+          : ""
+      );
+      return {
+        replaced: 0,
+        skippedOpen,
+        disconnectedWires: 0,
+        linkedByName: 0,
+        cancelled: false
+      };
+    }
+    const impact =
+      savedApiCompositeReplacementImpact(
+        record,
+        replaceable
+      );
+    const confirm =
+      window.RMLBuilderDialog?.confirm;
+    if (typeof confirm !== "function") {
+      throw new Error(
+        "The confirmation dialog is unavailable. No placed Composite was changed."
+      );
+    }
+    const confirmed = Boolean(
+      await confirm({
+        tone:
+          impact.disconnectedWires > 0
+            ? "warning"
+            : "primary",
+        kicker:
+          source === "import"
+            ? "Matching Composite instances found"
+            : "Update Node Graph from Saved Composite",
+        title:
+          `Replace ${replaceable.length.toLocaleString("de-DE")} placed instance${replaceable.length === 1 ? "" : "s"}?`,
+        message:
+          linkedByName > 0
+            ? requiresFingerprintMigration
+              ? "The normalized Composite name matches exactly, but the imported legacy file has no fingerprint. Replace it once and write the generated fingerprint while preserving container placement and every compatible external connection?"
+              : "The normalized Composite name matches exactly and its content fingerprint changed. Replace the internal graph while preserving container placement and every compatible external connection?"
+            : "Replace the internal graph of each matching instance while preserving its container position and every compatible external connection?",
+        details:
+          `${impact.connectedWires.toLocaleString("de-DE")} connected outer wire${impact.connectedWires === 1 ? " is" : "s are"} checked individually. ${impact.disconnectedWires > 0 ? `${impact.disconnectedWires.toLocaleString("de-DE")} wire${impact.disconnectedWires === 1 ? " uses" : "s use"} a removed or ambiguous port and will be disconnected.` : "All connected outer wires can be preserved."}${skippedOpen > 0 ? ` ${skippedOpen.toLocaleString("de-DE")} currently open instance is skipped until you return to the Runtime Graph.` : ""}`,
+        confirmLabel:
+          replaceable.length === 1
+            ? "Replace Instance"
+            : "Replace Instances",
+        cancelLabel:
+          "Keep Current Graph"
+      })
+    );
+    if (!confirmed) {
+      return {
+        replaced: 0,
+        skippedOpen,
+        disconnectedWires: 0,
+        linkedByName: 0,
+        cancelled: true
+      };
+    }
+    const result =
+      replaceSavedApiCompositeInstances(
+        record,
+        replaceable,
+        { linkToSaved }
+      );
+    renderGraphPalette();
+    showGraphMessage(
+      `${result.replaced.toLocaleString("de-DE")} placed Composite instance${result.replaced === 1 ? " was" : "s were"} replaced.${linkedByName > 0 ? linkToSaved ? ` ${linkedByName.toLocaleString("de-DE")} unlinked or stale-linked instance${linkedByName === 1 ? " was" : "s were"} matched by exact normalized name and linked to this Saved Composite fingerprint.` : ` ${linkedByName.toLocaleString("de-DE")} graph-only instance${linkedByName === 1 ? " was" : "s were"} matched by exact normalized name and remained independent from the Saved Composite library.` : ""}${result.disconnectedWires > 0 ? ` ${result.disconnectedWires.toLocaleString("de-DE")} incompatible outer wire${result.disconnectedWires === 1 ? " was" : "s were"} disconnected.` : " All compatible outer wires and their routes were preserved."}`,
+      result.disconnectedWires > 0
+        ? "warning"
+        : "success"
+    );
+    return {
+      ...result,
+      skippedOpen,
+      linkedByName,
+      cancelled: false
+    };
   }
 
   async function instantiateSavedApiCompositeAt(
@@ -8652,6 +10137,129 @@
     }
   }
 
+  function synchronizeApiCompositeInspectorSaveAction(
+    actions,
+    node,
+    linkedTemplate
+  ) {
+    let saveAction = actions.querySelector(
+      "[data-saved-api-composite-inspector-save]"
+    );
+    const shouldShow = Boolean(
+      !linkedTemplate ||
+      matchingSavedApiCompositeInstances(
+        linkedTemplate,
+        [node.id],
+        { staleOnly: true }
+      ).length > 0
+    );
+    if (!shouldShow) {
+      saveAction?.remove();
+      return;
+    }
+    const label = linkedTemplate
+      ? "Update"
+      : "Save Composite";
+    if (!saveAction) {
+      saveAction = inspectorButton(
+        label,
+        () =>
+          saveApiCompositeNode(
+            node.id
+          ).catch(error =>
+            showGraphMessage(
+              error instanceof Error
+                ? error.message
+                : String(error),
+              "error"
+            )
+          ),
+        linkedTemplate
+          ? "primary"
+          : ""
+      );
+      saveAction.dataset
+        .savedApiCompositeInspectorSave =
+        "true";
+      const followingAction =
+        actions.querySelector(
+          "[data-saved-api-composite-save-new], [data-saved-api-composite-delete]"
+        );
+      if (followingAction) {
+        actions.insertBefore(
+          saveAction,
+          followingAction
+        );
+      } else {
+        actions.appendChild(saveAction);
+      }
+    } else {
+      setInspectorButtonContent(
+        saveAction,
+        label
+      );
+    }
+  }
+
+  function refreshVisibleApiCompositeInspectorSaveActions() {
+    if (!dom.inspectorContent) {
+      return;
+    }
+    for (const actions of
+      dom.inspectorContent.querySelectorAll(
+        "[data-saved-api-composite-node-actions-for]"
+      )) {
+      const node = findGraphNode(
+        String(
+          actions.dataset
+            .savedApiCompositeNodeActionsFor ||
+          ""
+        )
+      );
+      if (!node) {
+        continue;
+      }
+      const linkedTemplate =
+        savedApiCompositeTemplates.get(
+          String(
+            node.parameters
+              ?.savedApiCompositeId ||
+            ""
+          )
+        );
+      synchronizeApiCompositeInspectorSaveAction(
+        actions,
+        node,
+        linkedTemplate
+      );
+    }
+  }
+
+  function refreshVisibleSavedApiCompositeUpdateActions() {
+    if (!dom.paletteContent) {
+      return;
+    }
+    for (const actions of
+      dom.paletteContent.querySelectorAll(
+        "[data-saved-api-composite-actions-for]"
+      )) {
+      const record =
+        savedApiCompositeTemplates.get(
+          String(
+            actions.dataset
+              .savedApiCompositeActionsFor ||
+            ""
+          )
+        );
+      if (record) {
+        synchronizeSavedApiCompositeUpdateAction(
+          actions,
+          record
+        );
+      }
+    }
+  }
+
   function updateCustomCSharpSynchronizationToast(
     nodeId,
     status
@@ -8788,7 +10396,7 @@
     }
     const worker = new Worker(
       new URL(
-        "graph_codegen_worker.js?v=108-harmony-only-reload-capability-v696",
+        "graph_codegen_worker.js?v=117-composite-inspector-fingerprint-actions-v705",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -10773,7 +12381,11 @@
       normalizePortLayoutParameter(
         parameters,
         definition,
-        kind === "configuration"
+        kind === "configuration" ||
+          Object.hasOwn(
+            parameters,
+            "portLayout"
+          )
       );
 
       normalizeNodeParametersObject(
@@ -11492,6 +13104,26 @@
         version: 1,
         title:
           owner.parameters.title,
+        contentFingerprint:
+          String(
+            source.contentFingerprint ||
+            owner.parameters
+              ?.apiCompositeFingerprint ||
+            ""
+          ).slice(0, 96),
+        fingerprintNameKey:
+          String(
+            source.fingerprintNameKey ||
+            ""
+          ).slice(0, 160),
+        fingerprintPortLayout:
+          source.fingerprintPortLayout ===
+            "mirrored"
+            ? "mirrored"
+            : source.fingerprintPortLayout ===
+                "standard"
+              ? "standard"
+              : "",
         createdCatalogFingerprint:
           String(
             source.createdCatalogFingerprint ||
@@ -12000,6 +13632,7 @@
   function graphSerializableState() {
     captureCustomCSharpEditorView();
     captureApiCompositeEditorView();
+    const rootView = rootRuntimeGraphView();
     const customCSharpFiles =
       serializableCustomCSharpFiles(
         graph.customCSharpFiles
@@ -12009,12 +13642,65 @@
       Object.entries(
         graph.apiCompositeGraphs || {}
       )) {
+      const owner = rootView.nodes.find(
+        node => node?.id === ownerId
+      );
+      const title = String(
+        owner?.parameters?.title ||
+        owner?.label ||
+        composite?.title ||
+        "API Composite"
+      );
+      const portLayout =
+        owner?.parameters?.portLayout ===
+          "mirrored"
+          ? "mirrored"
+          : "standard";
+      const fingerprintNameKey =
+        savedApiCompositeNameKey(title);
+      const fingerprintNeedsRefresh =
+        !String(
+          composite.contentFingerprint ||
+          ""
+        ) ||
+        composite.fingerprintNameKey !==
+          fingerprintNameKey ||
+        composite.fingerprintPortLayout !==
+          portLayout ||
+        apiCompositeEditor
+          ?.containerNodeId === ownerId;
+      const contentFingerprint =
+        fingerprintNeedsRefresh
+          ? savedApiCompositeFingerprint(
+              title,
+              composite,
+              portLayout
+            )
+          : String(
+              composite.contentFingerprint
+            );
+      composite.contentFingerprint =
+        contentFingerprint;
+      composite.fingerprintNameKey =
+        fingerprintNameKey;
+      composite.fingerprintPortLayout =
+        portLayout;
+      if (owner) {
+        owner.parameters =
+          owner.parameters &&
+          typeof owner.parameters === "object"
+            ? owner.parameters
+            : {};
+        owner.parameters.apiCompositeFingerprint =
+          contentFingerprint;
+      }
       apiCompositeGraphs[ownerId] = {
         version: 1,
-        title: String(
-          composite?.title ||
-          "API Composite"
-        ),
+        title,
+        contentFingerprint,
+        fingerprintNameKey,
+        fingerprintPortLayout:
+          portLayout,
         createdCatalogFingerprint:
           String(
             composite
@@ -12069,7 +13755,7 @@
       configSnapshot: graph.configSnapshot ? clone(graph.configSnapshot) : null,
       customCSharpFiles,
       apiCompositeGraphs,
-      ...serializableGraphView(rootRuntimeGraphView())
+      ...serializableGraphView(rootView)
     };
   }
 
@@ -12158,6 +13844,10 @@
 
       graph.version = GRAPH_SCHEMA_VERSION;
       const persistedGraph = graphSerializableState();
+      if (refreshOutput) {
+        refreshVisibleApiCompositeInspectorSaveActions();
+        refreshVisibleSavedApiCompositeUpdateActions();
+      }
       lastPersistedGraphReference = persistedGraph;
       lastPersistedGraphJson = "";
 
@@ -17740,6 +19430,8 @@
       [];
     const extensionEngineInitStatements =
       [];
+    const extensionRuntimeDrainStatements =
+      [];
     const extensionFiles = [];
     const extensionProjects = [];
     const extensionReferences =
@@ -17757,6 +19449,7 @@
       useWindowsForms: false,
       usesRuntimeConfigurationMenu: false,
       usesModUnloadLifecycle: false,
+      usesHarmony: false,
       runtimeReloadUnsafe: false
     };
 
@@ -18055,14 +19748,28 @@
           return;
         }
 
+        const hintPath = String(
+          reference.hintPath || ""
+        ).trim();
+        const isHarmonyReference =
+          include.toLowerCase() ===
+            "0harmony" ||
+          /(?:^|[\\/])0harmony\.dll$/i.test(
+            hintPath
+          );
+
+        if (isHarmonyReference) {
+          extensionRequirements.usesHarmony =
+            true;
+          extensionRequirements.runtimeReloadUnsafe =
+            true;
+        }
+
         extensionReferences.set(
           include.toLowerCase(),
           {
             include,
-            hintPath:
-              String(
-                reference.hintPath || ""
-              ).trim(),
+            hintPath,
             private:
               reference.private === true
           }
@@ -18242,6 +19949,12 @@
       addEngineInit(code) {
         addStatement(
           extensionEngineInitStatements,
+          code
+        );
+      },
+      addRuntimeDrain(code) {
+        addStatement(
+          extensionRuntimeDrainStatements,
           code
         );
       },
@@ -20332,7 +22045,12 @@ ${storeFieldsCode ? `\n${storeFieldsCode}` : ""}${extensionFieldsCode ? `\n\n${e
             0);
         Volatile.Write(
             ref _runtimeDisplayPumpStarted,
-            0);
+            0);${extensionRuntimeDrainStatements.length > 0
+  ? `\n${formatExtensionStatements(
+      extensionRuntimeDrainStatements,
+      "Runtime drain extension"
+    )}`
+  : ""}
     }
 
     public static async Task DrainRuntimeAsync(
@@ -21825,6 +23543,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         usesModUnloadLifecycle:
           extensionRequirements
             .usesModUnloadLifecycle,
+        usesHarmony:
+          extensionRequirements
+            .usesHarmony,
         runtimeReloadUnsafe:
           extensionRequirements
             .runtimeReloadUnsafe,
@@ -22534,7 +24255,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
       .rml-saved-api-composite-actions {
         display: grid;
-        grid-template-columns: repeat(2, 27px);
+        grid-template-columns: repeat(3, 27px);
         gap: 4px;
       }
 
@@ -22556,6 +24277,11 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       .rml-saved-api-composite-actions > button:focus-visible {
         border-color: rgba(255, 209, 129, 0.5);
         color: #ffd181;
+      }
+
+      .rml-saved-api-composite-actions > button:disabled {
+        cursor: default;
+        opacity: 0.4;
       }
 
       .rml-graph-palette-item {
@@ -24967,7 +26693,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         }
 
         body.rml-node-graph-mode .rml-saved-api-composite-actions {
-          grid-template-columns: repeat(2, 44px);
+          grid-template-columns: repeat(3, 44px);
         }
 
         body.rml-node-graph-mode .rml-saved-api-composite-actions > button {
@@ -26777,6 +28503,78 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     return button;
   }
 
+  function savedApiCompositeLibraryBusy() {
+    return (
+      savedApiCompositeOperations.has(
+        "import"
+      ) ||
+      savedApiCompositeOperations.has(
+        "catalog-reconciliation"
+      ) ||
+      savedApiCompositeOperations.has(
+        "open-graph-catalog-reconciliation"
+      )
+    );
+  }
+
+  function synchronizeSavedApiCompositeUpdateAction(
+    actions,
+    record
+  ) {
+    const matchingInstances =
+      matchingSavedApiCompositeInstances(
+        record,
+        null,
+        { staleOnly: true }
+      );
+    let updateGraphButton =
+      actions.querySelector(
+        "[data-saved-api-composite-graph-update]"
+      );
+    if (matchingInstances.length === 0) {
+      updateGraphButton?.remove();
+      return;
+    }
+    if (!updateGraphButton) {
+      updateGraphButton =
+        document.createElement("button");
+      updateGraphButton.type = "button";
+      updateGraphButton.textContent = "↻";
+      updateGraphButton.dataset
+        .savedApiCompositeGraphUpdate =
+        "true";
+      updateGraphButton.addEventListener(
+        "pointerdown",
+        event => event.stopPropagation()
+      );
+      updateGraphButton.addEventListener(
+        "click",
+        event => {
+          event.stopPropagation();
+          void applySavedApiCompositeVersion(
+            record,
+            { source: "library" }
+          ).catch(error =>
+            showGraphMessage(
+              error instanceof Error
+                ? error.message
+                : String(error),
+              "error"
+            )
+          );
+        }
+      );
+      actions.prepend(updateGraphButton);
+    }
+    setGraphButtonAvailability(
+      updateGraphButton,
+      !savedApiCompositeLibraryBusy(),
+      "Saved API Composites are currently being updated."
+    );
+    updateGraphButton.title =
+      `Update ${matchingInstances.length.toLocaleString("de-DE")} differing placed Node Graph instance${matchingInstances.length === 1 ? "" : "s"} from '${record.name}'`;
+  }
+
   function createSavedApiCompositePaletteItem(
     record
   ) {
@@ -26800,15 +28598,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         record.id
       ) || "";
     const libraryBusy =
-      savedApiCompositeOperations.has(
-        "import"
-      ) ||
-      savedApiCompositeOperations.has(
-        "catalog-reconciliation"
-      ) ||
-      savedApiCompositeOperations.has(
-        "open-graph-catalog-reconciliation"
-      );
+      savedApiCompositeLibraryBusy();
     button.className =
       "rml-graph-palette-item rml-saved-api-composite-item";
     if (compatibilityIssue) {
@@ -26907,6 +28697,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       document.createElement("div");
     actions.className =
       "rml-saved-api-composite-actions";
+    actions.dataset
+      .savedApiCompositeActionsFor =
+      record.id;
     const exportButton =
       document.createElement("button");
     exportButton.type = "button";
@@ -26951,6 +28744,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     actions.append(
       exportButton,
       deleteButton
+    );
+    synchronizeSavedApiCompositeUpdateAction(
+      actions,
+      record
     );
     row.append(button, actions);
     return row;
@@ -40027,6 +41824,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         apiCompositeEditor &&
         apiCompositeInternalDefinitionAllowed(
           definition
+        ) &&
+        apiCompositeNodeHasExposablePorts(
+          node.id
         )
       ) {
         actions.appendChild(
@@ -40109,14 +41909,21 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           savedApiCompositeTemplates.get(
             savedTemplateId
           );
-        actions.appendChild(
-          inspectorButton(
-            linkedTemplate
-              ? "Update"
-              : "Save Composite",
-            () => {
-              void saveApiCompositeNode(
-                node.id
+        actions.dataset
+          .savedApiCompositeNodeActionsFor =
+          node.id;
+        synchronizeApiCompositeInspectorSaveAction(
+          actions,
+          node,
+          linkedTemplate
+        );
+        if (linkedTemplate) {
+          const saveNew = inspectorButton(
+            "Save New",
+            () =>
+              saveApiCompositeNode(
+                node.id,
+                { asNew: true }
               ).catch(error =>
                 showGraphMessage(
                   error instanceof Error
@@ -40124,43 +41931,27 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
                     : String(error),
                   "error"
                 )
-              );
-            },
-            linkedTemplate
-              ? "primary"
-              : ""
-          )
-        );
-        if (linkedTemplate) {
-          actions.appendChild(
-            inspectorButton(
-              "Save New",
-              () => {
-                void saveApiCompositeNode(
-                  node.id,
-                  { asNew: true }
-                ).catch(error =>
-                  showGraphMessage(
-                    error instanceof Error
-                      ? error.message
-                      : String(error),
-                    "error"
-                  )
-                );
-              }
-            )
+              )
           );
+          saveNew.dataset
+            .savedApiCompositeSaveNew =
+            "true";
+          actions.appendChild(saveNew);
         }
         if (linkedTemplate) {
-          actions.appendChild(
+          const deleteSaved =
             inspectorButton(
               "Delete Saved Composite",
-              () => {
-                void removeSavedApiComposite(
+              () =>
+                removeSavedApiComposite(
                   linkedTemplate.id
-                );
-              }
-            )
+                )
+          );
+          deleteSaved.dataset
+            .savedApiCompositeDelete =
+            "true";
+          actions.appendChild(
+            deleteSaved
           );
         }
       }
@@ -40172,11 +41963,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           customCSharpFileNeedsOptimization(node)
               ? "Optimize & Open Node Graph"
               : "Open Node Graph",
-          () => {
-            void openCustomCSharpFileGraphSynced(
+          () =>
+            openCustomCSharpFileGraphSynced(
               node.id
-            );
-          },
+            ),
           "primary"
         );
         openButton.setAttribute(
@@ -40836,7 +42626,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         const script =
           document.createElement("script");
         script.src = new URL(
-          "custom_csharp_editor.js?v=42-harmony-only-reload-capability-v696",
+          "custom_csharp_editor.js?v=46-composite-inspector-fingerprint-actions-v705",
           document.baseURI
         ).href;
         script.async = true;
@@ -43721,7 +45511,15 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     );
     button.addEventListener(
       "click",
-      handler
+      async event => {
+        try {
+          await handler(event);
+        } finally {
+          renderGraphInspector({
+            force: true
+          });
+        }
+      }
     );
     return button;
   }
@@ -51031,7 +52829,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
 
   Object.defineProperty(window, "RMLDynamicGraphHost", {
     value: Object.freeze({
-      version: 61,
+      version: 66,
       getState() { return graph; },
       getProjectEpoch() {
         return builderProjectEpoch;

@@ -489,8 +489,11 @@
                   node placement, typed contracts, wires, bend points and branches. Open
                   <strong>Edit Internal API &amp; Logic Graph</strong> to continue editing it;
                   unconnected ports of newly added internal nodes are exposed on the outer
-                  Composite automatically. The final verified catalog API node cannot be
-                  removed, because every API Composite must retain at least one.
+                  Composite automatically. <strong>Expose unconnected ports</strong> appears
+                  only while the selected node really has an eligible unconnected port that
+                  is not exposed yet. If every internal node is removed, Back still returns
+                  safely to the Runtime Graph; the empty Composite remains editable but cannot
+                  be saved or exported until a verified catalog API node is restored.
                 </p>
                 <p>
                   The internal graph accepts verified API nodes, supported value, math,
@@ -507,8 +510,39 @@
                   <strong>Save New</strong>
                   to reuse the complete internal graph. Saved Composites can be inserted from
                   the Node Library, unpacked, deleted, exported and imported as JSON, and are
-                  checked individually against the active verified catalog. Existing placed
-                  instances remain complete when a library template is deleted. Owned Custom
+                  checked individually against the active verified catalog. Saving and importing
+                  preserve the outer Composite's switched port side as well as every internal
+                  node's port side. Every Saved Composite carries a content fingerprint derived
+                  from its normalized name, port order and side, complete node content and layout,
+                  connections, wire routes, branch routes and owned Custom C# graphs. A different
+                  name therefore creates a new Composite. An exact normalized name plus a changed
+                  fingerprint is offered as an update; an equal fingerprint remains unchanged.
+                  In Node Actions, <strong>Save Composite</strong> appears only for an unsaved
+                  Composite, while <strong>Update</strong> appears only when the linked placed
+                  graph differs from its Saved Composite. If both fingerprints match, neither
+                  action is rendered; <strong>Save New</strong> remains available for a linked
+                  Composite.
+                  Legacy Composite JSON without a fingerprint is offered once by exact normalized
+                  name and receives its generated fingerprint when the update is accepted. Import
+                  scope follows the matching name across both locations: a Graph-only match updates
+                  only the placed graph and creates no Saved entry; a Saved-only match updates only
+                  the library; a match in both locations updates both; only a name found nowhere is
+                  imported as new. Existing duplicate Saved entries with that exact normalized name
+                  are consolidated into one retained identity during the confirmed update. A stale
+                  or orphaned Saved-Composite identity on a placed instance never blocks the name
+                  match. An open matching Composite is replaced in place and remains open.
+                  Every graph replacement preserves position and every compatible external wire
+                  route. Updating placed graphs is intentionally available only from the matching
+                  Saved Composite's circular-arrow action in the Node Library. That action is not
+                  rendered at all while every matching placed graph has the same content fingerprint;
+                  it appears only when at least one matching graph actually differs.
+                  Removed or ambiguous ports are counted before confirmation instead of being
+                  silently rewired. Every Properties action button is re-evaluated immediately
+                  after its synchronous or asynchronous action completes. State-dependent actions
+                  such as <strong>Expose unconnected ports</strong>, Update and
+                  Optimize &amp; Open therefore appear, change or disappear without selecting the
+                  node again. Existing placed instances remain complete when a library
+                  template is deleted. Owned Custom
                   C# File Graphs and their source are included in project save, Composite save,
                   export, import, unpacking, migration and generated-code expansion.
                 </p>
@@ -609,6 +643,14 @@
                   Low-level HarmonyLib nodes produced by the API scanner are kept under
                   Advanced / Raw C#. They expose the scanned API but do not infer patch
                   signatures, callback methods or load phase automatically.
+                </p>
+                <p>
+                  Builder-owned Harmony patches receive one idempotent Harmony-specific
+                  shutdown routine. It calls <code>UnpatchAll</code> for the generated Harmony
+                  id during runtime drain and process shutdown. This routine is generated only
+                  when the graph actually creates the Builder's Harmony runtime; Harmony-free
+                  mods contain neither that code nor the <code>0Harmony.dll</code> reference.
+                  Every actual Harmony dependency remains explicitly excluded from live reload.
                 </p>
               </section>
 
