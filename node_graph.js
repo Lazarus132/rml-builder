@@ -8567,23 +8567,50 @@
       return;
     }
 
-    const button =
-      dom.inspectorContent.querySelector(
-        `[data-rml-custom-csharp-node-id="${CSS.escape(id)}"]`
+    const buttons =
+      dom.inspectorContent.querySelectorAll(
+        `[${CUSTOM_CSHARP_ACTION_NODE_ATTRIBUTE}="${CSS.escape(id)}"]`
       );
-    if (!(button instanceof HTMLButtonElement)) {
+    if (buttons.length === 0) {
       return;
     }
 
-    const node = graph?.nodes?.find(
-      candidate => candidate?.id === id
-    );
+    const node =
+      customCSharpEditorNodeCandidates(
+        id
+      )[0] || null;
     if (!node) {
       return;
     }
 
+    for (const button of buttons) {
+      if (
+        button instanceof
+          HTMLButtonElement
+      ) {
+        applyCustomCSharpSynchronizationControl(
+          button,
+          node
+        );
+      }
+    }
+  }
+
+  function applyCustomCSharpSynchronizationControl(
+    button,
+    node
+  ) {
+    if (
+      !(button instanceof HTMLButtonElement) ||
+      !node
+    ) {
+      return false;
+    }
+
     const synchronizing =
-      customCSharpSynchronizations.has(id);
+      customCSharpSynchronizations.has(
+        String(node.id || "")
+      );
     const label =
       customCSharpFileNeedsOptimization(node)
         ? "Optimize & Open Node Graph"
@@ -8594,12 +8621,35 @@
     );
     button.setAttribute(
       "aria-label",
-      "Open Custom C# Node Graph"
+      label
     );
     button.setAttribute(
       "aria-busy",
       synchronizing ? "true" : "false"
     );
+    return true;
+  }
+
+  function refreshVisibleInspectorActionControls() {
+    if (!dom.inspectorContent) {
+      return;
+    }
+    const nodeIds = new Set(
+      [...dom.inspectorContent.querySelectorAll(
+        `[${CUSTOM_CSHARP_ACTION_NODE_ATTRIBUTE}]`
+      )]
+        .map(button => String(
+          button.getAttribute(
+            CUSTOM_CSHARP_ACTION_NODE_ATTRIBUTE
+          ) || ""
+        ))
+        .filter(Boolean)
+    );
+    for (const nodeId of nodeIds) {
+      updateCustomCSharpSynchronizationControl(
+        nodeId
+      );
+    }
   }
 
   function updateCustomCSharpSynchronizationToast(
@@ -8738,7 +8788,7 @@
     }
     const worker = new Worker(
       new URL(
-        "graph_codegen_worker.js?v=98-graph-hierarchy-navigation-v685",
+        "graph_codegen_worker.js?v=104-explicit-live-action-binding-v691",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -9170,6 +9220,9 @@
       Number(existingGraph.catalogDefinitionRevision || 0) === initialCatalogStamp.definitionRevision
     ) {
       existingGraph.sourceEditedInInspector = false;
+      updateCustomCSharpSynchronizationControl(
+        ownerId
+      );
       persistGraph(true);
       return openAfterSync ? openCustomCSharpFileGraph(ownerId) : true;
     }
@@ -9394,6 +9447,9 @@
       prepared.customGraph.importedSource = true;
       prepared.customGraph.sourceEditedInInspector = false;
       graph.customCSharpFiles[ownerId] = prepared.customGraph;
+      updateCustomCSharpSynchronizationControl(
+        ownerId
+      );
       setCustomCSharpDiagnostics(
         ownerId,
         []
@@ -12057,6 +12113,9 @@
     immediate = false,
     refreshGeneratedOutput = true
   ) {
+    if (refreshGeneratedOutput) {
+      refreshVisibleInspectorActionControls();
+    }
     const schedule =
       ++persistSchedule;
     const projectEpoch =
@@ -23760,22 +23819,41 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
       }
 
       .rml-graph-inspector-actions .button {
-        min-height: 35px;
-        padding-inline: 7px;
-        font-size: 9px;
+        min-height: 38px;
       }
 
-      .rml-graph-inspector-icon-button {
+      .button.rml-graph-inspector-icon-button[data-action-tone] {
         position: relative;
         display: inline-grid !important;
         place-items: center;
-        width: 38px;
-        min-width: 38px;
-        max-width: 38px;
-        height: 38px;
+        box-sizing: border-box;
+        width: 38px !important;
+        min-width: 38px !important;
+        max-width: 38px !important;
+        height: 38px !important;
+        max-height: 38px !important;
         min-height: 38px !important;
         padding: 7px !important;
-        flex: 0 0 38px;
+        flex: 0 0 38px !important;
+        flex-grow: 0 !important;
+        flex-shrink: 0 !important;
+        border-color: color-mix(in srgb, var(--rml-node-action-accent, #8ea5bb) 58%, transparent);
+        color: color-mix(in srgb, var(--rml-node-action-accent, #c4d3df) 82%, white);
+        background:
+          linear-gradient(
+            145deg,
+            color-mix(in srgb, var(--rml-node-action-accent, #8ea5bb) 20%, rgba(17, 22, 29, .96)),
+            rgba(11, 15, 21, .96)
+          );
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, .055),
+          0 5px 14px rgba(0, 0, 0, .2);
+        transition:
+          border-color .16s ease,
+          color .16s ease,
+          background .16s ease,
+          box-shadow .16s ease,
+          transform .16s ease;
       }
 
       .rml-graph-inspector-icon-button svg {
@@ -23788,6 +23866,78 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         stroke-linecap: round;
         stroke-linejoin: round;
         pointer-events: none;
+      }
+
+      .rml-graph-inspector-icon-button:hover,
+      .rml-graph-inspector-icon-button:focus-visible {
+        border-color: color-mix(in srgb, var(--rml-node-action-accent, #8ea5bb) 88%, white);
+        color: color-mix(in srgb, var(--rml-node-action-accent, #c4d3df) 62%, white);
+        background:
+          linear-gradient(
+            145deg,
+            color-mix(in srgb, var(--rml-node-action-accent, #8ea5bb) 32%, rgba(17, 22, 29, .96)),
+            rgba(11, 15, 21, .96)
+          );
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, .09),
+          0 7px 18px color-mix(in srgb, var(--rml-node-action-accent, #8ea5bb) 20%, rgba(0, 0, 0, .45));
+        transform: translateY(-1px);
+      }
+
+      .rml-graph-inspector-icon-button[data-action-tone="graph"] {
+        --rml-node-action-accent: #66b8ff;
+      }
+
+      .rml-graph-inspector-icon-button[data-action-tone="code"] {
+        --rml-node-action-accent: #d79dff;
+      }
+
+      .rml-graph-inspector-icon-button[data-action-tone="ports"] {
+        --rml-node-action-accent: #55d9ca;
+      }
+
+      .rml-graph-inspector-icon-button[data-action-tone="select"] {
+        --rml-node-action-accent: #7fc7ff;
+      }
+
+      .rml-graph-inspector-icon-button[data-action-tone="create"] {
+        --rml-node-action-accent: #5fe29a;
+      }
+
+      .rml-graph-inspector-icon-button[data-action-tone="save"] {
+        --rml-node-action-accent: #f1c45e;
+      }
+
+      .rml-graph-inspector-icon-button[data-action-tone="update"] {
+        --rml-node-action-accent: #64d2ff;
+      }
+
+      .rml-graph-inspector-icon-button[data-action-tone="unpack"] {
+        --rml-node-action-accent: #ffad66;
+      }
+
+      .rml-graph-inspector-icon-button[data-action-tone="duplicate"] {
+        --rml-node-action-accent: #91a8ff;
+      }
+
+      .rml-graph-inspector-icon-button[data-action-tone="reset"] {
+        --rml-node-action-accent: #9aa9b7;
+      }
+
+      .rml-graph-inspector-icon-button[data-action-tone="remove"] {
+        --rml-node-action-accent: #ff7188;
+      }
+
+      .rml-graph-inspector-icon-button[data-action-tone="saved-remove"] {
+        --rml-node-action-accent: #ff9a68;
+      }
+
+      .rml-graph-inspector-icon-button[data-action-tone="connection-remove"] {
+        --rml-node-action-accent: #ff7eaa;
+      }
+
+      .rml-graph-inspector-icon-button[data-action-tone="adjust"] {
+        --rml-node-action-accent: #70d6ff;
       }
 
       .rml-graph-inspector-button-label {
@@ -24637,12 +24787,13 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           min-height: 44px;
         }
 
-        body.rml-node-graph-mode .rml-graph-inspector-icon-button {
-          width: 44px;
-          min-width: 44px;
-          max-width: 44px;
-          height: 44px;
-          flex-basis: 44px;
+        body.rml-node-graph-mode .button.rml-graph-inspector-icon-button[data-action-tone] {
+          width: 44px !important;
+          min-width: 44px !important;
+          max-width: 44px !important;
+          height: 44px !important;
+          max-height: 44px !important;
+          flex: 0 0 44px !important;
         }
 
         body.rml-node-graph-mode .rml-graph-palette-item,
@@ -36877,8 +37028,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         "A verified catalog, at least one generated API node and otherwise only supported logic/value/flow nodes are required."
       );
       create.title = !canCreateComposite
-        ? "A verified catalog, at least one generated API node and otherwise only supported logic/value/flow nodes are required."
-        : "Combine the selected API and logic nodes into one reversible composite node.";
+        ? "Create API Composite — unavailable until the selection contains a verified catalog API node and otherwise only supported logic/value/flow nodes."
+        : "Create API Composite — combine the selected API and logic nodes into one reversible composite node.";
       actions.appendChild(create);
       card.append(
         heading,
@@ -39764,8 +39915,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           "A verified live or cached API catalog is required."
         );
         open.title = !canOpenComposite
-          ? "A verified live or cached API catalog is required."
-          : "Edit preserved internal API and logic nodes. Unconnected ports of new nodes are exposed on the outer Composite automatically.";
+          ? "Edit Internal API & Logic Graph — a verified live or cached API catalog is required."
+          : "Edit Internal API & Logic Graph — edit preserved internal API and logic nodes; unconnected ports of new nodes are exposed on the outer Composite automatically.";
         actions.appendChild(open);
         actions.appendChild(
           inspectorButton(
@@ -39797,8 +39948,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         actions.appendChild(
           inspectorButton(
             linkedTemplate
-              ? "Update Saved Composite"
-              : "Save to Saved API Composites",
+              ? "Update"
+              : "Save Composite",
             () => {
               void saveApiCompositeNode(
                 node.id
@@ -39819,7 +39970,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         if (linkedTemplate) {
           actions.appendChild(
             inspectorButton(
-              "Save as New Composite",
+              "Save New",
               () => {
                 void saveApiCompositeNode(
                   node.id,
@@ -39864,17 +40015,15 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           },
           "primary"
         );
-        openButton.dataset
-          .rmlCustomCSharpNodeId =
-            node.id;
         openButton.setAttribute(
-          "aria-label",
-          "Open Custom C# Node Graph"
+          CUSTOM_CSHARP_ACTION_NODE_ATTRIBUTE,
+          String(node.id)
+        );
+        applyCustomCSharpSynchronizationControl(
+          openButton,
+          node
         );
         actions.appendChild(openButton);
-        updateCustomCSharpSynchronizationControl(
-          node.id
-        );
       }
       if (
         definition.apiCompositeContainer !==
@@ -40296,6 +40445,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     "data-rml-custom-csharp-code-node";
   const CUSTOM_CSHARP_CODE_PARAMETER_ATTRIBUTE =
     "data-rml-custom-csharp-code-parameter";
+  const CUSTOM_CSHARP_ACTION_NODE_ATTRIBUTE =
+    "data-rml-custom-csharp-action-node";
 
   function normalizedCustomCSharpEditorColor(
     value,
@@ -40521,7 +40672,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         const script =
           document.createElement("script");
         script.src = new URL(
-          "custom_csharp_editor.js?v=32-graph-hierarchy-navigation-v685",
+          "custom_csharp_editor.js?v=38-explicit-live-action-binding-v691",
           document.baseURI
         ).href;
         script.async = true;
@@ -43160,7 +43311,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
             }
           );
         openDetached.title =
-          `Open ${String(specification.label || specification.key)} here instead of the graph. The editor can then be moved to a separate synchronized window.`;
+          `Open code editor — edit ${String(specification.label || specification.key)} here instead of the graph, then move the synchronized editor to a separate window if needed.`;
         const contextualActions =
           document.createElement("div");
         contextualActions.className =
@@ -43180,9 +43331,17 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     const svg = paths =>
       `<svg viewBox="0 0 24 24" aria-hidden="true">${paths}</svg>`;
 
-    if (
-      label.includes("open code editor")
-    ) {
+    if (label === "+") {
+      return svg(
+        `<path d="M12 5v14M5 12h14"></path>`
+      );
+    }
+    if (label === "−" || label === "-") {
+      return svg(
+        `<path d="M5 12h14"></path>`
+      );
+    }
+    if (label.includes("open code editor")) {
       return svg(
         `<path d="M8 6 3 12l5 6M16 6l5 6-5 6M14 4l-4 16"></path>`
       );
@@ -43194,10 +43353,22 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         `<path d="M14 4h6v6M20 4l-9 9"></path><path d="M18 13v6H5V6h6"></path>`
       );
     }
-    if (
-      label.includes("delete") ||
-      label.includes("discard")
-    ) {
+    if (label.includes("delete saved composite")) {
+      return svg(
+        `<path d="M5 4h11l3 3v13H5zM8 4v6h7V4"></path><path d="M10 14l5 5M15 14l-5 5"></path>`
+      );
+    }
+    if (label.includes("delete point")) {
+      return svg(
+        `<path d="M3 12h5M16 12h5"></path><circle cx="12" cy="12" r="4"></circle><path d="M10.5 10.5l3 3M13.5 10.5l-3 3"></path>`
+      );
+    }
+    if (label.includes("delete wire")) {
+      return svg(
+        `<path d="M3 7h5l3 5-3 5H3M21 7h-5l-1.2 2"></path><path d="M14 13l5 5M19 13l-5 5"></path>`
+      );
+    }
+    if (label.includes("delete") || label.includes("discard")) {
       return svg(
         `<path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"></path>`
       );
@@ -43207,21 +43378,37 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         `<rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M16 8V5H5v11h3"></path>`
       );
     }
-    if (
-      label.includes("save") ||
-      label.includes("update saved")
-    ) {
+    if (label === "update") {
+      return svg(
+        `<path d="M20 7v5h-5M4 17v-5h5"></path><path d="M6.2 8a7 7 0 0 1 11.5-1.5L20 9M4 15l2.3 2.5A7 7 0 0 0 18 16"></path>`
+      );
+    }
+    if (label === "save new") {
+      return svg(
+        `<path d="M6 3h8l4 4v14H6zM14 3v5h5"></path><path d="M12 12v6M9 15h6"></path>`
+      );
+    }
+    if (label.includes("save")) {
       return svg(
         `<path d="M5 4h12l2 2v14H5z"></path><path d="M8 4v6h8V4M8 20v-6h8v6"></path>`
       );
     }
     if (
       label.includes("open node graph") ||
-      label.includes("open api composite") ||
       label.includes("optimize & open")
     ) {
+      if (label.includes("optimize")) {
+        return svg(
+          `<circle cx="6" cy="8" r="2"></circle><circle cx="13" cy="17" r="2"></circle><path d="M8 9.5l4 5M8 8h6"></path><path d="M18 3l.7 2.3L21 6l-2.3.7L18 9l-.7-2.3L15 6l2.3-.7z"></path>`
+        );
+      }
       return svg(
         `<circle cx="6" cy="7" r="2"></circle><circle cx="18" cy="7" r="2"></circle><circle cx="12" cy="17" r="2"></circle><path d="M8 8.5l3 6M16 8.5l-3 6M8 7h8"></path>`
+      );
+    }
+    if (label.includes("edit internal api")) {
+      return svg(
+        `<circle cx="5" cy="7" r="2"></circle><circle cx="12" cy="17" r="2"></circle><path d="M7 8.5l4 6M7 7h6"></path><path d="M15 5l2-2 4 4-8.5 8.5-3 .5.5-3z"></path>`
       );
     }
     if (label.includes("create api composite")) {
@@ -43235,6 +43422,11 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     ) {
       return svg(
         `<path d="M8.5 14.5l-2 2a3 3 0 0 0 4.2 4.2l3-3a3 3 0 0 0 0-4.2"></path><path d="M15.5 9.5l2-2a3 3 0 0 0-4.2-4.2l-3 3a3 3 0 0 0 0 4.2M9 15l6-6"></path>`
+      );
+    }
+    if (label.includes("expose unconnected ports")) {
+      return svg(
+        `<rect x="6" y="5" width="8" height="14" rx="2"></rect><path d="M14 9h4M14 15h4M20 6v6M17 9h6"></path>`
       );
     }
     if (
@@ -43264,6 +43456,11 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         `<path d="M4 20l4.5-1 10-10-3.5-3.5-10 10zM13.5 7l3.5 3.5"></path>`
       );
     }
+    if (label.includes("select")) {
+      return svg(
+        `<path d="M5 4l12 8-5 1.5L10.5 19z"></path><path d="M14 16l4 4"></path>`
+      );
+    }
     if (
       label === "abbrechen" ||
       label.includes("cancel")
@@ -43272,7 +43469,30 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         `<circle cx="12" cy="12" r="9"></circle><path d="M9 9l6 6M15 9l-6 6"></path>`
       );
     }
-    return "";
+    return svg(
+      `<circle cx="6" cy="12" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="18" cy="12" r="1"></circle>`
+    );
+  }
+
+  function inspectorButtonTone(text) {
+    const label = String(text || "")
+      .trim()
+      .toLowerCase();
+    if (label === "+" || label === "−" || label === "-") return "adjust";
+    if (label.includes("delete saved composite")) return "saved-remove";
+    if (label.includes("delete wire") || label.includes("delete point")) return "connection-remove";
+    if (label.includes("delete") || label.includes("discard") || label.includes("cancel")) return "remove";
+    if (label.includes("open code editor")) return "code";
+    if (label.includes("edit internal api") || label.includes("open node graph") || label.includes("optimize & open") || label.includes("edit configuration")) return "graph";
+    if (label.includes("expose") || label.includes("detach")) return "ports";
+    if (label.includes("select")) return "select";
+    if (label.includes("create")) return "create";
+    if (label === "update") return "update";
+    if (label.includes("save")) return "save";
+    if (label.includes("unpack")) return "unpack";
+    if (label.includes("duplicate")) return "duplicate";
+    if (label.includes("reset") || label.includes("straighten")) return "reset";
+    return "default";
   }
 
   function setInspectorButtonContent(
@@ -43282,33 +43502,43 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     const label = String(text || "");
     const icon =
       inspectorButtonIconMarkup(label);
-    button.replaceChildren();
+    const presentationChanged =
+      button.dataset.actionLabel !== label;
+    let content = null;
+    if (presentationChanged) {
+      content =
+        document.createDocumentFragment();
+      const template =
+        document.createElement("template");
+      template.innerHTML = icon;
+      content.appendChild(
+        template.content
+      );
+      const accessibleLabel =
+        document.createElement("span");
+      accessibleLabel.className =
+        "rml-graph-inspector-button-label";
+      accessibleLabel.textContent = label;
+      content.appendChild(accessibleLabel);
+    }
     button.title = label;
     button.setAttribute(
       "aria-label",
       label
     );
     button.dataset.help = label;
-    if (!icon) {
-      button.textContent = label;
-      button.classList.remove(
-        "rml-graph-inspector-icon-button"
-      );
-      return;
-    }
+    button.dataset.helpKicker =
+      "Node action";
+    button.dataset.actionLabel = label;
     button.classList.add(
       "rml-graph-inspector-icon-button"
     );
-    button.insertAdjacentHTML(
-      "afterbegin",
-      icon
-    );
-    const accessibleLabel =
-      document.createElement("span");
-    accessibleLabel.className =
-      "rml-graph-inspector-button-label";
-    accessibleLabel.textContent = label;
-    button.appendChild(accessibleLabel);
+    button.dataset.actionTone =
+      inspectorButtonTone(label);
+    if (content) {
+      button.replaceChildren(content);
+    }
+    return presentationChanged;
   }
 
   function inspectorButton(

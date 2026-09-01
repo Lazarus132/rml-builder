@@ -405,6 +405,23 @@
                   packed configuration node.
                 </p>
                 <p>
+                  Node, wire, route-point and Composite actions in Properties use one
+                  consistent square icon size. Their symbols and accent colors identify
+                  the action type without changing its behavior. Hover an icon or focus it
+                  with the keyboard to see its complete action name and explanation, such
+                  as <strong>Edit Internal API &amp; Logic Graph</strong>; screen readers receive
+                  the same name through the button label. Destructive actions remain
+                  visually distinct: deleting a saved Composite template, a placed node,
+                  a wire or a route point never shares the same symbol. Dynamic actions
+                  update their icon, tooltip, color, ARIA name and busy state immediately
+                  when the underlying node changes; the Properties fields and their focus
+                  are not rerendered. For example, <strong>Open Node Graph</strong> switches
+                  atomically to <strong>Optimize &amp; Open Node Graph</strong> while Source is edited
+                  and switches back as soon as synchronization completes. The same live binding
+                  applies to Custom C# File nodes directly in the Runtime Graph and inside an
+                  API Composite's internal graph.
+                </p>
+                <p>
                   Explicit scroll-layer selection works throughout the whole builder,
                   not only inside the runtime graph. Hold <strong>Ctrl</strong> (Command
                   on macOS) and use the wheel to choose a level. The hierarchy is captured
@@ -483,8 +500,8 @@
                   exclusive to a Custom C# File Graph.
                 </p>
                 <p>
-                  Use <strong>Save to Saved API Composites</strong>,
-                  <strong>Update Saved Composite</strong> or <strong>Save as New Composite</strong>
+                  Use <strong>Save Composite</strong>, <strong>Update</strong> or
+                  <strong>Save New</strong>
                   to reuse the complete internal graph. Saved Composites can be inserted from
                   the Node Library, unpacked, deleted, exported and imported as JSON, and are
                   checked individually against the active verified catalog. Existing placed

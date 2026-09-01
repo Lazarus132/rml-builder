@@ -40,7 +40,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "graph-hierarchy-navigation-20260831-v685";
+  "explicit-live-action-binding-20260901-v691";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -1166,7 +1166,7 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "graph_codegen_worker.js?v=98-graph-hierarchy-navigation-v685",
+      "graph_codegen_worker.js?v=104-explicit-live-action-binding-v691",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -29384,8 +29384,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "help_template.html?v=72-graph-hierarchy-navigation-v685",
-    "help_template.js?v=72-graph-hierarchy-navigation-v685",
+    "help_template.html?v=78-explicit-live-action-binding-v691",
+    "help_template.js?v=78-explicit-live-action-binding-v691",
     "help-template",
     "RMLHelpTemplateMarkup"
   )

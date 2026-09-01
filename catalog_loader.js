@@ -32,7 +32,7 @@
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "visual_csharp.js?v=63-graph-hierarchy-navigation-v685",
+    "visual_csharp.js?v=69-explicit-live-action-binding-v691",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
