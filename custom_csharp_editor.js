@@ -2116,7 +2116,7 @@
     "RMLCustomCSharpDetachedEditor",
     {
       value: Object.freeze({
-        version: 27,
+        version: 28,
         mount
       }),
       writable: false,

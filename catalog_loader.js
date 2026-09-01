@@ -32,11 +32,11 @@
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "visual_csharp.js?v=69-explicit-live-action-binding-v691",
+    "visual_csharp.js?v=70-repeat-safe-api-member-reads-v692",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=47-mobile-focus-scroll-stability-v649",
+    "api_nodes.js?v=48-repeat-safe-api-member-reads-v692",
     scriptUrl
   ).href;
 

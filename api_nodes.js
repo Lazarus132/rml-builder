@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const FACTORY_VERSION = 22;
+  const FACTORY_VERSION = 23;
   const API_VERIFICATION_SCHEMA_VERSION = 2;
   const ADVANCED_GROUP = "Advanced / Raw C#";
   const UNAVAILABLE_GROUP = "Unavailable API";
@@ -3492,7 +3492,7 @@
       const local =
         `_apiTarget${api.token(api.node.id)}`;
 
-      return `((${target}) is ${ownerCs} ${local} ? ${memberAccess(local)} : default(${valueCs})!)`;
+      return `((${target}) switch { ${ownerCs} ${local} => ${memberAccess(local)}, _ => default(${valueCs})! })`;
     }
 
     function propertyReadExpression(

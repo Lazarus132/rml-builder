@@ -8788,7 +8788,7 @@
     }
     const worker = new Worker(
       new URL(
-        "graph_codegen_worker.js?v=104-explicit-live-action-binding-v691",
+        "graph_codegen_worker.js?v=105-repeat-safe-api-member-reads-v692",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -40672,7 +40672,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         const script =
           document.createElement("script");
         script.src = new URL(
-          "custom_csharp_editor.js?v=38-explicit-live-action-binding-v691",
+          "custom_csharp_editor.js?v=39-repeat-safe-api-member-reads-v692",
           document.baseURI
         ).href;
         script.async = true;
