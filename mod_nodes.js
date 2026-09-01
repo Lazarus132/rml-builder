@@ -2516,7 +2516,7 @@ private static void SubscribeGraphEventWhenAvailable(
     CancellationToken cancellation =
         _graphEventSubscriptionCancellation.Token;
 
-    _ = Task.Run(
+    TrackGraphTask(Task.Run(
         async () =>
         {
             try
@@ -2539,7 +2539,7 @@ private static void SubscribeGraphEventWhenAvailable(
             {
             }
         },
-        cancellation);
+        cancellation));
 }
 
 private static bool TrySubscribeGraphEventProviders(
@@ -2734,7 +2734,7 @@ internal sealed record GraphHttpResponse(
     api.addMember("universal.task.helpers", String.raw`
 private static void RunGraphBackground(Action action)
 {
-    _ = Task.Run(action);
+    TrackGraphTask(Task.Run(action));
 }
 
 private static async Task WaitForAnyGraphTask(params Task[] tasks)
@@ -5780,6 +5780,10 @@ private static T GraphCollectionItemAt<T>(
       port("context", "Context", "patchContext")
     ],
     codegenCollect(api) {
+      api.require(
+        "runtimeReloadUnsafe",
+        true
+      );
       ensureHarmonyRuntime(api);
       api.requireRuntimeHelper(
         "ReportGraphRuntimeFailure"
@@ -6196,6 +6200,10 @@ private static T GraphCollectionItemAt<T>(
     inputs: [port("call", "Create", "impulse")],
     outputs: [port("done", "Done", "impulse")],
     codegenCollect(api) {
+      api.require(
+        "runtimeReloadUnsafe",
+        true
+      );
       ensureHarmonyRuntime(api);
     },
     codegenAction(api) {
@@ -7260,7 +7268,7 @@ private static T GraphCollectionItemAt<T>(
       );
       api.addMember(
         `${api.node.id}.run`,
-        `private static void RunBackground${token}()\n{\n    _ = Task.Run(() =>\n    {${background ? `\n        ${background}();` : ""}\n    }).ContinueWith(_ =>\n    {${completed ? `\n        ${completed}();` : ""}\n    }, TaskScheduler.Default);\n}`
+        `private static void RunBackground${token}()\n{\n    Task completion = Task.Run(() =>\n    {${background ? `\n        ${background}();` : ""}\n    }).ContinueWith(_ =>\n    {${completed ? `\n        ${completed}();` : ""}\n    }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);\n    TrackGraphTask(completion);\n}`
       );
     },
     codegenAction(api) {
@@ -11030,6 +11038,10 @@ private static string NormalConversionError<T>(object? value)
           }
 
           case "harmony.exactPatchSource": {
+            api.require(
+              "runtimeReloadUnsafe",
+              true
+            );
             ensureHarmonyRuntime({
               ...api,
               node,
@@ -11066,6 +11078,10 @@ private static string NormalConversionError<T>(object? value)
           }
 
           case "harmony.earlyPatchSource": {
+            api.require(
+              "runtimeReloadUnsafe",
+              true
+            );
             const fileName = String(
               node.parameters?.fileName ||
                 "EarlyHarmonyPatches.cs"
@@ -11270,6 +11286,35 @@ private static string NormalConversionError<T>(object? value)
             node.operatorId
           ]?.harmonyApiNode === true
         );
+
+      const scannedHarmonyPatchApiNodes =
+        scannedHarmonyApiNodes.filter(node => {
+          const definition =
+            api.definitions?.[
+              node.operatorId
+            ];
+          const memberName = String(
+            definition?.catalogMember ||
+            node.apiContract?.memberName ||
+            ""
+          ).trim().toLowerCase();
+          return [
+            "patch",
+            "patchall",
+            "patchcategory",
+            "patchbycategory"
+          ].includes(memberName);
+        });
+
+      if (
+        scannedHarmonyPatchApiNodes
+          .length > 0
+      ) {
+        api.require(
+          "runtimeReloadUnsafe",
+          true
+        );
+      }
 
       if (scannedHarmonyApiNodes.length > 0) {
         api.addReference({

@@ -8788,7 +8788,7 @@
     }
     const worker = new Worker(
       new URL(
-        "graph_codegen_worker.js?v=105-repeat-safe-api-member-reads-v692",
+        "graph_codegen_worker.js?v=108-harmony-only-reload-capability-v696",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -17756,7 +17756,8 @@
       allowUnsafeBlocks: false,
       useWindowsForms: false,
       usesRuntimeConfigurationMenu: false,
-      usesModUnloadLifecycle: false
+      usesModUnloadLifecycle: false,
+      runtimeReloadUnsafe: false
     };
 
     const addNamedBlock = (
@@ -20044,7 +20045,8 @@ ${dynamicChoiceRefreshCases.join("\n")}
       "using System.Globalization;",
       "using System.Linq;",
       "using System.Reflection;",
-      "using System.Threading;"
+      "using System.Threading;",
+      "using System.Threading.Tasks;"
     ]);
 
     if (usesElements) {
@@ -20248,6 +20250,11 @@ internal static partial class ${graphClassName}
     private static MethodInfo? _runtimeBridgePublisher;
     private static long _runtimeBridgeResolveAfter;
     private static int _runtimeDisplayPumpStarted;
+    private static readonly object _graphRuntimeTasksLock = new();
+    private static readonly HashSet<Task> _graphRuntimeTasks = new();
+    private static int _graphRuntimeAcceptingEntries = 1;
+    private static int _graphActiveEntries;
+    private static long _graphEntryGeneration;
     private static readonly object _graphImpulseExecutionLock = new();
     private static readonly object _graphRuntimeLastValuesLock = new();
     private static readonly Dictionary<string, object?> _graphRuntimeLastValues =
@@ -20278,6 +20285,9 @@ ${storeFieldsCode ? `\n${storeFieldsCode}` : ""}${extensionFieldsCode ? `\n\n${e
 
     public static void Initialize(Action<string>? display)
     {
+        Volatile.Write(
+            ref _graphRuntimeAcceptingEntries,
+            1);
         _display = display ?? (static _ => { });
         lock (_displayStateLock)
         {
@@ -20288,6 +20298,119 @@ ${storeFieldsCode ? `\n${storeFieldsCode}` : ""}${extensionFieldsCode ? `\n\n${e
       "Initialize extension"
     )}`
   : ""}
+    }
+
+    private static void TrackGraphTask(Task task)
+    {
+        if (task.IsCompleted)
+        {
+            return;
+        }
+
+        lock (_graphRuntimeTasksLock)
+        {
+            _graphRuntimeTasks.Add(task);
+        }
+
+        _ = task.ContinueWith(
+            completed =>
+            {
+                lock (_graphRuntimeTasksLock)
+                {
+                    _graphRuntimeTasks.Remove(completed);
+                }
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+    }
+
+    public static void BeginRuntimeDrain()
+    {
+        Volatile.Write(
+            ref _graphRuntimeAcceptingEntries,
+            0);
+        Volatile.Write(
+            ref _runtimeDisplayPumpStarted,
+            0);
+    }
+
+    public static async Task DrainRuntimeAsync(
+        CancellationToken cancellationToken)
+    {
+        BeginRuntimeDrain();
+
+        while (true)
+        {
+            while (Volatile.Read(
+                       ref _graphActiveEntries) != 0)
+            {
+                await Task.Delay(10, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            long quietGeneration = Interlocked.Read(
+                ref _graphEntryGeneration);
+            await Task.Delay(25, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (
+                Volatile.Read(
+                    ref _graphActiveEntries) == 0 &&
+                Interlocked.Read(
+                    ref _graphEntryGeneration) == quietGeneration)
+            {
+                break;
+            }
+        }
+
+        while (true)
+        {
+            Task[] pending;
+            lock (_graphRuntimeTasksLock)
+            {
+                _graphRuntimeTasks.RemoveWhere(
+                    task => task.IsCompleted);
+                pending = _graphRuntimeTasks.ToArray();
+            }
+
+            if (pending.Length == 0)
+            {
+                break;
+            }
+
+            try
+            {
+                await Task.WhenAll(pending)
+                    .WaitAsync(cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch when (!cancellationToken.IsCancellationRequested)
+            {
+                // A finished faulted task is still fully drained. Its graph
+                // error was already reported at the execution boundary.
+            }
+        }
+
+        _display = static _ => { };
+        DisplayValueChanged = null;
+        DisplayValueChangedByMonitorId = null;
+        lock (_runtimeBridgeResolverLock)
+        {
+            _runtimeBridgePublisher = null;
+        }
+        lock (_displayStateLock)
+        {
+            _displayValues.Clear();
+            _displayValuesByMonitorId.Clear();
+            _displayTextByMonitorId.Clear();
+            _displayFingerprints.Clear();
+        }
+        lock (_graphRuntimeLastValuesLock)
+        {
+            _graphRuntimeLastValues.Clear();
+        }
+        _graphExecutionFrame.Value = null;
     }
 
 ${setterCode || "    // No configuration setters."}${reactionCode ? `
@@ -20334,6 +20457,12 @@ ${startupEmitters.length > 0
 
     private static bool TryDispatchGraphToWorld(Action action)
     {
+        if (Volatile.Read(
+                ref _graphRuntimeAcceptingEntries) == 0)
+        {
+            return false;
+        }
+
         FrooxEngine.World? world = GraphExecutionWorld();
         if (!GraphWorldReady(world))
         {
@@ -20360,6 +20489,12 @@ ${startupEmitters.length > 0
 
     private static void DispatchGraphToWorld(Action action)
     {
+        if (Volatile.Read(
+                ref _graphRuntimeAcceptingEntries) == 0)
+        {
+            return;
+        }
+
         if (TryDispatchGraphToWorld(action))
         {
             return;
@@ -20377,16 +20512,20 @@ ${startupEmitters.length > 0
             return;
         }
 
-        _ = manager.StartTask(
+        Task dispatchTask = manager.StartTask(
             async () =>
             {
-                while (!TryDispatchGraphToWorld(action))
+                while (
+                    Volatile.Read(
+                        ref _graphRuntimeAcceptingEntries) != 0 &&
+                    !TryDispatchGraphToWorld(action))
                 {
                     // Updates is only a wait primitive. World.RunSynchronously
                     // is what grants the valid world mutation context.
                     await new FrooxEngine.Updates(1);
                 }
             });
+        TrackGraphTask(dispatchTask);
     }
 
     private static void ExecuteGraphSafely(
@@ -20420,9 +20559,22 @@ ${startupEmitters.length > 0
         private readonly GraphExecutionFrame? _previous;
         private bool _disposed;
 
+        internal bool Accepted { get; }
+
         internal GraphExecutionScope()
         {
             _previous = _graphExecutionFrame.Value;
+            Interlocked.Increment(
+                ref _graphActiveEntries);
+            Interlocked.Increment(
+                ref _graphEntryGeneration);
+            if (Volatile.Read(
+                    ref _graphRuntimeAcceptingEntries) == 0)
+            {
+                return;
+            }
+
+            Accepted = true;
             _graphExecutionFrame.Value =
                 new GraphExecutionFrame();
         }
@@ -20435,8 +20587,13 @@ ${startupEmitters.length > 0
             }
 
             _disposed = true;
-            _graphExecutionFrame.Value =
-                _previous;
+            if (Accepted)
+            {
+                _graphExecutionFrame.Value =
+                    _previous;
+            }
+            Interlocked.Decrement(
+                ref _graphActiveEntries);
         }
     }
 
@@ -20449,6 +20606,10 @@ ${startupEmitters.length > 0
     {
         using GraphExecutionScope scope =
             OpenGraphEntry();
+        if (!scope.Accepted)
+        {
+            return;
+        }
         action();
     }
 
@@ -21051,7 +21212,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
             return;
         }
 
-        _ = System.Threading.Tasks.Task.Run(
+        TrackGraphTask(System.Threading.Tasks.Task.Run(
             async () =>
             {
                 while (
@@ -21077,7 +21238,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
                 Interlocked.Exchange(
                     ref _runtimeDisplayPumpStarted,
                     0);
-            });
+            }));
     }
 
     private static MethodInfo? ResolveRuntimeBridgePublisher()
@@ -21664,6 +21825,9 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         usesModUnloadLifecycle:
           extensionRequirements
             .usesModUnloadLifecycle,
+        runtimeReloadUnsafe:
+          extensionRequirements
+            .runtimeReloadUnsafe,
         references:
           [...extensionReferences.values()],
         packageReferences:
@@ -40672,7 +40836,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         const script =
           document.createElement("script");
         script.src = new URL(
-          "custom_csharp_editor.js?v=39-repeat-safe-api-member-reads-v692",
+          "custom_csharp_editor.js?v=42-harmony-only-reload-capability-v696",
           document.baseURI
         ).href;
         script.async = true;

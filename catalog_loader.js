@@ -28,15 +28,15 @@
     document.currentScript?.src ||
     window.location.href;
   const modNodesUrl = new URL(
-    "mod_nodes.js?v=52-persistent-runtime-state-v622",
+    "mod_nodes.js?v=55-harmony-only-reload-capability-v696",
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "visual_csharp.js?v=70-repeat-safe-api-member-reads-v692",
+    "visual_csharp.js?v=73-harmony-only-reload-capability-v696",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=48-repeat-safe-api-member-reads-v692",
+    "api_nodes.js?v=51-harmony-only-reload-capability-v696",
     scriptUrl
   ).href;
 

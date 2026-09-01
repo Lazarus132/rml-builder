@@ -40,7 +40,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "repeat-safe-api-member-reads-20260901-v692";
+  "harmony-only-reload-capability-20260901-v696";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -1166,7 +1166,7 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "graph_codegen_worker.js?v=105-repeat-safe-api-member-reads-v692",
+      "graph_codegen_worker.js?v=108-harmony-only-reload-capability-v696",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -4581,6 +4581,13 @@ function generateCode() {
     graphContribution?.requirements
       ?.usesModUnloadLifecycle ===
     true;
+  const runtimeReloadUnsafe =
+    graphContribution?.requirements
+      ?.runtimeReloadUnsafe ===
+    true;
+  const supportsRuntimeReload =
+    usesModUnloadLifecycle &&
+    !runtimeReloadUnsafe;
   const controllers = entries.filter(
     entry =>
       entry.node.kind ===
@@ -4775,8 +4782,11 @@ ${usesColorX
           "IModConfigurationLayoutProvider"
         ]
       : []),
-    ...(usesModUnloadLifecycle
+    ...(supportsRuntimeReload
       ? ["IRuntimeReloadableMod"]
+      : []),
+    ...(runtimeReloadUnsafe
+      ? ["IModRuntimeReloadUnsafe"]
       : [])
   ];
   const interfaceSuffix =
@@ -4787,7 +4797,7 @@ ${usesColorX
       : "";
 
   const runtimeUnloadLifecycleBlock =
-    usesModUnloadLifecycle
+    supportsRuntimeReload
       ? `
     public bool CanUnload(
         out string reason)
@@ -4803,10 +4813,9 @@ ${usesColorX
         return System.Threading.Tasks.ValueTask.CompletedTask;
     }
 
-    public System.Threading.Tasks.ValueTask StopAsync(
+    public async System.Threading.Tasks.ValueTask StopAsync(
         System.Threading.CancellationToken cancellationToken)
     {
-        _ = cancellationToken;
 ${observedEntries.length > 0
     ? `        if (_configuration is not null)
         {
@@ -4816,7 +4825,10 @@ ${observedEntries.length > 0
 
 `
     : ""}        ${graphContribution.className}.Shutdown();
-        return System.Threading.Tasks.ValueTask.CompletedTask;
+        ${graphContribution.className}.BeginRuntimeDrain();
+        await ${graphContribution.className}
+            .DrainRuntimeAsync(cancellationToken)
+            .ConfigureAwait(false);
     }
 `
       : "";
@@ -29384,8 +29396,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "help_template.html?v=79-repeat-safe-api-member-reads-v692",
-    "help_template.js?v=79-repeat-safe-api-member-reads-v692",
+    "help_template.html?v=82-harmony-only-reload-capability-v696",
+    "help_template.js?v=82-harmony-only-reload-capability-v696",
     "help-template",
     "RMLHelpTemplateMarkup"
   )

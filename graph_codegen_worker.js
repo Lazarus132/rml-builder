@@ -194,16 +194,16 @@ async function ensureRuntime(catalog) {
       self.RMLResoniteApiCatalog;
 
     importScripts(
-      "node_graph.js?v=359-repeat-safe-api-member-reads-v692"
+      "node_graph.js?v=362-harmony-only-reload-capability-v696"
     );
     importScripts(
-      "mod_nodes.js?v=52-persistent-runtime-state-v622"
+      "mod_nodes.js?v=55-harmony-only-reload-capability-v696"
     );
     importScripts(
-      "visual_csharp.js?v=70-repeat-safe-api-member-reads-v692"
+      "visual_csharp.js?v=73-harmony-only-reload-capability-v696"
     );
     importScripts(
-      "api_nodes.js?v=48-repeat-safe-api-member-reads-v692"
+      "api_nodes.js?v=51-harmony-only-reload-capability-v696"
     );
 
     if (
