@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const FACTORY_VERSION = 30;
+  const FACTORY_VERSION = 31;
   const API_VERIFICATION_SCHEMA_VERSION = 3;
   const ADVANCED_GROUP = "Advanced / Raw C#";
   const UNAVAILABLE_GROUP = "Unavailable API";
@@ -131,6 +131,27 @@
       confidence: String(
         source.confidence || "unknown"
       ),
+      operation: String(
+        source.operation || ""
+      ).trim(),
+      classificationBasis: String(
+        source.classificationBasis || ""
+      ).trim(),
+      requiresExecutionProof:
+        source.requiresExecutionProof === true,
+      requiresUseSiteResolution:
+        source.requiresUseSiteResolution === true,
+      useSiteInputs: Object.freeze(
+        [...new Set(
+          (Array.isArray(source.useSiteInputs)
+            ? source.useSiteInputs
+            : [])
+            .map(input =>
+              String(input || "").trim()
+            )
+            .filter(Boolean)
+        )].sort()
+      ),
       reasons: Object.freeze(
         [...new Set(
           (Array.isArray(source.reasons)
@@ -216,6 +237,20 @@
               options.cleanupCapabilities
             )
               ? options.cleanupCapabilities
+              : [])
+              .map(value =>
+                String(value || "").trim()
+              )
+              .filter(Boolean)
+          )].sort()
+        ),
+      apiReloadAutomaticCleanup:
+        Object.freeze(
+          [...new Set(
+            (Array.isArray(
+              options.automaticCleanup
+            )
+              ? options.automaticCleanup
               : [])
               .map(value =>
                 String(value || "").trim()
@@ -2885,6 +2920,20 @@
                 .filter(Boolean)
             )].sort()
           ),
+        reloadAutomaticCleanup:
+          Object.freeze(
+            [...new Set(
+              (Array.isArray(
+                definition?.apiReloadAutomaticCleanup
+              )
+                ? definition.apiReloadAutomaticCleanup
+                : [])
+                .map(value =>
+                  String(value || "").trim()
+                )
+                .filter(Boolean)
+            )].sort()
+          ),
         stableContractId:
           String(
             definition?.apiStableContractId ||
@@ -3490,6 +3539,9 @@
       }, owner, eventInfo.reloadSafety, {
         member: eventInfo,
         cleanupCapabilities: [
+          "event-unsubscribe"
+        ],
+        automaticCleanup: [
           "event-unsubscribe"
         ]
       });

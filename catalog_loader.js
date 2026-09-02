@@ -34,15 +34,15 @@
     document.currentScript?.src ||
     window.location.href;
   const modNodesUrl = new URL(
-    "mod_nodes.js?v=67-scanner-authoritative-reload-v720",
+    "mod_nodes.js?v=67-reload-warning-aggregation-v722",
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "visual_csharp.js?v=78-scanner-authoritative-reload-v720",
+    "visual_csharp.js?v=78-reload-warning-aggregation-v722",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=63-scanner-authoritative-reload-v720",
+    "api_nodes.js?v=64-reload-warning-aggregation-v722",
     scriptUrl
   ).href;
 

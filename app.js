@@ -40,7 +40,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "scanner-authoritative-reload-safety-20260902-v720";
+  "reload-warning-aggregation-20260902-v722";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -1166,7 +1166,7 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "graph_codegen_worker.js?v=130-scanner-authoritative-reload-v720",
+      "graph_codegen_worker.js?v=132-reload-warning-aggregation-v722",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -29606,8 +29606,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "help_template.html?v=90-scanner-authoritative-reload-v720",
-    "help_template.js?v=90-scanner-authoritative-reload-v720",
+    "help_template.html?v=90-reload-warning-aggregation-v722",
+    "help_template.js?v=90-reload-warning-aggregation-v722",
     "help-template",
     "RMLHelpTemplateMarkup"
   )

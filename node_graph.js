@@ -10396,7 +10396,7 @@
     }
     const worker = new Worker(
       new URL(
-        "graph_codegen_worker.js?v=130-scanner-authoritative-reload-v720",
+        "graph_codegen_worker.js?v=132-reload-warning-aggregation-v722",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -19682,6 +19682,1075 @@
     return optimized;
   }
 
+  const RELOAD_USE_SITE_INPUTS =
+    new Set([
+      "actual-argument-type",
+      "cleanup-path",
+      "closed-generic-arguments",
+      "constructed-delegate-lifetime",
+      "constructed-object-lifetime",
+      "handler-origin",
+      "receiver-lifetime",
+      "receiver-runtime-type",
+      "result-lifetime",
+      "runtime-implementation",
+      "static-operation",
+      "static-storage",
+      "subscription-lifetime",
+      "target-origin",
+      "value-origin"
+    ]);
+
+  const RELOAD_INTRINSIC_VALUE_TYPES =
+    new Set([
+      "impulse",
+      "bool",
+      "string",
+      "Uri",
+      "int",
+      "float",
+      "double",
+      "int2",
+      "int3",
+      "int4",
+      "float2",
+      "float3",
+      "float4",
+      "double2",
+      "double3",
+      "double4",
+      "colorX"
+    ]);
+
+  function normalizedReloadStringList(
+    values
+  ) {
+    return [...new Set(
+      (Array.isArray(values) ? values : [])
+        .map(value =>
+          String(value || "").trim()
+        )
+        .filter(Boolean)
+    )].sort();
+  }
+
+  function reloadGraphTypeMayCarryModContext(
+    type,
+    typeDefinitions = TYPE_INFO
+  ) {
+    const normalized = String(
+      type || ""
+    ).trim();
+    const base = typeBase(normalized);
+    const information =
+      typeDefinitions?.[base] || {};
+
+    if (
+      normalized.startsWith("enum:") ||
+      base === "enum" ||
+      RELOAD_INTRINSIC_VALUE_TYPES.has(
+        base
+      ) ||
+      information.referenceType === false
+    ) {
+      return false;
+    }
+
+    return true;
+  }
+
+  function reloadDangerousBuilderOrigin(
+    node,
+    definition,
+    outputType
+  ) {
+    const operatorId = String(
+      node?.operatorId || ""
+    );
+    const base = typeBase(outputType);
+
+    if (
+      operatorId === "constant.nullObject" ||
+      operatorId === "task.completedTask"
+    ) {
+      return false;
+    }
+
+    if (
+      /^(?:csharp\.|harmony\.|reflection\.)/.test(
+        operatorId
+      ) ||
+      /^language\.(?:lambdaAction|method|callMethod)/.test(
+        operatorId
+      ) ||
+      operatorId === "flow.typedCallback" ||
+      definition?.customCSharpNode === true ||
+      definition?.customCSharpSyntaxNode === true ||
+      definition?.apiCompositeCustomCSharp === true
+    ) {
+      return true;
+    }
+
+    return [
+      "action",
+      "delegate",
+      "exception",
+      "fieldInfo",
+      "methodInfo",
+      "propertyInfo",
+      "task"
+    ].includes(base) ||
+      /^normalDelegate:/.test(base);
+  }
+
+  function reloadGraphUsage(
+    options = {}
+  ) {
+    const nodes = Array.isArray(
+      options.nodes
+    )
+      ? options.nodes
+      : [];
+    const connections = Array.isArray(
+      options.connections
+    )
+      ? options.connections
+      : [];
+    const nodeById =
+      options.nodeById ||
+      new Map(
+        nodes.map(node => [
+          String(node?.id || ""),
+          node
+        ])
+      );
+    const definitionForNode =
+      typeof options.definitionForNode ===
+        "function"
+        ? options.definitionForNode
+        : node =>
+            options.definitions?.[
+              node?.operatorId
+            ] || null;
+    const resolvedType =
+      typeof options.resolvedType ===
+        "function"
+        ? options.resolvedType
+        : (_node, port) =>
+            port?.type || null;
+    const outgoing = new Map();
+    const incoming =
+      options.incoming ||
+      new Map(
+        connections.map(connection => [
+          `${connection.toNode}:${connection.toPort}`,
+          connection
+        ])
+      );
+
+    for (const connection of connections) {
+      const list =
+        outgoing.get(
+          String(connection.fromNode || "")
+        ) || [];
+      list.push(connection);
+      outgoing.set(
+        String(connection.fromNode || ""),
+        list
+      );
+    }
+
+    const executed = new Set();
+    const pending = [];
+    for (const node of nodes) {
+      const definition =
+        definitionForNode(node);
+      const impulseInputs =
+        (definition?.inputs || [])
+          .filter(port =>
+            resolvedType(node, port) ===
+              "impulse"
+          );
+      const impulseOutputs =
+        (definition?.outputs || [])
+          .filter(port =>
+            resolvedType(node, port) ===
+              "impulse"
+          );
+      const isEventSubscription =
+        definition?.apiMemberKind ===
+          "event" ||
+        node?.operatorId ===
+          "lifecycle.subscribeEvent";
+
+      if (
+        isEventSubscription ||
+        (
+          impulseOutputs.length > 0 &&
+          impulseInputs.length === 0
+        )
+      ) {
+        pending.push(String(node.id));
+      }
+    }
+
+    while (pending.length > 0) {
+      const nodeId = pending.pop();
+      if (executed.has(nodeId)) {
+        continue;
+      }
+      executed.add(nodeId);
+      const node = nodeById.get(nodeId);
+      const definition =
+        definitionForNode(node);
+      for (const connection of
+        outgoing.get(nodeId) || []) {
+        const output =
+          definition?.outputs?.find(
+            port =>
+              String(port?.id || "") ===
+              String(
+                connection.fromPort || ""
+              )
+          );
+        if (
+          resolvedType(node, output) ===
+            "impulse"
+        ) {
+          pending.push(
+            String(connection.toNode || "")
+          );
+        }
+      }
+    }
+
+    const dataUsed = new Set();
+    const dataPending = [...executed];
+    while (dataPending.length > 0) {
+      const nodeId = dataPending.pop();
+      const node = nodeById.get(nodeId);
+      const definition =
+        definitionForNode(node);
+      for (const port of
+        definition?.inputs || []) {
+        if (
+          resolvedType(node, port) ===
+            "impulse"
+        ) {
+          continue;
+        }
+        const connection =
+          incoming.get(
+            `${nodeId}:${String(port?.id || "")}`
+          );
+        const sourceId = String(
+          connection?.fromNode || ""
+        );
+        if (
+          sourceId &&
+          !dataUsed.has(sourceId)
+        ) {
+          dataUsed.add(sourceId);
+          dataPending.push(sourceId);
+        }
+      }
+    }
+
+    return Object.freeze({
+      executed,
+      dataUsed
+    });
+  }
+
+  function reloadCatalogNodeIsUsed(
+    node,
+    definition,
+    usage,
+    resolvedType = (_node, port) =>
+      port?.type || null
+  ) {
+    const nodeId = String(node?.id || "");
+    if (
+      definition?.apiMemberKind === "event"
+    ) {
+      return true;
+    }
+    const hasImpulseInput =
+      (definition?.inputs || []).some(
+        port =>
+          resolvedType(node, port) ===
+          "impulse"
+      );
+
+    return hasImpulseInput
+      ? usage?.executed?.has(nodeId) === true
+      : usage?.dataUsed?.has(nodeId) === true ||
+          usage?.executed?.has(nodeId) === true;
+  }
+
+  function reloadUseSiteContext(
+    options = {}
+  ) {
+    const nodes = Array.isArray(
+      options.nodes
+    )
+      ? options.nodes
+      : [];
+    const connections = Array.isArray(
+      options.connections
+    )
+      ? options.connections
+      : [];
+
+    return {
+      nodes,
+      connections,
+      nodeById:
+        options.nodeById ||
+        new Map(
+          nodes.map(node => [
+            String(node?.id || ""),
+            node
+          ])
+        ),
+      incoming:
+        options.incoming ||
+        new Map(
+          connections.map(connection => [
+            `${connection.toNode}:${connection.toPort}`,
+            connection
+          ])
+        ),
+      connectedOutputs:
+        options.connectedOutputs ||
+        new Set(
+          connections.map(connection =>
+            `${connection.fromNode}:${connection.fromPort}`
+          )
+        ),
+      definitionForNode:
+        typeof options.definitionForNode ===
+          "function"
+          ? options.definitionForNode
+          : node =>
+              options.definitions?.[
+                node?.operatorId
+              ] || null,
+      resolvedType:
+        typeof options.resolvedType ===
+          "function"
+          ? options.resolvedType
+          : (_node, port) =>
+              port?.type || null,
+      typeDefinitions:
+        options.typeDefinitions ||
+        TYPE_INFO,
+      usage:
+        options.usage || null,
+      originCache:
+        options.originCache || new Map(),
+      originStack:
+        options.originStack || new Set(),
+      resolutionCache:
+        options.resolutionCache ||
+        new Map(),
+      resolutionStack:
+        options.resolutionStack ||
+        new Set()
+    };
+  }
+
+  function reloadInputOrigin(
+    node,
+    inputId,
+    context
+  ) {
+    const connection =
+      context.incoming.get(
+        `${node.id}:${inputId}`
+      );
+
+    if (!connection) {
+      return {
+        state: "safe",
+        detail:
+          `${inputId}:default-or-null`
+      };
+    }
+
+    const sourceNode =
+      context.nodeById.get(
+        String(connection.fromNode || "")
+      );
+    const sourceDefinition =
+      context.definitionForNode(sourceNode);
+    const output =
+      sourceDefinition?.outputs?.find(
+        port =>
+          String(port?.id || "") ===
+          String(connection.fromPort || "")
+      );
+    const outputType =
+      context.resolvedType(
+        sourceNode,
+        output
+      );
+    const key =
+      `${connection.fromNode}:${connection.fromPort}`;
+
+    if (
+      !reloadGraphTypeMayCarryModContext(
+        outputType,
+        context.typeDefinitions
+      )
+    ) {
+      return {
+        state: "safe",
+        detail: `${key}:value-type`
+      };
+    }
+
+    if (context.originCache.has(key)) {
+      return context.originCache.get(key);
+    }
+    if (
+      !sourceNode ||
+      !sourceDefinition ||
+      context.originStack.has(key)
+    ) {
+      return {
+        state: "unknown",
+        detail: `${key}:unresolved-origin`
+      };
+    }
+
+    context.originStack.add(key);
+    let result;
+    const memberKind = String(
+      sourceDefinition.apiMemberKind || ""
+    );
+    const sourceHasImpulseInput =
+      (sourceDefinition.inputs || []).some(
+        port =>
+          context.resolvedType(
+            sourceNode,
+            port
+          ) === "impulse"
+      );
+
+    if (
+      sourceHasImpulseInput &&
+      context.usage &&
+      !context.usage.executed.has(
+        String(sourceNode.id || "")
+      )
+    ) {
+      result = {
+        state: "safe",
+        detail:
+          `${key}:unexecuted-default-result`
+      };
+    } else if (
+      sourceDefinition.catalogGenerated ===
+        true &&
+      ["type", "enum"].includes(
+        memberKind
+      )
+    ) {
+      result = {
+        state: "safe",
+        detail: `${key}:catalog-${memberKind}`
+      };
+    } else if (
+      reloadDangerousBuilderOrigin(
+        sourceNode,
+        sourceDefinition,
+        outputType
+      )
+    ) {
+      result = {
+        state: "unsafe",
+        detail:
+          `${key}:mod-context-producing-node`
+      };
+    } else if (
+      sourceDefinition.catalogGenerated ===
+        true
+    ) {
+      const sourceSafety =
+        sourceDefinition.apiReloadSafety ||
+        sourceDefinition.apiVerification
+          ?.reloadSafety ||
+        {};
+      const sourceLevel = String(
+        sourceSafety.level || "unknown"
+      ).toLowerCase();
+
+      if (sourceLevel === "safe") {
+        result = {
+          state: "safe",
+          detail: `${key}:scanner-safe-source`
+        };
+      } else if (
+        sourceLevel === "conditional"
+      ) {
+        const resolution =
+          resolveCatalogReloadUseSite(
+            sourceNode,
+            sourceDefinition,
+            sourceSafety,
+            context
+          );
+        result = resolution.resolved
+          ? {
+              state: "safe",
+              detail:
+                `${key}:resolved-catalog-source`
+            }
+          : {
+              state: "unsafe",
+              detail:
+                `${key}:unsafe-catalog-source`
+            };
+      } else {
+        result = {
+          state: "unsafe",
+          detail:
+            `${key}:scanner-${sourceLevel}`
+        };
+      }
+    } else {
+      const dataInputs =
+        (Array.isArray(
+          sourceDefinition.inputs
+        )
+          ? sourceDefinition.inputs
+          : [])
+          .filter(port =>
+            context.resolvedType(
+              sourceNode,
+              port
+            ) !== "impulse"
+          );
+      const inputOrigins = dataInputs.map(
+        port =>
+          reloadInputOrigin(
+            sourceNode,
+            port.id,
+            context
+          )
+      );
+      const unsafe = inputOrigins.find(
+        origin => origin.state === "unsafe"
+      );
+      const unknown = inputOrigins.find(
+        origin => origin.state === "unknown"
+      );
+      const trustedRoot =
+        /^(?:constant\.|configuration\.|lifecycle\.|resonite\.)/.test(
+          String(
+            sourceNode.operatorId || ""
+          )
+        );
+
+      if (unsafe) {
+        result = unsafe;
+      } else if (unknown) {
+        result = unknown;
+      } else if (
+        dataInputs.length > 0 ||
+        trustedRoot
+      ) {
+        result = {
+          state: "safe",
+          detail:
+            `${key}:safe-builder-dataflow`
+        };
+      } else {
+        result = {
+          state: "unknown",
+          detail:
+            `${key}:unproven-builder-origin`
+        };
+      }
+    }
+
+    context.originStack.delete(key);
+    context.originCache.set(key, result);
+    return result;
+  }
+
+  function resolveCatalogReloadUseSite(
+    node,
+    definition,
+    safety,
+    suppliedContext = {}
+  ) {
+    const context =
+      suppliedContext.nodeById
+        ? suppliedContext
+        : reloadUseSiteContext(
+            suppliedContext
+          );
+    const cacheKey = String(
+      node?.id || ""
+    );
+
+    if (
+      cacheKey &&
+      context.resolutionCache.has(
+        cacheKey
+      )
+    ) {
+      return context.resolutionCache.get(
+        cacheKey
+      );
+    }
+    if (
+      cacheKey &&
+      context.resolutionStack.has(
+        cacheKey
+      )
+    ) {
+      return Object.freeze({
+        resolved: false,
+        resolution:
+          "unresolved-use-site",
+        missingCleanup:
+          normalizedReloadStringList(
+            safety?.requiredCleanup
+          ),
+        unresolvedUseSiteInputs: [
+          "cyclic-use-site-proof"
+        ],
+        unsafeOrigins: [],
+        evidence: []
+      });
+    }
+
+    const requiredCleanup =
+      normalizedReloadStringList(
+        safety?.requiredCleanup
+      );
+    const automaticCleanup =
+      new Set(
+        normalizedReloadStringList(
+          definition
+            ?.apiReloadAutomaticCleanup ||
+          definition?.apiVerification
+            ?.reloadAutomaticCleanup
+        )
+      );
+    const missingCleanup =
+      requiredCleanup.filter(
+        requirement =>
+          !automaticCleanup.has(
+            requirement
+          )
+      );
+    const useSiteInputs =
+      normalizedReloadStringList(
+        safety?.useSiteInputs
+      );
+    const unresolvedUseSiteInputs =
+      useSiteInputs.filter(input =>
+        !RELOAD_USE_SITE_INPUTS.has(input)
+      );
+    const unsafeOrigins = [];
+    const evidence = [];
+    const fail = input => {
+      if (
+        input &&
+        !unresolvedUseSiteInputs.includes(
+          input
+        )
+      ) {
+        unresolvedUseSiteInputs.push(input);
+      }
+    };
+    const inspectInput = (
+      inputId,
+      proofInput
+    ) => {
+      const origin = reloadInputOrigin(
+        node,
+        inputId,
+        context
+      );
+      evidence.push(origin.detail);
+      if (origin.state !== "safe") {
+        unsafeOrigins.push(origin.detail);
+        fail(proofInput);
+      }
+    };
+    const operation = String(
+      safety?.operation || ""
+    ).trim().toLowerCase();
+    const classificationBasis = String(
+      safety?.classificationBasis || ""
+    ).trim().toLowerCase();
+    const inputs = Array.isArray(
+      definition?.inputs
+    )
+      ? definition.inputs
+      : [];
+    const inputIds = new Set(
+      inputs.map(port =>
+        String(port?.id || "")
+      )
+    );
+    const allAutomaticCleanup =
+      missingCleanup.length === 0 &&
+      requiredCleanup.length > 0;
+
+    if (
+      safety?.requiresUseSiteResolution !==
+        true
+    ) {
+      fail("requires-use-site-resolution");
+    }
+    if (
+      ![
+        "construct",
+        "invoke",
+        "subscribe",
+        "write"
+      ].includes(operation)
+    ) {
+      fail("operation");
+    }
+    if (
+      classificationBasis !==
+        "use-site-dependent"
+    ) {
+      fail("classification-basis");
+    }
+    if (
+      safety?.requiresExecutionProof === true
+    ) {
+      fail("runtime-execution-proof");
+    }
+    context.resolutionStack.add(cacheKey);
+
+    if (
+      operation === "subscribe" ||
+      useSiteInputs.includes(
+        "handler-origin"
+      ) ||
+      useSiteInputs.includes(
+        "subscription-lifetime"
+      )
+    ) {
+      if (allAutomaticCleanup) {
+        evidence.push(
+          "automatic-cleanup:" +
+          requiredCleanup.join(",")
+        );
+      } else {
+        fail("subscription-lifetime");
+      }
+    } else {
+      if (
+        useSiteInputs.includes(
+          "value-origin"
+        )
+      ) {
+        if (inputIds.has("value")) {
+          inspectInput(
+            "value",
+            "value-origin"
+          );
+        } else {
+          fail("value-origin");
+        }
+      }
+
+      if (
+        useSiteInputs.includes(
+          "actual-argument-type"
+        )
+      ) {
+        const argumentInputs = inputs
+          .filter(port =>
+            /^arg\d+$/.test(
+              String(port?.id || "")
+            ) ||
+            Boolean(port?.apiParameterType)
+          );
+        for (const port of argumentInputs) {
+          inspectInput(
+            port.id,
+            "actual-argument-type"
+          );
+        }
+      }
+
+      if (
+        useSiteInputs.includes(
+          "closed-generic-arguments"
+        )
+      ) {
+        const genericInputs = inputs
+          .filter(port =>
+            /^generic\d+$/.test(
+              String(port?.id || "")
+            )
+          );
+        if (
+          genericInputs.length === 0 &&
+          Number(
+            definition?.apiGenericArity || 0
+          ) > 0
+        ) {
+          fail("closed-generic-arguments");
+        }
+        for (const port of genericInputs) {
+          inspectInput(
+            port.id,
+            "closed-generic-arguments"
+          );
+        }
+      }
+
+      if (
+        useSiteInputs.includes(
+          "receiver-lifetime"
+        ) ||
+        useSiteInputs.includes(
+          "receiver-runtime-type"
+        ) ||
+        useSiteInputs.includes(
+          "runtime-implementation"
+        )
+      ) {
+        if (
+          definition?.apiIsStatic !== true &&
+          inputIds.has("target")
+        ) {
+          inspectInput(
+            "target",
+            useSiteInputs.includes(
+              "runtime-implementation"
+            )
+              ? "runtime-implementation"
+              : useSiteInputs.includes(
+                    "receiver-runtime-type"
+                  )
+                ? "receiver-runtime-type"
+              : "receiver-lifetime"
+          );
+        } else if (
+          definition?.apiIsStatic !== true
+        ) {
+          fail(
+            useSiteInputs.includes(
+              "runtime-implementation"
+            )
+              ? "runtime-implementation"
+              : useSiteInputs.includes(
+                    "receiver-runtime-type"
+                  )
+                ? "receiver-runtime-type"
+              : "receiver-lifetime"
+          );
+        }
+      }
+
+      if (
+        useSiteInputs.includes(
+          "target-origin"
+        )
+      ) {
+        const targetArgument =
+          inputs.find(port =>
+            /target/i.test(
+              String(port?.label || "")
+            ) ||
+            /target/i.test(
+              String(port?.id || "")
+            )
+          ) ||
+          inputs.find(port =>
+            String(port?.id || "") ===
+            "arg0"
+          );
+        if (targetArgument) {
+          inspectInput(
+            targetArgument.id,
+            "target-origin"
+          );
+        } else {
+          fail("target-origin");
+        }
+      }
+      if (
+        useSiteInputs.includes(
+          "constructed-delegate-lifetime"
+        )
+      ) {
+        if (
+          !useSiteInputs.includes(
+            "target-origin"
+          )
+        ) {
+          fail(
+            "constructed-delegate-lifetime"
+          );
+        }
+        const retainedDelegate =
+          (definition?.outputs || [])
+            .some(port =>
+              ![
+                "done",
+                "success",
+                "exception"
+              ].includes(
+                String(port?.id || "")
+              ) &&
+              context.connectedOutputs.has(
+                `${node.id}:${port.id}`
+              )
+            );
+        if (
+          retainedDelegate &&
+          !allAutomaticCleanup
+        ) {
+          fail(
+            "constructed-delegate-lifetime"
+          );
+        } else if (!retainedDelegate) {
+          evidence.push(
+            "constructed-delegate-not-retained-by-graph"
+          );
+        }
+      }
+
+      if (
+        useSiteInputs.includes(
+          "constructed-object-lifetime"
+        ) &&
+        normalizedReloadStringList(
+          safety?.reasons
+        ).includes(
+          "background-lifetime-construction"
+        ) &&
+        !allAutomaticCleanup
+      ) {
+        fail(
+          "constructed-object-lifetime"
+        );
+      }
+
+      if (
+        useSiteInputs.includes(
+          "result-lifetime"
+        )
+      ) {
+        const liveResults =
+          (Array.isArray(
+            definition?.outputs
+          )
+            ? definition.outputs
+            : [])
+            .filter(port =>
+              ![
+                "done",
+                "success",
+                "exception"
+              ].includes(
+                String(port?.id || "")
+              ) &&
+              reloadGraphTypeMayCarryModContext(
+                context.resolvedType(
+                  node,
+                  port
+                ),
+                context.typeDefinitions
+              ) &&
+              context.connectedOutputs.has(
+                `${node.id}:${port.id}`
+              )
+            );
+        if (liveResults.length > 0) {
+          fail("result-lifetime");
+        } else {
+          evidence.push(
+            "result-not-retained-by-graph"
+          );
+        }
+      }
+
+      const materialProofInputs =
+        useSiteInputs.filter(input =>
+          ![
+            "cleanup-path",
+            "static-operation",
+            "static-storage"
+          ].includes(input)
+        );
+      if (
+        materialProofInputs.length === 0 &&
+        !allAutomaticCleanup
+      ) {
+        fail("cleanup-path");
+      }
+    }
+
+    if (
+      unresolvedUseSiteInputs.length > 0 &&
+      allAutomaticCleanup
+    ) {
+      const cleanupResolvable =
+        unresolvedUseSiteInputs.every(
+          input => [
+            "cleanup-path",
+            "handler-origin",
+            "subscription-lifetime"
+          ].includes(input)
+        );
+      if (cleanupResolvable) {
+        unresolvedUseSiteInputs.splice(
+          0,
+          unresolvedUseSiteInputs.length
+        );
+      }
+    }
+
+    context.resolutionStack.delete(cacheKey);
+    const resolved =
+      unresolvedUseSiteInputs.length === 0;
+    const result = Object.freeze({
+      resolved,
+      resolution: resolved
+        ? allAutomaticCleanup
+          ? "automatic-cleanup"
+          : "safe-use-site"
+        : "unresolved-use-site",
+      missingCleanup:
+        resolved ? [] : missingCleanup,
+      unresolvedUseSiteInputs:
+        normalizedReloadStringList(
+          unresolvedUseSiteInputs
+        ),
+      unsafeOrigins:
+        normalizedReloadStringList(
+          unsafeOrigins
+        ),
+      evidence:
+        normalizedReloadStringList(
+          evidence
+        )
+    });
+
+    if (cacheKey) {
+      context.resolutionCache.set(
+        cacheKey,
+        result
+      );
+    }
+    return result;
+  }
+
   function buildTypedNodeGraphCSharpContribution(
     request = {}
   ) {
@@ -19781,6 +20850,63 @@
     const reloadSafetyIssues = [];
     const reloadSafetyIssueKeys =
       new Set();
+    const analysis =
+      analyzeConnections(
+        graph.connections
+      );
+    const nodeById =
+      new Map(
+        graph.nodes.map(
+          node => [node.id, node]
+        )
+      );
+    const incoming =
+      new Map(
+        graph.connections.map(
+          connection => [
+            `${connection.toNode}:${connection.toPort}`,
+            connection
+          ]
+        )
+      );
+    const connectedOutputs =
+      new Set(
+        graph.connections.map(
+          connection =>
+            `${connection.fromNode}:${connection.fromPort}`
+        )
+      );
+    const resolvedType = (
+      node,
+      spec
+    ) =>
+      spec?.type ||
+      analysis.bindings
+        .get(node?.id)?.[
+          spec?.typeVar
+        ] ||
+      null;
+    const reloadUsage =
+      reloadGraphUsage({
+        nodes: graph.nodes,
+        connections: graph.connections,
+        nodeById,
+        incoming,
+        definitionForNode: nodeDefinition,
+        resolvedType
+      });
+    const reloadResolutionContext =
+      reloadUseSiteContext({
+        nodes: graph.nodes,
+        connections: graph.connections,
+        nodeById,
+        incoming,
+        connectedOutputs,
+        definitionForNode: nodeDefinition,
+        resolvedType,
+        typeDefinitions: TYPE_INFO,
+        usage: reloadUsage
+      });
 
     const addReloadSafetyIssue = issue => {
       const normalized = {
@@ -19812,6 +20938,15 @@
         )
           ? String(issue.level).toLowerCase()
           : "unknown",
+        operation: String(
+          issue?.operation || ""
+        ),
+        classificationBasis: String(
+          issue?.classificationBasis || ""
+        ),
+        requiresUseSiteResolution:
+          issue?.requiresUseSiteResolution ===
+          true,
         threadAffinity: String(
           issue?.threadAffinity ||
           "unknown"
@@ -19846,7 +20981,26 @@
               String(value || "").trim()
             )
             .filter(Boolean)
-        )].sort()
+        )].sort(),
+        useSiteInputs:
+          normalizedReloadStringList(
+            issue?.useSiteInputs
+          ),
+        unresolvedUseSiteInputs:
+          normalizedReloadStringList(
+            issue?.unresolvedUseSiteInputs
+          ),
+        unsafeOrigins:
+          normalizedReloadStringList(
+            issue?.unsafeOrigins
+          ),
+        useSiteEvidence:
+          normalizedReloadStringList(
+            issue?.useSiteEvidence
+          ),
+        resolution: String(
+          issue?.resolution || ""
+        )
       };
       const key = JSON.stringify(
         normalized
@@ -19873,36 +21027,53 @@
         normalized.missingCleanup.length > 0
           ? `; missing cleanup: ${normalized.missingCleanup.join(", ")}`
           : "";
+      const useSiteText =
+        normalized.unresolvedUseSiteInputs
+          .length > 0
+          ? `; unresolved use-site: ${normalized.unresolvedUseSiteInputs.join(", ")}`
+          : "";
+      const originText =
+        normalized.unsafeOrigins.length > 0
+          ? `; unsafe origin: ${normalized.unsafeOrigins.join(", ")}`
+          : "";
 
       warnings.push(
-        `Live reload disabled by node '${normalized.nodeLabel}' (${contractName}, ${normalized.level}, thread ${normalized.threadAffinity}): ${reasonText}${cleanupText}. The mod remains buildable and runs normally.`
+        `Live reload disabled by node '${normalized.nodeLabel}' (${contractName}, ${normalized.level}, thread ${normalized.threadAffinity}): ${reasonText}${cleanupText}${useSiteText}${originText}. The mod remains buildable and runs normally.`
       );
     };
 
     for (const node of graph.nodes) {
-      const nodeDefinition = OPERATOR_DEFINITIONS[node?.operatorId];
+      const definition = nodeDefinition(node);
       if (
         node?.kind !== "configuration" &&
         node?.operatorId !==
           "configuration.menuInstance" &&
-        !nodeDefinition
+        !definition
       ) {
         diagnostics.push(
           `Node '${node?.label || node?.id || "<unnamed>"}' uses unavailable operator '${node?.operatorId || "<missing>"}'. It cannot be exported until that verified node definition is available.`
         );
-      } else if (nodeDefinition?.unavailableApiContract === true) {
-        const preserved = nodeDefinition.preservedApiContract || node.apiContract || {};
+      } else if (definition?.unavailableApiContract === true) {
+        const preserved = definition.preservedApiContract || node.apiContract || {};
         diagnostics.push(
           `Node '${node?.label || node?.id || "<unnamed>"}' preserves unavailable API '${[preserved.ownerType, preserved.memberName].filter(Boolean).join(".") || node?.operatorId}'. The graph remains editable, but this unresolved runtime path cannot be exported.`
         );
       }
 
-      if (nodeDefinition?.catalogGenerated === true) {
+      if (
+        definition?.catalogGenerated === true &&
+        reloadCatalogNodeIsUsed(
+          node,
+          definition,
+          reloadUsage,
+          resolvedType
+        )
+      ) {
         const verification =
-          nodeDefinition.apiVerification ||
+          definition.apiVerification ||
           {};
         const safety =
-          nodeDefinition.apiReloadSafety ||
+          definition.apiReloadSafety ||
           verification.reloadSafety ||
           {};
         const level = String(
@@ -19915,28 +21086,32 @@
             ? safety.requiredCleanup
                 .map(String)
             : [];
-        const cleanupCapabilities =
-          new Set(
-            (Array.isArray(
-              nodeDefinition
-                .apiReloadCleanupCapabilities
-            )
-              ? nodeDefinition
-                  .apiReloadCleanupCapabilities
-              : verification
-                  .reloadCleanupCapabilities || [])
-              .map(String)
-          );
-        const missingCleanup =
-          requiredCleanup.filter(
-            requirement =>
-              !cleanupCapabilities.has(
-                requirement
+        const useSiteResolution =
+          level === "conditional"
+            ? resolveCatalogReloadUseSite(
+                node,
+                definition,
+                safety,
+                reloadResolutionContext
               )
-          );
+            : {
+                resolved: false,
+                resolution:
+                  level === "safe"
+                    ? "scanner-safe"
+                    : "scanner-blocked",
+                missingCleanup:
+                  requiredCleanup,
+                unresolvedUseSiteInputs:
+                  normalizedReloadStringList(
+                    safety.useSiteInputs
+                  ),
+                unsafeOrigins: []
+              };
         const conditionalResolved =
           level === "conditional" &&
-          missingCleanup.length === 0;
+          useSiteResolution.resolved ===
+            true;
 
         if (
           level !== "safe" &&
@@ -19946,14 +21121,14 @@
             nodeId: node?.id,
             nodeLabel:
               node?.label ||
-              nodeDefinition.title,
+              definition.title,
             operatorId: node?.operatorId,
             ownerType:
               verification.ownerType ||
-              nodeDefinition.catalogType,
+              definition.catalogType,
             memberName:
               verification.memberName ||
-              nodeDefinition.catalogMember,
+              definition.catalogMember,
             level:
               [
                 "conditional",
@@ -19963,9 +21138,16 @@
                 ? level
                 : "unknown",
             threadAffinity:
-              nodeDefinition
+              definition
                 .apiThreadAffinity ||
               verification.threadAffinity,
+            operation: safety.operation,
+            classificationBasis:
+              safety.classificationBasis,
+            requiresUseSiteResolution:
+              safety.requiresUseSiteResolution,
+            useSiteInputs:
+              safety.useSiteInputs,
             reasons:
               safety.reasons?.length
                 ? safety.reasons
@@ -19973,7 +21155,19 @@
                     "scanner-reload-metadata-missing"
                   ],
             requiredCleanup,
-            missingCleanup
+            missingCleanup:
+              useSiteResolution
+                .missingCleanup,
+            unresolvedUseSiteInputs:
+              useSiteResolution
+                .unresolvedUseSiteInputs,
+            unsafeOrigins:
+              useSiteResolution
+                .unsafeOrigins,
+            useSiteEvidence:
+              useSiteResolution.evidence,
+            resolution:
+              useSiteResolution.resolution
           });
         }
       }
@@ -20044,11 +21238,6 @@
         collection.push(normalized);
       }
     };
-
-    const analysis =
-      analyzeConnections(
-        graph.connections
-      );
 
     if (!analysis.valid) {
       diagnostics.push(
@@ -20202,43 +21391,10 @@
           ]
         )
       );
-    const nodeById =
-      new Map(
-        graph.nodes.map(
-          node => [node.id, node]
-        )
-      );
-    const incoming =
-      new Map(
-        graph.connections.map(
-          connection => [
-            `${connection.toNode}:${connection.toPort}`,
-            connection
-          ]
-        )
-      );
-    const connectedOutputs =
-      new Set(
-        graph.connections.map(
-          connection =>
-            `${connection.fromNode}:${connection.fromPort}`
-        )
-      );
     const expressionCache =
       new Map();
     const expressionStack =
       new Set();
-
-    const resolvedType = (
-      node,
-      spec
-    ) =>
-      spec?.type ||
-      analysis.bindings
-        .get(node.id)?.[
-          spec?.typeVar
-        ] ||
-      null;
 
     const inputExpression = (
       node,
@@ -22622,23 +23778,37 @@ ${dynamicChoiceRefreshCases.join("\n")}
             )
           )
           .join("\n");
+    const reloadWarningSummary = issue => {
+      const contractName = [
+        issue.ownerType,
+        issue.memberName
+      ]
+        .filter(Boolean)
+        .join(".") ||
+        issue.operatorId;
+      const reasons =
+        issue.reasons.length > 0
+          ? issue.reasons.join(", ")
+          : "unknown scanner result";
+      const cleanup =
+        issue.missingCleanup.length > 0
+          ? `; missing cleanup: ${issue.missingCleanup.join(", ")}`
+          : "";
+      const useSite =
+        issue.unresolvedUseSiteInputs
+          .length > 0
+          ? `; unresolved use-site: ${issue.unresolvedUseSiteInputs.join(", ")}`
+          : "";
+      return `${contractName} (${issue.level}, thread ${issue.threadAffinity}): ${reasons}${cleanup}${useSite}.`;
+    };
     const reloadWarningGroups = new Map();
     for (const issue of reloadSafetyIssues) {
-      const groupKey = JSON.stringify({
-        operatorId: issue.operatorId,
-        ownerType: issue.ownerType,
-        memberName: issue.memberName,
-        level: issue.level,
-        threadAffinity:
-          issue.threadAffinity,
-        reasons: issue.reasons,
-        missingCleanup:
-          issue.missingCleanup
-      });
+      const groupKey =
+        reloadWarningSummary(issue);
       const group =
         reloadWarningGroups.get(groupKey) || {
           count: 0,
-          issue
+          summary: groupKey
         };
       group.count += 1;
       reloadWarningGroups.set(
@@ -22660,24 +23830,9 @@ ${dynamicChoiceRefreshCases.join("\n")}
               .sort((left, right) =>
                 right.count - left.count
               )
-              .map(({ count, issue }) => {
-                const contractName = [
-                  issue.ownerType,
-                  issue.memberName
-                ]
-                  .filter(Boolean)
-                  .join(".") ||
-                  issue.operatorId;
-                const reasons =
-                  issue.reasons.length > 0
-                    ? issue.reasons.join(", ")
-                    : "unknown scanner result";
-                const cleanup =
-                  issue.missingCleanup.length > 0
-                    ? `; missing cleanup: ${issue.missingCleanup.join(", ")}`
-                    : "";
-                return `${count}x ${contractName} (${issue.level}, thread ${issue.threadAffinity}): ${reasons}${cleanup}.`;
-              })
+              .map(({ count, summary }) =>
+                `${count}x ${summary}`
+              )
           ]
         : []),
       ...nonReloadWarnings
@@ -24556,7 +25711,15 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
             requiredCleanup:
               [...issue.requiredCleanup],
             missingCleanup:
-              [...issue.missingCleanup]
+              [...issue.missingCleanup],
+            useSiteInputs:
+              [...issue.useSiteInputs],
+            unresolvedUseSiteInputs:
+              [...issue.unresolvedUseSiteInputs],
+            unsafeOrigins:
+              [...issue.unsafeOrigins],
+            useSiteEvidence:
+              [...issue.useSiteEvidence]
           })),
         references:
           [...extensionReferences.values()],
@@ -43776,7 +44939,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         const script =
           document.createElement("script");
         script.src = new URL(
-          "custom_csharp_editor.js?v=47-scanner-authoritative-reload-v720",
+          "custom_csharp_editor.js?v=47-reload-warning-aggregation-v722",
           document.baseURI
         ).href;
         script.async = true;
