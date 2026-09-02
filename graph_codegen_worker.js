@@ -194,16 +194,16 @@ async function ensureRuntime(catalog) {
       self.RMLResoniteApiCatalog;
 
     importScripts(
-      "node_graph.js?v=386-reload-warning-aggregation-v722"
+      "node_graph.js?v=387-guidance-comments-global-v723"
     );
     importScripts(
-      "mod_nodes.js?v=67-reload-warning-aggregation-v722"
+      "mod_nodes.js?v=68-guidance-comments-global-v723"
     );
     importScripts(
-      "visual_csharp.js?v=78-reload-warning-aggregation-v722"
+      "visual_csharp.js?v=78-guidance-comments-global-v723"
     );
     importScripts(
-      "api_nodes.js?v=64-reload-warning-aggregation-v722"
+      "api_nodes.js?v=64-guidance-comments-global-v723"
     );
 
     if (

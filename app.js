@@ -40,7 +40,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "reload-warning-aggregation-20260902-v722";
+  "guidance-comments-global-20260902-v723";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -1166,7 +1166,7 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "graph_codegen_worker.js?v=132-reload-warning-aggregation-v722",
+      "graph_codegen_worker.js?v=133-guidance-comments-global-v723",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -4178,7 +4178,11 @@ function hasOptionalArguments(setting) {
   );
 }
 
-function settingDeclaration(setting, path) {
+function settingDeclaration(
+  setting,
+  path,
+  includeGuideComments = false
+) {
   const type =
     setting.valueType === "enum"
       ? toPascalCase(setting.enumName, "SettingOption")
@@ -4214,11 +4218,13 @@ function settingDeclaration(setting, path) {
     );
   }
   const pathComment =
-    path.length > 0
-      ? `    // ${csharpSingleLineCommentText(
-          path.join(" / ")
-        )}\n`
-      : "    // Always visible\n";
+    includeGuideComments
+      ? path.length > 0
+        ? `    // ${csharpSingleLineCommentText(
+            path.join(" / ")
+          )}\n`
+        : "    // Always visible\n"
+      : "";
   return `${pathComment}    [AutoRegisterConfigKey]
     public static readonly ModConfigurationKey<${type}>
         ${field} =
@@ -4227,7 +4233,11 @@ function settingDeclaration(setting, path) {
 `;
 }
 
-function controllerDeclaration(controller, path) {
+function controllerDeclaration(
+  controller,
+  path,
+  includeGuideComments = false
+) {
   const field = toPascalCase(controller.fieldName, "ActivePage");
   const enumName = toPascalCase(controller.enumName, "SettingsPage");
   const defaultOption = enumValueExpression(
@@ -4238,11 +4248,13 @@ function controllerDeclaration(controller, path) {
     controller.options[0]?.name || "General"
   );
   const pathComment =
-    path.length > 0
-      ? `    // Nested navigation: ${csharpSingleLineCommentText(
-          path.join(" / ")
-        )}\n`
-      : "    // Top-level navigation\n";
+    includeGuideComments
+      ? path.length > 0
+        ? `    // Nested navigation: ${csharpSingleLineCommentText(
+            path.join(" / ")
+          )}\n`
+        : "    // Top-level navigation\n"
+      : "";
   return `${pathComment}    [AutoRegisterConfigKey]
     public static readonly ModConfigurationKey<${enumName}>
         ${field} =
@@ -4628,6 +4640,12 @@ function optimizeBuilderOwnedPrivateArrayReturns(
 
 function generateCode() {
   const metadata = state.metadata;
+  const includeGuideComments =
+    metadata.includeGuide === true;
+  const generatedGuidance = value =>
+    includeGuideComments
+      ? String(value || "")
+      : "";
   const outlineEntries = currentFlattenedNodes();
   const entries = outlineEntries.filter(
     entry =>
@@ -4780,7 +4798,7 @@ function generateCode() {
       ?.name ||
     `${className}.NodeGraph.cs`;
 
-  const guide = metadata.includeGuide
+  const guide = includeGuideComments
     ? `// RML configuration template version: 1.7
 
 /*
@@ -4864,11 +4882,13 @@ ${usesColorX
       "controller"
         ? controllerDeclaration(
             entry.node,
-            entry.path
+            entry.path,
+            includeGuideComments
           )
         : settingDeclaration(
             entry.node,
-            entry.path
+            entry.path,
+            includeGuideComments
           )
     )
     .join("\n");
@@ -5286,7 +5306,9 @@ ${changedStatements}
             }
           } else {
             statements.push(
-              `_ = value; // TODO: Replace only this line with mod-specific logic.`
+              `_ = value;${generatedGuidance(
+                " // TODO: Replace only this line with mod-specific logic."
+              )}`
             );
           }
 
@@ -5347,9 +5369,11 @@ ${graphInitializeStatement
 `
     : ""}
 ${startupSynchronizationCalls ||
-  (graphRuntimeActive
-    ? "        // No configuration values require synchronization."
-    : "        // No startup value read was requested.")}${graphEngineInitializedStatement
+  generatedGuidance(
+    graphRuntimeActive
+      ? "        // No configuration values require synchronization."
+      : "        // No startup value read was requested."
+  )}${graphEngineInitializedStatement
     ? `\n\n${indentGeneratedStatement(
         graphEngineInitializedStatement,
         8
@@ -5362,7 +5386,9 @@ ${observedEntries.length > 0
         ConfigurationChangedEvent configurationEvent)
     {
 ${configurationSynchronizationCalls ||
-  "        // No graph configuration values require synchronization."}
+  generatedGuidance(
+    "        // No graph configuration values require synchronization."
+  )}
 
 ${changedBranches}
     }
@@ -5373,10 +5399,11 @@ ${changedBranches}
   } else {
     runtimeBlock = `    public override void OnEngineInit()
     {
-        /*
+${generatedGuidance(`        /*
          * No automatic runtime reactions were selected.
          * Read configuration values whenever the mod requires them.
          */
+`)}
     }
 `;
   }
@@ -5854,15 +5881,18 @@ ${runtimeLayoutHelper}`;
         })()
       : "";
 
+  const classDocumentation =
+    generatedGuidance(`/// <summary>
+/// ${csharpSingleLineCommentText(
+  metadata.description
+)}
+/// </summary>`);
+
   return optimizeBuilderOwnedPrivateArrayReturns(`${guide}${usingLines}
 
 namespace ${namespaceName};
 
-${enums ? `${enums}\n\n` : ""}/// <summary>
-/// ${csharpSingleLineCommentText(
-  metadata.description
-)}
-/// </summary>
+${enums ? `${enums}\n\n` : ""}${classDocumentation}
 public sealed partial class ${className}
     : ResoniteMod${interfaceSuffix}
 {
@@ -6112,12 +6142,17 @@ function generateProjectFile() {
     useWindowsForms
       ? "net10.0-windows"
       : "net10.0";
-
-  return `<Project Sdk="Microsoft.NET.Sdk">
-  <!--
+  const projectGuidance =
+    state.metadata.includeGuide === true
+      ? `  <!--
     Current Resonite and RML 4.2/5.x use net10.0.
     Older targets require matching older Resonite and RML assemblies.
   -->
+`
+      : "";
+
+  return `<Project Sdk="Microsoft.NET.Sdk">
+${projectGuidance}
   <PropertyGroup>
     <TargetFramework>${targetFramework}</TargetFramework>
     <LangVersion>14.0</LangVersion>
@@ -22338,11 +22373,16 @@ function copyGeneratedNodeGraphCode(
 
   const combined = files
     .map(
-      file =>
-        `// ============================================================\n` +
-        `// FILE: ${file.name}\n` +
-        `// ============================================================\n\n` +
-        file.content.trimEnd()
+      file => {
+        const fileGuidance =
+          state.metadata.includeGuide === true
+            ? `// ============================================================\n` +
+              `// FILE: ${file.name}\n` +
+              `// ============================================================\n\n`
+            : "";
+        return fileGuidance +
+          file.content.trimEnd();
+      }
     )
     .join("\n\n");
 
@@ -29606,8 +29646,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "help_template.html?v=90-reload-warning-aggregation-v722",
-    "help_template.js?v=90-reload-warning-aggregation-v722",
+    "help_template.html?v=90-guidance-comments-global-v723",
+    "help_template.js?v=90-guidance-comments-global-v723",
     "help-template",
     "RMLHelpTemplateMarkup"
   )

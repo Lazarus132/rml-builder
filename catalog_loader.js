@@ -34,15 +34,15 @@
     document.currentScript?.src ||
     window.location.href;
   const modNodesUrl = new URL(
-    "mod_nodes.js?v=67-reload-warning-aggregation-v722",
+    "mod_nodes.js?v=68-guidance-comments-global-v723",
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "visual_csharp.js?v=78-reload-warning-aggregation-v722",
+    "visual_csharp.js?v=78-guidance-comments-global-v723",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=64-reload-warning-aggregation-v722",
+    "api_nodes.js?v=64-guidance-comments-global-v723",
     scriptUrl
   ).href;
 
