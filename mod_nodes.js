@@ -1850,6 +1850,26 @@ private const BindingFlags GraphAllMembers =
     BindingFlags.Static |
     BindingFlags.FlattenHierarchy;
 
+private static readonly System.Collections.Concurrent.ConcurrentDictionary<
+    (Type Type, string Name, bool? StaticTarget, bool RequireReadable, bool RequireWritable),
+    PropertyInfo> GraphPropertyCache = new();
+private static readonly System.Collections.Concurrent.ConcurrentDictionary<
+    (Type Type, string Name, bool? StaticTarget, bool RequireWritable),
+    FieldInfo> GraphFieldCache = new();
+private static readonly System.Collections.Concurrent.ConcurrentDictionary<
+    (Type Type, string Name, bool? StaticTarget),
+    EventInfo> GraphEventCache = new();
+private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Type>
+    GraphTypeCache = new(StringComparer.Ordinal);
+private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string[]>
+    GraphMemberPathCache = new(StringComparer.Ordinal);
+private static readonly System.Collections.Concurrent.ConcurrentDictionary<
+    (Type Type, string MethodName),
+    MethodInfo[]> GraphMethodCandidateCache = new();
+private static readonly System.Collections.Concurrent.ConcurrentDictionary<
+    Type,
+    ConstructorInfo[]> GraphConstructorCandidateCache = new();
+
 private static IEnumerable<Type> GraphTypeHierarchy(Type type)
 {
     for (Type? current = type; current is not null; current = current.BaseType)
@@ -1878,6 +1898,17 @@ private static PropertyInfo? FindGraphProperty(
         return null;
     }
 
+    var cacheKey = (
+        Type: type,
+        Name: propertyName,
+        StaticTarget: staticTarget,
+        RequireReadable: requireReadable,
+        RequireWritable: requireWritable);
+    if (GraphPropertyCache.TryGetValue(cacheKey, out PropertyInfo? cachedProperty))
+    {
+        return cachedProperty;
+    }
+
     foreach (Type current in GraphTypeHierarchy(type))
     {
         PropertyInfo? property = current
@@ -1900,6 +1931,7 @@ private static PropertyInfo? FindGraphProperty(
 
         if (property is not null)
         {
+            GraphPropertyCache.TryAdd(cacheKey, property);
             return property;
         }
     }
@@ -1925,6 +1957,7 @@ private static PropertyInfo? FindGraphProperty(
 
         if (property is not null)
         {
+            GraphPropertyCache.TryAdd(cacheKey, property);
             return property;
         }
     }
@@ -1943,6 +1976,16 @@ private static FieldInfo? FindGraphField(
         return null;
     }
 
+    var cacheKey = (
+        Type: type,
+        Name: fieldName,
+        StaticTarget: staticTarget,
+        RequireWritable: requireWritable);
+    if (GraphFieldCache.TryGetValue(cacheKey, out FieldInfo? cachedField))
+    {
+        return cachedField;
+    }
+
     foreach (Type current in GraphTypeHierarchy(type))
     {
         FieldInfo? field = current
@@ -1957,6 +2000,7 @@ private static FieldInfo? FindGraphField(
 
         if (field is not null)
         {
+            GraphFieldCache.TryAdd(cacheKey, field);
             return field;
         }
     }
@@ -1972,6 +2016,15 @@ private static EventInfo? FindGraphEvent(
     if (type is null || string.IsNullOrWhiteSpace(eventName))
     {
         return null;
+    }
+
+    var cacheKey = (
+        Type: type,
+        Name: eventName,
+        StaticTarget: staticTarget);
+    if (GraphEventCache.TryGetValue(cacheKey, out EventInfo? cachedEvent))
+    {
+        return cachedEvent;
     }
 
     foreach (Type current in GraphTypeHierarchy(type))
@@ -1990,6 +2043,7 @@ private static EventInfo? FindGraphEvent(
 
         if (eventInfo is not null)
         {
+            GraphEventCache.TryAdd(cacheKey, eventInfo);
             return eventInfo;
         }
     }
@@ -2012,6 +2066,7 @@ private static EventInfo? FindGraphEvent(
 
         if (eventInfo is not null)
         {
+            GraphEventCache.TryAdd(cacheKey, eventInfo);
             return eventInfo;
         }
     }
@@ -2026,9 +2081,15 @@ private static Type? FindType(string? typeName)
         return null;
     }
 
+    if (GraphTypeCache.TryGetValue(typeName, out Type? cachedType))
+    {
+        return cachedType;
+    }
+
     Type? direct = Type.GetType(typeName, throwOnError: false, ignoreCase: false);
     if (direct is not null)
     {
+        GraphTypeCache.TryAdd(typeName, direct);
         return direct;
     }
 
@@ -2037,6 +2098,7 @@ private static Type? FindType(string? typeName)
         Type? candidate = assembly.GetType(typeName, throwOnError: false, ignoreCase: false);
         if (candidate is not null)
         {
+            GraphTypeCache.TryAdd(typeName, candidate);
             return candidate;
         }
     }
@@ -2057,6 +2119,7 @@ private static Type? FindType(string? typeName)
 
             if (candidate is not null)
             {
+                GraphTypeCache.TryAdd(typeName, candidate);
                 return candidate;
             }
         }
@@ -2070,6 +2133,7 @@ private static Type? FindType(string? typeName)
 
             if (candidate is not null)
             {
+                GraphTypeCache.TryAdd(typeName, candidate);
                 return candidate;
             }
         }
@@ -2126,9 +2190,15 @@ private static object? ReadMember(object? target, string? memberName)
 private static object? ReadMemberPath(object? target, string? memberPath)
 {
     object? current = target;
+    string path = memberPath ?? string.Empty;
+    string[] parts = GraphMemberPathCache.GetOrAdd(
+        path,
+        static value => value.Split(
+            '.',
+            StringSplitOptions.RemoveEmptyEntries |
+            StringSplitOptions.TrimEntries));
 
-    foreach (string part in (memberPath ?? string.Empty)
-        .Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+    foreach (string part in parts)
     {
         current = ReadMember(current, part);
         if (current is null)
@@ -2340,10 +2410,18 @@ private static object? InvokeBest(
         : target.GetType();
     object? instance = target is Type ? null : target;
 
-    foreach (MethodInfo method in type
-        .GetMethods(GraphAllMembers)
-        .Where(method => string.Equals(method.Name, methodName, StringComparison.Ordinal))
-        .OrderBy(method => method.GetParameters().Length))
+    MethodInfo[] candidates = GraphMethodCandidateCache.GetOrAdd(
+        (Type: type, MethodName: methodName),
+        static key => key.Type
+            .GetMethods(GraphAllMembers)
+            .Where(method => string.Equals(
+                method.Name,
+                key.MethodName,
+                StringComparison.Ordinal))
+            .OrderBy(method => method.GetParameters().Length)
+            .ToArray());
+
+    foreach (MethodInfo method in candidates)
     {
         if (method.ContainsGenericParameters)
         {
@@ -2389,9 +2467,14 @@ private static object? CreateReflective(Type? type, object?[]? arguments)
 
     object?[] supplied = arguments ?? Array.Empty<object?>();
 
-    foreach (ConstructorInfo constructor in type
-        .GetConstructors(GraphAllMembers)
-        .OrderBy(constructor => constructor.GetParameters().Length))
+    ConstructorInfo[] constructors = GraphConstructorCandidateCache.GetOrAdd(
+        type,
+        static candidateType => candidateType
+            .GetConstructors(GraphAllMembers)
+            .OrderBy(constructor => constructor.GetParameters().Length)
+            .ToArray());
+
+    foreach (ConstructorInfo constructor in constructors)
     {
         if (!TryPrepareArguments(constructor.GetParameters(), supplied, out object?[] prepared))
         {
@@ -2434,6 +2517,9 @@ private static object?[] ToObjectArray(object? value)
     api.addField(
       "universal.event.subscriptions",
       "private static readonly object _graphEventSubscriptionLock = new();\nprivate static readonly List<(object? Target, EventInfo Event, Delegate Handler)> _graphEventSubscriptions = new();\nprivate static readonly HashSet<string> _graphEventSubscriptionKeys = new(StringComparer.Ordinal);\nprivate static readonly CancellationTokenSource _graphEventSubscriptionCancellation = new();"
+    );
+    api.addRuntimeDrain(
+      "UnsubscribeGraphEvents();"
     );
     api.addMember("universal.event.helpers", String.raw`
 private static Delegate? SubscribeGraphEvent(
@@ -3015,6 +3101,16 @@ private static void CreateGeneratedReversePatch(
       defaultCode
     );
     return field;
+  }
+
+  function generatedOutputIsUsed(
+    api,
+    outputId
+  ) {
+    return typeof api?.isOutputConnected ===
+      "function"
+      ? api.isOutputConnected(outputId)
+      : true;
   }
 
 
@@ -3774,7 +3870,7 @@ private static void CreateGeneratedReversePatch(
       )
     ],
     outputs: [port("value", "Values", "stringArray")],
-    codegenExpression(api) {
+    codegenCollect(api) {
       const items = String(
         api.node.parameters.items || ""
       )
@@ -3782,7 +3878,20 @@ private static void CreateGeneratedReversePatch(
         .map(value => value.trim())
         .filter(Boolean)
         .map(value => quote(api, value));
-      return `new string[] { ${items.join(", ")} }`;
+      const field =
+        `_constantStringArray${nodeToken(api)}`;
+      const initializer =
+        items.length > 0
+          ? `new string[] { ${items.join(", ")} }`
+          : "Array.Empty<string>()";
+
+      api.addField(
+        `${api.node.id}.constantStringArray`,
+        `private static readonly string[] ${field} = ${initializer};`
+      );
+    },
+    codegenExpression(api) {
+      return `_constantStringArray${nodeToken(api)}`;
     }
   });
 
@@ -6408,12 +6517,14 @@ private static T GraphCollectionItemAt<T>(
     ],
     codegenCollect(api) {
       ensureReflectionRuntime(api);
-      addStatefulField(
-        api,
-        "writeSuccess",
-        "bool",
-        "false"
-      );
+      if (generatedOutputIsUsed(api, "success")) {
+        addStatefulField(
+          api,
+          "writeSuccess",
+          "bool",
+          "false"
+        );
+      }
     },
     codegenExpression(api) {
       return `_writeSuccess${nodeToken(api)}`;
@@ -6421,7 +6532,15 @@ private static T GraphCollectionItemAt<T>(
     codegenAction(api) {
       const field = `_writeSuccess${nodeToken(api)}`;
       const done = api.emit("done");
-      return `${field} = WriteMember(${api.input("target").code}, ${api.input("name").code}, ${api.input("value").code});${done ? `\n        ${done}();` : ""}`;
+      const invocation =
+        `WriteMember(${api.input("target").code}, ${api.input("name").code}, ${api.input("value").code})`;
+      const statement = generatedOutputIsUsed(
+        api,
+        "success"
+      )
+        ? `${field} = ${invocation};`
+        : `_ = ${invocation};`;
+      return `${statement}${done ? `\n        ${done}();` : ""}`;
     }
   });
 
@@ -6445,18 +6564,22 @@ private static T GraphCollectionItemAt<T>(
     codegenCollect(api) {
       ensureReflectionRuntime(api);
       const token = nodeToken(api);
-      api.addRuntimeField(
-        `${api.node.id}.result`,
-        `_invokeResult${token}`,
-        "object?",
-        "null"
-      );
-      api.addRuntimeField(
-        `${api.node.id}.error`,
-        `_invokeException${token}`,
-        "Exception",
-        "null!"
-      );
+      if (generatedOutputIsUsed(api, "result")) {
+        api.addRuntimeField(
+          `${api.node.id}.result`,
+          `_invokeResult${token}`,
+          "object?",
+          "null"
+        );
+      }
+      if (generatedOutputIsUsed(api, "exception")) {
+        api.addRuntimeField(
+          `${api.node.id}.error`,
+          `_invokeException${token}`,
+          "Exception",
+          "null!"
+        );
+      }
     },
     codegenExpression(api) {
       const token = nodeToken(api);
@@ -6467,7 +6590,30 @@ private static T GraphCollectionItemAt<T>(
     codegenAction(api) {
       const token = nodeToken(api);
       const done = api.emit("done");
-      return `try\n        {\n            _invokeException${token} = null!;\n            _invokeResult${token} = InvokeMethodInfo(${api.input("method").code}, ${api.input("target").code}, ${api.input("arguments").code});\n        }\n        catch (Exception exception)\n        {\n            _invokeException${token} = exception;\n            _invokeResult${token} = null;\n        }${done ? `\n        ${done}();` : ""}`;
+      const keepResult =
+        generatedOutputIsUsed(api, "result");
+      const keepException =
+        generatedOutputIsUsed(api, "exception");
+      const invocation =
+        `InvokeMethodInfo(${api.input("method").code}, ${api.input("target").code}, ${api.input("arguments").code})`;
+      const before = keepException
+        ? `_invokeException${token} = null!;\n            `
+        : "";
+      const execute = keepResult
+        ? `_invokeResult${token} = ${invocation};`
+        : `_ = ${invocation};`;
+      const failure = [
+        keepException
+          ? `_invokeException${token} = exception;`
+          : "",
+        keepResult
+          ? `_invokeResult${token} = null;`
+          : ""
+      ].filter(Boolean).join("\n            ");
+      const catchDeclaration = keepException
+        ? "catch (Exception exception)"
+        : "catch (Exception)";
+      return `try\n        {\n            ${before}${execute}\n        }\n        ${catchDeclaration}\n        {${failure ? `\n            ${failure}\n        ` : ""}}${done ? `\n        ${done}();` : ""}`;
     }
   });
 
@@ -6489,12 +6635,13 @@ private static T GraphCollectionItemAt<T>(
     ],
     codegenCollect(api) {
       ensureReflectionRuntime(api);
-      addStatefulField(
-        api,
-        "callResult",
-        "object?",
-        "null"
-      );
+      if (generatedOutputIsUsed(api, "result")) {
+        const field = `_callResult${nodeToken(api)}`;
+        api.addField(
+          `${api.node.id}.callResult`,
+          `private static object? ${field} { get; set; }`
+        );
+      }
     },
     codegenExpression(api) {
       return `_callResult${nodeToken(api)}!`;
@@ -6502,7 +6649,15 @@ private static T GraphCollectionItemAt<T>(
     codegenAction(api) {
       const field = `_callResult${nodeToken(api)}`;
       const done = api.emit("done");
-      return `${field} = InvokeBest(${api.input("target").code}, ${api.input("name").code}, ${api.input("arguments").code});${done ? `\n        ${done}();` : ""}`;
+      const invocation =
+        `InvokeBest(${api.input("target").code}, ${api.input("name").code}, ${api.input("arguments").code})`;
+      const statement = generatedOutputIsUsed(
+        api,
+        "result"
+      )
+        ? `${field} = ${invocation};`
+        : `_ = ${invocation};`;
+      return `${statement}${done ? `\n        ${done}();` : ""}`;
     }
   });
 
@@ -6523,12 +6678,14 @@ private static T GraphCollectionItemAt<T>(
     ],
     codegenCollect(api) {
       ensureReflectionRuntime(api);
-      addStatefulField(
-        api,
-        "createdInstance",
-        "object?",
-        "null"
-      );
+      if (generatedOutputIsUsed(api, "instance")) {
+        addStatefulField(
+          api,
+          "createdInstance",
+          "object?",
+          "null"
+        );
+      }
     },
     codegenExpression(api) {
       return `_createdInstance${nodeToken(api)}!`;
@@ -6536,7 +6693,15 @@ private static T GraphCollectionItemAt<T>(
     codegenAction(api) {
       const field = `_createdInstance${nodeToken(api)}`;
       const done = api.emit("done");
-      return `${field} = CreateReflective(${api.input("type").code}, ${api.input("arguments").code});${done ? `\n        ${done}();` : ""}`;
+      const invocation =
+        `CreateReflective(${api.input("type").code}, ${api.input("arguments").code})`;
+      const statement = generatedOutputIsUsed(
+        api,
+        "instance"
+      )
+        ? `${field} = ${invocation};`
+        : `_ = ${invocation};`;
+      return `${statement}${done ? `\n        ${done}();` : ""}`;
     }
   });
 
@@ -9248,11 +9413,11 @@ private static string NormalConversionError<T>(object? value)
         );
       },
       codegenCollect(api) {
-        addStatefulField(
-          api,
-          `${id.replace(/[^A-Za-z0-9]/g, "")}Success`,
-          "bool",
-          "false"
+        const field =
+          `_${id.replace(/[^A-Za-z0-9]/g, "")}Success${nodeToken(api)}`;
+        api.addField(
+          `${api.node.id}.${id}.success`,
+          `private static bool ${field} { get; set; }`
         );
       },
       codegenExpression(api) {

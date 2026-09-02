@@ -1,8 +1,8 @@
 (() => {
   "use strict";
 
-  const FACTORY_VERSION = 23;
-  const API_VERIFICATION_SCHEMA_VERSION = 2;
+  const FACTORY_VERSION = 30;
+  const API_VERIFICATION_SCHEMA_VERSION = 3;
   const ADVANCED_GROUP = "Advanced / Raw C#";
   const UNAVAILABLE_GROUP = "Unavailable API";
   const API_GROUPS = Object.freeze({
@@ -17,6 +17,7 @@
   let prerequisiteWaitInstalled = false;
   let factoryBuildPromise = null;
   let legacyOperatorResolver = null;
+  let activeReloadSafetyContractCompatible = false;
   let factoryReadySettled = false;
   let resolveFactoryReady;
 
@@ -102,6 +103,129 @@
     }))}`;
   }
 
+  function normalizeReloadSafety(value) {
+    const source =
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value)
+        ? value
+        : {};
+    const requestedLevel = String(
+      source.level || "unknown"
+    ).toLowerCase();
+    const level = [
+      "safe",
+      "conditional",
+      "unsafe",
+      "unknown"
+    ].includes(requestedLevel)
+      ? requestedLevel
+      : "unknown";
+
+    return Object.freeze({
+      ruleVersion: Math.max(
+        0,
+        Number(source.ruleVersion) || 0
+      ),
+      level,
+      confidence: String(
+        source.confidence || "unknown"
+      ),
+      reasons: Object.freeze(
+        [...new Set(
+          (Array.isArray(source.reasons)
+            ? source.reasons
+            : [])
+            .map(reason =>
+              String(reason || "").trim()
+            )
+            .filter(Boolean)
+        )].sort()
+      ),
+      requiredCleanup: Object.freeze(
+        [...new Set(
+          (Array.isArray(source.requiredCleanup)
+            ? source.requiredCleanup
+            : [])
+            .map(requirement =>
+              String(requirement || "").trim()
+            )
+            .filter(Boolean)
+        )].sort()
+      ),
+      retainsCallerObjects:
+        source.retainsCallerObjects === true
+          ? true
+          : source.retainsCallerObjects === false
+            ? false
+            : null
+    });
+  }
+
+  function normalizeThreadAffinity(
+    member,
+    owner
+  ) {
+    const requested = String(
+      member?.threadAffinity ||
+      owner?.threadAffinity ||
+      "unknown"
+    ).toLowerCase();
+
+    return [
+      "any",
+      "world",
+      "render",
+      "main",
+      "unknown"
+    ].includes(requested)
+      ? requested
+      : "unknown";
+  }
+
+  function withReloadContract(
+    definition,
+    owner,
+    safety,
+    options = {}
+  ) {
+    const effectiveSafety =
+      activeReloadSafetyContractCompatible
+        ? safety
+        : {
+            level: "unknown",
+            confidence: "unknown",
+            reasons: [
+              "reload-safety-contract-incompatible"
+            ]
+          };
+
+    return {
+      ...definition,
+      apiThreadAffinity:
+        normalizeThreadAffinity(
+          options.member,
+          owner
+        ),
+      apiReloadSafety:
+        normalizeReloadSafety(effectiveSafety),
+      apiReloadCleanupCapabilities:
+        Object.freeze(
+          [...new Set(
+            (Array.isArray(
+              options.cleanupCapabilities
+            )
+              ? options.cleanupCapabilities
+              : [])
+              .map(value =>
+                String(value || "").trim()
+              )
+              .filter(Boolean)
+          )].sort()
+        )
+    };
+  }
+
   function exactApiSemanticContractKey(contract) {
     if (
       !contract ||
@@ -140,13 +264,14 @@
             0,
             Number(parameter?.position) || index
           ),
-          type: normalizeType(parameter?.type),
+          type: normalizeType(
+            parameter?.elementType ||
+            parameter?.type
+          ),
           isByRef:
             parameter?.isByRef === true,
           isOut:
-            parameter?.isOut === true,
-          isOptional:
-            parameter?.isOptional === true
+            parameter?.isOut === true
         })),
       returnType: normalizeType(
         contract.returnType ||
@@ -157,9 +282,7 @@
       genericArity: Math.max(
         0,
         Number(contract.genericArity) || 0
-      ),
-      runtimeBound:
-        contract.runtimeBound === true
+      )
     });
   }
 
@@ -355,8 +478,28 @@
         definition?.unavailableApiContract !== true
       )
     );
-    const stagedTypes = structuredClone(typeDefinitions);
-    const stagedValueTypes = [...valueTypes];
+    // A scanner refresh is a complete snapshot. Never carry catalog types
+    // from the previous fingerprint into the next factory generation.
+    // apiCatalogType also identifies types created by pre-v711 factories,
+    // before the explicit catalogGenerated marker existed.
+    const stagedTypes = structuredClone(
+      Object.fromEntries(
+        Object.entries(typeDefinitions).filter(
+          ([, information]) =>
+            information?.catalogGenerated !== true &&
+            !String(
+              information?.apiCatalogType || ""
+            ).trim()
+        )
+      )
+    );
+    const stagedValueTypes = valueTypes.filter(
+      type =>
+        Object.prototype.hasOwnProperty.call(
+          stagedTypes,
+          type
+        )
+    );
     const stagedGroups = [];
     const previousReport = window.RMLApiNodeFactoryReport || null;
     const previousFactoryVersion = Number(window.__RMLApiNodeFactoryVersion) || 0;
@@ -656,6 +799,9 @@
   }
 
   async function buildFactory(registry, catalog, publish = true) {
+    activeReloadSafetyContractCompatible =
+      catalog?.reloadSafetyCompatible === true;
+
     const {
       port,
       registerType,
@@ -1154,6 +1300,7 @@
                       ? ["reference", "serializable"]
                       : ["serializable"],
 
+          catalogGenerated: true,
           apiCatalogType: csType,
           assembly:
               String(information.assembly || "").trim(),
@@ -1323,7 +1470,7 @@
       }
       const csType = normalizeCsType(row.fullName);
       const id = `api.type.${stableHash(csType)}`;
-      registerGeneratedNode(id, {
+      registerGeneratedNode(id, withReloadContract({
         title: `Type · ${displayTypeName(row)}`,
         group: groupForType(row, API_GROUPS.types),
         symbol: "TYPE",
@@ -1341,7 +1488,10 @@
         apiParameters: [],
         apiReturnType: "System.Type",
         apiSearchText: `${csType} type typeof`
-      });
+      }, row,
+      row.typeTokenReloadSafety ||
+      row.reloadSafety,
+      { member: row }));
       typeNodeCount += 1;
     }
 
@@ -1374,7 +1524,7 @@
       const options = values.map(value => [value.name, value.name]);
       const defaultValue = values[0].name;
 
-      registerGeneratedNode(id, {
+      registerGeneratedNode(id, withReloadContract({
         title: `Enum · ${shortTypeName(csType)}`,
         group: groupForType(
           { fullName: csType },
@@ -1404,7 +1554,9 @@
         apiParameters: [],
         apiReturnType: csType,
         apiSearchText: `${csType} ${values.map(value => value.name).join(" ")}`
-      });
+      }, enumRow,
+      enumRow.valueReloadSafety,
+      { member: enumRow }));
       enumNodeCount += 1;
     }
 
@@ -1465,12 +1617,15 @@
           skippedCount += 1;
           continue;
         }
-        const id = `api.method.${method.id || stableHash(`${owner.fullName}|${method.signature}`)}`;
         const definition = createMethodDefinition(owner, method);
         if (!definition) {
           skippedCount += 1;
           continue;
         }
+        const id = canonicalMemberNodeId(
+          "api.method.",
+          definition
+        );
         if (definition.runtimeBound) {
           runtimeBoundMethodCount += 1;
         }
@@ -2226,8 +2381,33 @@
         memberName: String(
           definition?.catalogMember || ""
         ),
-        signature: String(
-          definition?.apiSignature || ""
+        parameters:
+          (Array.isArray(
+            definition?.apiParameters
+          )
+            ? definition.apiParameters
+            : [])
+            .map((parameter, index) => ({
+              position: Math.max(
+                0,
+                Number(
+                  parameter?.position
+                ) || index
+              ),
+              type: catalogExactType(
+                parameter?.elementType ||
+                parameter?.type ||
+                "System.Object"
+              ),
+              isByRef:
+                parameter?.isByRef === true ||
+                parameter?.isOut === true,
+              isOut:
+                parameter?.isOut === true
+            })),
+        returnType: catalogExactType(
+          definition?.apiReturnType ||
+          "System.Void"
         ),
         isStatic:
           definition?.apiIsStatic === true,
@@ -2682,6 +2862,29 @@
         ),
         runtimeBound:
           definition?.runtimeBound === true,
+        threadAffinity:
+          String(
+            definition?.apiThreadAffinity ||
+            "unknown"
+          ),
+        reloadSafety:
+          normalizeReloadSafety(
+            definition?.apiReloadSafety
+          ),
+        reloadCleanupCapabilities:
+          Object.freeze(
+            [...new Set(
+              (Array.isArray(
+                definition?.apiReloadCleanupCapabilities
+              )
+                ? definition.apiReloadCleanupCapabilities
+                : [])
+                .map(value =>
+                  String(value || "").trim()
+                )
+                .filter(Boolean)
+            )].sort()
+          ),
         stableContractId:
           String(
             definition?.apiStableContractId ||
@@ -2794,7 +2997,7 @@
         port("exception", "Exception", "exception")
       );
 
-      return {
+      return withReloadContract({
         title: `New · ${displayTypeName(owner)}`,
         group: groupForType(owner, API_GROUPS.constructors),
         symbol: "new",
@@ -2822,7 +3025,13 @@
             outParameters,
             direct
           });
-          if (!direct) ensureApiReflectionRuntime(api);
+          if (!direct) {
+            ensureApiReflectionRuntime(api);
+            collectReflectiveSignatureFields(
+              api,
+              parameters
+            );
+          }
         },
         codegenAction(api) {
           const action = direct
@@ -2838,7 +3047,9 @@
             direct
           });
         }
-      };
+      }, owner, constructor.reloadSafety, {
+        member: constructor
+      });
     }
 
     function createMethodDefinition(owner, method) {
@@ -2931,7 +3142,7 @@
       const group = noisy ? ADVANCED_GROUP : API_GROUPS.methods;
       const titlePrefix = method.isStatic ? "Static" : "Call";
 
-      return {
+      return withReloadContract({
         title: `${titlePrefix} · ${displayTypeName(owner)}.${method.name}`,
         group,
         symbol: "ƒ",
@@ -2963,7 +3174,13 @@
             outParameters,
             direct
           });
-          if (!direct) ensureApiReflectionRuntime(api);
+          if (!direct) {
+            ensureApiReflectionRuntime(api);
+            collectReflectiveSignatureFields(
+              api,
+              parameters
+            );
+          }
         },
         codegenAction(api) {
           const action = direct
@@ -2980,7 +3197,9 @@
             direct
           });
         }
-      };
+      }, owner, method.reloadSafety, {
+        member: method
+      });
     }
 
     function createPropertyGetDefinition(owner, property) {
@@ -3011,7 +3230,7 @@
         inputs.push(parameterPort(parameter));
       }
 
-      return {
+      return withReloadContract({
         title: `Get · ${displayTypeName(owner)}.${property.name}`,
         group: groupForType(owner, API_GROUPS.properties),
         symbol: "get",
@@ -3041,7 +3260,9 @@
             indexes
           );
         }
-      };
+      }, owner, property.readReloadSafety, {
+        member: property
+      });
     }
 
     function createPropertySetDefinition(owner, property) {
@@ -3072,7 +3293,7 @@
       }
       inputs.push(port("value", "Value", graphTypeFor(valueCs)));
 
-      return {
+      return withReloadContract({
         title: `Set · ${displayTypeName(owner)}.${property.name}`,
         group: groupForType(owner, API_GROUPS.properties),
         symbol: "set",
@@ -3106,15 +3327,19 @@
           collectActionFields(api, { isVoid: true, outParameters: [] });
         },
         codegenAction(api) {
-          const fields = actionFieldNames(api);
           const access = propertyAccessExpression(api, ownerCs, property, indexes);
-          const action = `try\n{\n    ${access} = ${api.input("value").code};\n    ${fields.success} = true;\n    ${fields.exception} = null;\n}\ncatch (System.Exception exception)\n{\n    ${fields.success} = false;\n    ${fields.exception} = exception;\n}`;
+          const action = wrapApiAction(
+            api,
+            `    ${access} = ${api.input("value").code};`
+          );
           return actionWithDoneImpulse(api, action);
         },
         codegenExpression(api) {
           return actionOutputExpression(api, { isVoid: true, outParameters: [] });
         }
-      };
+      }, owner, property.writeReloadSafety, {
+        member: property
+      });
     }
 
     function createFieldGetDefinition(owner, field) {
@@ -3132,7 +3357,7 @@
         return null;
       }
 
-      return {
+      return withReloadContract({
         title: `Read · ${displayTypeName(owner)}.${field.name}`,
         group: groupForType(owner, API_GROUPS.fields),
         symbol: "fld",
@@ -3166,7 +3391,9 @@
                 access
               );
         }
-      };
+      }, owner, field.readReloadSafety, {
+        member: field
+      });
     }
 
     function createFieldSetDefinition(owner, field) {
@@ -3186,7 +3413,7 @@
       }
       inputs.push(port("value", "Value", graphTypeFor(valueCs)));
 
-      return {
+      return withReloadContract({
         title: `Write · ${displayTypeName(owner)}.${field.name}`,
         group: groupForType(owner, API_GROUPS.fields),
         symbol: "fld=",
@@ -3214,17 +3441,21 @@
           collectActionFields(api, { isVoid: true, outParameters: [] });
         },
         codegenAction(api) {
-          const fields = actionFieldNames(api);
           const host = field.isStatic
             ? ownerCs
             : `((${ownerCs})(${api.input("target").code}))`;
-          const action = `try\n{\n    ${host}.${escapeCSharpIdentifier(field.name)} = ${api.input("value").code};\n    ${fields.success} = true;\n    ${fields.exception} = null;\n}\ncatch (System.Exception exception)\n{\n    ${fields.success} = false;\n    ${fields.exception} = exception;\n}`;
+          const action = wrapApiAction(
+            api,
+            `    ${host}.${escapeCSharpIdentifier(field.name)} = ${api.input("value").code};`
+          );
           return actionWithDoneImpulse(api, action);
         },
         codegenExpression(api) {
           return actionOutputExpression(api, { isVoid: true, outParameters: [] });
         }
-      };
+      }, owner, field.writeReloadSafety, {
+        member: field
+      });
     }
 
     function createEventDefinition(owner, eventInfo, templateEntry) {
@@ -3235,7 +3466,7 @@
       const [templateId, template] = templateEntry;
       const ownerCs = normalizeCsType(owner.fullName);
       const ownerGraph = registerApiType(ownerCs, owner) || "object";
-      const definition = {
+      const definition = withReloadContract({
         ...template,
         title: `On · ${displayTypeName(owner)}.${eventInfo.name}`,
         group: groupForType(owner, API_GROUPS.events),
@@ -3256,7 +3487,12 @@
         apiGenericArity: 0,
         apiSearchText: `${ownerCs} ${eventInfo.name} event ${eventInfo.handlerType || ""}`,
         apiTemplate: templateId
-      };
+      }, owner, eventInfo.reloadSafety, {
+        member: eventInfo,
+        cleanupCapabilities: [
+          "event-unsubscribe"
+        ]
+      });
 
       definition.inputs = (template.inputs || []).map(input => {
         const key = String(input.id || "").toLowerCase();
@@ -3337,11 +3573,21 @@
     function directConstructorAction(api, ownerCs, parameters) {
       const fields = actionFieldNames(api);
       const argumentState = buildDirectArguments(api, parameters);
-      return `try\n{\n${indent(argumentState.declarations, 4)}    ${fields.result} = new ${ownerCs}(${argumentState.arguments.join(", ")});\n${indent(argumentState.assignments, 4)}    ${fields.success} = true;\n    ${fields.exception} = null;\n}\ncatch (System.Exception exception)\n{\n    ${fields.success} = false;\n    ${fields.exception} = exception;\n}`;
+      const resultTarget = generatedApiOutputIsUsed(api, "result")
+        ? fields.result
+        : "_";
+      return wrapApiAction(
+        api,
+        `${indent(argumentState.declarations, 4)}    ${resultTarget} = new ${ownerCs}(${argumentState.arguments.join(", ")});\n${indent(argumentState.assignments, 4)}`
+      );
     }
 
     function reflectiveConstructorAction(api, ownerCs, parameters) {
       const fields = actionFieldNames(api);
+      const signature =
+        reflectiveSignatureFieldNames(
+          parameters
+        );
       const args = parameters
         .map(parameter => {
           if (parameter.isOut) {
@@ -3357,10 +3603,19 @@
             : input.code;
         });
       const outAssignments = parameters
-        .filter(parameter => parameter.isOut || parameter.isByRef)
-        .map(parameter => `${fields.out(parameter.position)} = apiArguments[${parameter.position}];`)
+        .filter(parameter =>
+          (parameter.isOut || parameter.isByRef) &&
+          generatedApiOutputIsUsed(api, `out${parameter.position}`)
+        )
+        .map(parameter => `${fields.out(parameter.position)} = apiArguments[${parameter.position}]!;`)
         .join("\n    ");
-      return `try\n{\n    System.Type apiType = ${apiRuntimeTypeExpression(ownerCs)};\n    object?[] apiArguments = new object?[] { ${args.join(", ")} };\n    System.Reflection.ConstructorInfo apiConstructor = ResolveApiCatalogConstructor(apiType, ${apiParameterTypeArray(parameters)}, ${apiParameterBoolArray(parameters, "isByRef")}, ${apiParameterBoolArray(parameters, "isOut")}) ?? throw new System.MissingMethodException(apiType.FullName, ".ctor");\n    ${fields.result} = apiConstructor.Invoke(apiArguments);\n${outAssignments ? `    ${outAssignments}\n` : ""}    ${fields.success} = true;\n    ${fields.exception} = null;\n}\ncatch (System.Exception exception)\n{\n    ${fields.success} = false;\n    ${fields.exception} = exception;\n}`;
+      const resultTarget = generatedApiOutputIsUsed(api, "result")
+        ? fields.result
+        : "_";
+      return wrapApiAction(
+        api,
+        `    System.Type apiType = ${apiRuntimeTypeExpression(ownerCs)};\n    object?[] apiArguments = new object?[] { ${args.join(", ")} };\n    System.Reflection.ConstructorInfo apiConstructor = ResolveApiCatalogConstructor(apiType, ${signature.parameterTypes}, ${signature.byRef}, ${signature.out}) ?? throw new System.MissingMethodException(apiType.FullName, ".ctor");\n    ${resultTarget} = apiConstructor.Invoke(apiArguments)!;\n${outAssignments ? `    ${outAssignments}\n` : ""}`
+      );
     }
 
     function directMethodAction(api, ownerCs, method, parameters, isVoid) {
@@ -3372,12 +3627,19 @@
       const call = `${host}.${escapeCSharpIdentifier(method.name)}(${argumentState.arguments.join(", ")})`;
       const invocation = isVoid
         ? `${call};`
-        : `${fields.result} = ${call};`;
-      return `try\n{\n${indent(argumentState.declarations, 4)}    ${invocation}\n${indent(argumentState.assignments, 4)}    ${fields.success} = true;\n    ${fields.exception} = null;\n}\ncatch (System.Exception exception)\n{\n    ${fields.success} = false;\n    ${fields.exception} = exception;\n}`;
+        : `${generatedApiOutputIsUsed(api, "result") ? fields.result : "_"} = ${call};`;
+      return wrapApiAction(
+        api,
+        `${indent(argumentState.declarations, 4)}    ${invocation}\n${indent(argumentState.assignments, 4)}`
+      );
     }
 
     function reflectiveMethodAction(api, ownerCs, method, parameters, isVoid) {
       const fields = actionFieldNames(api);
+      const signature =
+        reflectiveSignatureFieldNames(
+          parameters
+        );
       const supplied = [];
       for (const parameter of parameters) {
         if (parameter.isOut) {
@@ -3399,14 +3661,24 @@
         ? "null"
         : api.input("target").code;
       const outAssignments = parameters
-        .filter(parameter => parameter.isOut || parameter.isByRef)
-        .map(parameter => `${fields.out(parameter.position)} = apiArguments[${parameter.position}];`)
+        .filter(parameter =>
+          (parameter.isOut || parameter.isByRef) &&
+          generatedApiOutputIsUsed(api, `out${parameter.position}`)
+        )
+        .map(parameter => `${fields.out(parameter.position)} = apiArguments[${parameter.position}]!;`)
         .join("\n    ");
       const resultAssignment = isVoid
         ? "_ = apiMethod.Invoke(apiTarget, apiArguments);"
-        : `${fields.result} = apiMethod.Invoke(apiTarget, apiArguments);`;
+        : `${generatedApiOutputIsUsed(api, "result") ? fields.result : "_"} = apiMethod.Invoke(apiTarget, apiArguments)!;`;
+      const genericArgumentDeclaration =
+        genericInputs.length > 0
+          ? `    System.Type[] apiGenericArguments = new System.Type[] { ${genericInputs.join(", ")} };\n`
+          : "";
 
-      return `try\n{\n    System.Type apiDeclaringType = ${apiRuntimeTypeExpression(ownerCs)};\n    object? apiTarget = ${target};\n    object?[] apiArguments = new object?[] { ${supplied.join(", ")} };\n    System.Reflection.MethodInfo apiMethod = ResolveApiCatalogMethod(apiDeclaringType, "${escapeString(normalizeCsType(method.declaringType || ownerCs))}", "${escapeString(method.name)}", ${apiParameterTypeArray(parameters)}, ${apiParameterBoolArray(parameters, "isByRef")}, ${apiParameterBoolArray(parameters, "isOut")}, ${(method.genericParameters || []).length}, ${method.isStatic ? "true" : "false"}) ?? throw new System.MissingMethodException(apiDeclaringType.FullName, "${escapeString(method.name)}");\n${genericInputs.length > 0 ? `    apiMethod = apiMethod.MakeGenericMethod(new System.Type[] { ${genericInputs.join(", ")} });\n` : ""}    ${resultAssignment}\n${outAssignments ? `    ${outAssignments}\n` : ""}    ${fields.success} = true;\n    ${fields.exception} = null;\n}\ncatch (System.Exception exception)\n{\n    ${fields.success} = false;\n    ${fields.exception} = exception;\n}`;
+      return wrapApiAction(
+        api,
+        `    System.Type apiDeclaringType = ${apiRuntimeTypeExpression(ownerCs)};\n    object? apiTarget = ${target};\n    object?[] apiArguments = new object?[] { ${supplied.join(", ")} };\n${genericArgumentDeclaration}    System.Reflection.MethodInfo apiMethod = ResolveApiCatalogMethod(apiDeclaringType, "${escapeString(normalizeCsType(method.declaringType || ownerCs))}", "${escapeString(method.name)}", ${signature.parameterTypes}, ${signature.byRef}, ${signature.out}, ${(method.genericParameters || []).length}, ${method.isStatic ? "true" : "false"}) ?? throw new System.MissingMethodException(apiDeclaringType.FullName, "${escapeString(method.name)}");\n${genericInputs.length > 0 ? "    apiMethod = apiMethod.MakeGenericMethod(apiGenericArguments);\n" : ""}    ${resultAssignment}\n${outAssignments ? `    ${outAssignments}\n` : ""}`
+      );
     }
 
     function apiRuntimeTypeExpression(csType) {
@@ -3415,26 +3687,108 @@
         : `ResolveApiCatalogType("${escapeString(csType)}") ?? throw new System.TypeLoadException("${escapeString(csType)}")`;
     }
 
-    function apiParameterTypeArray(parameters) {
-      return `new string[] { ${(parameters || [])
-        .map(parameter =>
-          `"${escapeString(catalogExactType(parameter.elementType || parameter.type || "System.Object"))}"`
-        )
-        .join(", ")} }`;
+    function reflectiveSignatureIdentity(
+      parameters
+    ) {
+      return JSON.stringify({
+        parameterTypes:
+          apiParameterTypeValues(parameters),
+        byRef:
+          apiParameterBoolValues(
+            parameters,
+            "isByRef"
+          ),
+        out:
+          apiParameterBoolValues(
+            parameters,
+            "isOut"
+          )
+      });
     }
 
-    function apiParameterBoolArray(parameters, property) {
-      return `new bool[] { ${(parameters || [])
-        .map(parameter =>
-          parameter?.[property] === true ||
-          (
-            property === "isByRef" &&
-            parameter?.isOut === true
-          )
-            ? "true"
-            : "false"
+    function reflectiveSignatureFieldNames(
+      parameters
+    ) {
+      const token = stableHash(
+        reflectiveSignatureIdentity(
+          parameters
         )
-        .join(", ")} }`;
+      );
+      return {
+        parameterTypes:
+          `_apiParameterTypes${token}`,
+        byRef:
+          `_apiParameterByRef${token}`,
+        out:
+          `_apiParameterOut${token}`
+      };
+    }
+
+    function apiParameterTypeValues(parameters) {
+      return (parameters || []).map(parameter =>
+        `"${escapeString(catalogExactType(parameter.elementType || parameter.type || "System.Object"))}"`
+      );
+    }
+
+    function apiParameterBoolValues(
+      parameters,
+      property
+    ) {
+      return (parameters || []).map(parameter =>
+        parameter?.[property] === true ||
+        (
+          property === "isByRef" &&
+          parameter?.isOut === true
+        )
+          ? "true"
+          : "false"
+      );
+    }
+
+    function apiStaticArrayInitializer(
+      csType,
+      values
+    ) {
+      return values.length > 0
+        ? `new ${csType}[] { ${values.join(", ")} }`
+        : `System.Array.Empty<${csType}>()`;
+    }
+
+    function collectReflectiveSignatureFields(
+      api,
+      parameters
+    ) {
+      const names =
+        reflectiveSignatureFieldNames(
+          parameters
+        );
+      const identity =
+        reflectiveSignatureIdentity(
+          parameters
+        );
+      const parameterTypes =
+        apiParameterTypeValues(parameters);
+      const byRef = apiParameterBoolValues(
+        parameters,
+        "isByRef"
+      );
+      const out = apiParameterBoolValues(
+        parameters,
+        "isOut"
+      );
+
+      api.addField(
+        `api.signature.${identity}.types`,
+        `private static readonly string[] ${names.parameterTypes} = ${apiStaticArrayInitializer("string", parameterTypes)};`
+      );
+      api.addField(
+        `api.signature.${identity}.byRef`,
+        `private static readonly bool[] ${names.byRef} = ${apiStaticArrayInitializer("bool", byRef)};`
+      );
+      api.addField(
+        `api.signature.${identity}.out`,
+        `private static readonly bool[] ${names.out} = ${apiStaticArrayInitializer("bool", out)};`
+      );
     }
 
     function buildDirectArguments(api, parameters) {
@@ -3451,11 +3805,15 @@
         if (parameter.isOut) {
           declarations.push(`${csType} ${local};`);
           argumentsList.push(`out ${local}`);
-          assignments.push(`${fields.out(position)} = ${local};`);
+          if (generatedApiOutputIsUsed(api, `out${position}`)) {
+            assignments.push(`${fields.out(position)} = ${local};`);
+          }
         } else if (parameter.isByRef) {
           declarations.push(`${csType} ${local} = ${api.input(`arg${position}`).code};`);
           argumentsList.push(`ref ${local}`);
-          assignments.push(`${fields.out(position)} = ${local};`);
+          if (generatedApiOutputIsUsed(api, `out${position}`)) {
+            assignments.push(`${fields.out(position)} = ${local};`);
+          }
         } else {
           argumentsList.push(api.input(`arg${position}`).code);
         }
@@ -3528,20 +3886,24 @@
 
     function collectActionFields(api, descriptor) {
       const fields = actionFieldNames(api);
-      api.addRuntimeField(
-        `${api.node.id}.apiSuccess`,
-        fields.success,
-        "bool",
-        "false"
-      );
-      api.addRuntimeField(
-        `${api.node.id}.apiException`,
-        fields.exception,
-        "System.Exception?",
-        "null"
-      );
+      if (generatedApiOutputIsUsed(api, "success")) {
+        api.addRuntimeField(
+          `${api.node.id}.apiSuccess`,
+          fields.success,
+          "bool",
+          "false"
+        );
+      }
+      if (generatedApiOutputIsUsed(api, "exception")) {
+        api.addRuntimeField(
+          `${api.node.id}.apiException`,
+          fields.exception,
+          "System.Exception?",
+          "null"
+        );
+      }
 
-      if (!descriptor.isVoid) {
+      if (!descriptor.isVoid && generatedApiOutputIsUsed(api, "result")) {
         api.addRuntimeField(
           `${api.node.id}.apiResult`,
           fields.result,
@@ -3551,6 +3913,9 @@
       }
 
       for (const parameter of descriptor.outParameters || []) {
+        if (!generatedApiOutputIsUsed(api, `out${parameter.position}`)) {
+          continue;
+        }
         const csType = descriptor.direct
           ? normalizeCsType(parameter.elementType || parameter.type || "System.Object")
           : "object";
@@ -3561,6 +3926,31 @@
           "default!"
         );
       }
+    }
+
+    function generatedApiOutputIsUsed(api, outputId) {
+      return typeof api?.isOutputConnected === "function"
+        ? api.isOutputConnected(outputId)
+        : true;
+    }
+
+    function wrapApiAction(api, body) {
+      const fields = actionFieldNames(api);
+      const keepSuccess = generatedApiOutputIsUsed(api, "success");
+      const keepException = generatedApiOutputIsUsed(api, "exception");
+      const successLines = [
+        keepSuccess ? `    ${fields.success} = true;` : "",
+        keepException ? `    ${fields.exception} = null;` : ""
+      ].filter(Boolean).join("\n");
+      const failureLines = [
+        keepSuccess ? `    ${fields.success} = false;` : "",
+        keepException ? `    ${fields.exception} = exception;` : ""
+      ].filter(Boolean).join("\n");
+      const catchClause = keepException
+        ? "catch (System.Exception exception)"
+        : "catch (System.Exception)";
+
+      return `try\n{\n${String(body || "").trimEnd()}${successLines ? `\n${successLines}` : ""}\n}\n${catchClause}\n{${failureLines ? `\n${failureLines}\n` : "\n"}}`;
     }
 
     function actionOutputExpression(api, descriptor) {
@@ -3603,11 +3993,27 @@
       api.addUsing("System.Linq");
       api.addUsing("System.Reflection");
       api.addMember("api.catalog.runtime", String.raw`
+private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, System.Type>
+    ApiCatalogTypeCache = new(System.StringComparer.Ordinal);
+private static readonly System.Collections.Concurrent.ConcurrentDictionary<
+    (System.Type DeclaringType, string[] ParameterTypes, bool[] ByRef, bool[] IsOut),
+    System.Reflection.ConstructorInfo> ApiCatalogConstructorCache = new();
+private static readonly System.Collections.Concurrent.ConcurrentDictionary<
+    (System.Type DeclaringType, string ExpectedDeclaringType, string MethodName,
+     string[] ParameterTypes, bool[] ByRef, bool[] IsOut,
+     int GenericParameterCount, bool IsStatic),
+    System.Reflection.MethodInfo> ApiCatalogMethodCache = new();
+
 private static System.Type? ResolveApiCatalogType(string? fullName)
 {
     if (string.IsNullOrWhiteSpace(fullName))
     {
         return null;
+    }
+
+    if (ApiCatalogTypeCache.TryGetValue(fullName, out System.Type? cachedType))
+    {
+        return cachedType;
     }
 
     System.Type? direct = System.Type.GetType(
@@ -3617,6 +4023,7 @@ private static System.Type? ResolveApiCatalogType(string? fullName)
 
     if (direct is not null)
     {
+        ApiCatalogTypeCache.TryAdd(fullName, direct);
         return direct;
     }
 
@@ -3631,6 +4038,7 @@ private static System.Type? ResolveApiCatalogType(string? fullName)
 
             if (candidate is not null)
             {
+                ApiCatalogTypeCache.TryAdd(fullName, candidate);
                 return candidate;
             }
         }
@@ -3648,6 +4056,18 @@ private static System.Reflection.ConstructorInfo? ResolveApiCatalogConstructor(
     bool[] byRef,
     bool[] isOut)
 {
+    var cacheKey = (
+        DeclaringType: declaringType,
+        ParameterTypes: parameterTypes,
+        ByRef: byRef,
+        IsOut: isOut);
+    if (ApiCatalogConstructorCache.TryGetValue(
+            cacheKey,
+            out System.Reflection.ConstructorInfo? cachedConstructor))
+    {
+        return cachedConstructor;
+    }
+
     System.Reflection.ConstructorInfo[] matches = declaringType
         .GetConstructors(
             System.Reflection.BindingFlags.Public |
@@ -3670,7 +4090,9 @@ private static System.Reflection.ConstructorInfo? ResolveApiCatalogConstructor(
             $"Catalog constructor signature is not unique on {declaringType.FullName}.");
     }
 
-    return matches[0];
+    System.Reflection.ConstructorInfo resolved = matches[0];
+    ApiCatalogConstructorCache.TryAdd(cacheKey, resolved);
+    return resolved;
 }
 
 private static System.Reflection.MethodInfo? ResolveApiCatalogMethod(
@@ -3683,6 +4105,22 @@ private static System.Reflection.MethodInfo? ResolveApiCatalogMethod(
     int genericParameterCount,
     bool isStatic)
 {
+    var cacheKey = (
+        DeclaringType: declaringType,
+        ExpectedDeclaringType: expectedDeclaringType,
+        MethodName: methodName,
+        ParameterTypes: parameterTypes,
+        ByRef: byRef,
+        IsOut: isOut,
+        GenericParameterCount: genericParameterCount,
+        IsStatic: isStatic);
+    if (ApiCatalogMethodCache.TryGetValue(
+            cacheKey,
+            out System.Reflection.MethodInfo? cachedMethod))
+    {
+        return cachedMethod;
+    }
+
     System.Reflection.BindingFlags flags =
         System.Reflection.BindingFlags.Public |
         (isStatic
@@ -3713,7 +4151,9 @@ private static System.Reflection.MethodInfo? ResolveApiCatalogMethod(
             $"Catalog method signature is not unique: {expectedDeclaringType}.{methodName}.");
     }
 
-    return matches[0];
+    System.Reflection.MethodInfo resolved = matches[0];
+    ApiCatalogMethodCache.TryAdd(cacheKey, resolved);
+    return resolved;
 }
 
 private static bool ApiCatalogParametersMatch(

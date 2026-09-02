@@ -40,7 +40,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "composite-inspector-fingerprint-actions-20260901-v705";
+  "scanner-authoritative-reload-safety-20260902-v720";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -1166,7 +1166,7 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "graph_codegen_worker.js?v=117-composite-inspector-fingerprint-actions-v705",
+      "graph_codegen_worker.js?v=130-scanner-authoritative-reload-v720",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -4591,6 +4591,41 @@ function indentGeneratedStatement(
     .join("\n");
 }
 
+function optimizeBuilderOwnedPrivateArrayReturns(
+  source
+) {
+  const generatedArrayHelper =
+    /(\s*private static\s+)(?:System\.Collections\.Generic\.)?IReadOnlyList<([^<>{}\r\n]+)>(\s+Rml[A-Za-z_][A-Za-z0-9_]*\s*\([^)]*\)\s*\{)([\s\S]*?\n    \})/g;
+
+  return String(source || "").replace(
+    generatedArrayHelper,
+    (
+      complete,
+      prefix,
+      elementType,
+      signature,
+      body
+    ) => {
+      const returnCount =
+        (body.match(/\breturn\b/g) || [])
+          .length;
+      const returnsArray =
+        /\breturn\b[\s\S]*?\.ToArray\s*\(\s*\)\s*;/.test(
+          body
+        );
+
+      if (
+        returnCount !== 1 ||
+        !returnsArray
+      ) {
+        return complete;
+      }
+
+      return `${prefix}${elementType.trim()}[]${signature}${body}`;
+    }
+  );
+}
+
 function generateCode() {
   const metadata = state.metadata;
   const outlineEntries = currentFlattenedNodes();
@@ -4623,7 +4658,16 @@ function generateCode() {
     graphContribution?.requirements
       ?.usesModUnloadLifecycle ===
     true;
+  const reloadSafetyIssues =
+    Array.isArray(
+      graphContribution?.requirements
+        ?.reloadSafetyIssues
+    )
+      ? graphContribution.requirements
+          .reloadSafetyIssues
+      : [];
   const runtimeReloadUnsafe =
+    reloadSafetyIssues.length > 0 ||
     graphContribution?.requirements
       ?.runtimeReloadUnsafe ===
       true ||
@@ -4631,7 +4675,7 @@ function generateCode() {
       graphContribution?.requirements
     );
   const supportsRuntimeReload =
-    usesModUnloadLifecycle &&
+    graphRuntimeActive &&
     !runtimeReloadUnsafe;
   const controllers = entries.filter(
     entry =>
@@ -4792,6 +4836,25 @@ ${usesColorX
     "using ResoniteModLoader;"
   ]
     .filter(Boolean)
+    .sort((left, right) => {
+      const key = value => {
+        const namespaceName = value
+          .replace(/^using\s+/, "")
+          .replace(/;$/, "");
+        return namespaceName === "System"
+          ? "0:"
+          : namespaceName.startsWith("System.")
+            ? `0:${namespaceName}`
+            : `1:${namespaceName}`;
+      };
+      const leftKey = key(left);
+      const rightKey = key(right);
+      return leftKey === rightKey
+        ? 0
+        : leftKey < rightKey
+          ? -1
+          : 1;
+    })
     .join("\n");
   const enums =
     enumDeclarations(entries);
@@ -4869,8 +4932,10 @@ ${observedEntries.length > 0
         }
 
 `
-    : ""}        ${graphContribution.className}.Shutdown();
-        ${graphContribution.className}.BeginRuntimeDrain();
+    : ""}${usesModUnloadLifecycle
+    ? `        ${graphContribution.className}.Shutdown();
+`
+    : ""}        ${graphContribution.className}.BeginRuntimeDrain();
         await ${graphContribution.className}
             .DrainRuntimeAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -4899,7 +4964,12 @@ ${observedEntries.length > 0
                 )
               : node.valueType;
 
-        return `    private static ${type} _runtime${field} = default!;
+        const initializer =
+          ["string", "Uri"].includes(type)
+            ? " = default!"
+            : "";
+
+        return `    private static ${type} _runtime${field}${initializer};
 
     public static ${type} Current${field} =>
         _runtime${field};`;
@@ -5128,24 +5198,33 @@ ${runtimeMenuValueBranches}
                   ]
               : "";
           const applyCall =
-            `Apply${field}();`;
+            graphRuntimeActive
+              ? ""
+              : `Apply${field}();`;
           const reactionCall =
             typeof reactionStatement ===
                 "string" &&
               reactionStatement.trim()
-              ? `\n${indentGeneratedStatement(
-                  reactionStatement.trim(),
-                  12
-                )}`
+              ? reactionStatement.trim()
               : "";
           const synchronizedCall =
             graphRuntimeActive &&
             graphSynchronizedStatement
-              ? `\n${indentGeneratedStatement(
-                  graphSynchronizedStatement,
-                  12
-                )}`
+              ? graphSynchronizedStatement
               : "";
+          const changedStatements = [
+            applyCall,
+            reactionCall,
+            synchronizedCall
+          ]
+            .filter(Boolean)
+            .map(statement =>
+              indentGeneratedStatement(
+                statement,
+                12
+              )
+            )
+            .join("\n");
 
           return `        if (ReferenceEquals(
                 configurationEvent.Key,
@@ -5155,7 +5234,7 @@ ${runtimeMenuValueBranches}
                 ${field}.Name,
                 StringComparison.Ordinal))
         {
-            ${applyCall}${reactionCall}${synchronizedCall}
+${changedStatements}
             return;
         }`;
         })
@@ -5253,7 +5332,9 @@ ${statements
     public override void OnEngineInit()
     {
         _configuration =
-            GetConfiguration();
+            GetConfiguration() ??
+            throw new InvalidOperationException(
+                "RML did not provide a mod configuration instance during OnEngineInit().");
 ${graphInitializeStatement
     ? `\n${indentGeneratedStatement(
         graphInitializeStatement,
@@ -5576,8 +5657,8 @@ ${keyVisibilityBranches}
                 }));
             });
 
-          const groups = layoutRows
-            .map(entry => {
+          const layoutGroupItems =
+            layoutRows.map((entry, index) => {
               const row = entry.node;
               const itemIds = (
                 Array.isArray(row.layoutItemIds)
@@ -5588,11 +5669,34 @@ ${keyVisibilityBranches}
                         child?.kind === "controller"
                       )
                       .map(child => child.id)
-              )
-                .map(itemId =>
-                  `"${escapeCSharp(itemId)}"`
-                )
-                .join(", ");
+              ).map(itemId =>
+                `"${escapeCSharp(itemId)}"`
+              );
+
+              return {
+                row,
+                field:
+                  `_rmlLayoutGroupItems${index}`,
+                itemIds
+              };
+            });
+
+          const layoutGroupItemFields =
+            layoutGroupItems
+              .map(item => {
+                const initializer =
+                  item.itemIds.length > 0
+                    ? `new string[] { ${item.itemIds.join(", ")} }`
+                    : "System.Array.Empty<string>()";
+
+                return `    private static readonly string[] ${item.field} =
+        ${initializer};`;
+              })
+              .join("\n\n");
+
+          const groups = layoutGroupItems
+            .map(item => {
+              const row = item.row;
               const horizontal =
                 row.horizontal === false
                   ? "false"
@@ -5609,7 +5713,7 @@ ${keyVisibilityBranches}
                 "${escapeCSharp(row.label || "Inline Row")}",
                 ${outlineOrderById.get(row.id) ?? 0},
                 ${effectiveHorizontal},
-                new string[] { ${itemIds} })`;
+                ${item.field})`;
             })
             .join(",\n");
 
@@ -5698,6 +5802,8 @@ ${keyVisibilityBranches}
               : "";
 
           return `
+${layoutGroupItemFields}
+
     public System.Collections.Generic.IReadOnlyList<ModConfigurationLayoutGroup>
         GetConfigurationLayoutGroups() =>
         new ModConfigurationLayoutGroup[]
@@ -5748,7 +5854,7 @@ ${runtimeLayoutHelper}`;
         })()
       : "";
 
-  return `${guide}${usingLines}
+  return optimizeBuilderOwnedPrivateArrayReturns(`${guide}${usingLines}
 
 namespace ${namespaceName};
 
@@ -5777,7 +5883,7 @@ public sealed partial class ${className}
 
 ${declarations}
 ${runtimeBlock}${runtimeUnloadLifecycleBlock}${orderBlock}${visibilityBlock}${runtimeMenuProviderBlock}${layoutProviderBlock}}
-`;
+`);
 }
 
 function generateProjectFile() {
@@ -24684,6 +24790,41 @@ async function ensureProjectRuntimePrerequisites(
         });
       }
 
+      for (const entry of replacementQueue) {
+        const exactCandidates =
+          entry.candidates.filter(candidate =>
+            candidate?.semanticProof ===
+              "exact-contract"
+          );
+        if (
+          entry.candidates.length !== 1 ||
+          exactCandidates.length !== 1
+        ) {
+          continue;
+        }
+
+        const selected = exactCandidates[0];
+        manualMigrations[
+          entry.operatorId
+        ] = selected.operatorId;
+        manualPortMigrations[
+          entry.operatorId
+        ] = {
+          input:
+            structuredClone(
+              selected.inputMap || {}
+            ),
+          output:
+            structuredClone(
+              selected.outputMap || {}
+            )
+        };
+        entry.status = "selected";
+        entry.autoSelected = true;
+        entry.selectedOperatorId =
+          selected.operatorId;
+      }
+
       const unresolvedWithoutCandidates =
         replacementQueue.filter(entry =>
           entry.candidates.length === 0
@@ -24717,6 +24858,9 @@ async function ensureProjectRuntimePrerequisites(
         ) {
           const entry =
             replacementQueue[index];
+          if (entry.autoSelected === true) {
+            continue;
+          }
           const {
             requirement,
             operatorId,
@@ -24793,6 +24937,16 @@ async function ensureProjectRuntimePrerequisites(
           geometryVerified &&
           !selectedPlanAccepted
         ) {
+          const hasManualChoice =
+            replacementQueue.some(entry =>
+              entry.autoSelected !== true
+            );
+          if (!hasManualChoice) {
+            throw irreparableProjectJsonError(
+              "The unique exact API-contract migration did not produce a valid Runtime Graph. The JSON was not imported.",
+              selectedPlanDiagnostics
+            );
+          }
           updateBuilderWork(
             workSession,
             {
@@ -29452,8 +29606,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "help_template.html?v=89-composite-inspector-fingerprint-actions-v705",
-    "help_template.js?v=89-composite-inspector-fingerprint-actions-v705",
+    "help_template.html?v=90-scanner-authoritative-reload-v720",
+    "help_template.js?v=90-scanner-authoritative-reload-v720",
     "help-template",
     "RMLHelpTemplateMarkup"
   )

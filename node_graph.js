@@ -74,7 +74,7 @@
   const GRAPH_GPU_OVERVIEW_ENTER_ZOOM = 0.20;
   const GRAPH_GPU_OVERVIEW_EXIT_ZOOM = 0.24;
   const GRAPH_NODE_VIRTUAL_OVERSCAN_PIXELS = 260;
-  const API_EXPORT_VERIFICATION_SCHEMA_VERSION = 2;
+  const API_EXPORT_VERIFICATION_SCHEMA_VERSION = 3;
   const INTEGRATED_NODE_CONTRACT_SCHEMA_VERSION = 1;
   const INTEGRATED_NODE_CONTRACT_ALGORITHM =
     "fnv1a64-semantic-integrated-nodes-v1";
@@ -10396,7 +10396,7 @@
     }
     const worker = new Worker(
       new URL(
-        "graph_codegen_worker.js?v=117-composite-inspector-fingerprint-actions-v705",
+        "graph_codegen_worker.js?v=130-scanner-authoritative-reload-v720",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -18850,6 +18850,142 @@
     }
   }
 
+  const GRAPH_CS_PRIMITIVE_DEFAULTS = new Map([
+      ["bool", new Set(["false"])],
+      ["System.Boolean", new Set(["false"])],
+      ["byte", new Set(["0"])],
+      ["System.Byte", new Set(["0"])],
+      ["sbyte", new Set(["0"])],
+      ["System.SByte", new Set(["0"])],
+      ["short", new Set(["0"])],
+      ["System.Int16", new Set(["0"])],
+      ["ushort", new Set(["0"])],
+      ["System.UInt16", new Set(["0"])],
+      ["int", new Set(["0"])],
+      ["System.Int32", new Set(["0"])],
+      ["uint", new Set(["0", "0u", "0U"])],
+      ["System.UInt32", new Set(["0", "0u", "0U"])],
+      ["long", new Set(["0", "0l", "0L"])],
+      ["System.Int64", new Set(["0", "0l", "0L"])],
+      ["ulong", new Set(["0", "0ul", "0UL", "0Ul", "0uL"])],
+      ["System.UInt64", new Set(["0", "0ul", "0UL", "0Ul", "0uL"])],
+      ["nint", new Set(["0"])],
+      ["System.IntPtr", new Set(["0", "default(System.IntPtr)"])],
+      ["nuint", new Set(["0"])],
+      ["System.UIntPtr", new Set(["0", "default(System.UIntPtr)"])],
+      ["float", new Set(["0", "0f", "0F", "0.0f", "0.0F"])],
+      ["System.Single", new Set(["0", "0f", "0F", "0.0f", "0.0F"])],
+      ["double", new Set(["0", "0d", "0D", "0.0d", "0.0D"])],
+      ["System.Double", new Set(["0", "0d", "0D", "0.0d", "0.0D"])],
+      ["decimal", new Set(["0", "0m", "0M", "0.0m", "0.0M"])],
+      ["System.Decimal", new Set(["0", "0m", "0M", "0.0m", "0.0M"])],
+      ["char", new Set(["'\\0'", "'\\u0000'"])],
+      ["System.Char", new Set(["'\\0'", "'\\u0000'"])]
+  ]);
+
+  const GRAPH_CS_KNOWN_VALUE_TYPES = new Set([
+    "bool",
+    "int",
+    "float",
+    "double",
+    "int2",
+    "int3",
+    "int4",
+    "float2",
+    "float3",
+    "float4",
+    "double2",
+    "double3",
+    "double4",
+    "colorX"
+  ]);
+
+  function graphCsDefaultInitializerIsRedundant(
+    type,
+    csType,
+    defaultCode
+  ) {
+    const normalizedType = String(
+      csType || graphCsType(type)
+    )
+      .replace(/\s+/g, "")
+      .replace(/^global::/, "");
+    const normalizedDefault = String(
+      defaultCode || ""
+    )
+      .replace(/\s+/g, "")
+      .replace(/^global::/, "");
+    const primitiveDefaults =
+      GRAPH_CS_PRIMITIVE_DEFAULTS.get(
+        normalizedType
+      );
+
+    if (
+      primitiveDefaults?.has(
+        normalizedDefault
+      ) ||
+      (
+        primitiveDefaults &&
+        [
+          "default",
+          "default!",
+          `default(${normalizedType})`
+        ].includes(normalizedDefault)
+      )
+    ) {
+      return true;
+    }
+
+    if (
+      normalizedType.endsWith("?") &&
+      [
+        "null",
+        "null!",
+        "default",
+        "default!",
+        `default(${normalizedType})`
+      ].includes(normalizedDefault)
+    ) {
+      return true;
+    }
+
+    const baseType = typeBase(type);
+    const information =
+      TYPE_INFO[baseType] || {};
+    const isKnownValueType =
+      String(type || "").startsWith("enum:") ||
+      GRAPH_CS_KNOWN_VALUE_TYPES.has(baseType) ||
+      information.referenceType === false;
+    return (
+      isKnownValueType &&
+      (
+        normalizedDefault === "default" ||
+        normalizedDefault === "default!" ||
+        normalizedDefault ===
+          `default(${normalizedType})`
+      )
+    );
+  }
+
+  function graphCsStaticFieldDeclaration(
+    type,
+    csType,
+    fieldName,
+    defaultCode,
+    indent = ""
+  ) {
+    const initializer =
+      graphCsDefaultInitializerIsRedundant(
+        type,
+        csType,
+        defaultCode
+      )
+        ? ""
+        : ` = ${defaultCode}`;
+
+    return `${indent}private static ${csType} ${fieldName}${initializer};`;
+  }
+
   function graphCsNumberLiteral(
     value,
     type
@@ -19305,6 +19441,247 @@
     return errors;
   }
 
+  function compactSingleUseQueuedImpulseWrappers(
+    source,
+    impulseOutputs,
+    usedQueuedMethods,
+    usedEntryMethods
+  ) {
+    let optimized = String(source || "");
+
+    // A queued continuation normally consists of a one-line wrapper around
+    // EnqueueGraphImpulse. When that wrapper has exactly one ordinary call
+    // site and is never used as a delegate entry point, replacing the call
+    // with the wrapper body is mechanically equivalent and removes one C#
+    // method plus its metadata. Any ambiguous use keeps the wrapper intact.
+    for (const item of impulseOutputs) {
+      if (
+        !usedQueuedMethods.has(
+          item.queuedMethod
+        ) ||
+        usedEntryMethods.has(
+          item.entryMethod
+        )
+      ) {
+        continue;
+      }
+
+      const wrapper =
+`    private static void ${item.queuedMethod}() =>
+        EnqueueGraphImpulse(${item.method});`;
+      const tokenPattern =
+        new RegExp(
+          `\\b${item.queuedMethod}\\b`,
+          "g"
+        );
+      const references =
+        optimized.match(tokenPattern) || [];
+
+      if (
+        references.length !== 2 ||
+        !optimized.includes(wrapper)
+      ) {
+        continue;
+      }
+
+      const directCallPattern =
+        new RegExp(
+          `^([ \\t]*)${item.queuedMethod}\\(\\);[ \\t]*$`,
+          "gm"
+        );
+      const directCalls =
+        optimized.match(directCallPattern) || [];
+
+      if (directCalls.length !== 1) {
+        continue;
+      }
+
+      optimized = optimized.replace(
+        directCallPattern,
+        `$1EnqueueGraphImpulse(${item.method});`
+      );
+      optimized = optimized.replace(
+        `${wrapper}\n\n`,
+        ""
+      );
+    }
+
+    return optimized;
+  }
+
+  function removeUnreachableGeneratedImpulseMethods(
+    source,
+    additionalSources = []
+  ) {
+    const generated = String(source || "")
+      .replaceAll("\r\n", "\n");
+    const methodPattern =
+      /^    private static void ((?:Enter|QueueEmit|Inline|Emit)N[A-Za-z0-9_]+)\(\)/gm;
+    const methods = [];
+    let match;
+
+    while (
+      (match = methodPattern.exec(generated))
+    ) {
+      const start = match.index;
+      const lineEnd =
+        generated.indexOf("\n", start);
+      const signature = generated.slice(
+        start,
+        lineEnd < 0
+          ? generated.length
+          : lineEnd
+      );
+      let end = -1;
+
+      if (signature.includes("=>")) {
+        const semicolon =
+          generated.indexOf(
+            ";",
+            lineEnd
+          );
+        end =
+          semicolon < 0
+            ? -1
+            : semicolon + 1;
+      } else {
+        const closingBracePattern =
+          /^    }$/gm;
+        closingBracePattern.lastIndex =
+          lineEnd + 1;
+        const closingBrace =
+          closingBracePattern.exec(
+            generated
+          );
+        end = closingBrace
+          ? closingBrace.index +
+            closingBrace[0].length
+          : -1;
+      }
+
+      if (end <= start) {
+        continue;
+      }
+
+      methods.push({
+        name: match[1],
+        start,
+        end,
+        code: generated.slice(
+          start,
+          end
+        )
+      });
+    }
+
+    if (methods.length === 0) {
+      return generated;
+    }
+
+    const methodByName =
+      new Map(
+        methods.map(method => [
+          method.name,
+          method
+        ])
+      );
+    let rootSource = generated;
+
+    for (const method of
+      [...methods].sort(
+        (left, right) =>
+          right.start - left.start
+      )) {
+      rootSource =
+        rootSource.slice(
+          0,
+          method.start
+        ) +
+        rootSource.slice(method.end);
+    }
+
+    rootSource += `\n${additionalSources
+      .map(value => String(value || ""))
+      .join("\n")}`;
+
+    const referencedMethods = value =>
+      new Set(
+        (
+          String(value || "").match(
+            /\b(?:Enter|QueueEmit|Inline|Emit)N[A-Za-z0-9_]+\b/g
+          ) || []
+        ).filter(name =>
+          methodByName.has(name)
+        )
+      );
+    const roots =
+      referencedMethods(rootSource);
+    const dependencies =
+      new Map(
+        methods.map(method => [
+          method.name,
+          new Set(
+            [...referencedMethods(
+              method.code
+            )].filter(
+              name =>
+                name !== method.name
+            )
+          )
+        ])
+      );
+    const reachable = new Set();
+    const pending = [...roots];
+
+    while (pending.length > 0) {
+      const name = pending.pop();
+
+      if (reachable.has(name)) {
+        continue;
+      }
+
+      reachable.add(name);
+      for (const dependency of
+        dependencies.get(name) || []) {
+        if (!reachable.has(dependency)) {
+          pending.push(dependency);
+        }
+      }
+    }
+
+    let optimized = generated;
+    const unreachable = methods
+      .filter(method =>
+        !reachable.has(method.name)
+      )
+      .sort(
+        (left, right) =>
+          right.start - left.start
+      );
+
+    for (const method of unreachable) {
+      let end = method.end;
+
+      if (
+        optimized.slice(
+          end,
+          end + 2
+        ) === "\n\n"
+      ) {
+        end += 2;
+      }
+
+      optimized =
+        optimized.slice(
+          0,
+          method.start
+        ) +
+        optimized.slice(end);
+    }
+
+    return optimized;
+  }
+
   function buildTypedNodeGraphCSharpContribution(
     request = {}
   ) {
@@ -19401,6 +19778,106 @@
 
     const diagnostics = [];
     const warnings = [];
+    const reloadSafetyIssues = [];
+    const reloadSafetyIssueKeys =
+      new Set();
+
+    const addReloadSafetyIssue = issue => {
+      const normalized = {
+        nodeId: String(
+          issue?.nodeId || ""
+        ),
+        nodeLabel: String(
+          issue?.nodeLabel ||
+          issue?.nodeId ||
+          "<unnamed>"
+        ),
+        operatorId: String(
+          issue?.operatorId || ""
+        ),
+        ownerType: String(
+          issue?.ownerType || ""
+        ),
+        memberName: String(
+          issue?.memberName || ""
+        ),
+        level: [
+          "conditional",
+          "unsafe",
+          "unknown"
+        ].includes(
+          String(
+            issue?.level || "unknown"
+          ).toLowerCase()
+        )
+          ? String(issue.level).toLowerCase()
+          : "unknown",
+        threadAffinity: String(
+          issue?.threadAffinity ||
+          "unknown"
+        ),
+        reasons: [...new Set(
+          (Array.isArray(issue?.reasons)
+            ? issue.reasons
+            : [])
+            .map(value =>
+              String(value || "").trim()
+            )
+            .filter(Boolean)
+        )].sort(),
+        requiredCleanup: [...new Set(
+          (Array.isArray(
+            issue?.requiredCleanup
+          )
+            ? issue.requiredCleanup
+            : [])
+            .map(value =>
+              String(value || "").trim()
+            )
+            .filter(Boolean)
+        )].sort(),
+        missingCleanup: [...new Set(
+          (Array.isArray(
+            issue?.missingCleanup
+          )
+            ? issue.missingCleanup
+            : [])
+            .map(value =>
+              String(value || "").trim()
+            )
+            .filter(Boolean)
+        )].sort()
+      };
+      const key = JSON.stringify(
+        normalized
+      );
+      if (reloadSafetyIssueKeys.has(key)) {
+        return;
+      }
+      reloadSafetyIssueKeys.add(key);
+      reloadSafetyIssues.push(normalized);
+
+      const contractName =
+        [
+          normalized.ownerType,
+          normalized.memberName
+        ]
+          .filter(Boolean)
+          .join(".") ||
+        normalized.operatorId;
+      const reasonText =
+        normalized.reasons.length > 0
+          ? normalized.reasons.join(", ")
+          : "unknown scanner result";
+      const cleanupText =
+        normalized.missingCleanup.length > 0
+          ? `; missing cleanup: ${normalized.missingCleanup.join(", ")}`
+          : "";
+
+      warnings.push(
+        `Live reload disabled by node '${normalized.nodeLabel}' (${contractName}, ${normalized.level}, thread ${normalized.threadAffinity}): ${reasonText}${cleanupText}. The mod remains buildable and runs normally.`
+      );
+    };
 
     for (const node of graph.nodes) {
       const nodeDefinition = OPERATOR_DEFINITIONS[node?.operatorId];
@@ -19418,6 +19895,87 @@
         diagnostics.push(
           `Node '${node?.label || node?.id || "<unnamed>"}' preserves unavailable API '${[preserved.ownerType, preserved.memberName].filter(Boolean).join(".") || node?.operatorId}'. The graph remains editable, but this unresolved runtime path cannot be exported.`
         );
+      }
+
+      if (nodeDefinition?.catalogGenerated === true) {
+        const verification =
+          nodeDefinition.apiVerification ||
+          {};
+        const safety =
+          nodeDefinition.apiReloadSafety ||
+          verification.reloadSafety ||
+          {};
+        const level = String(
+          safety.level || "unknown"
+        ).toLowerCase();
+        const requiredCleanup =
+          Array.isArray(
+            safety.requiredCleanup
+          )
+            ? safety.requiredCleanup
+                .map(String)
+            : [];
+        const cleanupCapabilities =
+          new Set(
+            (Array.isArray(
+              nodeDefinition
+                .apiReloadCleanupCapabilities
+            )
+              ? nodeDefinition
+                  .apiReloadCleanupCapabilities
+              : verification
+                  .reloadCleanupCapabilities || [])
+              .map(String)
+          );
+        const missingCleanup =
+          requiredCleanup.filter(
+            requirement =>
+              !cleanupCapabilities.has(
+                requirement
+              )
+          );
+        const conditionalResolved =
+          level === "conditional" &&
+          missingCleanup.length === 0;
+
+        if (
+          level !== "safe" &&
+          !conditionalResolved
+        ) {
+          addReloadSafetyIssue({
+            nodeId: node?.id,
+            nodeLabel:
+              node?.label ||
+              nodeDefinition.title,
+            operatorId: node?.operatorId,
+            ownerType:
+              verification.ownerType ||
+              nodeDefinition.catalogType,
+            memberName:
+              verification.memberName ||
+              nodeDefinition.catalogMember,
+            level:
+              [
+                "conditional",
+                "unsafe",
+                "unknown"
+              ].includes(level)
+                ? level
+                : "unknown",
+            threadAffinity:
+              nodeDefinition
+                .apiThreadAffinity ||
+              verification.threadAffinity,
+            reasons:
+              safety.reasons?.length
+                ? safety.reasons
+                : [
+                    "scanner-reload-metadata-missing"
+                  ],
+            requiredCleanup,
+            missingCleanup
+          });
+        }
       }
     }
     const extensionUsingLines =
@@ -19450,7 +20008,8 @@
       usesRuntimeConfigurationMenu: false,
       usesModUnloadLifecycle: false,
       usesHarmony: false,
-      runtimeReloadUnsafe: false
+      runtimeReloadUnsafe:
+        reloadSafetyIssues.length > 0
     };
 
     const addNamedBlock = (
@@ -19658,6 +20217,13 @@
           ]
         )
       );
+    const connectedOutputs =
+      new Set(
+        graph.connections.map(
+          connection =>
+            `${connection.fromNode}:${connection.fromPort}`
+        )
+      );
     const expressionCache =
       new Map();
     const expressionStack =
@@ -19730,6 +20296,64 @@
       new Map();
     let entryMethodByPort =
       new Map();
+    const usedEntryMethods =
+      new Set();
+    const usedQueuedMethods =
+      new Set();
+    const usedInlineMethods =
+      new Set();
+
+    const requestQueuedMethod = (
+      nodeId,
+      portId
+    ) => {
+      const method =
+        impulseMethodByPort.get(
+          `${nodeId}:${portId}`
+        ) || "";
+
+      if (method) {
+        usedQueuedMethods.add(method);
+      }
+
+      return method;
+    };
+
+    const requestInlineMethod = (
+      nodeId,
+      portId
+    ) => {
+      const method =
+        inlineImpulseMethodByPort.get(
+          `${nodeId}:${portId}`
+        ) || "";
+
+      if (method) {
+        usedInlineMethods.add(method);
+      }
+
+      return method;
+    };
+
+    const requestEntryMethod = (
+      nodeId,
+      portId
+    ) => {
+      const method =
+        entryMethodByPort.get(
+          `${nodeId}:${portId}`
+        ) || "";
+
+      if (method) {
+        usedEntryMethods.add(method);
+        requestQueuedMethod(
+          nodeId,
+          portId
+        );
+      }
+
+      return method;
+    };
 
     const registerReference =
       reference => {
@@ -19841,6 +20465,11 @@
           `${node.id}:${inputId}`
         );
       },
+      isOutputConnected(outputId) {
+        return connectedOutputs.has(
+          `${node.id}:${outputId}`
+        );
+      },
       inputConnection(inputId) {
         return incoming.get(
           `${node.id}:${inputId}`
@@ -19858,23 +20487,26 @@
         nodeId,
         portId
       ) =>
-        impulseMethodByPort.get(
-          `${nodeId}:${portId}`
-        ) || "",
+        requestQueuedMethod(
+          nodeId,
+          portId
+        ),
       inlineMethod: (
         nodeId,
         portId
       ) =>
-        inlineImpulseMethodByPort.get(
-          `${nodeId}:${portId}`
-        ) || "",
+        requestInlineMethod(
+          nodeId,
+          portId
+        ),
       entryMethod: (
         nodeId,
         portId
       ) =>
-        entryMethodByPort.get(
-          `${nodeId}:${portId}`
-        ) || "",
+        requestEntryMethod(
+          nodeId,
+          portId
+        ),
       token: graphCsMethodToken,
       identifier: graphCsIdentifier,
       escapeString:
@@ -19925,12 +20557,18 @@
         key,
         fieldName,
         csType,
-        defaultCode
+        defaultCode,
+        graphType = ""
       ) {
         addNamedBlock(
           extensionFields,
           key,
-`private static ${csType} ${fieldName} = ${defaultCode};`
+          graphCsStaticFieldDeclaration(
+            graphType,
+            csType,
+            fieldName,
+            defaultCode
+          )
         );
       },
       addMember(key, code) {
@@ -20090,6 +20728,35 @@
           extensionRequirements[name] =
             extensionRequirements[name] ||
             Boolean(value);
+
+          if (
+            name ===
+              "runtimeReloadUnsafe" &&
+            Boolean(value)
+          ) {
+            addReloadSafetyIssue({
+              nodeId: node?.id,
+              nodeLabel:
+                node?.label ||
+                definition?.title,
+              operatorId:
+                node?.operatorId,
+              ownerType:
+                definition?.catalogType,
+              memberName:
+                definition?.catalogMember,
+              level: "unsafe",
+              threadAffinity:
+                definition
+                  ?.apiThreadAffinity ||
+                "unknown",
+              reasons: [
+                "builder-node-explicitly-reload-unsafe"
+              ],
+              requiredCleanup: [],
+              missingCleanup: []
+            });
+          }
         }
       },
       diagnostic(message) {
@@ -20501,9 +21168,16 @@
               );
             }
           );
+        const impulseConnected =
+          concreteType === "impulse" &&
+          graph.connections.some(
+            connection =>
+              connection.fromNode === node.id &&
+              connection.fromPort === spec.id
+          );
 
         if (
-          concreteType === "impulse" ||
+          impulseConnected ||
           reactiveConfigurationConnected
         ) {
           impulseOutputs.push({
@@ -20891,11 +21565,15 @@
 
       const emit = portId => {
         const method =
-          (inlineContinuations
-            ? inlineImpulseMethodByPort
-            : impulseMethodByPort).get(
-            `${targetNode.id}:${portId}`
-          );
+          inlineContinuations
+            ? requestInlineMethod(
+                targetNode.id,
+                portId
+              )
+            : requestQueuedMethod(
+                targetNode.id,
+                portId
+              );
 
         if (
           !method ||
@@ -21029,7 +21707,7 @@
       );
     };
 
-    const impulseMethods =
+    const impulseMethodEntries =
       impulseOutputs.map(item => {
         const sourceRef = {
           node: item.node,
@@ -21101,7 +21779,9 @@
             `Impulse ${item.node.operatorId}:${item.spec.id}`
           );
 
-        return `    private static void ${item.method}()
+        return {
+          item,
+          code: `    private static void ${item.method}()
     {
         try
         {
@@ -21118,14 +21798,13 @@ ${actions.length > 0
         }
         catch (Exception exception)
         {
-            ReportGraphRuntimeFailure(
-                "${failureSource}",
-                exception);
+            ReportGraphRuntimeFailure("${failureSource}", exception);
         }
-    }`;
-      }).join("\n\n");
+    }`
+        };
+      });
 
-    const inlineImpulseMethods =
+    const inlineImpulseMethodEntries =
       impulseOutputs.map(item => {
         const sourceRef = {
           node: item.node,
@@ -21163,7 +21842,9 @@ ${actions.length > 0
           )
           .filter(Boolean);
 
-        return `    private static void ${item.inlineMethod}()
+        return {
+          item,
+          code: `    private static void ${item.inlineMethod}()
     {
 ${actions.length > 0
   ? actions
@@ -21175,24 +21856,9 @@ ${actions.length > 0
       )
       .join("\n")
   : "        // No connected impulse targets."}
-    }`;
-      }).join("\n\n");
-
-    const queuedImpulseMethods =
-      impulseOutputs.map(item =>
-`    private static void ${item.queuedMethod}()
-    {
-        EnqueueGraphImpulse(${item.method});
     }`
-      ).join("\n\n");
-
-    const entryImpulseMethods =
-      impulseOutputs.map(item =>
-`    private static void ${item.entryMethod}()
-    {
-        BeginGraphEntry(${item.queuedMethod});
-    }`
-      ).join("\n\n");
+        };
+      });
 
     const configurationNode =
       graph.nodes.find(
@@ -21213,8 +21879,9 @@ ${actions.length > 0
         ? configurationButtons
             .map(entry => {
               const method =
-                entryMethodByPort.get(
-                  `${configurationNode.id}:config-${entry.node.id}`
+                requestEntryMethod(
+                  configurationNode.id,
+                  `config-${entry.node.id}`
                 );
 
               return method
@@ -21260,8 +21927,9 @@ ${configurationButtonCases.length > 0
         }
 
         const method =
-          entryMethodByPort.get(
-            `${configurationNode.id}:${item.portId}`
+          requestEntryMethod(
+            configurationNode.id,
+            item.portId
           );
 
         if (method) {
@@ -21284,8 +21952,9 @@ ${configurationButtonCases.length > 0
         "resonite.onStart"
       ) {
         const method =
-          entryMethodByPort.get(
-            `${node.id}:impulse`
+          requestEntryMethod(
+            node.id,
+            "impulse"
           );
         if (method) {
           startupEmitters.push(
@@ -21787,12 +22456,38 @@ ${dynamicChoiceRefreshCases.join("\n")}
     }
 
     const usingLines =
-      [...usingSet].join("\n");
+      [...usingSet]
+        .sort((left, right) => {
+          const key = value => {
+            const namespaceName = value
+              .replace(/^using\s+/, "")
+              .replace(/;$/, "");
+            return namespaceName === "System"
+              ? "0:"
+              : namespaceName.startsWith("System.")
+                ? `0:${namespaceName}`
+                : `1:${namespaceName}`;
+          };
+          const leftKey = key(left);
+          const rightKey = key(right);
+          return leftKey === rightKey
+            ? 0
+            : leftKey < rightKey
+              ? -1
+              : 1;
+        })
+        .join("\n");
     const configFieldsCode =
       configurationFields
         .map(item => {
           const fields = [
-            `    private static ${item.csType} ${item.backing} = ${graphCsDefault(item.type)};`
+            graphCsStaticFieldDeclaration(
+              item.type,
+              item.csType,
+              item.backing,
+              graphCsDefault(item.type),
+              "    "
+            )
           ];
 
           if (
@@ -21801,7 +22496,13 @@ ${dynamicChoiceRefreshCases.join("\n")}
             )
           ) {
             fields.push(
-              `    private static ${item.csType} ${item.configuredBacking} = ${graphCsDefault(item.type)};`
+              graphCsStaticFieldDeclaration(
+                item.type,
+                item.csType,
+                item.configuredBacking,
+                graphCsDefault(item.type),
+                "    "
+              )
             );
           }
 
@@ -21858,8 +22559,9 @@ ${dynamicChoiceRefreshCases.join("\n")}
         )
         .map(item => {
           const emitter =
-            entryMethodByPort.get(
-              `${configurationNode.id}:${item.portId}`
+            requestEntryMethod(
+              configurationNode.id,
+              item.portId
             );
 
           return `    public static void ${item.reactor}()
@@ -21875,7 +22577,13 @@ ${dynamicChoiceRefreshCases.join("\n")}
     const storeFieldsCode =
       storeFields
         .map(item =>
-          `    private static ${item.csType} ${item.field} = ${graphCsDefault(item.type)};`
+          graphCsStaticFieldDeclaration(
+            item.type,
+            item.csType,
+            item.field,
+            graphCsDefault(item.type),
+            "    "
+          )
         )
         .join("\n");
     const extensionFieldsCode =
@@ -21914,11 +22622,71 @@ ${dynamicChoiceRefreshCases.join("\n")}
             )
           )
           .join("\n");
+    const reloadWarningGroups = new Map();
+    for (const issue of reloadSafetyIssues) {
+      const groupKey = JSON.stringify({
+        operatorId: issue.operatorId,
+        ownerType: issue.ownerType,
+        memberName: issue.memberName,
+        level: issue.level,
+        threadAffinity:
+          issue.threadAffinity,
+        reasons: issue.reasons,
+        missingCleanup:
+          issue.missingCleanup
+      });
+      const group =
+        reloadWarningGroups.get(groupKey) || {
+          count: 0,
+          issue
+        };
+      group.count += 1;
+      reloadWarningGroups.set(
+        groupKey,
+        group
+      );
+    }
+    const nonReloadWarnings = warnings.filter(
+      warning =>
+        !String(warning).startsWith(
+          "Live reload disabled by node "
+        )
+    );
+    const sourceWarnings = [
+      ...(reloadSafetyIssues.length > 0
+        ? [
+            `Live reload is disabled for ${reloadSafetyIssues.length} node(s). Full per-node diagnostics remain in the generated project metadata.`,
+            ...[...reloadWarningGroups.values()]
+              .sort((left, right) =>
+                right.count - left.count
+              )
+              .map(({ count, issue }) => {
+                const contractName = [
+                  issue.ownerType,
+                  issue.memberName
+                ]
+                  .filter(Boolean)
+                  .join(".") ||
+                  issue.operatorId;
+                const reasons =
+                  issue.reasons.length > 0
+                    ? issue.reasons.join(", ")
+                    : "unknown scanner result";
+                const cleanup =
+                  issue.missingCleanup.length > 0
+                    ? `; missing cleanup: ${issue.missingCleanup.join(", ")}`
+                    : "";
+                return `${count}x ${contractName} (${issue.level}, thread ${issue.threadAffinity}): ${reasons}${cleanup}.`;
+              })
+          ]
+        : []),
+      ...nonReloadWarnings
+    ];
     const warningsComment =
-      warnings.length > 0
-        ? `\n/*\n${warnings
+      sourceWarnings.length > 0
+        ? `\n/*\n${sourceWarnings
             .map(warning =>
-              ` * ${warning}`
+              ` * ${String(warning).replaceAll("*/", "* /")}`
             )
             .join("\n")}\n */\n`
         : "\n";
@@ -21928,7 +22696,51 @@ ${dynamicChoiceRefreshCases.join("\n")}
         ? `// RML typed runtime graph\n\n/*\n * Generated by the RML Configuration Builder.\n *\n * STEP 1 - Configuration values\n * The main mod source forwards the current RML configuration values into\n * this generated runtime class through the Set... methods below.\n *\n * STEP 2 - Runtime reactions\n * React... methods are entry points for Configuration sockets configured to\n * react when settings are saved. Startup-capable sockets are emitted from\n * OnEngineInit(). Stored-only sockets remain typed value sources.\n *\n * STEP 3 - Typed graph execution\n * Emit... methods are the generated impulse paths. Value inputs are resolved\n * from their connected typed sources when an impulse path executes.\n *\n * STEP 4 - Runtime state and outputs\n * Generated fields retain node state and action outputs. Display Value and\n * Display Impulse nodes publish through DisplayValues/DisplayValueChanged and\n * stream to the local scanner runtime bridge when that scanner is installed.\n *\n * This file is generated from the visual graph. Edit the graph rather than\n * editing this generated file manually.\n */\n\n`
         : "";
 
-    const source = `${guideComment}${usingLines}
+    const queuedImpulseMethods =
+      impulseOutputs
+        .filter(item =>
+          usedQueuedMethods.has(
+            item.queuedMethod
+          )
+        )
+        .map(item =>
+`    private static void ${item.queuedMethod}() =>
+        EnqueueGraphImpulse(${item.method});`
+        )
+        .join("\n\n");
+    const inlineImpulseMethods =
+      inlineImpulseMethodEntries
+        .filter(({ item }) =>
+          usedInlineMethods.has(
+            item.inlineMethod
+          )
+        )
+        .map(({ code }) => code)
+        .join("\n\n");
+    const impulseMethods =
+      impulseMethodEntries
+        .filter(({ item }) =>
+          usedQueuedMethods.has(
+            item.queuedMethod
+          )
+        )
+        .map(({ code }) => code)
+        .join("\n\n");
+
+    const entryImpulseMethods =
+      impulseOutputs
+        .filter(item =>
+          usedEntryMethods.has(
+            item.entryMethod
+          )
+        )
+        .map(item =>
+`    private static void ${item.entryMethod}() =>
+        BeginGraphEntry(${item.queuedMethod});`
+        )
+        .join("\n\n");
+
+    let source = `${guideComment}${usingLines}
 
 namespace ${namespaceName};
 ${warningsComment}
@@ -21965,9 +22777,14 @@ internal static partial class ${graphClassName}
     private static int _runtimeDisplayPumpStarted;
     private static readonly object _graphRuntimeTasksLock = new();
     private static readonly HashSet<Task> _graphRuntimeTasks = new();
+    private static readonly object _graphDispatchWorldsLock = new();
+    private static readonly HashSet<FrooxEngine.World> _graphDispatchWorlds =
+        new(ReferenceEqualityComparer.Instance);
+    private static readonly object _graphEntryDrainLock = new();
+    private static TaskCompletionSource<bool> _graphEntriesDrained =
+        CreateCompletedGraphDrainSignal();
     private static int _graphRuntimeAcceptingEntries = 1;
     private static int _graphActiveEntries;
-    private static long _graphEntryGeneration;
     private static readonly object _graphImpulseExecutionLock = new();
     private static readonly object _graphRuntimeLastValuesLock = new();
     private static readonly Dictionary<string, object?> _graphRuntimeLastValues =
@@ -21998,9 +22815,12 @@ ${storeFieldsCode ? `\n${storeFieldsCode}` : ""}${extensionFieldsCode ? `\n\n${e
 
     public static void Initialize(Action<string>? display)
     {
-        Volatile.Write(
-            ref _graphRuntimeAcceptingEntries,
-            1);
+        lock (_graphEntryDrainLock)
+        {
+            Volatile.Write(
+                ref _graphRuntimeAcceptingEntries,
+                1);
+        }
         _display = display ?? (static _ => { });
         lock (_displayStateLock)
         {
@@ -22040,9 +22860,12 @@ ${storeFieldsCode ? `\n${storeFieldsCode}` : ""}${extensionFieldsCode ? `\n\n${e
 
     public static void BeginRuntimeDrain()
     {
-        Volatile.Write(
-            ref _graphRuntimeAcceptingEntries,
-            0);
+        lock (_graphEntryDrainLock)
+        {
+            Volatile.Write(
+                ref _graphRuntimeAcceptingEntries,
+                0);
+        }
         Volatile.Write(
             ref _runtimeDisplayPumpStarted,
             0);${extensionRuntimeDrainStatements.length > 0
@@ -22053,34 +22876,120 @@ ${storeFieldsCode ? `\n${storeFieldsCode}` : ""}${extensionFieldsCode ? `\n\n${e
   : ""}
     }
 
+    private static TaskCompletionSource<bool>
+        CreateCompletedGraphDrainSignal()
+    {
+        TaskCompletionSource<bool> signal =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        signal.TrySetResult(true);
+        return signal;
+    }
+
+    private static Task WaitForGraphEntriesDrainedAsync(
+        CancellationToken cancellationToken)
+    {
+        Task drainTask;
+        lock (_graphEntryDrainLock)
+        {
+            drainTask = _graphEntriesDrained.Task;
+        }
+
+        return drainTask.WaitAsync(cancellationToken);
+    }
+
+    private static async Task DrainWorldDispatchQueueAsync(
+        FrooxEngine.World? world,
+        CancellationToken cancellationToken)
+    {
+        if (world is null || world.IsDisposed)
+        {
+            return;
+        }
+
+        TaskCompletionSource<bool> barrier =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        try
+        {
+            world!.RunSynchronously(
+                () => barrier.TrySetResult(true),
+                immediatellyIfPossible: true);
+        }
+        catch
+        {
+            // A disposed/transitioning world cannot retain a runnable queue.
+            barrier.TrySetResult(true);
+        }
+
+        await barrier.Task
+            .WaitAsync(cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private static async Task DrainWorldDispatchQueuesAsync(
+        CancellationToken cancellationToken)
+    {
+        FrooxEngine.World? userspaceWorld =
+            FrooxEngine.Userspace.UserspaceWorld;
+        FrooxEngine.World? currentWorld =
+            GraphExecutionWorld();
+        FrooxEngine.World[] worlds;
+
+        lock (_graphDispatchWorldsLock)
+        {
+            if (currentWorld is not null && !currentWorld.IsDisposed)
+            {
+                _graphDispatchWorlds.Add(currentWorld!);
+            }
+            if (userspaceWorld is not null && !userspaceWorld.IsDisposed)
+            {
+                _graphDispatchWorlds.Add(userspaceWorld!);
+            }
+
+            worlds = _graphDispatchWorlds.ToArray();
+        }
+
+        // Drain non-userspace Worlds first. Their queued actions can enqueue
+        // follow-up work into Userspace; the Userspace barrier therefore runs
+        // last and also covers those nested dispatches.
+        foreach (FrooxEngine.World world in worlds.Where(candidate =>
+                     !ReferenceEquals(candidate, userspaceWorld)))
+        {
+            await DrainWorldDispatchQueueAsync(
+                    world,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        await DrainWorldDispatchQueueAsync(
+                userspaceWorld,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        lock (_graphDispatchWorldsLock)
+        {
+            _graphDispatchWorlds.Clear();
+        }
+    }
+
     public static async Task DrainRuntimeAsync(
         CancellationToken cancellationToken)
     {
         BeginRuntimeDrain();
 
-        while (true)
-        {
-            while (Volatile.Read(
-                       ref _graphActiveEntries) != 0)
-            {
-                await Task.Delay(10, cancellationToken)
-                    .ConfigureAwait(false);
-            }
+        await WaitForGraphEntriesDrainedAsync(
+                cancellationToken)
+            .ConfigureAwait(false);
 
-            long quietGeneration = Interlocked.Read(
-                ref _graphEntryGeneration);
-            await Task.Delay(25, cancellationToken)
-                .ConfigureAwait(false);
+        await DrainWorldDispatchQueuesAsync(
+                cancellationToken)
+            .ConfigureAwait(false);
 
-            if (
-                Volatile.Read(
-                    ref _graphActiveEntries) == 0 &&
-                Interlocked.Read(
-                    ref _graphEntryGeneration) == quietGeneration)
-            {
-                break;
-            }
-        }
+        // Every queued graph delegate has now crossed a FIFO barrier. Wait
+        // once more for an entry that began immediately before its barrier.
+        await WaitForGraphEntriesDrainedAsync(
+                cancellationToken)
+            .ConfigureAwait(false);
 
         while (true)
         {
@@ -22187,6 +23096,11 @@ ${startupEmitters.length > 0
             return false;
         }
 
+        lock (_graphDispatchWorldsLock)
+        {
+            _graphDispatchWorlds.Add(world!);
+        }
+
         try
         {
             world!.RunSynchronously(
@@ -22282,17 +23196,24 @@ ${startupEmitters.length > 0
         internal GraphExecutionScope()
         {
             _previous = _graphExecutionFrame.Value;
-            Interlocked.Increment(
-                ref _graphActiveEntries);
-            Interlocked.Increment(
-                ref _graphEntryGeneration);
-            if (Volatile.Read(
-                    ref _graphRuntimeAcceptingEntries) == 0)
+            lock (_graphEntryDrainLock)
             {
-                return;
+                if (Volatile.Read(
+                        ref _graphRuntimeAcceptingEntries) == 0)
+                {
+                    return;
+                }
+
+                if (_graphActiveEntries == 0)
+                {
+                    _graphEntriesDrained =
+                        new TaskCompletionSource<bool>(
+                            TaskCreationOptions.RunContinuationsAsynchronously);
+                }
+                _graphActiveEntries++;
+                Accepted = true;
             }
 
-            Accepted = true;
             _graphExecutionFrame.Value =
                 new GraphExecutionFrame();
         }
@@ -22310,8 +23231,21 @@ ${startupEmitters.length > 0
                 _graphExecutionFrame.Value =
                     _previous;
             }
-            Interlocked.Decrement(
-                ref _graphActiveEntries);
+            if (!Accepted)
+            {
+                return;
+            }
+
+            TaskCompletionSource<bool>? drainSignal = null;
+            lock (_graphEntryDrainLock)
+            {
+                _graphActiveEntries--;
+                if (_graphActiveEntries == 0)
+                {
+                    drainSignal = _graphEntriesDrained;
+                }
+            }
+            drainSignal?.TrySetResult(true);
         }
     }
 
@@ -22824,6 +23758,13 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
                    operatorName + " returned null.");
     }
 
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<
+        (string OperatorName, Type LeftType, Type RightType),
+        MethodInfo> GraphBinaryOperatorCache = new();
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<
+        (Type Type, string MemberName),
+        MemberInfo> GraphFloatComponentCache = new();
+
     private static MethodInfo? GraphOperatorMethod(
         string operatorName,
         object left,
@@ -22831,6 +23772,16 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     {
         Type leftType = left.GetType();
         Type rightType = right.GetType();
+        var cacheKey = (
+            OperatorName: operatorName,
+            LeftType: leftType,
+            RightType: rightType);
+        if (GraphBinaryOperatorCache.TryGetValue(
+                cacheKey,
+                out MethodInfo? cachedMethod))
+        {
+            return cachedMethod;
+        }
         Type? candidateType = leftType;
 
         for (int pass = 0; pass < 2; pass++)
@@ -22855,6 +23806,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
                         parameters[0].ParameterType.IsInstanceOfType(left) &&
                         parameters[1].ParameterType.IsInstanceOfType(right))
                     {
+                        GraphBinaryOperatorCache.TryAdd(cacheKey, method);
                         return method;
                     }
                 }
@@ -22877,6 +23829,23 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         }
 
         Type type = value.GetType();
+        var cacheKey = (
+            Type: type,
+            MemberName: memberName);
+        if (GraphFloatComponentCache.TryGetValue(
+                cacheKey,
+                out MemberInfo? cachedMember))
+        {
+            object? cachedValue = cachedMember switch
+            {
+                FieldInfo cachedField => cachedField.GetValue(value),
+                PropertyInfo cachedProperty => cachedProperty.GetValue(value),
+                _ => null
+            };
+            return Convert.ToSingle(
+                cachedValue,
+                CultureInfo.InvariantCulture);
+        }
         BindingFlags flags =
             BindingFlags.Instance |
             BindingFlags.Public |
@@ -22895,6 +23864,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
             .FirstOrDefault();
         if (field is not null)
         {
+            GraphFloatComponentCache.TryAdd(cacheKey, field);
             return Convert.ToSingle(
                 field.GetValue(value),
                 CultureInfo.InvariantCulture);
@@ -22913,6 +23883,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
             .FirstOrDefault();
         if (property is not null)
         {
+            GraphFloatComponentCache.TryAdd(cacheKey, property);
             return Convert.ToSingle(
                 property.GetValue(value),
                 CultureInfo.InvariantCulture);
@@ -23115,7 +24086,13 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
             return result.ToArray();
         }
 
-        return value;
+        // The scanner/runtime-display bridge lives outside this collectible
+        // mod generation and may cache the supplied object. Never let that
+        // cache receive a boxed enum, custom class, delegate or other object
+        // whose runtime Type belongs to the generated DLL. The bridge is a
+        // display-only contract, so an immutable string is the safe neutral
+        // representation for every remaining non-collection value.
+        return FormatValue(value);
     }
 
     private static void PublishRuntimeBridge(
@@ -23368,6 +24345,20 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     }
 }
 `;
+    source =
+      compactSingleUseQueuedImpulseWrappers(
+        source,
+        impulseOutputs,
+        usedQueuedMethods,
+        usedEntryMethods
+      );
+    source =
+      removeUnreachableGeneratedImpulseMethods(
+        source,
+        extensionFiles.map(
+          file => file?.content || ""
+        )
+      );
 
     for (const helper of
       extensionRuntimeHelpers) {
@@ -23549,6 +24540,24 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         runtimeReloadUnsafe:
           extensionRequirements
             .runtimeReloadUnsafe,
+        reloadSafetyContractVersion:
+          Math.max(
+            0,
+            Number(
+              window.RMLResoniteApiCatalog
+                ?.reloadSafetyContractVersion
+            ) || 0
+          ),
+        reloadSafetyReaderVersion: 1,
+        reloadSafetyIssues:
+          reloadSafetyIssues.map(issue => ({
+            ...issue,
+            reasons: [...issue.reasons],
+            requiredCleanup:
+              [...issue.requiredCleanup],
+            missingCleanup:
+              [...issue.missingCleanup]
+          })),
         references:
           [...extensionReferences.values()],
         packageReferences:
@@ -40221,6 +41230,10 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         stableIntegratedContractValue(
           options.candidateParameters || {}
         ),
+      replacementIdentity:
+        stableIntegratedContractValue(
+          options.replacementIdentity || {}
+        ),
       inputs:
         stableIntegratedContractValue(
           oldInputs
@@ -40476,6 +41489,13 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
             resolvedCandidate ||
               candidate
           ),
+        apiContract:
+          clone(
+            resolvedCandidate
+              ?.apiVerification ||
+            candidate?.apiVerification ||
+            {}
+          ),
         inputMap,
         outputMap
       });
@@ -40566,71 +41586,172 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
     requirement,
     candidate
   ) {
-    const sourceText = [
-      requirement?.operatorId,
-      ...(Array.isArray(
-        requirement?.nodeLabels
-      )
-        ? requirement.nodeLabels
-        : []),
-      requirement?.apiContract?.ownerType,
-      requirement?.apiContract?.memberName,
-      requirement?.apiContract?.kind
-    ].filter(Boolean).join(" ");
-    const candidateText = [
-      candidate?.operatorId,
-      candidate?.title,
-      candidate?.description,
-      candidate?.group,
-      candidate?.catalogType,
-      candidate?.catalogMember,
-      candidate?.apiSearchText,
-      candidate?.apiMemberKind
-    ].filter(Boolean).join(" ");
-    const sourceTokens =
-      manualReplacementTokens(
-        sourceText
-      );
-    const candidateTokens =
-      manualReplacementTokens(
-        candidateText
-      );
-    let matchedTokens = 0;
-    for (const token of sourceTokens) {
-      if (candidateTokens.has(token)) {
-        matchedTokens += 1;
+    const normalizeType = value =>
+      String(value || "System.Object")
+        .replace(/^global::/, "")
+        .replace(/\s+/g, "")
+        .replace(/&$/, "");
+    const semanticKey = contract => {
+      if (
+        !contract ||
+        typeof contract !== "object" ||
+        Array.isArray(contract) ||
+        !String(contract.ownerType || "").trim() ||
+        !String(contract.kind || "").trim()
+      ) {
+        return "";
       }
-    }
-
-    const sourceLeaf = String(
-      requirement?.operatorId || ""
-    )
-      .split(".")
-      .pop()
-      .replace(
-        /(?:typed|constant)$/i,
-        ""
-      )
-      .replace(/[^a-z0-9]/gi, "")
-      .toLocaleLowerCase();
-    const candidateCompact =
-      candidateText
-        .replace(/[^a-z0-9]/gi, "")
-        .toLocaleLowerCase();
+      return JSON.stringify({
+        kind: String(contract.kind),
+        ownerType:
+          normalizeType(contract.ownerType),
+        memberName:
+          String(contract.memberName || ""),
+        parameters:
+          (Array.isArray(contract.parameters)
+            ? contract.parameters
+            : []).map((parameter, index) => ({
+              position: Math.max(
+                0,
+                Number(parameter?.position) || index
+              ),
+              type: normalizeType(
+                parameter?.elementType ||
+                parameter?.type
+              ),
+              isByRef:
+                parameter?.isByRef === true ||
+                parameter?.isOut === true,
+              isOut:
+                parameter?.isOut === true
+            })),
+        returnType: normalizeType(
+          contract.returnType ||
+          "System.Void"
+        ),
+        isStatic:
+          contract.isStatic === true,
+        genericArity: Math.max(
+          0,
+          Number(contract.genericArity) || 0
+        )
+      });
+    };
+    const sourceContract =
+      requirement?.apiContract;
+    const candidateContract =
+      candidate?.apiContract ||
+      candidate?.apiVerification ||
+      null;
+    const sourceSemanticKey =
+      semanticKey(sourceContract);
+    const candidateSemanticKey =
+      semanticKey(candidateContract);
+    const exactSemanticContract = Boolean(
+      sourceSemanticKey &&
+      sourceSemanticKey ===
+        candidateSemanticKey
+    );
+    const literalLabelTokens = new Set(
+      (Array.isArray(requirement?.nodeLabels)
+        ? requirement.nodeLabels
+        : [])
+        .flatMap(label =>
+          String(label || "")
+            .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+            .toLocaleLowerCase()
+            .split(/[^a-z0-9]+/)
+            .filter(Boolean)
+        )
+    );
+    const candidateMemberName = String(
+      candidateContract?.memberName ||
+      candidate?.catalogMember ||
+      ""
+    ).trim();
+    const normalizedMemberName =
+      candidateMemberName
+        .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+        .toLocaleLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter(Boolean);
     const exactOperationName = Boolean(
-      sourceLeaf.length >= 3 &&
-      candidateCompact.includes(
-        sourceLeaf
+      normalizedMemberName.length > 0 &&
+      normalizedMemberName.every(token =>
+        literalLabelTokens.has(token)
       )
+    );
+    const requiredOperatorId = String(
+      requirement?.operatorId || ""
+    );
+    const requiredKind =
+      requiredOperatorId.startsWith(
+        "api.method."
+      )
+        ? "method"
+        : requiredOperatorId.startsWith(
+              "api.ctor."
+            )
+          ? "constructor"
+          : requiredOperatorId.startsWith(
+                "api.property.get."
+              )
+            ? "property-get"
+            : requiredOperatorId.startsWith(
+                  "api.property.set."
+                )
+              ? "property-set"
+              : requiredOperatorId.startsWith(
+                    "api.field.get."
+                  )
+                ? "field-get"
+                : requiredOperatorId.startsWith(
+                      "api.field.set."
+                    )
+                  ? "field-set"
+                  : requiredOperatorId.startsWith(
+                        "api.event."
+                      )
+                    ? "event"
+                    : "";
+    const candidateKind = String(
+      candidateContract?.kind ||
+      candidate?.apiMemberKind ||
+      ""
+    );
+    const kindMatches =
+      !requiredKind ||
+      candidateKind === requiredKind;
+    const provenByName = Boolean(
+      !sourceSemanticKey &&
+      exactOperationName &&
+      kindMatches
     );
 
     return Object.freeze({
-      matchedTokens,
+      matchedTokens:
+        exactSemanticContract
+          ? 100
+          : provenByName
+            ? normalizedMemberName.length
+            : 0,
       exactOperationName,
-      score: matchedTokens * 240,
+      exactSemanticContract,
+      mode:
+        exactSemanticContract
+          ? "exact-contract"
+          : provenByName
+            ? "exact-name"
+            : "none",
+      score:
+        exactSemanticContract
+          ? 100000
+          : provenByName
+            ? 10000
+            : 0,
       proven:
-        exactOperationName ||
-        matchedTokens >= 2
+        exactSemanticContract ||
+        provenByName
     });
   }
 
@@ -40956,7 +42077,21 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
           requireResoniteCatalog,
           candidateParameters,
           matchMode:
-            "manual-structural"
+            "manual-structural",
+          replacementIdentity: {
+            operatorId:
+              String(
+                requirement?.operatorId || ""
+              ),
+            apiContract:
+              requirement?.apiContract || null,
+            nodeLabels:
+              Array.isArray(
+                requirement?.nodeLabels
+              )
+                ? requirement.nodeLabels
+                : []
+          }
         }
       );
     const cached =
@@ -41162,6 +42297,8 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         exactOperationName:
           identityProof
             .exactOperationName,
+        semanticProof:
+          identityProof.mode,
         score,
         unmappedRequiredInputs
       });
@@ -41366,15 +42503,23 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         }
       );
     let matchMode = "strict";
-    if (allCatalogObjects) {
-      candidates = candidates.filter(
-        candidate =>
+    candidates = candidates
+      .map(candidate => ({
+        ...candidate,
+        identityProof:
           manualReplacementIdentityProof(
             requirement,
             candidate
-          ).proven
-      );
-    }
+          )
+      }))
+      .filter(candidate =>
+        candidate.identityProof.proven
+      )
+      .map(candidate => ({
+        ...candidate,
+        semanticProof:
+          candidate.identityProof.mode
+      }));
     if (candidates.length === 0) {
       candidates =
         manualStructuralReplacementCandidates(
@@ -41416,6 +42561,11 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
             ),
           score:
             Number(candidate.score) || 0,
+          semanticProof:
+            String(
+              candidate.semanticProof ||
+              "none"
+            ),
           unmappedRequiredInputs:
             Object.freeze(
               (Array.isArray(
@@ -42626,7 +43776,7 @@ ${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods
         const script =
           document.createElement("script");
         script.src = new URL(
-          "custom_csharp_editor.js?v=46-composite-inspector-fingerprint-actions-v705",
+          "custom_csharp_editor.js?v=47-scanner-authoritative-reload-v720",
           document.baseURI
         ).href;
         script.async = true;

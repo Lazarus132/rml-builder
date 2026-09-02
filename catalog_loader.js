@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const LOADER_VERSION = 65;
+  const LOADER_VERSION = 73;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
   const CATALOG_PATH = "/resonite_api_catalog.json";
@@ -19,8 +19,14 @@
   const CACHE_RECORD_KEY = "latest-live";
   const KNOWN_SCANNER_URL_STORAGE_KEY =
     "rml-resonite-api-last-scanner-url";
-  const REQUIRED_CATALOG_SCHEMA_VERSION = 6;
+  const REQUIRED_CATALOG_SCHEMA_VERSION = 8;
+  const REQUIRED_METHOD_IDENTITY_VERSION = 2;
   const REQUIRED_SCANNER_FINGERPRINT_VERSION = 1;
+  // This is the reader implemented by this Builder. A newer scanner may
+  // publish any writer version/policy as long as its advertised reader range
+  // still contains v1. Incompatible reload metadata never rejects the API
+  // catalog; it only disables automatic reload approval.
+  const SUPPORTED_RELOAD_SAFETY_READER_VERSION = 1;
   const REQUIRED_SCANNER_FINGERPRINT_ALGORITHM =
     "sha256-canonical-semantic-catalog-v1";
 
@@ -28,15 +34,15 @@
     document.currentScript?.src ||
     window.location.href;
   const modNodesUrl = new URL(
-    "mod_nodes.js?v=61-composite-inspector-fingerprint-actions-v705",
+    "mod_nodes.js?v=67-scanner-authoritative-reload-v720",
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "visual_csharp.js?v=77-composite-inspector-fingerprint-actions-v705",
+    "visual_csharp.js?v=78-scanner-authoritative-reload-v720",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=55-composite-inspector-fingerprint-actions-v705",
+    "api_nodes.js?v=63-scanner-authoritative-reload-v720",
     scriptUrl
   ).href;
 
@@ -133,6 +139,43 @@
     const scannerVersion = String(
       raw?.scannerVersion || ""
     ).trim();
+    const methodIdentityVersion = Number(
+      raw?.methodIdentityVersion
+    );
+    const methodIdentityAlgorithm = String(
+      raw?.methodIdentityAlgorithm || ""
+    ).trim();
+    const reloadSafetyContractVersion =
+      Number(
+        raw?.reloadSafetyContractVersion
+      );
+    const reloadSafetyPolicy = String(
+      raw?.reloadSafetyPolicy || ""
+    ).trim();
+    const reloadSafetyMinimumReaderVersion =
+      Number(
+        raw?.reloadSafetyMinimumReaderVersion
+      );
+    const reloadSafetyMaximumReaderVersion =
+      Number(
+        raw?.reloadSafetyMaximumReaderVersion
+      );
+    const reloadSafetyCompatible =
+      Number.isInteger(
+        reloadSafetyContractVersion
+      ) &&
+      reloadSafetyContractVersion > 0 &&
+      Boolean(reloadSafetyPolicy) &&
+      Number.isInteger(
+        reloadSafetyMinimumReaderVersion
+      ) &&
+      Number.isInteger(
+        reloadSafetyMaximumReaderVersion
+      ) &&
+      reloadSafetyMinimumReaderVersion <=
+        SUPPORTED_RELOAD_SAFETY_READER_VERSION &&
+      reloadSafetyMaximumReaderVersion >=
+        SUPPORTED_RELOAD_SAFETY_READER_VERSION;
 
     if (
       !/^[a-f0-9]{64}$/.test(fingerprint) ||
@@ -143,7 +186,13 @@
       !Number.isInteger(schemaVersion) ||
       schemaVersion <
         REQUIRED_CATALOG_SCHEMA_VERSION ||
-      !scannerVersion
+      !scannerVersion ||
+      !Number.isInteger(
+        methodIdentityVersion
+      ) ||
+      methodIdentityVersion <
+        REQUIRED_METHOD_IDENTITY_VERSION ||
+      !methodIdentityAlgorithm
     ) {
       return null;
     }
@@ -153,7 +202,14 @@
       version,
       algorithm,
       schemaVersion,
-      scannerVersion
+      scannerVersion,
+      methodIdentityVersion,
+      methodIdentityAlgorithm,
+      reloadSafetyContractVersion,
+      reloadSafetyPolicy,
+      reloadSafetyMinimumReaderVersion,
+      reloadSafetyMaximumReaderVersion,
+      reloadSafetyCompatible
     });
   }
 
@@ -307,6 +363,21 @@
       catalogFingerprintAlgorithm:
         fingerprintContract?.algorithm ||
         "legacy-scanner-cache",
+      reloadSafetyContractVersion:
+        fingerprintContract
+          ?.reloadSafetyContractVersion || 0,
+      reloadSafetyPolicy:
+        fingerprintContract
+          ?.reloadSafetyPolicy || "unknown",
+      reloadSafetyMinimumReaderVersion:
+        fingerprintContract
+          ?.reloadSafetyMinimumReaderVersion || 0,
+      reloadSafetyMaximumReaderVersion:
+        fingerprintContract
+          ?.reloadSafetyMaximumReaderVersion || 0,
+      reloadSafetyCompatible:
+        fingerprintContract
+          ?.reloadSafetyCompatible === true,
       scannerFingerprintSupplied: true,
       scannerFingerprintVerified:
         Boolean(fingerprintContract),

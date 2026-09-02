@@ -1696,10 +1696,56 @@
 
   function injectUsing(code, namespaceName) {
     const line = `using ${namespaceName};`;
-    if (code.includes(line)) return code;
-    const usingIndex = code.indexOf("using ");
-    if (usingIndex < 0) return `${line}\n${code}`;
-    return `${code.slice(0, usingIndex)}${line}\n${code.slice(usingIndex)}`;
+    const lines = String(code || "").split("\n");
+    if (lines.some(candidate => candidate.trim() === line)) {
+      return code;
+    }
+
+    const usingLineIndex = lines.findIndex(candidate =>
+      /^using\s+[A-Za-z_][A-Za-z0-9_.]*\s*;\s*$/.test(
+        candidate.trim()
+      )
+    );
+    if (usingLineIndex >= 0) {
+      const usingSortKey = value => {
+        const candidateNamespace = value
+          .trim()
+          .replace(/^using\s+/, "")
+          .replace(/;$/, "");
+        return candidateNamespace === "System"
+          ? "0:"
+          : candidateNamespace.startsWith("System.")
+            ? `0:${candidateNamespace}`
+            : `1:${candidateNamespace}`;
+      };
+      const lineKey = usingSortKey(line);
+      let insertionIndex = usingLineIndex;
+      while (
+        insertionIndex < lines.length &&
+        /^using\s+[A-Za-z_][A-Za-z0-9_.]*\s*;\s*$/.test(
+          lines[insertionIndex].trim()
+        ) &&
+        usingSortKey(lines[insertionIndex]) < lineKey
+      ) {
+        insertionIndex += 1;
+      }
+      lines.splice(insertionIndex, 0, line);
+      return lines.join("\n");
+    }
+
+    const namespaceLineIndex = lines.findIndex(candidate =>
+      /^namespace\s+[A-Za-z_][A-Za-z0-9_.]*\s*;?\s*$/.test(
+        candidate.trim()
+      )
+    );
+    lines.splice(
+      namespaceLineIndex >= 0
+        ? namespaceLineIndex
+        : 0,
+      0,
+      line
+    );
+    return lines.join("\n");
   }
 
   function dynamicConfigurationKeyIdentifier(node) {
@@ -1831,10 +1877,40 @@
       code,
       "IModConfigurationDynamicSettingsProvider"
     );
-    const source = dynamicProviderSource();
+    const source = optimizeDynamicProviderSource(
+      dynamicProviderSource()
+    );
     const lastBrace = code.lastIndexOf("}");
     if (lastBrace < 0) return code;
     return `${code.slice(0, lastBrace)}${source}\n${code.slice(lastBrace)}`;
+  }
+
+  function optimizeDynamicProviderSource(source) {
+    return String(source || "")
+      .replace(
+        "    private static void\n        RmlInvokeConfigurationButton(string itemId)",
+        "    private static readonly System.Type[]\n" +
+          "        RmlConfigurationButtonParameterTypes =\n" +
+          "            new System.Type[] { typeof(string) };\n\n" +
+          "    private static void\n" +
+          "        RmlInvokeConfigurationButton(string itemId)"
+      )
+      .replace(
+        "types: new[] { typeof(string) }",
+        "types: RmlConfigurationButtonParameterTypes"
+      )
+      .replace(
+        "private static System.Collections.Generic.IReadOnlyList<string>\n" +
+          "        RmlDynamicItems(string text)",
+        "private static string[]\n" +
+          "        RmlDynamicItems(string text)"
+      )
+      .replace(
+        "private static System.Collections.Generic.IReadOnlyList<bool>\n" +
+          "        RmlDynamicBools(string text)",
+        "private static bool[]\n" +
+          "        RmlDynamicBools(string text)"
+      );
   }
 
   function wrapGenerators() {
