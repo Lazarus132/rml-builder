@@ -7,7 +7,7 @@
       content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
     <meta
       name="rml-builder-build"
-      content="export-preparation-status-20260903-v735">
+      content="domain-folder-layout-20260903-v754">
     <meta
       name="description"
       content="Build complete typed ResoniteModLoader projects visually with automatic dependencies; optional Raw C# tools remain an expert fallback.">
@@ -18,7 +18,7 @@
         "RMLBuilderBuildId",
         {
           value:
-            "export-preparation-status-20260903-v735",
+            "domain-folder-layout-20260903-v754",
           writable: false,
           enumerable: true,
           configurable: true
@@ -28,487 +28,14 @@
         .rmlBuilderBuild =
           window.RMLBuilderBuildId;
     </script>
-    <link rel="stylesheet" href="styles.css?v=269-background-custom-csharp-build-v603f37">
-    <style>
-      #export-browser-compilation {
-        box-sizing: border-box !important;
-        display: grid !important;
-        grid-template-columns: minmax(0, 1fr) !important;
-        width: 100% !important;
-        max-width: 100% !important;
-        min-width: 0 !important;
-      }
-
-      #export-compiler-toggle {
-        box-sizing: border-box !important;
-        display: grid !important;
-        grid-template-columns: 18px minmax(0, 1fr) !important;
-        align-items: start !important;
-        gap: 10px !important;
-        width: 100% !important;
-        min-width: 0 !important;
-        min-height: 0 !important;
-        height: auto !important;
-        padding: 11px 12px !important;
-      }
-
-      #export-compiler-toggle > #export-include-compiled {
-        position: static !important;
-        box-sizing: border-box !important;
-        width: 18px !important;
-        min-width: 18px !important;
-        max-width: 18px !important;
-        height: 18px !important;
-        min-height: 18px !important;
-        max-height: 18px !important;
-        margin: 1px 0 0 !important;
-        padding: 0 !important;
-        transform: none !important;
-      }
-
-      #export-compiler-toggle > span {
-        position: static !important;
-        display: block !important;
-        width: auto !important;
-        min-width: 0 !important;
-        overflow: hidden !important;
-      }
-
-      #export-compiler-toggle strong,
-      #export-compiler-toggle small {
-        display: block !important;
-        max-width: 100% !important;
-        white-space: normal !important;
-        overflow: visible !important;
-        text-overflow: clip !important;
-        overflow-wrap: anywhere !important;
-      }
-
-      #export-compiler-toggle strong {
-        line-height: 1.3 !important;
-      }
-
-      #export-compiler-toggle small {
-        margin-top: 3px !important;
-        line-height: 1.4 !important;
-      }
-
-      #export-compiler-details {
-        box-sizing: border-box !important;
-        grid-column: 1 / -1 !important;
-        width: 100% !important;
-        min-width: 0 !important;
-      }
-
-      #export-compiler-details[hidden] {
-        display: none !important;
-      }
-
-      #export-compiler-reference-status {
-        box-sizing: border-box;
-        display: block;
-        width: 100%;
-        min-width: 0;
-        padding: 9px 10px;
-        border: 1px solid rgba(182, 121, 255, .35);
-        border-radius: 9px;
-        background: rgba(182, 121, 255, .08);
-        color: inherit;
-        font: inherit;
-        line-height: 1.45;
-        white-space: normal;
-        overflow-wrap: anywhere;
-        cursor: copy;
-        transition:
-          border-color 120ms ease,
-          background-color 120ms ease,
-          box-shadow 120ms ease;
-      }
-
-      #export-compiler-reference-status.is-drag-active {
-        border-color: rgba(202, 157, 255, .95);
-        background: rgba(182, 121, 255, .2);
-        box-shadow: 0 0 0 3px rgba(182, 121, 255, .14);
-      }
-
-      #export-compiler-reference-list {
-        box-sizing: border-box;
-        display: grid;
-        gap: 6px;
-        width: 100%;
-        min-width: 0;
-      }
-
-      #export-compiler-reference-list[hidden] {
-        display: none !important;
-      }
-
-      .export-compiler-reference-item {
-        box-sizing: border-box;
-        display: grid;
-        grid-template-columns: minmax(0, 1fr);
-        gap: 2px;
-        min-width: 0;
-        padding: 7px 9px;
-        border-radius: 8px;
-        background: rgba(255, 255, 255, .04);
-      }
-
-      .export-compiler-reference-item strong,
-      .export-compiler-reference-item small {
-        min-width: 0;
-        white-space: normal;
-        overflow-wrap: anywhere;
-      }
-
-      #export-compiler-build-status {
-        display: block;
-        min-width: 0;
-        white-space: normal;
-        overflow-wrap: anywhere;
-      }
-
-      .builder-work-replacement[hidden] {
-        display: none !important;
-      }
-
-      .builder-work-overlay[data-mode="replacement"] .builder-work-card {
-        width: min(720px, calc(100vw - 32px));
-        max-width: 720px;
-        max-height: calc(100dvh - 24px);
-        overflow: auto;
-      }
-
-      .builder-work-overlay[data-mode="replacement"] {
-        z-index: 2147483000 !important;
-        background: rgba(5, 8, 14, .96) !important;
-        backdrop-filter: blur(10px);
-      }
-
-      .builder-work-overlay[data-mode="replacement"] .builder-work-spinner {
-        display: none;
-      }
-
-      .builder-work-replacement {
-        display: grid;
-        gap: 12px;
-        min-width: 0;
-        width: 100%;
-      }
-
-      .builder-work-replacement-queue {
-        display: grid;
-        gap: 6px;
-        max-height: 132px;
-        overflow: auto;
-        padding: 8px;
-        border: 1px solid rgba(255, 255, 255, .12);
-        border-radius: 12px;
-        background: rgba(0, 0, 0, .16);
-        scrollbar-gutter: stable;
-      }
-
-      .builder-work-replacement-queue-item {
-        display: grid;
-        grid-template-columns: 18px minmax(0, 1fr) auto;
-        gap: 8px;
-        align-items: center;
-        min-width: 0;
-        padding: 5px 7px;
-        border-radius: 8px;
-        font-size: 12px;
-        background: rgba(255, 255, 255, .035);
-      }
-
-      .builder-work-replacement-queue-item[data-status="current"] {
-        color: #dff5ff;
-        background: rgba(116, 202, 255, .15);
-      }
-
-      .builder-work-replacement-queue-item[data-status="selected"] {
-        color: #d8ffe6;
-        background: rgba(94, 224, 143, .1);
-      }
-
-      .builder-work-replacement-queue-item[data-status="unavailable"] {
-        color: #ffd8d8;
-        background: rgba(255, 104, 104, .1);
-      }
-
-      .builder-work-replacement-queue-state {
-        font-weight: 800;
-        text-align: center;
-      }
-
-      .builder-work-replacement-queue-name {
-        min-width: 0;
-        overflow-wrap: anywhere;
-      }
-
-      .builder-work-replacement-queue-count {
-        opacity: .72;
-        white-space: nowrap;
-      }
-
-      .builder-work-replacement label {
-        display: grid;
-        gap: 6px;
-      }
-
-      .builder-work-replacement input,
-      .builder-work-replacement-list {
-        box-sizing: border-box;
-        width: 100%;
-      }
-
-      .builder-work-replacement input {
-        font-size: 16px;
-      }
-
-      .builder-work-replacement-list {
-        display: grid;
-        gap: 8px;
-        max-height: min(48vh, 460px);
-        min-height: 180px;
-        overflow: auto;
-        padding: 8px;
-        border: 1px solid rgba(255, 255, 255, .16);
-        border-radius: 12px;
-        background: rgba(0, 0, 0, .2);
-        overscroll-behavior: contain;
-        scrollbar-gutter: stable;
-      }
-
-      .builder-work-replacement-item {
-        display: grid;
-        grid-template-columns: 38px minmax(0, 1fr);
-        gap: 10px;
-        align-items: center;
-        width: 100%;
-        height: 64px;
-        min-height: 64px;
-        padding: 7px 10px;
-        border: 1px solid rgba(255, 255, 255, .12);
-        border-radius: 10px;
-        color: inherit;
-        background: rgba(255, 255, 255, .045);
-        text-align: left;
-        cursor: pointer;
-      }
-
-      .builder-work-replacement-item:hover,
-      .builder-work-replacement-item:focus-visible {
-        border-color: rgba(116, 202, 255, .72);
-        background: rgba(116, 202, 255, .1);
-        outline: none;
-      }
-
-      .builder-work-replacement-item[aria-selected="true"] {
-        border-color: #74caff;
-        background: rgba(116, 202, 255, .18);
-        box-shadow: 0 0 0 1px rgba(116, 202, 255, .28) inset;
-      }
-
-      .builder-work-replacement-symbol {
-        display: grid;
-        place-items: center;
-        width: 34px;
-        height: 34px;
-        border: 1px solid rgba(143, 220, 255, .26);
-        border-color: color-mix(in srgb, var(--rml-node-icon-color, #8fdcff) 26%, transparent);
-        border-radius: 7px;
-        color: var(--rml-node-icon-color, #8fdcff);
-        background: #0b1119;
-        background: color-mix(in srgb, var(--rml-node-icon-color, #8fdcff) 17%, #0b1119);
-        font-family: Consolas, monospace;
-        font-size: 10px;
-        font-weight: 900;
-        letter-spacing: .04em;
-        overflow: hidden;
-        white-space: nowrap;
-      }
-
-      .builder-work-replacement-copy {
-        display: grid;
-        gap: 2px;
-        min-width: 0;
-      }
-
-      .builder-work-replacement-copy strong,
-      .builder-work-replacement-copy small {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-
-      .builder-work-replacement-copy strong {
-        font-size: 14px;
-        line-height: 16px;
-      }
-
-      .builder-work-replacement-copy small {
-        opacity: .76;
-        font-size: 10px;
-        line-height: 11px;
-      }
-
-      .builder-work-replacement-match {
-        color: #bfe8ff;
-      }
-
-      .builder-work-replacement-match[data-warning="true"] {
-        color: #ffd28a;
-      }
-
-      .builder-work-replacement-empty {
-        display: grid;
-        place-items: center;
-        min-height: 160px;
-        padding: 24px;
-        text-align: center;
-        opacity: .75;
-      }
-
-      .builder-work-replacement-summary {
-        overflow-wrap: anywhere;
-      }
-
-      .builder-work-replacement-actions {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: flex-end;
-        gap: 10px;
-      }
-
-      .rml-graph-code-editor-actions {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: flex-end;
-        gap: 8px;
-        min-height: 38px;
-        margin: -5px 1px 4px 0;
-      }
-
-      html {
-        -webkit-text-size-adjust: 100%;
-        text-size-adjust: 100%;
-      }
-
-      @media (hover: none), (pointer: coarse), (max-width: 780px) {
-        input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([hidden]):not([readonly]),
-        textarea:not([hidden]):not([readonly]),
-        select:not([hidden]),
-        [contenteditable="true"] {
-          font-size: 16px !important;
-        }
-
-        .rml-graph-code-input {
-          font-size: 17px !important;
-          line-height: 1.5 !important;
-          -webkit-text-size-adjust: 100%;
-          text-size-adjust: 100%;
-        }
-
-        input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([hidden]),
-        select:not([hidden]),
-        textarea:not([hidden]),
-        button:not([hidden]),
-        .button,
-        dialog button,
-        [role="button"] {
-          min-height: 44px;
-        }
-
-        button,
-        input,
-        select,
-        textarea,
-        [role="button"] {
-          touch-action: manipulation;
-        }
-
-        .workspace,
-        #palette-content,
-        #builder-canvas,
-        #inspector-content,
-        .builder-work-card,
-        .builder-work-replacement-queue,
-        .builder-work-replacement-list,
-        .project-dialog-body,
-        .export-dialog-body,
-        .rml-preview-content,
-        .rml-preview-settings,
-        .information-content,
-        #rml-setup-assistant,
-        [data-rml-scroll-layer],
-        pre {
-          -webkit-overflow-scrolling: touch;
-          scrollbar-width: auto;
-          scrollbar-color: rgba(166, 111, 255, .92) rgba(30, 23, 43, .78);
-        }
-
-        .workspace::-webkit-scrollbar,
-        #palette-content::-webkit-scrollbar,
-        #builder-canvas::-webkit-scrollbar,
-        #inspector-content::-webkit-scrollbar,
-        .builder-work-card::-webkit-scrollbar,
-        .builder-work-replacement-queue::-webkit-scrollbar,
-        .builder-work-replacement-list::-webkit-scrollbar,
-        .project-dialog-body::-webkit-scrollbar,
-        .export-dialog-body::-webkit-scrollbar,
-        .rml-preview-content::-webkit-scrollbar,
-        .rml-preview-settings::-webkit-scrollbar,
-        .information-content::-webkit-scrollbar,
-        #rml-setup-assistant::-webkit-scrollbar,
-        [data-rml-scroll-layer]::-webkit-scrollbar,
-        pre::-webkit-scrollbar {
-          width: 10px;
-          height: 10px;
-        }
-
-        .workspace::-webkit-scrollbar-thumb,
-        #palette-content::-webkit-scrollbar-thumb,
-        #builder-canvas::-webkit-scrollbar-thumb,
-        #inspector-content::-webkit-scrollbar-thumb,
-        .builder-work-card::-webkit-scrollbar-thumb,
-        .builder-work-replacement-queue::-webkit-scrollbar-thumb,
-        .builder-work-replacement-list::-webkit-scrollbar-thumb,
-        .project-dialog-body::-webkit-scrollbar-thumb,
-        .export-dialog-body::-webkit-scrollbar-thumb,
-        .rml-preview-content::-webkit-scrollbar-thumb,
-        .rml-preview-settings::-webkit-scrollbar-thumb,
-        .information-content::-webkit-scrollbar-thumb,
-        #rml-setup-assistant::-webkit-scrollbar-thumb,
-        [data-rml-scroll-layer]::-webkit-scrollbar-thumb,
-        pre::-webkit-scrollbar-thumb {
-          min-width: 44px;
-          min-height: 44px;
-          border: 2px solid rgba(30, 23, 43, .78);
-          border-radius: 999px;
-          background: rgba(166, 111, 255, .92);
-        }
-
-        .builder-work-overlay,
-        dialog[open] {
-          padding-top: max(12px, env(safe-area-inset-top));
-          padding-right: max(12px, env(safe-area-inset-right));
-          padding-bottom: max(12px, env(safe-area-inset-bottom));
-          padding-left: max(12px, env(safe-area-inset-left));
-        }
-
-        .builder-work-card,
-        dialog[open] > * {
-          max-height: calc(var(--rml-mobile-viewport-height, 100dvh) - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
-        }
-      }
-    </style>
-    <link rel="shortcut icon" href="./favicon.svg">
-    <link rel="icon" href="./favicon.svg">
+    <link rel="stylesheet" href="styles/base/styles.css?v=281-domain-folder-layout-v754">
+    <link rel="shortcut icon" href="assets/icons/favicon.svg">
+    <link rel="icon" href="assets/icons/favicon.svg">
   </head>
   <body>
     <header class="topbar">
       <div class="brand-logo" aria-hidden="true">
-        <img src="./favicon.svg" alt="">
+        <img src="assets/icons/favicon.svg" alt="">
       </div>
       <div class="brand-copy">
         <small>Resonite Mod Loader</small>
@@ -521,9 +48,9 @@
       <div
         id="api-catalog-state"
         class="api-catalog-state"
-        data-source="loading"
+        data-source="deferred"
         aria-live="polite">
-        Resonite API · loading…
+        Resonite API · on demand
       </div>
       <button
         id="top-menu-toggle"
@@ -559,6 +86,12 @@
           aria-label="Project manager" data-help="Save or restore the builder project as JSON.">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h7l2 2h9v10H3z M3 7V5h7l2 2"></path></svg>
           <span class="top-action-label">Project</span>
+        </button>
+        <button id="pack-into-node" class="button secondary top-action-button rml-pack-button" type="button"
+          disabled aria-disabled="true" data-runtime-readiness="ready"
+          aria-label="Runtime Graph" data-help="The Runtime Graph becomes available when the restored project is ready.">
+          <span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span>
+          <span class="top-action-label">Pack into Node</span>
         </button>
         <button id="download-code" class="button primary top-action-button" type="button" disabled aria-disabled="true"
           aria-label="Export project" data-help="Export the generated C# project files.">
@@ -727,28 +260,25 @@
               role="group"
               aria-label="Runtime mod actions">
               <button
-                class="rml-preview-runtime-action"
+                class="rml-preview-runtime-action rml-preview-runtime-action-deactivate"
                 type="button"
                 data-preview-runtime-action="deactivate"
-                data-tooltip="Deactivate mod"
                 title="Deactivate mod"
                 aria-label="Deactivate mod">
                 <span aria-hidden="true">⏸</span>
               </button>
               <button
-                class="rml-preview-runtime-action"
+                class="rml-preview-runtime-action rml-preview-runtime-action-reload"
                 type="button"
                 data-preview-runtime-action="reload"
-                data-tooltip="Reload or update DLL"
                 title="Reload or update DLL"
                 aria-label="Reload or update DLL">
                 <span aria-hidden="true">↻</span>
               </button>
               <button
-                class="rml-preview-runtime-action"
+                class="rml-preview-runtime-action rml-preview-runtime-action-quarantine"
                 type="button"
                 data-preview-runtime-action="quarantine"
-                data-tooltip="Move DLL to quarantine"
                 title="Move DLL to quarantine"
                 aria-label="Move DLL to quarantine">
                 <span aria-hidden="true">⌫</span>
@@ -1179,17 +709,12 @@
       </section>
     </div>
 
-    <script src="scroll_manager.js?v=32-mobile-viewport-focus-v649"></script>
-    <script src="scroll_hierarchy.js?v=8"></script>
-    <script src="csharp14_roslyn.js?v=9-auto-reference-v730"></script>
-    <script src="compile.js?v=4-auto-reference-v730"></script>
-    <script src="compiler_reference_discovery.js?v=1-auto-reference-v730"></script>
-    <script src="crypto.js?v=5-guidance-comments-global-v723"></script>
-    <script src="app.js?v=564-export-preparation-status-v735"></script>
-    <script src="catalog_loader.js?v=184-warning-free-codegen-v734"></script>
-    <script src="runtime_bridge.js?v=4-live-compatibility-v621"></script>
-    <script src="graph_gpu_renderer.js?v=12-single-context-cleanup-v733"></script>
-    <script src="node_graph.js?v=390-warning-free-codegen-v734"></script>
-    <script src="dynamic_settings.js?v=28-guidance-comments-global-v723"></script>
+    <script src="js/loaders/style_loader.js?v=4-domain-folder-layout-v754"></script>
+    <script src="js/loaders/script_loader.js?v=8-domain-folder-layout-v754"></script>
+    <script src="js/ui/scroll_manager.js?v=34-class-driven-styles-v751"></script>
+    <script src="js/ui/scroll_hierarchy.js?v=9-javascript-integrity-audit-v737"></script>
+    <script src="js/core/crypto.js?v=5-guidance-comments-global-v723"></script>
+    <script src="js/bootstrap/app.js?v=579-domain-folder-layout-v754"></script>
+    <script src="js/core/dynamic_settings.js?v=29-javascript-integrity-audit-v737"></script>
 </body>
 </html>
