@@ -40,7 +40,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "guidance-comments-global-20260902-v723";
+  "export-preparation-status-20260903-v735";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -121,6 +121,39 @@ function alwaysClickableButtonAvailable(
     button.getAttribute(
       "aria-disabled"
     ) !== "true"
+  );
+}
+
+function setExportControlAvailability(
+  button,
+  available
+) {
+  if (
+    !button ||
+    String(button.tagName || "") !==
+      "BUTTON"
+  ) {
+    return;
+  }
+  const enabled = available === true;
+  button.disabled = !enabled;
+  button.setAttribute(
+    "aria-disabled",
+    String(!enabled)
+  );
+  button.classList.toggle(
+    "rml-action-unavailable",
+    !enabled
+  );
+  delete button.dataset.unavailableReason;
+}
+
+function exportControlAvailable(button) {
+  return Boolean(
+    button &&
+    button.disabled !== true &&
+    button.getAttribute("aria-disabled") !==
+      "true"
   );
 }
 
@@ -334,7 +367,8 @@ const DEFAULT_EXPORT_OPTIONS = {
   platform: "windows",
   resonitePath: EXPORT_PLATFORM_PRESETS.windows,
   includeCs: true,
-  includeCsproj: true
+  includeCsproj: true,
+  includeCompiled: false
 };
 
 const state = {
@@ -458,6 +492,342 @@ let typedNodeGraphModulesTrackingStarted = false;
 let generatedOutlineArtifactKey = "";
 let generatedGraphArtifactKey = "";
 let exportCopyArtifactKey = "";
+const browserCompilerReferenceFiles = new Map();
+const browserCompilerAdditionalRequiredReferences =
+  new Map();
+let browserCompilerBuildCache = null;
+let browserCompilerBuildSequence = 0;
+let browserCompilerBuilding = false;
+let browserCompilerBuildPromise = null;
+let browserCompilerDirectoryFiles = Object.freeze([]);
+let browserCompilerDirectoryFileCount = 0;
+let browserCompilerDirectoryMatchCount = 0;
+let browserCompilerReferencePaths = new WeakMap();
+let browserCompilerReferenceSearchRunning = false;
+let browserCompilerReferenceDragDepth = 0;
+const EXPORT_PREFLIGHT_DELAY = 180;
+let exportPreflightTimer = 0;
+let exportPreflightSequence = 0;
+let exportReadiness = Object.freeze({
+  phase: "idle",
+  fingerprint: "",
+  diagnostics: Object.freeze([]),
+  fileCount: 0
+});
+
+function generatedCSharpFiles(
+  artifacts
+) {
+  return (Array.isArray(artifacts)
+    ? artifacts
+    : [])
+    .filter(artifact =>
+      artifact &&
+      /\.cs$/i.test(
+        String(
+          artifact.archivePath ||
+          artifact.relativePath ||
+          artifact.fileName ||
+          ""
+        )
+      )
+    )
+    .map(artifact => ({
+      name: String(
+        artifact.archivePath ||
+        artifact.relativePath ||
+        artifact.fileName ||
+        "Generated.cs"
+      ),
+      content: String(
+        artifact.content || ""
+      )
+    }));
+}
+
+function exportReadinessDiagnostics() {
+  return exportReadiness.phase === "error"
+    ? [...exportReadiness.diagnostics]
+    : [];
+}
+
+const LARGE_GRAPH_CODEGEN_PENDING_MESSAGE =
+  "Large graph code generation is running in a background worker. Export becomes available automatically when it finishes.";
+const TYPED_GRAPH_MODULES_PENDING_MESSAGE =
+  "Node graph: the C# generator modules are still initializing.";
+
+function isAutomatedExportPreparationDiagnostic(
+  diagnostic
+) {
+  const message = String(
+    diagnostic || ""
+  ).trim();
+  return (
+    message ===
+      `Node graph: ${LARGE_GRAPH_CODEGEN_PENDING_MESSAGE}` ||
+    message ===
+      TYPED_GRAPH_MODULES_PENDING_MESSAGE
+  );
+}
+
+function renderGeneratedDiagnostics(
+  synchronousDiagnostics = getDiagnostics()
+) {
+  const diagnostics = [
+    ...(Array.isArray(synchronousDiagnostics)
+      ? synchronousDiagnostics
+      : []),
+    ...exportReadinessDiagnostics()
+  ];
+  const preparationMessages =
+    diagnostics.filter(
+      isAutomatedExportPreparationDiagnostic
+    );
+  const blockingDiagnostics =
+    diagnostics.filter(
+      diagnostic =>
+        !isAutomatedExportPreparationDiagnostic(
+          diagnostic
+        )
+    );
+  elements.diagnostics.hidden =
+    diagnostics.length === 0;
+  elements.diagnostics.innerHTML = [
+    blockingDiagnostics.length > 0
+      ? `<strong>Fix these issues before exporting:</strong><ul>${blockingDiagnostics
+          .map(error =>
+            `<li>${escapeHtml(error)}</li>`
+          )
+          .join("")}</ul>`
+      : "",
+    preparationMessages.length > 0
+      ? `<strong>Preparing export:</strong><ul>${preparationMessages
+          .map(message =>
+            `<li>${escapeHtml(message)}</li>`
+          )
+          .join("")}</ul>`
+      : ""
+  ].join("");
+}
+
+function exportPreflightReady(
+  synchronousDiagnostics = null
+) {
+  const diagnostics =
+    synchronousDiagnostics === null
+      ? getDiagnostics()
+      : synchronousDiagnostics;
+  return (
+    diagnostics.length === 0 &&
+    exportReadiness.phase === "ready"
+  );
+}
+
+function applyPrimaryExportAvailability(
+  synchronousDiagnostics = getDiagnostics()
+) {
+  const ready = exportPreflightReady(
+    synchronousDiagnostics
+  );
+  setExportControlAvailability(
+    elements.copyCodeBottom,
+    ready
+  );
+  setExportControlAvailability(
+    elements.downloadCode,
+    ready
+  );
+  renderGeneratedDiagnostics(
+    synchronousDiagnostics
+  );
+}
+
+function formatExportPreflightDiagnostics(
+  result
+) {
+  const formatter =
+    window.RMLCompile?.diagnosticText;
+  return (Array.isArray(result?.diagnostics)
+    ? result.diagnostics
+    : [])
+    .map(diagnostic =>
+      `Generated C#: ${
+        typeof formatter === "function"
+          ? formatter(diagnostic)
+          : String(
+              diagnostic?.message ||
+              diagnostic ||
+              "Invalid C# 14 syntax."
+            )
+      }`
+    );
+}
+
+function setExportReadiness(
+  phase,
+  {
+    fingerprint = "",
+    diagnostics = [],
+    fileCount = 0
+  } = {},
+  synchronousDiagnostics = getDiagnostics()
+) {
+  exportReadiness = Object.freeze({
+    phase: String(phase || "idle"),
+    fingerprint: String(
+      fingerprint || ""
+    ),
+    diagnostics: Object.freeze([
+      ...(Array.isArray(diagnostics)
+        ? diagnostics
+        : [])
+    ]),
+    fileCount:
+      Math.max(0, Number(fileCount) || 0)
+  });
+  applyPrimaryExportAvailability(
+    synchronousDiagnostics
+  );
+}
+
+function scheduleExportPreflight(
+  artifacts,
+  synchronousDiagnostics
+) {
+  const sequence =
+    ++exportPreflightSequence;
+  if (exportPreflightTimer) {
+    window.clearTimeout(
+      exportPreflightTimer
+    );
+    exportPreflightTimer = 0;
+  }
+
+  if (synchronousDiagnostics.length > 0) {
+    setExportReadiness(
+      "blocked",
+      {},
+      synchronousDiagnostics
+    );
+    return;
+  }
+
+  const compiler = window.RMLCompile;
+  const files = generatedCSharpFiles(
+    artifacts
+  );
+  if (
+    !compiler ||
+    typeof compiler.fingerprint !==
+      "function" ||
+    typeof compiler.validate !== "function"
+  ) {
+    setExportReadiness(
+      "error",
+      {
+        diagnostics: [
+          "Generated C#: the browser C# preflight module is unavailable."
+        ],
+        fileCount: files.length
+      },
+      synchronousDiagnostics
+    );
+    return;
+  }
+
+  const fingerprint =
+    compiler.fingerprint(files);
+  const inspected =
+    compiler.inspect?.(files);
+  if (
+    inspected?.fingerprint ===
+      fingerprint &&
+    (
+      inspected.phase === "ready" ||
+      inspected.phase === "error"
+    )
+  ) {
+    setExportReadiness(
+      inspected.phase,
+      {
+        fingerprint,
+        diagnostics:
+          formatExportPreflightDiagnostics(
+            inspected
+          ),
+        fileCount: files.length
+      },
+      synchronousDiagnostics
+    );
+    return;
+  }
+
+  setExportReadiness(
+    "checking",
+    {
+      fingerprint,
+      fileCount: files.length
+    },
+    synchronousDiagnostics
+  );
+
+  exportPreflightTimer =
+    window.setTimeout(() => {
+      exportPreflightTimer = 0;
+      void compiler.validate(files)
+        .then(result => {
+          if (
+            sequence !==
+              exportPreflightSequence ||
+            result?.fingerprint !==
+              fingerprint
+          ) {
+            return;
+          }
+          const latestDiagnostics =
+            getDiagnostics();
+          setExportReadiness(
+            result.phase,
+            {
+              fingerprint,
+              diagnostics:
+                formatExportPreflightDiagnostics(
+                  result
+                ),
+              fileCount: files.length
+            },
+            latestDiagnostics
+          );
+          if (elements.exportDialog?.open) {
+            updateExportDialog();
+          }
+        })
+        .catch(error => {
+          if (
+            sequence !==
+              exportPreflightSequence
+          ) {
+            return;
+          }
+          const latestDiagnostics =
+            getDiagnostics();
+          setExportReadiness(
+            "error",
+            {
+              fingerprint,
+              diagnostics: [
+                `Generated C#: Roslyn validation failed: ${error instanceof Error ? error.message : String(error)}`
+              ],
+              fileCount: files.length
+            },
+            latestDiagnostics
+          );
+          if (elements.exportDialog?.open) {
+            updateExportDialog();
+          }
+        });
+    }, EXPORT_PREFLIGHT_DELAY);
+}
 function currentTypedRuntimeGraphIsLarge() {
   const graph =
     state?.extensions?.typedNodeGraph;
@@ -1166,7 +1536,7 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "graph_codegen_worker.js?v=133-guidance-comments-global-v723",
+      "graph_codegen_worker.js?v=135-warning-free-codegen-v734",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -1384,7 +1754,7 @@ function pendingLargeGraphContribution() {
       rawErrorMessage !== baseErrorMessage
       ? `${baseErrorMessage}: ${rawErrorMessage}.`
       : `${baseErrorMessage}.`
-    : "Large graph code generation is running in a background worker. Export becomes available automatically when it finishes.";
+    : LARGE_GRAPH_CODEGEN_PENDING_MESSAGE;
 
   return {
     active: true,
@@ -6643,6 +7013,24 @@ function getDiagnostics() {
     if (count > 1) errors.push(`Duplicate enum type name: ${enumName}.`);
   }
 
+  const typedGraphState =
+    state.extensions?.typedNodeGraph;
+  const packedRuntimeGraph = Boolean(
+    typedGraphState?.configSnapshot &&
+    Array.isArray(
+      typedGraphState.configSnapshot.nodes
+    )
+  );
+  if (
+    packedRuntimeGraph &&
+    typedNodeGraphModulesState ===
+      "pending"
+  ) {
+    errors.push(
+      "Node graph: the C# generator modules are still initializing."
+    );
+  }
+
   const graphContribution =
     getTypedNodeGraphContribution();
 
@@ -8338,7 +8726,12 @@ function parseProjectDocument(
         typeof exportSource.includeCsproj ===
         "boolean"
           ? exportSource.includeCsproj
-          : DEFAULT_EXPORT_OPTIONS.includeCsproj
+          : DEFAULT_EXPORT_OPTIONS.includeCsproj,
+      includeCompiled:
+        typeof exportSource.includeCompiled ===
+        "boolean"
+          ? exportSource.includeCompiled
+          : DEFAULT_EXPORT_OPTIONS.includeCompiled
     },
     nodes:
       sanitizeProjectNodes(
@@ -19045,9 +19438,57 @@ function populateGeneratedArtifactSelect(
 }
 
 function updateGeneratedOutput() {
-  const errors = getDiagnostics();
-  const output =
-    generatedCodeForCurrentView();
+  invalidateBrowserCompilerBuild(false);
+  setExportControlAvailability(
+    elements.copyCodeBottom,
+    false
+  );
+  setExportControlAvailability(
+    elements.downloadCode,
+    false
+  );
+
+  let errors;
+  let output;
+  try {
+    errors = getDiagnostics();
+    output =
+      generatedCodeForCurrentView();
+  } catch (error) {
+    exportPreflightSequence += 1;
+    if (exportPreflightTimer) {
+      window.clearTimeout(
+        exportPreflightTimer
+      );
+      exportPreflightTimer = 0;
+    }
+    const message =
+      error instanceof Error
+        ? error.message
+        : String(error);
+    elements.generatedCode.textContent =
+      "// Generated output is not ready.\n";
+    elements.codeSummary.textContent =
+      "Generated project files are not ready.";
+    setExportReadiness(
+      "error",
+      {
+        diagnostics: [
+          `Generated project: ${message}`
+        ]
+      },
+      []
+    );
+    setExportControlAvailability(
+      elements.exportCopySelectedFile,
+      false
+    );
+    setExportControlAvailability(
+      elements.exportDownloadSelected,
+      false
+    );
+    return;
+  }
   const code = output.code;
   const selected =
     output.selectedArtifact;
@@ -19097,29 +19538,10 @@ function updateGeneratedOutput() {
       `Copy ${path} to the clipboard.`;
   }
 
-  elements.diagnostics.hidden =
-    errors.length === 0;
-  elements.diagnostics.innerHTML =
-    errors.length
-      ? `<strong>Fix these issues before copying:</strong><ul>${errors
-          .map(error =>
-            `<li>${escapeHtml(error)}</li>`
-          )
-          .join("")}</ul>`
-      : "";
-
-  [
-    elements.copyCodeBottom,
-    elements.downloadCode
-  ].forEach(button => {
-    if (button) {
-      setAlwaysClickableButtonAvailability(
-        button,
-        errors.length === 0,
-        "Fix the listed diagnostics before copying or downloading generated code."
-      );
-    }
-  });
+  scheduleExportPreflight(
+    output.artifacts,
+    errors
+  );
 
   if (elements.exportDialog?.open) {
     updateExportDialog();
@@ -22327,7 +22749,7 @@ async function copyText(text, button) {
 }
 
 function copyGeneratedCode(button) {
-  if (getDiagnostics().length > 0) {
+  if (!exportPreflightReady()) {
     return Promise.resolve();
   }
   return copyText(
@@ -22339,7 +22761,7 @@ function copyGeneratedCode(button) {
 function copyGeneratedCodeForCurrentView(
   button
 ) {
-  if (getDiagnostics().length > 0) {
+  if (!exportPreflightReady()) {
     return Promise.resolve();
   }
   return copyText(
@@ -22349,7 +22771,7 @@ function copyGeneratedCodeForCurrentView(
 }
 
 function copyGeneratedProjectFile(button) {
-  if (getDiagnostics().length > 0) {
+  if (!exportPreflightReady()) {
     return Promise.resolve();
   }
   return copyText(
@@ -22361,7 +22783,7 @@ function copyGeneratedProjectFile(button) {
 function copyGeneratedNodeGraphCode(
   button
 ) {
-  if (getDiagnostics().length > 0) {
+  if (!exportPreflightReady()) {
     return Promise.resolve();
   }
   const files =
@@ -26980,7 +27402,18 @@ function createZipBlob(files) {
 
   for (const file of files) {
     const nameBytes = encoder.encode(file.name);
-    const contentBytes = encoder.encode(file.content);
+    const rawContent = file.content;
+    const contentBytes = rawContent instanceof Uint8Array
+      ? rawContent
+      : rawContent instanceof ArrayBuffer
+        ? new Uint8Array(rawContent)
+        : ArrayBuffer.isView(rawContent)
+          ? new Uint8Array(
+              rawContent.buffer,
+              rawContent.byteOffset,
+              rawContent.byteLength
+            )
+          : encoder.encode(String(rawContent ?? ""));
     const checksum = crc32(contentBytes);
 
     const localHeader = new Uint8Array(
@@ -27446,6 +27879,14 @@ function generatedArtifactKind(
   const type = String(mimeType || "")
     .toLowerCase();
 
+  if (name.endsWith(".dll")) {
+    return {
+      kind: "binary",
+      kindLabel: ".NET assembly",
+      badge: "DLL"
+    };
+  }
+
   if (name.endsWith(".cs")) {
     return {
       kind: "source",
@@ -27636,8 +28077,7 @@ function buildGeneratedArtifactCatalog(
             .split("/")
             .pop() ||
           normalizedPath,
-        content:
-          String(file.content || ""),
+        content: file.content ?? "",
         type:
           file.type ||
           "text/plain;charset=utf-8",
@@ -27665,6 +28105,1139 @@ function buildGeneratedArtifactCatalog(
     projects,
     artifacts
   };
+}
+
+function browserCompilerReferenceSelectionError(
+  message
+) {
+  const error = new Error(message);
+  error.code = "RML_COMPILER_REFERENCES_REQUIRED";
+  return error;
+}
+
+function normalizedAssemblyFileName(
+  value
+) {
+  return String(value || "")
+    .trim()
+    .split(",", 1)[0]
+    .replace(/\.dll$/i, "")
+    .toLowerCase();
+}
+
+function selectedBrowserCompilerReferences() {
+  return [...browserCompilerReferenceFiles.values()]
+    .sort((left, right) =>
+      String(left.name || "").localeCompare(
+        String(right.name || ""),
+        "en"
+      )
+    );
+}
+
+function browserCompilerReferencePath(file) {
+  return String(
+    browserCompilerReferencePaths.get(file) ||
+    file?.webkitRelativePath ||
+    file?.name ||
+    ""
+  );
+}
+
+function browserCompilerDllCandidates(files) {
+  return Object.freeze(
+    [...(files || [])].filter(file =>
+      /\.dll$/i.test(
+        String(file?.name || "")
+      )
+    )
+  );
+}
+
+function retainSelectedBrowserCompilerDirectoryFiles() {
+  if (browserCompilerDirectoryFiles.length === 0) {
+    return;
+  }
+  const selected = new Set(
+    selectedBrowserCompilerReferences()
+  );
+  browserCompilerDirectoryFiles =
+    Object.freeze(
+      browserCompilerDirectoryFiles.filter(
+        file => selected.has(file)
+      )
+    );
+}
+
+function renderBrowserCompilerReferenceList() {
+  const host =
+    elements.exportCompilerReferenceList;
+  if (!host) return;
+
+  const references =
+    selectedBrowserCompilerReferences();
+  host.hidden = references.length === 0;
+  if (references.length === 0) {
+    host.replaceChildren();
+    return;
+  }
+
+  const fragment =
+    document.createDocumentFragment();
+  for (const file of references) {
+    const item = document.createElement("div");
+    item.className =
+      "export-compiler-reference-item";
+
+    const name = document.createElement("strong");
+    name.textContent = `Found: ${file.name}`;
+    item.append(name);
+
+    const path = browserCompilerReferencePath(file);
+    if (path && path !== file.name) {
+      const detail = document.createElement("small");
+      detail.textContent = path;
+      item.append(detail);
+    }
+
+    fragment.append(item);
+  }
+  host.replaceChildren(fragment);
+}
+
+function requiredBrowserCompilerReferences(
+  catalog
+) {
+  const required = new Map();
+  const add = value => {
+    const display = String(value || "")
+      .trim()
+      .split(",", 1)[0];
+    const key = normalizedAssemblyFileName(
+      display
+    );
+
+    if (key) {
+      required.set(key, display);
+    }
+  };
+
+  for (const artifact of catalog.artifacts) {
+    if (artifact.kind !== "project") {
+      continue;
+    }
+
+    const content = String(
+      artifact.content || ""
+    );
+    for (const match of content.matchAll(
+      /<Reference\s+Include="([^"]+)"/gi
+    )) {
+      add(match[1]);
+    }
+
+    if (
+      /<UseWindowsForms>\s*true\s*<\/UseWindowsForms>/i
+        .test(content)
+    ) {
+      add("System.Windows.Forms");
+    }
+  }
+
+  for (
+    const name of
+      browserCompilerAdditionalRequiredReferences.values()
+  ) {
+    add(name);
+  }
+
+  return [...required.values()].sort(
+    (left, right) =>
+      left.localeCompare(right, "en")
+  );
+}
+
+function missingBrowserCompilerReferences(
+  catalog
+) {
+  const selected = new Set(
+    selectedBrowserCompilerReferences()
+      .map(file =>
+        normalizedAssemblyFileName(
+          file.name
+        )
+      )
+  );
+
+  return requiredBrowserCompilerReferences(
+    catalog
+  ).filter(name =>
+    !selected.has(
+      normalizedAssemblyFileName(name)
+    )
+  );
+}
+
+function browserCompilerBundledFrameworkAssembly(
+  name
+) {
+  const key = normalizedAssemblyFileName(name);
+  return (
+    key === "system" ||
+    key.startsWith("system.") ||
+    key === "mscorlib" ||
+    key === "netstandard" ||
+    key === "microsoft.csharp" ||
+    key === "microsoft.visualbasic" ||
+    key.startsWith("microsoft.visualbasic.") ||
+    key === "windowsbase"
+  );
+}
+
+function missingAssembliesFromCompilerResult(
+  result
+) {
+  const names = new Map();
+  const add = value => {
+    const display = String(value || "")
+      .trim()
+      .split(",", 1)[0]
+      .replace(/\.dll$/i, "");
+    const key = normalizedAssemblyFileName(display);
+    if (
+      key &&
+      !browserCompilerBundledFrameworkAssembly(display) &&
+      !browserCompilerReferenceFiles.has(`${key}.dll`) &&
+      !browserCompilerReferenceFiles.has(key)
+    ) {
+      names.set(key, display);
+    }
+  };
+
+  const discovered =
+    window.RMLCompilerReferenceDiscovery
+      ?.assemblyNamesFromDiagnostics?.(
+        result?.diagnostics
+      ) || [];
+  for (const name of discovered) {
+    add(name);
+  }
+
+  return [...names.values()];
+}
+
+function setBrowserCompilerSearchStatus(message) {
+  if (elements.exportCompilerBuildStatus) {
+    elements.exportCompilerBuildStatus.textContent =
+      String(message || "");
+  }
+}
+
+function selectBrowserCompilerFiles(
+  files,
+  missingNames,
+  { invalidate = true } = {}
+) {
+  const discovery =
+    window.RMLCompilerReferenceDiscovery;
+  if (typeof discovery?.selectMissingFiles !== "function") {
+    throw new Error(
+      "The automatic compiler-reference finder is unavailable."
+    );
+  }
+
+  const result = discovery.selectMissingFiles(
+    files,
+    missingNames
+  );
+  if (result.files.length > 0) {
+    addBrowserCompilerReferenceFiles(
+      result.files,
+      { invalidate, refresh: false }
+    );
+  }
+  return result;
+}
+
+function requestBrowserCompilerInputFiles(input) {
+  if (!input) return Promise.resolve([]);
+
+  return new Promise(resolve => {
+    let settled = false;
+    const finish = files => {
+      if (settled) return;
+      settled = true;
+      input.removeEventListener("change", changed);
+      input.removeEventListener("cancel", cancelled);
+      // The copied File objects remain valid. Clearing the native input drops
+      // its potentially very large recursive FileList immediately.
+      input.value = "";
+      resolve(files);
+    };
+    const changed = () => finish(
+      [...(input.files || [])]
+    );
+    const cancelled = () => finish([]);
+
+    input.value = "";
+    input.addEventListener("change", changed);
+    input.addEventListener("cancel", cancelled);
+    try {
+      input.click();
+    } catch {
+      finish([]);
+    }
+  });
+}
+
+function requestBrowserCompilerDirectoryFiles() {
+  return requestBrowserCompilerInputFiles(
+    elements.exportCompilerDirectory
+  );
+}
+
+function captureBrowserCompilerDrop(dataTransfer) {
+  const entries = [];
+  for (const item of dataTransfer?.items || []) {
+    if (item?.kind !== "file") continue;
+    const entry =
+      item.webkitGetAsEntry?.();
+    if (entry) entries.push(entry);
+  }
+
+  return Object.freeze({
+    entries: Object.freeze(entries),
+    files: Object.freeze([
+      ...(dataTransfer?.files || [])
+    ])
+  });
+}
+
+function readBrowserCompilerDirectoryEntries(
+  directoryEntry
+) {
+  return new Promise(resolve => {
+    const reader = directoryEntry.createReader();
+    const entries = [];
+    const readBatch = () => {
+      reader.readEntries(batch => {
+        if (batch.length === 0) {
+          resolve(entries);
+          return;
+        }
+        entries.push(...batch);
+        readBatch();
+      }, () => resolve(entries));
+    };
+    readBatch();
+  });
+}
+
+function readBrowserCompilerFileEntry(entry) {
+  return new Promise(resolve => {
+    entry.file(
+      file => resolve(file),
+      () => resolve(null)
+    );
+  });
+}
+
+async function collectBrowserCompilerDroppedFiles(
+  capture
+) {
+  if (capture.entries.length === 0) {
+    return Object.freeze({
+      files: browserCompilerDllCandidates(
+        capture.files
+      ),
+      hasDirectory: false,
+      fileCount: capture.files.length
+    });
+  }
+
+  const queue = capture.entries.map(entry => ({
+    entry,
+    path: String(entry.name || "")
+  }));
+  const fileEntries = [];
+  let hasDirectory = false;
+  let fileCount = 0;
+
+  for (let index = 0; index < queue.length; index += 1) {
+    const current = queue[index];
+    if (current.entry.isDirectory) {
+      hasDirectory = true;
+      const children =
+        await readBrowserCompilerDirectoryEntries(
+          current.entry
+        );
+      for (const child of children) {
+        queue.push({
+          entry: child,
+          path: current.path
+            ? `${current.path}/${child.name}`
+            : String(child.name || "")
+        });
+      }
+      setBrowserCompilerSearchStatus(
+        `Reading folder tree… ${queue.length.toLocaleString()} entries found`
+      );
+    } else if (current.entry.isFile) {
+      fileCount += 1;
+      if (/\.dll$/i.test(current.entry.name || "")) {
+        fileEntries.push(current);
+      }
+    }
+  }
+
+  const files = [];
+  const batchSize = 64;
+  for (
+    let offset = 0;
+    offset < fileEntries.length;
+    offset += batchSize
+  ) {
+    const batch = fileEntries.slice(
+      offset,
+      offset + batchSize
+    );
+    const resolved = await Promise.all(
+      batch.map(async item => ({
+        file: await readBrowserCompilerFileEntry(
+          item.entry
+        ),
+        path: item.path
+      }))
+    );
+    for (const item of resolved) {
+      if (!item.file) continue;
+      files.push(item.file);
+      browserCompilerReferencePaths.set(
+        item.file,
+        item.path
+      );
+    }
+    setBrowserCompilerSearchStatus(
+      `Reading DLL files… ${files.length.toLocaleString()}/${fileEntries.length.toLocaleString()}`
+    );
+  }
+
+  return Object.freeze({
+    files: Object.freeze(files),
+    hasDirectory,
+    fileCount
+  });
+}
+
+function resetBrowserCompilerDropState() {
+  browserCompilerReferenceDragDepth = 0;
+  elements.exportCompilerReferenceStatus
+    ?.classList.remove("is-drag-active");
+}
+
+function browserCompilerReferenceDragEnter(event) {
+  event.preventDefault();
+  browserCompilerReferenceDragDepth += 1;
+  elements.exportCompilerReferenceStatus
+    ?.classList.add("is-drag-active");
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = "copy";
+  }
+}
+
+function browserCompilerReferenceDragOver(event) {
+  event.preventDefault();
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = "copy";
+  }
+}
+
+function browserCompilerReferenceDragLeave(event) {
+  event.preventDefault();
+  browserCompilerReferenceDragDepth = Math.max(
+    0,
+    browserCompilerReferenceDragDepth - 1
+  );
+  if (browserCompilerReferenceDragDepth === 0) {
+    elements.exportCompilerReferenceStatus
+      ?.classList.remove("is-drag-active");
+  }
+}
+
+async function browserCompilerReferenceDrop(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  const capture = captureBrowserCompilerDrop(
+    event.dataTransfer
+  );
+  resetBrowserCompilerDropState();
+
+  if (
+    capture.entries.length === 0 &&
+    capture.files.length === 0
+  ) {
+    return;
+  }
+
+  browserCompilerReferenceSearchRunning = true;
+  updateExportDialog();
+  let dropError = null;
+  try {
+    const dropped =
+      await collectBrowserCompilerDroppedFiles(
+        capture
+      );
+    if (dropped.files.length === 0) {
+      throw new Error(
+        "The dropped selection contains no readable DLL files."
+      );
+    }
+
+    const catalog = buildGeneratedArtifactCatalog(
+      true,
+      true
+    );
+    const missing =
+      missingBrowserCompilerReferences(catalog);
+
+    if (dropped.hasDirectory) {
+      browserCompilerDirectoryFiles =
+        dropped.files;
+      browserCompilerDirectoryFileCount =
+        dropped.fileCount;
+      browserCompilerDirectoryMatchCount = 0;
+    }
+
+    const selected = selectBrowserCompilerFiles(
+      dropped.files,
+      missing
+    );
+    if (dropped.hasDirectory) {
+      browserCompilerDirectoryMatchCount =
+        selected.files.length;
+    }
+  } catch (error) {
+    dropError = error;
+  } finally {
+    browserCompilerReferenceSearchRunning = false;
+    updateExportDialog();
+    if (dropError) {
+      elements.exportDownloadHint.textContent =
+        dropError instanceof Error
+          ? dropError.message
+          : String(dropError);
+      elements.exportDownloadHint.classList.add(
+        "error"
+      );
+    }
+  }
+}
+
+async function ensureBrowserCompilerReferences(
+  catalog
+) {
+  let missing =
+    missingBrowserCompilerReferences(catalog);
+  if (missing.length === 0) return;
+
+  browserCompilerReferenceSearchRunning = true;
+  setBrowserCompilerSearchStatus(
+    "Finding required DLLs…"
+  );
+
+  try {
+    if (browserCompilerDirectoryFiles.length > 0) {
+      const cachedResult = selectBrowserCompilerFiles(
+        browserCompilerDirectoryFiles,
+        missing
+      );
+      browserCompilerDirectoryMatchCount +=
+        cachedResult.files.length;
+      missing =
+        missingBrowserCompilerReferences(catalog);
+    }
+
+    if (missing.length > 0) {
+      const directoryPromise =
+        requestBrowserCompilerDirectoryFiles();
+      const directoryFiles =
+        await directoryPromise;
+      if (directoryFiles.length === 0) {
+        throw browserCompilerReferenceSelectionError(
+          "Folder selection cancelled. Press Build ZIP to try again."
+        );
+      }
+
+      const directoryDllFiles =
+        browserCompilerDllCandidates(
+          directoryFiles
+        );
+      browserCompilerDirectoryFiles =
+        directoryDllFiles;
+      browserCompilerDirectoryFileCount =
+        directoryFiles.length;
+      browserCompilerDirectoryMatchCount = 0;
+      setBrowserCompilerSearchStatus(
+        `Checking ${directoryFiles.length.toLocaleString()} folder files…`
+      );
+      const folderResult = selectBrowserCompilerFiles(
+        directoryDllFiles,
+        missing
+      );
+      browserCompilerDirectoryMatchCount =
+        folderResult.files.length;
+      missing =
+        missingBrowserCompilerReferences(catalog);
+    }
+
+    if (missing.length > 0) {
+      throw browserCompilerReferenceSelectionError(
+        `Folder checked: ${browserCompilerDirectoryFileCount.toLocaleString()} files, ${browserCompilerDirectoryMatchCount} required DLL${browserCompilerDirectoryMatchCount === 1 ? "" : "s"} found. Still missing: ${missing.join(", ")}. Drop the missing DLLs or another folder onto the Missing DLLs field.`
+      );
+    }
+  } finally {
+    browserCompilerReferenceSearchRunning = false;
+    if (elements.exportDialog?.open) {
+      updateExportDialog();
+    }
+  }
+}
+
+function browserCompilationProjects(
+  catalog
+) {
+  return catalog.projects.map(project => {
+    const sources = catalog.artifacts
+      .filter(artifact =>
+        artifact.kind === "source" &&
+        artifact.projectId === project.id
+      )
+      .map(artifact => {
+        let name = artifact.relativePath;
+        if (
+          project.folder &&
+          name.startsWith(
+            `${project.folder}/`
+          )
+        ) {
+          name = name.slice(
+            project.folder.length + 1
+          );
+        }
+
+        return {
+          name,
+          content: String(
+            artifact.content || ""
+          )
+        };
+      });
+    const projectFile = catalog.artifacts.find(
+      artifact =>
+        artifact.kind === "project" &&
+        artifact.projectId === project.id
+    );
+    const projectXml = String(
+      projectFile?.content || ""
+    );
+
+    return {
+      ...project,
+      sources,
+      allowUnsafe:
+        /<AllowUnsafeBlocks>\s*true\s*<\/AllowUnsafeBlocks>/i
+          .test(projectXml),
+      checkOverflow:
+        /<CheckForOverflowUnderflow>\s*true\s*<\/CheckForOverflowUnderflow>/i
+          .test(projectXml),
+      deterministic:
+        !/<Deterministic>\s*false\s*<\/Deterministic>/i
+          .test(projectXml),
+      implicitUsings:
+        !/<ImplicitUsings>\s*(?:false|disable)\s*<\/ImplicitUsings>/i
+          .test(projectXml),
+      nullable:
+        !/<Nullable>\s*(?:false|disable)\s*<\/Nullable>/i
+          .test(projectXml),
+      optimize: true
+    };
+  }).filter(project =>
+    project.sources.length > 0
+  );
+}
+
+function browserCompilerReferenceFingerprint() {
+  return selectedBrowserCompilerReferences()
+    .map(file => [
+      String(file.name || ""),
+      Number(file.size) || 0,
+      Number(file.lastModified) || 0,
+      String(
+        file.webkitRelativePath || ""
+      )
+    ].join(":"))
+    .join("|");
+}
+
+function browserCompilationFingerprint(
+  projects
+) {
+  const sourceFiles = projects.flatMap(
+    project => project.sources.map(source => ({
+      name:
+        `${project.id}/${source.name}`,
+      content: source.content
+    }))
+  );
+  const sourceFingerprint =
+    window.RMLCompile?.fingerprint?.(
+      sourceFiles
+    ) || "unavailable";
+  const projectOptions = projects
+    .map(project => [
+      project.id,
+      project.assemblyName,
+      project.allowUnsafe,
+      project.checkOverflow,
+      project.deterministic,
+      project.implicitUsings,
+      project.nullable
+    ].join(":"))
+    .join("|");
+
+  return `${sourceFingerprint}|${projectOptions}|${browserCompilerReferenceFingerprint()}`;
+}
+
+function formatBrowserCompilerDiagnostics(
+  result
+) {
+  return (Array.isArray(result?.diagnostics)
+    ? result.diagnostics
+    : [])
+    .filter(diagnostic =>
+      String(
+        diagnostic?.severity || "Error"
+      ).toLowerCase() === "error"
+    )
+    .slice(0, 12)
+    .map(diagnostic => {
+      const line =
+        Number(diagnostic?.startLine) || 0;
+      const column =
+        Number(diagnostic?.startColumn) || 0;
+      const location = line > 0
+        ? `:${line}:${Math.max(1, column)}`
+        : "";
+
+      return `Generated C#: ${diagnostic?.projectLabel || "Generated project"} · ${diagnostic?.fileName || "Generated.cs"}${location} ${diagnostic?.id || "C#"}: ${diagnostic?.message || "Compilation failed."}`;
+    });
+}
+
+function compiledBrowserOutputFiles(
+  result,
+  outputs
+) {
+  const root = result.multiProject
+    ? safeArchiveSegment(
+        `${generatedBaseName()}-RML-Project`,
+        "RML-Project"
+      )
+    : "";
+  const projects = generatedProjectDescriptors(
+    result
+  );
+  const projectMap = new Map(
+    projects.map(project => [
+      project.id,
+      project
+    ])
+  );
+
+  return outputs.map(output => {
+    const project =
+      projectMap.get(output.projectId) ||
+      projects[0];
+    const assemblyName = safeArchiveSegment(
+      output.assemblyName ||
+      project?.assemblyName,
+      "GeneratedMod"
+    );
+    const target = [
+      project?.folder || "",
+      "bin/Release/net10.0",
+      `${assemblyName}.dll`
+    ].filter(Boolean).join("/");
+
+    return {
+      name: root
+        ? `${root}/${target}`
+        : target,
+      content: output.peImage,
+      type:
+        "application/vnd.microsoft.portable-executable"
+    };
+  });
+}
+
+function browserCompiledPlaceholderArtifacts(
+  catalog
+) {
+  const outputs = catalog.projects.map(
+    project => ({
+      projectId: project.id,
+      assemblyName: project.assemblyName,
+      peImage: new Uint8Array()
+    })
+  );
+
+  return compiledBrowserOutputFiles(
+    catalog,
+    outputs
+  ).map((file, index) => {
+    const project = catalog.projects[index];
+    const relativePath =
+      stripGeneratedArchiveRoot(
+        file.name,
+        catalog.multiProject
+      );
+
+    return {
+      key: `compiled:${project.id}`,
+      archivePath: file.name,
+      relativePath,
+      fileName:
+        relativePath.split("/").pop() ||
+        relativePath,
+      content: null,
+      type: file.type,
+      ...generatedArtifactKind(
+        relativePath,
+        file.type
+      ),
+      projectId: project.id,
+      projectLabel: project.label,
+      deployDirectory:
+        project.deployDirectory,
+      projectRole: project.role,
+      requiresResonitePath: false,
+      copyable: false
+    };
+  });
+}
+
+function invalidateBrowserCompilerBuild(
+  resetReferences = false
+) {
+  browserCompilerBuildSequence += 1;
+  browserCompilerBuildCache = null;
+
+  if (resetReferences) {
+    void window.RMLCSharp14Roslyn
+      ?.resetCompilerReferences?.();
+  }
+}
+
+function updateBrowserCompilerStatus(
+  completeCatalog
+) {
+  if (
+    !elements.exportCompilerReferenceStatus ||
+    !elements.exportCompilerBuildStatus
+  ) {
+    return {
+      available: false,
+      missing: []
+    };
+  }
+
+  const references =
+    selectedBrowserCompilerReferences();
+  const missing =
+    missingBrowserCompilerReferences(
+      completeCatalog
+    );
+  const available =
+    window.RMLCompile?.capabilities?.()
+      ?.binaryCompilation === true;
+  const projects =
+    browserCompilationProjects(
+      completeCatalog
+    );
+  const fingerprint =
+    browserCompilationFingerprint(projects);
+  const cacheReady =
+    browserCompilerBuildCache
+      ?.fingerprint === fingerprint;
+
+  if (missing.length > 0) {
+    elements.exportCompilerReferenceStatus.textContent =
+      `Missing DLLs (${missing.length}): ${missing.join(", ")}. Drop DLLs or a Resonite folder here.`;
+    elements.exportCompilerReferenceStatus.dataset.state =
+      "missing";
+  } else {
+    elements.exportCompilerReferenceStatus.textContent =
+      `References ready: ${references.length} DLL${references.length === 1 ? "" : "s"}. You can also drop DLLs or a Resonite folder here.`;
+    elements.exportCompilerReferenceStatus.dataset.state =
+      "ready";
+  }
+  renderBrowserCompilerReferenceList();
+
+  if (browserCompilerReferenceSearchRunning) {
+    elements.exportCompilerBuildStatus.textContent =
+      "Finding required DLLs…";
+  } else if (!available) {
+    elements.exportCompilerBuildStatus.textContent =
+      "The bundled local browser compiler is unavailable.";
+  } else if (browserCompilerBuilding) {
+    elements.exportCompilerBuildStatus.textContent =
+      "Roslyn is compiling the generated projects…";
+  } else if (cacheReady) {
+    elements.exportCompilerBuildStatus.textContent =
+      `${browserCompilerBuildCache.outputs.length} DLL${browserCompilerBuildCache.outputs.length === 1 ? "" : "s"} ready for the ZIP.`;
+  } else if (missing.length > 0) {
+    elements.exportCompilerBuildStatus.textContent =
+      browserCompilerDirectoryFileCount > 0
+        ? `Folder checked: ${browserCompilerDirectoryFileCount.toLocaleString()} files · ${browserCompilerDirectoryMatchCount} required DLL${browserCompilerDirectoryMatchCount === 1 ? "" : "s"} found. Drop missing DLLs or another folder above.`
+        : "Build ZIP will ask for the Resonite folder.";
+  } else {
+    elements.exportCompilerBuildStatus.textContent =
+      "Ready. Files stay on this device.";
+  }
+
+  setExportControlAvailability(
+    elements.exportClearCompilerReferences,
+    (
+      references.length > 0 ||
+      browserCompilerDirectoryFiles.length > 0
+    ) &&
+      !browserCompilerBuilding
+  );
+  const pickerDisabled =
+    browserCompilerBuilding ||
+    browserCompilerReferenceSearchRunning;
+  if (elements.exportCompilerDirectory) {
+    elements.exportCompilerDirectory.disabled =
+      pickerDisabled;
+  }
+
+  return {
+    available,
+    missing,
+    cacheReady,
+    fingerprint,
+    projectCount: projects.length
+  };
+}
+
+async function compileGeneratedBrowserDlls() {
+  if (browserCompilerBuildPromise) {
+    return browserCompilerBuildPromise;
+  }
+
+  const completeCatalog =
+    buildGeneratedArtifactCatalog(
+      true,
+      true
+    );
+  const projects =
+    browserCompilationProjects(
+      completeCatalog
+    );
+  const initialFingerprint =
+    browserCompilationFingerprint(projects);
+
+  if (
+    browserCompilerBuildCache
+      ?.fingerprint === initialFingerprint
+  ) {
+    return browserCompilerBuildCache;
+  }
+
+  const missing =
+    missingBrowserCompilerReferences(
+      completeCatalog
+    );
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing compiler reference DLLs: ${missing.join(", ")}`
+    );
+  }
+
+  const compiler = window.RMLCompile;
+  if (
+    typeof compiler?.compile !== "function" ||
+    compiler.capabilities?.()
+      ?.binaryCompilation !== true
+  ) {
+    throw new Error(
+      "The bundled local browser compiler is unavailable."
+    );
+  }
+
+  const sequence =
+    ++browserCompilerBuildSequence;
+  browserCompilerBuilding = true;
+  updateExportDialog();
+
+  browserCompilerBuildPromise = (async () => {
+    let result = null;
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      result = await compiler.compile(
+        projects.flatMap(project =>
+          project.sources
+        ),
+        {
+          projects,
+          referenceFiles:
+            selectedBrowserCompilerReferences(),
+          emitPdb: false,
+          onProgress(progress) {
+            if (
+              sequence !==
+                browserCompilerBuildSequence ||
+              !elements.exportCompilerBuildStatus
+            ) {
+              return;
+            }
+
+            if (progress?.phase === "references") {
+              elements.exportCompilerBuildStatus.textContent =
+                `References ${progress.completed}/${progress.total}: ${progress.name}`;
+            } else {
+              elements.exportCompilerBuildStatus.textContent =
+                `Building ${progress.completed}/${progress.total}: ${progress.name}`;
+            }
+          }
+        }
+      );
+
+      if (result?.ok === true) break;
+
+      const indirectMissing =
+        missingAssembliesFromCompilerResult(result);
+      if (indirectMissing.length === 0) break;
+
+      for (const name of indirectMissing) {
+        browserCompilerAdditionalRequiredReferences.set(
+          normalizedAssemblyFileName(name),
+          name
+        );
+      }
+
+      setBrowserCompilerSearchStatus(
+        `Finding ${indirectMissing.join(", ")}…`
+      );
+      const discovered =
+        selectBrowserCompilerFiles(
+          browserCompilerDirectoryFiles,
+          indirectMissing,
+          { invalidate: false }
+        );
+      browserCompilerDirectoryMatchCount +=
+        discovered.files.length;
+      if (
+        discovered.files.length === 0 ||
+        discovered.missing.length > 0
+      ) {
+        throw browserCompilerReferenceSelectionError(
+          `Not found in the Resonite folder: ${discovered.missing.join(", ") || indirectMissing.join(", ")}. Drop the missing DLLs or another folder onto the Missing DLLs field.`
+        );
+      }
+    }
+
+    if (result?.ok !== true) {
+      const diagnostics =
+        formatBrowserCompilerDiagnostics(
+          result
+        );
+      throw new Error(
+        diagnostics.join(" | ") ||
+        result?.error ||
+        "Roslyn compilation failed."
+      );
+    }
+
+    const fingerprint =
+      browserCompilationFingerprint(projects);
+    const cache = Object.freeze({
+      fingerprint,
+      outputs: result.outputs,
+      diagnostics: result.diagnostics
+    });
+
+    if (
+      sequence !==
+      browserCompilerBuildSequence
+    ) {
+      throw new Error(
+        "The generated project changed during compilation. Build it again."
+      );
+    }
+
+    browserCompilerBuildCache = cache;
+    return cache;
+  })().finally(() => {
+    // Indirect Roslyn dependencies have now been discovered. Keep only the
+    // DLL File objects that are genuine compiler references.
+    retainSelectedBrowserCompilerDirectoryFiles();
+    browserCompilerBuilding = false;
+    browserCompilerBuildPromise = null;
+    if (elements.exportDialog?.open) {
+      updateExportDialog();
+    }
+  });
+
+  return browserCompilerBuildPromise;
+}
+
+function addBrowserCompilerReferenceFiles(
+  fileList,
+  {
+    invalidate = true,
+    refresh = true
+  } = {}
+) {
+  let added = 0;
+  for (const file of fileList || []) {
+    if (!/\.dll$/i.test(file?.name || "")) {
+      continue;
+    }
+
+    browserCompilerReferenceFiles.set(
+      String(file.name).toLowerCase(),
+      file
+    );
+    added += 1;
+  }
+
+  if (added > 0) {
+    if (invalidate) {
+      invalidateBrowserCompilerBuild(true);
+      const completeCatalog =
+        buildGeneratedArtifactCatalog(
+          true,
+          true
+        );
+      scheduleExportPreflight(
+        completeCatalog.artifacts,
+        getDiagnostics()
+      );
+    }
+  }
+
+  if (refresh) updateExportDialog();
+  return added;
+}
+
+function clearBrowserCompilerReferences() {
+  browserCompilerReferenceFiles.clear();
+  browserCompilerAdditionalRequiredReferences.clear();
+  browserCompilerDirectoryFiles = Object.freeze([]);
+  browserCompilerDirectoryFileCount = 0;
+  browserCompilerDirectoryMatchCount = 0;
+  browserCompilerReferencePaths = new WeakMap();
+  invalidateBrowserCompilerBuild(true);
+  updateExportDialog();
 }
 
 function renderExportProjectSummary(
@@ -27768,8 +29341,11 @@ function renderExportGeneratedFiles(
     row.dataset.kind = artifact.kind;
     row.dataset.artifactKey =
       artifact.key;
-    row.title =
-      `Select ${artifact.relativePath} for copying`;
+    row.title = artifact.copyable === false
+      ? `${artifact.relativePath} is created by the browser compiler.`
+      : `Select ${artifact.relativePath} for copying`;
+    row.disabled =
+      artifact.copyable === false;
 
     badge.className =
       "export-generated-file-badge";
@@ -27778,8 +29354,9 @@ function renderExportGeneratedFiles(
       "export-generated-file-copy";
     path.textContent =
       artifact.relativePath;
-    detail.textContent =
-      `${artifact.kindLabel} · ${artifact.projectLabel}`;
+    detail.textContent = artifact.copyable === false
+      ? `${artifact.kindLabel} · compiled locally · ${artifact.projectLabel}`
+      : `${artifact.kindLabel} · ${artifact.projectLabel}`;
     copy.append(path, detail);
 
     target.className =
@@ -27794,17 +29371,19 @@ function renderExportGeneratedFiles(
       copy,
       target
     );
-    row.addEventListener(
-      "click",
-      () => {
-        exportCopyArtifactKey =
-          artifact.key;
+    if (artifact.copyable !== false) {
+      row.addEventListener(
+        "click",
+        () => {
+          exportCopyArtifactKey =
+            artifact.key;
 
-        updateExportCopyButtonState(
-          catalog
-        );
-      }
-    );
+          updateExportCopyButtonState(
+            catalog
+          );
+        }
+      );
+    }
     fragment.appendChild(row);
   }
 
@@ -27822,8 +29401,9 @@ function currentExportCopyArtifact(
     );
   let artifact = catalog.artifacts.find(
     candidate =>
+      candidate.copyable !== false &&
       candidate.key ===
-      exportCopyArtifactKey
+        exportCopyArtifactKey
   );
 
   if (!artifact) {
@@ -27835,7 +29415,9 @@ function currentExportCopyArtifact(
         catalog.artifacts,
         graphFiles
       ) ||
-      catalog.artifacts[0] ||
+      catalog.artifacts.find(candidate =>
+        candidate.copyable !== false
+      ) ||
       null;
   }
 
@@ -27868,6 +29450,9 @@ function updateExportCopyButtonState(
     existingHasDiagnostics === null
       ? getDiagnostics().length > 0
       : existingHasDiagnostics;
+  const exportReady =
+    !hasDiagnostics &&
+    exportReadiness.phase === "ready";
 
   elements.exportGeneratedFiles
     ?.querySelectorAll(
@@ -27891,25 +29476,18 @@ function updateExportCopyButtonState(
 
   if (elements.exportCopySelectedFile) {
     const unavailable =
-      hasDiagnostics ||
+      !exportReady ||
       !artifact ||
       (
         artifact.requiresResonitePath &&
         !pathAvailable
       );
-    setAlwaysClickableButtonAvailability(
+    setExportControlAvailability(
       elements.exportCopySelectedFile,
-      !unavailable,
-      hasDiagnostics
-        ? "Fix the listed diagnostics before copying this generated file."
-        : !artifact
-          ? "Select a generated file before copying."
-          : "Enter the required Resonite installation path before copying this generated file."
+      !unavailable
     );
     elements.exportCopySelectedFile.textContent =
-      artifact
-        ? `Copy ${artifact.fileName}`
-        : "Copy selected file";
+      "Copy";
     elements.exportCopySelectedFile.title =
       artifact
         ? artifact.relativePath
@@ -27918,38 +29496,47 @@ function updateExportCopyButtonState(
 }
 
 async function validateGeneratedCSharp14Files(files) {
-  const sources = (Array.isArray(files) ? files : [])
-    .filter(file => /\.cs$/i.test(String(file?.name || "")));
-  if (sources.length === 0) return;
-  const parser = window.RMLCSharp14Roslyn;
-  if (!parser?.validate || parser.languageVersion !== "14.0") {
-    throw new Error("The bundled .NET 10 Roslyn C# 14 validator is unavailable. Export is blocked instead of emitting unchecked source.");
+  const compiler = window.RMLCompile;
+  if (typeof compiler?.validate !== "function") {
+    throw new Error(
+      "The browser C# preflight module is unavailable."
+    );
   }
-  const failures = [];
-  for (const file of sources) {
-    const result = await parser.validate(String(file.content || ""));
-    if (result?.ok === true) continue;
-    const details = typeof window.RMLVisualCSharp?.formatRoslynDiagnostics === "function"
-      ? window.RMLVisualCSharp.formatRoslynDiagnostics(result?.diagnostics)
-      : (result?.diagnostics || []).map(diagnostic => `${diagnostic?.id || "C#14"}: ${diagnostic?.message || "Invalid syntax."}`);
-    failures.push(`${file.name}: ${details.slice(0, 8).join(" | ") || "Roslyn rejected the generated C# 14 source."}`);
-  }
-  if (failures.length > 0) {
-    throw new Error(`C# 14 export validation failed. ${failures.join(" | ")}`);
-  }
+  const result = await compiler.validate(files);
+  if (result?.phase === "ready") return;
+  const failures =
+    formatExportPreflightDiagnostics(
+      result
+    );
+  throw new Error(
+    failures.slice(0, 8).join(" | ") ||
+    "C# 14 export validation failed."
+  );
 }
 
 function setExportValidationFailure(error) {
   const message = error instanceof Error ? error.message : String(error);
-  setAlwaysClickableButtonAvailability(
-    elements.exportDownloadSelected,
-    false,
-    message
+  setExportReadiness(
+    "error",
+    {
+      fingerprint:
+        exportReadiness.fingerprint,
+      diagnostics: [
+        message.startsWith("Generated C#:")
+          ? message
+          : `Generated C#: ${message}`
+      ],
+      fileCount:
+        exportReadiness.fileCount
+    }
   );
-  setAlwaysClickableButtonAvailability(
+  setExportControlAvailability(
+    elements.exportDownloadSelected,
+    false
+  );
+  setExportControlAvailability(
     elements.exportCopySelectedFile,
-    false,
-    message
+    false
   );
   elements.exportDownloadHint.textContent = message;
   elements.exportDownloadHint.classList.add("error");
@@ -27963,10 +29550,10 @@ async function copySelectedExportArtifact(
 
   if (
     !artifact ||
-    !alwaysClickableButtonAvailable(
+    !exportControlAvailable(
       button
     ) ||
-    getDiagnostics().length > 0
+    !exportPreflightReady()
   ) {
     return;
   }
@@ -27974,12 +29561,11 @@ async function copySelectedExportArtifact(
   const originalLabel = button.textContent;
   let failed = false;
   try {
-    setAlwaysClickableButtonAvailability(
+    setExportControlAvailability(
       button,
-      false,
-      "This generated file is already being validated for copying."
+      false
     );
-    button.textContent = "Validating C# 14…";
+    button.textContent = "Checking…";
     elements.exportDownloadHint.classList.remove("error");
     const complete = buildSelectedExportFiles(true, false);
     await validateGeneratedCSharp14Files(complete.files);
@@ -28115,6 +29701,14 @@ function renderExportApiCompatibilityWarning() {
 }
 
 function updateExportDialog() {
+  setExportControlAvailability(
+    elements.exportCopySelectedFile,
+    false
+  );
+  setExportControlAvailability(
+    elements.exportDownloadSelected,
+    false
+  );
   elements.exportDownloadHint.classList.remove("error");
   const platform =
     elements.exportPlatform.value;
@@ -28122,6 +29716,14 @@ function updateExportDialog() {
     elements.exportIncludeCs.checked;
   const includeCsproj =
     elements.exportIncludeCsproj.checked;
+  const includeCompiled =
+    elements.exportIncludeCompiled.checked;
+  if (elements.exportCompilerDetails) {
+    elements.exportCompilerDetails.hidden =
+      !includeCompiled;
+    elements.exportCompilerDetails.style.display =
+      includeCompiled ? "" : "none";
+  }
   const catalog =
     buildGeneratedArtifactCatalog(
       includeCs,
@@ -28132,17 +29734,44 @@ function updateExportDialog() {
       true,
       true
     );
+  const compiledArtifacts = includeCompiled
+    ? browserCompiledPlaceholderArtifacts(
+        completeCatalog
+      )
+    : [];
+  const displayCatalog = {
+    ...catalog,
+    projects: completeCatalog.projects,
+    artifacts: [
+      ...catalog.artifacts,
+      ...compiledArtifacts
+    ]
+  };
   const pathAvailable =
     elements.exportResonitePath.value
       .trim()
       .length > 0;
   const hasSelection =
-    catalog.artifacts.length > 0;
+    displayCatalog.artifacts.length > 0;
   const projectPathMissing =
     includeCsproj &&
     !pathAvailable;
   const hasDiagnostics =
     getDiagnostics().length > 0;
+  const exportReady =
+    !hasDiagnostics &&
+    exportReadiness.phase === "ready";
+  const compilerStatus =
+    updateBrowserCompilerStatus(
+      completeCatalog
+    );
+  const compilerBlocked =
+    includeCompiled &&
+    (
+      !compilerStatus.available ||
+      browserCompilerBuilding ||
+      browserCompilerReferenceSearchRunning
+    );
   const sourceCount =
     completeCatalog.artifacts.filter(
       artifact =>
@@ -28154,7 +29783,7 @@ function updateExportDialog() {
         artifact.kind !== "source"
     ).length;
   const activeProjectIds = new Set(
-    catalog.artifacts
+    displayCatalog.artifacts
       .map(artifact => artifact.projectId)
       .filter(projectId =>
         projectId !== "support"
@@ -28180,12 +29809,12 @@ function updateExportDialog() {
 
   if (elements.exportPackageSummary) {
     elements.exportPackageSummary.textContent =
-      `${activeProjectCount} project${activeProjectCount === 1 ? "" : "s"} · ${catalog.artifacts.length} file${catalog.artifacts.length === 1 ? "" : "s"}`;
+      `${activeProjectCount} project${activeProjectCount === 1 ? "" : "s"} · ${displayCatalog.artifacts.length} file${displayCatalog.artifacts.length === 1 ? "" : "s"}`;
   }
 
   if (elements.exportPackageMode) {
     elements.exportPackageMode.textContent =
-      catalog.artifacts.length === 0
+      displayCatalog.artifacts.length === 0
         ? "No files selected"
         : effectiveMultiProject
           ? "Multi-project ZIP"
@@ -28196,10 +29825,10 @@ function updateExportDialog() {
         : "single";
   }
 
-  renderExportProjectSummary(catalog);
-  renderExportGeneratedFiles(catalog);
+  renderExportProjectSummary(displayCatalog);
+  renderExportGeneratedFiles(displayCatalog);
   updateExportCopyButtonState(
-    catalog,
+    displayCatalog,
     pathAvailable,
     hasDiagnostics
   );
@@ -28208,16 +29837,12 @@ function updateExportDialog() {
     "aria-invalid",
     String(projectPathMissing)
   );
-  setAlwaysClickableButtonAvailability(
+  setExportControlAvailability(
     elements.exportDownloadSelected,
-    !hasDiagnostics &&
+    exportReady &&
       hasSelection &&
-      !projectPathMissing,
-    hasDiagnostics
-      ? "Fix the listed diagnostics before downloading the generated package."
-      : !hasSelection
-        ? "Select at least one generated file group before downloading."
-        : "Enter the required Resonite installation path before downloading."
+      !projectPathMissing &&
+      !compilerBlocked
   );
 
   const platformNotes = {
@@ -28239,9 +29864,25 @@ function updateExportDialog() {
 
   if (!hasSelection) {
     elements.exportDownloadSelected.textContent =
-      "Select a file";
+      "Download";
     elements.exportDownloadHint.textContent =
       "Select at least one generated file group to download.";
+    return;
+  }
+
+  if (includeCompiled) {
+    elements.exportDownloadSelected.textContent =
+      compilerStatus.cacheReady
+        ? "Download ZIP"
+        : "Build ZIP";
+    elements.exportDownloadHint.textContent =
+      compilerStatus.missing.length > 0
+        ? browserCompilerDirectoryFileCount > 0
+          ? `Still missing: ${compilerStatus.missing.join(", ")}. Drop these DLLs or another folder onto the Missing DLLs field.`
+          : `Build ZIP asks for the Resonite folder and searches all subfolders for: ${compilerStatus.missing.join(", ")}. You can also drop DLLs or a folder onto the Missing DLLs field.`
+        : browserCompilerBuilding
+          ? "Roslyn is compiling locally. The ZIP download unlocks when the build is complete."
+          : `The exact ZIP manifest above includes ${compiledArtifacts.length} browser-compiled DLL${compiledArtifacts.length === 1 ? "" : "s"}. The target assemblies stay on this device.`;
     return;
   }
 
@@ -28263,24 +29904,17 @@ function updateExportDialog() {
     ];
 
     elements.exportDownloadSelected.textContent =
-      "Download multi-project ZIP";
+      "Download ZIP";
     elements.exportDownloadHint.textContent =
-      `The live manifest above is the exact ZIP content: ${catalog.artifacts.length} files across ${activeProjectCount} independently compiled projects${destinations.length > 0 ? `, deploying to ${destinations.join(" and ")}` : ""}.`;
+      `The live manifest above is the exact ZIP content: ${displayCatalog.artifacts.length} files across ${activeProjectCount} independently compiled projects${destinations.length > 0 ? `, deploying to ${destinations.join(" and ")}` : ""}.`;
     return;
   }
 
   if (catalog.artifacts.length === 1) {
     const artifact =
       catalog.artifacts[0];
-    const extension =
-      artifact.fileName.includes(".")
-        ? artifact.fileName.slice(
-            artifact.fileName.lastIndexOf(".")
-          )
-        : " file";
-
     elements.exportDownloadSelected.textContent =
-      `Download ${extension}`;
+      "Download";
     elements.exportDownloadHint.textContent =
       artifact.requiresResonitePath &&
       !pathAvailable
@@ -28304,7 +29938,9 @@ function syncExportOptions() {
     includeCs:
       elements.exportIncludeCs.checked,
     includeCsproj:
-      elements.exportIncludeCsproj.checked
+      elements.exportIncludeCsproj.checked,
+    includeCompiled:
+      elements.exportIncludeCompiled.checked
   };
   persist();
   updateExportDialog();
@@ -28364,6 +30000,10 @@ async function openExportDialog() {
     Boolean(state.exportOptions.includeCs);
   elements.exportIncludeCsproj.checked =
     Boolean(state.exportOptions.includeCsproj);
+  elements.exportIncludeCompiled.checked =
+    Boolean(
+      state.exportOptions.includeCompiled
+    );
   elements.exportDialog.classList.add(
     "rml-dialog-loading"
   );
@@ -28374,15 +30014,13 @@ async function openExportDialog() {
   elements.exportProjectSummary.replaceChildren();
   elements.exportGeneratedFiles.innerHTML =
     '<div class="rml-inline-dialog-loading">Preparing the exact generated package…</div>';
-  setAlwaysClickableButtonAvailability(
+  setExportControlAvailability(
     elements.exportCopySelectedFile,
-    false,
-    "The generated files are still being prepared."
+    false
   );
-  setAlwaysClickableButtonAvailability(
+  setExportControlAvailability(
     elements.exportDownloadSelected,
-    false,
-    "The generated package is still being prepared."
+    false
   );
 
   if (typeof elements.exportDialog.showModal === "function") {
@@ -28420,15 +30058,13 @@ async function openExportDialog() {
     );
     elements.exportGeneratedFiles.innerHTML =
       '<div class="rml-inline-dialog-loading">The export summary could not be prepared. Close this dialog and review Diagnostics.</div>';
-    setAlwaysClickableButtonAvailability(
+    setExportControlAvailability(
       elements.exportCopySelectedFile,
-      false,
-      "The export summary could not be prepared. Review Diagnostics and retry."
+      false
     );
-    setAlwaysClickableButtonAvailability(
+    setExportControlAvailability(
       elements.exportDownloadSelected,
-      false,
-      "The export summary could not be prepared. Review Diagnostics and retry."
+      false
     );
   } finally {
     elements.exportDialog.classList.remove(
@@ -28463,10 +30099,10 @@ async function downloadSelectedExport() {
   syncExportOptions();
 
   if (
-    !alwaysClickableButtonAvailable(
+    !exportControlAvailable(
       elements.exportDownloadSelected
     ) ||
-    getDiagnostics().length > 0
+    !exportPreflightReady()
   ) {
     return;
   }
@@ -28474,22 +30110,67 @@ async function downloadSelectedExport() {
   const baseName =
     generatedBaseName();
   const originalLabel = elements.exportDownloadSelected.textContent;
-  setAlwaysClickableButtonAvailability(
+  setExportControlAvailability(
     elements.exportDownloadSelected,
-    false,
-    "The generated package is already being validated."
+    false
   );
-  elements.exportDownloadSelected.textContent = "Validating C# 14…";
+  elements.exportDownloadSelected.textContent = "Checking…";
   elements.exportDownloadHint.classList.remove("error");
   let result;
+  let resolvingReferences = false;
   try {
+    const completeCatalog =
+      buildGeneratedArtifactCatalog(
+        true,
+        true
+      );
     const complete = buildSelectedExportFiles(true, false);
+    if (state.exportOptions.includeCompiled) {
+      resolvingReferences = true;
+      elements.exportDownloadSelected.textContent =
+        "Finding DLLs…";
+      const referencePromise =
+        ensureBrowserCompilerReferences(
+          completeCatalog
+        );
+      await referencePromise;
+      resolvingReferences = false;
+      elements.exportDownloadSelected.textContent =
+        "Checking…";
+    }
     await validateGeneratedCSharp14Files(complete.files);
     result = buildSelectedExportFiles(
       state.exportOptions.includeCs,
       state.exportOptions.includeCsproj
     );
+    if (state.exportOptions.includeCompiled) {
+      elements.exportDownloadSelected.textContent =
+        "Building…";
+      const compiled =
+        await compileGeneratedBrowserDlls();
+      result.files.push(
+        ...compiledBrowserOutputFiles(
+          result,
+          compiled.outputs
+        )
+      );
+    }
   } catch (error) {
+    if (
+      resolvingReferences ||
+      error?.code ===
+        "RML_COMPILER_REFERENCES_REQUIRED"
+    ) {
+      updateExportDialog();
+      elements.exportDownloadHint.textContent =
+        error instanceof Error
+          ? error.message
+          : String(error);
+      elements.exportDownloadHint.classList.add(
+        "error"
+      );
+      return;
+    }
     setExportValidationFailure(error);
     elements.exportDownloadSelected.textContent = originalLabel;
     return;
@@ -28504,7 +30185,8 @@ async function downloadSelectedExport() {
 
   if (
     files.length === 1 &&
-    !result.multiProject
+    !result.multiProject &&
+    !state.exportOptions.includeCompiled
   ) {
     const file = files[0];
 
@@ -30762,6 +32444,27 @@ function cacheElements() {
     exportIncludeCs: document.getElementById("export-include-cs"),
     exportIncludeCsproj: document.getElementById(
       "export-include-csproj"
+    ),
+    exportIncludeCompiled: document.getElementById(
+      "export-include-compiled"
+    ),
+    exportCompilerDetails: document.getElementById(
+      "export-compiler-details"
+    ),
+    exportCompilerDirectory: document.getElementById(
+      "export-compiler-directory"
+    ),
+    exportCompilerReferenceStatus: document.getElementById(
+      "export-compiler-reference-status"
+    ),
+    exportCompilerReferenceList: document.getElementById(
+      "export-compiler-reference-list"
+    ),
+    exportCompilerBuildStatus: document.getElementById(
+      "export-compiler-build-status"
+    ),
+    exportClearCompilerReferences: document.getElementById(
+      "export-clear-compiler-references"
     ),
     exportCsFilename: document.getElementById("export-cs-filename"),
     exportCsprojFilename: document.getElementById(
@@ -34951,6 +36654,30 @@ async function initialize() {
   elements.exportIncludeCsproj.addEventListener(
     "change",
     syncExportOptions
+  );
+  elements.exportIncludeCompiled.addEventListener(
+    "change",
+    syncExportOptions
+  );
+  elements.exportClearCompilerReferences.addEventListener(
+    "click",
+    clearBrowserCompilerReferences
+  );
+  elements.exportCompilerReferenceStatus.addEventListener(
+    "dragenter",
+    browserCompilerReferenceDragEnter
+  );
+  elements.exportCompilerReferenceStatus.addEventListener(
+    "dragover",
+    browserCompilerReferenceDragOver
+  );
+  elements.exportCompilerReferenceStatus.addEventListener(
+    "dragleave",
+    browserCompilerReferenceDragLeave
+  );
+  elements.exportCompilerReferenceStatus.addEventListener(
+    "drop",
+    browserCompilerReferenceDrop
   );
   elements.exportCopySelectedFile.addEventListener(
     "click",

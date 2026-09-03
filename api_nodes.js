@@ -3981,7 +3981,15 @@
     }
 
     function generatedApiOutputIsUsed(api, outputId) {
-      return typeof api?.isOutputConnected === "function"
+      if (
+        typeof api?.isActionReachable ===
+          "function" &&
+        !api.isActionReachable()
+      ) {
+        return false;
+      }
+      return typeof api?.isOutputConnected ===
+        "function"
         ? api.isOutputConnected(outputId)
         : true;
     }
@@ -4006,6 +4014,13 @@
     }
 
     function actionOutputExpression(api, descriptor) {
+      if (
+        typeof api?.isActionReachable ===
+          "function" &&
+        !api.isActionReachable()
+      ) {
+        return "default!";
+      }
       const fields = actionFieldNames(api);
       const output = outputPortId(api);
       if (output === "success") return fields.success;

@@ -74,6 +74,8 @@
   const GRAPH_GPU_OVERVIEW_ENTER_ZOOM = 0.20;
   const GRAPH_GPU_OVERVIEW_EXIT_ZOOM = 0.24;
   const GRAPH_NODE_VIRTUAL_OVERSCAN_PIXELS = 260;
+  const GRAPH_NODE_VIRTUALIZATION_PAN_STEP_PIXELS = 96;
+  const GRAPH_VIEW_PERSIST_IDLE_MILLISECONDS = 180;
   const API_EXPORT_VERIFICATION_SCHEMA_VERSION = 3;
   const INTEGRATED_NODE_CONTRACT_SCHEMA_VERSION = 1;
   const INTEGRATED_NODE_CONTRACT_ALGORITHM =
@@ -1648,6 +1650,8 @@
   let graphCodegenRevision = 1;
   let persistSchedule = 0;
   let persistGeneratedOutputDirty = false;
+  let graphViewPersistTimer = 0;
+  let graphViewPersistContentDirty = false;
   let generatedOutputRefreshQueued = false;
   let generatedOutputRefreshEpoch = 0;
   let graphMessageTimer = 0;
@@ -1793,12 +1797,53 @@
   let graphScrollLayerIndicator = null;
   let graphRevealAnimationFrame = 0;
   let graphHybridRenderer = null;
+  let graphToolbarResizeObserver = null;
+  let graphToolbarResizeFallback = null;
+
+  function releaseGraphToolbarResizeTracking() {
+    graphToolbarResizeObserver?.disconnect();
+    graphToolbarResizeObserver = null;
+    if (graphToolbarResizeFallback) {
+      window.removeEventListener(
+        "resize",
+        graphToolbarResizeFallback
+      );
+      graphToolbarResizeFallback = null;
+    }
+  }
+
+  function detachGraphHybridRenderer() {
+    if (!graphHybridRenderer) {
+      return;
+    }
+    if (
+      typeof graphHybridRenderer.detach ===
+        "function"
+    ) {
+      graphHybridRenderer.detach();
+      return;
+    }
+
+    // Compatibility with a cached pre-v7 renderer: it cannot be reused
+    // safely, so release it once and let the current renderer be created.
+    graphHybridRenderer.dispose?.();
+    graphHybridRenderer = null;
+  }
+
+  function disposeGraphHybridRenderer() {
+    graphHybridRenderer?.dispose?.();
+    graphHybridRenderer = null;
+  }
+
   let graphNodeVirtualizationFrame = 0;
   let graphNodeVirtualizationSignature = "";
+  let graphNodeVirtualizationAnchor = null;
   let graphGpuOverviewMode = false;
   const graphNodeGeometryCache = new Map();
   const graphForcedNodeIds = new Set();
   const graphSocketElementCache = new Map();
+  const graphSvgWirePathCache = new Map();
+  const graphSvgWirePointCache = new Map();
   let graphNodeDefinitionCache = new WeakMap();
   let graphNodeLookupCache = new Map();
   let graphConnectionLookupCache = new Map();
@@ -1833,7 +1878,10 @@
     graphNodeGeometryCache.clear();
     graphForcedNodeIds.clear();
     graphSocketElementCache.clear();
+    graphSvgWirePathCache.clear();
+    graphSvgWirePointCache.clear();
     graphNodeVirtualizationSignature = "";
+    graphNodeVirtualizationAnchor = null;
     graphGpuOverviewMode = false;
     graphNodeDefinitionCache = new WeakMap();
     graphNodeLookupCache.clear();
@@ -1892,10 +1940,15 @@
       clearTimeout(graphMessageTimer);
       graphMessageTimer = 0;
     }
+    if (graphViewPersistTimer) {
+      clearTimeout(graphViewPersistTimer);
+      graphViewPersistTimer = 0;
+    }
 
     graphWireFullRenderPending = false;
     graphWirePartialConnectionIds.clear();
     graphPendingInteractionMotion = null;
+    graphViewPersistContentDirty = false;
     packedSnapshotSyncScheduled = false;
     packedSnapshotSyncEpoch = 0;
   }
@@ -3368,9 +3421,23 @@
     graph.nextSequence = view.nextSequence;
   }
 
-  function captureCustomCSharpEditorView() {
+  function captureCustomCSharpEditorView(
+    options = {}
+  ) {
     if (!customCSharpEditor || !graph) return null;
     const existing = graph.customCSharpFiles?.[customCSharpEditor.fileNodeId] || {};
+    if (
+      options.synchronizeSource === false
+    ) {
+      const captured = {
+        ...existing,
+        ...graphViewFrom(graph)
+      };
+      graph.customCSharpFiles[
+        customCSharpEditor.fileNodeId
+      ] = captured;
+      return captured;
+    }
     const captured = {
       ...existing,
       ...graphViewFrom(graph)
@@ -5282,7 +5349,9 @@
     return false;
   }
 
-  function captureApiCompositeEditorView() {
+  function captureApiCompositeEditorView(
+    options = {}
+  ) {
     if (!apiCompositeEditor || !graph) {
       return null;
     }
@@ -5291,6 +5360,18 @@
     const existing =
       graph.apiCompositeGraphs?.[ownerId] ||
       {};
+    if (
+      options.synchronizeBoundaries ===
+        false
+    ) {
+      const captured = {
+        ...existing,
+        ...graphViewFrom(graph)
+      };
+      graph.apiCompositeGraphs[ownerId] =
+        captured;
+      return captured;
+    }
     const internalNodeIds = new Set(
       graph.nodes.map(node => node.id)
     );
@@ -10396,7 +10477,7 @@
     }
     const worker = new Worker(
       new URL(
-        "graph_codegen_worker.js?v=133-guidance-comments-global-v723",
+        "graph_codegen_worker.js?v=135-warning-free-codegen-v734",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -13629,9 +13710,17 @@
     return result;
   }
 
-  function graphSerializableState() {
-    captureCustomCSharpEditorView();
-    captureApiCompositeEditorView();
+  function graphSerializableState(
+    options = {}
+  ) {
+    const viewOnly =
+      options.viewOnly === true;
+    captureCustomCSharpEditorView({
+      synchronizeSource: !viewOnly
+    });
+    captureApiCompositeEditorView({
+      synchronizeBoundaries: !viewOnly
+    });
     const rootView = rootRuntimeGraphView();
     const customCSharpFiles =
       serializableCustomCSharpFiles(
@@ -13659,16 +13748,19 @@
       const fingerprintNameKey =
         savedApiCompositeNameKey(title);
       const fingerprintNeedsRefresh =
-        !String(
-          composite.contentFingerprint ||
-          ""
-        ) ||
-        composite.fingerprintNameKey !==
-          fingerprintNameKey ||
-        composite.fingerprintPortLayout !==
-          portLayout ||
-        apiCompositeEditor
-          ?.containerNodeId === ownerId;
+        !viewOnly &&
+        (
+          !String(
+            composite.contentFingerprint ||
+            ""
+          ) ||
+          composite.fingerprintNameKey !==
+            fingerprintNameKey ||
+          composite.fingerprintPortLayout !==
+            portLayout ||
+          apiCompositeEditor
+            ?.containerNodeId === ownerId
+        );
       const contentFingerprint =
         fingerprintNeedsRefresh
           ? savedApiCompositeFingerprint(
@@ -13797,8 +13889,15 @@
 
   function persistGraph(
     immediate = false,
-    refreshGeneratedOutput = true
+    refreshGeneratedOutput = true,
+    viewOnly = false,
+    refreshCompositeActions = false
   ) {
+    if (!viewOnly && graphViewPersistTimer) {
+      clearTimeout(graphViewPersistTimer);
+      graphViewPersistTimer = 0;
+      graphViewPersistContentDirty = false;
+    }
     if (refreshGeneratedOutput) {
       refreshVisibleInspectorActionControls();
     }
@@ -13843,8 +13942,14 @@
       }
 
       graph.version = GRAPH_SCHEMA_VERSION;
-      const persistedGraph = graphSerializableState();
-      if (refreshOutput) {
+      const persistedGraph =
+        graphSerializableState({
+          viewOnly
+        });
+      if (
+        refreshOutput ||
+        refreshCompositeActions
+      ) {
         refreshVisibleApiCompositeInspectorSaveActions();
         refreshVisibleSavedApiCompositeUpdateActions();
       }
@@ -13874,12 +13979,82 @@
   }
 
   function persistGraphView(
-    immediate = false
+    immediate = false,
+    contentChanged = false
   ) {
+    graphViewPersistContentDirty =
+      graphViewPersistContentDirty ||
+      contentChanged;
+
+    if (graphViewPersistTimer) {
+      clearTimeout(graphViewPersistTimer);
+      graphViewPersistTimer = 0;
+    }
+
+    const commit = () => {
+      const refreshContent =
+        graphViewPersistContentDirty;
+      graphViewPersistContentDirty = false;
+      persistGraph(
+        immediate,
+        false,
+        !refreshContent,
+        refreshContent
+      );
+    };
+
+    if (immediate) {
+      commit();
+      return;
+    }
+
+    const projectEpoch =
+      builderProjectEpoch;
+    const commitWhenIdle = () => {
+      graphViewPersistTimer = 0;
+      if (
+        projectEpoch !==
+          builderProjectEpoch
+      ) {
+        graphViewPersistContentDirty =
+          false;
+        return;
+      }
+      if (activeInteraction) {
+        graphViewPersistTimer =
+          window.setTimeout(
+            commitWhenIdle,
+            GRAPH_VIEW_PERSIST_IDLE_MILLISECONDS
+          );
+        return;
+      }
+      commit();
+    };
+    graphViewPersistTimer =
+      window.setTimeout(
+        commitWhenIdle,
+        GRAPH_VIEW_PERSIST_IDLE_MILLISECONDS
+      );
+  }
+
+  function flushGraphViewPersistence(
+    immediate = true
+  ) {
+    if (!graphViewPersistTimer) {
+      return false;
+    }
+    clearTimeout(graphViewPersistTimer);
+    graphViewPersistTimer = 0;
+    const refreshContent =
+      graphViewPersistContentDirty;
+    graphViewPersistContentDirty = false;
     persistGraph(
       immediate,
-      false
+      false,
+      !refreshContent,
+      refreshContent
     );
+    return true;
   }
 
   function hashText(value) {
@@ -19387,6 +19562,134 @@
     return [...duplicates].sort();
   }
 
+  function generatedPrivateFieldLivenessProblems(
+    source,
+    additionalSources = []
+  ) {
+    const sanitized =
+      sanitizeGeneratedCSharp(source);
+    const externalSanitized =
+      (Array.isArray(additionalSources)
+        ? additionalSources
+        : [])
+        .map(value =>
+          sanitizeGeneratedCSharp(value)
+        )
+        .join("\n");
+    const referencePattern =
+      /\b_[A-Za-z_]\w*N[0-9a-f]{8}\b/gi;
+    const referencesByName = new Map();
+    for (const reference of
+      sanitized.matchAll(referencePattern)) {
+      const references =
+        referencesByName.get(
+          reference[0]
+        ) || [];
+      references.push(reference);
+      referencesByName.set(
+        reference[0],
+        references
+      );
+    }
+    const externalNames = new Set(
+      [...externalSanitized.matchAll(
+        referencePattern
+      )].map(reference => reference[0])
+    );
+    const declarations = [];
+    const pattern =
+      /^ {4}private\s+static\s+(?:(?:readonly|volatile)\s+)*(?<type>[^\n;{}=]+?)\s+(?<name>_[A-Za-z_]\w*N[0-9a-f]{8})(?<initializer>\s*=\s*[^;\n]+)?\s*;$/gim;
+
+    for (const match of
+      sanitized.matchAll(pattern)) {
+      declarations.push({
+        start: match.index,
+        end:
+          match.index + match[0].length,
+        name: match.groups.name,
+        initialized:
+          Boolean(match.groups.initializer)
+      });
+    }
+
+    const problems = [];
+
+    for (const declaration of
+      declarations) {
+      if (externalNames.has(
+        declaration.name
+      )) {
+        continue;
+      }
+      const occurrences =
+        (referencesByName.get(
+          declaration.name
+        ) || []).filter(match =>
+          match.index < declaration.start ||
+          match.index >= declaration.end
+        );
+
+      if (occurrences.length === 0) {
+        problems.push(
+          `${declaration.name} (${declaration.initialized ? "initialized but never read" : "never used"})`
+        );
+        continue;
+      }
+
+      let hasRead = false;
+      let hasWrite =
+        declaration.initialized;
+
+      for (const occurrence of
+        occurrences) {
+        const before = sanitized.slice(
+          Math.max(
+            0,
+            occurrence.index - 16
+          ),
+          occurrence.index
+        );
+        const after = sanitized.slice(
+          occurrence.index +
+            occurrence[0].length,
+          occurrence.index +
+            occurrence[0].length +
+            16
+        );
+        const simpleAssignment =
+          /^\s*=(?!=|>)/.test(after);
+        const readWriteOperation =
+          /^\s*(?:\+\+|--|(?:\+|-|\*|\/|%|&|\||\^|<<|>>|\?\?)=)/.test(
+            after
+          ) ||
+          /(?:\+\+|--|\bref\s+|\bout\s+)$/.test(
+            before
+          );
+
+        if (simpleAssignment) {
+          hasWrite = true;
+        } else if (readWriteOperation) {
+          hasRead = true;
+          hasWrite = true;
+        } else {
+          hasRead = true;
+        }
+      }
+
+      if (!hasRead) {
+        problems.push(
+          `${declaration.name} (written but never read)`
+        );
+      } else if (!hasWrite) {
+        problems.push(
+          `${declaration.name} (read but never assigned)`
+        );
+      }
+    }
+
+    return problems.sort();
+  }
+
   function generatedSourceDiagnostics(
     source,
     fileName,
@@ -19436,6 +19739,22 @@
       errors.push(
         `Internal code-generation error: duplicate generated member(s) in ${fileName}: ${duplicates.join(", ")}.`
       );
+    }
+
+    if (
+      options.checkGeneratedFieldLiveness !==
+      false
+    ) {
+      const fieldProblems =
+        generatedPrivateFieldLivenessProblems(
+          source,
+          options.additionalSources
+        );
+      if (fieldProblems.length > 0) {
+        errors.push(
+          `Internal code-generation error: dead or invalid generated field(s) in ${fileName}: ${fieldProblems.join(", ")}.`
+        );
+      }
     }
 
     return errors;
@@ -19677,6 +19996,208 @@
           method.start
         ) +
         optimized.slice(end);
+    }
+
+    return optimized;
+  }
+
+  function removeUnreferencedGeneratedFields(
+    source,
+    additionalSources = []
+  ) {
+    let optimized = String(source || "")
+      .replaceAll("\r\n", "\n");
+    const declarationPattern =
+      /^    private static (?!readonly\b)([^\n;{}=]+?)\s+(_[A-Za-z_][A-Za-z0-9_]*N[0-9a-f]{8})(\s*=\s*[^;\n]+)?\s*;$/gim;
+    const declarations = [
+      ...optimized.matchAll(
+        declarationPattern
+      )
+    ];
+    const sanitized =
+      sanitizeGeneratedCSharp(optimized);
+    const referencePattern =
+      /\b_[A-Za-z_]\w*N[0-9a-f]{8}\b/gi;
+    const referencesByName = new Map();
+    for (const reference of
+      sanitized.matchAll(referencePattern)) {
+      const references =
+        referencesByName.get(
+          reference[0]
+        ) || [];
+      references.push(reference);
+      referencesByName.set(
+        reference[0],
+        references
+      );
+    }
+    const externalNames = new Set(
+      (Array.isArray(additionalSources)
+        ? additionalSources
+        : [])
+        .flatMap(value => [
+          ...sanitizeGeneratedCSharp(value)
+            .matchAll(referencePattern)
+        ])
+        .map(reference => reference[0])
+    );
+    const transformations = [];
+
+    for (const declaration of
+      declarations) {
+      const csType =
+        String(declaration[1] || "")
+          .trim();
+      const name = declaration[2];
+      const hasInitializer =
+        Boolean(declaration[3]);
+      const escaped = name.replace(
+        /[.*+?^${}()|[\]\\]/g,
+        "\\$&"
+      );
+      if (externalNames.has(name)) {
+        continue;
+      }
+      const references =
+        referencesByName.get(name) || [];
+      const remainingReferences =
+        references.filter(reference =>
+          reference.index <
+            declaration.index ||
+          reference.index >=
+            declaration.index +
+              declaration[0].length
+        );
+      const uses =
+        remainingReferences.map(
+          reference => {
+            const before = sanitized.slice(
+              Math.max(
+                0,
+                reference.index - 64
+              ),
+              reference.index
+            );
+            const after = sanitized.slice(
+              reference.index +
+                reference[0].length,
+              reference.index +
+                reference[0].length +
+                16
+            );
+            const simpleWrite =
+              /^\s*=(?!=|>)/.test(after);
+            const readWrite =
+              /^\s*(?:\+\+|--|(?:\+|-|\*|\/|%|&|\||\^|<<|>>|\?\?)=)/.test(
+                after
+              ) ||
+              (
+                /(?:\+\+|--|\bref\s+|\bout\s+)$/.test(
+                  before
+                ) &&
+                !/(?:Interlocked|Volatile)\.Read\(\s*ref\s*$/i.test(
+                  before
+                )
+              );
+            return {
+              simpleWrite,
+              assigns:
+                simpleWrite || readWrite
+            };
+          }
+        );
+      const replaceReads =
+        uses.length > 0 &&
+        !hasInitializer &&
+        !uses.some(use => use.assigns);
+      const initializer =
+        String(declaration[3] || "")
+          .replace(/^\s*=\s*/, "")
+          .trim();
+      const removableInitializer =
+        !hasInitializer ||
+        /^(?:null!?|default!?|default\([^)]*\)!?|true|false|[-+]?\d+(?:\.\d+)?[a-z]*|string\.Empty|Array\.Empty<[^>]+>\(\))$/i.test(
+          initializer
+        );
+      const replaceWrites =
+        uses.length > 0 &&
+        removableInitializer &&
+        uses.every(
+          use => use.simpleWrite
+        );
+
+      if (
+        uses.length === 0 ||
+        replaceReads ||
+        replaceWrites
+      ) {
+        transformations.push({
+          name,
+          escaped,
+          replacement: replaceReads
+            ? `default(${csType})`
+            : "",
+          replaceReads,
+          replaceWrites,
+          start: declaration.index,
+          end:
+            declaration.index +
+            declaration[0].length
+        });
+      }
+    }
+
+    for (const declaration of
+      transformations.sort(
+        (left, right) =>
+          right.start - left.start
+      )) {
+      let end = declaration.end;
+      if (
+        optimized.slice(end, end + 2) ===
+        "\n\n"
+      ) {
+        end += 2;
+      }
+      optimized =
+        optimized.slice(
+          0,
+          declaration.start
+        ) +
+        optimized.slice(end);
+    }
+
+    for (const transformation of
+      transformations.filter(
+        item => item.replaceReads
+      )) {
+      optimized = optimized.replace(
+        new RegExp(
+          `(?:System\\.Threading\\.)?Interlocked\\.Read\\(ref\\s+${transformation.escaped}\\)`,
+          "g"
+        ),
+        transformation.replacement
+      );
+      optimized = optimized.replace(
+        new RegExp(
+          `\\b${transformation.escaped}\\b`,
+          "g"
+        ),
+        transformation.replacement
+      );
+    }
+
+    for (const transformation of
+      transformations.filter(
+        item => item.replaceWrites
+      )) {
+      optimized = optimized.replace(
+        new RegExp(
+          `\\b${transformation.escaped}\\b(?=\\s*=(?!=|>))`,
+          "g"
+        ),
+        "_"
+      );
     }
 
     return optimized;
@@ -20902,6 +21423,11 @@
         definitionForNode: nodeDefinition,
         resolvedType
       });
+    const codegenActionIsReachable =
+      nodeId =>
+        reloadUsage.executed.has(
+          String(nodeId || "")
+        );
     const reloadResolutionContext =
       reloadUseSiteContext({
         nodes: graph.nodes,
@@ -21631,6 +22157,13 @@
       isOutputConnected(outputId) {
         return connectedOutputs.has(
           `${node.id}:${outputId}`
+        );
+      },
+      isActionReachable(
+        nodeId = node?.id
+      ) {
+        return codegenActionIsReachable(
+          nodeId
         );
       },
       inputConnection(inputId) {
@@ -25571,6 +26104,13 @@ ${generatedGuidance(`            // Keep an immutable display snapshot. Mutable 
           file => file?.content || ""
         )
       );
+    source =
+      removeUnreferencedGeneratedFields(
+        source,
+        extensionFiles.map(
+          file => file?.content || ""
+        )
+      );
 
     for (const helper of
       extensionRuntimeHelpers) {
@@ -25597,7 +26137,13 @@ ${generatedGuidance(`            // Keep an immutable display snapshot. Mutable 
     diagnostics.push(
       ...generatedSourceDiagnostics(
         source,
-        fileName
+        fileName,
+        {
+          additionalSources:
+            extensionFiles.map(
+              file => file?.content || ""
+            )
+        }
       )
     );
     for (const file of extensionFiles) {
@@ -25617,7 +26163,11 @@ ${generatedGuidance(`            // Keep an immutable display snapshot. Mutable 
             ...generatedSourceDiagnostics(
               file.content,
               file.name,
-              { checkUnresolved: false }
+              {
+                checkUnresolved: false,
+                checkGeneratedFieldLiveness:
+                  false
+              }
             )
           );
         }
@@ -30575,8 +31125,8 @@ ${generatedGuidance(`            // Keep an immutable display snapshot. Mutable 
     }
     graphWireFullRenderPending = false;
     graphWirePartialConnectionIds.clear();
-    graphHybridRenderer?.dispose?.();
-    graphHybridRenderer = null;
+    releaseGraphToolbarResizeTracking();
+    detachGraphHybridRenderer();
     graphNodeVirtualizationSignature = "";
 
     dom.root = null;
@@ -33339,8 +33889,8 @@ ${generatedGuidance(`            // Keep an immutable display snapshot. Mutable 
       pruneConnections();
     }
 
-    graphHybridRenderer?.dispose?.();
-    graphHybridRenderer = null;
+    releaseGraphToolbarResizeTracking();
+    detachGraphHybridRenderer();
     graphNodeVirtualizationSignature = "";
 
     dom.builderCanvas.replaceChildren();
@@ -33620,41 +34170,54 @@ ${generatedGuidance(`            // Keep an immutable display snapshot. Mutable 
 
     const hybridFactory =
       window.RMLGraphHybridRenderer;
+    const rendererAttachment = {
+      viewport,
+      onAvailabilityChange(
+        available
+      ) {
+        root.classList.toggle(
+          "rml-graph-hybrid-active",
+          available
+        );
+        const synchronizeRenderer = () => {
+          renderGraphNodes();
+          renderGraphWires();
+        };
+        if (
+          dom.viewport === viewport &&
+          dom.nodesHost &&
+          dom.wires
+        ) {
+          synchronizeRenderer();
+        } else {
+          requestProjectAnimationFrame(
+            synchronizeRenderer
+          );
+        }
+      }
+    };
     if (
-      hybridFactory?.create &&
-      typeof hybridFactory.create ===
+      typeof graphHybridRenderer?.attach ===
+        "function" ||
+      typeof hybridFactory?.create ===
         "function"
     ) {
       try {
-        graphHybridRenderer =
-          hybridFactory.create({
-            viewport,
-            onAvailabilityChange(
-              available
-            ) {
-              root.classList.toggle(
-                "rml-graph-hybrid-active",
-                available
-              );
-              const synchronizeRenderer = () => {
-                renderGraphNodes();
-                renderGraphWires();
-              };
-              if (
-                dom.viewport === viewport &&
-                dom.nodesHost &&
-                dom.wires
-              ) {
-                synchronizeRenderer();
-              } else {
-                requestProjectAnimationFrame(
-                  synchronizeRenderer
-                );
-              }
-            }
-          });
+        if (
+          typeof graphHybridRenderer?.attach ===
+            "function"
+        ) {
+          graphHybridRenderer.attach(
+            rendererAttachment
+          );
+        } else {
+          graphHybridRenderer =
+            hybridFactory.create(
+              rendererAttachment
+            );
+        }
       } catch (error) {
-        graphHybridRenderer = null;
+        disposeGraphHybridRenderer();
         console.error(
           "RML graph hybrid renderer could not be created. SVG fallback remains active.",
           error
@@ -33710,13 +34273,15 @@ ${generatedGuidance(`            // Keep an immutable display snapshot. Mutable 
     updateToolbarLayout();
 
     if (typeof ResizeObserver === "function") {
-      const toolbarResizeObserver =
+      graphToolbarResizeObserver =
         new ResizeObserver(updateToolbarLayout);
-      toolbarResizeObserver.observe(root);
+      graphToolbarResizeObserver.observe(root);
     } else {
+      graphToolbarResizeFallback =
+        updateToolbarLayout;
       window.addEventListener(
         "resize",
-        updateToolbarLayout,
+        graphToolbarResizeFallback,
         { passive: true }
       );
     }
@@ -33779,7 +34344,8 @@ ${generatedGuidance(`            // Keep an immutable display snapshot. Mutable 
       (
         !overview ||
         overview !== previousOverview
-      )
+      ) &&
+      graphNodeVirtualizationRefreshRequired()
     ) {
       scheduleGraphNodeVirtualization();
     }
@@ -37455,7 +38021,7 @@ ${generatedGuidance(`            // Keep an immutable display snapshot. Mutable 
     }
 
     if (changed) {
-      persistGraphView();
+      persistGraphView(false, true);
     }
   }
 
@@ -37476,7 +38042,7 @@ ${generatedGuidance(`            // Keep an immutable display snapshot. Mutable 
       node.height = null;
     }
 
-    persistGraphView();
+    persistGraphView(false, true);
     renderGraphNodesAndWires();
     renderGraphInspector();
   }
@@ -37808,7 +38374,10 @@ ${generatedGuidance(`            // Keep an immutable display snapshot. Mutable 
       "resizing"
     );
     activeInteraction = null;
-    persistGraphView();
+    persistGraphView(
+      false,
+      commit === true
+    );
     renderGraphNodesAndWires();
     renderGraphInspector();
   }
@@ -38399,6 +38968,51 @@ ${generatedGuidance(`            // Keep an immutable display snapshot. Mutable 
     };
   }
 
+  function recordGraphNodeVirtualizationAnchor() {
+    if (!dom.viewport || !graph?.viewport) {
+      graphNodeVirtualizationAnchor = null;
+      return;
+    }
+    graphNodeVirtualizationAnchor = {
+      x: graph.viewport.x,
+      y: graph.viewport.y,
+      scale: graph.viewport.scale,
+      width: dom.viewport.clientWidth,
+      height: dom.viewport.clientHeight
+    };
+  }
+
+  function graphNodeVirtualizationRefreshRequired() {
+    const anchor =
+      graphNodeVirtualizationAnchor;
+    if (
+      !anchor ||
+      !dom.viewport ||
+      !graph?.viewport
+    ) {
+      return true;
+    }
+
+    if (
+      anchor.width !==
+        dom.viewport.clientWidth ||
+      anchor.height !==
+        dom.viewport.clientHeight ||
+      Math.abs(
+        anchor.scale -
+          graph.viewport.scale
+      ) > 0.000001
+    ) {
+      return true;
+    }
+
+    return Math.hypot(
+      graph.viewport.x - anchor.x,
+      graph.viewport.y - anchor.y
+    ) >=
+      GRAPH_NODE_VIRTUALIZATION_PAN_STEP_PIXELS;
+  }
+
   function graphViewportHasVisibleNode() {
     const rectangle =
       dom.viewport
@@ -38723,6 +39337,7 @@ ${generatedGuidance(`            // Keep an immutable display snapshot. Mutable 
 
     graphNodeVirtualizationSignature =
       renderedGraphNodeSignature(nodes);
+    recordGraphNodeVirtualizationAnchor();
 
     
     
@@ -38804,6 +39419,7 @@ ${generatedGuidance(`            // Keep an immutable display snapshot. Mutable 
           renderedGraphNodeSignature(
             nodes
           );
+        recordGraphNodeVirtualizationAnchor();
         if (
           signature ===
             graphNodeVirtualizationSignature
@@ -38970,12 +39586,8 @@ ${generatedGuidance(`            // Keep an immutable display snapshot. Mutable 
     const liveGeometryRequired = Boolean(
       activeInteraction?.nodeId ===
         nodeId &&
-      (
-        activeInteraction.kind ===
-          "node" ||
-        activeInteraction.kind ===
-          "node-resize"
-      )
+      activeInteraction.kind ===
+        "node-resize"
     );
     if (
       node &&
@@ -39983,15 +40595,113 @@ ${generatedGuidance(`            // Keep an immutable display snapshot. Mutable 
     );
   }
 
+  function graphSvgWirePathKey(
+    connectionId,
+    segmentIndex
+  ) {
+    return `${connectionId}\u0000${segmentIndex}`;
+  }
+
+  function graphSvgWirePointKey(
+    connectionId,
+    pointId
+  ) {
+    return `${connectionId}\u0000${pointId}`;
+  }
+
+  function rebuildGraphSvgWireCaches() {
+    graphSvgWirePathCache.clear();
+    graphSvgWirePointCache.clear();
+    for (const element of
+      dom.wires?.querySelectorAll(
+        "[data-connection-id][data-segment-index]"
+      ) || []) {
+      const key = graphSvgWirePathKey(
+        element.dataset.connectionId,
+        element.dataset.segmentIndex
+      );
+      const paths =
+        graphSvgWirePathCache.get(key) ||
+        [];
+      paths.push(element);
+      graphSvgWirePathCache.set(
+        key,
+        paths
+      );
+    }
+    for (const element of
+      dom.wires?.querySelectorAll(
+        ".rml-graph-wire-point[data-connection-id][data-point-id]"
+      ) || []) {
+      graphSvgWirePointCache.set(
+        graphSvgWirePointKey(
+          element.dataset.connectionId,
+          element.dataset.pointId
+        ),
+        element
+      );
+    }
+  }
+
+  function updateGraphSvgWirePaths(
+    records
+  ) {
+    if (!materializeSvgWireCompatibility()) {
+      return true;
+    }
+    for (const record of records) {
+      const paths =
+        graphSvgWirePathCache.get(
+          graphSvgWirePathKey(
+            record.connectionId,
+            record.segmentIndex
+          )
+        );
+      if (!paths?.length) {
+        return false;
+      }
+      const path = wirePath(
+        record.from,
+        record.to
+      );
+      for (const element of paths) {
+        element.setAttribute(
+          "d",
+          path
+        );
+      }
+    }
+    return true;
+  }
+
+  function graphWireGeometryInteractionActive() {
+    return [
+      "node",
+      "node-resize",
+      "wire-segment",
+      "wire-point"
+    ].includes(
+      activeInteraction?.kind
+    );
+  }
+
   function updateGraphWireConnections(
     connectionIds
   ) {
+    const gpuPartialUpdate =
+      graphHybridActive() &&
+      !forceSvgWireVisuals() &&
+      Boolean(
+        graphHybridRenderer
+          ?.updateSegments
+      );
+    const svgInteractionUpdate =
+      !graphHybridActive() &&
+      !forceSvgWireVisuals() &&
+      graphWireGeometryInteractionActive();
     if (
-      !graphHybridActive() ||
-      forceSvgWireVisuals() ||
-      materializeSvgWireCompatibility() ||
-      !graphHybridRenderer
-        ?.updateSegments
+      !gpuPartialUpdate &&
+      !svgInteractionUpdate
     ) {
       return false;
     }
@@ -40015,32 +40725,36 @@ ${generatedGuidance(`            // Keep an immutable display snapshot. Mutable 
     }
     if (
       records.length === 0 ||
-      !graphHybridRenderer
-        .updateSegments(records)
+      (
+        gpuPartialUpdate &&
+        !graphHybridRenderer
+          .updateSegments(records)
+      )
     ) {
       return false;
     }
 
-    for (
-      const handle of
-      dom.wires?.querySelectorAll(
-        ".rml-graph-wire-point"
-      ) || []
-    ) {
-      if (
-        !ids.has(
-          handle.dataset.connectionId
-        )
-      ) {
-        continue;
-      }
-      const point = wirePointById(
+    if (!updateGraphSvgWirePaths(records)) {
+      return false;
+    }
+
+    for (const connectionId of ids) {
+      const connection =
         graphConnectionById(
-          handle.dataset.connectionId
-        ),
-        handle.dataset.pointId
-      );
-      if (point) {
+          connectionId
+        );
+      for (const point of
+        connection?.points || []) {
+        const handle =
+          graphSvgWirePointCache.get(
+            graphSvgWirePointKey(
+              connectionId,
+              point.id
+            )
+          );
+        if (!handle) {
+          continue;
+        }
         handle.setAttribute(
           "cx",
           String(point.x)
@@ -40051,7 +40765,9 @@ ${generatedGuidance(`            // Keep an immutable display snapshot. Mutable 
         );
       }
     }
-    graphHybridRenderer.drawNow?.();
+    if (gpuPartialUpdate) {
+      graphHybridRenderer.drawNow?.();
+    }
     return true;
   }
 
@@ -40152,6 +40868,7 @@ ${generatedGuidance(`            // Keep an immutable display snapshot. Mutable 
     dom.wires.replaceChildren(
       ...handles
     );
+    rebuildGraphSvgWireCaches();
     notifyGraphRenderComplete();
   }
 
@@ -40458,6 +41175,7 @@ ${generatedGuidance(`            // Keep an immutable display snapshot. Mutable 
       ...svgItems,
       ...handles
     );
+    rebuildGraphSvgWireCaches();
 
     if (
       activeInteraction?.kind ===
@@ -45251,8 +45969,8 @@ ${generatedGuidance(`            // Keep an immutable display snapshot. Mutable 
     }
     graphWireFullRenderPending = false;
     graphWirePartialConnectionIds.clear();
-    graphHybridRenderer?.dispose?.();
-    graphHybridRenderer = null;
+    releaseGraphToolbarResizeTracking();
+    detachGraphHybridRenderer();
     graphNodeVirtualizationSignature = "";
     dom.builderCanvas?.replaceChildren();
     dom.root = null;
@@ -48491,7 +49209,11 @@ ${generatedGuidance(`            // Keep an immutable display snapshot. Mutable 
       graph.connections
     );
     normalizeSelectedWirePoint();
-    persistGraphView();
+    persistGraphView(
+      false,
+      commit === true &&
+        interaction.dragging === true
+    );
     renderGraphWires();
     renderGraphInspector();
   }
@@ -48712,7 +49434,10 @@ ${generatedGuidance(`            // Keep an immutable display snapshot. Mutable 
     normalizeConnectionRouting(
       graph.connections
     );
-    persistGraphView();
+    persistGraphView(
+      false,
+      commit === true
+    );
     renderGraphWires();
     renderGraphInspector();
   }
@@ -51111,7 +51836,10 @@ ${generatedGuidance(`            // Keep an immutable display snapshot. Mutable 
         nodeInteraction.connectionIds;
       activeInteraction = null;
       stopAutoPan();
-      persistGraphView();
+      persistGraphView(
+        false,
+        nodeInteraction.dragging === true
+      );
       scheduleGraphWireRender(
         connectionIds
       );
@@ -51621,9 +52349,14 @@ ${generatedGuidance(`            // Keep an immutable display snapshot. Mutable 
 
     window.addEventListener(
       "pagehide",
-      () => {
+      event => {
+        flushGraphViewPersistence(true);
         captureGraphPaletteUiState();
         persistGraphPaletteUiState(true);
+        if (event.persisted !== true) {
+          releaseGraphToolbarResizeTracking();
+          disposeGraphHybridRenderer();
+        }
       },
       { capture: true }
     );
@@ -55199,7 +55932,7 @@ ${generatedGuidance(`            // Keep an immutable display snapshot. Mutable 
 
   Object.defineProperty(window, "RMLDynamicGraphHost", {
     value: Object.freeze({
-      version: 66,
+      version: 67,
       getState() { return graph; },
       getProjectEpoch() {
         return builderProjectEpoch;

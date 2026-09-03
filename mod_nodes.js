@@ -2741,11 +2741,19 @@ private static bool AddGraphJsonArrayItem(
     api.addUsing("System.Text");
     api.addUsing("System.Threading");
     api.addUsing("System.Threading.Tasks");
+  }
+
+  function ensureHttpRuntime(
+    api,
+    includeResponseType = true
+  ) {
+    ensureNetworkRuntime(api);
     api.addField(
       "universal.network.httpClient",
       "private static readonly HttpClient _graphHttpClient = new();"
     );
-    api.addMember("universal.network.response", String.raw`
+    if (includeResponseType) {
+      api.addMember("universal.network.response", String.raw`
 internal sealed record GraphHttpResponse(
     int StatusCode,
     string Body,
@@ -2757,6 +2765,7 @@ internal sealed record GraphHttpResponse(
         new(0, string.Empty, string.Empty, false, string.Empty);
 }
 `);
+    }
   }
 
   function ensureTaskRuntime(api) {
@@ -3010,6 +3019,42 @@ private static void CreateGeneratedReversePatch(
       defaultCode
     );
     return field;
+  }
+
+  function generatedOutputIsUsed(
+    api,
+    outputId
+  ) {
+    return typeof api?.isOutputConnected ===
+      "function"
+      ? api.isOutputConnected(outputId)
+      : true;
+  }
+
+  function generatedActionOutputIsUsed(
+    api,
+    outputId
+  ) {
+    const reachable =
+      typeof api?.isActionReachable ===
+        "function"
+        ? api.isActionReachable()
+        : true;
+    return (
+      reachable &&
+      generatedOutputIsUsed(api, outputId)
+    );
+  }
+
+  function generatedActionOutputExpression(
+    api,
+    expression
+  ) {
+    return typeof api?.isActionReachable ===
+      "function" &&
+      !api.isActionReachable()
+      ? api.csDefault(api.type)
+      : expression;
   }
 
 
@@ -4284,15 +4329,25 @@ private sealed class GraphReturnSignal : Exception
     ],
     codegenCollect(api) {
       ensureStructuredFlowRuntime(api);
-      addStatefulField(
-        api,
-        "caughtException",
-        "Exception?",
-        "null"
-      );
+      if (
+        generatedActionOutputIsUsed(
+          api,
+          "exception"
+        )
+      ) {
+        addStatefulField(
+          api,
+          "caughtException",
+          "Exception?",
+          "null"
+        );
+      }
     },
     codegenExpression(api) {
-      return `_caughtException${nodeToken(api)}!`;
+      return generatedActionOutputExpression(
+        api,
+        `_caughtException${nodeToken(api)}!`
+      );
     },
     codegenAction(api) {
       const token = nodeToken(api);
@@ -4305,8 +4360,22 @@ private sealed class GraphReturnSignal : Exception
         api.inlineMethod(api.node.id, "finally");
       const completed =
         api.emit("completed");
+      const keepException =
+        generatedActionOutputIsUsed(
+          api,
+          "exception"
+        );
+      const resetException = keepException
+        ? `${field} = null;\n        `
+        : "";
+      const exceptionCatch = keepException
+        ? "catch (Exception exception)"
+        : "catch (Exception)";
+      const storeException = keepException
+        ? `${field} = exception;`
+        : "";
 
-      return `${field} = null;\n        try\n        {${tryBranch ? `\n            ${tryBranch}();` : ""}\n        }\n        catch (GraphBreakSignal)\n        {\n            throw;\n        }\n        catch (GraphContinueSignal)\n        {\n            throw;\n        }\n        catch (GraphReturnSignal)\n        {\n            throw;\n        }\n        catch (Exception exception)\n        {\n            ${field} = exception;${catchBranch ? `\n            ${catchBranch}();` : ""}\n        }\n        finally\n        {${finallyBranch ? `\n            ${finallyBranch}();` : ""}\n        }${completed ? `\n        ${completed}();` : ""}`;
+      return `${resetException}try\n        {${tryBranch ? `\n            ${tryBranch}();` : ""}\n        }\n        catch (GraphBreakSignal)\n        {\n            throw;\n        }\n        catch (GraphContinueSignal)\n        {\n            throw;\n        }\n        catch (GraphReturnSignal)\n        {\n            throw;\n        }\n        ${exceptionCatch}\n        {${storeException ? `\n            ${storeException}` : ""}${catchBranch ? `\n            ${catchBranch}();` : ""}\n        }\n        finally\n        {${finallyBranch ? `\n            ${finallyBranch}();` : ""}\n        }${completed ? `\n        ${completed}();` : ""}`;
     }
   });
 
@@ -4696,34 +4765,54 @@ private static T GraphUserMethodArgument<T>(int index)
       const type =
         api.node.parameters?.valueType ||
         "object";
-      addStatefulField(
-        api,
-        "visualMethodResult",
-        api.csType(type),
-        api.csDefault(type)
-      );
-      addStatefulField(
-        api,
-        "visualMethodSuccess",
-        "bool",
-        "false"
-      );
-      addStatefulField(
-        api,
-        "visualMethodException",
-        "Exception?",
-        "null"
-      );
+      if (generatedActionOutputIsUsed(api, "result")) {
+        addStatefulField(
+          api,
+          "visualMethodResult",
+          api.csType(type),
+          api.csDefault(type)
+        );
+      }
+      if (generatedActionOutputIsUsed(api, "success")) {
+        addStatefulField(
+          api,
+          "visualMethodSuccess",
+          "bool",
+          "false"
+        );
+      }
+      if (
+        generatedActionOutputIsUsed(
+          api,
+          "exception"
+        )
+      ) {
+        addStatefulField(
+          api,
+          "visualMethodException",
+          "Exception?",
+          "null"
+        );
+      }
     },
     codegenExpression(api) {
       const token = nodeToken(api);
       if (api.portId === "success") {
-        return `_visualMethodSuccess${token}`;
+        return generatedActionOutputExpression(
+          api,
+          `_visualMethodSuccess${token}`
+        );
       }
       if (api.portId === "exception") {
-        return `_visualMethodException${token}!`;
+        return generatedActionOutputExpression(
+          api,
+          `_visualMethodException${token}!`
+        );
       }
-      return `_visualMethodResult${token}`;
+      return generatedActionOutputExpression(
+        api,
+        `_visualMethodResult${token}`
+      );
     },
     codegenAction(api) {
       const methodName = String(
@@ -4751,7 +4840,39 @@ private static T GraphUserMethodArgument<T>(int index)
         "object";
       const done = api.emit("done");
       const faulted = api.emit("faulted");
-      return `try\n        {\n            ${exception} = null;\n            ${result} = ConvertGraphValue<${api.csType(type)}>(UserMethod${methodToken}(${api.input("arguments").code}));\n            ${success} = true;${done ? `\n            ${done}();` : ""}\n        }\n        catch (Exception caught)\n        {\n            ${exception} = caught;\n            ${success} = false;${faulted ? `\n            ${faulted}();` : ""}\n        }`;
+      const keepResult =
+        generatedActionOutputIsUsed(api, "result");
+      const keepSuccess =
+        generatedActionOutputIsUsed(api, "success");
+      const keepException =
+        generatedActionOutputIsUsed(
+          api,
+          "exception"
+        );
+      const call = `ConvertGraphValue<${api.csType(type)}>(UserMethod${methodToken}(${api.input("arguments").code}))`;
+      const successLines = [
+        keepException
+          ? `${exception} = null;`
+          : "",
+        keepResult
+          ? `${result} = ${call};`
+          : `_ = ${call};`,
+        keepSuccess
+          ? `${success} = true;`
+          : ""
+      ].filter(Boolean).join("\n            ");
+      const failureLines = [
+        keepException
+          ? `${exception} = caught;`
+          : "",
+        keepSuccess
+          ? `${success} = false;`
+          : ""
+      ].filter(Boolean).join("\n            ");
+      const catchClause = keepException
+        ? "catch (Exception caught)"
+        : "catch (Exception)";
+      return `try\n        {\n            ${successLines}${done ? `\n            ${done}();` : ""}\n        }\n        ${catchClause}\n        {${failureLines ? `\n            ${failureLines}` : ""}${faulted ? `\n            ${faulted}();` : ""}\n        }`;
     }
   });
 
@@ -4854,23 +4975,39 @@ private static T GraphUserMethodArgument<T>(int index)
       port("count", "Count", "int")
     ],
     codegenCollect(api) {
-      addStatefulField(
-        api,
-        "counter",
-        "int",
-        "0"
-      );
+      if (
+        generatedActionOutputIsUsed(
+          api,
+          "count"
+        )
+      ) {
+        addStatefulField(
+          api,
+          "counter",
+          "int",
+          "0"
+        );
+      }
     },
     codegenExpression(api) {
-      return `_counter${nodeToken(api)}`;
+      return generatedActionOutputExpression(
+        api,
+        `_counter${nodeToken(api)}`
+      );
     },
     codegenAction(api) {
       const field = `_counter${nodeToken(api)}`;
       const next = api.emit("changed");
-      const operation =
-        api.connection.toPort === "reset"
+      const keepCount =
+        generatedActionOutputIsUsed(
+          api,
+          "count"
+        );
+      const operation = keepCount
+        ? api.connection.toPort === "reset"
           ? `${field} = 0;`
-          : `${field}++;`;
+          : `${field}++;`
+        : "";
       return `${operation}${next ? `\n        ${next}();` : ""}`;
     }
   });
@@ -4892,22 +5029,41 @@ private static T GraphUserMethodArgument<T>(int index)
     ],
     codegenCollect(api) {
       ensureStructuredFlowRuntime(api);
-      addStatefulField(
-        api,
-        "loopIndex",
-        "int",
-        "0"
-      );
+      if (
+        generatedActionOutputIsUsed(
+          api,
+          "index"
+        )
+      ) {
+        addStatefulField(
+          api,
+          "loopIndex",
+          "int",
+          "0"
+        );
+      }
     },
     codegenExpression(api) {
-      return `_loopIndex${nodeToken(api)}`;
+      return generatedActionOutputExpression(
+        api,
+        `_loopIndex${nodeToken(api)}`
+      );
     },
     codegenAction(api) {
-      const field = `_loopIndex${nodeToken(api)}`;
+      const token = nodeToken(api);
+      const field = `_loopIndex${token}`;
+      const keepIndex =
+        generatedActionOutputIsUsed(
+          api,
+          "index"
+        );
+      const declaration = keepIndex
+        ? ""
+        : "int ";
       const body =
         api.inlineMethod(api.node.id, "body");
       const done = api.emit("completed");
-      return `for (${field} = 0; ${field} < Math.Max(0, ${api.input("count").code}); ${field}++)\n        {\n            try\n            {\n                ${body ? `${body}();` : generatedGuidance(api, "// No Body path.")}\n            }\n            catch (GraphContinueSignal)\n            {\n                continue;\n            }\n            catch (GraphBreakSignal)\n            {\n                break;\n            }\n        }${done ? `\n        ${done}();` : ""}`;
+      return `for (${declaration}${field} = 0; ${field} < Math.Max(0, ${api.input("count").code}); ${field}++)\n        {\n            try\n            {\n                ${body ? `${body}();` : generatedGuidance(api, "// No Body path.")}\n            }\n            catch (GraphContinueSignal)\n            {\n                continue;\n            }\n            catch (GraphBreakSignal)\n            {\n                break;\n            }\n        }${done ? `\n        ${done}();` : ""}`;
     }
   });
 
@@ -4958,18 +5114,32 @@ private static T GraphUserMethodArgument<T>(int index)
         ) || "object";
       const token = nodeToken(api);
 
-      addStatefulField(
-        api,
-        "forEachItem",
-        api.csType(itemType),
-        api.csDefault(itemType)
-      );
-      addStatefulField(
-        api,
-        "forEachIndex",
-        "int",
-        "0"
-      );
+      if (
+        generatedActionOutputIsUsed(
+          api,
+          "item"
+        )
+      ) {
+        addStatefulField(
+          api,
+          "forEachItem",
+          api.csType(itemType),
+          api.csDefault(itemType)
+        );
+      }
+      if (
+        generatedActionOutputIsUsed(
+          api,
+          "index"
+        )
+      ) {
+        addStatefulField(
+          api,
+          "forEachIndex",
+          "int",
+          "0"
+        );
+      }
 
       api.addUsing("System.Collections");
       api.addMember(
@@ -5062,9 +5232,12 @@ private static T GraphCollectionItem<T>(object? value)
         ""
       );
 
-      return output === "index"
-        ? `_forEachIndex${token}`
-        : `_forEachItem${token}`;
+      return generatedActionOutputExpression(
+        api,
+        output === "index"
+          ? `_forEachIndex${token}`
+          : `_forEachItem${token}`
+      );
     },
     codegenAction(api) {
       const itemSpec =
@@ -5090,8 +5263,30 @@ private static T GraphCollectionItem<T>(object? value)
         api.inlineMethod(api.node.id, "body");
       const completed =
         api.emit("completed");
+      const keepItem =
+        generatedActionOutputIsUsed(
+          api,
+          "item"
+        );
+      const keepIndex =
+        generatedActionOutputIsUsed(
+          api,
+          "index"
+        );
+      const initializeIndex = keepIndex
+        ? `${indexField} = 0;\n`
+        : "";
+      const assignItem = keepItem
+        ? `${itemField} = GraphCollectionItem<${itemCsType}>(${rawItem});`
+        : `_ = GraphCollectionItem<${itemCsType}>(${rawItem});`;
+      const incrementIndex = keepIndex
+        ? `\n                ${indexField}++;`
+        : "";
+      const incrementAfterBody = keepIndex
+        ? `\n            ${indexField}++;`
+        : "";
 
-      return `${indexField} = 0;\nforeach (object? ${rawItem} in GraphEnumerateCollection(${api.input("collection").code}))\n        {\n            ${itemField} = GraphCollectionItem<${itemCsType}>(${rawItem});\n            try\n            {\n                ${body ? `${body}();` : generatedGuidance(api, "// No Body path.")}\n            }\n            catch (GraphContinueSignal)\n            {\n                ${indexField}++;\n                continue;\n            }\n            catch (GraphBreakSignal)\n            {\n                break;\n            }\n            ${indexField}++;\n        }${completed ? `\n        ${completed}();` : ""}`;
+      return `${initializeIndex}foreach (object? ${rawItem} in GraphEnumerateCollection(${api.input("collection").code}))\n        {\n            ${assignItem}\n            try\n            {\n                ${body ? `${body}();` : generatedGuidance(api, "// No Body path.")}\n            }\n            catch (GraphContinueSignal)\n            {${incrementIndex}\n                continue;\n            }\n            catch (GraphBreakSignal)\n            {\n                break;\n            }${incrementAfterBody}\n        }${completed ? `\n        ${completed}();` : ""}`;
     },
     previewEvaluate({
       portId,
@@ -5665,15 +5860,22 @@ private static T GraphCollectionItemAt<T>(
         api.node.id,
         "event"
       );
-      api.addRuntimeField(
-        `${api.node.id}.exception`,
-        field,
-        "Exception",
-        "null!"
-      );
+      const keepException =
+        generatedOutputIsUsed(
+          api,
+          "exception"
+        );
+      if (keepException) {
+        api.addRuntimeField(
+          `${api.node.id}.exception`,
+          field,
+          "Exception",
+          "null!"
+        );
+      }
       if (emit) {
         api.addInitialize(
-          `AppDomain.CurrentDomain.UnhandledException += (_, args) =>\n        {\n            using GraphExecutionScope scope = OpenGraphEntry();\n            ${field} = args.ExceptionObject as Exception ?? new Exception(FormatValue(args.ExceptionObject));\n            ${emit}();\n        };`
+          `AppDomain.CurrentDomain.UnhandledException += (_, args) =>\n        {\n            using GraphExecutionScope scope = OpenGraphEntry();${keepException ? `\n            ${field} = args.ExceptionObject as Exception ?? new Exception(FormatValue(args.ExceptionObject));` : ""}\n            ${emit}();\n        };`
         );
       }
     },
@@ -5705,15 +5907,22 @@ private static T GraphCollectionItemAt<T>(
         api.node.id,
         "event"
       );
-      api.addRuntimeField(
-        `${api.node.id}.args`,
-        field,
-        "object?[]",
-        "Array.Empty<object?>()"
-      );
+      const keepArguments =
+        generatedOutputIsUsed(
+          api,
+          "arguments"
+        );
+      if (keepArguments) {
+        api.addRuntimeField(
+          `${api.node.id}.args`,
+          field,
+          "object?[]",
+          "Array.Empty<object?>()"
+        );
+      }
       api.addMember(
         `${api.node.id}.callback`,
-        `private static void ${callback}(object?[] arguments)\n{\n    using GraphExecutionScope scope = OpenGraphEntry();\n    ${field} = arguments;${emit ? `\n    ${emit}();` : ""}\n}`
+        `private static void ${callback}(object?[] arguments)\n{\n    using GraphExecutionScope scope = OpenGraphEntry();${keepArguments ? `\n    ${field} = arguments;` : ""}${emit ? `\n    ${emit}();` : ""}\n}`
       );
       api.addEngineInit(
         `SubscribeGraphEventWhenAvailable(${quote(api, api.node.id)}, () => (object?)(${api.input("target").code}), () => (string?)(${api.input("eventName").code}), ${callback});`
@@ -6401,20 +6610,37 @@ private static T GraphCollectionItemAt<T>(
     ],
     codegenCollect(api) {
       ensureReflectionRuntime(api);
-      addStatefulField(
-        api,
-        "writeSuccess",
-        "bool",
-        "false"
-      );
+      if (
+        generatedActionOutputIsUsed(
+          api,
+          "success"
+        )
+      ) {
+        addStatefulField(
+          api,
+          "writeSuccess",
+          "bool",
+          "false"
+        );
+      }
     },
     codegenExpression(api) {
-      return `_writeSuccess${nodeToken(api)}`;
+      return generatedActionOutputExpression(
+        api,
+        `_writeSuccess${nodeToken(api)}`
+      );
     },
     codegenAction(api) {
       const field = `_writeSuccess${nodeToken(api)}`;
       const done = api.emit("done");
-      return `${field} = WriteMember(${api.input("target").code}, ${api.input("name").code}, ${api.input("value").code});${done ? `\n        ${done}();` : ""}`;
+      const call = `WriteMember(${api.input("target").code}, ${api.input("name").code}, ${api.input("value").code})`;
+      const write = generatedActionOutputIsUsed(
+        api,
+        "success"
+      )
+        ? `${field} = ${call};`
+        : `${call};`;
+      return `${write}${done ? `\n        ${done}();` : ""}`;
     }
   });
 
@@ -6438,29 +6664,66 @@ private static T GraphCollectionItemAt<T>(
     codegenCollect(api) {
       ensureReflectionRuntime(api);
       const token = nodeToken(api);
-      api.addRuntimeField(
-        `${api.node.id}.result`,
-        `_invokeResult${token}`,
-        "object?",
-        "null"
-      );
-      api.addRuntimeField(
-        `${api.node.id}.error`,
-        `_invokeException${token}`,
-        "Exception",
-        "null!"
-      );
+      if (generatedActionOutputIsUsed(api, "result")) {
+        api.addRuntimeField(
+          `${api.node.id}.result`,
+          `_invokeResult${token}`,
+          "object?",
+          "null"
+        );
+      }
+      if (
+        generatedActionOutputIsUsed(
+          api,
+          "exception"
+        )
+      ) {
+        api.addRuntimeField(
+          `${api.node.id}.error`,
+          `_invokeException${token}`,
+          "Exception",
+          "null!"
+        );
+      }
     },
     codegenExpression(api) {
       const token = nodeToken(api);
-      return api.portId === "exception"
+      return generatedActionOutputExpression(
+        api,
+        api.portId === "exception"
         ? `_invokeException${token}`
-        : `_invokeResult${token}!`;
+        : `_invokeResult${token}!`
+      );
     },
     codegenAction(api) {
       const token = nodeToken(api);
       const done = api.emit("done");
-      return `try\n        {\n            _invokeException${token} = null!;\n            _invokeResult${token} = InvokeMethodInfo(${api.input("method").code}, ${api.input("target").code}, ${api.input("arguments").code});\n        }\n        catch (Exception exception)\n        {\n            _invokeException${token} = exception;\n            _invokeResult${token} = null;\n        }${done ? `\n        ${done}();` : ""}`;
+      const keepResult =
+        generatedActionOutputIsUsed(api, "result");
+      const keepException =
+        generatedActionOutputIsUsed(
+          api,
+          "exception"
+        );
+      const call = `InvokeMethodInfo(${api.input("method").code}, ${api.input("target").code}, ${api.input("arguments").code})`;
+      const resultLine = keepResult
+        ? `_invokeResult${token} = ${call};`
+        : `${call};`;
+      const resetLine = keepException
+        ? `_invokeException${token} = null!;\n            `
+        : "";
+      const catchClause = keepException
+        ? "catch (Exception exception)"
+        : "catch (Exception)";
+      const catchLines = [
+        keepException
+          ? `_invokeException${token} = exception;`
+          : "",
+        keepResult
+          ? `_invokeResult${token} = null;`
+          : ""
+      ].filter(Boolean).join("\n            ");
+      return `try\n        {\n            ${resetLine}${resultLine}\n        }\n        ${catchClause}\n        {${catchLines ? `\n            ${catchLines}\n        ` : ""}}${done ? `\n        ${done}();` : ""}`;
     }
   });
 
@@ -6482,20 +6745,37 @@ private static T GraphCollectionItemAt<T>(
     ],
     codegenCollect(api) {
       ensureReflectionRuntime(api);
-      addStatefulField(
-        api,
-        "callResult",
-        "object?",
-        "null"
-      );
+      if (
+        generatedActionOutputIsUsed(
+          api,
+          "result"
+        )
+      ) {
+        addStatefulField(
+          api,
+          "callResult",
+          "object?",
+          "null"
+        );
+      }
     },
     codegenExpression(api) {
-      return `_callResult${nodeToken(api)}!`;
+      return generatedActionOutputExpression(
+        api,
+        `_callResult${nodeToken(api)}!`
+      );
     },
     codegenAction(api) {
       const field = `_callResult${nodeToken(api)}`;
       const done = api.emit("done");
-      return `${field} = InvokeBest(${api.input("target").code}, ${api.input("name").code}, ${api.input("arguments").code});${done ? `\n        ${done}();` : ""}`;
+      const call = `InvokeBest(${api.input("target").code}, ${api.input("name").code}, ${api.input("arguments").code})`;
+      const invoke = generatedActionOutputIsUsed(
+        api,
+        "result"
+      )
+        ? `${field} = ${call};`
+        : `${call};`;
+      return `${invoke}${done ? `\n        ${done}();` : ""}`;
     }
   });
 
@@ -6516,20 +6796,37 @@ private static T GraphCollectionItemAt<T>(
     ],
     codegenCollect(api) {
       ensureReflectionRuntime(api);
-      addStatefulField(
-        api,
-        "createdInstance",
-        "object?",
-        "null"
-      );
+      if (
+        generatedActionOutputIsUsed(
+          api,
+          "instance"
+        )
+      ) {
+        addStatefulField(
+          api,
+          "createdInstance",
+          "object?",
+          "null"
+        );
+      }
     },
     codegenExpression(api) {
-      return `_createdInstance${nodeToken(api)}!`;
+      return generatedActionOutputExpression(
+        api,
+        `_createdInstance${nodeToken(api)}!`
+      );
     },
     codegenAction(api) {
       const field = `_createdInstance${nodeToken(api)}`;
       const done = api.emit("done");
-      return `${field} = CreateReflective(${api.input("type").code}, ${api.input("arguments").code});${done ? `\n        ${done}();` : ""}`;
+      const call = `CreateReflective(${api.input("type").code}, ${api.input("arguments").code})`;
+      const create = generatedActionOutputIsUsed(
+        api,
+        "instance"
+      )
+        ? `${field} = ${call};`
+        : `${call};`;
+      return `${create}${done ? `\n        ${done}();` : ""}`;
     }
   });
 
@@ -6618,29 +6915,65 @@ private static T GraphCollectionItemAt<T>(
     codegenCollect(api) {
       api.addUsing("System.IO");
       const token = nodeToken(api);
-      api.addRuntimeField(
-        `${api.node.id}.text`,
-        `_readText${token}`,
-        "string",
-        "string.Empty"
-      );
-      api.addRuntimeField(
-        `${api.node.id}.exception`,
-        `_readTextException${token}`,
-        "Exception",
-        "null!"
-      );
+      if (generatedActionOutputIsUsed(api, "text")) {
+        api.addRuntimeField(
+          `${api.node.id}.text`,
+          `_readText${token}`,
+          "string",
+          "string.Empty"
+        );
+      }
+      if (
+        generatedActionOutputIsUsed(
+          api,
+          "exception"
+        )
+      ) {
+        api.addRuntimeField(
+          `${api.node.id}.exception`,
+          `_readTextException${token}`,
+          "Exception",
+          "null!"
+        );
+      }
     },
     codegenExpression(api) {
       const token = nodeToken(api);
-      return api.portId === "exception"
-        ? `_readTextException${token}`
-        : `_readText${token}`;
+      return generatedActionOutputExpression(
+        api,
+        api.portId === "exception"
+          ? `_readTextException${token}`
+          : `_readText${token}`
+      );
     },
     codegenAction(api) {
       const token = nodeToken(api);
       const done = api.emit("done");
-      return `try\n        {\n            _readTextException${token} = null!;\n            _readText${token} = File.ReadAllText(${api.input("path").code});\n        }\n        catch (Exception exception)\n        {\n            _readTextException${token} = exception;\n            _readText${token} = string.Empty;\n        }${done ? `\n        ${done}();` : ""}`;
+      const keepText =
+        generatedActionOutputIsUsed(api, "text");
+      const keepException =
+        generatedActionOutputIsUsed(
+          api,
+          "exception"
+        );
+      const resetException = keepException
+        ? `_readTextException${token} = null!;\n            `
+        : "";
+      const read = keepText
+        ? `_readText${token} = File.ReadAllText(${api.input("path").code});`
+        : `File.ReadAllText(${api.input("path").code});`;
+      const catchClause = keepException
+        ? "catch (Exception exception)"
+        : "catch (Exception)";
+      const catchLines = [
+        keepException
+          ? `_readTextException${token} = exception;`
+          : "",
+        keepText
+          ? `_readText${token} = string.Empty;`
+          : ""
+      ].filter(Boolean).join("\n            ");
+      return `try\n        {\n            ${resetException}${read}\n        }\n        ${catchClause}\n        {${catchLines ? `\n            ${catchLines}\n        ` : ""}}${done ? `\n        ${done}();` : ""}`;
     }
   });
 
@@ -6659,20 +6992,36 @@ private static T GraphCollectionItemAt<T>(
     ],
     codegenCollect(api) {
       api.addUsing("System.IO");
-      addStatefulField(
-        api,
-        "readBytes",
-        "byte[]",
-        "Array.Empty<byte>()"
-      );
+      if (
+        generatedActionOutputIsUsed(
+          api,
+          "bytes"
+        )
+      ) {
+        addStatefulField(
+          api,
+          "readBytes",
+          "byte[]",
+          "Array.Empty<byte>()"
+        );
+      }
     },
     codegenExpression(api) {
-      return `_readBytes${nodeToken(api)}`;
+      return generatedActionOutputExpression(
+        api,
+        `_readBytes${nodeToken(api)}`
+      );
     },
     codegenAction(api) {
       const field = `_readBytes${nodeToken(api)}`;
       const done = api.emit("done");
-      return `${field} = File.ReadAllBytes(${api.input("path").code});${done ? `\n        ${done}();` : ""}`;
+      const read = generatedActionOutputIsUsed(
+        api,
+        "bytes"
+      )
+        ? `${field} = File.ReadAllBytes(${api.input("path").code});`
+        : `File.ReadAllBytes(${api.input("path").code});`;
+      return `${read}${done ? `\n        ${done}();` : ""}`;
     }
   });
 
@@ -6700,20 +7049,44 @@ private static T GraphCollectionItemAt<T>(
       ],
       codegenCollect(api) {
         api.addUsing("System.IO");
-        api.addRuntimeField(
-          `${api.node.id}.exception`,
-          `_fileWriteException${nodeToken(api)}`,
-          "Exception",
-          "null!"
-        );
+        if (
+          generatedActionOutputIsUsed(
+            api,
+            "exception"
+          )
+        ) {
+          api.addRuntimeField(
+            `${api.node.id}.exception`,
+            `_fileWriteException${nodeToken(api)}`,
+            "Exception",
+            "null!"
+          );
+        }
       },
       codegenExpression(api) {
-        return `_fileWriteException${nodeToken(api)}`;
+        return generatedActionOutputExpression(
+          api,
+          `_fileWriteException${nodeToken(api)}`
+        );
       },
       codegenAction(api) {
         const token = nodeToken(api);
         const done = api.emit("done");
-        return `try\n        {\n            _fileWriteException${token} = null!;\n            ${method}(${api.input("path").code}, ${api.input("value").code});\n        }\n        catch (Exception exception)\n        {\n            _fileWriteException${token} = exception;\n        }${done ? `\n        ${done}();` : ""}`;
+        const keepException =
+          generatedActionOutputIsUsed(
+            api,
+            "exception"
+          );
+        const reset = keepException
+          ? `_fileWriteException${token} = null!;\n            `
+          : "";
+        const catchClause = keepException
+          ? "catch (Exception exception)"
+          : "catch (Exception)";
+        const store = keepException
+          ? `\n            _fileWriteException${token} = exception;\n        `
+          : "";
+        return `try\n        {\n            ${reset}${method}(${api.input("path").code}, ${api.input("value").code});\n        }\n        ${catchClause}\n        {${store}}${done ? `\n        ${done}();` : ""}`;
       }
     });
   }
@@ -6969,18 +7342,43 @@ private static T GraphCollectionItemAt<T>(
       port("error", "Error", "string")
     ],
     codegenCollect(api) {
-      ensureNetworkRuntime(api);
+      if (
+        typeof api.isActionReachable ===
+          "function" &&
+        !api.isActionReachable()
+      ) {
+        return;
+      }
       const token = nodeToken(api);
       const emit = api.emitMethod(
         api.node.id,
         "done"
       );
-      api.addRuntimeField(
-        `${api.node.id}.response`,
-        `_httpResponse${token}`,
-        "GraphHttpResponse",
-        "GraphHttpResponse.Empty"
+      const keepResponse = [
+        "response",
+        "status",
+        "body",
+        "contentType",
+        "success",
+        "error"
+      ].some(outputId =>
+        generatedActionOutputIsUsed(
+          api,
+          outputId
+        )
       );
+      ensureHttpRuntime(
+        api,
+        keepResponse
+      );
+      if (keepResponse) {
+        api.addRuntimeField(
+          `${api.node.id}.response`,
+          `_httpResponse${token}`,
+          "GraphHttpResponse",
+          "GraphHttpResponse.Empty"
+        );
+      }
       api.addMember(
         `${api.node.id}.send`,
         `private static async void SendHttp${token}(string url, string body)\n{\n    try\n    {\n        using HttpRequestMessage request = new(new HttpMethod(${quote(
@@ -6993,11 +7391,18 @@ private static T GraphCollectionItemAt<T>(
         )});\n        }\n\n        foreach (string line in ${quote(
           api,
           api.node.parameters.headers || ""
-        )}.Split('\\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))\n        {\n            int separator = line.IndexOf(':');\n            if (separator <= 0) continue;\n            string name = line[..separator].Trim();\n            string value = line[(separator + 1)..].Trim();\n            if (!request.Headers.TryAddWithoutValidation(name, value))\n            {\n                request.Content?.Headers.TryAddWithoutValidation(name, value);\n            }\n        }\n\n        using HttpResponseMessage response = await _graphHttpClient.SendAsync(request).ConfigureAwait(false);\n        string responseBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);\n        _httpResponse${token} = new GraphHttpResponse(\n            (int)response.StatusCode,\n            responseBody,\n            response.Content.Headers.ContentType?.ToString() ?? string.Empty,\n            response.IsSuccessStatusCode,\n            string.Empty);\n    }\n    catch (Exception exception)\n    {\n        _httpResponse${token} = new GraphHttpResponse(\n            0,\n            string.Empty,\n            string.Empty,\n            false,\n            exception.ToString());\n    }${emit ? `\n\n    ${emit}();` : ""}\n}`
+        )}.Split('\\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))\n        {\n            int separator = line.IndexOf(':');\n            if (separator <= 0) continue;\n            string name = line[..separator].Trim();\n            string value = line[(separator + 1)..].Trim();\n            if (!request.Headers.TryAddWithoutValidation(name, value))\n            {\n                request.Content?.Headers.TryAddWithoutValidation(name, value);\n            }\n        }\n\n        using HttpResponseMessage response = await _graphHttpClient.SendAsync(request).ConfigureAwait(false);${keepResponse ? `\n        string responseBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);` : `\n        _ = await response.Content.ReadAsStringAsync().ConfigureAwait(false);`}${keepResponse ? `\n        _httpResponse${token} = new GraphHttpResponse(\n            (int)response.StatusCode,\n            responseBody,\n            response.Content.Headers.ContentType?.ToString() ?? string.Empty,\n            response.IsSuccessStatusCode,\n            string.Empty);` : ""}\n    }\n    catch (Exception exception)\n    {${keepResponse ? `\n        _httpResponse${token} = new GraphHttpResponse(\n            0,\n            string.Empty,\n            string.Empty,\n            false,\n            exception.ToString());` : `\n        _ = exception;`}\n    }${emit ? `\n\n    ${emit}();` : ""}\n}`
       );
     },
     codegenExpression(api) {
       const field = `_httpResponse${nodeToken(api)}`;
+      if (
+        typeof api.isActionReachable ===
+          "function" &&
+        !api.isActionReachable()
+      ) {
+        return api.csDefault(api.type);
+      }
       switch (api.portId) {
         case "status":
           return `${field}.StatusCode`;
@@ -7049,8 +7454,14 @@ private static T GraphCollectionItemAt<T>(
       port("error", "Error", "string")
     ],
     codegenCollect(api) {
+      if (
+        typeof api.isActionReachable ===
+          "function" &&
+        !api.isActionReachable()
+      ) {
+        return;
+      }
       ensureNetworkRuntime(api);
-      api.addUsing("System.IO");
       const token = nodeToken(api);
       const connected = api.entryMethod(
         api.node.id,
@@ -7064,36 +7475,65 @@ private static T GraphCollectionItemAt<T>(
         api.node.id,
         "closed"
       );
+      const keepText =
+        generatedOutputIsUsed(api, "text");
+      const keepBytes =
+        generatedOutputIsUsed(api, "bytes");
+      const keepConnected =
+        generatedOutputIsUsed(
+          api,
+          "isConnected"
+        );
+      const keepError =
+        generatedOutputIsUsed(api, "error");
+      if (keepText || keepBytes) {
+        api.addUsing("System.IO");
+      }
       api.addField(
         `${api.node.id}.socket`,
         `private static ClientWebSocket? _webSocket${token};`
       );
-      api.addField(
-        `${api.node.id}.text`,
-        `private static string _webSocketText${token} = string.Empty;`
-      );
-      api.addField(
-        `${api.node.id}.bytes`,
-        `private static byte[] _webSocketBytes${token} = Array.Empty<byte>();`
-      );
-      api.addField(
-        `${api.node.id}.connected`,
-        `private static bool _webSocketConnected${token};`
-      );
-      api.addField(
-        `${api.node.id}.error`,
-        `private static string _webSocketError${token} = string.Empty;`
-      );
+      if (keepText) {
+        api.addField(
+          `${api.node.id}.text`,
+          `private static string _webSocketText${token} = string.Empty;`
+        );
+      }
+      if (keepBytes) {
+        api.addField(
+          `${api.node.id}.bytes`,
+          `private static byte[] _webSocketBytes${token} = Array.Empty<byte>();`
+        );
+      }
+      if (keepConnected) {
+        api.addField(
+          `${api.node.id}.connected`,
+          `private static bool _webSocketConnected${token};`
+        );
+      }
+      if (keepError) {
+        api.addField(
+          `${api.node.id}.error`,
+          `private static string _webSocketError${token} = string.Empty;`
+        );
+      }
       api.addMember(
         `${api.node.id}.connect`,
-        `private static async void ConnectWebSocket${token}(string url)\n{\n    try\n    {\n        if (_webSocket${token} is not null)\n        {\n            _webSocket${token}.Dispose();\n        }\n\n        _webSocket${token} = new ClientWebSocket();\n        _webSocketError${token} = string.Empty;\n\n        foreach (string line in ${quote(
+        `private static async void ConnectWebSocket${token}(string url)\n{\n    try\n    {\n        if (_webSocket${token} is not null)\n        {\n            _webSocket${token}.Dispose();\n        }\n\n        _webSocket${token} = new ClientWebSocket();${keepError ? `\n        _webSocketError${token} = string.Empty;` : ""}\n\n        foreach (string line in ${quote(
           api,
           api.node.parameters.headers || ""
-        )}.Split('\\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))\n        {\n            int separator = line.IndexOf(':');\n            if (separator > 0)\n            {\n                _webSocket${token}.Options.SetRequestHeader(\n                    line[..separator].Trim(),\n                    line[(separator + 1)..].Trim());\n            }\n        }\n\n        await _webSocket${token}.ConnectAsync(new Uri(url), CancellationToken.None).ConfigureAwait(false);\n        _webSocketConnected${token} = true;${connected ? `\n        ${connected}();` : ""}\n\n        byte[] buffer = new byte[64 * 1024];\n\n        while (_webSocket${token}.State == WebSocketState.Open)\n        {\n            using MemoryStream frame = new();\n            WebSocketReceiveResult result;\n\n            do\n            {\n                result = await _webSocket${token}\n                    .ReceiveAsync(buffer, CancellationToken.None)\n                    .ConfigureAwait(false);\n\n                if (result.Count > 0)\n                {\n                    frame.Write(buffer, 0, result.Count);\n                }\n            }\n            while (!result.EndOfMessage);\n\n            if (result.MessageType == WebSocketMessageType.Close)\n            {\n                break;\n            }\n\n            _webSocketBytes${token} = frame.ToArray();\n            _webSocketText${token} = result.MessageType == WebSocketMessageType.Text\n                ? Encoding.UTF8.GetString(_webSocketBytes${token})\n                : string.Empty;${message ? `\n            ${message}();` : ""}\n        }\n    }\n    catch (Exception exception)\n    {\n        _webSocketError${token} = exception.ToString();\n    }\n    finally\n    {\n        _webSocketConnected${token} = false;${closed ? `\n        ${closed}();` : ""}\n    }\n}\n\nprivate static async void CloseWebSocket${token}()\n{\n    try\n    {\n        if (_webSocket${token}?.State == WebSocketState.Open)\n        {\n            await _webSocket${token}\n                .CloseAsync(WebSocketCloseStatus.NormalClosure, "Graph close", CancellationToken.None)\n                .ConfigureAwait(false);\n        }\n    }\n    catch (Exception exception)\n    {\n        _webSocketError${token} = exception.ToString();\n    }\n}`
+        )}.Split('\\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))\n        {\n            int separator = line.IndexOf(':');\n            if (separator > 0)\n            {\n                _webSocket${token}.Options.SetRequestHeader(\n                    line[..separator].Trim(),\n                    line[(separator + 1)..].Trim());\n            }\n        }\n\n        await _webSocket${token}.ConnectAsync(new Uri(url), CancellationToken.None).ConfigureAwait(false);${keepConnected ? `\n        _webSocketConnected${token} = true;` : ""}${connected ? `\n        ${connected}();` : ""}\n\n        byte[] buffer = new byte[64 * 1024];\n\n        while (_webSocket${token}.State == WebSocketState.Open)\n        {${keepText || keepBytes ? `\n            using MemoryStream frame = new();` : ""}\n            WebSocketReceiveResult result;\n\n            do\n            {\n                result = await _webSocket${token}\n                    .ReceiveAsync(buffer, CancellationToken.None)\n                    .ConfigureAwait(false);\n${keepText || keepBytes ? `\n                if (result.Count > 0)\n                {\n                    frame.Write(buffer, 0, result.Count);\n                }` : ""}\n            }\n            while (!result.EndOfMessage);\n\n            if (result.MessageType == WebSocketMessageType.Close)\n            {\n                break;\n            }\n${keepText || keepBytes ? `\n            byte[] messageBytes = frame.ToArray();` : ""}${keepBytes ? `\n            _webSocketBytes${token} = messageBytes;` : ""}${keepText ? `\n            _webSocketText${token} = result.MessageType == WebSocketMessageType.Text\n                ? Encoding.UTF8.GetString(messageBytes)\n                : string.Empty;` : ""}${message ? `\n            ${message}();` : ""}\n        }\n    }\n    catch (Exception exception)\n    {${keepError ? `\n        _webSocketError${token} = exception.ToString();` : `\n        _ = exception;`}\n    }\n    finally\n    {${keepConnected ? `\n        _webSocketConnected${token} = false;` : ""}${closed ? `\n        ${closed}();` : ""}\n    }\n}\n\nprivate static async void CloseWebSocket${token}()\n{\n    try\n    {\n        if (_webSocket${token}?.State == WebSocketState.Open)\n        {\n            await _webSocket${token}\n                .CloseAsync(WebSocketCloseStatus.NormalClosure, "Graph close", CancellationToken.None)\n                .ConfigureAwait(false);\n        }\n    }\n    catch (Exception exception)\n    {${keepError ? `\n        _webSocketError${token} = exception.ToString();` : `\n        _ = exception;`}\n    }\n}`
       );
     },
     codegenExpression(api) {
       const token = nodeToken(api);
+      if (
+        typeof api.isActionReachable ===
+          "function" &&
+        !api.isActionReachable()
+      ) {
+        return api.csDefault(api.type);
+      }
       switch (api.portId) {
         case "text":
           return `_webSocketText${token}`;
@@ -7136,19 +7576,29 @@ private static T GraphCollectionItemAt<T>(
         api.node.id,
         "done"
       );
-      api.addRuntimeField(
-        `${api.node.id}.error`,
-        `_webSocketSendError${token}`,
-        "string",
-        "string.Empty"
-      );
+      const keepError =
+        generatedActionOutputIsUsed(
+          api,
+          "error"
+        );
+      if (keepError) {
+        api.addRuntimeField(
+          `${api.node.id}.error`,
+          `_webSocketSendError${token}`,
+          "string",
+          "string.Empty"
+        );
+      }
       api.addMember(
         `${api.node.id}.send`,
-        `private static async void SendWebSocket${token}(ClientWebSocket socket, string text)\n{\n    try\n    {\n        _webSocketSendError${token} = string.Empty;\n        byte[] data = Encoding.UTF8.GetBytes(text ?? string.Empty);\n        await socket.SendAsync(data, WebSocketMessageType.Text, true, CancellationToken.None).ConfigureAwait(false);\n    }\n    catch (Exception exception)\n    {\n        _webSocketSendError${token} = exception.ToString();\n    }${done ? `\n\n    ${done}();` : ""}\n}`
+        `private static async void SendWebSocket${token}(ClientWebSocket? socket, string text)\n{\n    try\n    {${keepError ? `\n        _webSocketSendError${token} = string.Empty;` : ""}\n        ClientWebSocket activeSocket = socket ?? throw new InvalidOperationException("The WebSocket input is null.");\n        byte[] data = Encoding.UTF8.GetBytes(text ?? string.Empty);\n        await activeSocket.SendAsync(data, WebSocketMessageType.Text, true, CancellationToken.None).ConfigureAwait(false);\n    }\n    catch (Exception exception)\n    {${keepError ? `\n        _webSocketSendError${token} = exception.ToString();` : `\n        _ = exception;`}\n    }${done ? `\n\n    ${done}();` : ""}\n}`
       );
     },
     codegenExpression(api) {
-      return `_webSocketSendError${nodeToken(api)}`;
+      return generatedActionOutputExpression(
+        api,
+        `_webSocketSendError${nodeToken(api)}`
+      );
     },
     codegenAction(api) {
       return `SendWebSocket${nodeToken(api)}(${api.input("socket").code}, ${api.input("text").code});`;
@@ -7178,19 +7628,29 @@ private static T GraphCollectionItemAt<T>(
         api.node.id,
         "done"
       );
-      api.addRuntimeField(
-        `${api.node.id}.error`,
-        `_tcpError${token}`,
-        "string",
-        "string.Empty"
-      );
+      const keepError =
+        generatedActionOutputIsUsed(
+          api,
+          "error"
+        );
+      if (keepError) {
+        api.addRuntimeField(
+          `${api.node.id}.error`,
+          `_tcpError${token}`,
+          "string",
+          "string.Empty"
+        );
+      }
       api.addMember(
         `${api.node.id}.send`,
-        `private static async void SendTcp${token}(string host, int port, string text)\n{\n    try\n    {\n        _tcpError${token} = string.Empty;\n        using TcpClient client = new();\n        await client.ConnectAsync(host, port).ConfigureAwait(false);\n        byte[] data = Encoding.UTF8.GetBytes(text ?? string.Empty);\n        await client.GetStream().WriteAsync(data).ConfigureAwait(false);\n    }\n    catch (Exception exception)\n    {\n        _tcpError${token} = exception.ToString();\n    }${done ? `\n\n    ${done}();` : ""}\n}`
+        `private static async void SendTcp${token}(string host, int port, string text)\n{\n    try\n    {${keepError ? `\n        _tcpError${token} = string.Empty;` : ""}\n        using TcpClient client = new();\n        await client.ConnectAsync(host, port).ConfigureAwait(false);\n        byte[] data = Encoding.UTF8.GetBytes(text ?? string.Empty);\n        await client.GetStream().WriteAsync(data).ConfigureAwait(false);\n    }\n    catch (Exception exception)\n    {${keepError ? `\n        _tcpError${token} = exception.ToString();` : `\n        _ = exception;`}\n    }${done ? `\n\n    ${done}();` : ""}\n}`
       );
     },
     codegenExpression(api) {
-      return `_tcpError${nodeToken(api)}`;
+      return generatedActionOutputExpression(
+        api,
+        `_tcpError${nodeToken(api)}`
+      );
     },
     codegenAction(api) {
       return `SendTcp${nodeToken(api)}(${api.input("host").code}, ${api.input("port").code}, ${api.input("text").code});`;
@@ -7220,19 +7680,29 @@ private static T GraphCollectionItemAt<T>(
         api.node.id,
         "done"
       );
-      api.addRuntimeField(
-        `${api.node.id}.error`,
-        `_udpError${token}`,
-        "string",
-        "string.Empty"
-      );
+      const keepError =
+        generatedActionOutputIsUsed(
+          api,
+          "error"
+        );
+      if (keepError) {
+        api.addRuntimeField(
+          `${api.node.id}.error`,
+          `_udpError${token}`,
+          "string",
+          "string.Empty"
+        );
+      }
       api.addMember(
         `${api.node.id}.send`,
-        `private static async void SendUdp${token}(string host, int port, string text)\n{\n    try\n    {\n        _udpError${token} = string.Empty;\n        using UdpClient client = new();\n        byte[] data = Encoding.UTF8.GetBytes(text ?? string.Empty);\n        await client.SendAsync(data, data.Length, host, port).ConfigureAwait(false);\n    }\n    catch (Exception exception)\n    {\n        _udpError${token} = exception.ToString();\n    }${done ? `\n\n    ${done}();` : ""}\n}`
+        `private static async void SendUdp${token}(string host, int port, string text)\n{\n    try\n    {${keepError ? `\n        _udpError${token} = string.Empty;` : ""}\n        using UdpClient client = new();\n        byte[] data = Encoding.UTF8.GetBytes(text ?? string.Empty);\n        await client.SendAsync(data, data.Length, host, port).ConfigureAwait(false);\n    }\n    catch (Exception exception)\n    {${keepError ? `\n        _udpError${token} = exception.ToString();` : `\n        _ = exception;`}\n    }${done ? `\n\n    ${done}();` : ""}\n}`
       );
     },
     codegenExpression(api) {
-      return `_udpError${nodeToken(api)}`;
+      return generatedActionOutputExpression(
+        api,
+        `_udpError${nodeToken(api)}`
+      );
     },
     codegenAction(api) {
       return `SendUdp${nodeToken(api)}(${api.input("host").code}, ${api.input("port").code}, ${api.input("text").code});`;
@@ -7251,6 +7721,13 @@ private static T GraphCollectionItemAt<T>(
     ],
     outputs: [port("done", "Done", "impulse")],
     codegenCollect(api) {
+      if (
+        typeof api.isActionReachable ===
+          "function" &&
+        !api.isActionReachable()
+      ) {
+        return;
+      }
       ensureTaskRuntime(api);
       const token = nodeToken(api);
       const done = api.emitMethod(
@@ -7263,6 +7740,13 @@ private static T GraphCollectionItemAt<T>(
       );
     },
     codegenAction(api) {
+      if (
+        typeof api.isActionReachable ===
+          "function" &&
+        !api.isActionReachable()
+      ) {
+        return "";
+      }
       return `Delay${nodeToken(api)}(${api.input("milliseconds").code});`;
     }
   });
@@ -7279,6 +7763,13 @@ private static T GraphCollectionItemAt<T>(
       port("completed", "Completed", "impulse")
     ],
     codegenCollect(api) {
+      if (
+        typeof api.isActionReachable ===
+          "function" &&
+        !api.isActionReachable()
+      ) {
+        return;
+      }
       ensureTaskRuntime(api);
       const token = nodeToken(api);
       const background = api.emitMethod(
@@ -7295,6 +7786,13 @@ private static T GraphCollectionItemAt<T>(
       );
     },
     codegenAction(api) {
+      if (
+        typeof api.isActionReachable ===
+          "function" &&
+        !api.isActionReachable()
+      ) {
+        return "";
+      }
       return `RunBackground${nodeToken(api)}();`;
     }
   });
@@ -7315,6 +7813,13 @@ private static T GraphCollectionItemAt<T>(
       port("exception", "Exception", "exception")
     ],
     codegenCollect(api) {
+      if (
+        typeof api.isActionReachable ===
+          "function" &&
+        !api.isActionReachable()
+      ) {
+        return;
+      }
       ensureTaskRuntime(api);
       const token = nodeToken(api);
       const done = api.emitMethod(
@@ -7325,21 +7830,38 @@ private static T GraphCollectionItemAt<T>(
         api.node.id,
         "faulted"
       );
-      api.addRuntimeField(
-        `${api.node.id}.exception`,
-        `_awaitException${token}`,
-        "Exception",
-        "null!"
-      );
+      const keepException =
+        generatedActionOutputIsUsed(
+          api,
+          "exception"
+        );
+      if (keepException) {
+        api.addRuntimeField(
+          `${api.node.id}.exception`,
+          `_awaitException${token}`,
+          "Exception",
+          "null!"
+        );
+      }
       api.addMember(
         `${api.node.id}.await`,
-        `private static async void AwaitTask${token}(Task task)\n{\n    try\n    {\n        _awaitException${token} = null!;\n        await task.ConfigureAwait(false);${done ? `\n        ${done}();` : ""}\n    }\n    catch (Exception exception)\n    {\n        _awaitException${token} = exception;${faulted ? `\n        ${faulted}();` : ""}\n    }\n}`
+        `private static async void AwaitTask${token}(Task task)\n{\n    try\n    {${keepException ? `\n        _awaitException${token} = null!;` : ""}\n        await task.ConfigureAwait(false);${done ? `\n        ${done}();` : ""}\n    }\n    catch (Exception exception)\n    {${keepException ? `\n        _awaitException${token} = exception;` : `\n        _ = exception;`}${faulted ? `\n        ${faulted}();` : ""}\n    }\n}`
       );
     },
     codegenExpression(api) {
-      return `_awaitException${nodeToken(api)}`;
+      return generatedActionOutputExpression(
+        api,
+        `_awaitException${nodeToken(api)}`
+      );
     },
     codegenAction(api) {
+      if (
+        typeof api.isActionReachable ===
+          "function" &&
+        !api.isActionReachable()
+      ) {
+        return "";
+      }
       return `AwaitTask${nodeToken(api)}(${api.input("task").code});`;
     }
   });
@@ -9241,18 +9763,28 @@ private static string NormalConversionError<T>(object? value)
         );
       },
       codegenCollect(api) {
-        addStatefulField(
-          api,
-          `${id.replace(/[^A-Za-z0-9]/g, "")}Success`,
-          "bool",
-          "false"
-        );
+        if (
+          generatedActionOutputIsUsed(
+            api,
+            "success"
+          )
+        ) {
+          addStatefulField(
+            api,
+            `${id.replace(/[^A-Za-z0-9]/g, "")}Success`,
+            "bool",
+            "false"
+          );
+        }
       },
       codegenExpression(api) {
         const token = nodeToken(api);
         const list = api.input("list").code;
         if (api.portId === "success") {
-          return `_${id.replace(/[^A-Za-z0-9]/g, "")}Success${token}`;
+          return generatedActionOutputExpression(
+            api,
+            `_${id.replace(/[^A-Za-z0-9]/g, "")}Success${token}`
+          );
         }
         if (api.portId === "count") {
           return `${list}.Count`;
@@ -9261,7 +9793,13 @@ private static string NormalConversionError<T>(object? value)
       },
       codegenAction(api) {
         const token = nodeToken(api);
-        const success = `_${id.replace(/[^A-Za-z0-9]/g, "")}Success${token}`;
+        const success =
+          generatedActionOutputIsUsed(
+            api,
+            "success"
+          )
+            ? `_${id.replace(/[^A-Za-z0-9]/g, "")}Success${token}`
+            : "";
         const list = api.input("list").code;
         const action = actionRenderer(
           api,
@@ -9280,7 +9818,7 @@ private static string NormalConversionError<T>(object? value)
     "+[]",
     [{ id: "value", label: "Value", type: "$item" }],
     (api, list, success) =>
-      `lock (${list}) { ${list}.Add(${api.input("value").code}); ${success} = true; }`
+      `lock (${list}) { ${list}.Add(${api.input("value").code});${success ? ` ${success} = true;` : ""} }`
   );
   registerNormalListMutation(
     "collection.insertItem",
@@ -9292,7 +9830,10 @@ private static string NormalConversionError<T>(object? value)
     ],
     (api, list, success) => {
       const index = api.input("index").code;
-      return `lock (${list}) { ${success} = ${index} >= 0 && ${index} <= ${list}.Count; if (${success}) { ${list}.Insert(${index}, ${api.input("value").code}); } }`;
+      const condition = `${index} >= 0 && ${index} <= ${list}.Count`;
+      return success
+        ? `lock (${list}) { ${success} = ${condition}; if (${success}) { ${list}.Insert(${index}, ${api.input("value").code}); } }`
+        : `lock (${list}) { if (${condition}) { ${list}.Insert(${index}, ${api.input("value").code}); } }`;
     }
   );
   registerNormalListMutation(
@@ -9301,7 +9842,7 @@ private static string NormalConversionError<T>(object? value)
     "−[]",
     [{ id: "value", label: "Value", type: "$item" }],
     (api, list, success) =>
-      `lock (${list}) { ${success} = ${list}.Remove(${api.input("value").code}); }`
+      `lock (${list}) { ${success ? `${success} = ` : ""}${list}.Remove(${api.input("value").code}); }`
   );
   registerNormalListMutation(
     "collection.removeAt",
@@ -9310,7 +9851,10 @@ private static string NormalConversionError<T>(object? value)
     [port("index", "Index", "int")],
     (api, list, success) => {
       const index = api.input("index").code;
-      return `lock (${list}) { ${success} = ${index} >= 0 && ${index} < ${list}.Count; if (${success}) { ${list}.RemoveAt(${index}); } }`;
+      const condition = `${index} >= 0 && ${index} < ${list}.Count`;
+      return success
+        ? `lock (${list}) { ${success} = ${condition}; if (${success}) { ${list}.RemoveAt(${index}); } }`
+        : `lock (${list}) { if (${condition}) { ${list}.RemoveAt(${index}); } }`;
     }
   );
   registerNormalListMutation(
@@ -9319,7 +9863,7 @@ private static string NormalConversionError<T>(object? value)
     "CLR[]",
     [],
     (_api, list, success) =>
-      `lock (${list}) { ${list}.Clear(); ${success} = true; }`
+      `lock (${list}) { ${list}.Clear();${success ? ` ${success} = true;` : ""} }`
   );
 
   function registerNormalListQuery(
@@ -9622,7 +10166,13 @@ private static string NormalConversionError<T>(object? value)
         );
       },
       codegenCollect(api) {
-        if (options.statefulSuccess === true) {
+        if (
+          options.statefulSuccess === true &&
+          generatedActionOutputIsUsed(
+            api,
+            "success"
+          )
+        ) {
           addStatefulField(
             api,
             `${id.replace(/[^A-Za-z0-9]/g, "")}Success`,
@@ -9642,7 +10192,10 @@ private static string NormalConversionError<T>(object? value)
           options.statefulSuccess === true &&
           api.portId === "success"
         ) {
-          return `_${id.replace(/[^A-Za-z0-9]/g, "")}Success${nodeToken(api)}`;
+          return generatedActionOutputExpression(
+            api,
+            `_${id.replace(/[^A-Za-z0-9]/g, "")}Success${nodeToken(api)}`
+          );
         }
         return expression ? expression(api) : "default!";
       },
@@ -9671,9 +10224,15 @@ private static string NormalConversionError<T>(object? value)
       ? `${api.input("dictionary").code}.Count`
       : api.input("dictionary").code,
     api => {
-      const success = `_dictionarysetValueSuccess${nodeToken(api)}`;
+      const success =
+        generatedActionOutputIsUsed(
+          api,
+          "success"
+        )
+          ? `_dictionarysetValueSuccess${nodeToken(api)}`
+          : "";
       const dictionary = api.input("dictionary").code;
-      return `try { lock (${dictionary}) { ${dictionary}[${api.input("key").code}] = ${api.input("value").code}; } ${success} = true; } catch { ${success} = false; }`;
+      return `try { lock (${dictionary}) { ${dictionary}[${api.input("key").code}] = ${api.input("value").code}; }${success ? ` ${success} = true;` : ""} } catch {${success ? ` ${success} = false;` : ""} }`;
     }
   );
   registerNormalDictionaryNode(
@@ -9711,9 +10270,15 @@ private static string NormalConversionError<T>(object? value)
       ? `${api.input("dictionary").code}.Count`
       : api.input("dictionary").code,
     api => {
-      const success = `_dictionaryremoveKeySuccess${nodeToken(api)}`;
+      const success =
+        generatedActionOutputIsUsed(
+          api,
+          "success"
+        )
+          ? `_dictionaryremoveKeySuccess${nodeToken(api)}`
+          : "";
       const dictionary = api.input("dictionary").code;
-      return `lock (${dictionary}) { ${success} = ${dictionary}.Remove(${api.input("key").code}); }`;
+      return `lock (${dictionary}) { ${success ? `${success} = ` : ""}${dictionary}.Remove(${api.input("key").code}); }`;
     }
   );
   registerNormalDictionaryNode(
@@ -9767,24 +10332,36 @@ private static string NormalConversionError<T>(object? value)
       ],
       codegenCollect(api) {
         api.addUsing("System.IO");
-        addStatefulField(
-          api,
-          `${id.replace(/[^A-Za-z0-9]/g, "")}Success`,
-          "bool",
-          "false"
-        );
-        addStatefulField(
-          api,
-          `${id.replace(/[^A-Za-z0-9]/g, "")}Exception`,
-          "Exception",
-          "null!"
-        );
+        if (generatedActionOutputIsUsed(api, "success")) {
+          addStatefulField(
+            api,
+            `${id.replace(/[^A-Za-z0-9]/g, "")}Success`,
+            "bool",
+            "false"
+          );
+        }
+        if (
+          generatedActionOutputIsUsed(
+            api,
+            "exception"
+          )
+        ) {
+          addStatefulField(
+            api,
+            `${id.replace(/[^A-Za-z0-9]/g, "")}Exception`,
+            "Exception",
+            "null!"
+          );
+        }
       },
       codegenExpression(api) {
         const stem = id.replace(/[^A-Za-z0-9]/g, "");
-        return api.portId === "exception"
-          ? `_${stem}Exception${nodeToken(api)}`
-          : `_${stem}Success${nodeToken(api)}`;
+        return generatedActionOutputExpression(
+          api,
+          api.portId === "exception"
+            ? `_${stem}Exception${nodeToken(api)}`
+            : `_${stem}Success${nodeToken(api)}`
+        );
       },
       codegenAction(api) {
         const stem = id.replace(/[^A-Za-z0-9]/g, "");
@@ -9795,7 +10372,24 @@ private static string NormalConversionError<T>(object? value)
           ? "true"
           : "false";
         const done = api.emit("done");
-        return `try\n        {\n            ${exception} = null!;\n            ${method}(${api.input("source").code}, ${api.input("destination").code}, ${overwrite});\n            ${success} = true;\n        }\n        catch (Exception caught)\n        {\n            ${success} = false;\n            ${exception} = caught;\n        }${done ? `\n        ${done}();` : ""}`;
+        const keepSuccess =
+          generatedActionOutputIsUsed(api, "success");
+        const keepException =
+          generatedActionOutputIsUsed(api, "exception");
+        const before = keepException
+          ? `${exception} = null!;\n            `
+          : "";
+        const after = keepSuccess
+          ? `\n            ${success} = true;`
+          : "";
+        const catchClause = keepException
+          ? "catch (Exception caught)"
+          : "catch (Exception)";
+        const failure = [
+          keepSuccess ? `${success} = false;` : "",
+          keepException ? `${exception} = caught;` : ""
+        ].filter(Boolean).join("\n            ");
+        return `try\n        {\n            ${before}${method}(${api.input("source").code}, ${api.input("destination").code}, ${overwrite});${after}\n        }\n        ${catchClause}\n        {${failure ? `\n            ${failure}\n        ` : ""}}${done ? `\n        ${done}();` : ""}`;
       }
     });
   }
@@ -9895,26 +10489,41 @@ private static string NormalConversionError<T>(object? value)
       codegenCollect(api) {
         ensureJsonRuntime(api);
         const stem = id.replace(/[^A-Za-z0-9]/g, "");
-        addStatefulField(
-          api,
-          `${stem}Success`,
-          "bool",
-          "false"
-        );
-        addStatefulField(
-          api,
-          `${stem}Exception`,
-          "Exception",
-          "null!"
-        );
+        if (generatedActionOutputIsUsed(api, "success")) {
+          addStatefulField(
+            api,
+            `${stem}Success`,
+            "bool",
+            "false"
+          );
+        }
+        if (
+          generatedActionOutputIsUsed(
+            api,
+            "exception"
+          )
+        ) {
+          addStatefulField(
+            api,
+            `${stem}Exception`,
+            "Exception",
+            "null!"
+          );
+        }
       },
       codegenExpression(api) {
         const stem = id.replace(/[^A-Za-z0-9]/g, "");
         if (api.portId === "success") {
-          return `_${stem}Success${nodeToken(api)}`;
+          return generatedActionOutputExpression(
+            api,
+            `_${stem}Success${nodeToken(api)}`
+          );
         }
         if (api.portId === "exception") {
-          return `_${stem}Exception${nodeToken(api)}`;
+          return generatedActionOutputExpression(
+            api,
+            `_${stem}Exception${nodeToken(api)}`
+          );
         }
         return api.input("json").code;
       },
@@ -9924,7 +10533,24 @@ private static string NormalConversionError<T>(object? value)
         const success = `_${stem}Success${token}`;
         const exception = `_${stem}Exception${token}`;
         const done = api.emit("done");
-        return `try\n        {\n            ${exception} = null!;\n            ${success} = ${operation(api)};\n        }\n        catch (Exception caught)\n        {\n            ${success} = false;\n            ${exception} = caught;\n        }${done ? `\n        ${done}();` : ""}`;
+        const keepSuccess =
+          generatedActionOutputIsUsed(api, "success");
+        const keepException =
+          generatedActionOutputIsUsed(api, "exception");
+        const before = keepException
+          ? `${exception} = null!;\n            `
+          : "";
+        const mutate = keepSuccess
+          ? `${success} = ${operation(api)};`
+          : `_ = ${operation(api)};`;
+        const catchClause = keepException
+          ? "catch (Exception caught)"
+          : "catch (Exception)";
+        const failure = [
+          keepSuccess ? `${success} = false;` : "",
+          keepException ? `${exception} = caught;` : ""
+        ].filter(Boolean).join("\n            ");
+        return `try\n        {\n            ${before}${mutate}\n        }\n        ${catchClause}\n        {${failure ? `\n            ${failure}\n        ` : ""}}${done ? `\n        ${done}();` : ""}`;
       }
     });
   }
@@ -9975,16 +10601,37 @@ private static string NormalConversionError<T>(object? value)
     codegenCollect(api) {
       ensureTaskRuntime(api);
       const token = nodeToken(api);
-      api.addField(
-        `${api.node.id}.source`,
-        `private static CancellationTokenSource _normalCancellation${token} = new();`
-      );
-      addStatefulField(
-        api,
-        "normalCancellationException",
-        "Exception",
-        "null!"
-      );
+      const actionReachable =
+        typeof api.isActionReachable ===
+          "function"
+          ? api.isActionReachable()
+          : true;
+      if (
+        actionReachable ||
+        generatedOutputIsUsed(api, "token") ||
+        generatedOutputIsUsed(
+          api,
+          "isCancellationRequested"
+        )
+      ) {
+        api.addField(
+          `${api.node.id}.source`,
+          `private static CancellationTokenSource _normalCancellation${token} = new();`
+        );
+      }
+      if (
+        generatedActionOutputIsUsed(
+          api,
+          "exception"
+        )
+      ) {
+        addStatefulField(
+          api,
+          "normalCancellationException",
+          "Exception",
+          "null!"
+        );
+      }
     },
     codegenExpression(api) {
       const token = nodeToken(api);
@@ -9992,7 +10639,10 @@ private static string NormalConversionError<T>(object? value)
         return `_normalCancellation${token}.IsCancellationRequested`;
       }
       if (api.portId === "exception") {
-        return `_normalCancellationException${token}`;
+        return generatedActionOutputExpression(
+          api,
+          `_normalCancellationException${token}`
+        );
       }
       return `_normalCancellation${token}.Token`;
     },
@@ -10000,12 +10650,23 @@ private static string NormalConversionError<T>(object? value)
       const token = nodeToken(api);
       const exception = `_normalCancellationException${token}`;
       const failed = api.emit("failed");
+      const keepException =
+        generatedActionOutputIsUsed(
+          api,
+          "exception"
+        );
       if (api.connection?.toPort === "cancel") {
         const cancelled = api.emit("cancelled");
-        return `try\n        {\n            ${exception} = null!;\n            _normalCancellation${token}.Cancel();${cancelled ? `\n            ${cancelled}();` : ""}\n        }\n        catch (Exception caught)\n        {\n            ${exception} = caught;${failed ? `\n            ${failed}();` : ""}\n        }`;
+        const catchClause = keepException
+          ? "catch (Exception caught)"
+          : "catch (Exception)";
+        return `try\n        {${keepException ? `\n            ${exception} = null!;` : ""}\n            _normalCancellation${token}.Cancel();${cancelled ? `\n            ${cancelled}();` : ""}\n        }\n        ${catchClause}\n        {${keepException ? `\n            ${exception} = caught;` : ""}${failed ? `\n            ${failed}();` : ""}\n        }`;
       }
       const ready = api.emit("ready");
-      return `try\n        {\n            _normalCancellation${token}.Dispose();\n            _normalCancellation${token} = new CancellationTokenSource();\n            ${exception} = null!;${ready ? `\n            ${ready}();` : ""}\n        }\n        catch (Exception caught)\n        {\n            ${exception} = caught;${failed ? `\n            ${failed}();` : ""}\n        }`;
+      const catchClause = keepException
+        ? "catch (Exception caught)"
+        : "catch (Exception)";
+      return `try\n        {\n            _normalCancellation${token}.Dispose();\n            _normalCancellation${token} = new CancellationTokenSource();${keepException ? `\n            ${exception} = null!;` : ""}${ready ? `\n            ${ready}();` : ""}\n        }\n        ${catchClause}\n        {${keepException ? `\n            ${exception} = caught;` : ""}${failed ? `\n            ${failed}();` : ""}\n        }`;
     }
   });
 
@@ -10041,19 +10702,37 @@ private static string NormalConversionError<T>(object? value)
         api.node.id,
         "faulted"
       );
-      addStatefulField(
-        api,
-        "normalTimeoutException",
-        "Exception",
-        "null!"
-      );
+      if (
+        generatedActionOutputIsUsed(
+          api,
+          "exception"
+        )
+      ) {
+        addStatefulField(
+          api,
+          "normalTimeoutException",
+          "Exception",
+          "null!"
+        );
+      }
+      const keepException =
+        generatedActionOutputIsUsed(
+          api,
+          "exception"
+        );
+      const catchClause = keepException
+        ? "catch (Exception caught)"
+        : "catch (Exception)";
       api.addMember(
         `${api.node.id}.timeout`,
-        `private static async void WaitWithTimeout${token}(Task task, int milliseconds)\n{\n    try\n    {\n        _normalTimeoutException${token} = null!;\n        Task delay = Task.Delay(Math.Max(0, milliseconds));\n        Task winner = await Task.WhenAny(task, delay).ConfigureAwait(false);\n        if (ReferenceEquals(winner, delay))\n        {${timedOut ? `\n            ${timedOut}();` : ""}\n            return;\n        }\n\n        await task.ConfigureAwait(false);${completed ? `\n        ${completed}();` : ""}\n    }\n    catch (Exception caught)\n    {\n        _normalTimeoutException${token} = caught;${faulted ? `\n        ${faulted}();` : ""}\n    }\n}`
+        `private static async void WaitWithTimeout${token}(Task task, int milliseconds)\n{\n    try\n    {${keepException ? `\n        _normalTimeoutException${token} = null!;` : ""}\n        Task delay = Task.Delay(Math.Max(0, milliseconds));\n        Task winner = await Task.WhenAny(task, delay).ConfigureAwait(false);\n        if (ReferenceEquals(winner, delay))\n        {${timedOut ? `\n            ${timedOut}();` : ""}\n            return;\n        }\n\n        await task.ConfigureAwait(false);${completed ? `\n        ${completed}();` : ""}\n    }\n    ${catchClause}\n    {${keepException ? `\n        _normalTimeoutException${token} = caught;` : ""}${faulted ? `\n        ${faulted}();` : ""}\n    }\n}`
       );
     },
     codegenExpression(api) {
-      return `_normalTimeoutException${nodeToken(api)}`;
+      return generatedActionOutputExpression(
+        api,
+        `_normalTimeoutException${nodeToken(api)}`
+      );
     },
     codegenAction(api) {
       return `WaitWithTimeout${nodeToken(api)}(${api.input("task").code}, ${api.input("milliseconds").code});`;

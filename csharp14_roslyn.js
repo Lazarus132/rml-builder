@@ -3,86 +3,284 @@
 
   const ASSEMBLY = "RmlCSharp14ParserWasm";
   const LANGUAGE_VERSION = "14.0";
-  const MODULE_URL = "./_framework/dotnet.js";
-  let runtimePromise = null;
+  const channels = {
+    validator: {
+      label: "C# 14 validator",
+      url: "./validator_worker.js?v=3-auto-reference-v730",
+      name: "rml-csharp14-validator",
+      worker: null,
+      failure: null
+    },
+    compiler: {
+      label: ".NET compiler",
+      url: "./compiler_worker.js?v=3-auto-reference-v730",
+      name: "rml-csharp14-compiler",
+      worker: null,
+      failure: null
+    }
+  };
+  const START_TIMEOUT_MS = 5 * 60 * 1000;
+  const OPERATION_TIMEOUT_MS = 10 * 60 * 1000;
 
-  function parseJson(value, label) {
-    try {
-      return JSON.parse(String(value));
-    } catch (error) {
-      throw new Error(`${label} returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
+  let requestSequence = 0;
+  const pending = new Map();
+
+  function describeError(error, fallback) {
+    const message = error instanceof Error
+      ? error.message
+      : String(error || "");
+    return message || fallback;
+  }
+
+  function rejectPending(channel, error) {
+    for (const [id, request] of pending) {
+      if (request.channel !== channel) continue;
+      globalThis.clearTimeout(request.timer);
+      request.reject(error);
+      pending.delete(id);
     }
   }
 
-  async function startRuntime() {
-    const runtimeModule = await import(MODULE_URL);
-    if (!runtimeModule?.dotnet?.create) {
-      throw new Error("The bundled .NET 10 browser runtime is incomplete.");
+  function markWorkerFailed(channel, message) {
+    if (channel.failure) return channel.failure;
+    channel.failure = new Error(
+      message ||
+      `The isolated ${channel.label} worker stopped unexpectedly. Reload the Builder before trying again.`
+    );
+    const failedWorker = channel.worker;
+    channel.worker = null;
+    try {
+      failedWorker?.terminate();
+    } catch {
+      // The worker may already have terminated after a native runtime failure.
     }
-    const runtime = await runtimeModule.dotnet
-      .withApplicationArguments("--rml-csharp14-parser")
-      .create();
-    const config = runtime.getConfig();
-    if (config?.mainAssemblyName !== ASSEMBLY) {
-      throw new Error(`Unexpected Roslyn parser assembly '${config?.mainAssemblyName || "unknown"}'.`);
+    rejectPending(channel, channel.failure);
+    return channel.failure;
+  }
+
+  function handleMessage(channel, event) {
+    const message = event?.data;
+    const request = pending.get(message?.id);
+    if (!request || request.channel !== channel) return;
+
+    if (message.type === "progress") {
+      try {
+        request.onProgress?.(message.progress);
+      } catch (error) {
+        console.error("Compiler progress callback failed.", error);
+      }
+      return;
     }
-    const exports = await runtime.getAssemblyExports(config.mainAssemblyName);
-    const bridge = exports?.RmlCSharp14ParserWasm?.CSharp14ParserBridge;
-    if (!bridge?.ParseCSharp14Export || !bridge?.ValidateCSharp14Export || !bridge?.GetCSharp14SyntaxKindsExport) {
-      throw new Error("The bundled Roslyn C# 14 bridge exports are missing.");
+
+    pending.delete(message.id);
+    globalThis.clearTimeout(request.timer);
+    if (message.type === "result") {
+      request.resolve(message.result);
+      return;
     }
-    const syntaxKinds = parseJson(bridge.GetCSharp14SyntaxKindsExport(), "Roslyn SyntaxKind catalog");
-    if (!Array.isArray(syntaxKinds) || syntaxKinds.length < 500) {
-      throw new Error(`The Roslyn SyntaxKind catalog is incomplete (${syntaxKinds?.length || 0}).`);
+
+    const detail = String(
+      message?.error?.message ||
+      "The isolated compiler operation failed."
+    );
+    const error = new Error(detail);
+    if (message?.error?.stack) {
+      error.stack = String(message.error.stack);
     }
-    return Object.freeze({ runtime, bridge, syntaxKinds: Object.freeze(syntaxKinds) });
+    request.reject(error);
+  }
+
+  function createWorker(channel) {
+    if (channel.failure) throw channel.failure;
+    if (channel.worker) return channel.worker;
+    if (typeof globalThis.Worker !== "function") {
+      throw markWorkerFailed(
+        channel,
+        "This browser does not support the isolated workers required for local C# validation and DLL builds."
+      );
+    }
+
+    const nextWorker = new Worker(channel.url, {
+      name: channel.name
+    });
+    channel.worker = nextWorker;
+    nextWorker.addEventListener(
+      "message",
+      event => handleMessage(channel, event)
+    );
+    nextWorker.addEventListener("messageerror", () => {
+      markWorkerFailed(
+        channel,
+        `The browser could not read a response from the isolated ${channel.label} worker. Reload the Builder before trying again.`
+      );
+    });
+    nextWorker.addEventListener("error", event => {
+      event.preventDefault?.();
+      const detail = String(event?.message || "").trim();
+      markWorkerFailed(
+        channel,
+        detail
+          ? `The isolated ${channel.label} worker stopped: ${detail}`
+          : `The isolated ${channel.label} worker stopped unexpectedly. Reload the Builder before trying again.`
+      );
+    });
+    return channel.worker;
+  }
+
+  function invoke(
+    channel,
+    method,
+    args = [],
+    {
+      onProgress = null,
+      timeoutMs = OPERATION_TIMEOUT_MS
+    } = {}
+  ) {
+    if (channel.failure) {
+      return Promise.reject(channel.failure);
+    }
+
+    return new Promise((resolve, reject) => {
+      let activeWorker;
+      try {
+        activeWorker = createWorker(channel);
+      } catch (error) {
+        reject(error);
+        return;
+      }
+
+      const id = ++requestSequence;
+      const timer = globalThis.setTimeout(() => {
+        pending.delete(id);
+        const error = markWorkerFailed(
+          channel,
+          `The isolated ${channel.label} did not finish '${method}' within ${Math.round(timeoutMs / 60000)} minutes. Reload the Builder before trying again.`
+        );
+        reject(error);
+      }, timeoutMs);
+      pending.set(id, {
+        resolve,
+        reject,
+        onProgress,
+        timer,
+        channel
+      });
+
+      try {
+        activeWorker.postMessage({
+          type: "invoke",
+          id,
+          method,
+          args
+        });
+      } catch (error) {
+        pending.delete(id);
+        globalThis.clearTimeout(timer);
+        reject(markWorkerFailed(
+          channel,
+          `The ${channel.label} request could not be sent to its worker: ${describeError(error, "unknown browser error")}`
+        ));
+      }
+    });
   }
 
   function ensureReady() {
-    if (!runtimePromise) {
-      runtimePromise = startRuntime().catch(error => {
-        runtimePromise = null;
-        throw error;
-      });
+    return invoke(
+      channels.validator,
+      "ensureReady",
+      [],
+      { timeoutMs: START_TIMEOUT_MS }
+    );
+  }
+
+  function parse(source) {
+    return invoke(
+      channels.validator,
+      "parse",
+      [String(source ?? "")]
+    );
+  }
+
+  function validate(source) {
+    return invoke(
+      channels.validator,
+      "validate",
+      [String(source ?? "")]
+    );
+  }
+
+  function getSyntaxKinds() {
+    return invoke(
+      channels.validator,
+      "getSyntaxKinds"
+    );
+  }
+
+  function configureReferences(files, onProgress) {
+    return invoke(
+      channels.compiler,
+      "configureReferences",
+      [Array.isArray(files) ? files : []],
+      { onProgress }
+    );
+  }
+
+  function compile(projects, options = {}) {
+    const workerOptions = {
+      referenceFiles: Array.isArray(options.referenceFiles)
+        ? options.referenceFiles
+        : [],
+      emitPdb: options.emitPdb === true
+    };
+    return invoke(
+      channels.compiler,
+      "compile",
+      [Array.isArray(projects) ? projects : [], workerOptions],
+      { onProgress: options.onProgress }
+    );
+  }
+
+  function resetCompilerReferences() {
+    if (
+      !channels.compiler.worker ||
+      channels.compiler.failure
+    ) {
+      return Promise.resolve();
     }
-    return runtimePromise;
+    return invoke(
+      channels.compiler,
+      "resetCompilerReferences"
+    );
   }
 
-  async function parse(source) {
-    const { bridge } = await ensureReady();
-    const result = parseJson(bridge.ParseCSharp14Export(String(source ?? "")), "Roslyn C# 14 parser");
-    if (!result || result.languageVersion !== LANGUAGE_VERSION || !result.root) {
-      throw new Error("The bundled parser did not return the fixed C# 14 AST contract.");
+  Object.defineProperty(
+    window,
+    "RMLCSharp14Roslyn",
+    {
+      value: Object.freeze({
+        version: 9,
+        name: "Roslyn C# 14 isolated browser compiler (.NET 9 host, .NET 10 target)",
+        languageVersion: LANGUAGE_VERSION,
+        assembly: ASSEMBLY,
+        runtime: "split-dotnet9-browser-wasm-workers-net10-target",
+        ensureReady,
+        parse,
+        validate,
+        getSyntaxKinds,
+        compile,
+        configureReferences,
+        resetCompilerReferences,
+        capabilities: Object.freeze({
+          syntaxValidation: true,
+          binaryCompilation: true,
+          portablePdb: false,
+          offline: true,
+          isolatedWorker: true,
+          targetFramework: "net10.0"
+        })
+      }),
+      configurable: true,
+      enumerable: true
     }
-    return result;
-  }
-
-  async function validate(source) {
-    const { bridge } = await ensureReady();
-    const result = parseJson(bridge.ValidateCSharp14Export(String(source ?? "")), "Roslyn C# 14 validator");
-    if (!result || result.languageVersion !== LANGUAGE_VERSION || !Array.isArray(result.diagnostics)) {
-      throw new Error("The bundled validator did not return the fixed C# 14 diagnostic contract.");
-    }
-    return result;
-  }
-
-  async function getSyntaxKinds() {
-    const { syntaxKinds } = await ensureReady();
-    return [...syntaxKinds];
-  }
-
-  Object.defineProperty(window, "RMLCSharp14Roslyn", {
-    value: Object.freeze({
-      version: 3,
-      languageVersion: LANGUAGE_VERSION,
-      assembly: ASSEMBLY,
-      runtime: "bundled-dotnet10-browser-wasm",
-      ensureReady,
-      parse,
-      validate,
-      getSyntaxKinds
-    }),
-    configurable: true,
-    enumerable: true
-  });
+  );
 })();

@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const LOADER_VERSION = 73;
+  const LOADER_VERSION = 74;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
   const CATALOG_PATH = "/resonite_api_catalog.json";
@@ -34,7 +34,7 @@
     document.currentScript?.src ||
     window.location.href;
   const modNodesUrl = new URL(
-    "mod_nodes.js?v=68-guidance-comments-global-v723",
+    "mod_nodes.js?v=69-warning-free-codegen-v734",
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
@@ -42,7 +42,7 @@
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=64-guidance-comments-global-v723",
+    "api_nodes.js?v=65-warning-free-codegen-v734",
     scriptUrl
   ).href;
 

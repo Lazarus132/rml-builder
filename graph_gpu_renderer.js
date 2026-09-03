@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = 6;
+  const VERSION = 7;
   const WIRE_CELL_SIZE = 240;
   const NODE_CELL_SIZE = 360;
   const WIRE_LINEAR_PICK_LIMIT = 512;
@@ -297,11 +297,8 @@
 
   class GraphHybridRenderer {
     constructor(options = {}) {
-      this.viewport = options.viewport || null;
-      this.onAvailabilityChange =
-        typeof options.onAvailabilityChange === "function"
-          ? options.onAvailabilityChange
-          : null;
+      this.viewport = null;
+      this.onAvailabilityChange = null;
       this.canvas = document.createElement("canvas");
       this.canvas.className = "rml-graph-gpu-canvas";
       this.canvas.setAttribute("aria-hidden", "true");
@@ -320,7 +317,20 @@
       this.pixelRatio = 1;
       this.available = false;
       this.contextLost = false;
+      this.disposed = false;
       this.frame = 0;
+      this.resizeObserver = null;
+      this.gridProgram = null;
+      this.wireProgram = null;
+      this.nodeProgram = null;
+      this.uniforms = null;
+      this.wireVertexArray = null;
+      this.wireVertexBuffer = null;
+      this.previewVertexArray = null;
+      this.previewVertexBuffer = null;
+      this.nodeVertexArray = null;
+      this.nodeVertexBuffer = null;
+      this.nodeIndexBuffer = null;
       this.wireRecords = [];
       this.wireSpatialIndex = new Map();
       this.wireLayerCache = new Map();
@@ -358,33 +368,32 @@
       };
       this.drawSamples = 0;
 
+      this.handleContextLost = event => {
+        event.preventDefault();
+        if (this.disposed) return;
+        this.contextLost = true;
+        this.setAvailability(false);
+      };
+      this.handleContextRestored = () => {
+        if (this.disposed) return;
+        this.contextLost = false;
+        this.initialize();
+        this.setScene(this.scene);
+        this.setPreview(
+          this.previewSegment
+        );
+      };
       this.canvas.addEventListener(
         "webglcontextlost",
-        event => {
-          event.preventDefault();
-          this.contextLost = true;
-          this.setAvailability(false);
-        }
+        this.handleContextLost
       );
       this.canvas.addEventListener(
         "webglcontextrestored",
-        () => {
-          this.contextLost = false;
-          this.initialize();
-          this.setScene(this.scene);
-          this.setPreview(
-            this.previewSegment
-          );
-        }
+        this.handleContextRestored
       );
 
       this.initialize();
-      this.resizeObserver =
-        typeof ResizeObserver === "function" && this.viewport
-          ? new ResizeObserver(() => this.resize())
-          : null;
-      this.resizeObserver?.observe(this.viewport);
-      this.resize();
+      this.attach(options);
     }
 
     setAvailability(value) {
@@ -399,7 +408,7 @@
     }
 
     initialize() {
-      if (this.contextLost) {
+      if (this.contextLost || this.disposed) {
         return false;
       }
 
@@ -427,6 +436,7 @@
 
       try {
         this.gl = gl;
+        this.deleteGpuResources();
         this.createPrograms();
         this.createBuffers();
         gl.disable(gl.DEPTH_TEST);
@@ -440,10 +450,188 @@
         return true;
       } catch (error) {
         console.error("RML graph WebGL initialization failed.", error);
+        this.deleteGpuResources();
         this.gl = null;
         this.setAvailability(false);
         return false;
       }
+    }
+
+    attach(options = {}) {
+      if (this.disposed) {
+        return false;
+      }
+
+      this.resizeObserver?.disconnect();
+      this.resizeObserver = null;
+      this.viewport = options.viewport || null;
+      this.onAvailabilityChange =
+        typeof options.onAvailabilityChange === "function"
+          ? options.onAvailabilityChange
+          : null;
+
+      if (
+        typeof ResizeObserver === "function" &&
+        this.viewport
+      ) {
+        this.resizeObserver =
+          new ResizeObserver(() => this.resize());
+        this.resizeObserver.observe(this.viewport);
+      }
+
+      this.onAvailabilityChange?.(
+        this.available
+      );
+      this.resize();
+      this.scheduleDraw();
+      return true;
+    }
+
+    detach() {
+      if (this.disposed) {
+        return false;
+      }
+      if (this.frame) {
+        cancelAnimationFrame(this.frame);
+        this.frame = 0;
+      }
+      this.resizeObserver?.disconnect();
+      this.resizeObserver = null;
+      this.viewport = null;
+      this.onAvailabilityChange = null;
+      this.clearScene();
+      this.canvas.remove();
+
+      // Keep the one reusable WebGL context, but release its large drawing
+      // surface while no graph viewport is mounted.
+      this.canvas.width = 1;
+      this.canvas.height = 1;
+      this.canvas.style.width = "1px";
+      this.canvas.style.height = "1px";
+      this.cssWidth = 1;
+      this.cssHeight = 1;
+      return true;
+    }
+
+    clearScene() {
+      this.scene = {
+        segments: [],
+        nodes: []
+      };
+      this.previewSegment = null;
+      this.previewInstanceCount = 0;
+      this.wireRecords = [];
+      this.nodeRecords = [];
+      this.wireSpatialIndex.clear();
+      this.nodeSpatialIndex.clear();
+      this.wireLayerCache.clear();
+      this.wireRecordIndexByKey.clear();
+      this.wireInstanceData = new Float32Array(0);
+      this.wireSpatialIndexDirty = false;
+      this.nodeSpatialIndexDirty = false;
+      this.wireVertexCount = 0;
+      this.wireInstanceCount = 0;
+      this.nodeVertexCount = 0;
+      this.nodeIndexCount = 0;
+      this.stats.segments = 0;
+      this.stats.nodes = 0;
+      this.stats.wireVertices = 0;
+      this.stats.wireInstances = 0;
+      this.stats.nodeVertices = 0;
+      this.stats.hiddenConnections = 0;
+      this.stats.previewInstances = 0;
+
+      const gl = this.gl;
+      if (
+        gl &&
+        this.available &&
+        !this.contextLost
+      ) {
+        gl.bindBuffer(
+          gl.ARRAY_BUFFER,
+          this.wireVertexBuffer
+        );
+        gl.bufferData(
+          gl.ARRAY_BUFFER,
+          0,
+          gl.DYNAMIC_DRAW
+        );
+        gl.bindBuffer(
+          gl.ARRAY_BUFFER,
+          this.nodeVertexBuffer
+        );
+        gl.bufferData(
+          gl.ARRAY_BUFFER,
+          0,
+          gl.DYNAMIC_DRAW
+        );
+        gl.bindBuffer(
+          gl.ELEMENT_ARRAY_BUFFER,
+          this.nodeIndexBuffer
+        );
+        gl.bufferData(
+          gl.ELEMENT_ARRAY_BUFFER,
+          0,
+          gl.DYNAMIC_DRAW
+        );
+        gl.bindBuffer(gl.ARRAY_BUFFER, null);
+        gl.bindBuffer(
+          gl.ELEMENT_ARRAY_BUFFER,
+          null
+        );
+      }
+    }
+
+    deleteGpuResources() {
+      const gl = this.gl;
+      if (gl) {
+        gl.bindVertexArray?.(null);
+        gl.bindBuffer?.(gl.ARRAY_BUFFER, null);
+        gl.bindBuffer?.(
+          gl.ELEMENT_ARRAY_BUFFER,
+          null
+        );
+        gl.useProgram?.(null);
+
+        for (const buffer of [
+          this.wireVertexBuffer,
+          this.previewVertexBuffer,
+          this.nodeVertexBuffer,
+          this.nodeIndexBuffer
+        ]) {
+          if (buffer) gl.deleteBuffer?.(buffer);
+        }
+        for (const vertexArray of [
+          this.wireVertexArray,
+          this.previewVertexArray,
+          this.nodeVertexArray
+        ]) {
+          if (vertexArray) {
+            gl.deleteVertexArray?.(vertexArray);
+          }
+        }
+        for (const shaderProgram of [
+          this.gridProgram,
+          this.wireProgram,
+          this.nodeProgram
+        ]) {
+          if (shaderProgram) {
+            gl.deleteProgram?.(shaderProgram);
+          }
+        }
+      }
+
+      this.gridProgram = null;
+      this.wireProgram = null;
+      this.nodeProgram = null;
+      this.uniforms = null;
+      this.wireVertexArray = null;
+      this.wireVertexBuffer = null;
+      this.previewVertexArray = null;
+      this.previewVertexBuffer = null;
+      this.nodeVertexArray = null;
+      this.nodeVertexBuffer = null;
+      this.nodeIndexBuffer = null;
     }
 
     createPrograms() {
@@ -872,7 +1060,7 @@
     }
 
     resize() {
-      if (!this.viewport) {
+      if (!this.viewport || this.disposed) {
         return;
       }
       const rectangle = this.viewport.getBoundingClientRect();
@@ -1464,7 +1652,12 @@
     }
 
     scheduleDraw() {
-      if (this.frame || !this.available) {
+      if (
+        this.frame ||
+        !this.available ||
+        !this.viewport ||
+        this.disposed
+      ) {
         return;
       }
       this.frame = requestAnimationFrame(() => {
@@ -1483,7 +1676,13 @@
 
     draw() {
       const gl = this.gl;
-      if (!gl || !this.available || this.contextLost) {
+      if (
+        !gl ||
+        !this.available ||
+        this.contextLost ||
+        !this.viewport ||
+        this.disposed
+      ) {
         return;
       }
       const started = performance.now();
@@ -1792,23 +1991,31 @@
     }
 
     dispose() {
+      if (this.disposed) {
+        return;
+      }
       if (this.frame) {
         cancelAnimationFrame(this.frame);
         this.frame = 0;
       }
       this.resizeObserver?.disconnect();
       this.resizeObserver = null;
-      if (this.gl) {
-        this.gl.deleteBuffer?.(
-          this.previewVertexBuffer
-        );
-        this.gl.deleteVertexArray?.(
-          this.previewVertexArray
-        );
-      }
+      this.clearScene();
+      this.deleteGpuResources();
       this.canvas.remove();
       this.setAvailability(false);
+      this.canvas.removeEventListener(
+        "webglcontextlost",
+        this.handleContextLost
+      );
+      this.canvas.removeEventListener(
+        "webglcontextrestored",
+        this.handleContextRestored
+      );
+      this.viewport = null;
+      this.onAvailabilityChange = null;
       this.gl = null;
+      this.disposed = true;
     }
   }
 
