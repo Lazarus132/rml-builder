@@ -1,14 +1,79 @@
 (() => {
   "use strict";
 
-  const VERSION = 8;
-  const WIRE_CELL_SIZE = 240;
+  const VERSION = 10;
+  const WIRE_CULL_CELL_SIZE = 960;
   const NODE_CELL_SIZE = 360;
   const WIRE_LINEAR_PICK_LIMIT = 512;
+  const MAX_CULL_QUERY_CELLS = 4096;
+  const MAX_WIRE_CULL_RECORD_CELLS = 256;
+  const SPATIAL_KEY_STRIDE = 2000003;
+  const WIRE_CULL_MARGIN_PIXELS = 24;
+  const NODE_CULL_MARGIN_PIXELS = 8;
   const GPU_CURVE_STEPS = 32;
   const FLOATS_PER_WIRE_INSTANCE = 15;
   const WIRE_LAYERS_PER_SEGMENT = 1;
   const FLOATS_PER_NODE_INSTANCE = 6;
+  const WEBGPU_WORKGROUP_SIZE = 128;
+
+  const webGpuRuntime = {
+    adapter: null,
+    device: null,
+    format: null,
+    pipelines: null,
+    error: null,
+    ready: null
+  };
+
+  webGpuRuntime.ready = (async () => {
+    if (
+      typeof navigator === "undefined" ||
+      !navigator.gpu
+    ) {
+      return false;
+    }
+    try {
+      const adapter =
+        await navigator.gpu.requestAdapter({
+          powerPreference: "high-performance"
+        });
+      if (!adapter) {
+        return false;
+      }
+      const device =
+        await adapter.requestDevice();
+      const format =
+        navigator.gpu.getPreferredCanvasFormat();
+      device.pushErrorScope("validation");
+      const pipelineHolder = {
+        gpuDevice: device,
+        gpuFormat: format,
+        gpuPipelines: Object.create(null)
+      };
+      await GraphWebGpuRenderer.prototype
+        .createWebGpuPipelines.call(
+          pipelineHolder
+        );
+      const validationError =
+        await device.popErrorScope();
+      if (validationError) {
+        throw validationError;
+      }
+      webGpuRuntime.adapter = adapter;
+      webGpuRuntime.device = device;
+      webGpuRuntime.format = format;
+      webGpuRuntime.pipelines =
+        pipelineHolder.gpuPipelines;
+      return true;
+    } catch (error) {
+      webGpuRuntime.error = error;
+      console.warn(
+        "RML graph WebGPU initialization failed; WebGL2 remains active.",
+        error
+      );
+      return false;
+    }
+  })();
 
   function grownCapacity(current, required, minimum = 64) {
     let capacity = Math.max(
@@ -193,6 +258,21 @@
     };
   }
 
+  function sameCurve(a, b) {
+    return Boolean(
+      a &&
+      b &&
+      a.p0.x === b.p0.x &&
+      a.p0.y === b.p0.y &&
+      a.p1.x === b.p1.x &&
+      a.p1.y === b.p1.y &&
+      a.p2.x === b.p2.x &&
+      a.p2.y === b.p2.y &&
+      a.p3.x === b.p3.x &&
+      a.p3.y === b.p3.y
+    );
+  }
+
   function squaredDistanceToSegment(point, a, b) {
     const dx = b.x - a.x;
     const dy = b.y - a.y;
@@ -313,54 +393,148 @@
     };
   }
 
+  function spatialKey(x, y) {
+    return y * SPATIAL_KEY_STRIDE + x;
+  }
+
   function addToSpatialIndex(index, bounds, cellSize, value, padding = 0) {
     const range = cellRange(bounds, cellSize, padding);
+    const keys = [];
     for (let y = range.minimumY; y <= range.maximumY; y += 1) {
       for (let x = range.minimumX; x <= range.maximumX; x += 1) {
-        const key = `${x}:${y}`;
+        const key = spatialKey(x, y);
         const values = index.get(key) || [];
         values.push(value);
         index.set(key, values);
+        keys.push(key);
+      }
+    }
+    return keys;
+  }
+
+  function removeFromSpatialIndex(index, keys, value) {
+    if (!Array.isArray(keys)) {
+      return;
+    }
+    for (const key of keys) {
+      const values = index.get(key);
+      if (!values) {
+        continue;
+      }
+      const position = values.indexOf(value);
+      if (position >= 0) {
+        values.splice(position, 1);
+      }
+      if (values.length === 0) {
+        index.delete(key);
       }
     }
   }
 
-  function addWireToSpatialIndex(index, record, cellSize, padding = 0) {
-    const curve = record.curve;
-    const approximateLength = Math.max(1, finite(record.length, 1));
-    const steps = clamp(
-      Math.ceil(approximateLength / Math.max(1, cellSize * 0.65)),
-      12,
-      160
+  function intersectsBounds(record, bounds) {
+    return !(
+      record.right < bounds.left ||
+      record.left > bounds.right ||
+      record.bottom < bounds.top ||
+      record.top > bounds.bottom
     );
-    const occupied = new Set();
-    let previous = cubicPoint(curve, 0);
+  }
 
-    for (let step = 1; step <= steps; step += 1) {
-      const current = cubicPoint(curve, step / steps);
-      const range = cellRange(
-        {
-          left: Math.min(previous.x, current.x),
-          top: Math.min(previous.y, current.y),
-          right: Math.max(previous.x, current.x),
-          bottom: Math.max(previous.y, current.y)
-        },
-        cellSize,
-        padding
-      );
-      for (let y = range.minimumY; y <= range.maximumY; y += 1) {
-        for (let x = range.minimumX; x <= range.maximumX; x += 1) {
-          occupied.add(`${x}:${y}`);
+  function sameRecordOrder(previous, records) {
+    if (previous.length !== records.length) {
+      return false;
+    }
+    for (let index = 0; index < records.length; index += 1) {
+      if (previous[index] !== records[index]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  function spatialRecordsInBounds(
+    index,
+    records,
+    bounds,
+    cellSize,
+    accept = () => true,
+    overflowRecords = []
+  ) {
+    const range = cellRange(bounds, cellSize);
+    const columns =
+      range.maximumX - range.minimumX + 1;
+    const rows =
+      range.maximumY - range.minimumY + 1;
+    const result = [];
+
+    if (
+      columns <= 0 ||
+      rows <= 0
+    ) {
+      return result;
+    }
+
+    if (
+      columns * rows >
+        MAX_CULL_QUERY_CELLS
+    ) {
+      for (const record of records) {
+        if (
+          accept(record) &&
+          intersectsBounds(
+            record.bounds || record,
+            bounds
+          )
+        ) {
+          result.push(record);
         }
       }
-      previous = current;
+      return result;
     }
 
-    for (const key of occupied) {
-      const values = index.get(key) || [];
-      values.push(record);
-      index.set(key, values);
+    const candidates = new Set();
+    for (
+      let y = range.minimumY;
+      y <= range.maximumY;
+      y += 1
+    ) {
+      for (
+        let x = range.minimumX;
+        x <= range.maximumX;
+        x += 1
+      ) {
+        for (const record of
+          index.get(spatialKey(x, y)) || []) {
+          candidates.add(record);
+        }
+      }
     }
+
+    for (const record of candidates) {
+      if (
+        accept(record) &&
+        intersectsBounds(
+          record.bounds || record,
+          bounds
+        )
+      ) {
+        result.push(record);
+      }
+    }
+    for (const record of overflowRecords) {
+      if (
+        !candidates.has(record) &&
+        accept(record) &&
+        intersectsBounds(
+          record.bounds || record,
+          bounds
+        )
+      ) {
+        result.push(record);
+      }
+    }
+    result.sort((a, b) => a.order - b.order);
+    return result;
   }
 
   class GraphHybridRenderer {
@@ -399,10 +573,17 @@
       this.nodeVertexArray = null;
       this.nodeInstanceBuffer = null;
       this.wireRecords = [];
-      this.wireSpatialIndex = new Map();
+      this.wireCullSpatialIndex = new Map();
+      this.wireCullOverflowRecords = [];
       this.wireRecordIndexByKey = new Map();
       this.wireInstanceData = new Float32Array(0);
       this.wireInstanceCapacity = 0;
+      this.visibleWireInstanceData = new Float32Array(0);
+      this.visibleWireInstanceCapacity = 0;
+      this.visibleWireRecords = [];
+      this.wireDataRevision = 0;
+      this.visibleWireDataRevision = -1;
+      this.visibleWireSelectionDirty = true;
       this.wireBufferBytes = 0;
       this.wireScratchData = new Float32Array(
         FLOATS_PER_WIRE_INSTANCE
@@ -413,13 +594,21 @@
       this.previewSegment = null;
       this.previewInstanceCount = 0;
       this.nodeRecords = [];
+      this.nodeRecordIndexById = new Map();
       this.nodeSpatialIndex = new Map();
-      this.wireSpatialIndexDirty = true;
+      this.nodeExcludedIds = new Set();
+      this.wireCullSpatialIndexDirty = true;
       this.nodeSpatialIndexDirty = true;
       this.wireVertexCount = 0;
       this.wireInstanceCount = 0;
       this.nodeInstanceData = new Float32Array(0);
       this.nodeInstanceCapacity = 0;
+      this.visibleNodeInstanceData = new Float32Array(0);
+      this.visibleNodeInstanceCapacity = 0;
+      this.visibleNodeRecords = [];
+      this.nodeDataRevision = 0;
+      this.visibleNodeDataRevision = -1;
+      this.visibleNodeSelectionDirty = true;
       this.nodeBufferBytes = 0;
       this.nodeInstanceCount = 0;
       this.nodeVertexCount = 0;
@@ -429,17 +618,24 @@
         nodes: 0,
         wireVertices: 0,
         wireInstances: 0,
+        visibleSegments: 0,
+        culledSegments: 0,
         nodeVertices: 0,
+        nodeInstances: 0,
+        visibleNodes: 0,
+        culledNodes: 0,
         drawCalls: 0,
         curveSteps: GPU_CURVE_STEPS,
         lastDrawMilliseconds: 0,
         averageDrawMilliseconds: 0,
         maximumDrawMilliseconds: 0,
         wireIndexMilliseconds: 0,
+        wireCullIndexMilliseconds: 0,
         nodeIndexMilliseconds: 0,
         lastWirePickMilliseconds: 0,
         lastWirePickCandidates: 0,
         hiddenConnections: 0,
+        reusedWireGeometries: 0,
         previewInstances: 0,
         lastNodePickMilliseconds: 0
       };
@@ -455,21 +651,22 @@
         if (this.disposed) return;
         this.contextLost = false;
         this.initialize();
-        this.setScene(this.scene);
+        this.setScene(this.scene, true);
         this.setPreview(
           this.previewSegment
         );
       };
-      this.canvas.addEventListener(
-        "webglcontextlost",
-        this.handleContextLost
-      );
-      this.canvas.addEventListener(
-        "webglcontextrestored",
-        this.handleContextRestored
-      );
-
-      this.initialize();
+      if (!options.deferGraphics) {
+        this.canvas.addEventListener(
+          "webglcontextlost",
+          this.handleContextLost
+        );
+        this.canvas.addEventListener(
+          "webglcontextrestored",
+          this.handleContextRestored
+        );
+        this.initialize();
+      }
       this.attach(options);
     }
 
@@ -578,9 +775,6 @@
       this.onAvailabilityChange = null;
       this.clearScene();
       this.canvas.remove();
-
-      // Keep the one reusable WebGL context, but release its large drawing
-      // surface while no graph viewport is mounted.
       this.canvas.width = 1;
       this.canvas.height = 1;
       this.canvas.dataset.rmlCssWidth = "1";
@@ -599,18 +793,33 @@
       this.previewInstanceCount = 0;
       this.wireRecords = [];
       this.nodeRecords = [];
-      this.wireSpatialIndex.clear();
+      this.wireCullSpatialIndex.clear();
+      this.wireCullOverflowRecords = [];
       this.nodeSpatialIndex.clear();
       this.wireRecordIndexByKey.clear();
+      this.nodeRecordIndexById.clear();
       this.wireInstanceData = new Float32Array(0);
       this.wireInstanceCapacity = 0;
+      this.visibleWireInstanceData = new Float32Array(0);
+      this.visibleWireInstanceCapacity = 0;
+      this.visibleWireRecords = [];
+      this.wireDataRevision += 1;
+      this.visibleWireDataRevision = -1;
+      this.visibleWireSelectionDirty = true;
       this.wireBufferBytes = 0;
-      this.wireSpatialIndexDirty = false;
+      this.wireCullSpatialIndexDirty = false;
       this.nodeSpatialIndexDirty = false;
       this.wireVertexCount = 0;
       this.wireInstanceCount = 0;
       this.nodeInstanceData = new Float32Array(0);
       this.nodeInstanceCapacity = 0;
+      this.visibleNodeInstanceData = new Float32Array(0);
+      this.visibleNodeInstanceCapacity = 0;
+      this.visibleNodeRecords = [];
+      this.nodeExcludedIds.clear();
+      this.nodeDataRevision += 1;
+      this.visibleNodeDataRevision = -1;
+      this.visibleNodeSelectionDirty = true;
       this.nodeBufferBytes = 0;
       this.nodeInstanceCount = 0;
       this.nodeVertexCount = 0;
@@ -618,7 +827,12 @@
       this.stats.nodes = 0;
       this.stats.wireVertices = 0;
       this.stats.wireInstances = 0;
+      this.stats.visibleSegments = 0;
+      this.stats.culledSegments = 0;
       this.stats.nodeVertices = 0;
+      this.stats.nodeInstances = 0;
+      this.stats.visibleNodes = 0;
+      this.stats.culledNodes = 0;
       this.stats.hiddenConnections = 0;
       this.stats.previewInstances = 0;
 
@@ -1157,6 +1371,8 @@
           String(width);
         this.canvas.dataset.rmlCssHeight =
           String(height);
+        this.visibleWireSelectionDirty = true;
+        this.visibleNodeSelectionDirty = true;
         this.scheduleDraw();
       }
     }
@@ -1175,33 +1391,158 @@
       this.camera.x = x;
       this.camera.y = y;
       this.camera.scale = scale;
+      this.visibleWireSelectionDirty = true;
+      this.visibleNodeSelectionDirty = true;
       this.scheduleDraw();
     }
 
-    setScene(scene = {}) {
-      this.scene = {
-        segments: Array.isArray(scene.segments)
-          ? scene.segments.slice()
-          : [],
-        nodes: Array.isArray(scene.nodes)
-          ? scene.nodes
-          : []
-      };
-      this.prepareSceneRecords();
-      if (this.available) {
+    setScene(scene = {}, force = false) {
+      const segments = Array.isArray(scene.segments)
+        ? scene.segments
+        : [];
+      const nodes = Array.isArray(scene.nodes)
+        ? scene.nodes
+        : [];
+      const segmentsChanged =
+        force || this.scene.segments !== segments;
+      const nodesChanged =
+        force || this.scene.nodes !== nodes;
+      this.scene = { segments, nodes };
+      if (segmentsChanged) {
+        this.prepareWireRecords();
+      }
+      if (nodesChanged) {
+        this.prepareNodeRecords();
+      }
+      if (this.available && segmentsChanged) {
         this.rebuildWireBuffers();
+      }
+      if (this.available && nodesChanged) {
         this.rebuildNodeBuffers();
       }
       this.scheduleDraw();
+      return segmentsChanged || nodesChanged;
     }
 
     setNodes(nodes = []) {
-      this.scene.nodes = Array.isArray(nodes) ? nodes : [];
+      const next = Array.isArray(nodes) ? nodes : [];
+      if (
+        this.scene.nodes === next &&
+        this.nodeRecords.length === next.length
+      ) {
+        return false;
+      }
+      this.scene.nodes = next;
       this.prepareNodeRecords();
       if (this.available) {
         this.rebuildNodeBuffers();
       }
       this.scheduleDraw();
+      return true;
+    }
+
+    setNodeExclusions(nodeIds = []) {
+      const next = new Set(
+        Array.isArray(nodeIds) ||
+        nodeIds instanceof Set
+          ? nodeIds
+          : [nodeIds]
+      );
+      next.delete("");
+      next.delete(null);
+      next.delete(undefined);
+      if (
+        next.size === this.nodeExcludedIds.size &&
+        [...next].every(nodeId =>
+          this.nodeExcludedIds.has(nodeId)
+        )
+      ) {
+        return false;
+      }
+      this.nodeExcludedIds = next;
+      this.visibleNodeSelectionDirty = true;
+      this.scheduleDraw();
+      return true;
+    }
+
+    updateNodes(nodes = []) {
+      if (
+        !Array.isArray(nodes) ||
+        nodes.length === 0
+      ) {
+        return false;
+      }
+      const updates = [];
+      for (const node of nodes) {
+        const index =
+          this.nodeRecordIndexById.get(
+            node?.nodeId
+          );
+        if (!Number.isInteger(index)) {
+          return false;
+        }
+        updates.push({
+          index,
+          node,
+          record:
+            this.prepareNodeRecord(
+              node,
+              index
+            )
+        });
+      }
+      for (const update of updates) {
+        const previous =
+          this.nodeRecords[update.index];
+        if (!this.nodeSpatialIndexDirty) {
+          removeFromSpatialIndex(
+            this.nodeSpatialIndex,
+            previous.spatialKeys,
+            previous
+          );
+        }
+        this.scene.nodes[update.index] =
+          update.node;
+        this.nodeRecords[update.index] =
+          update.record;
+        if (!this.nodeSpatialIndexDirty) {
+          update.record.spatialKeys =
+            addToSpatialIndex(
+              this.nodeSpatialIndex,
+              update.record,
+              NODE_CELL_SIZE,
+              update.record
+            );
+        }
+        const offset =
+          update.index *
+          FLOATS_PER_NODE_INSTANCE;
+        const record = update.record;
+        this.nodeInstanceData[offset] =
+          record.left;
+        this.nodeInstanceData[offset + 1] =
+          record.top;
+        this.nodeInstanceData[offset + 2] =
+          Math.max(
+            1,
+            record.right - record.left
+          );
+        this.nodeInstanceData[offset + 3] =
+          Math.max(
+            1,
+            record.bottom - record.top
+          );
+        this.nodeInstanceData[offset + 4] =
+          record.configuration === true
+            ? 1
+            : 0;
+        this.nodeInstanceData[offset + 5] =
+          record.selected === true ? 1 : 0;
+      }
+      this.nodeDataRevision += 1;
+      this.visibleNodeSelectionDirty = true;
+      this.scheduleDraw();
+      return true;
     }
 
     setPreview(segment = null) {
@@ -1250,9 +1591,18 @@
       return true;
     }
 
-    prepareSceneRecords() {
+    prepareWireRecords() {
+      const previousRecords = new Map();
+      for (const record of this.wireRecords) {
+        previousRecords.set(
+          this.wireRecordKey(record),
+          record
+        );
+      }
       this.wireRecords = [];
       this.wireRecordIndexByKey.clear();
+      let reusedWireGeometries = 0;
+      const hiddenConnectionIds = new Set();
       for (
         let index = 0;
         index < this.scene.segments.length;
@@ -1260,10 +1610,23 @@
       ) {
         const segment =
           this.scene.segments[index];
+        const key = this.wireRecordKey(
+          segment
+        );
         const record =
           this.prepareWireRecord(
-            segment
+            segment,
+            previousRecords.get(key)
           );
+        record.order = index;
+        if (record.geometryReused) {
+          reusedWireGeometries += 1;
+        }
+        if (record.hidden === true) {
+          hiddenConnectionIds.add(
+            record.connectionId
+          );
+        }
         this.wireRecords.push(record);
         this.wireRecordIndexByKey.set(
           this.wireRecordKey(record),
@@ -1271,39 +1634,63 @@
         );
       }
 
-      this.prepareNodeRecords();
-      this.wireSpatialIndexDirty = true;
+      this.wireCullSpatialIndexDirty = true;
+      this.visibleWireSelectionDirty = true;
       this.stats.segments = this.wireRecords.length;
       this.stats.hiddenConnections =
-        this.countHiddenConnections();
+        hiddenConnectionIds.size;
+      this.stats.reusedWireGeometries =
+        reusedWireGeometries;
+    }
+
+    prepareNodeRecord(node, index) {
+      const left = finite(node.x, 0);
+      const top = finite(node.y, 0);
+      return {
+        nodeId: node.nodeId,
+        order: index,
+        left,
+        top,
+        right:
+          left + Math.max(
+            1,
+            finite(node.width, 280)
+          ),
+        bottom:
+          top + Math.max(
+            1,
+            finite(node.height, 180)
+          ),
+        configuration:
+          node.configuration === true,
+        selected:
+          node.selected === true,
+        spatialKeys: null
+      };
     }
 
     prepareNodeRecords() {
-      this.nodeRecords =
-        this.scene.nodes.map(node => {
-          const left = finite(node.x, 0);
-          const top = finite(node.y, 0);
-          return {
-            nodeId: node.nodeId,
-            left,
-            top,
-            right:
-              left + Math.max(
-                1,
-                finite(node.width, 280)
-              ),
-            bottom:
-              top + Math.max(
-                1,
-                finite(node.height, 180)
-              ),
-            configuration:
-              node.configuration === true,
-            selected:
-              node.selected === true
-          };
-        });
+      this.nodeRecords = [];
+      this.nodeRecordIndexById.clear();
+      for (
+        let index = 0;
+        index < this.scene.nodes.length;
+        index += 1
+      ) {
+        const node = this.scene.nodes[index];
+        const record =
+          this.prepareNodeRecord(
+            node,
+            index
+          );
+        this.nodeRecords.push(record);
+        this.nodeRecordIndexById.set(
+          record.nodeId,
+          index
+        );
+      }
       this.nodeSpatialIndexDirty = true;
+      this.visibleNodeSelectionDirty = true;
       this.stats.nodes = this.nodeRecords.length;
     }
 
@@ -1323,13 +1710,22 @@
       return connectionIds.size;
     }
 
-    prepareWireRecord(segment) {
-      const curve =
+    prepareWireRecord(segment, previous = null) {
+      const candidateCurve =
         curveFromSegment(segment);
+      const geometryReused =
+        sameCurve(
+          candidateCurve,
+          previous?.curve
+        );
+      const curve = geometryReused
+        ? previous.curve
+        : candidateCurve;
       const length =
-        approximateCubicLength(
+        this.computeWireLength(
           curve,
-          12
+          previous,
+          geometryReused
         );
       return {
         connectionId:
@@ -1347,8 +1743,26 @@
           segment.hidden === true,
         curve,
         length,
-        bounds: curveBounds(curve)
+        bounds: geometryReused
+          ? previous.bounds
+          : curveBounds(curve),
+        geometryReused,
+        spatialKeys: null,
+        spatialOverflow: false
       };
+    }
+
+    computeWireLength(
+      curve,
+      previous,
+      geometryReused
+    ) {
+      return geometryReused
+        ? previous.length
+        : approximateCubicLength(
+            curve,
+            12
+          );
     }
 
     writeWireLayerData(
@@ -1398,23 +1812,69 @@
       return target;
     }
 
-    buildWireSpatialIndex() {
-      if (!this.wireSpatialIndexDirty) {
+    buildWireCullSpatialIndex() {
+      if (!this.wireCullSpatialIndexDirty) {
         return;
       }
       const started = performance.now();
-      this.wireSpatialIndex.clear();
+      this.wireCullSpatialIndex.clear();
+      this.wireCullOverflowRecords = [];
       for (const record of this.wireRecords) {
-        addWireToSpatialIndex(
-          this.wireSpatialIndex,
-          record,
-          WIRE_CELL_SIZE,
-          24
+        this.addWireCullRecord(record);
+      }
+      this.wireCullSpatialIndexDirty = false;
+      this.stats.wireCullIndexMilliseconds =
+        performance.now() - started;
+    }
+
+    addWireCullRecord(record) {
+      const range = cellRange(
+        record.bounds,
+        WIRE_CULL_CELL_SIZE
+      );
+      const columns =
+        range.maximumX - range.minimumX + 1;
+      const rows =
+        range.maximumY - range.minimumY + 1;
+      if (
+        columns * rows >
+          MAX_WIRE_CULL_RECORD_CELLS
+      ) {
+        record.spatialKeys = null;
+        record.spatialOverflow = true;
+        this.wireCullOverflowRecords.push(record);
+        return;
+      }
+      record.spatialOverflow = false;
+      record.spatialKeys = addToSpatialIndex(
+        this.wireCullSpatialIndex,
+        record.bounds,
+        WIRE_CULL_CELL_SIZE,
+        record
+      );
+    }
+
+    removeWireCullRecord(record) {
+      if (record.spatialOverflow) {
+        const position =
+          this.wireCullOverflowRecords.indexOf(
+            record
+          );
+        if (position >= 0) {
+          this.wireCullOverflowRecords.splice(
+            position,
+            1
+          );
+        }
+      } else {
+        removeFromSpatialIndex(
+          this.wireCullSpatialIndex,
+          record.spatialKeys,
+          record
         );
       }
-      this.wireSpatialIndexDirty = false;
-      this.stats.wireIndexMilliseconds =
-        performance.now() - started;
+      record.spatialKeys = null;
+      record.spatialOverflow = false;
     }
 
     buildNodeSpatialIndex() {
@@ -1424,7 +1884,7 @@
       const started = performance.now();
       this.nodeSpatialIndex.clear();
       for (const record of this.nodeRecords) {
-        addToSpatialIndex(
+        record.spatialKeys = addToSpatialIndex(
           this.nodeSpatialIndex,
           record,
           NODE_CELL_SIZE,
@@ -1436,12 +1896,278 @@
         performance.now() - started;
     }
 
-    rebuildWireBuffers() {
-      const gl = this.gl;
-      if (!gl) {
+    viewportGraphBounds(marginPixels = 0) {
+      const scale = Math.max(
+        0.0001,
+        this.camera.scale
+      );
+      const margin = Math.max(
+        0,
+        marginPixels
+      ) / scale;
+      return {
+        left: -this.camera.x / scale - margin,
+        top: -this.camera.y / scale - margin,
+        right:
+          (this.cssWidth - this.camera.x) / scale +
+          margin,
+        bottom:
+          (this.cssHeight - this.camera.y) / scale +
+          margin
+      };
+    }
+
+    visibleWireRecordsForCamera() {
+      if (this.wireRecords.length === 0) {
+        return [];
+      }
+      this.buildWireCullSpatialIndex();
+      return spatialRecordsInBounds(
+        this.wireCullSpatialIndex,
+        this.wireRecords,
+        this.viewportGraphBounds(
+          WIRE_CULL_MARGIN_PIXELS
+        ),
+        WIRE_CULL_CELL_SIZE,
+        record => record.hidden !== true,
+        this.wireCullOverflowRecords
+      );
+    }
+
+    visibleNodeRecordsForCamera() {
+      if (this.nodeRecords.length === 0) {
+        return [];
+      }
+      this.buildNodeSpatialIndex();
+      return spatialRecordsInBounds(
+        this.nodeSpatialIndex,
+        this.nodeRecords,
+        this.viewportGraphBounds(
+          NODE_CULL_MARGIN_PIXELS
+        ),
+        NODE_CELL_SIZE,
+        record =>
+          !this.nodeExcludedIds.has(
+            record.nodeId
+          )
+      );
+    }
+
+    uploadVisibleWireInstances() {
+      if (
+        !this.visibleWireSelectionDirty &&
+        this.visibleWireDataRevision ===
+          this.wireDataRevision
+      ) {
+        return;
+      }
+      const records =
+        this.visibleWireRecordsForCamera();
+      const selectionChanged =
+        !sameRecordOrder(
+          this.visibleWireRecords,
+          records
+        );
+      const dataChanged =
+        this.visibleWireDataRevision !==
+        this.wireDataRevision;
+      this.visibleWireSelectionDirty = false;
+      if (!selectionChanged && !dataChanged) {
         return;
       }
 
+      this.visibleWireRecords = records;
+      const requiredInstances =
+        records.length *
+        WIRE_LAYERS_PER_SEGMENT;
+      if (
+        requiredInstances >
+          this.visibleWireInstanceCapacity
+      ) {
+        this.visibleWireInstanceCapacity =
+          grownCapacity(
+            this.visibleWireInstanceCapacity,
+            requiredInstances
+          );
+        this.visibleWireInstanceData =
+          new Float32Array(
+            this.visibleWireInstanceCapacity *
+              FLOATS_PER_WIRE_INSTANCE
+          );
+      }
+
+      for (
+        let index = 0;
+        index < records.length;
+        index += 1
+      ) {
+        const sourceOffset =
+          records[index].order *
+          FLOATS_PER_WIRE_INSTANCE;
+        this.visibleWireInstanceData.set(
+          this.wireInstanceData.subarray(
+            sourceOffset,
+            sourceOffset +
+              FLOATS_PER_WIRE_INSTANCE
+          ),
+          index * FLOATS_PER_WIRE_INSTANCE
+        );
+      }
+
+      const gl = this.gl;
+      gl.bindBuffer(
+        gl.ARRAY_BUFFER,
+        this.wireVertexBuffer
+      );
+      if (
+        this.wireBufferBytes !==
+          this.visibleWireInstanceData.byteLength
+      ) {
+        gl.bufferData(
+          gl.ARRAY_BUFFER,
+          this.visibleWireInstanceData.byteLength,
+          gl.DYNAMIC_DRAW
+        );
+        this.wireBufferBytes =
+          this.visibleWireInstanceData.byteLength;
+      }
+      const requiredFloats =
+        requiredInstances *
+        FLOATS_PER_WIRE_INSTANCE;
+      if (requiredFloats > 0) {
+        gl.bufferSubData(
+          gl.ARRAY_BUFFER,
+          0,
+          this.visibleWireInstanceData,
+          0,
+          requiredFloats
+        );
+      }
+      this.wireInstanceCount = requiredInstances;
+      this.wireVertexCount =
+        requiredInstances *
+        (GPU_CURVE_STEPS + 1) * 2;
+      this.stats.wireVertices =
+        this.wireVertexCount;
+      this.stats.wireInstances =
+        requiredInstances;
+      this.stats.visibleSegments = records.length;
+      this.stats.culledSegments = Math.max(
+        0,
+        this.wireRecords.length - records.length
+      );
+      this.visibleWireDataRevision =
+        this.wireDataRevision;
+    }
+
+    uploadVisibleNodeInstances() {
+      if (
+        !this.visibleNodeSelectionDirty &&
+        this.visibleNodeDataRevision ===
+          this.nodeDataRevision
+      ) {
+        return;
+      }
+      const records =
+        this.visibleNodeRecordsForCamera();
+      const selectionChanged =
+        !sameRecordOrder(
+          this.visibleNodeRecords,
+          records
+        );
+      const dataChanged =
+        this.visibleNodeDataRevision !==
+        this.nodeDataRevision;
+      this.visibleNodeSelectionDirty = false;
+      if (!selectionChanged && !dataChanged) {
+        return;
+      }
+
+      this.visibleNodeRecords = records;
+      const requiredInstances = records.length;
+      if (
+        requiredInstances >
+          this.visibleNodeInstanceCapacity
+      ) {
+        this.visibleNodeInstanceCapacity =
+          grownCapacity(
+            this.visibleNodeInstanceCapacity,
+            requiredInstances
+          );
+        this.visibleNodeInstanceData =
+          new Float32Array(
+            this.visibleNodeInstanceCapacity *
+              FLOATS_PER_NODE_INSTANCE
+          );
+      }
+
+      for (
+        let index = 0;
+        index < records.length;
+        index += 1
+      ) {
+        const sourceOffset =
+          records[index].order *
+          FLOATS_PER_NODE_INSTANCE;
+        this.visibleNodeInstanceData.set(
+          this.nodeInstanceData.subarray(
+            sourceOffset,
+            sourceOffset +
+              FLOATS_PER_NODE_INSTANCE
+          ),
+          index * FLOATS_PER_NODE_INSTANCE
+        );
+      }
+
+      const gl = this.gl;
+      gl.bindBuffer(
+        gl.ARRAY_BUFFER,
+        this.nodeInstanceBuffer
+      );
+      if (
+        this.nodeBufferBytes !==
+          this.visibleNodeInstanceData.byteLength
+      ) {
+        gl.bufferData(
+          gl.ARRAY_BUFFER,
+          this.visibleNodeInstanceData.byteLength,
+          gl.DYNAMIC_DRAW
+        );
+        this.nodeBufferBytes =
+          this.visibleNodeInstanceData.byteLength;
+      }
+      const requiredFloats =
+        requiredInstances *
+        FLOATS_PER_NODE_INSTANCE;
+      if (requiredFloats > 0) {
+        gl.bufferSubData(
+          gl.ARRAY_BUFFER,
+          0,
+          this.visibleNodeInstanceData,
+          0,
+          requiredFloats
+        );
+      }
+      this.nodeInstanceCount = requiredInstances;
+      this.nodeVertexCount = requiredInstances * 4;
+      this.stats.nodeVertices =
+        this.nodeVertexCount;
+      this.stats.nodeInstances = requiredInstances;
+      this.stats.visibleNodes = records.length;
+      this.stats.culledNodes = Math.max(
+        0,
+        this.nodeRecords.length - records.length
+      );
+      this.visibleNodeDataRevision =
+        this.nodeDataRevision;
+    }
+
+    prepareVisibleInstances() {
+      this.uploadVisibleWireInstances();
+      this.uploadVisibleNodeInstances();
+    }
+
+    rebuildWireBuffers() {
       const requiredInstances =
         this.wireRecords.length *
           WIRE_LAYERS_PER_SEGMENT;
@@ -1473,45 +2199,12 @@
         );
       }
 
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.wireVertexBuffer);
-      const requiredFloats =
-        requiredInstances *
-          FLOATS_PER_WIRE_INSTANCE;
-      if (
-        this.wireBufferBytes !==
-          this.wireInstanceData.byteLength
-      ) {
-        gl.bufferData(
-          gl.ARRAY_BUFFER,
-          this.wireInstanceData.byteLength,
-          gl.DYNAMIC_DRAW
-        );
-        this.wireBufferBytes =
-          this.wireInstanceData.byteLength;
-      }
-      if (requiredFloats > 0) {
-        gl.bufferSubData(
-          gl.ARRAY_BUFFER,
-          0,
-          this.wireInstanceData,
-          0,
-          requiredFloats
-        );
-      }
-      this.wireInstanceCount =
-        requiredInstances;
-      this.wireVertexCount =
-        this.wireInstanceCount *
-        (GPU_CURVE_STEPS + 1) * 2;
-      this.stats.wireVertices = this.wireVertexCount;
-      this.stats.wireInstances =
-        this.wireInstanceCount;
+      this.wireDataRevision += 1;
+      this.visibleWireSelectionDirty = true;
     }
 
     updateSegments(segments = []) {
-      const gl = this.gl;
       if (
-        !gl ||
         !this.available ||
         !Array.isArray(segments) ||
         segments.length === 0
@@ -1521,12 +2214,8 @@
 
       const prepared = [];
       for (const segment of segments) {
-        const record =
-          this.prepareWireRecord(
-            segment
-          );
         const key =
-          this.wireRecordKey(record);
+          this.wireRecordKey(segment);
         const index =
           this.wireRecordIndexByKey.get(
             key
@@ -1534,6 +2223,11 @@
         if (!Number.isInteger(index)) {
           return false;
         }
+        const record =
+          this.prepareWireRecord(
+            segment,
+            this.wireRecords[index]
+          );
         prepared.push({
           index,
           record,
@@ -1541,11 +2235,13 @@
         });
       }
 
-      gl.bindBuffer(
-        gl.ARRAY_BUFFER,
-        this.wireVertexBuffer
-      );
       for (const update of prepared) {
+        const previous =
+          this.wireRecords[update.index];
+        if (!this.wireCullSpatialIndexDirty) {
+          this.removeWireCullRecord(previous);
+        }
+        update.record.order = update.index;
         const floatOffset =
           update.index *
           WIRE_LAYERS_PER_SEGMENT *
@@ -1553,6 +2249,11 @@
         this.wireRecords[
           update.index
         ] = update.record;
+        if (!this.wireCullSpatialIndexDirty) {
+          this.addWireCullRecord(
+            update.record
+          );
+        }
         this.scene.segments[
           update.index
         ] = update.segment;
@@ -1565,13 +2266,9 @@
           this.wireScratchData,
           floatOffset
         );
-        gl.bufferSubData(
-          gl.ARRAY_BUFFER,
-          floatOffset * 4,
-          this.wireScratchData
-        );
       }
-      this.wireSpatialIndexDirty = true;
+      this.wireDataRevision += 1;
+      this.visibleWireSelectionDirty = true;
       this.scheduleDraw();
       return true;
     }
@@ -1611,47 +2308,50 @@
           ...(this.scene.segments[index] || {}),
           hidden: true
         };
-        this.wireRecords[index] = record;
-        this.scene.segments[index] = segment;
-        updates.push({ index, record });
+        updates.push({
+          index,
+          previous,
+          record,
+          segment
+        });
       }
 
       if (updates.length === 0) {
         return 0;
       }
 
-      if (
-        this.available &&
-        this.gl &&
-        this.wireInstanceData.length > 0
-      ) {
-        this.gl.bindBuffer(
-          this.gl.ARRAY_BUFFER,
-          this.wireVertexBuffer
-        );
-        for (const update of updates) {
-          const floatOffset =
-            update.index *
-            WIRE_LAYERS_PER_SEGMENT *
-            FLOATS_PER_WIRE_INSTANCE;
-          this.writeWireLayerData(
-            update.record,
-            this.wireScratchData,
-            0
-          );
-          this.wireInstanceData.set(
-            this.wireScratchData,
-            floatOffset
-          );
-          this.gl.bufferSubData(
-            this.gl.ARRAY_BUFFER,
-            floatOffset * 4,
-            this.wireScratchData
+      for (const update of updates) {
+        if (!this.wireCullSpatialIndexDirty) {
+          this.removeWireCullRecord(
+            update.previous
           );
         }
+        this.wireRecords[update.index] =
+          update.record;
+        this.scene.segments[update.index] =
+          update.segment;
+        if (!this.wireCullSpatialIndexDirty) {
+          this.addWireCullRecord(
+            update.record
+          );
+        }
+        const floatOffset =
+          update.index *
+          WIRE_LAYERS_PER_SEGMENT *
+          FLOATS_PER_WIRE_INSTANCE;
+        this.writeWireLayerData(
+          update.record,
+          this.wireScratchData,
+          0
+        );
+        this.wireInstanceData.set(
+          this.wireScratchData,
+          floatOffset
+        );
       }
 
-      this.wireSpatialIndexDirty = true;
+      this.wireDataRevision += 1;
+      this.visibleWireSelectionDirty = true;
       this.stats.hiddenConnections =
         this.countHiddenConnections();
       this.scheduleDraw();
@@ -1663,10 +2363,6 @@
     }
 
     rebuildNodeBuffers() {
-      const gl = this.gl;
-      if (!gl) {
-        return;
-      }
       const requiredInstances =
         this.nodeRecords.length;
       if (
@@ -1707,39 +2403,8 @@
           node.selected === true ? 1 : 0;
       }
 
-      const requiredFloats =
-        requiredInstances *
-          FLOATS_PER_NODE_INSTANCE;
-      gl.bindBuffer(
-        gl.ARRAY_BUFFER,
-        this.nodeInstanceBuffer
-      );
-      if (
-        this.nodeBufferBytes !==
-          this.nodeInstanceData.byteLength
-      ) {
-        gl.bufferData(
-          gl.ARRAY_BUFFER,
-          this.nodeInstanceData.byteLength,
-          gl.DYNAMIC_DRAW
-        );
-        this.nodeBufferBytes =
-          this.nodeInstanceData.byteLength;
-      }
-      if (requiredFloats > 0) {
-        gl.bufferSubData(
-          gl.ARRAY_BUFFER,
-          0,
-          this.nodeInstanceData,
-          0,
-          requiredFloats
-        );
-      }
-      this.nodeInstanceCount =
-        requiredInstances;
-      this.nodeVertexCount =
-        requiredInstances * 4;
-      this.stats.nodeVertices = this.nodeVertexCount;
+      this.nodeDataRevision += 1;
+      this.visibleNodeSelectionDirty = true;
     }
 
     scheduleDraw() {
@@ -1777,6 +2442,7 @@
         return;
       }
       const started = performance.now();
+      this.prepareVisibleInstances();
       gl.viewport(0, 0, this.canvas.width, this.canvas.height);
       gl.clearColor(0.0314, 0.0392, 0.0627, 1);
       gl.clear(gl.COLOR_BUFFER_BIT);
@@ -1969,13 +2635,27 @@
           }
         }
       } else {
-        this.buildWireSpatialIndex();
-        const range = cellRange(bounds, WIRE_CELL_SIZE);
+        this.buildWireCullSpatialIndex();
+        const range = cellRange(
+          bounds,
+          WIRE_CULL_CELL_SIZE
+        );
         for (let y = range.minimumY; y <= range.maximumY; y += 1) {
           for (let x = range.minimumX; x <= range.maximumX; x += 1) {
-            for (const record of this.wireSpatialIndex.get(`${x}:${y}`) || []) {
+            for (const record of this.wireCullSpatialIndex.get(spatialKey(x, y)) || []) {
               candidates.add(record);
             }
+          }
+        }
+        for (const record of
+          this.wireCullOverflowRecords) {
+          if (
+            intersectsBounds(
+              record.bounds,
+              bounds
+            )
+          ) {
+            candidates.add(record);
           }
         }
       }
@@ -2029,9 +2709,16 @@
       const target = this.clientToGraph(clientX, clientY);
       const cellX = Math.floor(target.x / NODE_CELL_SIZE);
       const cellY = Math.floor(target.y / NODE_CELL_SIZE);
-      const candidates = this.nodeSpatialIndex.get(`${cellX}:${cellY}`) || [];
+      const candidates = this.nodeSpatialIndex.get(spatialKey(cellX, cellY)) || [];
       for (let index = candidates.length - 1; index >= 0; index -= 1) {
         const record = candidates[index];
+        if (
+          this.nodeExcludedIds.has(
+            record.nodeId
+          )
+        ) {
+          continue;
+        }
         if (
           target.x >= record.left &&
           target.x <= record.right &&
@@ -2110,13 +2797,1418 @@
     }
   }
 
+  class GraphWebGpuRenderer extends GraphHybridRenderer {
+    constructor(options = {}, runtime) {
+      super({
+        ...options,
+        deferGraphics: true
+      });
+      this.gpuAdapter = runtime.adapter;
+      this.gpuDevice = runtime.device;
+      this.gpuContext = null;
+      this.gpuFormat = runtime.format;
+      this.gpuBuffers = Object.create(null);
+      this.gpuBufferSizes = Object.create(null);
+      this.gpuPipelines = {
+        ...runtime.pipelines
+      };
+      this.gpuBindGroups = Object.create(null);
+      this.wireBoundsData = new Float32Array(0);
+      this.nodeVisibilityData = new Uint32Array(0);
+      this.renderUniformData = new Float32Array(8);
+      this.cullUniformData = new ArrayBuffer(32);
+      this.cullUniformFloats =
+        new Float32Array(
+          this.cullUniformData,
+          0,
+          4
+        );
+      this.cullUniformIntegers =
+        new Uint32Array(
+          this.cullUniformData,
+          16,
+          4
+        );
+      this.wireIndirectData =
+        new Uint32Array([
+          (GPU_CURVE_STEPS + 1) * 2,
+          0,
+          0,
+          0
+        ]);
+      this.nodeIndirectData =
+        new Uint32Array([4, 0, 0, 0]);
+      this.gpuResourcesReady = false;
+      this.initializeWebGpu();
+    }
+
+    setAvailability(value) {
+      const next = value === true;
+      if (this.available === next) {
+        return;
+      }
+      this.available = next;
+      this.canvas.classList.toggle(
+        "available",
+        next
+      );
+      this.stats.renderer = next
+        ? "webgpu-wgsl"
+        : "svg-fallback";
+      this.stats.gpuComputeCulling = next;
+      this.onAvailabilityChange?.(next);
+    }
+
+    initializeWebGpu() {
+      if (
+        !this.gpuDevice ||
+        !navigator.gpu ||
+        this.disposed
+      ) {
+        this.setAvailability(false);
+        return false;
+      }
+      try {
+        this.gpuContext =
+          this.canvas.getContext("webgpu");
+        if (!this.gpuContext) {
+          this.setAvailability(false);
+          return false;
+        }
+        this.gpuContext.configure({
+          device: this.gpuDevice,
+          format: this.gpuFormat,
+          alphaMode: "premultiplied"
+        });
+        if (!this.gpuPipelines.compute) {
+          throw new Error(
+            "Validated WebGPU graph pipelines are unavailable."
+          );
+        }
+        this.ensureWebGpuBuffers();
+        this.gpuResourcesReady = true;
+        this.gpuDevice.lost.then(info => {
+          if (this.disposed) {
+            return;
+          }
+          console.warn(
+            "RML graph WebGPU device was lost; switching to the SVG fallback.",
+            info
+          );
+          this.contextLost = true;
+          this.setAvailability(false);
+        });
+        this.setAvailability(true);
+        this.resize();
+        this.scheduleDraw();
+        return true;
+      } catch (error) {
+        console.warn(
+          "RML graph WebGPU renderer failed; switching to the SVG fallback.",
+          error
+        );
+        this.deleteGpuResources();
+        this.setAvailability(false);
+        return false;
+      }
+    }
+
+    async createWebGpuPipelines() {
+      const device = this.gpuDevice;
+      const format = this.gpuFormat;
+      const computeModule =
+        device.createShaderModule({
+          label: "RML graph WGSL culling",
+          code: `
+            struct CullUniforms {
+              bounds: vec4<f32>,
+              wireCount: u32,
+              nodeCount: u32,
+              padding0: u32,
+              padding1: u32,
+            };
+            struct FloatData {
+              values: array<f32>,
+            };
+            struct UintData {
+              values: array<u32>,
+            };
+            struct DrawIndirect {
+              vertexCount: u32,
+              instanceCount: atomic<u32>,
+              firstVertex: u32,
+              firstInstance: u32,
+            };
+            @group(0) @binding(0)
+            var<uniform> cull: CullUniforms;
+            @group(0) @binding(1)
+            var<storage, read> masterWires: FloatData;
+            @group(0) @binding(2)
+            var<storage, read> wireBounds: FloatData;
+            @group(0) @binding(3)
+            var<storage, read_write> visibleWires: FloatData;
+            @group(0) @binding(4)
+            var<storage, read_write> wireDraw: DrawIndirect;
+            @group(0) @binding(5)
+            var<storage, read> masterNodes: FloatData;
+            @group(0) @binding(6)
+            var<storage, read> nodeVisibility: UintData;
+            @group(0) @binding(7)
+            var<storage, read_write> visibleNodes: FloatData;
+            @group(0) @binding(8)
+            var<storage, read_write> nodeDraw: DrawIndirect;
+
+            fn intersects(
+              left: f32,
+              top: f32,
+              right: f32,
+              bottom: f32
+            ) -> bool {
+              return !(
+                right < cull.bounds.x ||
+                left > cull.bounds.z ||
+                bottom < cull.bounds.y ||
+                top > cull.bounds.w
+              );
+            }
+
+            @compute @workgroup_size(${WEBGPU_WORKGROUP_SIZE})
+            fn main(
+              @builtin(global_invocation_id) invocation: vec3<u32>
+            ) {
+              let index = invocation.x;
+              if (index < cull.wireCount) {
+                let boundsOffset = index * 4u;
+                let sourceOffset = index * ${FLOATS_PER_WIRE_INSTANCE}u;
+                if (
+                  masterWires.values[sourceOffset + 11u] > 0.0001 &&
+                  intersects(
+                    wireBounds.values[boundsOffset],
+                    wireBounds.values[boundsOffset + 1u],
+                    wireBounds.values[boundsOffset + 2u],
+                    wireBounds.values[boundsOffset + 3u]
+                  )
+                ) {
+                  let destination =
+                    atomicAdd(&wireDraw.instanceCount, 1u);
+                  let destinationOffset =
+                    destination * ${FLOATS_PER_WIRE_INSTANCE}u;
+                  for (
+                    var component = 0u;
+                    component < ${FLOATS_PER_WIRE_INSTANCE}u;
+                    component += 1u
+                  ) {
+                    visibleWires.values[
+                      destinationOffset + component
+                    ] = masterWires.values[
+                      sourceOffset + component
+                    ];
+                  }
+                  let p0 = vec2<f32>(
+                    masterWires.values[sourceOffset],
+                    masterWires.values[sourceOffset + 1u]
+                  );
+                  let p1 = vec2<f32>(
+                    masterWires.values[sourceOffset + 2u],
+                    masterWires.values[sourceOffset + 3u]
+                  );
+                  let p2 = vec2<f32>(
+                    masterWires.values[sourceOffset + 4u],
+                    masterWires.values[sourceOffset + 5u]
+                  );
+                  let p3 = vec2<f32>(
+                    masterWires.values[sourceOffset + 6u],
+                    masterWires.values[sourceOffset + 7u]
+                  );
+                  visibleWires.values[
+                    destinationOffset + 14u
+                  ] = distance(p0, p1) +
+                    distance(p1, p2) +
+                    distance(p2, p3);
+                }
+              }
+
+              if (
+                index < cull.nodeCount &&
+                nodeVisibility.values[index] != 0u
+              ) {
+                let sourceOffset =
+                  index * ${FLOATS_PER_NODE_INSTANCE}u;
+                let left = masterNodes.values[sourceOffset];
+                let top = masterNodes.values[sourceOffset + 1u];
+                let right =
+                  left + masterNodes.values[sourceOffset + 2u];
+                let bottom =
+                  top + masterNodes.values[sourceOffset + 3u];
+                if (intersects(left, top, right, bottom)) {
+                  let destination =
+                    atomicAdd(&nodeDraw.instanceCount, 1u);
+                  let destinationOffset =
+                    destination * ${FLOATS_PER_NODE_INSTANCE}u;
+                  for (
+                    var component = 0u;
+                    component < ${FLOATS_PER_NODE_INSTANCE}u;
+                    component += 1u
+                  ) {
+                    visibleNodes.values[
+                      destinationOffset + component
+                    ] = masterNodes.values[
+                      sourceOffset + component
+                    ];
+                  }
+                }
+              }
+            }
+          `
+        });
+
+      const gridModule =
+        device.createShaderModule({
+          label: "RML graph WGSL grid",
+          code: `
+            struct RenderUniforms {
+              resolution: vec2<f32>,
+              pan: vec2<f32>,
+              scale: f32,
+              pixelRatio: f32,
+              padding: vec2<f32>,
+            };
+            @group(0) @binding(0)
+            var<uniform> scene: RenderUniforms;
+            @vertex
+            fn vertexMain(
+              @builtin(vertex_index) index: u32
+            ) -> @builtin(position) vec4<f32> {
+              let x = select(-1.0, 3.0, index == 1u);
+              let y = select(-1.0, 3.0, index == 2u);
+              return vec4<f32>(x, y, 0.0, 1.0);
+            }
+            fn lineMask(coordinate: f32, spacing: f32) -> f32 {
+              let pixel = coordinate / scene.pixelRatio;
+              let phase = pixel % spacing;
+              let distanceToLine = min(phase, spacing - phase);
+              return 1.0 - smoothstep(0.45, 1.15, distanceToLine);
+            }
+            @fragment
+            fn fragmentMain(
+              @builtin(position) position: vec4<f32>
+            ) -> @location(0) vec4<f32> {
+              let minor = max(
+                lineMask(position.x, 18.0),
+                lineMask(position.y, 18.0)
+              );
+              let major = max(
+                lineMask(position.x, 90.0),
+                lineMask(position.y, 90.0)
+              );
+              let base = vec3<f32>(0.0314, 0.0392, 0.0627);
+              var color = mix(base, vec3<f32>(1.0), minor * 0.025);
+              color = mix(
+                color,
+                vec3<f32>(0.337, 0.651, 0.871),
+                major * 0.025
+              );
+              return vec4<f32>(color, 1.0);
+            }
+          `
+        });
+
+      const wireModule =
+        device.createShaderModule({
+          label: "RML graph WGSL wires",
+          code: `
+            struct RenderUniforms {
+              resolution: vec2<f32>,
+              pan: vec2<f32>,
+              scale: f32,
+              pixelRatio: f32,
+              padding: vec2<f32>,
+            };
+            struct FloatData {
+              values: array<f32>,
+            };
+            struct WireOutput {
+              @builtin(position) position: vec4<f32>,
+              @location(0) color: vec4<f32>,
+              @location(1) edgePixels: f32,
+              @location(2) coreHalfPixels: f32,
+              @location(3) distance: f32,
+              @location(4) dash: f32,
+              @location(5) style: f32,
+            };
+            @group(0) @binding(0)
+            var<uniform> scene: RenderUniforms;
+            @group(0) @binding(1)
+            var<storage, read> wires: FloatData;
+
+            fn wireValue(instance: u32, component: u32) -> f32 {
+              return wires.values[
+                instance * ${FLOATS_PER_WIRE_INSTANCE}u + component
+              ];
+            }
+            fn cubic(
+              p0: vec2<f32>,
+              p1: vec2<f32>,
+              p2: vec2<f32>,
+              p3: vec2<f32>,
+              t: f32
+            ) -> vec2<f32> {
+              let inverse = 1.0 - t;
+              let inverse2 = inverse * inverse;
+              let t2 = t * t;
+              return inverse2 * inverse * p0 +
+                3.0 * inverse2 * t * p1 +
+                3.0 * inverse * t2 * p2 +
+                t2 * t * p3;
+            }
+            @vertex
+            fn vertexMain(
+              @builtin(vertex_index) vertex: u32,
+              @builtin(instance_index) instance: u32
+            ) -> WireOutput {
+              let p0 = vec2<f32>(
+                wireValue(instance, 0u),
+                wireValue(instance, 1u)
+              );
+              let p1 = vec2<f32>(
+                wireValue(instance, 2u),
+                wireValue(instance, 3u)
+              );
+              let p2 = vec2<f32>(
+                wireValue(instance, 4u),
+                wireValue(instance, 5u)
+              );
+              let p3 = vec2<f32>(
+                wireValue(instance, 6u),
+                wireValue(instance, 7u)
+              );
+              let pointIndex = vertex / 2u;
+              let side = select(-1.0, 1.0, vertex % 2u == 1u);
+              let t = clamp(
+                f32(pointIndex) / ${GPU_CURVE_STEPS}.0,
+                0.0,
+                1.0
+              );
+              let step = 1.0 / ${GPU_CURVE_STEPS}.0;
+              let position = cubic(p0, p1, p2, p3, t);
+              let previous = cubic(
+                p0, p1, p2, p3, max(0.0, t - step)
+              );
+              let following = cubic(
+                p0, p1, p2, p3, min(1.0, t + step)
+              );
+              var tangent = following - previous;
+              if (length(tangent) < 0.000001) {
+                tangent = vec2<f32>(1.0, 0.0);
+              } else {
+                tangent = normalize(tangent);
+              }
+              let normal = vec2<f32>(-tangent.y, tangent.x);
+              let safeScale = max(scene.scale, 0.0001);
+              let extrusion = 7.0 + 1.25 / safeScale;
+              let graphPosition =
+                position + normal * side * extrusion;
+              let screenPosition =
+                graphPosition * scene.scale + scene.pan;
+              let clip = vec2<f32>(
+                screenPosition.x / scene.resolution.x * 2.0 - 1.0,
+                1.0 - screenPosition.y / scene.resolution.y * 2.0
+              );
+              var output: WireOutput;
+              output.position = vec4<f32>(clip, 0.0, 1.0);
+              output.color = vec4<f32>(
+                wireValue(instance, 8u),
+                wireValue(instance, 9u),
+                wireValue(instance, 10u),
+                wireValue(instance, 11u)
+              );
+              output.edgePixels = side * extrusion * scene.scale;
+              output.coreHalfPixels = max(0.05, 2.0 * scene.scale);
+              output.distance = t * wireValue(instance, 14u);
+              output.dash = wireValue(instance, 13u);
+              output.style = wireValue(instance, 12u);
+              return output;
+            }
+            fn coverage(edge: f32, halfWidth: f32) -> f32 {
+              return 1.0 - smoothstep(
+                halfWidth,
+                halfWidth + 1.25,
+                abs(edge)
+              );
+            }
+            fn over(under: vec4<f32>, upper: vec4<f32>) -> vec4<f32> {
+              let alpha = upper.a + under.a * (1.0 - upper.a);
+              if (alpha <= 0.00001) {
+                return vec4<f32>(0.0);
+              }
+              let premultiplied =
+                upper.rgb * upper.a +
+                under.rgb * under.a * (1.0 - upper.a);
+              return vec4<f32>(premultiplied / alpha, alpha);
+            }
+            @fragment
+            fn fragmentMain(input: WireOutput) -> @location(0) vec4<f32> {
+              let selected = input.style % 2.0 >= 1.0;
+              let valid = floor(input.style / 2.0) % 2.0 >= 1.0;
+              let invalid = floor(input.style / 4.0) >= 1.0;
+              let scaleEstimate = max(
+                0.0001,
+                input.coreHalfPixels / 2.0
+              );
+              var result = vec4<f32>(0.0);
+              result = over(
+                result,
+                vec4<f32>(
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.72 * coverage(
+                    input.edgePixels,
+                    4.0 * scaleEstimate
+                  )
+                )
+              );
+              if (selected || valid) {
+                let glowHalf = select(6.5, 7.0, selected) * scaleEstimate;
+                let glowAlpha = select(0.22, 0.06, invalid);
+                result = over(
+                  result,
+                  vec4<f32>(
+                    input.color.rgb,
+                    glowAlpha * coverage(
+                      input.edgePixels,
+                      glowHalf
+                    )
+                  )
+                );
+              }
+              let dashMask = select(
+                1.0,
+                0.0,
+                input.dash > 0.5 && input.distance % 17.0 > 10.0
+              );
+              let coreHalf = select(2.0, 3.0, selected || valid) * scaleEstimate;
+              result = over(
+                result,
+                vec4<f32>(
+                  input.color.rgb,
+                  input.color.a *
+                    coverage(input.edgePixels, coreHalf) *
+                    dashMask
+                )
+              );
+              if (result.a <= 0.001) {
+                discard;
+              }
+              return result;
+            }
+          `
+        });
+
+      const nodeModule =
+        device.createShaderModule({
+          label: "RML graph WGSL nodes",
+          code: `
+            struct RenderUniforms {
+              resolution: vec2<f32>,
+              pan: vec2<f32>,
+              scale: f32,
+              pixelRatio: f32,
+              padding: vec2<f32>,
+            };
+            struct FloatData {
+              values: array<f32>,
+            };
+            struct NodeOutput {
+              @builtin(position) position: vec4<f32>,
+              @location(0) local: vec2<f32>,
+              @location(1) size: vec2<f32>,
+              @location(2) configuration: f32,
+              @location(3) selected: f32,
+            };
+            @group(0) @binding(0)
+            var<uniform> scene: RenderUniforms;
+            @group(0) @binding(1)
+            var<storage, read> nodes: FloatData;
+            fn nodeValue(instance: u32, component: u32) -> f32 {
+              return nodes.values[
+                instance * ${FLOATS_PER_NODE_INSTANCE}u + component
+              ];
+            }
+            @vertex
+            fn vertexMain(
+              @builtin(vertex_index) vertex: u32,
+              @builtin(instance_index) instance: u32
+            ) -> NodeOutput {
+              let corner = vec2<f32>(
+                f32(vertex % 2u),
+                floor(f32(vertex) * 0.5)
+              );
+              let origin = vec2<f32>(
+                nodeValue(instance, 0u),
+                nodeValue(instance, 1u)
+              );
+              let size = vec2<f32>(
+                nodeValue(instance, 2u),
+                nodeValue(instance, 3u)
+              );
+              let local = corner * size;
+              let screenPosition =
+                (origin + local) * scene.scale + scene.pan;
+              let clip = vec2<f32>(
+                screenPosition.x / scene.resolution.x * 2.0 - 1.0,
+                1.0 - screenPosition.y / scene.resolution.y * 2.0
+              );
+              var output: NodeOutput;
+              output.position = vec4<f32>(clip, 0.0, 1.0);
+              output.local = local;
+              output.size = size;
+              output.configuration = nodeValue(instance, 4u);
+              output.selected = nodeValue(instance, 5u);
+              return output;
+            }
+            fn roundedDistance(
+              point: vec2<f32>,
+              size: vec2<f32>,
+              radius: f32
+            ) -> f32 {
+              let q = abs(point - size * 0.5) -
+                (size * 0.5 - vec2<f32>(radius));
+              return length(max(q, vec2<f32>(0.0))) +
+                min(max(q.x, q.y), 0.0) - radius;
+            }
+            @fragment
+            fn fragmentMain(input: NodeOutput) -> @location(0) vec4<f32> {
+              let distance = roundedDistance(
+                input.local,
+                input.size,
+                10.0
+              );
+              let antialiasGraph =
+                1.15 / max(scene.scale, 0.0001);
+              let alpha = 1.0 - smoothstep(
+                0.0,
+                antialiasGraph,
+                distance
+              );
+              if (alpha <= 0.001) {
+                discard;
+              }
+              let header = input.local.y <= min(45.0, input.size.y);
+              let body = select(
+                vec3<f32>(0.0745, 0.0902, 0.1216),
+                vec3<f32>(0.0627, 0.1098, 0.1529),
+                input.configuration > 0.5
+              );
+              let headerMix = clamp(input.local.y / 45.0, 0.0, 1.0);
+              let headerColor = mix(
+                vec3<f32>(0.1333, 0.1686, 0.2118),
+                vec3<f32>(0.0902, 0.1137, 0.1451),
+                headerMix
+              );
+              var color = select(body, headerColor, header);
+              let borderWidth = 1.0 / max(scene.scale, 0.0001);
+              let border = select(
+                select(
+                  vec3<f32>(0.2039, 0.2549, 0.3098),
+                  vec3<f32>(0.3451, 0.7490, 1.0),
+                  input.configuration > 0.5
+                ),
+                vec3<f32>(0.4392, 0.8118, 1.0),
+                input.selected > 0.5
+              );
+              let borderMask = 1.0 - smoothstep(
+                borderWidth,
+                borderWidth + antialiasGraph,
+                abs(distance)
+              );
+              color = mix(color, border, borderMask);
+              return vec4<f32>(color, alpha * 0.99);
+            }
+          `
+        });
+
+      const blend = {
+        color: {
+          srcFactor: "src-alpha",
+          dstFactor: "one-minus-src-alpha",
+          operation: "add"
+        },
+        alpha: {
+          srcFactor: "one",
+          dstFactor: "one-minus-src-alpha",
+          operation: "add"
+        }
+      };
+      const computeDescriptor = {
+          label: "RML graph compute culling",
+          layout: "auto",
+          compute: {
+            module: computeModule,
+            entryPoint: "main"
+          }
+        };
+      const gridDescriptor = {
+          label: "RML graph grid",
+          layout: "auto",
+          vertex: {
+            module: gridModule,
+            entryPoint: "vertexMain"
+          },
+          fragment: {
+            module: gridModule,
+            entryPoint: "fragmentMain",
+            targets: [{ format }]
+          },
+          primitive: { topology: "triangle-list" }
+        };
+      const wireDescriptor = {
+          label: "RML graph wires",
+          layout: "auto",
+          vertex: {
+            module: wireModule,
+            entryPoint: "vertexMain"
+          },
+          fragment: {
+            module: wireModule,
+            entryPoint: "fragmentMain",
+            targets: [{ format, blend }]
+          },
+          primitive: { topology: "triangle-strip" }
+        };
+      const nodeDescriptor = {
+          label: "RML graph nodes",
+          layout: "auto",
+          vertex: {
+            module: nodeModule,
+            entryPoint: "vertexMain"
+          },
+          fragment: {
+            module: nodeModule,
+            entryPoint: "fragmentMain",
+            targets: [{ format, blend }]
+          },
+          primitive: { topology: "triangle-strip" }
+        };
+      const createCompute = descriptor =>
+        typeof device.createComputePipelineAsync ===
+          "function"
+          ? device.createComputePipelineAsync(
+              descriptor
+            )
+          : Promise.resolve(
+              device.createComputePipeline(
+                descriptor
+              )
+            );
+      const createRender = descriptor =>
+        typeof device.createRenderPipelineAsync ===
+          "function"
+          ? device.createRenderPipelineAsync(
+              descriptor
+            )
+          : Promise.resolve(
+              device.createRenderPipeline(
+                descriptor
+              )
+            );
+      [
+        this.gpuPipelines.compute,
+        this.gpuPipelines.grid,
+        this.gpuPipelines.wire,
+        this.gpuPipelines.node
+      ] = await Promise.all([
+        createCompute(computeDescriptor),
+        createRender(gridDescriptor),
+        createRender(wireDescriptor),
+        createRender(nodeDescriptor)
+      ]);
+    }
+
+    ensureBuffer(name, requiredBytes, usage) {
+      const size = Math.max(
+        4,
+        Math.ceil(requiredBytes / 4) * 4
+      );
+      if (
+        this.gpuBuffers[name] &&
+        this.gpuBufferSizes[name] >= size
+      ) {
+        return false;
+      }
+      this.gpuBuffers[name]?.destroy?.();
+      this.gpuBuffers[name] =
+        this.gpuDevice.createBuffer({
+          label: `RML graph ${name}`,
+          size: grownCapacity(
+            this.gpuBufferSizes[name] || 0,
+            size,
+            256
+          ),
+          usage
+        });
+      this.gpuBufferSizes[name] =
+        this.gpuBuffers[name].size;
+      return true;
+    }
+
+    ensureWebGpuBuffers() {
+      const storageCopy =
+        GPUBufferUsage.STORAGE |
+        GPUBufferUsage.COPY_DST;
+      let changed = false;
+      changed = this.ensureBuffer(
+        "renderUniform",
+        32,
+        GPUBufferUsage.UNIFORM |
+          GPUBufferUsage.COPY_DST
+      ) || changed;
+      changed = this.ensureBuffer(
+        "cullUniform",
+        32,
+        GPUBufferUsage.UNIFORM |
+          GPUBufferUsage.COPY_DST
+      ) || changed;
+      changed = this.ensureBuffer(
+        "wireMaster",
+        this.wireInstanceCapacity *
+          FLOATS_PER_WIRE_INSTANCE * 4,
+        storageCopy
+      ) || changed;
+      changed = this.ensureBuffer(
+        "wireBounds",
+        this.wireInstanceCapacity * 4 * 4,
+        storageCopy
+      ) || changed;
+      changed = this.ensureBuffer(
+        "wireVisible",
+        this.wireInstanceCapacity *
+          FLOATS_PER_WIRE_INSTANCE * 4,
+        GPUBufferUsage.STORAGE
+      ) || changed;
+      changed = this.ensureBuffer(
+        "wireIndirect",
+        16,
+        GPUBufferUsage.STORAGE |
+          GPUBufferUsage.INDIRECT |
+          GPUBufferUsage.COPY_DST
+      ) || changed;
+      changed = this.ensureBuffer(
+        "nodeMaster",
+        this.nodeInstanceCapacity *
+          FLOATS_PER_NODE_INSTANCE * 4,
+        storageCopy
+      ) || changed;
+      changed = this.ensureBuffer(
+        "nodeVisibility",
+        this.nodeInstanceCapacity * 4,
+        storageCopy
+      ) || changed;
+      changed = this.ensureBuffer(
+        "nodeVisible",
+        this.nodeInstanceCapacity *
+          FLOATS_PER_NODE_INSTANCE * 4,
+        GPUBufferUsage.STORAGE
+      ) || changed;
+      changed = this.ensureBuffer(
+        "nodeIndirect",
+        16,
+        GPUBufferUsage.STORAGE |
+          GPUBufferUsage.INDIRECT |
+          GPUBufferUsage.COPY_DST
+      ) || changed;
+      changed = this.ensureBuffer(
+        "preview",
+        FLOATS_PER_WIRE_INSTANCE * 4,
+        storageCopy
+      ) || changed;
+      if (changed) {
+        this.createWebGpuBindGroups();
+      }
+    }
+
+    createWebGpuBindGroups() {
+      const device = this.gpuDevice;
+      const buffers = this.gpuBuffers;
+      if (
+        !buffers.renderUniform ||
+        !this.gpuPipelines.compute
+      ) {
+        return;
+      }
+      this.gpuBindGroups.compute =
+        device.createBindGroup({
+          layout:
+            this.gpuPipelines.compute
+              .getBindGroupLayout(0),
+          entries: [
+            [0, buffers.cullUniform],
+            [1, buffers.wireMaster],
+            [2, buffers.wireBounds],
+            [3, buffers.wireVisible],
+            [4, buffers.wireIndirect],
+            [5, buffers.nodeMaster],
+            [6, buffers.nodeVisibility],
+            [7, buffers.nodeVisible],
+            [8, buffers.nodeIndirect]
+          ].map(([binding, buffer]) => ({
+            binding,
+            resource: { buffer }
+          }))
+        });
+      const renderGroup = (
+        pipeline,
+        dataBuffer
+      ) => device.createBindGroup({
+        layout:
+          pipeline.getBindGroupLayout(0),
+        entries: [
+          {
+            binding: 0,
+            resource: {
+              buffer: buffers.renderUniform
+            }
+          },
+          ...(dataBuffer
+            ? [{
+                binding: 1,
+                resource: {
+                  buffer: dataBuffer
+                }
+              }]
+            : [])
+        ]
+      });
+      this.gpuBindGroups.grid =
+        renderGroup(
+          this.gpuPipelines.grid,
+          null
+        );
+      this.gpuBindGroups.wire =
+        renderGroup(
+          this.gpuPipelines.wire,
+          buffers.wireVisible
+        );
+      this.gpuBindGroups.preview =
+        renderGroup(
+          this.gpuPipelines.wire,
+          buffers.preview
+        );
+      this.gpuBindGroups.node =
+        renderGroup(
+          this.gpuPipelines.node,
+          buffers.nodeVisible
+        );
+    }
+
+    rebuildWireBuffers() {
+      super.rebuildWireBuffers();
+      if (!this.gpuResourcesReady) {
+        return;
+      }
+      this.ensureWebGpuBuffers();
+      const count = this.wireRecords.length;
+      if (
+        this.wireBoundsData.length <
+          this.wireInstanceCapacity * 4
+      ) {
+        this.wireBoundsData =
+          new Float32Array(
+            this.wireInstanceCapacity * 4
+          );
+      }
+      for (let index = 0; index < count; index += 1) {
+        const bounds =
+          this.wireRecords[index].bounds;
+        const offset = index * 4;
+        this.wireBoundsData[offset] = bounds.left;
+        this.wireBoundsData[offset + 1] = bounds.top;
+        this.wireBoundsData[offset + 2] = bounds.right;
+        this.wireBoundsData[offset + 3] = bounds.bottom;
+      }
+      if (count > 0) {
+        this.gpuDevice.queue.writeBuffer(
+          this.gpuBuffers.wireMaster,
+          0,
+          this.wireInstanceData.subarray(
+            0,
+            count * FLOATS_PER_WIRE_INSTANCE
+          )
+        );
+        this.gpuDevice.queue.writeBuffer(
+          this.gpuBuffers.wireBounds,
+          0,
+          this.wireBoundsData.subarray(
+            0,
+            count * 4
+          )
+        );
+      }
+    }
+
+    computeWireLength(
+      curve,
+      previous,
+      geometryReused
+    ) {
+      return geometryReused
+        ? previous.length
+        : 0;
+    }
+
+    rebuildNodeBuffers() {
+      super.rebuildNodeBuffers();
+      if (!this.gpuResourcesReady) {
+        return;
+      }
+      this.ensureWebGpuBuffers();
+      const count = this.nodeRecords.length;
+      if (
+        this.nodeVisibilityData.length <
+          this.nodeInstanceCapacity
+      ) {
+        this.nodeVisibilityData =
+          new Uint32Array(
+            this.nodeInstanceCapacity
+          );
+      }
+      for (let index = 0; index < count; index += 1) {
+        this.nodeVisibilityData[index] =
+          this.nodeExcludedIds.has(
+            this.nodeRecords[index].nodeId
+          )
+            ? 0
+            : 1;
+      }
+      if (count > 0) {
+        this.gpuDevice.queue.writeBuffer(
+          this.gpuBuffers.nodeMaster,
+          0,
+          this.nodeInstanceData.subarray(
+            0,
+            count * FLOATS_PER_NODE_INSTANCE
+          )
+        );
+        this.gpuDevice.queue.writeBuffer(
+          this.gpuBuffers.nodeVisibility,
+          0,
+          this.nodeVisibilityData.subarray(
+            0,
+            count
+          )
+        );
+      }
+    }
+
+    updateSegments(segments = []) {
+      const indices = segments.map(segment =>
+        this.wireRecordIndexByKey.get(
+          this.wireRecordKey(segment)
+        )
+      );
+      const updated = super.updateSegments(
+        segments
+      );
+      if (!updated) {
+        return false;
+      }
+      for (const index of indices) {
+        const dataOffset =
+          index * FLOATS_PER_WIRE_INSTANCE;
+        const boundsOffset = index * 4;
+        const bounds =
+          this.wireRecords[index].bounds;
+        this.wireBoundsData[boundsOffset] =
+          bounds.left;
+        this.wireBoundsData[boundsOffset + 1] =
+          bounds.top;
+        this.wireBoundsData[boundsOffset + 2] =
+          bounds.right;
+        this.wireBoundsData[boundsOffset + 3] =
+          bounds.bottom;
+        this.gpuDevice.queue.writeBuffer(
+          this.gpuBuffers.wireMaster,
+          dataOffset * 4,
+          this.wireInstanceData.subarray(
+            dataOffset,
+            dataOffset + FLOATS_PER_WIRE_INSTANCE
+          )
+        );
+        this.gpuDevice.queue.writeBuffer(
+          this.gpuBuffers.wireBounds,
+          boundsOffset * 4,
+          this.wireBoundsData.subarray(
+            boundsOffset,
+            boundsOffset + 4
+          )
+        );
+      }
+      return true;
+    }
+
+    updateNodes(nodes = []) {
+      const indices = nodes.map(node =>
+        this.nodeRecordIndexById.get(
+          node?.nodeId
+        )
+      );
+      const updated = super.updateNodes(nodes);
+      if (!updated) {
+        return false;
+      }
+      for (const index of indices) {
+        const offset =
+          index * FLOATS_PER_NODE_INSTANCE;
+        this.gpuDevice.queue.writeBuffer(
+          this.gpuBuffers.nodeMaster,
+          offset * 4,
+          this.nodeInstanceData.subarray(
+            offset,
+            offset + FLOATS_PER_NODE_INSTANCE
+          )
+        );
+      }
+      return true;
+    }
+
+    hideConnections(connectionIds = []) {
+      const ids = new Set(
+        Array.isArray(connectionIds) ||
+        connectionIds instanceof Set
+          ? connectionIds
+          : [connectionIds]
+      );
+      const indices = [];
+      for (
+        let index = 0;
+        index < this.wireRecords.length;
+        index += 1
+      ) {
+        if (
+          ids.has(
+            this.wireRecords[index]
+              .connectionId
+          )
+        ) {
+          indices.push(index);
+        }
+      }
+      const hidden =
+        super.hideConnections(connectionIds);
+      if (!hidden) {
+        return hidden;
+      }
+      for (const index of indices) {
+        const offset =
+          index * FLOATS_PER_WIRE_INSTANCE;
+        this.gpuDevice.queue.writeBuffer(
+          this.gpuBuffers.wireMaster,
+          offset * 4,
+          this.wireInstanceData.subarray(
+            offset,
+            offset + FLOATS_PER_WIRE_INSTANCE
+          )
+        );
+      }
+      return hidden;
+    }
+
+    setNodeExclusions(nodeIds = []) {
+      const previous = this.nodeExcludedIds;
+      const changed =
+        super.setNodeExclusions(nodeIds);
+      if (!changed) {
+        return false;
+      }
+      const dirtyIds = new Set([
+        ...previous,
+        ...this.nodeExcludedIds
+      ]);
+      for (const nodeId of dirtyIds) {
+        const index =
+          this.nodeRecordIndexById.get(
+            nodeId
+          );
+        if (!Number.isInteger(index)) {
+          continue;
+        }
+        this.nodeVisibilityData[index] =
+          this.nodeExcludedIds.has(nodeId)
+            ? 0
+            : 1;
+        this.gpuDevice.queue.writeBuffer(
+          this.gpuBuffers.nodeVisibility,
+          index * 4,
+          this.nodeVisibilityData.subarray(
+            index,
+            index + 1
+          )
+        );
+      }
+      return true;
+    }
+
+    setPreview(segment = null) {
+      this.previewSegment =
+        segment && typeof segment === "object"
+          ? segment
+          : null;
+      if (!this.previewSegment) {
+        this.previewInstanceCount = 0;
+        this.stats.previewInstances = 0;
+        this.scheduleDraw();
+        return true;
+      }
+      const record = this.prepareWireRecord(
+        this.previewSegment
+      );
+      record.selected = true;
+      record.length = approximateCubicLength(
+        record.curve,
+        12
+      );
+      this.writeWireLayerData(
+        record,
+        this.previewInstanceData,
+        0
+      );
+      this.gpuDevice.queue.writeBuffer(
+        this.gpuBuffers.preview,
+        0,
+        this.previewInstanceData
+      );
+      this.previewInstanceCount = 1;
+      this.stats.previewInstances = 1;
+      this.scheduleDraw();
+      return true;
+    }
+
+    draw() {
+      if (
+        !this.available ||
+        !this.gpuResourcesReady ||
+        this.contextLost ||
+        !this.viewport ||
+        this.disposed
+      ) {
+        return;
+      }
+      const started = performance.now();
+      const device = this.gpuDevice;
+      const bounds = this.viewportGraphBounds(
+        WIRE_CULL_MARGIN_PIXELS
+      );
+      this.renderUniformData[0] = this.cssWidth;
+      this.renderUniformData[1] = this.cssHeight;
+      this.renderUniformData[2] = this.camera.x;
+      this.renderUniformData[3] = this.camera.y;
+      this.renderUniformData[4] = this.camera.scale;
+      this.renderUniformData[5] = this.pixelRatio;
+      this.cullUniformFloats[0] = bounds.left;
+      this.cullUniformFloats[1] = bounds.top;
+      this.cullUniformFloats[2] = bounds.right;
+      this.cullUniformFloats[3] = bounds.bottom;
+      this.cullUniformIntegers[0] =
+        this.wireRecords.length;
+      this.cullUniformIntegers[1] =
+        this.nodeRecords.length;
+      device.queue.writeBuffer(
+        this.gpuBuffers.renderUniform,
+        0,
+        this.renderUniformData
+      );
+      device.queue.writeBuffer(
+        this.gpuBuffers.cullUniform,
+        0,
+        this.cullUniformData
+      );
+      device.queue.writeBuffer(
+        this.gpuBuffers.wireIndirect,
+        0,
+        this.wireIndirectData
+      );
+      device.queue.writeBuffer(
+        this.gpuBuffers.nodeIndirect,
+        0,
+        this.nodeIndirectData
+      );
+
+      const encoder =
+        device.createCommandEncoder({
+          label: "RML graph frame"
+        });
+      const maximumCount = Math.max(
+        this.wireRecords.length,
+        this.nodeRecords.length
+      );
+      if (maximumCount > 0) {
+        const compute =
+          encoder.beginComputePass({
+            label: "RML graph visibility"
+          });
+        compute.setPipeline(
+          this.gpuPipelines.compute
+        );
+        compute.setBindGroup(
+          0,
+          this.gpuBindGroups.compute
+        );
+        compute.dispatchWorkgroups(
+          Math.ceil(
+            maximumCount /
+              WEBGPU_WORKGROUP_SIZE
+          )
+        );
+        compute.end();
+      }
+
+      const render = encoder.beginRenderPass({
+        label: "RML graph render",
+        colorAttachments: [{
+          view:
+            this.gpuContext
+              .getCurrentTexture()
+              .createView(),
+          clearValue: {
+            r: 0.0314,
+            g: 0.0392,
+            b: 0.0627,
+            a: 1
+          },
+          loadOp: "clear",
+          storeOp: "store"
+        }]
+      });
+      let drawCalls = 0;
+      render.setPipeline(
+        this.gpuPipelines.grid
+      );
+      render.setBindGroup(
+        0,
+        this.gpuBindGroups.grid
+      );
+      render.draw(3);
+      drawCalls += 1;
+      if (this.wireRecords.length > 0) {
+        render.setPipeline(
+          this.gpuPipelines.wire
+        );
+        render.setBindGroup(
+          0,
+          this.gpuBindGroups.wire
+        );
+        render.drawIndirect(
+          this.gpuBuffers.wireIndirect,
+          0
+        );
+        drawCalls += 1;
+      }
+      if (this.previewInstanceCount > 0) {
+        render.setPipeline(
+          this.gpuPipelines.wire
+        );
+        render.setBindGroup(
+          0,
+          this.gpuBindGroups.preview
+        );
+        render.draw(
+          (GPU_CURVE_STEPS + 1) * 2,
+          1
+        );
+        drawCalls += 1;
+      }
+      if (this.nodeRecords.length > 0) {
+        render.setPipeline(
+          this.gpuPipelines.node
+        );
+        render.setBindGroup(
+          0,
+          this.gpuBindGroups.node
+        );
+        render.drawIndirect(
+          this.gpuBuffers.nodeIndirect,
+          0
+        );
+        drawCalls += 1;
+      }
+      render.end();
+      device.queue.submit([encoder.finish()]);
+
+      this.stats.drawCalls = drawCalls;
+      this.stats.wireInstances = null;
+      this.stats.nodeInstances = null;
+      this.stats.visibleSegments = null;
+      this.stats.visibleNodes = null;
+      this.stats.culledSegments = null;
+      this.stats.culledNodes = null;
+      this.stats.gpuSubmittedSegments =
+        this.wireRecords.length;
+      this.stats.gpuSubmittedNodes =
+        this.nodeRecords.length;
+      const elapsed = performance.now() - started;
+      this.drawSamples += 1;
+      this.stats.lastDrawMilliseconds = elapsed;
+      this.stats.maximumDrawMilliseconds = Math.max(
+        this.stats.maximumDrawMilliseconds,
+        elapsed
+      );
+      this.stats.averageDrawMilliseconds +=
+        (elapsed - this.stats.averageDrawMilliseconds) /
+        this.drawSamples;
+    }
+
+    clearScene() {
+      super.clearScene();
+      if (
+        this.gpuResourcesReady &&
+        this.gpuBuffers.wireIndirect
+      ) {
+        this.gpuDevice.queue.writeBuffer(
+          this.gpuBuffers.wireIndirect,
+          0,
+          this.wireIndirectData
+        );
+        this.gpuDevice.queue.writeBuffer(
+          this.gpuBuffers.nodeIndirect,
+          0,
+          this.nodeIndirectData
+        );
+      }
+    }
+
+    deleteGpuResources() {
+      if (this.gpuBuffers) {
+        for (const buffer of
+          Object.values(this.gpuBuffers)) {
+          buffer?.destroy?.();
+        }
+      }
+      this.gpuBuffers = Object.create(null);
+      this.gpuBufferSizes = Object.create(null);
+      this.gpuBindGroups = Object.create(null);
+      this.gpuResourcesReady = false;
+    }
+  }
+
   Object.defineProperty(
     window,
     "RMLGraphHybridRenderer",
     {
       value: Object.freeze({
         version: VERSION,
+        ready: webGpuRuntime.ready,
         create(options) {
+          if (webGpuRuntime.device) {
+            const renderer =
+              new GraphWebGpuRenderer(
+                options,
+                webGpuRuntime
+              );
+            if (renderer.available) {
+              return renderer;
+            }
+            renderer.dispose();
+          }
           return new GraphHybridRenderer(options);
         }
       }),

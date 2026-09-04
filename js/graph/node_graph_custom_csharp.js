@@ -820,7 +820,7 @@ function buildCustomCSharpFragmentInWorker(nodeId, source, parseResult, options)
     }
     const worker = new Worker(
       new URL(
-        "js/workers/graph_codegen_worker.js?v=138-domain-folder-layout-v754",
+        "js/workers/graph_codegen_worker.js?v=138-max-graph-performance-v755",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -1830,7 +1830,7 @@ function loadCustomCSharpDetachedEditorModule() {
         const script =
           document.createElement("script");
         script.src = new URL(
-          "js/editor/custom_csharp_editor.js?v=53-domain-folder-layout-v754",
+          "js/editor/custom_csharp_editor.js?v=53-max-graph-performance-v755",
           document.baseURI
         ).href;
         script.async = true;
@@ -2567,7 +2567,7 @@ function prepareCustomCSharpEditorHost(
       hostWindow.document.createElement("link");
     stylesheet.rel = "stylesheet";
     stylesheet.href = new URL(
-      "styles/features/styles.runtime-graph.css?v=4-domain-folder-layout-v754",
+      "styles/features/styles.runtime-graph.css?v=4-max-graph-performance-v755",
       window.location.href
     ).href;
     hostWindow.document.head.appendChild(

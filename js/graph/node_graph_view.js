@@ -160,6 +160,14 @@ const GRAPH_NODE_SPATIAL_CELL_SIZE = 720;
 
 const GRAPH_NODE_SPATIAL_MAX_QUERY_CELLS = 4096;
 
+const GRAPH_NODE_SPATIAL_KEY_STRIDE = 1000003;
+
+const GRAPH_DOM_DETAIL_NODE_MINIMUM = 48;
+
+const GRAPH_DOM_DETAIL_NODE_MAXIMUM = 240;
+
+const GRAPH_DOM_DETAIL_PIXELS_PER_NODE = 8000;
+
 const GRAPH_VIEW_PERSIST_IDLE_MILLISECONDS = 180;
 
 let graphInspectorRenderDeferred = false;
@@ -431,6 +439,34 @@ let graphNodeViewportSpatialLength = -1;
 
 let graphNodeViewportSpatialDirty = true;
 
+const graphNodeViewportSpatialDirtyNodeIds = new Set();
+
+let graphGpuDetailOverflowMode = false;
+
+let graphGpuNodeRecordSource = null;
+
+let graphGpuNodeRecordLength = -1;
+
+let graphGpuNodeRecords = [];
+
+const graphGpuNodeRecordById = new Map();
+
+const graphGpuNodeDirtyIds = new Set();
+
+let graphGpuNodeRecordsDirty = true;
+
+let graphGpuSelectedNodeId = null;
+
+let graphConnectedPortKeysSource = null;
+
+let graphConnectedPortKeysLength = -1;
+
+let graphConnectedPortKeysCache = new Set();
+
+const graphConnectionGeometryCache = new Map();
+
+const emptyGraphSocketGeometry = new Map();
+
 let graphInteractionMotionFrame = 0;
 
 let graphPendingInteractionMotion = null;
@@ -506,6 +542,19 @@ function cancelProjectScopedGraphWork() {
     graphNodeViewportSpatialSource = null;
     graphNodeViewportSpatialLength = -1;
     graphNodeViewportSpatialDirty = true;
+    graphNodeViewportSpatialDirtyNodeIds.clear();
+    graphGpuDetailOverflowMode = false;
+    graphGpuNodeRecordSource = null;
+    graphGpuNodeRecordLength = -1;
+    graphGpuNodeRecords = [];
+    graphGpuNodeRecordById.clear();
+    graphGpuNodeDirtyIds.clear();
+    graphGpuNodeRecordsDirty = true;
+    graphGpuSelectedNodeId = null;
+    graphConnectedPortKeysSource = null;
+    graphConnectedPortKeysLength = -1;
+    graphConnectedPortKeysCache = new Set();
+    graphConnectionGeometryCache.clear();
   }
 
 const graphSharedWheelClaims = (() => {
@@ -12053,6 +12102,15 @@ function centerGraph() {
   }
 
 function connectedPortKeys() {
+    if (
+      graphConnectedPortKeysSource ===
+        graph.connections &&
+      graphConnectedPortKeysLength ===
+        graph.connections.length
+    ) {
+      return graphConnectedPortKeysCache;
+    }
+
     const keys = new Set();
 
     for (const connection of graph.connections) {
@@ -12064,7 +12122,12 @@ function connectedPortKeys() {
       );
     }
 
-    return keys;
+    graphConnectedPortKeysSource =
+      graph.connections;
+    graphConnectedPortKeysLength =
+      graph.connections.length;
+    graphConnectedPortKeysCache = keys;
+    return graphConnectedPortKeysCache;
   }
 
 function scheduleNodeBodyWireRefresh(
@@ -12828,20 +12891,13 @@ function refreshRenderedNodeResizeLimits() {
 
     let changed = false;
 
-    const nodesById = new Map(
-      graph.nodes.map(node => [
-        node.id,
-        node
-      ])
-    );
-
     for (
       const article of
       dom.nodesHost.querySelectorAll(
         ":scope > .rml-graph-node"
       )
     ) {
-      const node = nodesById.get(
+      const node = findGraphNode(
         article.dataset.graphNodeId
       );
       if (!node) {
@@ -13182,7 +13238,9 @@ function updateNodeResize(
       );
     }
 
-    invalidateGraphNodeViewportSpatialIndex();
+    invalidateGraphNodeViewportSpatialIndex(
+      node.id
+    );
 
     applyNodeSizeStyles(
       node,
@@ -13259,7 +13317,9 @@ function finishNodeResize(
           );
         }
       }
-      invalidateGraphNodeViewportSpatialIndex();
+      invalidateGraphNodeViewportSpatialIndex(
+        node.id
+      );
     }
 
     interaction.article?.classList.remove(
@@ -13808,12 +13868,152 @@ function estimatedGraphNodeGeometry(node) {
       right: node.x + width,
       bottom: node.y + height,
       sockets:
-        cached?.sockets || new Map()
+        cached?.sockets ||
+        emptyGraphSocketGeometry
     };
   }
 
-function invalidateGraphNodeViewportSpatialIndex() {
+function invalidateGraphNodeViewportSpatialIndex(
+    nodeId = null
+  ) {
+    invalidateGraphGpuNodeRecord(nodeId);
+    if (
+      nodeId &&
+      !graphNodeViewportSpatialDirty &&
+      graphNodeViewportSpatialSource ===
+        graph?.nodes &&
+      graphNodeViewportSpatialLength ===
+        graph.nodes.length
+    ) {
+      graphNodeViewportSpatialDirtyNodeIds.add(
+        nodeId
+      );
+      return;
+    }
     graphNodeViewportSpatialDirty = true;
+    graphNodeViewportSpatialDirtyNodeIds.clear();
+  }
+
+function graphNodeSpatialRecord(
+    node,
+    order
+  ) {
+    const geometry =
+      estimatedGraphNodeGeometry(node);
+    return {
+      node,
+      order,
+      left: geometry.x,
+      top: geometry.y,
+      right: geometry.right,
+      bottom: geometry.bottom
+    };
+  }
+
+function insertGraphNodeSpatialRecord(
+    index,
+    record
+  ) {
+    const range =
+      graphNodeSpatialCellRange(record);
+    for (
+      let y = range.minimumY;
+      y <= range.maximumY;
+      y += 1
+    ) {
+      for (
+        let x = range.minimumX;
+        x <= range.maximumX;
+        x += 1
+      ) {
+        const key =
+          graphNodeSpatialCellKey(x, y);
+        const values = index.get(key);
+        if (values) {
+          values.push(record);
+        } else {
+          index.set(key, [record]);
+        }
+      }
+    }
+  }
+
+function removeGraphNodeSpatialRecord(
+    index,
+    record
+  ) {
+    const range =
+      graphNodeSpatialCellRange(record);
+    for (
+      let y = range.minimumY;
+      y <= range.maximumY;
+      y += 1
+    ) {
+      for (
+        let x = range.minimumX;
+        x <= range.maximumX;
+        x += 1
+      ) {
+        const key =
+          graphNodeSpatialCellKey(x, y);
+        const values = index.get(key);
+        if (!values) {
+          continue;
+        }
+        const position = values.indexOf(record);
+        if (position >= 0) {
+          values.splice(position, 1);
+        }
+        if (values.length === 0) {
+          index.delete(key);
+        }
+      }
+    }
+  }
+
+function updateDirtyGraphNodeSpatialRecords() {
+    if (
+      graphNodeViewportSpatialDirtyNodeIds
+        .size === 0
+    ) {
+      return;
+    }
+    for (const nodeId of
+      graphNodeViewportSpatialDirtyNodeIds) {
+      const previous =
+        graphNodeViewportSpatialRecordById
+          .get(nodeId);
+      if (previous) {
+        removeGraphNodeSpatialRecord(
+          graphNodeViewportSpatialIndex,
+          previous
+        );
+        graphNodeViewportSpatialRecordById
+          .delete(nodeId);
+      }
+      const node = findGraphNode(nodeId);
+      if (
+        !node ||
+        node?.parameters
+          ?._rmlInternalDynamicMonitor ===
+            true
+      ) {
+        continue;
+      }
+      const record = graphNodeSpatialRecord(
+        node,
+        previous?.order ?? 0
+      );
+      graphNodeViewportSpatialRecordById.set(
+        nodeId,
+        record
+      );
+      insertGraphNodeSpatialRecord(
+        graphNodeViewportSpatialIndex,
+        record
+      );
+    }
+    graphNodeViewportSpatialDirtyNodeIds.clear();
   }
 
 function graphNodeSpatialCellRange(bounds) {
@@ -13831,14 +14031,21 @@ function graphNodeSpatialCellRange(bounds) {
     };
   }
 
+function graphNodeSpatialCellKey(x, y) {
+    return y *
+      GRAPH_NODE_SPATIAL_KEY_STRIDE +
+      x;
+  }
+
 function ensureGraphNodeViewportSpatialIndex() {
     const nodes = graph?.nodes || [];
-    if (
-      !graphNodeViewportSpatialDirty &&
-      graphNodeViewportSpatialSource === nodes &&
-      graphNodeViewportSpatialLength ===
-        nodes.length
-    ) {
+    const rebuild =
+      graphNodeViewportSpatialDirty ||
+      graphNodeViewportSpatialSource !== nodes ||
+      graphNodeViewportSpatialLength !==
+        nodes.length;
+    if (!rebuild) {
+      updateDirtyGraphNodeSpatialRecords();
       return;
     }
 
@@ -13858,41 +14065,15 @@ function ensureGraphNodeViewportSpatialIndex() {
       ) {
         continue;
       }
-      const geometry =
-        estimatedGraphNodeGeometry(node);
-      const record = {
+      const record = graphNodeSpatialRecord(
         node,
-        order,
-        left: geometry.x,
-        top: geometry.y,
-        right: geometry.right,
-        bottom: geometry.bottom
-      };
+        order
+      );
       byId.set(node.id, record);
-
-      const range =
-        graphNodeSpatialCellRange(
-          record
-        );
-      for (
-        let y = range.minimumY;
-        y <= range.maximumY;
-        y += 1
-      ) {
-        for (
-          let x = range.minimumX;
-          x <= range.maximumX;
-          x += 1
-        ) {
-          const key = `${x}:${y}`;
-          const values = index.get(key);
-          if (values) {
-            values.push(record);
-          } else {
-            index.set(key, [record]);
-          }
-        }
-      }
+      insertGraphNodeSpatialRecord(
+        index,
+        record
+      );
     }
 
     graphNodeViewportSpatialIndex = index;
@@ -13902,6 +14083,7 @@ function ensureGraphNodeViewportSpatialIndex() {
     graphNodeViewportSpatialLength =
       nodes.length;
     graphNodeViewportSpatialDirty = false;
+    graphNodeViewportSpatialDirtyNodeIds.clear();
   }
 
 function graphNodeSpatialRecordsInBounds(
@@ -13961,7 +14143,7 @@ function graphNodeSpatialRecordsInBounds(
       ) {
         for (const record of
           graphNodeViewportSpatialIndex.get(
-            `${x}:${y}`
+            graphNodeSpatialCellKey(x, y)
           ) || []) {
           candidates.add(record);
         }
@@ -14111,19 +14293,137 @@ function graphViewportHasVisibleNode() {
     const bounds =
       visibleGraphBounds(0);
 
+    if (
+      graphGpuOverviewActive() &&
+      (
+        graphNodeViewportSpatialDirty ||
+        graphNodeViewportSpatialSource !==
+          graph.nodes ||
+        graphNodeViewportSpatialLength !==
+          graph.nodes.length
+      )
+    ) {
+      for (const node of graph.nodes) {
+        if (
+          node?.parameters
+            ?._rmlInternalDynamicMonitor ===
+              true
+        ) {
+          continue;
+        }
+        const geometry =
+          estimatedGraphNodeGeometry(node);
+        if (!(
+          geometry.right < bounds.left ||
+          geometry.x > bounds.right ||
+          geometry.bottom < bounds.top ||
+          geometry.y > bounds.bottom
+        )) {
+          return true;
+        }
+      }
+      return false;
+    }
+
     return graphNodeSpatialRecordsInBounds(
       bounds
     ).length > 0;
   }
 
+function graphDetailedDomNodeLimit() {
+    const width = Math.max(
+      1,
+      dom.viewport?.clientWidth || 1
+    );
+    const height = Math.max(
+      1,
+      dom.viewport?.clientHeight || 1
+    );
+    return Math.round(
+      nodeGraphClamp(
+        Math.floor(
+          width * height /
+            GRAPH_DOM_DETAIL_PIXELS_PER_NODE
+        ),
+        GRAPH_DOM_DETAIL_NODE_MINIMUM,
+        GRAPH_DOM_DETAIL_NODE_MAXIMUM
+      )
+    );
+  }
+
+function nearestGraphNodeRecords(
+    records,
+    limit,
+    centerX,
+    centerY
+  ) {
+    if (
+      limit <= 0 ||
+      records.length === 0
+    ) {
+      return [];
+    }
+    for (const record of records) {
+      const x = (record.left + record.right) / 2;
+      const y = (record.top + record.bottom) / 2;
+      record.viewportDistance =
+        (x - centerX) ** 2 +
+        (y - centerY) ** 2;
+    }
+    if (records.length <= limit) {
+      return records;
+    }
+
+    let left = 0;
+    let right = records.length - 1;
+    const target = limit - 1;
+    while (left < right) {
+      const pivot =
+        records[
+          left + ((right - left) >> 1)
+        ].viewportDistance;
+      let low = left;
+      let high = right;
+      while (low <= high) {
+        while (
+          records[low].viewportDistance < pivot
+        ) {
+          low += 1;
+        }
+        while (
+          records[high].viewportDistance > pivot
+        ) {
+          high -= 1;
+        }
+        if (low <= high) {
+          const swap = records[low];
+          records[low] = records[high];
+          records[high] = swap;
+          low += 1;
+          high -= 1;
+        }
+      }
+      if (target <= high) {
+        right = high;
+      } else if (target >= low) {
+        left = low;
+      } else {
+        break;
+      }
+    }
+    return records.slice(0, limit);
+  }
+
 function desiredRenderedGraphNodes() {
     const fallbackVirtualized =
       fallbackGraphVirtualizationActive();
+    const hybrid = graphHybridActive();
 
     if (
-      !graphHybridActive() &&
+      !hybrid &&
       !fallbackVirtualized
     ) {
+      graphGpuDetailOverflowMode = false;
       return graph.nodes.filter(node =>
         node?.parameters
           ?._rmlInternalDynamicMonitor !==
@@ -14135,7 +14435,6 @@ function desiredRenderedGraphNodes() {
       graphGpuOverviewActive();
     const bounds =
       visibleGraphBounds();
-    ensureGraphNodeViewportSpatialIndex();
     const requiredIds =
       requiredGraphNodeIds();
     const candidateRecords = overview
@@ -14147,47 +14446,82 @@ function desiredRenderedGraphNodes() {
       candidateRecords
     );
     for (const nodeId of requiredIds) {
-      const record =
-        graphNodeViewportSpatialRecordById
-          .get(nodeId);
+      let record =
+        !overview ||
+        (
+          graphNodeViewportSpatialSource ===
+            graph.nodes &&
+          graphNodeViewportSpatialLength ===
+            graph.nodes.length
+        )
+          ? graphNodeViewportSpatialRecordById
+              .get(nodeId)
+          : null;
+      if (!record && overview) {
+        const node = findGraphNode(nodeId);
+        if (node) {
+          record = graphNodeSpatialRecord(
+            node,
+            0
+          );
+        }
+      }
       if (record) {
         selectedRecords.add(record);
       }
     }
-    const candidates = [
-      ...selectedRecords
-    ]
-      .sort((a, b) => a.order - b.order)
-      .map(record => record.node);
+    const candidates = [...selectedRecords];
+    const detailLimit = fallbackVirtualized
+      ? Math.min(
+          GRAPH_FALLBACK_MAX_DETAILED_NODES,
+          graphDetailedDomNodeLimit()
+        )
+      : graphDetailedDomNodeLimit();
+    graphGpuDetailOverflowMode = Boolean(
+      hybrid &&
+      !overview &&
+      candidates.length > detailLimit
+    );
 
-    if (
-      !fallbackVirtualized ||
-      candidates.length <=
-        GRAPH_FALLBACK_MAX_DETAILED_NODES
-    ) {
-      return candidates;
+    if (candidates.length <= detailLimit) {
+      return candidates
+        .sort((a, b) => a.order - b.order)
+        .map(record => record.node);
     }
 
     const required = candidates.filter(
-      node => requiredIds.has(node.id)
+      record => requiredIds.has(record.node.id)
     );
-    const cappedRequiredIds = new Set(
-      required.map(node => node.id)
+    const requiredRecordIds = new Set(
+      required.map(record => record.node.id)
     );
     const remaining = Math.max(
       0,
-      GRAPH_FALLBACK_MAX_DETAILED_NODES -
+      detailLimit -
         required.length
+    );
+    const centerX =
+      (bounds.left + bounds.right) / 2;
+    const centerY =
+      (bounds.top + bounds.bottom) / 2;
+    const optional = candidates.filter(record =>
+        !requiredRecordIds.has(
+          record.node.id
+        )
+      );
+    const nearest = nearestGraphNodeRecords(
+      optional,
+      remaining,
+      centerX,
+      centerY
     );
 
     return [
       ...required,
-      ...candidates
-        .filter(node =>
-          !cappedRequiredIds.has(node.id)
-        )
-        .slice(0, remaining)
-    ];
+      ...nearest
+    ]
+      .sort((a, b) => a.order - b.order)
+      .map(record => record.node);
   }
 
 function cacheGraphNodeGeometry(
@@ -14266,7 +14600,9 @@ function cacheGraphNodeGeometry(
         previous.height - value.height
       ) > 0.01
     ) {
-      invalidateGraphNodeViewportSpatialIndex();
+      invalidateGraphNodeViewportSpatialIndex(
+        node.id
+      );
     }
     return value;
   }
@@ -14277,6 +14613,8 @@ function renderedGraphNodeSignature(
     return `${
       graphGpuOverviewActive()
         ? "overview"
+        : graphGpuDetailOverflowMode
+          ? "density"
         : "detail"
     }:${nodes.map(node => node.id).join("\u0001")}`;
   }
@@ -14894,7 +15232,8 @@ function connectionVisualStart(
   }
 
 function connectionGeometry(
-    connection
+    connection,
+    includeSvgPath = true
   ) {
     const start =
       connectionVisualStart(
@@ -14915,6 +15254,57 @@ function connectionGeometry(
       Array.isArray(connection.points)
         ? connection.points
         : [];
+    const cached =
+      graphConnectionGeometryCache.get(
+        connection.id
+      );
+    let pointsUnchanged = Boolean(
+      cached &&
+      cached.pointCoordinates.length ===
+        routePoints.length * 2
+    );
+    if (pointsUnchanged) {
+      for (
+        let index = 0;
+        index < routePoints.length;
+        index += 1
+      ) {
+        if (
+          cached.pointCoordinates[index * 2] !==
+            routePoints[index].x ||
+          cached.pointCoordinates[
+            index * 2 + 1
+          ] !== routePoints[index].y
+        ) {
+          pointsUnchanged = false;
+          break;
+        }
+      }
+    }
+    if (
+      pointsUnchanged &&
+      cached.startX === start.x &&
+      cached.startY === start.y &&
+      cached.startSide === start.side &&
+      cached.endX === end.x &&
+      cached.endY === end.y &&
+      cached.endSide === end.side
+    ) {
+      if (
+        includeSvgPath &&
+        !cached.hasSvgPaths
+      ) {
+        for (const segment of
+          cached.geometry.segments) {
+          segment.d = wirePath(
+            segment.from,
+            segment.to
+          );
+        }
+        cached.hasSvgPaths = true;
+      }
+      return cached.geometry;
+    }
     const anchors = [
       {
         x: start.x,
@@ -14962,20 +15352,52 @@ function connectionGeometry(
             : "right")
       };
 
-      segments.push({
+      const segment = {
         index,
         from,
-        to,
-        d: wirePath(from, to)
-      });
+        to
+      };
+      if (includeSvgPath) {
+        segment.d = wirePath(from, to);
+      }
+      segments.push(segment);
     }
 
-    return {
+    const geometry = {
       start,
       end,
       anchors,
       segments
     };
+    const pointCoordinates =
+      new Float64Array(
+        routePoints.length * 2
+      );
+    for (
+      let index = 0;
+      index < routePoints.length;
+      index += 1
+    ) {
+      pointCoordinates[index * 2] =
+        routePoints[index].x;
+      pointCoordinates[index * 2 + 1] =
+        routePoints[index].y;
+    }
+    graphConnectionGeometryCache.set(
+      connection.id,
+      {
+        startX: start.x,
+        startY: start.y,
+        startSide: start.side,
+        endX: end.x,
+        endY: end.y,
+        endSide: end.side,
+        pointCoordinates,
+        hasSvgPaths: includeSvgPath,
+        geometry
+      }
+    );
+    return geometry;
   }
 
 function sourceSocketRefForConnection(
@@ -15463,9 +15885,172 @@ function graphSegmentInsideViewport(
     );
   }
 
+function graphGpuSimplifiedNodesActive() {
+    return Boolean(
+      graphHybridActive() &&
+      !forceSvgWireVisuals() &&
+      (
+        graphGpuOverviewActive() ||
+        graphGpuDetailOverflowMode
+      )
+    );
+  }
+
+function graphGpuNodeRecord(node) {
+    const geometry =
+      estimatedGraphNodeGeometry(node);
+    return {
+      nodeId: node.id,
+      x: node.x,
+      y: node.y,
+      width: geometry.width,
+      height: geometry.height,
+      configuration:
+        node.kind === "configuration",
+      selected:
+        graph.selectedNodeId === node.id
+    };
+  }
+
+function invalidateGraphGpuNodeRecord(
+    nodeId = null
+  ) {
+    if (nodeId) {
+      if (!graphGpuNodeRecordsDirty) {
+        graphGpuNodeDirtyIds.add(nodeId);
+      }
+      return;
+    }
+    graphGpuNodeRecordsDirty = true;
+    graphGpuNodeDirtyIds.clear();
+  }
+
+function ensureGraphGpuNodeRecords() {
+    const nodes = graph?.nodes || [];
+    const rebuild =
+      graphGpuNodeRecordsDirty ||
+      graphGpuNodeRecordSource !== nodes ||
+      graphGpuNodeRecordLength !== nodes.length;
+    if (rebuild) {
+      graphGpuNodeRecords = [];
+      graphGpuNodeRecordById.clear();
+      for (const node of nodes) {
+        if (
+          node?.parameters
+            ?._rmlInternalDynamicMonitor ===
+              true
+        ) {
+          continue;
+        }
+        const record =
+          graphGpuNodeRecord(node);
+        const index =
+          graphGpuNodeRecords.length;
+        graphGpuNodeRecords.push(record);
+        graphGpuNodeRecordById.set(
+          node.id,
+          { index, record }
+        );
+      }
+      graphGpuNodeRecordSource = nodes;
+      graphGpuNodeRecordLength = nodes.length;
+      graphGpuNodeRecordsDirty = false;
+      graphGpuNodeDirtyIds.clear();
+      return {
+        records: graphGpuNodeRecords,
+        updates: [],
+        rebuilt: true
+      };
+    }
+
+    const updates = [];
+    for (const nodeId of graphGpuNodeDirtyIds) {
+      const entry =
+        graphGpuNodeRecordById.get(nodeId);
+      const node = findGraphNode(nodeId);
+      if (
+        !entry ||
+        !node ||
+        node?.parameters
+          ?._rmlInternalDynamicMonitor ===
+            true
+      ) {
+        graphGpuNodeRecordsDirty = true;
+        graphGpuNodeDirtyIds.clear();
+        return ensureGraphGpuNodeRecords();
+      }
+      const record = graphGpuNodeRecord(node);
+      graphGpuNodeRecords[entry.index] = record;
+      graphGpuNodeRecordById.set(
+        nodeId,
+        { index: entry.index, record }
+      );
+      updates.push(record);
+    }
+    graphGpuNodeDirtyIds.clear();
+    return {
+      records: graphGpuNodeRecords,
+      updates,
+      rebuilt: false
+    };
+  }
+
 function gpuOverviewNodeRecords() {
-    if (!graphGpuOverviewActive()) {
-      return [];
+    return graphGpuSimplifiedNodesActive()
+      ? ensureGraphGpuNodeRecords().records
+      : [];
+  }
+
+function synchronizeGpuOverviewNodes() {
+    if (
+      !graphHybridActive() ||
+      forceSvgWireVisuals() ||
+      !graphHybridRenderer?.setNodes
+    ) {
+      return;
+    }
+    const selectedNodeId =
+      graph.selectedNodeId || null;
+    if (
+      graphGpuSelectedNodeId !==
+        selectedNodeId
+    ) {
+      invalidateGraphGpuNodeRecord(
+        graphGpuSelectedNodeId
+      );
+      invalidateGraphGpuNodeRecord(
+        selectedNodeId
+      );
+      graphGpuSelectedNodeId =
+        selectedNodeId;
+    }
+    if (!graphGpuSimplifiedNodesActive()) {
+      graphHybridRenderer
+        .setNodeExclusions?.([]);
+      graphHybridRenderer.setNodes([]);
+      graphHybridRenderer.setCamera?.(
+        graph.viewport
+      );
+      graphHybridRenderer.drawNow?.();
+      return;
+    }
+
+    const snapshot =
+      ensureGraphGpuNodeRecords();
+    const installed =
+      graphHybridRenderer.setNodes(
+        snapshot.records
+      );
+    if (
+      !installed &&
+      snapshot.updates.length > 0 &&
+      !graphHybridRenderer.updateNodes?.(
+        snapshot.updates
+      )
+    ) {
+      graphHybridRenderer.setNodes(
+        snapshot.records.slice()
+      );
     }
     const rendered = new Set(
       [
@@ -15477,55 +16062,23 @@ function gpuOverviewNodeRecords() {
         element.dataset.graphNodeId
       )
     );
-    return graph.nodes
-      .filter(node =>
-        !rendered.has(node.id) &&
-        node?.parameters
-          ?._rmlInternalDynamicMonitor !==
-          true
-      )
-      .map(node => {
-        const geometry =
-          estimatedGraphNodeGeometry(node);
-        return {
-          nodeId: node.id,
-          x: node.x,
-          y: node.y,
-          width: geometry.width,
-          height: geometry.height,
-          configuration:
-            node.kind ===
-            "configuration",
-          selected:
-            graph.selectedNodeId ===
-            node.id
-        };
-      });
-  }
-
-function synchronizeGpuOverviewNodes() {
-    if (
-      !graphHybridActive() ||
-      forceSvgWireVisuals() ||
-      !graphHybridRenderer?.setNodes
-    ) {
-      return;
-    }
-    graphHybridRenderer.setNodes(
-      gpuOverviewNodeRecords()
-    );
+    graphHybridRenderer
+      .setNodeExclusions?.(rendered);
     graphHybridRenderer.setCamera?.(
       graph.viewport
     );
+    graphHybridRenderer.drawNow?.();
   }
 
 function gpuSegmentsForConnection(
     connection,
-    inputBranchStart = null
+    inputBranchStart = null,
+    target = null
   ) {
     const geometry =
       connectionGeometry(
-        connection
+        connection,
+        false
       );
     if (!geometry) {
       return [];
@@ -15566,8 +16119,9 @@ function gpuSegmentsForConnection(
     const selected =
       graph.selectedConnectionId ===
       connection.id;
-    return geometry.segments.map(
-      segment => ({
+    const records = target || [];
+    for (const segment of geometry.segments) {
+      records.push({
         connectionId: connection.id,
         segmentIndex: segment.index,
         from: segment.from,
@@ -15576,8 +16130,9 @@ function gpuSegmentsForConnection(
         impulse,
         selected,
         targetState
-      })
-    );
+      });
+    }
+    return records;
   }
 
 function relatedGraphConnectionIds(
@@ -15731,11 +16286,12 @@ function updateGraphWireConnections(
       if (!connection) {
         return false;
       }
-      records.push(
-        ...gpuSegmentsForConnection(
+      for (const record of
+        gpuSegmentsForConnection(
           connection
-        )
-      );
+        )) {
+        records.push(record);
+      }
     }
     if (
       records.length === 0 ||
@@ -15823,14 +16379,17 @@ function renderCompleteHybridGraphWires({
     
 
     for (const connection of graph.connections) {
-      const records =
-        gpuSegmentsForConnection(
-          connection
-        );
-      gpuSegments.push(...records);
+      const firstRecordIndex =
+        gpuSegments.length;
+      gpuSegmentsForConnection(
+        connection,
+        null,
+        gpuSegments
+      );
 
       const color =
-        records[0]?.color ||
+        gpuSegments[firstRecordIndex]
+          ?.color ||
         typeInfo("generic").color;
       for (const point of
         connection.points || []) {
@@ -15954,7 +16513,8 @@ function renderGraphWires() {
 
       const geometry =
         connectionGeometry(
-          connection
+          connection,
+          !gpuVisual || svgCompatibility
         );
 
       if (!geometry) {
@@ -16263,7 +16823,9 @@ function selectGraphNode(
     refreshGraphSelectionWires(
       previousConnectionId
     );
+    synchronizeGpuOverviewNodes();
     renderGraphInspector();
+    scheduleGraphNodeVirtualization();
   }
 
 function selectGraphConnection(
@@ -16491,6 +17053,13 @@ function removeGraphConnectionsFromState(
     graphConnectionLookupSource = null;
     graphConnectionLookupLength = -1;
     graphIncidentConnectionLookupCache.clear();
+    graphConnectedPortKeysSource = null;
+    graphConnectedPortKeysLength = -1;
+    for (const connectionId of removed) {
+      graphConnectionGeometryCache.delete(
+        connectionId
+      );
+    }
     return removed;
   }
 
@@ -22677,7 +23246,9 @@ function updateNodeDragPosition(
       -GRAPH_COORDINATE_LIMIT,
       GRAPH_COORDINATE_LIMIT
     );
-    invalidateGraphNodeViewportSpatialIndex();
+    invalidateGraphNodeViewportSpatialIndex(
+      node.id
+    );
 
     const element =
       dom.nodesHost?.querySelector(
@@ -24377,6 +24948,9 @@ function handleDocumentPointerUp(event) {
         synchronizeGpuOverviewNodes();
       }
       scheduleGraphNodeVirtualization();
+      if (fallbackGraphVirtualizationActive()) {
+        scheduleGraphWireRender();
+      }
     } else if (
       activeInteraction.kind ===
       "node"
@@ -24423,7 +24997,9 @@ function handleDocumentPointerUp(event) {
             editorDropTarget.editorKey || "";
           node.x = nodeInteraction.originalX;
           node.y = nodeInteraction.originalY;
-          invalidateGraphNodeViewportSpatialIndex();
+          invalidateGraphNodeViewportSpatialIndex(
+            node.id
+          );
           const element =
             dom.nodesHost?.querySelector(
               `[data-graph-node-id="${CSS.escape(node.id)}"]`
@@ -24457,7 +25033,9 @@ function handleDocumentPointerUp(event) {
         }
         node.x = nodeInteraction.originalX;
         node.y = nodeInteraction.originalY;
-        invalidateGraphNodeViewportSpatialIndex();
+        invalidateGraphNodeViewportSpatialIndex(
+          node.id
+        );
         activeInteraction = null;
         stopAutoPan();
         renderGraphNodesAndWires();
@@ -24480,7 +25058,9 @@ function handleDocumentPointerUp(event) {
           Math.round(
             node.y / GRAPH_GRID
           ) * GRAPH_GRID;
-        invalidateGraphNodeViewportSpatialIndex();
+        invalidateGraphNodeViewportSpatialIndex(
+          node.id
+        );
 
         const element =
           dom.nodesHost?.querySelector(
@@ -24590,7 +25170,9 @@ function cancelInteraction(
             interaction.originalX;
           node.y =
             interaction.originalY;
-          invalidateGraphNodeViewportSpatialIndex();
+          invalidateGraphNodeViewportSpatialIndex(
+            node.id
+          );
         }
       }
       activeInteraction = null;

@@ -3,7 +3,7 @@
 self.window = self;
 
 importScripts(
-  "../compiler/csharp14_roslyn_worker_runtime.js?v=11-domain-folder-layout-v754"
+  "../compiler/csharp14_roslyn_worker_runtime.js?v=11-max-graph-performance-v755"
 );
 
 function errorPayload(error) {

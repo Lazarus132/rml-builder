@@ -40,7 +40,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "domain-folder-layout-20260903-v754";
+  "max-graph-performance-20260903-v755";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -1531,7 +1531,7 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=138-domain-folder-layout-v754",
+      "../workers/graph_codegen_worker.js?v=138-max-graph-performance-v755",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -31173,7 +31173,7 @@ function ensureSetupAssistantLoaded(firstRun = false) {
       .then(() => new Promise((resolve, reject) => {
         const script = document.createElement("script");
         script.src = new URL(
-          "../tour/setup_assistant.js?v=205-domain-folder-layout-v754",
+          "../tour/setup_assistant.js?v=205-max-graph-performance-v755",
           APP_SCRIPT_BASE_URL
         ).href;
         script.async = true;

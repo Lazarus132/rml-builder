@@ -7,7 +7,7 @@
     validator: {
       label: "C# 14 validator",
       url: new URL(
-        "../workers/validator_worker.js?v=4-domain-folder-layout-v754",
+        "../workers/validator_worker.js?v=4-max-graph-performance-v755",
         document.currentScript?.src || window.location.href
       ).href,
       name: "rml-csharp14-validator",
@@ -17,7 +17,7 @@
     compiler: {
       label: ".NET compiler",
       url: new URL(
-        "../workers/compiler_worker.js?v=4-domain-folder-layout-v754",
+        "../workers/compiler_worker.js?v=4-max-graph-performance-v755",
         document.currentScript?.src || window.location.href
       ).href,
       name: "rml-csharp14-compiler",

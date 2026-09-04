@@ -70,7 +70,7 @@
     const link = document.createElement("link");
     link.rel = "stylesheet";
     link.href = new URL(
-      "../../styles/features/styles.runtime-graph.css?v=4-domain-folder-layout-v754",
+      "../../styles/features/styles.runtime-graph.css?v=4-max-graph-performance-v755",
       scriptUrl
     ).href;
     link.dataset.rmlStyleBundle = "runtime-graph";
@@ -89,16 +89,16 @@
       window.RMLClassStyles
         ? []
         : [
-            "../loaders/style_loader.js?v=4-domain-folder-layout-v754"
+            "../loaders/style_loader.js?v=4-max-graph-performance-v755"
           ]
     ),
     "node_graph_registry.js?v=1-physical-modules-v748",
     "node_graph_codegen.js?v=1-physical-modules-v748",
     "runtime_bridge.js?v=5-physical-modules-v748",
     "node_graph_composites.js?v=2-class-driven-styles-v751",
-    "node_graph_custom_csharp.js?v=4-domain-folder-layout-v754",
+    "node_graph_custom_csharp.js?v=4-max-graph-performance-v755",
     "node_graph_guided.js?v=1-physical-modules-v748",
-    "node_graph_view.js?v=6-class-rule-cache-v753",
+    "node_graph_view.js?v=7-viewport-culling-v755",
     "node_graph_bootstrap.js?v=1-physical-modules-v748"
   ];
 

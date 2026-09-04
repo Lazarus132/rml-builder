@@ -3,7 +3,7 @@
 self.window = self;
 
 importScripts(
-  "../compiler/csharp14_validator_runtime.js?v=4-domain-folder-layout-v754"
+  "../compiler/csharp14_validator_runtime.js?v=4-max-graph-performance-v755"
 );
 
 function errorPayload(error) {

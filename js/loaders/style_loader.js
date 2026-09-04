@@ -584,12 +584,12 @@
     window.location.href;
   const baseUrl = new URL(".", currentScriptUrl);
   const bundleFiles = Object.freeze({
-    preview: "../../styles/features/styles.preview.css?v=4-domain-folder-layout-v754",
-    information: "../../styles/features/styles.information.css?v=2-domain-folder-layout-v754",
-    setup: "../../styles/features/styles.setup.css?v=4-domain-folder-layout-v754",
-    project: "../../styles/features/styles.project.css?v=4-domain-folder-layout-v754",
-    export: "../../styles/features/styles.export.css?v=2-domain-folder-layout-v754",
-    "runtime-graph": "../../styles/features/styles.runtime-graph.css?v=4-domain-folder-layout-v754"
+    preview: "../../styles/features/styles.preview.css?v=4-max-graph-performance-v755",
+    information: "../../styles/features/styles.information.css?v=2-max-graph-performance-v755",
+    setup: "../../styles/features/styles.setup.css?v=4-max-graph-performance-v755",
+    project: "../../styles/features/styles.project.css?v=4-max-graph-performance-v755",
+    export: "../../styles/features/styles.export.css?v=2-max-graph-performance-v755",
+    "runtime-graph": "../../styles/features/styles.runtime-graph.css?v=4-max-graph-performance-v755"
   });
   const bundleOrder = Object.freeze([
     "preview",
@@ -694,7 +694,7 @@
     try {
       worker = new Worker(
         new URL(
-          "../workers/style_loader_worker.js?v=2-domain-folder-layout-v754",
+          "../workers/style_loader_worker.js?v=2-max-graph-performance-v755",
           baseUrl
         ).href
       );

@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  if (window.RMLScriptLoader?.version >= 7) {
+  if (window.RMLScriptLoader?.version >= 8) {
     return;
   }
 
@@ -102,13 +102,13 @@
           url: "../graph/node_graph_composites.js?v=2-class-driven-styles-v751"
         }),
         Object.freeze({
-          url: "../graph/node_graph_custom_csharp.js?v=4-domain-folder-layout-v754"
+          url: "../graph/node_graph_custom_csharp.js?v=4-max-graph-performance-v755"
         }),
         Object.freeze({
           url: "../graph/node_graph_guided.js?v=1-physical-modules-v748"
         }),
         Object.freeze({
-          url: "../graph/node_graph_view.js?v=6-class-rule-cache-v753"
+          url: "../graph/node_graph_view.js?v=7-viewport-culling-v755"
         }),
         Object.freeze({
           url: "../graph/node_graph_bootstrap.js?v=1-physical-modules-v748",
@@ -129,11 +129,24 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/graph_gpu_renderer.js?v=16-data-oriented-render-v752",
+          url: "../graph/graph_gpu_renderer.js?v=18-wgsl-compute-culling-v755",
           ready: () =>
             typeof window.RMLGraphHybridRenderer?.create === "function"
         })
-      ])
+      ]),
+      settle: async () => {
+        await Promise.race([
+          Promise.resolve(
+            window.RMLGraphHybridRenderer?.ready
+          ),
+          new Promise(resolve =>
+            window.setTimeout(
+              () => resolve(false),
+              2500
+            )
+          )
+        ]);
+      }
     })
   });
 
@@ -338,9 +351,6 @@
       await Promise.all(
         definition.dependencies.map(ensure)
       );
-      // Dynamic classic scripts with async=false execute in insertion order,
-      // while their downloads may proceed together. That preserves the
-      // shared lexical module contract without serial network round trips.
       await Promise.all(
         definition.files.map(loadFile)
       );
@@ -423,8 +433,6 @@
         unavailableReason
       );
     } else {
-      // Keep the native click channel alive while assets are warming.
-      // Disabling on pointerdown would suppress click on mobile.
       button.disabled = !available;
     }
     button.setAttribute(
@@ -616,7 +624,7 @@
 
   Object.defineProperty(window, "RMLScriptLoader", {
     value: Object.freeze({
-      version: 7,
+      version: 8,
       ensure,
       ensureMany(names) {
         return Promise.all(
