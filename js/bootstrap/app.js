@@ -40,7 +40,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "gzip-import-recovery-20260904-v757";
+  "unified-file-import-20260904-v758";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -31305,8 +31305,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "../../templates/help_template.html?v=90-guidance-comments-global-v723",
-    "../templates/help_template.js?v=90-guidance-comments-global-v723",
+    "../../templates/help_template.html?v=91-unified-file-import-v758",
+    "../templates/help_template.js?v=91-unified-file-import-v758",
     "help-template",
     "RMLHelpTemplateMarkup"
   )
@@ -31518,7 +31518,7 @@ function ensureSetupAssistantLoaded(firstRun = false) {
       .then(() => new Promise((resolve, reject) => {
         const script = document.createElement("script");
         script.src = new URL(
-          "../tour/setup_assistant.js?v=205-max-graph-performance-v755",
+          "../tour/setup_assistant.js?v=206-unified-file-import-v758",
           APP_SCRIPT_BASE_URL
         ).href;
         script.async = true;

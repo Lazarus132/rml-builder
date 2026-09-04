@@ -85,7 +85,7 @@
               <button type="button" data-information-section-target="info-graph">Pack into Node</button>
               <button type="button" data-information-section-target="info-preview">Preview</button>
               <button type="button" data-information-section-target="info-projects">Projects & storage</button>
-              <button type="button" data-information-section-target="info-export">Export</button>
+              <button type="button" data-information-section-target="info-export">Export Project</button>
               <button type="button" data-information-section-target="info-tour">Guided tour</button>
             </nav>
 
@@ -211,16 +211,16 @@
                 <span class="information-kicker">Local data</span>
                 <h3>Projects, autosave and privacy</h3>
                 <p>
-                  The current draft is saved automatically in this browser. A JSON
-                  project file creates a portable backup that can be reopened on this
-                  or another device. The builder runs entirely in the browser; source
-                  code and configuration data are not uploaded by the builder.
+                  The current draft is saved automatically in this browser. Save Project
+                  creates a portable GZIP backup. Import accepts complete Builder projects
+                  and Saved API Composites as JSON or GZIP. The builder runs entirely in
+                  the browser; source code and configuration data are not uploaded.
                 </p>
               </section>
 
               <section id="info-export" class="information-section">
                 <span class="information-kicker">Generated project</span>
-                <h3>Export</h3>
+                <h3>Export Project</h3>
                 <p>
                   Generated projects target <strong>.NET 10</strong> for the current
                   Resonite/RML setup. The Resonite installation path is used for local
@@ -236,13 +236,15 @@
                   <code>rml_mods</code> and <code>rml_libs</code> respectively. The
                   Export dialog renders the exact live package manifest rather than a
                   hard-coded list, so later generator extensions appear automatically.
+                  Saved API Composites use their own export controls and are not exported
+                  through the main Export Project button.
                 </p>
               </section>
 
               <section id="info-tour" class="information-section">
                 <span class="information-kicker">Interactive onboarding</span>
                 <h3>Guided first-steps tour</h3>
-                <p>The Tour button starts the same visual assistant that appears on the first launch. Every lesson is explained in the Step Overlay first; only Demonstrate starts one teacher-mouse run, and Replay repeats it deliberately. The assistant uses the real Outline, graph, scroll, zoom, Project, Export and Help controls, keeps the demonstrated subject visible on the current screen size and restores the snapshotted builder state when you finish or skip it.</p>
+                <p>The Tour button starts the same visual assistant that appears on the first launch. Every lesson is explained in the Step Overlay first; only Demonstrate starts one teacher-mouse run, and Replay repeats it deliberately. The assistant uses the real Outline, graph, scroll, zoom, Project, Export Project and Help controls, keeps the demonstrated subject visible on the current screen size and restores the snapshotted builder state when you finish or skip it.</p>
               </section>
             </article>
           </div>

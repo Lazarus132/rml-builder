@@ -7,7 +7,7 @@
       content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
     <meta
       name="rml-builder-build"
-      content="gzip-import-recovery-20260904-v757">
+      content="unified-file-import-20260904-v758">
     <meta
       name="description"
       content="Build complete typed ResoniteModLoader projects visually with automatic dependencies; optional Raw C# tools remain an expert fallback.">
@@ -18,7 +18,7 @@
         "RMLBuilderBuildId",
         {
           value:
-            "gzip-import-recovery-20260904-v757",
+            "unified-file-import-20260904-v758",
           writable: false,
           enumerable: true,
           configurable: true
@@ -83,7 +83,7 @@
           <span class="top-action-label">Preview</span>
         </button>
         <button id="project-manager" class="button secondary top-action-button" type="button"
-          aria-label="Project manager" data-help="Save or restore the builder project as JSON.">
+          aria-label="Project manager" data-help="Save the current project or import a Builder project or API Composite from JSON or GZIP.">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h7l2 2h9v10H3z M3 7V5h7l2 2"></path></svg>
           <span class="top-action-label">Project</span>
         </button>
@@ -94,9 +94,9 @@
           <span class="top-action-label">Pack into Node</span>
         </button>
         <button id="download-code" class="button primary top-action-button" type="button" disabled aria-disabled="true"
-          aria-label="Export project" data-help="Export the generated C# project files.">
+          aria-label="Export project" data-help="Export the generated C# project. Saved API Composites use their separate export controls.">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12 M7.5 10.5 12 15l4.5-4.5 M4 19h16"></path></svg>
-          <span class="top-action-label">Export</span>
+          <span class="top-action-label">Export Project</span>
         </button>
       </div>
     </header>
@@ -323,8 +323,8 @@
       aria-labelledby="project-dialog-title">
       <div class="export-dialog-header">
         <div>
-          <small>Local project file</small>
-          <h2 id="project-dialog-title">Save or restore the builder</h2>
+          <small>Local Builder files</small>
+          <h2 id="project-dialog-title">Save or import Builder data</h2>
         </div>
         <button
           id="project-close"
@@ -338,9 +338,9 @@
       <div class="project-dialog-body">
         <p class="project-storage-note">
           The current draft is already saved automatically in this browser.
-          A GZIP-compressed JSON project file creates a compact portable backup
-          that can be reopened on this or another device. Existing uncompressed
-          JSON files remain importable. Nothing is uploaded.
+          Saving creates a compact GZIP project backup. Import accepts complete
+          Builder projects and Saved API Composites as JSON or GZIP. Nothing is
+          uploaded.
         </p>
 
         <div class="project-file-actions">
@@ -348,13 +348,13 @@
             id="project-save-json"
             class="button primary"
             type="button">
-            Save JSON
+            Save Project
           </button>
           <button
             id="project-load-json"
             class="button secondary"
             type="button">
-            Import JSON…
+            Import…
           </button>
           <button
             id="load-example"
@@ -715,7 +715,7 @@
     <script src="js/ui/scroll_manager.js?v=34-class-driven-styles-v751"></script>
     <script src="js/ui/scroll_hierarchy.js?v=9-javascript-integrity-audit-v737"></script>
     <script src="js/core/crypto.js?v=5-guidance-comments-global-v723"></script>
-    <script src="js/bootstrap/app.js?v=581-gzip-import-recovery-v757"></script>
+    <script src="js/bootstrap/app.js?v=582-unified-file-import-v758"></script>
     <script src="js/core/dynamic_settings.js?v=29-javascript-integrity-audit-v737"></script>
 </body>
 </html>

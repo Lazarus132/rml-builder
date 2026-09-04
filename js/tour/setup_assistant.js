@@ -1270,7 +1270,7 @@
       target: ".identity-grid",
       mode: "outline",
       title: "1. Top bar and mod details",
-      text: "The top bar provides status information and the main actions: New blank, Help, Tour, Preview, Project and Export. Save JSON is introduced but never pressed. The demonstration then completes the six fields that identify the mod.",
+      text: "The top bar provides status information and the main actions: New blank, Help, Tour, Preview, Project and Export Project. Save Project is introduced but never pressed. The demonstration then completes the six fields that identify the mod.",
       hint: "On smaller screens, the closed menu button is introduced first. The menu then opens so every action inside can be explained before the demonstration begins.",
       demo: "topbar-identity-workflow"
     },
@@ -1877,7 +1877,7 @@
       },
       {
         targets: visibleTopbarTarget("#project-manager"),
-        text: "Project saves or loads a Builder project. Save JSON creates a backup file; the button is introduced here but is not pressed."
+        text: "Project saves the current Builder project or imports a Builder project or Saved API Composite. Save Project creates a compressed backup file; the button is introduced here but is not pressed."
       },
       {
         targets: visibleTopbarTarget("#download-code"),
@@ -9275,7 +9275,7 @@
         try {
           await teacherPointElement(
             save,
-            "Save JSON creates a portable backup; the tour deliberately explains it without starting a download",
+            "Save Project creates a portable compressed backup; the tour deliberately explains it without starting a download",
             runId
           );
         } finally {
@@ -9293,7 +9293,7 @@
         );
         if (!saveWasExplanationOnly) {
           throw new Error(
-            "[RML Tour · Step 1] Save JSON was activated although this control must only be explained."
+            "[RML Tour · Step 1] Save Project was activated although this control must only be explained."
           );
         }
       }
