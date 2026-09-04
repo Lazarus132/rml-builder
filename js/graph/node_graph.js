@@ -95,7 +95,7 @@
     "node_graph_registry.js?v=1-physical-modules-v748",
     "node_graph_codegen.js?v=1-physical-modules-v748",
     "runtime_bridge.js?v=5-physical-modules-v748",
-    "node_graph_composites.js?v=2-class-driven-styles-v751",
+    "node_graph_composites.js?v=4-gzip-import-recovery-v757",
     "node_graph_custom_csharp.js?v=4-max-graph-performance-v755",
     "node_graph_guided.js?v=1-physical-modules-v748",
     "node_graph_view.js?v=7-viewport-culling-v755",

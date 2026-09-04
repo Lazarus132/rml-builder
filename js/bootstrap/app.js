@@ -40,7 +40,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "max-graph-performance-20260903-v755";
+  "gzip-import-recovery-20260904-v757";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -1011,6 +1011,250 @@ const APP_SCRIPT_BASE_URL =
 let projectIoWorker = null;
 let projectIoRequestSequence = 1;
 const projectIoPendingRequests = new Map();
+const PROJECT_GZIP_MAGIC_FIRST = 0x1f;
+const PROJECT_GZIP_MAGIC_SECOND = 0x8b;
+let projectGzipFallbackLoadPromise = null;
+
+function projectGzipFallbackCodec() {
+  if (
+    typeof window.RMLGzipCodec
+      ?.compress === "function" &&
+    typeof window.RMLGzipCodec
+      ?.decompress === "function"
+  ) {
+    return Promise.resolve(
+      window.RMLGzipCodec
+    );
+  }
+  if (projectGzipFallbackLoadPromise) {
+    return projectGzipFallbackLoadPromise;
+  }
+
+  projectGzipFallbackLoadPromise =
+    new Promise((resolve, reject) => {
+      const script =
+        document.createElement("script");
+      script.src = new URL(
+        "../core/gzip_codec.js?v=1-own-gzip-fallback-v756",
+        APP_SCRIPT_BASE_URL
+      ).href;
+      script.async = true;
+      script.dataset.rmlGzipFallback =
+        "true";
+      script.addEventListener(
+        "load",
+        () => {
+          if (
+            typeof window.RMLGzipCodec
+              ?.compress !== "function" ||
+            typeof window.RMLGzipCodec
+              ?.decompress !== "function"
+          ) {
+            reject(
+              new Error(
+                "The built-in GZIP fallback did not initialize."
+              )
+            );
+            return;
+          }
+          resolve(window.RMLGzipCodec);
+        },
+        { once: true }
+      );
+      script.addEventListener(
+        "error",
+        () => reject(
+          new Error(
+            "The built-in GZIP fallback could not be loaded."
+          )
+        ),
+        { once: true }
+      );
+      (document.body || document.head)
+        .appendChild(script);
+    }).catch(error => {
+      projectGzipFallbackLoadPromise =
+        null;
+      throw error;
+    });
+
+  return projectGzipFallbackLoadPromise;
+}
+
+async function readProjectBlobTextOnMainThread(
+  blob,
+  maximumBytes = PROJECT_FILE_MAX_BYTES
+) {
+  const header = new Uint8Array(
+    await blob.slice(0, 2).arrayBuffer()
+  );
+  const gzip =
+    header.length === 2 &&
+    header[0] ===
+      PROJECT_GZIP_MAGIC_FIRST &&
+    header[1] ===
+      PROJECT_GZIP_MAGIC_SECOND;
+
+  if (!gzip) {
+    if (blob.size > maximumBytes) {
+      throw new RangeError(
+        "The uncompressed JSON exceeds the configured project limit."
+      );
+    }
+    return {
+      text: await blob.text(),
+      uncompressedBytes: blob.size,
+      compression: "identity"
+    };
+  }
+
+  if (
+    typeof DecompressionStream !==
+      "function"
+  ) {
+    const codec =
+      await projectGzipFallbackCodec();
+    const decompressed =
+      codec.decompress(
+        new Uint8Array(
+          await blob.arrayBuffer()
+        ),
+        maximumBytes
+      );
+    return {
+      text: new TextDecoder(
+        "utf-8",
+        { fatal: true }
+      ).decode(decompressed),
+      uncompressedBytes:
+        decompressed.byteLength,
+      compression: "gzip"
+    };
+  }
+
+  const reader = blob.stream()
+    .pipeThrough(
+      new DecompressionStream("gzip")
+    )
+    .getReader();
+  const decoder = new TextDecoder(
+    "utf-8",
+    { fatal: true }
+  );
+  const parts = [];
+  let uncompressedBytes = 0;
+
+  try {
+    while (true) {
+      const { done, value } =
+        await reader.read();
+      if (done) {
+        break;
+      }
+      uncompressedBytes +=
+        value.byteLength;
+      if (
+        uncompressedBytes >
+          maximumBytes
+      ) {
+        await reader.cancel();
+        throw new RangeError(
+          "The decompressed JSON exceeds the configured project limit."
+        );
+      }
+      parts.push(
+        decoder.decode(
+          value,
+          { stream: true }
+        )
+      );
+    }
+    parts.push(decoder.decode());
+  } catch (error) {
+    if (error instanceof RangeError) {
+      throw error;
+    }
+    try {
+      const codec =
+        await projectGzipFallbackCodec();
+      const decompressed =
+        codec.decompress(
+          new Uint8Array(
+            await blob.arrayBuffer()
+          ),
+          maximumBytes
+        );
+      return {
+        text: new TextDecoder(
+          "utf-8",
+          { fatal: true }
+        ).decode(decompressed),
+        uncompressedBytes:
+          decompressed.byteLength,
+        compression: "gzip"
+      };
+    } catch (fallbackError) {
+      throw new Error(
+        `The GZIP project data is damaged or incomplete. ${String(fallbackError?.message || "The independent decoder also rejected the data.")}`,
+        { cause: error }
+      );
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return {
+    text: parts.join(""),
+    uncompressedBytes,
+    compression: "gzip"
+  };
+}
+
+async function compressProjectJsonOnMainThread(
+  value
+) {
+  const text = JSON.stringify(value);
+  const source = new Blob(
+    [text],
+    {
+      type:
+        "application/json;charset=utf-8"
+    }
+  );
+  if (
+    typeof CompressionStream !==
+      "function"
+  ) {
+    const codec =
+      await projectGzipFallbackCodec();
+    const compressed =
+      codec.compress(
+        new Uint8Array(
+          await source.arrayBuffer()
+        )
+      );
+    return {
+      buffer: compressed.buffer,
+      jsonBytes: source.size,
+      compressedBytes:
+        compressed.byteLength,
+      compression: "gzip"
+    };
+  }
+
+  const buffer = await new Response(
+    source.stream().pipeThrough(
+      new CompressionStream("gzip")
+    )
+  ).arrayBuffer();
+
+  return {
+    buffer,
+    jsonBytes: source.size,
+    compressedBytes: buffer.byteLength,
+    compression: "gzip"
+  };
+}
 
 function projectIoWorkerInstance() {
   if (projectIoWorker) {
@@ -1024,7 +1268,7 @@ function projectIoWorkerInstance() {
   try {
     const worker = new Worker(
       new URL(
-        "../workers/project_io_worker.js?v=9-complete-visual-csharp-v600f1",
+        "../workers/project_io_worker.js?v=11-gzip-import-recovery-v757",
         APP_SCRIPT_BASE_URL
       ),
       {
@@ -1131,14 +1375,27 @@ function projectIoRequest(
                 );
               }
 
-              void payload.file.text()
-                .then(text => {
+              void readProjectBlobTextOnMainThread(
+                payload.file,
+                Number(
+                  payload.maximumBytes
+                ) || PROJECT_FILE_MAX_BYTES
+              )
+                .then(decoded => {
                   try {
                     const value =
-                      JSON.parse(text);
+                      JSON.parse(
+                        decoded.text
+                      );
                     resolve({
                       ok: true,
                       value,
+                      uncompressedBytes:
+                        decoded.uncompressedBytes,
+                      compressedBytes:
+                        payload.file.size,
+                      compression:
+                        decoded.compression,
                       fingerprint:
                         projectIdentityFingerprint(
                           projectIdFromSource(value)
@@ -1148,6 +1405,16 @@ function projectIoRequest(
                     reject(error);
                   }
                 }, reject);
+              return;
+            }
+
+            if (
+              operation ===
+                "stringifyGzip"
+            ) {
+              void compressProjectJsonOnMainThread(
+                payload.value
+              ).then(resolve, reject);
               return;
             }
 
@@ -1191,6 +1458,44 @@ function projectIoRequest(
     }
   );
 }
+
+async function createCompressedJsonBlob(
+  value
+) {
+  const response =
+    await projectIoRequest(
+      "stringifyGzip",
+      { value }
+    );
+  return {
+    blob: new Blob(
+      [response.buffer],
+      { type: "application/gzip" }
+    ),
+    jsonBytes:
+      Number(response.jsonBytes) || 0,
+    compressedBytes:
+      Number(response.compressedBytes) ||
+      response.buffer?.byteLength ||
+      0,
+    compression: "gzip"
+  };
+}
+
+Object.defineProperty(
+  window,
+  "RMLJsonFileCodec",
+  {
+    value: Object.freeze({
+      version: 1,
+      compress: value =>
+        createCompressedJsonBlob(value)
+    }),
+    writable: false,
+    enumerable: false,
+    configurable: true
+  }
+);
 
 function formatProjectByteLimit(value) {
   const mebibytes =
@@ -9428,9 +9733,27 @@ async function readJsonFileSource(
     const response =
       await projectIoRequest(
         "parseFile",
-        { file }
+        {
+          file,
+          maximumBytes:
+            PROJECT_FILE_MAX_BYTES
+        }
       );
-    return response.value;
+    return {
+      value: response.value,
+      compression:
+        response.compression === "gzip"
+          ? "gzip"
+          : "identity",
+      compressedBytes:
+        Number(
+          response.compressedBytes
+        ) || file.size,
+      uncompressedBytes:
+        Number(
+          response.uncompressedBytes
+        ) || file.size
+    };
   } catch (error) {
     if (
       error instanceof SyntaxError ||
@@ -22373,8 +22696,28 @@ function downloadBlob(blob, filename) {
   document.body.appendChild(link);
   link.click();
   link.remove();
-  URL.revokeObjectURL(objectUrl);
+  window.setTimeout(
+    () => URL.revokeObjectURL(
+      objectUrl
+    ),
+    60000
+  );
 }
+
+Object.defineProperty(
+  window,
+  "RMLFileDownload",
+  {
+    value: Object.freeze({
+      version: 1,
+      blob: (blob, filename) =>
+        downloadBlob(blob, filename)
+    }),
+    writable: false,
+    enumerable: false,
+    configurable: true
+  }
+);
 
 function setProjectFileStatus(
   message,
@@ -26543,7 +26886,7 @@ function builderHasActiveProject() {
 async function saveProjectJson() {
   try {
     setProjectFileStatus(
-      "Preparing project JSON…"
+      "Preparing and compressing project JSON…"
     );
 
 
@@ -26582,33 +26925,33 @@ async function saveProjectJson() {
       }
     );
 
-    const response =
-      await projectIoRequest(
-        "stringify",
-        {
-          value: portableProject,
-          space: 2
-        }
+    const compressed =
+      await createCompressedJsonBlob(
+        portableProject
       );
-    const projectJson =
-      `${response.text}\n`;
     const filename =
       `${projectFileBaseName()}` +
-      ".json";
+      ".rmlproject.json.gz";
 
     downloadBlob(
-      new Blob(
-        [projectJson],
-        {
-          type:
-            "application/json;charset=utf-8"
-        }
-      ),
+      compressed.blob,
       filename
     );
 
+    const reduction =
+      compressed.jsonBytes > 0
+        ? Math.max(
+            0,
+            Math.round(
+              (1 -
+                compressed.compressedBytes /
+                  compressed.jsonBytes) *
+                100
+            )
+          )
+        : 0;
     setProjectFileStatus(
-      `Saved ${filename}.`,
+      `Saved ${filename} with GZIP compression${reduction > 0 ? ` (${reduction}% smaller)` : ""}.`,
       "success"
     );
   } catch (error) {
@@ -26656,11 +26999,13 @@ async function loadProjectJsonFile(
 
     await paintBuilderUi();
 
-    const projectSource =
+    const projectFile =
       await readJsonFileSource(
         file,
         file.name
       );
+    const projectSource =
+      projectFile.value;
 
     if (
       loadSession !==
@@ -26697,11 +27042,11 @@ async function loadProjectJsonFile(
       const host =
         window.RMLDynamicGraphHost;
       if (
-        file.size >
+        projectFile.uncompressedBytes >
           SAVED_API_COMPOSITE_IMPORT_MAX_BYTES
       ) {
         throw new Error(
-          "The Saved API Composite JSON is larger than 32 MiB."
+          "The decompressed Saved API Composite JSON is larger than 32 MiB."
         );
       }
       if (

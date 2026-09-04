@@ -775,6 +775,9 @@
       this.onAvailabilityChange = null;
       this.clearScene();
       this.canvas.remove();
+
+      // Keep the one reusable WebGL context, but release its large drawing
+      // surface while no graph viewport is mounted.
       this.canvas.width = 1;
       this.canvas.height = 1;
       this.canvas.dataset.rmlCssWidth = "1";

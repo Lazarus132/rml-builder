@@ -1,5 +1,221 @@
 "use strict";
 
+const DEFAULT_PROJECT_MAX_BYTES =
+  512 * 1024 * 1024;
+const GZIP_MAGIC_FIRST = 0x1f;
+const GZIP_MAGIC_SECOND = 0x8b;
+
+function projectGzipFallbackCodec() {
+  if (
+    typeof self.RMLGzipCodec?.decompress ===
+      "function" &&
+    typeof self.RMLGzipCodec?.compress ===
+      "function"
+  ) {
+    return self.RMLGzipCodec;
+  }
+  if (typeof importScripts !== "function") {
+    throw new Error(
+      "The built-in GZIP fallback cannot be loaded in this worker."
+    );
+  }
+  importScripts(
+    "../core/gzip_codec.js?v=1-own-gzip-fallback-v756"
+  );
+  if (
+    typeof self.RMLGzipCodec?.decompress !==
+      "function" ||
+    typeof self.RMLGzipCodec?.compress !==
+      "function"
+  ) {
+    throw new Error(
+      "The built-in GZIP fallback did not initialize."
+    );
+  }
+  return self.RMLGzipCodec;
+}
+
+function projectMaximumBytes(value) {
+  const maximum = Number(value);
+  return Number.isFinite(maximum) &&
+    maximum > 0
+    ? Math.floor(maximum)
+    : DEFAULT_PROJECT_MAX_BYTES;
+}
+
+async function readProjectBlobText(
+  blob,
+  maximumBytes
+) {
+  const limit =
+    projectMaximumBytes(maximumBytes);
+  const header = new Uint8Array(
+    await blob.slice(0, 2).arrayBuffer()
+  );
+  const gzip =
+    header.length === 2 &&
+    header[0] === GZIP_MAGIC_FIRST &&
+    header[1] === GZIP_MAGIC_SECOND;
+
+  if (!gzip) {
+    if (blob.size > limit) {
+      throw new RangeError(
+        "The uncompressed JSON exceeds the configured project limit."
+      );
+    }
+    return {
+      text: await blob.text(),
+      uncompressedBytes: blob.size,
+      compression: "identity"
+    };
+  }
+
+  if (
+    typeof DecompressionStream !==
+      "function"
+  ) {
+    const compressed = new Uint8Array(
+      await blob.arrayBuffer()
+    );
+    const decompressed =
+      projectGzipFallbackCodec()
+        .decompress(compressed, limit);
+    return {
+      text: new TextDecoder(
+        "utf-8",
+        { fatal: true }
+      ).decode(decompressed),
+      uncompressedBytes:
+        decompressed.byteLength,
+      compression: "gzip",
+      codec: "fallback"
+    };
+  }
+
+  let stream;
+  try {
+    stream = blob.stream().pipeThrough(
+      new DecompressionStream("gzip")
+    );
+  } catch (error) {
+    throw new Error(
+      "The compressed project file could not be opened.",
+      { cause: error }
+    );
+  }
+
+  const reader = stream.getReader();
+  const decoder = new TextDecoder(
+    "utf-8",
+    { fatal: true }
+  );
+  const parts = [];
+  let uncompressedBytes = 0;
+
+  try {
+    while (true) {
+      const { done, value } =
+        await reader.read();
+      if (done) {
+        break;
+      }
+      uncompressedBytes +=
+        value.byteLength;
+      if (uncompressedBytes > limit) {
+        await reader.cancel();
+        throw new RangeError(
+          "The decompressed JSON exceeds the configured project limit."
+        );
+      }
+      parts.push(
+        decoder.decode(
+          value,
+          { stream: true }
+        )
+      );
+    }
+    parts.push(decoder.decode());
+  } catch (error) {
+    if (error instanceof RangeError) {
+      throw error;
+    }
+    try {
+      const compressed =
+        new Uint8Array(
+          await blob.arrayBuffer()
+        );
+      const decompressed =
+        projectGzipFallbackCodec()
+          .decompress(compressed, limit);
+      return {
+        text: new TextDecoder(
+          "utf-8",
+          { fatal: true }
+        ).decode(decompressed),
+        uncompressedBytes:
+          decompressed.byteLength,
+        compression: "gzip",
+        codec: "fallback-after-native"
+      };
+    } catch (fallbackError) {
+      throw new Error(
+        `The GZIP project data is damaged or incomplete. ${String(fallbackError?.message || "The independent decoder also rejected the data.")}`,
+        { cause: error }
+      );
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return {
+    text: parts.join(""),
+    uncompressedBytes,
+    compression: "gzip"
+  };
+}
+
+async function compressProjectJson(value) {
+  const text = JSON.stringify(value);
+  const source = new Blob(
+    [text],
+    {
+      type:
+        "application/json;charset=utf-8"
+    }
+  );
+  if (
+    typeof CompressionStream !==
+      "function"
+  ) {
+    const compressed =
+      projectGzipFallbackCodec()
+        .compress(
+          new Uint8Array(
+            await source.arrayBuffer()
+          )
+        );
+    return {
+      buffer: compressed.buffer,
+      jsonBytes: source.size,
+      compressedBytes:
+        compressed.byteLength
+    };
+  }
+
+  const stream = source.stream().pipeThrough(
+    new CompressionStream("gzip")
+  );
+  const buffer =
+    await new Response(stream)
+      .arrayBuffer();
+
+  return {
+    buffer,
+    jsonBytes: source.size,
+    compressedBytes: buffer.byteLength
+  };
+}
+
 function canonicalProjectFingerprintValue(
   value,
   path = []
@@ -153,19 +369,53 @@ self.addEventListener("message", event => {
           );
         }
 
-        const text =
-          await request.file.text();
-        const value = JSON.parse(text);
+        const decoded =
+          await readProjectBlobText(
+            request.file,
+            request.maximumBytes
+          );
+        const value =
+          JSON.parse(decoded.text);
 
         self.postMessage({
           id,
           ok: true,
           value,
+          uncompressedBytes:
+            decoded.uncompressedBytes,
+          compressedBytes:
+            request.file.size,
+          compression:
+            decoded.compression,
           fingerprint:
             projectIdentityFingerprint(
               projectIdFromSource(value)
             )
         });
+        return;
+      }
+
+      if (
+        request.operation ===
+          "stringifyGzip"
+      ) {
+        const result =
+          await compressProjectJson(
+            request.value
+          );
+
+        self.postMessage(
+          {
+            id,
+            ok: true,
+            buffer: result.buffer,
+            jsonBytes: result.jsonBytes,
+            compressedBytes:
+              result.compressedBytes,
+            compression: "gzip"
+          },
+          [result.buffer]
+        );
         return;
       }
 

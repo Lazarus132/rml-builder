@@ -2360,7 +2360,7 @@ function savedApiCompositeFileStem(value) {
       "Saved-API-Composite";
   }
 
-function downloadSavedApiCompositeRecords(
+async function downloadSavedApiCompositeRecords(
     records,
     filename
   ) {
@@ -2368,27 +2368,30 @@ function downloadSavedApiCompositeRecords(
       savedApiCompositeExportPayload(
         records
       );
-    const blob = new Blob(
-      [
-        `${JSON.stringify(
-          payload,
-          null,
-          2
-        )}\n`
-      ],
-      { type: "application/json" }
+    const codec =
+      window.RMLJsonFileCodec;
+    if (
+      typeof codec?.compress !==
+        "function"
+    ) {
+      throw new Error(
+        "The compressed JSON file codec is unavailable."
+      );
+    }
+    const compressed =
+      await codec.compress(payload);
+    const download =
+      window.RMLFileDownload?.blob;
+    if (typeof download !== "function") {
+      throw new Error(
+        "The safe file download handler is unavailable."
+      );
+    }
+    download(
+      compressed.blob,
+      filename
     );
-    const objectUrl =
-      URL.createObjectURL(blob);
-    const link =
-      document.createElement("a");
-    link.href = objectUrl;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(objectUrl);
-    return true;
+    return compressed;
   }
 
 function savedApiCompositeRecordsFromJson(
@@ -5138,7 +5141,7 @@ function createSavedApiCompositePaletteItem(
     exportButton.type = "button";
     exportButton.textContent = "⇩";
     exportButton.title =
-      `Export '${record.name}' as JSON`;
+      `Export '${record.name}' as compressed JSON`;
     exportButton.addEventListener(
       "pointerdown",
       event => event.stopPropagation()
@@ -5147,12 +5150,49 @@ function createSavedApiCompositePaletteItem(
       "click",
       event => {
         event.stopPropagation();
-        downloadSavedApiCompositeRecords(
+        if (exportButton.disabled) {
+          return;
+        }
+        exportButton.disabled = true;
+        void downloadSavedApiCompositeRecords(
           [record],
           `${savedApiCompositeFileStem(
             record.name
-          )}.rmlapicomposite.json`
-        );
+          )}.rmlapicomposite.json.gz`
+        ).then(
+          compressed => {
+            const reduction =
+              compressed.jsonBytes > 0
+                ? Math.max(
+                    0,
+                    Math.round(
+                      (1 -
+                        compressed.compressedBytes /
+                          compressed.jsonBytes) *
+                        100
+                    )
+                  )
+                : 0;
+            showGraphMessage(
+              `Saved API Composite '${record.name}' with GZIP compression${reduction > 0 ? ` (${reduction}% smaller)` : ""}.`,
+              "success"
+            );
+          },
+          error => {
+            console.error(
+              "Could not export the compressed Saved API Composite JSON.",
+              error
+            );
+            showGraphMessage(
+              error instanceof Error
+                ? error.message
+                : "The compressed API Composite could not be exported.",
+              "error"
+            );
+          }
+        ).finally(() => {
+          exportButton.disabled = false;
+        });
       }
     );
     const deleteButton =
