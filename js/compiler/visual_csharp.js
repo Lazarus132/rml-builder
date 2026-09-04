@@ -19,7 +19,7 @@
     getTypeDefinitions
   } = registry;
 
-  const VERSION = 22;
+  const VERSION = 23;
   const CUSTOM_CSHARP_COORDINATE_SPACE_VERSION = 2;
   const SYNTAX_TYPE = "csharpSyntax";
   const GROUPS = {
@@ -3590,7 +3590,13 @@
       const effectivePreserve = preserveExact || preserveWhitespaceContext > 0;
       if (preserveExact) preserveWhitespaceContext += 1;
       try {
-        const semanticId = tryAddSemanticNode(syntaxNode, depth);
+        // A raw Roslyn subtree is the fail-closed recovery path. Once exact
+        // preservation begins, none of its descendants may re-enter semantic
+        // optimization; otherwise the supposed exact fallback can reproduce
+        // the same token/trivia drift that it is meant to recover from.
+        const semanticId = effectivePreserve
+          ? null
+          : tryAddSemanticNode(syntaxNode, depth);
         return semanticId
           ? wrapSemanticTrivia(syntaxNode, semanticId, depth, effectivePreserve)
           : addSyntaxNode(syntaxNode, depth);
@@ -3749,7 +3755,9 @@
       if (!fragment.ok || !await validateFragment(fragment)) {
         return {
           ok: false,
-          diagnostics: ["The imported Node Graph did not reproduce the complete validated C# 14 token and meaningful-trivia stream."],
+          diagnostics: [
+            "Roslyn accepted this file as valid C# 14, but this Builder version could not convert its complete token and meaningful-trivia stream into a lossless editable Custom C# graph. This is a visual-importer limitation, not a damaged source file. The Runtime Graph was left unchanged and no source data was discarded."
+          ],
           nodes: [], connections: []
         };
       }

@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  if (window.RMLScriptLoader?.version >= 10) {
+  if (window.RMLScriptLoader?.version >= 13) {
     return;
   }
 
@@ -11,7 +11,8 @@
   const baseUrl = new URL(".", currentScriptUrl);
   const fileStates = new Map();
   const bundleStates = new Map();
-  const preloadedFiles = new Set();
+  const prefetchedFiles = new Set();
+  let runtimeViewPreparationPromise = null;
   let runtimeViewOpenAfterLoadPromise = null;
   let runtimeViewLoadingNoticePromise = null;
 
@@ -41,7 +42,7 @@
       dependencies: Object.freeze([]),
       files: Object.freeze([
         Object.freeze({
-          url: "../catalog/catalog_loader.js?v=186-physical-modules-v748",
+          url: "../catalog/catalog_loader.js?v=188-custom-csharp-exact-fallback-v764",
           ready: () =>
             typeof window.RMLBaseModNodesReady?.then === "function" ||
             typeof window.RMLModNodesReady?.then === "function"
@@ -102,13 +103,13 @@
           url: "../graph/node_graph_composites.js?v=4-gzip-import-recovery-v757"
         }),
         Object.freeze({
-          url: "../graph/node_graph_custom_csharp.js?v=4-max-graph-performance-v755"
+          url: "../graph/node_graph_custom_csharp.js?v=8-custom-csharp-render-barrier-v766"
         }),
         Object.freeze({
           url: "../graph/node_graph_guided.js?v=1-physical-modules-v748"
         }),
         Object.freeze({
-          url: "../graph/node_graph_view.js?v=7-viewport-culling-v755"
+          url: "../graph/node_graph_view.js?v=9-custom-csharp-render-barrier-v766"
         }),
         Object.freeze({
           url: "../graph/node_graph_bootstrap.js?v=1-physical-modules-v748",
@@ -129,7 +130,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/graph_gpu_renderer.js?v=18-wgsl-compute-culling-v755",
+          url: "../graph/graph_gpu_renderer.js?v=21-wire-artifact-guard-v766",
           ready: () =>
             typeof window.RMLGraphHybridRenderer?.create === "function"
         })
@@ -252,26 +253,27 @@
     return state.promise;
   }
 
-  function preloadFile(file) {
+  function prefetchFile(file) {
     if (file.ready?.() === true) {
       return;
     }
 
     const absolute = new URL(file.url, baseUrl).href;
-    if (preloadedFiles.has(absolute)) {
+    if (prefetchedFiles.has(absolute)) {
       return;
     }
-    preloadedFiles.add(absolute);
+    prefetchedFiles.add(absolute);
 
     const link = document.createElement("link");
-    link.rel = "preload";
+    link.rel = "prefetch";
     link.as = "script";
     link.href = absolute;
-    link.dataset.rmlLazyScriptPreload = file.url;
+    link.fetchPriority = "low";
+    link.dataset.rmlLazyScriptPrefetch = file.url;
     link.addEventListener(
       "error",
       () => {
-        preloadedFiles.delete(absolute);
+        prefetchedFiles.delete(absolute);
         link.remove();
       },
       { once: true }
@@ -279,7 +281,7 @@
     document.head.appendChild(link);
   }
 
-  function preloadBundle(name, visited = new Set()) {
+  function prefetchBundle(name, visited = new Set()) {
     if (visited.has(name)) {
       return;
     }
@@ -290,9 +292,9 @@
       return;
     }
     definition.dependencies.forEach(
-      dependency => preloadBundle(dependency, visited)
+      dependency => prefetchBundle(dependency, visited)
     );
-    definition.files.forEach(preloadFile);
+    definition.files.forEach(prefetchFile);
   }
 
   function afterRuntimeLoadingPaint() {
@@ -408,6 +410,7 @@
     const bridge = window.RMLBuilderBridge;
     const graph = runtimeGraphState();
     const loading =
+      runtimeViewPreparationPromise !== null ||
       runtimeViewOpenAfterLoadPromise !== null ||
       status("node-registry").status === "loading" ||
       status("graph-codegen").status === "loading" ||
@@ -496,12 +499,53 @@
     await ensure("runtime-view");
   }
 
-  async function prewarmRuntimeView() {
-    await (
-      window.RMLStyleLoader?.ensure?.("runtime-graph") ||
-      Promise.resolve(true)
+  function startRuntimeViewPreparation() {
+    if (
+      status("runtime-view").status ===
+        "loaded"
+    ) {
+      return Promise.resolve(true);
+    }
+    if (runtimeViewPreparationPromise) {
+      return runtimeViewPreparationPromise;
+    }
+
+    const preparation = (async () => {
+      await afterRuntimeLoadingPaint();
+      await prepareRuntimeView();
+      return true;
+    })();
+    runtimeViewPreparationPromise = preparation;
+    updateRuntimeButton();
+    void preparation.then(
+      () => {
+        if (
+          runtimeViewPreparationPromise ===
+            preparation
+        ) {
+          runtimeViewPreparationPromise = null;
+        }
+        updateRuntimeButton();
+      },
+      () => {
+        if (
+          runtimeViewPreparationPromise ===
+            preparation
+        ) {
+          runtimeViewPreparationPromise = null;
+        }
+        updateRuntimeButton();
+      }
     );
-    preloadBundle("runtime-view");
+    return preparation;
+  }
+
+  async function prefetchRuntimeView() {
+    window.RMLStyleLoader?.prefetch?.(
+      "runtime-graph"
+    );
+    prefetchBundle("runtime-view");
+    return true;
   }
 
   function reportRuntimeViewStillLoading() {
@@ -538,20 +582,34 @@
     }
     button.dataset.rmlLazyScriptBound = "true";
 
-    const warm = () => {
-      void prewarmRuntimeView()
+    const prefetch = () => {
+      void prefetchRuntimeView()
         .catch(() => {})
         .finally(updateRuntimeButton);
     };
-    button.addEventListener("pointerenter", warm, {
+    button.addEventListener("pointerenter", prefetch, {
       passive: true,
       once: true
     });
-    button.addEventListener("pointerdown", warm, {
-      passive: true,
-      once: true
-    });
-    button.addEventListener("focus", warm, { once: true });
+    button.addEventListener("focus", prefetch, { once: true });
+    button.addEventListener(
+      "pointerdown",
+      () => {
+        if (
+          button.getAttribute(
+            "aria-disabled"
+          ) === "true"
+        ) {
+          return;
+        }
+        void startRuntimeViewPreparation()
+          .catch(() => {});
+      },
+      {
+        passive: true,
+        once: true
+      }
+    );
     button.addEventListener("click", event => {
       if (
         button.dataset.rmlGraphActionBound === "true" &&
@@ -567,10 +625,8 @@
         updateRuntimeButton();
         return;
       }
-      const continuation = (async () => {
-        await afterRuntimeLoadingPaint();
-        await prepareRuntimeView();
-      })();
+      const continuation =
+        startRuntimeViewPreparation();
       runtimeViewOpenAfterLoadPromise = continuation;
       updateRuntimeButton();
       reportRuntimeViewStillLoading();
@@ -629,7 +685,7 @@
 
   Object.defineProperty(window, "RMLScriptLoader", {
     value: Object.freeze({
-      version: 10,
+      version: 13,
       ensure,
       ensureMany(names) {
         return Promise.all(

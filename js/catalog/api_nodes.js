@@ -2396,7 +2396,17 @@
       window.dispatchEvent(
         new CustomEvent("rml-api-node-factory-ready", { detail: report })
       );
-      console.info("RML API Node Factory ready.", report);
+      const workerContext =
+        typeof WorkerGlobalScope !==
+          "undefined" &&
+        globalThis instanceof
+          WorkerGlobalScope;
+      console.info(
+        workerContext
+          ? "RML API Node Factory ready (graph-codegen worker)."
+          : "RML API Node Factory ready (main thread).",
+        report
+      );
     }
 
     return report;

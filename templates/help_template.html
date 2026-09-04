@@ -187,6 +187,19 @@
                   generated runtime-graph source. The selector updates automatically when
                   graph nodes add, remove or rename generated outputs.
                 </p>
+                <p>
+                  WebGPU/WGSL is the preferred graph renderer, followed by WebGL2/GLSL and
+                  the virtualized SVG/DOM fallback. After opening Runtime Graph once, use
+                  <code>RMLGraphHybridRenderer.setBackend("glsl")</code> in the browser
+                  console to force the GLSL path. Use <code>"wgsl"</code>,
+                  <code>"svg"</code> or <code>"auto"</code> to select the other modes, and
+                  <code>RMLGraphHybridRenderer.getBackend()</code> to inspect the stored and
+                  active backend. Changing the backend reloads the page automatically.
+                  WGSL caches a 384-pixel overscan selection while panning and sends only
+                  the affected Spatial-Tile indices to its compute shader when that cache
+                  must be rebuilt. Very large indexes warm up in idle batches so opening
+                  the graph does not wait on one long synchronous indexing pass.
+                </p>
               </section>
 
               <section id="info-preview" class="information-section">

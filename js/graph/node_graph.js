@@ -89,16 +89,16 @@
       window.RMLClassStyles
         ? []
         : [
-            "../loaders/style_loader.js?v=4-max-graph-performance-v755"
+            "../loaders/style_loader.js?v=5-runtime-prefetch-v763"
           ]
     ),
     "node_graph_registry.js?v=1-physical-modules-v748",
     "node_graph_codegen.js?v=1-physical-modules-v748",
     "runtime_bridge.js?v=5-physical-modules-v748",
     "node_graph_composites.js?v=4-gzip-import-recovery-v757",
-    "node_graph_custom_csharp.js?v=4-max-graph-performance-v755",
+    "node_graph_custom_csharp.js?v=8-custom-csharp-render-barrier-v766",
     "node_graph_guided.js?v=1-physical-modules-v748",
-    "node_graph_view.js?v=7-viewport-culling-v755",
+    "node_graph_view.js?v=9-custom-csharp-render-barrier-v766",
     "node_graph_bootstrap.js?v=1-physical-modules-v748"
   ];
 

@@ -7,7 +7,7 @@
       content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
     <meta
       name="rml-builder-build"
-      content="unified-file-import-20260904-v758">
+      content="custom-csharp-render-barrier-20260904-v766">
     <meta
       name="description"
       content="Build complete typed ResoniteModLoader projects visually with automatic dependencies; optional Raw C# tools remain an expert fallback.">
@@ -18,7 +18,7 @@
         "RMLBuilderBuildId",
         {
           value:
-            "unified-file-import-20260904-v758",
+            "custom-csharp-render-barrier-20260904-v766",
           writable: false,
           enumerable: true,
           configurable: true
@@ -117,7 +117,14 @@
           </label>
           <label>
             Version
-            <input id="version" autocomplete="off">
+            <input
+              id="version"
+              autocomplete="off"
+              inputmode="numeric"
+              pattern="[0-9]+(?:\.[0-9]+){0,3}"
+              maxlength="23"
+              spellcheck="false"
+              title="Use one to four numeric version parts, for example 1.2.3 or 1.2.3.4.">
           </label>
           <label>
             Namespace
@@ -710,12 +717,12 @@
       </section>
     </div>
 
-    <script src="js/loaders/style_loader.js?v=4-max-graph-performance-v755"></script>
-    <script src="js/loaders/script_loader.js?v=10-gzip-import-recovery-v757"></script>
+    <script src="js/loaders/style_loader.js?v=5-runtime-prefetch-v763"></script>
+    <script src="js/loaders/script_loader.js?v=15-custom-csharp-render-barrier-v766"></script>
     <script src="js/ui/scroll_manager.js?v=34-class-driven-styles-v751"></script>
     <script src="js/ui/scroll_hierarchy.js?v=9-javascript-integrity-audit-v737"></script>
     <script src="js/core/crypto.js?v=5-guidance-comments-global-v723"></script>
-    <script src="js/bootstrap/app.js?v=582-unified-file-import-v758"></script>
+    <script src="js/bootstrap/app.js?v=590-custom-csharp-render-barrier-v766"></script>
     <script src="js/core/dynamic_settings.js?v=29-javascript-integrity-audit-v737"></script>
 </body>
 </html>

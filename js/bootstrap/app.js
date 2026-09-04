@@ -40,7 +40,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "unified-file-import-20260904-v758";
+  "custom-csharp-render-barrier-20260904-v766";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -339,6 +339,142 @@ const DEFAULT_METADATA = {
   description: "A Resonite mod generated with the RML Configuration Builder.",
   includeGuide: true
 };
+
+const DOTNET_VERSION_COMPONENT_LIMIT = 4;
+const DOTNET_VERSION_COMPONENT_MAX = 65535;
+const PROJECT_VERSION_PATTERN =
+  /^\d+(?:\.\d+){0,3}$/;
+
+function projectVersionComponents(value) {
+  const text = String(value ?? "").trim();
+  if (!PROJECT_VERSION_PATTERN.test(text)) {
+    return null;
+  }
+
+  const components = text
+    .split(".")
+    .map(component => Number(component));
+
+  return components.every(component =>
+    Number.isSafeInteger(component) &&
+    component >= 0 &&
+    component <= DOTNET_VERSION_COMPONENT_MAX
+  )
+    ? components
+    : null;
+}
+
+function isValidProjectVersion(value) {
+  return projectVersionComponents(value) !== null;
+}
+
+function normalizeProjectVersion(
+  value,
+  fallback = DEFAULT_METADATA.version
+) {
+  const components =
+    projectVersionComponents(value);
+
+  if (components) {
+    return components
+      .map(component => String(component))
+      .join(".");
+  }
+
+  const recovered = String(value ?? "")
+    .match(/\d+/g)
+    ?.slice(0, DOTNET_VERSION_COMPONENT_LIMIT)
+    .map(component =>
+      Math.min(
+        Number(component) || 0,
+        DOTNET_VERSION_COMPONENT_MAX
+      )
+    );
+
+  if (recovered?.length) {
+    return recovered.join(".");
+  }
+
+  const fallbackComponents =
+    projectVersionComponents(fallback) ||
+    [1, 0, 0];
+
+  return fallbackComponents
+    .map(component => String(component))
+    .join(".");
+}
+
+function filterProjectVersionInput(value) {
+  let result = "";
+  let separators = 0;
+
+  for (const character of String(value ?? "")) {
+    if (/\d/.test(character)) {
+      result += character;
+      continue;
+    }
+
+    if (
+      character === "." &&
+      result.length > 0 &&
+      !result.endsWith(".") &&
+      separators <
+        DOTNET_VERSION_COMPONENT_LIMIT - 1
+    ) {
+      result += character;
+      separators += 1;
+    }
+  }
+
+  return result;
+}
+
+function projectVersionMetadata(
+  value = state?.metadata?.version
+) {
+  const version = normalizeProjectVersion(
+    value,
+    DEFAULT_METADATA.version
+  );
+  const components =
+    projectVersionComponents(version) ||
+    [1, 0, 0];
+  const assemblyComponents = [
+    ...components
+  ];
+
+  while (
+    assemblyComponents.length <
+    DOTNET_VERSION_COMPONENT_LIMIT
+  ) {
+    assemblyComponents.push(0);
+  }
+
+  const assemblyVersion =
+    assemblyComponents
+      .slice(0, DOTNET_VERSION_COMPONENT_LIMIT)
+      .join(".");
+
+  return Object.freeze({
+    version,
+    assemblyVersion,
+    fileVersion: assemblyVersion,
+    informationalVersion: version
+  });
+}
+
+function generatedAssemblyMetadataSource(
+  value = state?.metadata?.version
+) {
+  const metadata =
+    projectVersionMetadata(value);
+
+  return `// Generated from the numeric Builder project version.
+[assembly: System.Reflection.AssemblyVersionAttribute("${metadata.assemblyVersion}")]
+[assembly: System.Reflection.AssemblyFileVersionAttribute("${metadata.fileVersion}")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("${metadata.informationalVersion}")]
+`;
+}
 
 const EXPORT_PLATFORM_PRESETS = {
   windows:
@@ -1836,7 +1972,7 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=138-max-graph-performance-v755",
+      "../workers/graph_codegen_worker.js?v=140-custom-csharp-exact-fallback-v764",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -6664,6 +6800,8 @@ function generateProjectFile() {
       state.exportOptions.resonitePath
     )
   );
+  const versionMetadata =
+    projectVersionMetadata();
 
   const referenceMap = new Map();
 
@@ -6874,6 +7012,11 @@ ${projectGuidance}
 
     <AssemblyName>${escapeXml(className)}</AssemblyName>
     <RootNamespace>${escapeXml(namespaceName)}</RootNamespace>
+    <Version>${escapeXml(versionMetadata.version)}</Version>
+    <AssemblyVersion>${escapeXml(versionMetadata.assemblyVersion)}</AssemblyVersion>
+    <FileVersion>${escapeXml(versionMetadata.fileVersion)}</FileVersion>
+    <InformationalVersion>${escapeXml(versionMetadata.informationalVersion)}</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
 
     <ResonitePath Condition="'$(ResonitePath)' == ''">${resonitePath}</ResonitePath>
     <ResonitePath>$([MSBuild]::NormalizeDirectory('$(ResonitePath)'))</ResonitePath>
@@ -6946,6 +7089,8 @@ function generateAuxiliaryProjectFile(
       state.exportOptions.resonitePath
     )
   );
+  const versionMetadata =
+    projectVersionMetadata();
   const referenceMap = new Map();
 
   const addReference = reference => {
@@ -7130,6 +7275,11 @@ function generateAuxiliaryProjectFile(
     <RootNamespace>${escapeXml(
       rootNamespace
     )}</RootNamespace>
+    <Version>${escapeXml(versionMetadata.version)}</Version>
+    <AssemblyVersion>${escapeXml(versionMetadata.assemblyVersion)}</AssemblyVersion>
+    <FileVersion>${escapeXml(versionMetadata.fileVersion)}</FileVersion>
+    <InformationalVersion>${escapeXml(versionMetadata.informationalVersion)}</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
 
     <ResonitePath Condition="'$(ResonitePath)' == ''">${resonitePath}</ResonitePath>
     <ResonitePath>$([MSBuild]::NormalizeDirectory('$(ResonitePath)'))</ResonitePath>
@@ -7175,6 +7325,11 @@ function getDiagnostics() {
   const enumNames = new Map();
   if (!state.metadata.modName.trim()) errors.push("Mod name is required.");
   if (!state.metadata.author.trim()) errors.push("Author is required.");
+  if (!isValidProjectVersion(state.metadata.version)) {
+    errors.push(
+      "Version requires one to four numeric parts from 0 to 65535, for example 1.2.3 or 1.2.3.4."
+    );
+  }
   for (const entry of entries) {
     const node = entry.node;
     if (node.kind === LAYOUT_ROW_KIND) {
@@ -9021,9 +9176,11 @@ function parseProjectDocument(
           DEFAULT_METADATA.author
         ),
       version:
-        projectString(
-          metadataSource.version,
-          DEFAULT_METADATA.version
+        normalizeProjectVersion(
+          projectString(
+            metadataSource.version,
+            DEFAULT_METADATA.version
+          )
         ),
       description:
         projectString(
@@ -9975,10 +10132,64 @@ function renderMetadata() {
     const element = document.getElementById(id);
     element.value = state.metadata[property];
     element.oninput = () => {
+      if (property === "version") {
+        const filtered =
+          filterProjectVersionInput(
+            element.value
+          );
+        if (element.value !== filtered) {
+          element.value = filtered;
+        }
+        element.setCustomValidity(
+          isValidProjectVersion(filtered)
+            ? ""
+            : "Use one to four numeric version parts from 0 to 65535."
+        );
+        element.setAttribute(
+          "aria-invalid",
+          String(
+            !isValidProjectVersion(filtered)
+          )
+        );
+      }
       state.metadata[property] = element.value;
       updateGeneratedOutput();
       persist();
     };
+    if (property === "version") {
+      element.setCustomValidity(
+        isValidProjectVersion(element.value)
+          ? ""
+          : "Use one to four numeric version parts from 0 to 65535."
+      );
+      element.setAttribute(
+        "aria-invalid",
+        String(
+          !isValidProjectVersion(element.value)
+        )
+      );
+      element.onblur = () => {
+        const normalized =
+          normalizeProjectVersion(
+            element.value
+          );
+        if (
+          element.value === normalized &&
+          state.metadata.version === normalized
+        ) {
+          return;
+        }
+        element.value = normalized;
+        element.setCustomValidity("");
+        element.setAttribute(
+          "aria-invalid",
+          "false"
+        );
+        state.metadata.version = normalized;
+        updateGeneratedOutput();
+        persist();
+      };
+    }
   }
   elements.includeGuide.checked = state.metadata.includeGuide;
   elements.includeGuide.onchange = () => {
@@ -27893,6 +28104,8 @@ function generatedProjectDescriptors(
         : "",
       label: `${baseName} · Main mod`,
       assemblyName: baseName,
+      version:
+        projectVersionMetadata().version,
       deployDirectory: "rml_mods",
       role: "rml-mod"
     }
@@ -27923,6 +28136,8 @@ function generatedProjectDescriptors(
             project.name ||
             `Library-${index + 1}`
           ),
+        version:
+          projectVersionMetadata().version,
         deployDirectory:
           String(
             project.deployDirectory ||
@@ -28666,6 +28881,14 @@ function browserCompilationProjects(
       projectFile?.content || ""
     );
 
+    sources.push({
+      name: "RML.AssemblyMetadata.g.cs",
+      content:
+        generatedAssemblyMetadataSource(
+          project.version
+        )
+    });
+
     return {
       ...project,
       sources,
@@ -28722,6 +28945,7 @@ function browserCompilationFingerprint(
     .map(project => [
       project.id,
       project.assemblyName,
+      project.version,
       project.allowUnsafe,
       project.checkOverflow,
       project.deterministic,
@@ -31305,8 +31529,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "../../templates/help_template.html?v=91-unified-file-import-v758",
-    "../templates/help_template.js?v=91-unified-file-import-v758",
+    "../../templates/help_template.html?v=93-wgsl-frame-pacing-v760",
+    "../templates/help_template.js?v=93-wgsl-frame-pacing-v760",
     "help-template",
     "RMLHelpTemplateMarkup"
   )

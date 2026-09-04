@@ -200,10 +200,10 @@ async function ensureRuntime(catalog) {
       "../catalog/mod_nodes.js?v=70-javascript-integrity-audit-v737"
     );
     importScripts(
-      "../compiler/visual_csharp.js?v=79-javascript-integrity-audit-v737"
+      "../compiler/visual_csharp.js?v=80-custom-csharp-exact-fallback-v764"
     );
     importScripts(
-      "../catalog/api_nodes.js?v=66-javascript-integrity-audit-v737"
+      "../catalog/api_nodes.js?v=67-runtime-prefetch-console-v763"
     );
 
     if (

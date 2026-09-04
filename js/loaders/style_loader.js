@@ -600,6 +600,7 @@
     "setup"
   ]);
   const states = new Map();
+  const prefetchedBundles = new Set();
   const pendingWorkerRequests = new Map();
   let worker = null;
   let nextRequestId = 1;
@@ -622,6 +623,39 @@
       throw new Error(`Unknown style bundle: ${name}`);
     }
     return new URL(file, baseUrl).href;
+  }
+
+  function prefetch(name) {
+    const state = stateFor(name);
+    if (
+      state.status === "loading" ||
+      state.status === "loaded"
+    ) {
+      return true;
+    }
+
+    const url = bundleUrl(name);
+    if (prefetchedBundles.has(url)) {
+      return true;
+    }
+    prefetchedBundles.add(url);
+
+    const link = document.createElement("link");
+    link.rel = "prefetch";
+    link.as = "style";
+    link.href = url;
+    link.fetchPriority = "low";
+    link.dataset.rmlStylePrefetch = name;
+    link.addEventListener(
+      "error",
+      () => {
+        prefetchedBundles.delete(url);
+        link.remove();
+      },
+      { once: true }
+    );
+    document.head.appendChild(link);
+    return true;
   }
 
   function insertBundleElement(element, name) {
@@ -800,9 +834,10 @@
 
   Object.defineProperty(window, "RMLStyleLoader", {
     value: Object.freeze({
-      version: 4,
+      version: 5,
       ensure,
       ensureMany,
+      prefetch,
       warm(name) {
         return ensure(name);
       },

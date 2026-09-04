@@ -196,6 +196,10 @@ function requestProjectAnimationFrame(
 
 let runtimeGraphViewActive = false;
 
+let runtimeGraphPresentationPending = false;
+
+let runtimeGraphPresentationRevision = 0;
+
 let graphCatalogReadiness = "ready";
 
 let graphCatalogReadinessMessage = "";
@@ -1469,6 +1473,8 @@ function handleProjectReplacement(event) {
     customCSharpSynchronizationControllers.clear();
     customCSharpSynchronizationTasks.clear();
     customCSharpForegroundSynchronizationTokens.clear();
+    runtimeGraphPresentationPending = false;
+    runtimeGraphPresentationRevision += 1;
 
     if (customCSharpEditor && graph) {
       applyGraphView(
@@ -4926,9 +4932,19 @@ function updatePackButton() {
       Boolean(graphHostError);
     const catalogDependent =
       graphUsesCatalogOperators();
-    const catalogLoading =
+    const customCSharpLoading =
+      customCSharpSynchronizations.size > 0 ||
+      (
+        runtimeGraphPresentationPending &&
+        Boolean(customCSharpEditor)
+      );
+    const graphLoading =
       hostLoading ||
       runtimeGraphStyleTransitionPending ||
+      runtimeGraphStyleActivationQueued ||
+      runtimeGraphStylePromise !== null ||
+      runtimeGraphPresentationPending ||
+      customCSharpLoading ||
       (
         catalogDependent &&
         graphCatalogReadiness ===
@@ -4945,7 +4961,7 @@ function updatePackButton() {
 
     const visualState = inlineEditorActive
       ? "editor-back"
-      : catalogLoading
+      : graphLoading
         ? "loading"
         : catalogFailed
           ? hostFailed
@@ -4971,8 +4987,8 @@ function updatePackButton() {
       dom.packButton.innerHTML =
         inlineEditorActive
           ? `<svg class="rml-pack-back-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5 M10 7l-5 5 5 5"></path></svg><span class="top-action-label">Back to Previous Graph</span>`
-          : catalogLoading
-            ? `<span class="brand-mark rml-pack-brand-mark rml-runtime-graph-loader rml-runtime-graph-spinner" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">Loading Runtime Graph…</span>`
+          : graphLoading
+            ? `<span class="brand-mark rml-pack-brand-mark rml-runtime-graph-loader rml-runtime-graph-spinner" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">${customCSharpLoading ? "Loading Custom C# Graph…" : "Loading Runtime Graph…"}</span>`
             : catalogFailed
             ? `<span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">${hostFailed ? "Runtime Graph unavailable" : "Repair Runtime Graph…"}</span>`
             : customCSharpEditor ||
@@ -4989,8 +5005,10 @@ function updatePackButton() {
       "aria-label",
       inlineEditorActive
         ? "Close embedded editor and return to the previous graph"
-        : catalogLoading
-          ? "Runtime Graph is loading"
+        : graphLoading
+          ? customCSharpLoading
+            ? "Custom C# Graph is loading"
+            : "Runtime Graph is loading"
           : catalogFailed
           ? hostFailed
             ? "Runtime Graph is unavailable"
@@ -5006,7 +5024,7 @@ function updatePackButton() {
     );
 
     if (
-      catalogLoading &&
+      graphLoading &&
       !inlineEditorActive
     ) {
       dom.packButton.setAttribute(
@@ -5022,7 +5040,7 @@ function updatePackButton() {
     dom.packButton.dataset.runtimeReadiness =
       inlineEditorActive
         ? "ready"
-        : catalogLoading
+        : graphLoading
           ? "loading"
           : catalogFailed
             ? "failed"
@@ -5056,8 +5074,12 @@ function updatePackButton() {
     dom.packButton.dataset.help =
       inlineEditorActive
         ? "Close the embedded Custom C# editor and return to the graph that it replaced."
-        : catalogLoading
-        ? runtimeGraphStyleTransitionPending
+        : graphLoading
+        ? customCSharpLoading
+          ? "The Runtime Graph remains busy until the Custom C# graph has been parsed, materialized and presented."
+          : runtimeGraphStyleTransitionPending ||
+            runtimeGraphStyleActivationQueued ||
+            runtimeGraphStylePromise !== null
           ? "The Runtime Graph stylesheet is being prepared locally before the view changes."
           : hostLoading
           ? "The Runtime Graph control is ready. The locally restored project state is still being connected to it."
@@ -6268,6 +6290,7 @@ function activateGraphMode() {
     if (!runtimeGraphStylesLoaded()) {
       if (!runtimeGraphStyleActivationQueued) {
         runtimeGraphStyleActivationQueued = true;
+        updatePackButton();
         void ensureRuntimeGraphStyles()
           .then(() => {
             if (
@@ -6283,6 +6306,7 @@ function activateGraphMode() {
           )
           .finally(() => {
             runtimeGraphStyleActivationQueued = false;
+            updatePackButton();
           });
       }
       return false;
@@ -8879,6 +8903,10 @@ function renderGraphCanvas() {
     ) {
       return;
     }
+
+    runtimeGraphPresentationPending = true;
+    runtimeGraphPresentationRevision += 1;
+    updatePackButton();
 
     cancelInteraction(false);
     if (!currentAnalysis) {
@@ -16343,30 +16371,84 @@ function updateGraphWireConnections(
 
 function notifyGraphRenderComplete() {
     const rootView = rootRuntimeGraphView();
+    const detail = {
+      scope: customCSharpEditor
+        ? "custom-csharp-file"
+        : "runtime-root",
+      fileNodeId:
+        customCSharpEditor?.fileNodeId || "",
+      nodes:
+        graph?.nodes?.length || 0,
+      connections:
+        graph?.connections?.length || 0,
+      rootNodes:
+        rootView?.nodes?.length || 0,
+      rootConnections:
+        rootView?.connections?.length || 0,
+      projectEpoch:
+        builderProjectEpoch
+    };
     document.dispatchEvent(
       new CustomEvent(
         "rml-graph:render-complete",
-        {
-          detail: {
-            scope: customCSharpEditor
-              ? "custom-csharp-file"
-              : "runtime-root",
-            fileNodeId:
-              customCSharpEditor?.fileNodeId || "",
-            nodes:
-              graph?.nodes?.length || 0,
-            connections:
-              graph?.connections?.length || 0,
-            rootNodes:
-              rootView?.nodes?.length || 0,
-            rootConnections:
-              rootView?.connections?.length || 0,
-            projectEpoch:
-              builderProjectEpoch
-          }
-        }
+        { detail }
       )
     );
+
+    if (!runtimeGraphPresentationPending) {
+      return;
+    }
+
+    runtimeGraphPresentationRevision += 1;
+    const presentationRevision =
+      runtimeGraphPresentationRevision;
+    const presented = async () => {
+      try {
+        await graphHybridRenderer
+          ?.whenSubmittedWorkDone?.();
+      } catch {}
+      await new Promise(resolve => {
+        let frames = 0;
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(fallback);
+          resolve(true);
+        };
+        const fallback = window.setTimeout(
+          finish,
+          250
+        );
+        const frame = () => {
+          frames += 1;
+          if (frames >= 2) {
+            finish();
+            return;
+          }
+          window.requestAnimationFrame(frame);
+        };
+        window.requestAnimationFrame(frame);
+      });
+      if (
+        !runtimeGraphPresentationPending ||
+        presentationRevision !==
+          runtimeGraphPresentationRevision ||
+        detail.projectEpoch !==
+          builderProjectEpoch
+      ) {
+        return;
+      }
+      runtimeGraphPresentationPending = false;
+      updatePackButton();
+      document.dispatchEvent(
+        new CustomEvent(
+          "rml-graph:presentation-complete",
+          { detail }
+        )
+      );
+    };
+    void presented();
   }
 
 function renderCompleteHybridGraphWires({
@@ -22033,6 +22115,86 @@ function detachBranchesFromPoint(
     return count;
   }
 
+function wireNeedsStraightening(
+    connection
+  ) {
+    const points = Array.isArray(
+      connection?.points
+    )
+      ? connection.points
+      : [];
+    if (points.length === 0) {
+      return false;
+    }
+
+    const start = connectionVisualStart(
+      connection
+    );
+    const end = socketGraphCenter(
+      connection.toNode,
+      connection.toPort,
+      "input"
+    );
+    if (!start || !end) {
+      return true;
+    }
+
+    const deltaX = end.x - start.x;
+    const deltaY = end.y - start.y;
+    const lengthSquared =
+      deltaX * deltaX + deltaY * deltaY;
+    const tolerance = Math.max(
+      1,
+      GRAPH_WIRE_POINT_SNAP * 0.5
+    );
+    const toleranceSquared =
+      tolerance * tolerance;
+    if (lengthSquared <= toleranceSquared) {
+      return points.some(point =>
+        Math.hypot(
+          point.x - start.x,
+          point.y - start.y
+        ) > tolerance
+      );
+    }
+
+    const inverseLengthSquared =
+      1 / lengthSquared;
+    const parameterTolerance =
+      tolerance / Math.sqrt(lengthSquared);
+    let previousParameter =
+      -parameterTolerance;
+
+    for (const point of points) {
+      const offsetX = point.x - start.x;
+      const offsetY = point.y - start.y;
+      const parameter =
+        (offsetX * deltaX + offsetY * deltaY) *
+        inverseLengthSquared;
+      const cross =
+        offsetX * deltaY -
+        offsetY * deltaX;
+      const distanceSquared =
+        cross * cross * inverseLengthSquared;
+
+      if (
+        distanceSquared > toleranceSquared ||
+        parameter < -parameterTolerance ||
+        parameter > 1 + parameterTolerance ||
+        parameter + parameterTolerance <
+          previousParameter
+      ) {
+        return true;
+      }
+      previousParameter = Math.max(
+        previousParameter,
+        parameter
+      );
+    }
+
+    return false;
+  }
+
 function removeWirePoint(
     connectionId,
     pointId
@@ -22976,10 +23138,7 @@ function connectionInspectorCard(
       );
     }
 
-    if (
-      (connection.points || [])
-        .length > 0
-    ) {
+    if (wireNeedsStraightening(connection)) {
       actions.appendChild(
         inspectorButton(
           "Straighten wire",

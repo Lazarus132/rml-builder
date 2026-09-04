@@ -122,6 +122,7 @@ function openCustomCSharpFileGraph(fileNodeId) {
       }
       if (graph.nodes.length <= 40) {
         centerGraph();
+        renderGraphWires();
         return;
       }
       const output = graph.nodes.find(node => node.id === customGraph.outputNodeId);
@@ -136,6 +137,115 @@ function openCustomCSharpFileGraph(fileNodeId) {
       renderGraphWires();
     }));
     showGraphMessage(`Opened ${customCSharpEditor.fileName} in its separate C# graph.`, "success");
+    return true;
+  }
+
+async function openCustomCSharpFileGraphReady(
+    fileNodeId,
+    signal = null
+  ) {
+    const normalizedFileNodeId =
+      String(fileNodeId || "");
+    const expectedProjectEpoch =
+      builderProjectEpoch;
+    if (signal?.aborted) {
+      throw signal.reason ||
+        new DOMException(
+          "Custom C# graph presentation was cancelled.",
+          "AbortError"
+        );
+    }
+    let settled = false;
+    let timer = 0;
+    let cancelPresentationWait = () => {};
+
+    const presentation = new Promise(
+      (resolve, reject) => {
+        const cleanup = () => {
+          if (timer) {
+            window.clearTimeout(timer);
+          }
+          document.removeEventListener(
+            "rml-graph:presentation-complete",
+            handlePresented
+          );
+          signal?.removeEventListener?.(
+            "abort",
+            handleAbort
+          );
+        };
+        const finish = (callback, value) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          callback(value);
+        };
+        const handlePresented = event => {
+          const detail = event?.detail || {};
+          if (
+            detail.scope !==
+              "custom-csharp-file" ||
+            String(detail.fileNodeId || "") !==
+              normalizedFileNodeId ||
+            Number(detail.projectEpoch || 0) !==
+              Number(expectedProjectEpoch || 0)
+          ) {
+            return;
+          }
+          finish(resolve, true);
+        };
+        const handleAbort = () =>
+          finish(
+            reject,
+            signal?.reason ||
+              new DOMException(
+                "Custom C# graph presentation was cancelled.",
+                "AbortError"
+              )
+          );
+        cancelPresentationWait = () =>
+          finish(resolve, false);
+
+        document.addEventListener(
+          "rml-graph:presentation-complete",
+          handlePresented
+        );
+        signal?.addEventListener?.(
+          "abort",
+          handleAbort,
+          { once: true }
+        );
+        timer = window.setTimeout(
+          () =>
+            finish(
+              reject,
+              new Error(
+                "The Custom C# Node Graph did not finish rendering within 60 seconds."
+              )
+            ),
+          60000
+        );
+      }
+    );
+    setCustomCSharpSynchronizationStatus(
+      normalizedFileNodeId,
+      "Rendering Custom C# Node Graph…"
+    );
+    let opened = false;
+    try {
+      opened = openCustomCSharpFileGraph(
+        normalizedFileNodeId
+      );
+    } catch (error) {
+      cancelPresentationWait();
+      throw error;
+    }
+    if (!opened) {
+      cancelPresentationWait();
+      await presentation;
+      return false;
+    }
+    await presentation;
     return true;
   }
 
@@ -611,6 +721,7 @@ function setCustomCSharpSynchronizationStatus(
       }
     }
     updateCustomCSharpSynchronizationControl(id);
+    updatePackButton();
   }
 
 function updateCustomCSharpSynchronizationControl(
@@ -820,7 +931,7 @@ function buildCustomCSharpFragmentInWorker(nodeId, source, parseResult, options)
     }
     const worker = new Worker(
       new URL(
-        "js/workers/graph_codegen_worker.js?v=138-max-graph-performance-v755",
+        "js/workers/graph_codegen_worker.js?v=140-custom-csharp-exact-fallback-v764",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -1191,7 +1302,10 @@ async function synchronizeCustomCSharpFileGraph(
         || createEmptyCustomCSharpFileGraph(owner);
       persistGraph(true);
       if (!openAfterSync) return true;
-      const opened = openCustomCSharpFileGraph(ownerId);
+      const opened = await openCustomCSharpFileGraphReady(
+        ownerId,
+        signal
+      );
       if (opened) {
         showGraphMessage("Opened an empty visual C# 14 file graph. Build the complete source with syntax nodes and connect it to Output.", "success");
       }
@@ -1210,7 +1324,10 @@ async function synchronizeCustomCSharpFileGraph(
         createEmptyCustomCSharpFileGraph(owner);
       persistGraph(true);
       if (!openAfterSync) return true;
-      const opened = openCustomCSharpFileGraph(ownerId);
+      const opened = await openCustomCSharpFileGraphReady(
+        ownerId,
+        signal
+      );
       if (opened && !existingGraph) {
         showGraphMessage(
           "Opened an empty visual C# 14 file graph. This manually created Custom C# File is graph-authoritative, so its persistent Source field does not overwrite its nodes.",
@@ -1256,7 +1373,12 @@ async function synchronizeCustomCSharpFileGraph(
         ownerId
       );
       persistGraph(true);
-      return openAfterSync ? openCustomCSharpFileGraph(ownerId) : true;
+      return openAfterSync
+        ? await openCustomCSharpFileGraphReady(
+            ownerId,
+            signal
+          )
+        : true;
     }
 
     setCustomCSharpSynchronizationStatus(
@@ -1463,7 +1585,37 @@ async function synchronizeCustomCSharpFileGraph(
         prepared = visualCSharp.createCustomCSharpFileGraphFromFragment(fragment);
       }
       if (!prepared?.ok || !await validatePreparedGraph(prepared)) {
-        throw new Error(`The locally optimized Node Graph did not reproduce valid live-checked C# 14 source. ${preparedGraphValidationFailure || "The local subtree validator failed without a diagnostic."} The previous valid graph was preserved; it was not replaced by a whole-file Raw Roslyn graph.`);
+        setCustomCSharpSynchronizationStatus(
+          ownerId,
+          "Worker: building exact Roslyn fallback…"
+        );
+        fragment = await buildCustomCSharpFragmentInWorker(
+          ownerId,
+          source,
+          parseResult,
+          {
+            ...fragmentOptions,
+            prefix: `${fragmentOptions.prefix}-exact`,
+            disableCatalogNodes: true,
+            semanticOptimization: false
+          }
+        );
+        assertCurrentProject();
+        if (!fragment?.ok) {
+          throw new Error(
+            fragment?.diagnostics?.[0] ||
+              "The exact Roslyn fallback graph could not be created."
+          );
+        }
+        prepared =
+          visualCSharp.createCustomCSharpFileGraphFromFragment(
+            fragment
+          );
+      }
+      if (!prepared?.ok || !await validatePreparedGraph(prepared)) {
+        throw new Error(
+          `Roslyn accepted this file as valid C# 14, but even the exact raw Roslyn graph could not reproduce it losslessly. ${preparedGraphValidationFailure || "The exact subtree validator failed without a diagnostic."} This is an internal visual-importer error. The previous valid graph and the original source were preserved.`
+        );
       }
       if (String(findGraphNode(ownerId)?.parameters?.source || "") !== source) {
         return false;
@@ -1492,7 +1644,10 @@ async function synchronizeCustomCSharpFileGraph(
         ownerId,
         "Opening optimized Node Graph…"
       );
-      const opened = openCustomCSharpFileGraph(ownerId);
+      const opened = await openCustomCSharpFileGraphReady(
+        ownerId,
+        signal
+      );
       if (opened) {
         const synchronizedNodes = prepared.customGraph.nodes || [];
         const usingCount = synchronizedNodes.filter(node => node.operatorId === "csharp.usingDirective").length;

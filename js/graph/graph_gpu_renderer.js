@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = 10;
+  const VERSION = 13;
   const WIRE_CULL_CELL_SIZE = 960;
   const NODE_CELL_SIZE = 360;
   const WIRE_LINEAR_PICK_LIMIT = 512;
@@ -11,10 +11,158 @@
   const WIRE_CULL_MARGIN_PIXELS = 24;
   const NODE_CULL_MARGIN_PIXELS = 8;
   const GPU_CURVE_STEPS = 32;
+  const GPU_MAX_CURVE_STEPS = 64;
   const FLOATS_PER_WIRE_INSTANCE = 15;
   const WIRE_LAYERS_PER_SEGMENT = 1;
   const FLOATS_PER_NODE_INSTANCE = 6;
   const WEBGPU_WORKGROUP_SIZE = 128;
+  const WEBGPU_CULL_OVERSCAN_PIXELS = 384;
+  const WEBGPU_CULL_SCALE_REUSE_RATIO = 1.125;
+  const WEBGPU_ASYNC_INDEX_THRESHOLD = 20000;
+  const WEBGPU_INDEX_BATCH_SIZE = 1024;
+  const RENDERER_BACKEND_STORAGE_KEY =
+    "rml.graph.rendererBackend";
+  const RENDERER_BACKENDS = new Set([
+    "auto",
+    "wgsl",
+    "glsl",
+    "svg"
+  ]);
+
+  function normalizeRendererBackend(value) {
+    const normalized = String(value || "auto")
+      .trim()
+      .toLowerCase();
+    if (normalized === "webgpu") {
+      return "wgsl";
+    }
+    if (
+      normalized === "webgl" ||
+      normalized === "webgl2"
+    ) {
+      return "glsl";
+    }
+    return RENDERER_BACKENDS.has(normalized)
+      ? normalized
+      : null;
+  }
+
+  function storedRendererBackend() {
+    try {
+      return normalizeRendererBackend(
+        window.localStorage?.getItem(
+          RENDERER_BACKEND_STORAGE_KEY
+        )
+      ) || "auto";
+    } catch {
+      return "auto";
+    }
+  }
+
+  function persistRendererBackend(value) {
+    try {
+      if (value === "auto") {
+        window.localStorage?.removeItem(
+          RENDERER_BACKEND_STORAGE_KEY
+        );
+      } else {
+        window.localStorage?.setItem(
+          RENDERER_BACKEND_STORAGE_KEY,
+          value
+        );
+      }
+    } catch {
+      // A private or embedded context can deny storage. The in-memory
+      // preference still applies to every renderer created in this page.
+    }
+  }
+
+  function curveStepsForScale(
+    scale,
+    maximumCurveLength = 0
+  ) {
+    const zoom = Math.max(
+      0.0001,
+      finite(scale, 1)
+    );
+    let steps = GPU_CURVE_STEPS;
+    if (zoom <= 0.12) {
+      steps = 8;
+    } else if (zoom <= 0.35) {
+      steps = 16;
+    } else if (zoom <= 0.75) {
+      steps = 24;
+    }
+    const projectedLength =
+      Number.isFinite(maximumCurveLength)
+        ? Math.max(0, maximumCurveLength) * zoom
+        : Infinity;
+    if (projectedLength >= 1800) {
+      return GPU_MAX_CURVE_STEPS;
+    }
+    if (projectedLength >= 900) {
+      return Math.max(steps, 48);
+    }
+    if (projectedLength >= 420) {
+      return Math.max(steps, 32);
+    }
+    if (projectedLength >= 200) {
+      return Math.max(steps, 24);
+    }
+    if (projectedLength >= 80) {
+      return Math.max(steps, 16);
+    }
+    return steps;
+  }
+
+  function curveControlPolygonLength(curve) {
+    if (!curve) return 0;
+    return (
+      Math.hypot(
+        curve.p1.x - curve.p0.x,
+        curve.p1.y - curve.p0.y
+      ) +
+      Math.hypot(
+        curve.p2.x - curve.p1.x,
+        curve.p2.y - curve.p1.y
+      ) +
+      Math.hypot(
+        curve.p3.x - curve.p2.x,
+        curve.p3.y - curve.p2.y
+      )
+    );
+  }
+
+  function maximumCurveControlPolygonLength(
+    records
+  ) {
+    let maximum = 0;
+    for (const record of records || []) {
+      maximum = Math.max(
+        maximum,
+        curveControlPolygonLength(record?.curve)
+      );
+      if (!Number.isFinite(maximum)) {
+        return Infinity;
+      }
+    }
+    return maximum;
+  }
+
+  function webGpuAdapterOptions() {
+    const platform = String(
+      navigator.userAgentData?.platform ||
+      navigator.platform ||
+      ""
+    );
+    return /windows|win32|win64/i.test(platform)
+      ? undefined
+      : { powerPreference: "high-performance" };
+  }
+
+  let rendererBackendPreference =
+    storedRendererBackend();
+  let activeRendererBackend = "none";
 
   const webGpuRuntime = {
     adapter: null,
@@ -27,6 +175,8 @@
 
   webGpuRuntime.ready = (async () => {
     if (
+      rendererBackendPreference === "glsl" ||
+      rendererBackendPreference === "svg" ||
       typeof navigator === "undefined" ||
       !navigator.gpu
     ) {
@@ -34,9 +184,9 @@
     }
     try {
       const adapter =
-        await navigator.gpu.requestAdapter({
-          powerPreference: "high-performance"
-        });
+        await navigator.gpu.requestAdapter(
+          webGpuAdapterOptions()
+        );
       if (!adapter) {
         return false;
       }
@@ -440,6 +590,30 @@
     );
   }
 
+  function containsBounds(outer, inner) {
+    return Boolean(
+      outer &&
+      inner &&
+      outer.left <= inner.left &&
+      outer.top <= inner.top &&
+      outer.right >= inner.right &&
+      outer.bottom >= inner.bottom
+    );
+  }
+
+  function spatialQueryCellCount(bounds, cellSize) {
+    const range = cellRange(bounds, cellSize);
+    const columns = Math.max(
+      0,
+      range.maximumX - range.minimumX + 1
+    );
+    const rows = Math.max(
+      0,
+      range.maximumY - range.minimumY + 1
+    );
+    return columns * rows;
+  }
+
   function sameRecordOrder(previous, records) {
     if (previous.length !== records.length) {
       return false;
@@ -581,6 +755,7 @@
       this.visibleWireInstanceData = new Float32Array(0);
       this.visibleWireInstanceCapacity = 0;
       this.visibleWireRecords = [];
+      this.maximumWireCurveLength = 0;
       this.wireDataRevision = 0;
       this.visibleWireDataRevision = -1;
       this.visibleWireSelectionDirty = true;
@@ -678,6 +853,9 @@
       this.available = next;
       this.canvas.classList.toggle("available", next);
       this.stats.renderer = next ? "webgl2" : "svg-fallback";
+      activeRendererBackend = next
+        ? "webgl2-glsl"
+        : "svg-fallback";
       this.onAvailabilityChange?.(next);
     }
 
@@ -806,6 +984,7 @@
       this.visibleWireInstanceData = new Float32Array(0);
       this.visibleWireInstanceCapacity = 0;
       this.visibleWireRecords = [];
+      this.maximumWireCurveLength = 0;
       this.wireDataRevision += 1;
       this.visibleWireDataRevision = -1;
       this.visibleWireSelectionDirty = true;
@@ -939,9 +1118,10 @@
         out vec4 outputColor;
         float lineMask(float coordinate, float spacing) {
           float pixel = coordinate / uPixelRatio;
+          float phase = mod(pixel, spacing);
           float distanceToLine = min(
-            mod(pixel, spacing),
-            spacing - mod(pixel, spacing)
+            phase,
+            spacing - phase
           );
           return 1.0 - smoothstep(0.45, 1.15, distanceToLine);
         }
@@ -978,12 +1158,13 @@
         uniform vec2 uResolution;
         uniform vec2 uPan;
         uniform float uScale;
-        out vec4 vColor;
+        uniform float uCurveSteps;
+        flat out vec4 vColor;
         out float vEdgePixels;
-        out float vCoreHalfPixels;
+        flat out float vCoreHalfPixels;
         out float vDistance;
-        out float vDash;
-        out float vStyle;
+        flat out float vDash;
+        flat out float vStyle;
         vec2 cubicPoint(float t) {
           float inverse = 1.0 - t;
           float inverse2 = inverse * inverse;
@@ -1002,43 +1183,57 @@
             3.0 * t * t * (aP3 - aP2);
         }
         void main() {
-          const float STEPS = ${GPU_CURVE_STEPS}.0;
           int pointIndex = gl_VertexID / 2;
-          float side = mod(float(gl_VertexID), 2.0) < 0.5
+          float side = (gl_VertexID & 1) == 0
             ? -1.0
             : 1.0;
-          float t = clamp(float(pointIndex) / STEPS, 0.0, 1.0);
+          float activeSteps = max(1.0, uCurveSteps);
+          float t = clamp(
+            float(pointIndex) / activeSteps,
+            0.0,
+            1.0
+          );
           vec2 position = cubicPoint(t);
-          float stepSize = 1.0 / STEPS;
-          vec2 previousPosition = cubicPoint(max(0.0, t - stepSize));
-          vec2 nextPosition = cubicPoint(min(1.0, t + stepSize));
-          vec2 incoming = position - previousPosition;
-          vec2 outgoing = nextPosition - position;
-          float incomingLength = length(incoming);
-          float outgoingLength = length(outgoing);
-          vec2 incomingDirection = incomingLength > 0.000001
-            ? incoming / incomingLength
-            : vec2(0.0);
-          vec2 outgoingDirection = outgoingLength > 0.000001
-            ? outgoing / outgoingLength
-            : vec2(0.0);
-          if (pointIndex == 0) {
-            incomingDirection = outgoingDirection;
-          }
-          if (pointIndex == int(STEPS)) {
-            outgoingDirection = incomingDirection;
-          }
-          vec2 joinedDirection =
-            incomingDirection + outgoingDirection;
-          float joinLength = length(joinedDirection);
+          float derivativeStep =
+            0.5 / activeSteps;
+          vec2 incomingDerivative =
+            cubicDerivative(
+              max(0.0, t - derivativeStep)
+            );
+          vec2 outgoingDerivative =
+            cubicDerivative(
+              min(1.0, t + derivativeStep)
+            );
+          float incomingLength =
+            length(incomingDerivative);
+          float outgoingLength =
+            length(outgoingDerivative);
           vec2 fallbackDirection = aP3 - aP0;
           float fallbackLength = length(fallbackDirection);
           if (fallbackLength <= 0.000001) {
             fallbackDirection = vec2(1.0, 0.0);
             fallbackLength = 1.0;
           }
-          vec2 tangent = joinLength > 0.000001
-            ? joinedDirection / joinLength
+          vec2 incomingDirection =
+            incomingLength > 0.000001
+              ? incomingDerivative / incomingLength
+              : vec2(0.0);
+          vec2 outgoingDirection =
+            outgoingLength > 0.000001
+              ? outgoingDerivative / outgoingLength
+              : vec2(0.0);
+          if (pointIndex == 0) {
+            incomingDirection = outgoingDirection;
+          }
+          if (pointIndex == int(activeSteps)) {
+            outgoingDirection = incomingDirection;
+          }
+          vec2 joinedDirection =
+            incomingDirection + outgoingDirection;
+          float joinedLength =
+            length(joinedDirection);
+          vec2 tangent = joinedLength > 0.000001
+            ? joinedDirection / joinedLength
             : fallbackDirection / fallbackLength;
           vec2 normal = vec2(-tangent.y, tangent.x);
           float reversalDot = dot(
@@ -1073,29 +1268,33 @@
         }`,
         `#version 300 es
         precision highp float;
-        in vec4 vColor;
+        flat in vec4 vColor;
         in float vEdgePixels;
-        in float vCoreHalfPixels;
+        flat in float vCoreHalfPixels;
         in float vDistance;
-        in float vDash;
-        in float vStyle;
+        flat in float vDash;
+        flat in float vStyle;
         out vec4 outputColor;
-        float coverage(float halfWidth) {
+        float coverage(
+          float edgeDistance,
+          float halfWidth
+        ) {
           return 1.0 - smoothstep(
             halfWidth,
             halfWidth + 1.25,
-            abs(vEdgePixels)
+            edgeDistance
           );
         }
-        vec4 over(vec4 under, vec4 upper) {
-          float alpha = upper.a + under.a * (1.0 - upper.a);
-          if (alpha <= 0.00001) {
-            return vec4(0.0);
-          }
-          vec3 premultiplied =
-            upper.rgb * upper.a +
-            under.rgb * under.a * (1.0 - upper.a);
-          return vec4(premultiplied / alpha, alpha);
+        vec4 overPremultiplied(
+          vec4 under,
+          vec3 upperColor,
+          float upperAlpha
+        ) {
+          float inverse = 1.0 - upperAlpha;
+          return vec4(
+            upperColor * upperAlpha + under.rgb * inverse,
+            upperAlpha + under.a * inverse
+          );
         }
         void main() {
           bool selected = mod(vStyle, 2.0) >= 1.0;
@@ -1105,25 +1304,30 @@
             0.0001,
             vCoreHalfPixels / 2.0
           );
+          float edgeDistance = abs(vEdgePixels);
           vec4 result = vec4(0.0);
-          result = over(
+          result = overPremultiplied(
             result,
-            vec4(0.0, 0.0, 0.0, 0.10 * coverage(7.0 * scaleEstimate))
+            vec3(0.0),
+            0.10 * coverage(edgeDistance, 7.0 * scaleEstimate)
           );
-          result = over(
+          result = overPremultiplied(
             result,
-            vec4(0.0, 0.0, 0.0, 0.20 * coverage(5.0 * scaleEstimate))
+            vec3(0.0),
+            0.20 * coverage(edgeDistance, 5.0 * scaleEstimate)
           );
-          result = over(
+          result = overPremultiplied(
             result,
-            vec4(0.0, 0.0, 0.0, 0.72 * coverage(4.0 * scaleEstimate))
+            vec3(0.0),
+            0.72 * coverage(edgeDistance, 4.0 * scaleEstimate)
           );
           if (selected || valid) {
             float glowHalf = (selected ? 7.0 : 6.5) * scaleEstimate;
             float glowAlpha = invalid ? 0.06 : 0.22;
-            result = over(
+            result = overPremultiplied(
               result,
-              vec4(vColor.rgb, glowAlpha * coverage(glowHalf))
+              vColor.rgb,
+              glowAlpha * coverage(edgeDistance, glowHalf)
             );
           }
           float dashMask =
@@ -1131,17 +1335,18 @@
               ? 0.0
               : 1.0;
           float coreHalf = (selected || valid ? 3.0 : 2.0) * scaleEstimate;
-          result = over(
+          result = overPremultiplied(
             result,
-            vec4(
-              vColor.rgb,
-              vColor.a * coverage(coreHalf) * dashMask
-            )
+            vColor.rgb,
+            vColor.a * coverage(edgeDistance, coreHalf) * dashMask
           );
           if (result.a <= 0.001) {
             discard;
           }
-          outputColor = result;
+          outputColor = vec4(
+            result.rgb / result.a,
+            result.a
+          );
         }`
       );
 
@@ -1156,13 +1361,13 @@
         uniform vec2 uPan;
         uniform float uScale;
         out vec2 vLocal;
-        out vec2 vSize;
-        out float vConfiguration;
-        out float vSelected;
+        flat out vec2 vSize;
+        flat out float vConfiguration;
+        flat out float vSelected;
         void main() {
           vec2 corner = vec2(
-            mod(float(gl_VertexID), 2.0),
-            floor(float(gl_VertexID) * 0.5)
+            float(gl_VertexID & 1),
+            float(gl_VertexID >> 1)
           );
           vec2 local = corner * aBounds.zw;
           vec2 position = aBounds.xy + local;
@@ -1181,9 +1386,9 @@
         precision highp float;
         uniform float uScale;
         in vec2 vLocal;
-        in vec2 vSize;
-        in float vConfiguration;
-        in float vSelected;
+        flat in vec2 vSize;
+        flat in float vConfiguration;
+        flat in float vSelected;
         out vec4 outputColor;
         float roundedDistance(vec2 point, vec2 size, float radius) {
           vec2 q = abs(point - size * 0.5) -
@@ -1246,7 +1451,11 @@
         wire: {
           resolution: gl.getUniformLocation(this.wireProgram, "uResolution"),
           pan: gl.getUniformLocation(this.wireProgram, "uPan"),
-          scale: gl.getUniformLocation(this.wireProgram, "uScale")
+          scale: gl.getUniformLocation(this.wireProgram, "uScale"),
+          curveSteps: gl.getUniformLocation(
+            this.wireProgram,
+            "uCurveSteps"
+          )
         },
         node: {
           resolution: gl.getUniformLocation(this.nodeProgram, "uResolution"),
@@ -1605,6 +1814,7 @@
       this.wireRecords = [];
       this.wireRecordIndexByKey.clear();
       let reusedWireGeometries = 0;
+      let maximumCurveLength = 0;
       const hiddenConnectionIds = new Set();
       for (
         let index = 0;
@@ -1631,6 +1841,12 @@
           );
         }
         this.wireRecords.push(record);
+        maximumCurveLength = Math.max(
+          maximumCurveLength,
+          curveControlPolygonLength(
+            record.curve
+          )
+        );
         this.wireRecordIndexByKey.set(
           this.wireRecordKey(record),
           index
@@ -1638,6 +1854,8 @@
       }
 
       this.wireCullSpatialIndexDirty = true;
+      this.maximumWireCurveLength =
+        maximumCurveLength;
       this.visibleWireSelectionDirty = true;
       this.stats.segments = this.wireRecords.length;
       this.stats.hiddenConnections =
@@ -2270,6 +2488,14 @@
           floatOffset
         );
       }
+      for (const update of prepared) {
+        this.maximumWireCurveLength = Math.max(
+          this.maximumWireCurveLength,
+          curveControlPolygonLength(
+            update.record.curve
+          )
+        );
+      }
       this.wireDataRevision += 1;
       this.visibleWireSelectionDirty = true;
       this.scheduleDraw();
@@ -2433,6 +2659,10 @@
       this.draw();
     }
 
+    whenSubmittedWorkDone() {
+      return Promise.resolve(true);
+    }
+
     draw() {
       const gl = this.gl;
       if (
@@ -2446,6 +2676,19 @@
       }
       const started = performance.now();
       this.prepareVisibleInstances();
+      const curveSteps = curveStepsForScale(
+        this.camera.scale,
+        maximumCurveControlPolygonLength(
+          this.visibleWireRecords
+        )
+      );
+      const wireVertexCount =
+        (curveSteps + 1) * 2;
+      this.stats.curveSteps = curveSteps;
+      this.wireVertexCount =
+        this.wireInstanceCount * wireVertexCount;
+      this.stats.wireVertices =
+        this.wireVertexCount;
       gl.viewport(0, 0, this.canvas.width, this.canvas.height);
       gl.clearColor(0.0314, 0.0392, 0.0627, 1);
       gl.clear(gl.COLOR_BUFFER_BIT);
@@ -2480,11 +2723,15 @@
           this.uniforms.wire.scale,
           this.camera.scale
         );
+        gl.uniform1f(
+          this.uniforms.wire.curveSteps,
+          curveSteps
+        );
         gl.bindVertexArray(this.wireVertexArray);
         gl.drawArraysInstanced(
           gl.TRIANGLE_STRIP,
           0,
-          (GPU_CURVE_STEPS + 1) * 2,
+          wireVertexCount,
           this.wireInstanceCount
         );
         drawCalls += 1;
@@ -2506,13 +2753,17 @@
           this.uniforms.wire.scale,
           this.camera.scale
         );
+        gl.uniform1f(
+          this.uniforms.wire.curveSteps,
+          curveSteps
+        );
         gl.bindVertexArray(
           this.previewVertexArray
         );
         gl.drawArraysInstanced(
           gl.TRIANGLE_STRIP,
           0,
-          (GPU_CURVE_STEPS + 1) * 2,
+          wireVertexCount,
           this.previewInstanceCount
         );
         drawCalls += 1;
@@ -2816,8 +3067,8 @@
         ...runtime.pipelines
       };
       this.gpuBindGroups = Object.create(null);
-      this.wireBoundsData = new Float32Array(0);
-      this.nodeVisibilityData = new Uint32Array(0);
+      this.wireCandidateData = new Uint32Array(0);
+      this.nodeCandidateData = new Uint32Array(0);
       this.renderUniformData = new Float32Array(8);
       this.cullUniformData = new ArrayBuffer(32);
       this.cullUniformFloats =
@@ -2841,6 +3092,30 @@
         ]);
       this.nodeIndirectData =
         new Uint32Array([4, 0, 0, 0]);
+      this.activeCurveSteps = GPU_CURVE_STEPS;
+      this.gpuCullBounds = null;
+      this.gpuCullScale = 0;
+      this.gpuCullDirty = true;
+      this.gpuCullReady = false;
+      this.gpuWireCandidateCount = 0;
+      this.gpuNodeCandidateCount = 0;
+      this.gpuWireCandidateMode = "empty";
+      this.gpuNodeCandidateMode = "empty";
+      this.gpuCandidateMaximumCurveLength = 0;
+      this.gpuSpatialBuildTasks = {
+        wire: null,
+        node: null
+      };
+      this.stats.gpuCullPasses = 0;
+      this.stats.gpuCullReusedFrames = 0;
+      this.stats.gpuWireCandidates = 0;
+      this.stats.gpuNodeCandidates = 0;
+      this.stats.gpuWireCandidateMode = "empty";
+      this.stats.gpuNodeCandidateMode = "empty";
+      this.stats.gpuCullOverscanPixels =
+        WEBGPU_CULL_OVERSCAN_PIXELS;
+      this.stats.gpuLastCullMilliseconds = 0;
+      this.stats.gpuSpatialIndexBuilding = false;
       this.gpuResourcesReady = false;
       this.initializeWebGpu();
     }
@@ -2856,6 +3131,9 @@
         next
       );
       this.stats.renderer = next
+        ? "webgpu-wgsl"
+        : "svg-fallback";
+      activeRendererBackend = next
         ? "webgpu-wgsl"
         : "svg-fallback";
       this.stats.gpuComputeCulling = next;
@@ -2927,8 +3205,8 @@
               bounds: vec4<f32>,
               wireCount: u32,
               nodeCount: u32,
-              padding0: u32,
-              padding1: u32,
+              wireCandidateMode: u32,
+              nodeCandidateMode: u32,
             };
             struct FloatData {
               values: array<f32>,
@@ -2947,19 +3225,19 @@
             @group(0) @binding(1)
             var<storage, read> masterWires: FloatData;
             @group(0) @binding(2)
-            var<storage, read> wireBounds: FloatData;
-            @group(0) @binding(3)
             var<storage, read_write> visibleWires: FloatData;
-            @group(0) @binding(4)
+            @group(0) @binding(3)
             var<storage, read_write> wireDraw: DrawIndirect;
-            @group(0) @binding(5)
+            @group(0) @binding(4)
             var<storage, read> masterNodes: FloatData;
-            @group(0) @binding(6)
-            var<storage, read> nodeVisibility: UintData;
-            @group(0) @binding(7)
+            @group(0) @binding(5)
             var<storage, read_write> visibleNodes: FloatData;
-            @group(0) @binding(8)
+            @group(0) @binding(6)
             var<storage, read_write> nodeDraw: DrawIndirect;
+            @group(0) @binding(7)
+            var<storage, read> wireCandidates: UintData;
+            @group(0) @binding(8)
+            var<storage, read> nodeCandidates: UintData;
 
             fn intersects(
               left: f32,
@@ -2981,15 +3259,59 @@
             ) {
               let index = invocation.x;
               if (index < cull.wireCount) {
-                let boundsOffset = index * 4u;
-                let sourceOffset = index * ${FLOATS_PER_WIRE_INSTANCE}u;
+                var sourceIndex = index;
+                if (cull.wireCandidateMode != 0u) {
+                  sourceIndex = wireCandidates.values[index];
+                }
+                let sourceOffset =
+                  sourceIndex * ${FLOATS_PER_WIRE_INSTANCE}u;
+                let minimumX = min(
+                  min(
+                    masterWires.values[sourceOffset],
+                    masterWires.values[sourceOffset + 2u]
+                  ),
+                  min(
+                    masterWires.values[sourceOffset + 4u],
+                    masterWires.values[sourceOffset + 6u]
+                  )
+                );
+                let minimumY = min(
+                  min(
+                    masterWires.values[sourceOffset + 1u],
+                    masterWires.values[sourceOffset + 3u]
+                  ),
+                  min(
+                    masterWires.values[sourceOffset + 5u],
+                    masterWires.values[sourceOffset + 7u]
+                  )
+                );
+                let maximumX = max(
+                  max(
+                    masterWires.values[sourceOffset],
+                    masterWires.values[sourceOffset + 2u]
+                  ),
+                  max(
+                    masterWires.values[sourceOffset + 4u],
+                    masterWires.values[sourceOffset + 6u]
+                  )
+                );
+                let maximumY = max(
+                  max(
+                    masterWires.values[sourceOffset + 1u],
+                    masterWires.values[sourceOffset + 3u]
+                  ),
+                  max(
+                    masterWires.values[sourceOffset + 5u],
+                    masterWires.values[sourceOffset + 7u]
+                  )
+                );
                 if (
                   masterWires.values[sourceOffset + 11u] > 0.0001 &&
                   intersects(
-                    wireBounds.values[boundsOffset],
-                    wireBounds.values[boundsOffset + 1u],
-                    wireBounds.values[boundsOffset + 2u],
-                    wireBounds.values[boundsOffset + 3u]
+                    minimumX,
+                    minimumY,
+                    maximumX,
+                    maximumY
                   )
                 ) {
                   let destination =
@@ -3031,19 +3353,22 @@
                 }
               }
 
-              if (
-                index < cull.nodeCount &&
-                nodeVisibility.values[index] != 0u
-              ) {
+              if (index < cull.nodeCount) {
+                var sourceIndex = index;
+                if (cull.nodeCandidateMode != 0u) {
+                  sourceIndex = nodeCandidates.values[index];
+                }
                 let sourceOffset =
-                  index * ${FLOATS_PER_NODE_INSTANCE}u;
+                  sourceIndex * ${FLOATS_PER_NODE_INSTANCE}u;
                 let left = masterNodes.values[sourceOffset];
                 let top = masterNodes.values[sourceOffset + 1u];
                 let right =
                   left + masterNodes.values[sourceOffset + 2u];
                 let bottom =
                   top + masterNodes.values[sourceOffset + 3u];
-                if (intersects(left, top, right, bottom)) {
+                if (
+                  intersects(left, top, right, bottom)
+                ) {
                   let destination =
                     atomicAdd(&nodeDraw.instanceCount, 1u);
                   let destinationOffset =
@@ -3074,7 +3399,8 @@
               pan: vec2<f32>,
               scale: f32,
               pixelRatio: f32,
-              padding: vec2<f32>,
+              curveSteps: f32,
+              padding: f32,
             };
             @group(0) @binding(0)
             var<uniform> scene: RenderUniforms;
@@ -3125,19 +3451,20 @@
               pan: vec2<f32>,
               scale: f32,
               pixelRatio: f32,
-              padding: vec2<f32>,
+              curveSteps: f32,
+              padding: f32,
             };
             struct FloatData {
               values: array<f32>,
             };
             struct WireOutput {
               @builtin(position) position: vec4<f32>,
-              @location(0) color: vec4<f32>,
+              @location(0) @interpolate(flat) color: vec4<f32>,
               @location(1) edgePixels: f32,
-              @location(2) coreHalfPixels: f32,
+              @location(2) @interpolate(flat) coreHalfPixels: f32,
               @location(3) distance: f32,
-              @location(4) dash: f32,
-              @location(5) style: f32,
+              @location(4) @interpolate(flat) dash: f32,
+              @location(5) @interpolate(flat) style: f32,
             };
             @group(0) @binding(0)
             var<uniform> scene: RenderUniforms;
@@ -3164,6 +3491,18 @@
                 3.0 * inverse * t2 * p2 +
                 t2 * t * p3;
             }
+            fn cubicDerivative(
+              p0: vec2<f32>,
+              p1: vec2<f32>,
+              p2: vec2<f32>,
+              p3: vec2<f32>,
+              t: f32
+            ) -> vec2<f32> {
+              let inverse = 1.0 - t;
+              return 3.0 * inverse * inverse * (p1 - p0) +
+                6.0 * inverse * t * (p2 - p1) +
+                3.0 * t * t * (p3 - p2);
+            }
             @vertex
             fn vertexMain(
               @builtin(vertex_index) vertex: u32,
@@ -3188,27 +3527,78 @@
               let pointIndex = vertex / 2u;
               let side = select(-1.0, 1.0, vertex % 2u == 1u);
               let t = clamp(
-                f32(pointIndex) / ${GPU_CURVE_STEPS}.0,
+                f32(pointIndex) / max(1.0, scene.curveSteps),
                 0.0,
                 1.0
               );
-              let step = 1.0 / ${GPU_CURVE_STEPS}.0;
               let position = cubic(p0, p1, p2, p3, t);
-              let previous = cubic(
-                p0, p1, p2, p3, max(0.0, t - step)
+              let derivativeStep =
+                0.5 / max(1.0, scene.curveSteps);
+              let incomingDerivative = cubicDerivative(
+                p0,
+                p1,
+                p2,
+                p3,
+                max(0.0, t - derivativeStep)
               );
-              let following = cubic(
-                p0, p1, p2, p3, min(1.0, t + step)
+              let outgoingDerivative = cubicDerivative(
+                p0,
+                p1,
+                p2,
+                p3,
+                min(1.0, t + derivativeStep)
               );
-              var tangent = following - previous;
-              if (length(tangent) < 0.000001) {
+              let incomingLength =
+                length(incomingDerivative);
+              let outgoingLength =
+                length(outgoingDerivative);
+              var incomingDirection = vec2<f32>(0.0);
+              var outgoingDirection = vec2<f32>(0.0);
+              if (incomingLength > 0.000001) {
+                incomingDirection =
+                  incomingDerivative / incomingLength;
+              }
+              if (outgoingLength > 0.000001) {
+                outgoingDirection =
+                  outgoingDerivative / outgoingLength;
+              }
+              if (pointIndex == 0u) {
+                incomingDirection = outgoingDirection;
+              }
+              if (
+                pointIndex ==
+                  u32(max(1.0, scene.curveSteps))
+              ) {
+                outgoingDirection = incomingDirection;
+              }
+              let joinedDirection =
+                incomingDirection + outgoingDirection;
+              let joinedLength =
+                length(joinedDirection);
+              var tangent = p3 - p0;
+              let fallbackLength = length(tangent);
+              if (joinedLength > 0.000001) {
+                tangent =
+                  joinedDirection / joinedLength;
+              } else if (fallbackLength < 0.000001) {
                 tangent = vec2<f32>(1.0, 0.0);
               } else {
-                tangent = normalize(tangent);
+                tangent /= fallbackLength;
               }
               let normal = vec2<f32>(-tangent.y, tangent.x);
+              let reversalDot = dot(
+                incomingDirection,
+                outgoingDirection
+              );
+              let joinWidthFactor = smoothstep(
+                -0.985,
+                -0.90,
+                reversalDot
+              );
               let safeScale = max(scene.scale, 0.0001);
-              let extrusion = 7.0 + 1.25 / safeScale;
+              let extrusion =
+                (7.0 + 1.25 / safeScale) *
+                joinWidthFactor;
               let graphPosition =
                 position + normal * side * extrusion;
               let screenPosition =
@@ -3232,22 +3622,23 @@
               output.style = wireValue(instance, 12u);
               return output;
             }
-            fn coverage(edge: f32, halfWidth: f32) -> f32 {
+            fn coverage(edgeDistance: f32, halfWidth: f32) -> f32 {
               return 1.0 - smoothstep(
                 halfWidth,
                 halfWidth + 1.25,
-                abs(edge)
+                edgeDistance
               );
             }
-            fn over(under: vec4<f32>, upper: vec4<f32>) -> vec4<f32> {
-              let alpha = upper.a + under.a * (1.0 - upper.a);
-              if (alpha <= 0.00001) {
-                return vec4<f32>(0.0);
-              }
-              let premultiplied =
-                upper.rgb * upper.a +
-                under.rgb * under.a * (1.0 - upper.a);
-              return vec4<f32>(premultiplied / alpha, alpha);
+            fn overPremultiplied(
+              under: vec4<f32>,
+              upperColor: vec3<f32>,
+              upperAlpha: f32
+            ) -> vec4<f32> {
+              let inverse = 1.0 - upperAlpha;
+              return vec4<f32>(
+                upperColor * upperAlpha + under.rgb * inverse,
+                upperAlpha + under.a * inverse
+              );
             }
             @fragment
             fn fragmentMain(input: WireOutput) -> @location(0) vec4<f32> {
@@ -3258,30 +3649,25 @@
                 0.0001,
                 input.coreHalfPixels / 2.0
               );
+              let edgeDistance = abs(input.edgePixels);
               var result = vec4<f32>(0.0);
-              result = over(
+              result = overPremultiplied(
                 result,
-                vec4<f32>(
-                  0.0,
-                  0.0,
-                  0.0,
-                  0.72 * coverage(
-                    input.edgePixels,
-                    4.0 * scaleEstimate
-                  )
+                vec3<f32>(0.0),
+                0.72 * coverage(
+                  edgeDistance,
+                  4.0 * scaleEstimate
                 )
               );
               if (selected || valid) {
                 let glowHalf = select(6.5, 7.0, selected) * scaleEstimate;
                 let glowAlpha = select(0.22, 0.06, invalid);
-                result = over(
+                result = overPremultiplied(
                   result,
-                  vec4<f32>(
-                    input.color.rgb,
-                    glowAlpha * coverage(
-                      input.edgePixels,
-                      glowHalf
-                    )
+                  input.color.rgb,
+                  glowAlpha * coverage(
+                    edgeDistance,
+                    glowHalf
                   )
                 );
               }
@@ -3291,19 +3677,20 @@
                 input.dash > 0.5 && input.distance % 17.0 > 10.0
               );
               let coreHalf = select(2.0, 3.0, selected || valid) * scaleEstimate;
-              result = over(
+              result = overPremultiplied(
                 result,
-                vec4<f32>(
-                  input.color.rgb,
-                  input.color.a *
-                    coverage(input.edgePixels, coreHalf) *
-                    dashMask
-                )
+                input.color.rgb,
+                input.color.a *
+                  coverage(edgeDistance, coreHalf) *
+                  dashMask
               );
               if (result.a <= 0.001) {
                 discard;
               }
-              return result;
+              return vec4<f32>(
+                result.rgb / result.a,
+                result.a
+              );
             }
           `
         });
@@ -3317,7 +3704,8 @@
               pan: vec2<f32>,
               scale: f32,
               pixelRatio: f32,
-              padding: vec2<f32>,
+              curveSteps: f32,
+              padding: f32,
             };
             struct FloatData {
               values: array<f32>,
@@ -3325,9 +3713,9 @@
             struct NodeOutput {
               @builtin(position) position: vec4<f32>,
               @location(0) local: vec2<f32>,
-              @location(1) size: vec2<f32>,
-              @location(2) configuration: f32,
-              @location(3) selected: f32,
+              @location(1) @interpolate(flat) size: vec2<f32>,
+              @location(2) @interpolate(flat) configuration: f32,
+              @location(3) @interpolate(flat) selected: f32,
             };
             @group(0) @binding(0)
             var<uniform> scene: RenderUniforms;
@@ -3345,7 +3733,7 @@
             ) -> NodeOutput {
               let corner = vec2<f32>(
                 f32(vertex % 2u),
-                floor(f32(vertex) * 0.5)
+                f32(vertex / 2u)
               );
               let origin = vec2<f32>(
                 nodeValue(instance, 0u),
@@ -3555,6 +3943,429 @@
       return true;
     }
 
+    invalidateGpuCulling() {
+      this.gpuCullDirty = true;
+      this.gpuCullReady = false;
+      this.gpuCullBounds = null;
+      this.gpuCullScale = 0;
+    }
+
+    scheduleGpuSpatialIndexBuild(kind) {
+      const isWire = kind === "wire";
+      const records = isWire
+        ? this.wireRecords
+        : this.nodeRecords;
+      const revision = isWire
+        ? this.wireDataRevision
+        : this.nodeDataRevision;
+      const existing =
+        this.gpuSpatialBuildTasks[kind];
+      if (
+        existing &&
+        existing.records === records &&
+        existing.revision === revision
+      ) {
+        return;
+      }
+      const task = {
+        records,
+        revision,
+        position: 0,
+        commitPosition: 0,
+        indexComplete: false,
+        index: new Map(),
+        overflow: [],
+        spatialKeys: new Array(records.length),
+        workMilliseconds: 0
+      };
+      this.gpuSpatialBuildTasks[kind] = task;
+      this.stats.gpuSpatialIndexBuilding = true;
+
+      const schedule = callback => {
+        if (
+          typeof globalThis.requestIdleCallback ===
+          "function"
+        ) {
+          globalThis.requestIdleCallback(
+            callback,
+            { timeout: 80 }
+          );
+          return;
+        }
+        globalThis.setTimeout(
+          () => callback({
+            timeRemaining: () => 4
+          }),
+          0
+        );
+      };
+      const runBatch = deadline => {
+        if (
+          this.disposed ||
+          this.gpuSpatialBuildTasks[kind] !== task ||
+          task.records !== (
+            isWire
+              ? this.wireRecords
+              : this.nodeRecords
+          ) ||
+          task.revision !== (
+            isWire
+              ? this.wireDataRevision
+              : this.nodeDataRevision
+          ) ||
+          (isWire
+            ? !this.wireCullSpatialIndexDirty
+            : !this.nodeSpatialIndexDirty)
+        ) {
+          if (
+            this.gpuSpatialBuildTasks[kind] ===
+            task
+          ) {
+            this.gpuSpatialBuildTasks[kind] = null;
+          }
+          this.stats.gpuSpatialIndexBuilding =
+            Boolean(
+              this.gpuSpatialBuildTasks.wire ||
+              this.gpuSpatialBuildTasks.node
+            );
+          return;
+        }
+        const started = performance.now();
+        if (!task.indexComplete) {
+          const batchEnd = Math.min(
+            records.length,
+            task.position + WEBGPU_INDEX_BATCH_SIZE
+          );
+          let processed = 0;
+          while (
+            task.position < batchEnd &&
+            (
+              processed < 64 ||
+              deadline.timeRemaining() > 1
+            )
+          ) {
+            const record = records[task.position];
+            if (isWire) {
+              const range = cellRange(
+                record.bounds,
+                WIRE_CULL_CELL_SIZE
+              );
+              const columns =
+                range.maximumX - range.minimumX + 1;
+              const rows =
+                range.maximumY - range.minimumY + 1;
+              if (
+                columns * rows >
+                  MAX_WIRE_CULL_RECORD_CELLS
+              ) {
+                task.spatialKeys[task.position] = null;
+                task.overflow.push(record);
+              } else {
+                task.spatialKeys[task.position] =
+                  addToSpatialIndex(
+                    task.index,
+                    record.bounds,
+                    WIRE_CULL_CELL_SIZE,
+                    record
+                  );
+              }
+            } else {
+              task.spatialKeys[task.position] =
+                addToSpatialIndex(
+                  task.index,
+                  record,
+                  NODE_CELL_SIZE,
+                  record
+                );
+            }
+            task.position += 1;
+            processed += 1;
+          }
+          task.workMilliseconds +=
+            performance.now() - started;
+          if (task.position < records.length) {
+            schedule(runBatch);
+            return;
+          }
+          task.indexComplete = true;
+          schedule(runBatch);
+          return;
+        }
+        const commitEnd = Math.min(
+          records.length,
+          task.commitPosition + WEBGPU_INDEX_BATCH_SIZE
+        );
+        let committed = 0;
+        while (
+          task.commitPosition < commitEnd &&
+          (
+            committed < 64 ||
+            deadline.timeRemaining() > 1
+          )
+        ) {
+          const index = task.commitPosition;
+          records[index].spatialKeys = task.spatialKeys[index];
+          if (isWire) {
+            records[index].spatialOverflow =
+              task.spatialKeys[index] === null;
+          }
+          task.commitPosition += 1;
+          committed += 1;
+        }
+        task.workMilliseconds +=
+          performance.now() - started;
+        if (task.commitPosition < records.length) {
+          schedule(runBatch);
+          return;
+        }
+        if (isWire) {
+          this.wireCullSpatialIndex = task.index;
+          this.wireCullOverflowRecords =
+            task.overflow;
+          this.wireCullSpatialIndexDirty = false;
+          this.stats.wireCullIndexMilliseconds =
+            task.workMilliseconds;
+        } else {
+          this.nodeSpatialIndex = task.index;
+          this.nodeSpatialIndexDirty = false;
+          this.stats.nodeIndexMilliseconds =
+            task.workMilliseconds;
+        }
+        this.gpuSpatialBuildTasks[kind] = null;
+        this.stats.gpuSpatialIndexBuilding =
+          Boolean(
+            this.gpuSpatialBuildTasks.wire ||
+            this.gpuSpatialBuildTasks.node
+          );
+      };
+      schedule(runBatch);
+    }
+
+    gpuWireCullPlan(bounds) {
+      const total = this.wireRecords.length;
+      if (total === 0) {
+        return {
+          mode: "empty",
+          records: [],
+          count: 0
+        };
+      }
+      if (
+        total < WEBGPU_WORKGROUP_SIZE * 4 ||
+        spatialQueryCellCount(
+          bounds,
+          WIRE_CULL_CELL_SIZE
+        ) > MAX_CULL_QUERY_CELLS
+      ) {
+        return {
+          mode: "full",
+          records: null,
+          count: total
+        };
+      }
+      if (
+        this.wireCullSpatialIndexDirty &&
+        total >= WEBGPU_ASYNC_INDEX_THRESHOLD
+      ) {
+        this.scheduleGpuSpatialIndexBuild("wire");
+        return {
+          mode: "full",
+          records: null,
+          count: total
+        };
+      }
+      this.buildWireCullSpatialIndex();
+      const records = spatialRecordsInBounds(
+        this.wireCullSpatialIndex,
+        this.wireRecords,
+        bounds,
+        WIRE_CULL_CELL_SIZE,
+        record => record.hidden !== true,
+        this.wireCullOverflowRecords
+      );
+      return {
+        mode: "tiles",
+        records,
+        count: records.length
+      };
+    }
+
+    gpuNodeCullPlan(bounds) {
+      const total = this.nodeRecords.length;
+      if (total === 0) {
+        return {
+          mode: "empty",
+          records: [],
+          count: 0
+        };
+      }
+      if (
+        this.nodeExcludedIds.size === 0 &&
+        (
+          total < WEBGPU_WORKGROUP_SIZE * 4 ||
+          spatialQueryCellCount(
+            bounds,
+            NODE_CELL_SIZE
+          ) > MAX_CULL_QUERY_CELLS
+        )
+      ) {
+        return {
+          mode: "full",
+          records: null,
+          count: total
+        };
+      }
+      if (
+        this.nodeSpatialIndexDirty &&
+        total >= WEBGPU_ASYNC_INDEX_THRESHOLD
+      ) {
+        this.scheduleGpuSpatialIndexBuild("node");
+        if (this.nodeExcludedIds.size === 0) {
+          return {
+            mode: "full",
+            records: null,
+            count: total
+          };
+        }
+        const records = this.nodeRecords.filter(
+          record =>
+            !this.nodeExcludedIds.has(
+              record.nodeId
+            )
+        );
+        return {
+          mode: "tiles",
+          records,
+          count: records.length
+        };
+      }
+      this.buildNodeSpatialIndex();
+      const records = spatialRecordsInBounds(
+        this.nodeSpatialIndex,
+        this.nodeRecords,
+        bounds,
+        NODE_CELL_SIZE,
+        record =>
+          !this.nodeExcludedIds.has(
+            record.nodeId
+          )
+      );
+      return {
+        mode: "tiles",
+        records,
+        count: records.length
+      };
+    }
+
+    uploadGpuCandidateIndices(
+      name,
+      records
+    ) {
+      if (!records || records.length === 0) {
+        return;
+      }
+      const property = name === "wire"
+        ? "wireCandidateData"
+        : "nodeCandidateData";
+      if (
+        this[property].length < records.length
+      ) {
+        this[property] = new Uint32Array(
+          grownCapacity(
+            this[property].length,
+            records.length
+          )
+        );
+      }
+      const data = this[property];
+      for (
+        let index = 0;
+        index < records.length;
+        index += 1
+      ) {
+        data[index] = records[index].order;
+      }
+      this.gpuDevice.queue.writeBuffer(
+        this.gpuBuffers[
+          name === "wire"
+            ? "wireCandidates"
+            : "nodeCandidates"
+        ],
+        0,
+        data.subarray(0, records.length)
+      );
+    }
+
+    prepareGpuCulling(bounds) {
+      const started = performance.now();
+      const wirePlan =
+        this.gpuWireCullPlan(bounds);
+      const nodePlan =
+        this.gpuNodeCullPlan(bounds);
+      const curveRecords = wirePlan.records ||
+        (
+          wirePlan.count <=
+            WEBGPU_WORKGROUP_SIZE * 16
+            ? this.wireRecords
+            : null
+        );
+      this.gpuCandidateMaximumCurveLength =
+        curveRecords
+          ? maximumCurveControlPolygonLength(
+              curveRecords
+            )
+          : wirePlan.count > 0
+            ? this.maximumWireCurveLength
+            : 0;
+      this.uploadGpuCandidateIndices(
+        "wire",
+        wirePlan.records
+      );
+      this.uploadGpuCandidateIndices(
+        "node",
+        nodePlan.records
+      );
+      this.cullUniformFloats[0] = bounds.left;
+      this.cullUniformFloats[1] = bounds.top;
+      this.cullUniformFloats[2] = bounds.right;
+      this.cullUniformFloats[3] = bounds.bottom;
+      this.cullUniformIntegers[0] =
+        wirePlan.count;
+      this.cullUniformIntegers[1] =
+        nodePlan.count;
+      this.cullUniformIntegers[2] =
+        wirePlan.mode === "tiles" ? 1 : 0;
+      this.cullUniformIntegers[3] =
+        nodePlan.mode === "tiles" ? 1 : 0;
+      this.gpuDevice.queue.writeBuffer(
+        this.gpuBuffers.cullUniform,
+        0,
+        this.cullUniformData
+      );
+      this.gpuWireCandidateCount =
+        wirePlan.count;
+      this.gpuNodeCandidateCount =
+        nodePlan.count;
+      this.gpuWireCandidateMode =
+        wirePlan.mode;
+      this.gpuNodeCandidateMode =
+        nodePlan.mode;
+      this.stats.gpuWireCandidates =
+        wirePlan.count;
+      this.stats.gpuNodeCandidates =
+        nodePlan.count;
+      this.stats.gpuWireCandidateMode =
+        wirePlan.mode;
+      this.stats.gpuNodeCandidateMode =
+        nodePlan.mode;
+      this.stats.gpuLastCullMilliseconds =
+        performance.now() - started;
+      return Math.max(
+        wirePlan.count,
+        nodePlan.count
+      );
+    }
+
     ensureWebGpuBuffers() {
       const storageCopy =
         GPUBufferUsage.STORAGE |
@@ -3579,8 +4390,8 @@
         storageCopy
       ) || changed;
       changed = this.ensureBuffer(
-        "wireBounds",
-        this.wireInstanceCapacity * 4 * 4,
+        "wireCandidates",
+        this.wireInstanceCapacity * 4,
         storageCopy
       ) || changed;
       changed = this.ensureBuffer(
@@ -3603,7 +4414,7 @@
         storageCopy
       ) || changed;
       changed = this.ensureBuffer(
-        "nodeVisibility",
+        "nodeCandidates",
         this.nodeInstanceCapacity * 4,
         storageCopy
       ) || changed;
@@ -3626,7 +4437,18 @@
         storageCopy
       ) || changed;
       if (changed) {
+        this.invalidateGpuCulling();
         this.createWebGpuBindGroups();
+        this.gpuDevice.queue.writeBuffer(
+          this.gpuBuffers.wireIndirect,
+          0,
+          this.wireIndirectData
+        );
+        this.gpuDevice.queue.writeBuffer(
+          this.gpuBuffers.nodeIndirect,
+          0,
+          this.nodeIndirectData
+        );
       }
     }
 
@@ -3647,13 +4469,13 @@
           entries: [
             [0, buffers.cullUniform],
             [1, buffers.wireMaster],
-            [2, buffers.wireBounds],
-            [3, buffers.wireVisible],
-            [4, buffers.wireIndirect],
-            [5, buffers.nodeMaster],
-            [6, buffers.nodeVisibility],
-            [7, buffers.nodeVisible],
-            [8, buffers.nodeIndirect]
+            [2, buffers.wireVisible],
+            [3, buffers.wireIndirect],
+            [4, buffers.nodeMaster],
+            [5, buffers.nodeVisible],
+            [6, buffers.nodeIndirect],
+            [7, buffers.wireCandidates],
+            [8, buffers.nodeCandidates]
           ].map(([binding, buffer]) => ({
             binding,
             resource: { buffer }
@@ -3711,24 +4533,6 @@
       }
       this.ensureWebGpuBuffers();
       const count = this.wireRecords.length;
-      if (
-        this.wireBoundsData.length <
-          this.wireInstanceCapacity * 4
-      ) {
-        this.wireBoundsData =
-          new Float32Array(
-            this.wireInstanceCapacity * 4
-          );
-      }
-      for (let index = 0; index < count; index += 1) {
-        const bounds =
-          this.wireRecords[index].bounds;
-        const offset = index * 4;
-        this.wireBoundsData[offset] = bounds.left;
-        this.wireBoundsData[offset + 1] = bounds.top;
-        this.wireBoundsData[offset + 2] = bounds.right;
-        this.wireBoundsData[offset + 3] = bounds.bottom;
-      }
       if (count > 0) {
         this.gpuDevice.queue.writeBuffer(
           this.gpuBuffers.wireMaster,
@@ -3738,15 +4542,8 @@
             count * FLOATS_PER_WIRE_INSTANCE
           )
         );
-        this.gpuDevice.queue.writeBuffer(
-          this.gpuBuffers.wireBounds,
-          0,
-          this.wireBoundsData.subarray(
-            0,
-            count * 4
-          )
-        );
       }
+      this.invalidateGpuCulling();
     }
 
     computeWireLength(
@@ -3766,23 +4563,6 @@
       }
       this.ensureWebGpuBuffers();
       const count = this.nodeRecords.length;
-      if (
-        this.nodeVisibilityData.length <
-          this.nodeInstanceCapacity
-      ) {
-        this.nodeVisibilityData =
-          new Uint32Array(
-            this.nodeInstanceCapacity
-          );
-      }
-      for (let index = 0; index < count; index += 1) {
-        this.nodeVisibilityData[index] =
-          this.nodeExcludedIds.has(
-            this.nodeRecords[index].nodeId
-          )
-            ? 0
-            : 1;
-      }
       if (count > 0) {
         this.gpuDevice.queue.writeBuffer(
           this.gpuBuffers.nodeMaster,
@@ -3792,15 +4572,8 @@
             count * FLOATS_PER_NODE_INSTANCE
           )
         );
-        this.gpuDevice.queue.writeBuffer(
-          this.gpuBuffers.nodeVisibility,
-          0,
-          this.nodeVisibilityData.subarray(
-            0,
-            count
-          )
-        );
       }
+      this.invalidateGpuCulling();
     }
 
     updateSegments(segments = []) {
@@ -3818,17 +4591,6 @@
       for (const index of indices) {
         const dataOffset =
           index * FLOATS_PER_WIRE_INSTANCE;
-        const boundsOffset = index * 4;
-        const bounds =
-          this.wireRecords[index].bounds;
-        this.wireBoundsData[boundsOffset] =
-          bounds.left;
-        this.wireBoundsData[boundsOffset + 1] =
-          bounds.top;
-        this.wireBoundsData[boundsOffset + 2] =
-          bounds.right;
-        this.wireBoundsData[boundsOffset + 3] =
-          bounds.bottom;
         this.gpuDevice.queue.writeBuffer(
           this.gpuBuffers.wireMaster,
           dataOffset * 4,
@@ -3837,15 +4599,8 @@
             dataOffset + FLOATS_PER_WIRE_INSTANCE
           )
         );
-        this.gpuDevice.queue.writeBuffer(
-          this.gpuBuffers.wireBounds,
-          boundsOffset * 4,
-          this.wireBoundsData.subarray(
-            boundsOffset,
-            boundsOffset + 4
-          )
-        );
       }
+      this.invalidateGpuCulling();
       return true;
     }
 
@@ -3871,6 +4626,7 @@
           )
         );
       }
+      this.invalidateGpuCulling();
       return true;
     }
 
@@ -3913,41 +4669,17 @@
           )
         );
       }
+      this.invalidateGpuCulling();
       return hidden;
     }
 
     setNodeExclusions(nodeIds = []) {
-      const previous = this.nodeExcludedIds;
       const changed =
         super.setNodeExclusions(nodeIds);
       if (!changed) {
         return false;
       }
-      const dirtyIds = new Set([
-        ...previous,
-        ...this.nodeExcludedIds
-      ]);
-      for (const nodeId of dirtyIds) {
-        const index =
-          this.nodeRecordIndexById.get(
-            nodeId
-          );
-        if (!Number.isInteger(index)) {
-          continue;
-        }
-        this.nodeVisibilityData[index] =
-          this.nodeExcludedIds.has(nodeId)
-            ? 0
-            : 1;
-        this.gpuDevice.queue.writeBuffer(
-          this.gpuBuffers.nodeVisibility,
-          index * 4,
-          this.nodeVisibilityData.subarray(
-            index,
-            index + 1
-          )
-        );
-      }
+      this.invalidateGpuCulling();
       return true;
     }
 
@@ -3998,71 +4730,109 @@
       }
       const started = performance.now();
       const device = this.gpuDevice;
-      const bounds = this.viewportGraphBounds(
+      const viewportBounds = this.viewportGraphBounds(
         WIRE_CULL_MARGIN_PIXELS
       );
+      const scaleReuseRatio =
+        Math.max(
+          this.camera.scale,
+          this.gpuCullScale || this.camera.scale
+        ) /
+        Math.max(
+          0.0001,
+          Math.min(
+            this.camera.scale,
+            this.gpuCullScale || this.camera.scale
+          )
+        );
+      const needsCull =
+        this.gpuCullDirty ||
+        !this.gpuCullReady ||
+        scaleReuseRatio >=
+          WEBGPU_CULL_SCALE_REUSE_RATIO ||
+        !containsBounds(
+          this.gpuCullBounds,
+          viewportBounds
+        );
+      let cullBounds = null;
+      let maximumCount = 0;
+      if (needsCull) {
+        cullBounds =
+          this.viewportGraphBounds(
+            WEBGPU_CULL_OVERSCAN_PIXELS
+          );
+        maximumCount =
+          this.prepareGpuCulling(cullBounds);
+      }
+      const curveSteps = curveStepsForScale(
+        this.camera.scale,
+        this.gpuCandidateMaximumCurveLength
+      );
+      if (curveSteps !== this.activeCurveSteps) {
+        this.activeCurveSteps = curveSteps;
+        this.wireIndirectData[0] =
+          (curveSteps + 1) * 2;
+        device.queue.writeBuffer(
+          this.gpuBuffers.wireIndirect,
+          0,
+          this.wireIndirectData.subarray(0, 1)
+        );
+      }
+      this.stats.curveSteps = curveSteps;
       this.renderUniformData[0] = this.cssWidth;
       this.renderUniformData[1] = this.cssHeight;
       this.renderUniformData[2] = this.camera.x;
       this.renderUniformData[3] = this.camera.y;
       this.renderUniformData[4] = this.camera.scale;
       this.renderUniformData[5] = this.pixelRatio;
-      this.cullUniformFloats[0] = bounds.left;
-      this.cullUniformFloats[1] = bounds.top;
-      this.cullUniformFloats[2] = bounds.right;
-      this.cullUniformFloats[3] = bounds.bottom;
-      this.cullUniformIntegers[0] =
-        this.wireRecords.length;
-      this.cullUniformIntegers[1] =
-        this.nodeRecords.length;
+      this.renderUniformData[6] = curveSteps;
       device.queue.writeBuffer(
         this.gpuBuffers.renderUniform,
         0,
         this.renderUniformData
       );
-      device.queue.writeBuffer(
-        this.gpuBuffers.cullUniform,
-        0,
-        this.cullUniformData
-      );
-      device.queue.writeBuffer(
-        this.gpuBuffers.wireIndirect,
-        0,
-        this.wireIndirectData
-      );
-      device.queue.writeBuffer(
-        this.gpuBuffers.nodeIndirect,
-        0,
-        this.nodeIndirectData
-      );
-
       const encoder =
         device.createCommandEncoder({
           label: "RML graph frame"
         });
-      const maximumCount = Math.max(
-        this.wireRecords.length,
-        this.nodeRecords.length
-      );
-      if (maximumCount > 0) {
-        const compute =
-          encoder.beginComputePass({
-            label: "RML graph visibility"
-          });
-        compute.setPipeline(
-          this.gpuPipelines.compute
+      if (needsCull) {
+        encoder.clearBuffer(
+          this.gpuBuffers.wireIndirect,
+          4,
+          4
         );
-        compute.setBindGroup(
-          0,
-          this.gpuBindGroups.compute
+        encoder.clearBuffer(
+          this.gpuBuffers.nodeIndirect,
+          4,
+          4
         );
-        compute.dispatchWorkgroups(
-          Math.ceil(
-            maximumCount /
-              WEBGPU_WORKGROUP_SIZE
-          )
-        );
-        compute.end();
+        if (maximumCount > 0) {
+          const compute =
+            encoder.beginComputePass({
+              label: "RML graph visibility"
+            });
+          compute.setPipeline(
+            this.gpuPipelines.compute
+          );
+          compute.setBindGroup(
+            0,
+            this.gpuBindGroups.compute
+          );
+          compute.dispatchWorkgroups(
+            Math.ceil(
+              maximumCount /
+                WEBGPU_WORKGROUP_SIZE
+            )
+          );
+          compute.end();
+        }
+        this.gpuCullBounds = cullBounds;
+        this.gpuCullScale = this.camera.scale;
+        this.gpuCullDirty = false;
+        this.gpuCullReady = true;
+        this.stats.gpuCullPasses += 1;
+      } else {
+        this.stats.gpuCullReusedFrames += 1;
       }
 
       const render = encoder.beginRenderPass({
@@ -4115,7 +4885,7 @@
           this.gpuBindGroups.preview
         );
         render.draw(
-          (GPU_CURVE_STEPS + 1) * 2,
+          (curveSteps + 1) * 2,
           1
         );
         drawCalls += 1;
@@ -4145,9 +4915,14 @@
       this.stats.culledSegments = null;
       this.stats.culledNodes = null;
       this.stats.gpuSubmittedSegments =
-        this.wireRecords.length;
+        this.gpuWireCandidateCount;
       this.stats.gpuSubmittedNodes =
+        this.gpuNodeCandidateCount;
+      this.stats.gpuMasterSegments =
+        this.wireRecords.length;
+      this.stats.gpuMasterNodes =
         this.nodeRecords.length;
+      this.stats.gpuCullReused = !needsCull;
       const elapsed = performance.now() - started;
       this.drawSamples += 1;
       this.stats.lastDrawMilliseconds = elapsed;
@@ -4160,8 +4935,20 @@
         this.drawSamples;
     }
 
+    whenSubmittedWorkDone() {
+      return this.gpuDevice?.queue
+        ?.onSubmittedWorkDone?.() ||
+        Promise.resolve(true);
+    }
+
     clearScene() {
       super.clearScene();
+      this.invalidateGpuCulling();
+      this.gpuWireCandidateCount = 0;
+      this.gpuNodeCandidateCount = 0;
+      this.gpuWireCandidateMode = "empty";
+      this.gpuNodeCandidateMode = "empty";
+      this.gpuCandidateMaximumCurveLength = 0;
       if (
         this.gpuResourcesReady &&
         this.gpuBuffers.wireIndirect
@@ -4190,7 +4977,51 @@
       this.gpuBufferSizes = Object.create(null);
       this.gpuBindGroups = Object.create(null);
       this.gpuResourcesReady = false;
+      this.gpuSpatialBuildTasks = {
+        wire: null,
+        node: null
+      };
+      this.stats.gpuSpatialIndexBuilding = false;
+      this.invalidateGpuCulling();
     }
+  }
+
+  function rendererBackendStatus() {
+    return Object.freeze({
+      preference: rendererBackendPreference,
+      active: activeRendererBackend,
+      webGpuAvailable: Boolean(
+        webGpuRuntime.device
+      ),
+      webGpuInitializationError:
+        webGpuRuntime.error || null
+    });
+  }
+
+  function setRendererBackend(
+    value,
+    reload = true
+  ) {
+    const normalized =
+      normalizeRendererBackend(value);
+    if (!normalized) {
+      throw new TypeError(
+        "Unknown graph renderer backend. Use auto, wgsl, glsl or svg."
+      );
+    }
+    rendererBackendPreference = normalized;
+    persistRendererBackend(normalized);
+    console.info(
+      `[RML Graph] Renderer backend set to ${normalized}.`
+    );
+    if (
+      reload !== false &&
+      typeof window.location?.reload ===
+        "function"
+    ) {
+      window.location.reload();
+    }
+    return rendererBackendStatus();
   }
 
   Object.defineProperty(
@@ -4200,19 +5031,40 @@
       value: Object.freeze({
         version: VERSION,
         ready: webGpuRuntime.ready,
+        getBackend: rendererBackendStatus,
+        setBackend: setRendererBackend,
         create(options) {
-          if (webGpuRuntime.device) {
+          if (
+            rendererBackendPreference !== "glsl" &&
+            rendererBackendPreference !== "svg" &&
+            webGpuRuntime.device
+          ) {
             const renderer =
               new GraphWebGpuRenderer(
                 options,
                 webGpuRuntime
               );
             if (renderer.available) {
+              activeRendererBackend =
+                "webgpu-wgsl";
               return renderer;
             }
             renderer.dispose();
           }
-          return new GraphHybridRenderer(options);
+          const renderer =
+            new GraphHybridRenderer(
+              rendererBackendPreference === "svg"
+                ? {
+                    ...options,
+                    deferGraphics: true
+                  }
+                : options
+            );
+          activeRendererBackend =
+            renderer.available
+              ? "webgl2-glsl"
+              : "svg-fallback";
+          return renderer;
         }
       }),
       writable: false,
