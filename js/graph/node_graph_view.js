@@ -7471,6 +7471,11 @@ function renderGraphPalette() {
       () => {
         graph.showAdvancedNodes =
           modeInput.checked;
+        bridge
+          ?.setBuilderPreferences?.({
+            showAdvancedNodes:
+              graph.showAdvancedNodes
+          });
         persistGraph(true);
         window.dispatchEvent(
           new CustomEvent(
@@ -25504,7 +25509,9 @@ function handleBuilderRendered(event) {
         lastPersistedGraphReference &&
       !activeInteraction
     ) {
-      graph = sanitizeGraphState(incoming);
+      graph = sanitizeBuilderProjectGraphState(
+        incoming
+      );
       openGraphCatalogReconciliationCompletedKey =
         "";
       graph.lastOpenPage =
@@ -25548,6 +25555,30 @@ function handleBuilderRendered(event) {
     }
   }
 
+function sanitizeBuilderProjectGraphState(
+    source
+  ) {
+    const result =
+      sanitizeGraphState(source);
+    const hasStoredAdvancedMode =
+      source &&
+      typeof source === "object" &&
+      !Array.isArray(source) &&
+      Object.hasOwn(
+        source,
+        "showAdvancedNodes"
+      );
+
+    if (!hasStoredAdvancedMode) {
+      result.showAdvancedNodes =
+        bridge
+          ?.getBuilderPreferences?.()
+          ?.showAdvancedNodes === true;
+    }
+
+    return result;
+  }
+
 function initializeNodeGraphHost() {
     if (graphHostInitialized) {
       return true;
@@ -25577,7 +25608,7 @@ function initializeNodeGraphHost() {
         : bridge.getExtensionState(
             EXTENSION_NAME
           );
-    graph = sanitizeGraphState(
+    graph = sanitizeBuilderProjectGraphState(
       initialExtensionState
     );
     graph.lastOpenPage =

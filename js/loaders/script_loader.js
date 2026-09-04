@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  if (window.RMLScriptLoader?.version >= 13) {
+  if (window.RMLScriptLoader?.version >= 14) {
     return;
   }
 
@@ -109,7 +109,7 @@
           url: "../graph/node_graph_guided.js?v=1-physical-modules-v748"
         }),
         Object.freeze({
-          url: "../graph/node_graph_view.js?v=9-custom-csharp-render-barrier-v766"
+          url: "../graph/node_graph_view.js?v=10-new-project-preferences-v767"
         }),
         Object.freeze({
           url: "../graph/node_graph_bootstrap.js?v=1-physical-modules-v748",
@@ -685,7 +685,7 @@
 
   Object.defineProperty(window, "RMLScriptLoader", {
     value: Object.freeze({
-      version: 13,
+      version: 14,
       ensure,
       ensureMany(names) {
         return Promise.all(

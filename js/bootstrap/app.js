@@ -21,6 +21,8 @@ const ACTIVE_PREVIEW_STORAGE_KEY = RML_VISUAL_TOUR_TEST
   : PREVIEW_STORAGE_KEY;
 const ACTIVE_PAGE_STORAGE_KEY =
   `${ACTIVE_STORAGE_KEY}-active-page-v1`;
+const ACTIVE_BUILDER_PREFERENCES_STORAGE_KEY =
+  `${ACTIVE_STORAGE_KEY}-builder-preferences-v1`;
 const PROJECT_FORMAT = "rml-configuration-builder-project";
 const PROJECT_FORMAT_VERSION = 1;
 const SAVED_API_COMPOSITE_IMPORT_SCHEMA =
@@ -40,7 +42,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "custom-csharp-render-barrier-20260904-v766";
+  "new-project-preferences-20260904-v767";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -495,16 +497,210 @@ const DEFAULT_EXPORT_OPTIONS = {
   includeCompiled: false
 };
 
+const BUILDER_PREFERENCE_PLATFORMS =
+  new Set([
+    ...Object.keys(
+      EXPORT_PLATFORM_PRESETS
+    ),
+    "custom"
+  ]);
+
+function sanitizeBuilderPreferences(
+  source
+) {
+  const record =
+    source &&
+    typeof source === "object" &&
+    !Array.isArray(source)
+      ? source
+      : {};
+  const exportSource =
+    record.exportOptions &&
+    typeof record.exportOptions ===
+      "object" &&
+    !Array.isArray(
+      record.exportOptions
+    )
+      ? record.exportOptions
+      : {};
+  const platform =
+    BUILDER_PREFERENCE_PLATFORMS.has(
+      exportSource.platform
+    )
+      ? exportSource.platform
+      : DEFAULT_EXPORT_OPTIONS.platform;
+
+  return {
+    version: 1,
+    includeGuide:
+      typeof record.includeGuide ===
+        "boolean"
+        ? record.includeGuide
+        : DEFAULT_METADATA.includeGuide,
+    showAdvancedNodes:
+      record.showAdvancedNodes === true,
+    collapsedPaletteGroups:
+      Array.isArray(
+        record.collapsedPaletteGroups
+      )
+        ? [
+            ...new Set(
+              record
+                .collapsedPaletteGroups
+                .filter(group =>
+                  PALETTE_GROUP_NAMES
+                    .includes(group)
+                )
+            )
+          ]
+        : [],
+    exportOptions: {
+      platform,
+      resonitePath:
+        typeof exportSource
+          .resonitePath === "string"
+          ? exportSource.resonitePath
+          : (
+              EXPORT_PLATFORM_PRESETS[
+                platform
+              ] ||
+              DEFAULT_EXPORT_OPTIONS
+                .resonitePath
+            ),
+      includeCs:
+        typeof exportSource.includeCs ===
+          "boolean"
+          ? exportSource.includeCs
+          : DEFAULT_EXPORT_OPTIONS.includeCs,
+      includeCsproj:
+        typeof exportSource
+          .includeCsproj === "boolean"
+          ? exportSource.includeCsproj
+          : DEFAULT_EXPORT_OPTIONS
+              .includeCsproj,
+      includeCompiled:
+        typeof exportSource
+          .includeCompiled === "boolean"
+          ? exportSource.includeCompiled
+          : DEFAULT_EXPORT_OPTIONS
+              .includeCompiled
+    }
+  };
+}
+
+function readBuilderPreferences() {
+  try {
+    const saved =
+      localStorage.getItem(
+        ACTIVE_BUILDER_PREFERENCES_STORAGE_KEY
+      );
+
+    return sanitizeBuilderPreferences(
+      saved ? JSON.parse(saved) : null
+    );
+  } catch {
+    return sanitizeBuilderPreferences(
+      null
+    );
+  }
+}
+
+let builderPreferences =
+  readBuilderPreferences();
+
+function persistBuilderPreferences() {
+  try {
+    localStorage.setItem(
+      ACTIVE_BUILDER_PREFERENCES_STORAGE_KEY,
+      JSON.stringify(builderPreferences)
+    );
+  } catch {
+  }
+}
+
+function updateBuilderPreferences(
+  patch = {}
+) {
+  const source =
+    patch &&
+    typeof patch === "object" &&
+    !Array.isArray(patch)
+      ? patch
+      : {};
+
+  builderPreferences =
+    sanitizeBuilderPreferences({
+      ...builderPreferences,
+      ...source,
+      exportOptions:
+        source.exportOptions &&
+        typeof source.exportOptions ===
+          "object" &&
+        !Array.isArray(
+          source.exportOptions
+        )
+          ? {
+              ...builderPreferences
+                .exportOptions,
+              ...source.exportOptions
+            }
+          : builderPreferences
+              .exportOptions
+    });
+  persistBuilderPreferences();
+  return clone(builderPreferences);
+}
+
+function synchronizeBuilderPreferencesFromState() {
+  const graphState =
+    state?.extensions
+      ?.typedNodeGraph;
+  const showAdvancedNodes =
+    graphState &&
+    typeof graphState === "object" &&
+    !Array.isArray(graphState) &&
+    Object.hasOwn(
+      graphState,
+      "showAdvancedNodes"
+    )
+      ? graphState
+          .showAdvancedNodes === true
+      : builderPreferences
+          .showAdvancedNodes;
+
+  return updateBuilderPreferences({
+    includeGuide:
+      state?.metadata?.includeGuide ===
+      true,
+    showAdvancedNodes,
+    collapsedPaletteGroups:
+      state?.collapsedPaletteGroups ||
+      [],
+    exportOptions:
+      state?.exportOptions ||
+      DEFAULT_EXPORT_OPTIONS
+  });
+}
+
 const state = {
   projectId: createFreshProjectId(),
-  metadata: { ...DEFAULT_METADATA },
-  exportOptions: { ...DEFAULT_EXPORT_OPTIONS },
+  metadata: {
+    ...DEFAULT_METADATA,
+    includeGuide:
+      builderPreferences.includeGuide
+  },
+  exportOptions: {
+    ...builderPreferences.exportOptions
+  },
   nodes: [],
   extensions: {},
   activePage: "configuration-outline",
   selectedId: null,
   activeContainerId: ROOT_CONTAINER,
-  collapsedPaletteGroups: [],
+  collapsedPaletteGroups: [
+    ...builderPreferences
+      .collapsedPaletteGroups
+  ],
   dragOverContainer: null,
   dragInsertContainer: null,
   dragInsertIndex: null
@@ -9350,6 +9546,7 @@ function applyProjectDocument(
       project.workspace.collapsedPaletteGroups ||
         []
     )];
+  synchronizeBuilderPreferencesFromState();
   writePageStateMarker(
     state.activePage,
     reason
@@ -9775,11 +9972,20 @@ document.addEventListener(
 );
 
 function resetProjectState() {
+  const retainedPreferences =
+    sanitizeBuilderPreferences(
+      builderPreferences
+    );
   state.projectId =
     createFreshProjectId();
-  state.metadata = { ...DEFAULT_METADATA };
+  state.metadata = {
+    ...DEFAULT_METADATA,
+    includeGuide:
+      retainedPreferences.includeGuide
+  };
   state.exportOptions = {
-    ...DEFAULT_EXPORT_OPTIONS
+    ...retainedPreferences
+      .exportOptions
   };
   state.extensions = {};
   state.activePage =
@@ -9787,7 +9993,10 @@ function resetProjectState() {
   state.nodes = [];
   state.selectedId = null;
   state.activeContainerId = ROOT_CONTAINER;
-  state.collapsedPaletteGroups = [];
+  state.collapsedPaletteGroups = [
+    ...retainedPreferences
+      .collapsedPaletteGroups
+  ];
   writePageStateMarker(
     state.activePage,
     "project-reset"
@@ -10194,6 +10403,10 @@ function renderMetadata() {
   elements.includeGuide.checked = state.metadata.includeGuide;
   elements.includeGuide.onchange = () => {
     state.metadata.includeGuide = elements.includeGuide.checked;
+    updateBuilderPreferences({
+      includeGuide:
+        state.metadata.includeGuide
+    });
     updateGeneratedOutput();
     persist();
   };
@@ -10365,6 +10578,10 @@ function renderPalette() {
                 group =>
                   group !== groupName
               );
+        updateBuilderPreferences({
+          collapsedPaletteGroups:
+            state.collapsedPaletteGroups
+        });
         persist();
       };
     });
@@ -27085,6 +27302,7 @@ function builderHasActiveProject() {
     DEFAULT_METADATA
   ).some(
     key =>
+      key !== "includeGuide" &&
       String(
         state.metadata?.[key] ?? ""
       ) !==
@@ -30092,6 +30310,10 @@ function syncExportOptions() {
     includeCompiled:
       elements.exportIncludeCompiled.checked
   };
+  updateBuilderPreferences({
+    exportOptions:
+      state.exportOptions
+  });
   persist();
   updateExportDialog();
 }
@@ -30433,6 +30655,8 @@ async function loadExampleProject() {
 async function newBlank() {
   const previousProjectId =
     state.projectId;
+  const retainedPreferences =
+    synchronizeBuilderPreferencesFromState();
 
   if (builderHasActiveProject()) {
     closeProjectDialog();
@@ -30490,15 +30714,27 @@ async function newBlank() {
       packButton?.click();
     }
 
-    state.metadata = { ...DEFAULT_METADATA };
+    state.metadata = {
+      ...DEFAULT_METADATA,
+      includeGuide:
+        retainedPreferences.includeGuide
+    };
     state.projectId =
       createFreshProjectId();
+    state.exportOptions = {
+      ...retainedPreferences
+        .exportOptions
+    };
     state.extensions = {};
     state.activePage =
       "configuration-outline";
     state.nodes = [];
     state.selectedId = null;
     state.activeContainerId = ROOT_CONTAINER;
+    state.collapsedPaletteGroups = [
+      ...retainedPreferences
+        .collapsedPaletteGroups
+    ];
     writePageStateMarker(
       state.activePage,
       "new-blank"
@@ -33173,7 +33409,7 @@ function builderCodegenStateSnapshot() {
 
 function exposeBuilderBridge() {
   const bridge = {
-    version: 5,
+    version: 6,
 
     getStorageContract() {
       return {
@@ -33186,6 +33422,20 @@ function exposeBuilderBridge() {
 
     getStateSnapshot() {
       return builderStateSnapshot();
+    },
+
+    getBuilderPreferences() {
+      return clone(
+        builderPreferences
+      );
+    },
+
+    setBuilderPreferences(
+      preferences
+    ) {
+      return updateBuilderPreferences(
+        preferences
+      );
     },
 
     getFlattenedEntries() {

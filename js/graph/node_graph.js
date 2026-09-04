@@ -98,7 +98,7 @@
     "node_graph_composites.js?v=4-gzip-import-recovery-v757",
     "node_graph_custom_csharp.js?v=8-custom-csharp-render-barrier-v766",
     "node_graph_guided.js?v=1-physical-modules-v748",
-    "node_graph_view.js?v=9-custom-csharp-render-barrier-v766",
+    "node_graph_view.js?v=10-new-project-preferences-v767",
     "node_graph_bootstrap.js?v=1-physical-modules-v748"
   ];
 
