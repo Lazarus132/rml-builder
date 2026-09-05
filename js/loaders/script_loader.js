@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  if (window.RMLScriptLoader?.version >= 18) {
+  if (window.RMLScriptLoader?.version >= 19) {
     return;
   }
 
@@ -103,7 +103,7 @@
           url: "../graph/node_graph_composites.js?v=4-gzip-import-recovery-v757"
         }),
         Object.freeze({
-          url: "../graph/node_graph_custom_csharp.js?v=12-css-compatibility-v771"
+          url: "../graph/node_graph_custom_csharp.js?v=13-responsive-panel-order-v773"
         }),
         Object.freeze({
           url: "../graph/node_graph_guided.js?v=1-physical-modules-v748"
@@ -353,6 +353,9 @@
       await Promise.all(
         definition.dependencies.map(ensure)
       );
+      // Dynamic classic scripts with async=false execute in insertion order,
+      // while their downloads may proceed together. That preserves the
+      // shared lexical module contract without serial network round trips.
       await Promise.all(
         definition.files.map(loadFile)
       );
@@ -436,6 +439,8 @@
         unavailableReason
       );
     } else {
+      // Keep the native click channel alive while assets are warming.
+      // Disabling on pointerdown would suppress click on mobile.
       button.disabled = !available;
     }
     button.setAttribute(
@@ -680,7 +685,7 @@
 
   Object.defineProperty(window, "RMLScriptLoader", {
     value: Object.freeze({
-      version: 18,
+      version: 19,
       ensure,
       ensureMany(names) {
         return Promise.all(

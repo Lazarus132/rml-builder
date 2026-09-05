@@ -42,7 +42,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "dynamic-settings-scope-20260905-v772";
+  "responsive-panel-order-20260905-v773";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 

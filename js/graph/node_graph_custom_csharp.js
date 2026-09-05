@@ -2722,7 +2722,7 @@ function prepareCustomCSharpEditorHost(
       hostWindow.document.createElement("link");
     stylesheet.rel = "stylesheet";
     stylesheet.href = new URL(
-      "styles/features/styles.runtime-graph.css?v=4-max-graph-performance-v755",
+      "styles/features/styles.runtime-graph.css?v=5-responsive-panel-order-v773",
       window.location.href
     ).href;
     hostWindow.document.head.appendChild(

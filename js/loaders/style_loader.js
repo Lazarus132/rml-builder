@@ -604,7 +604,7 @@
     setup: "../../styles/features/styles.setup.css?v=4-max-graph-performance-v755",
     project: "../../styles/features/styles.project.css?v=4-max-graph-performance-v755",
     export: "../../styles/features/styles.export.css?v=2-max-graph-performance-v755",
-    "runtime-graph": "../../styles/features/styles.runtime-graph.css?v=4-max-graph-performance-v755"
+    "runtime-graph": "../../styles/features/styles.runtime-graph.css?v=5-responsive-panel-order-v773"
   });
   const bundleOrder = Object.freeze([
     "preview",
@@ -849,7 +849,7 @@
 
   Object.defineProperty(window, "RMLStyleLoader", {
     value: Object.freeze({
-      version: 6,
+      version: 7,
       ensure,
       ensureMany,
       prefetch,

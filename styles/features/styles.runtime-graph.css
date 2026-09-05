@@ -2207,8 +2207,19 @@ body.rml-node-graph-mode .workspace {
     grid-template-columns: 220px minmax(0, 1fr);
   }
 
+body.rml-node-graph-mode .workspace > .palette {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+body.rml-node-graph-mode .workspace > .canvas {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
 body.rml-node-graph-mode .inspector {
     grid-column: 1 / -1;
+    grid-row: 2;
   }
 
 body.rml-node-graph-mode #inspector-content {
@@ -2219,12 +2230,22 @@ body.rml-node-graph-mode.rml-graph-left-collapsed:not(.rml-graph-right-collapsed
     grid-template-columns: minmax(0, 1fr);
   }
 
+body.rml-node-graph-mode.rml-graph-left-collapsed:not(.rml-graph-right-collapsed) .workspace > .canvas {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
 body.rml-node-graph-mode.rml-graph-right-collapsed:not(.rml-graph-left-collapsed) .workspace {
     grid-template-columns: 220px minmax(0, 1fr);
   }
 
 body.rml-node-graph-mode.rml-graph-left-collapsed.rml-graph-right-collapsed .workspace {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+body.rml-node-graph-mode.rml-graph-left-collapsed.rml-graph-right-collapsed .workspace > .canvas {
+    grid-column: 1 / -1;
+    grid-row: 1;
   }
 }
 
@@ -2261,6 +2282,18 @@ body.rml-node-graph-mode .workspace > .inspector {
     width: 100%;
     max-width: 100%;
     min-width: 0;
+  }
+
+body.rml-node-graph-mode .workspace > .palette {
+    grid-row: 1;
+  }
+
+body.rml-node-graph-mode .workspace > .canvas {
+    grid-row: 2;
+  }
+
+body.rml-node-graph-mode .workspace > .inspector {
+    grid-row: 3;
   }
 
 body.rml-node-graph-mode .workspace > .canvas {
@@ -2801,15 +2834,16 @@ body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-toolbar {
   }
 
 @media (max-width: 780px) {
-  body.rml-node-graph-mode .rml-graph-palette-scroll,
-  body.rml-node-graph-mode.rml-graph-edit-mode .workspace,
-  body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-palette-scroll,
-  body.rml-node-graph-mode.rml-graph-edit-mode #inspector-content {
-        -webkit-overflow-scrolling: touch;
-      }
-  }
+body.rml-node-graph-mode .rml-graph-palette-scroll,
+body.rml-node-graph-mode.rml-graph-edit-mode .workspace,
+body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-palette-scroll,
+body.rml-node-graph-mode.rml-graph-edit-mode #inspector-content {
+      -webkit-overflow-scrolling: touch;
+    }
+}
 }
 
+/* Declarative runtime values: JavaScript updates data, CSS owns presentation. */
 :root {
   --rml-graph-edit-viewport-width:
     var(--rml-attr-rml-graph-edit-viewport-width, 100dvw);
