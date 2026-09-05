@@ -1,0 +1,12 @@
+C:\Users\schad\Desktop\ResoniteModLoader-5.0.1\Configuration Builder\scanner\bin\Debug\net10.0\ResoniteModLoaderComponentScanner.deps.json
+C:\Users\schad\Desktop\ResoniteModLoader-5.0.1\Configuration Builder\scanner\bin\Debug\net10.0\ResoniteModLoaderComponentScanner.dll
+C:\Users\schad\Desktop\ResoniteModLoader-5.0.1\Configuration Builder\scanner\bin\Debug\net10.0\ResoniteModLoaderComponentScanner.pdb
+C:\Users\schad\Desktop\ResoniteModLoader-5.0.1\Configuration Builder\scanner\obj\Debug\net10.0\ResoniteModLoaderComponentScanner.csproj.AssemblyReference.cache
+C:\Users\schad\Desktop\ResoniteModLoader-5.0.1\Configuration Builder\scanner\obj\Debug\net10.0\ResoniteModLoaderComponentScanner.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\schad\Desktop\ResoniteModLoader-5.0.1\Configuration Builder\scanner\obj\Debug\net10.0\ResoniteModLoaderComponentScanner.AssemblyInfoInputs.cache
+C:\Users\schad\Desktop\ResoniteModLoader-5.0.1\Configuration Builder\scanner\obj\Debug\net10.0\ResoniteModLoaderComponentScanner.AssemblyInfo.cs
+C:\Users\schad\Desktop\ResoniteModLoader-5.0.1\Configuration Builder\scanner\obj\Debug\net10.0\ResoniteModLoaderComponentScanner.csproj.CoreCompileInputs.cache
+C:\Users\schad\Desktop\ResoniteModLoader-5.0.1\Configuration Builder\scanner\obj\Debug\net10.0\ResoniteModLoaderComponentScanner.dll
+C:\Users\schad\Desktop\ResoniteModLoader-5.0.1\Configuration Builder\scanner\obj\Debug\net10.0\refint\ResoniteModLoaderComponentScanner.dll
+C:\Users\schad\Desktop\ResoniteModLoader-5.0.1\Configuration Builder\scanner\obj\Debug\net10.0\ResoniteModLoaderComponentScanner.pdb
+C:\Users\schad\Desktop\ResoniteModLoader-5.0.1\Configuration Builder\scanner\obj\Debug\net10.0\ref\ResoniteModLoaderComponentScanner.dll

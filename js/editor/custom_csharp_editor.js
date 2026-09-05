@@ -9,7 +9,7 @@
     document.currentScript?.src ||
     document.baseURI;
   const EDITOR_STYLESHEET_URL = new URL(
-    "../../styles/features/styles.custom-csharp-editor.css?v=2-css-compatibility-v771",
+    "../../styles/features/styles.custom-csharp-editor.css?v=3-source-comment-pruning-v776",
     EDITOR_MODULE_URL
   ).href;
 

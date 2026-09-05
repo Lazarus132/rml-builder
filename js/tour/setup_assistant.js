@@ -5028,9 +5028,7 @@
           entries.push([key, window.localStorage.getItem(key)]);
         }
       }
-    } catch {
-      // Storage may be unavailable in hardened browser profiles.
-    }
+    } catch {}
     entries.sort(([left], [right]) => left.localeCompare(right));
     return entries;
   }
@@ -6499,15 +6497,15 @@
         ? options.focus
         : element;
     positionShades(focus);
-    if (options.preserveCardPlacement === true) {
-      // The caller already placed the card around a reserved future UI area.
-    } else if (options.keepFocusVisible === true) {
-      positionCardAwayFromPath(
-        centerOf(focus, .08, .08),
-        centerOf(focus, .92, .92)
-      );
-    } else {
-      positionCard(focus);
+    if (options.preserveCardPlacement !== true) {
+      if (options.keepFocusVisible === true) {
+        positionCardAwayFromPath(
+          centerOf(focus, .08, .08),
+          centerOf(focus, .92, .92)
+        );
+      } else {
+        positionCard(focus);
+      }
     }
     let point = centerOf(element);
     const currentPoint =
@@ -25007,9 +25005,7 @@
     if (typeof structuredClone === "function") {
       try {
         return structuredClone(value);
-      } catch {
-        // JSON is sufficient for the builder's portable state shape.
-      }
+      } catch {}
     }
     return JSON.parse(JSON.stringify(value));
   }

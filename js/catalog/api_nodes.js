@@ -513,7 +513,6 @@
         definition?.unavailableApiContract !== true
       )
     );
-
     const stagedTypes = structuredClone(
       Object.fromEntries(
         Object.entries(typeDefinitions).filter(

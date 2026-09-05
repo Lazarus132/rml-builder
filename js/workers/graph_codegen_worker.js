@@ -200,10 +200,10 @@ async function ensureRuntime(catalog) {
       "../catalog/mod_nodes.js?v=70-javascript-integrity-audit-v737"
     );
     importScripts(
-      "../compiler/visual_csharp.js?v=80-custom-csharp-exact-fallback-v764"
+      "../compiler/visual_csharp.js?v=82-source-comment-pruning-v776"
     );
     importScripts(
-      "../catalog/api_nodes.js?v=67-runtime-prefetch-console-v763"
+      "../catalog/api_nodes.js?v=68-source-comment-pruning-v776"
     );
 
     if (
@@ -215,7 +215,7 @@ async function ensureRuntime(catalog) {
     }
 
     importScripts(
-      "../graph/node_graph_codegen.js?v=1-physical-modules-v748"
+      "../graph/node_graph_codegen.js?v=3-source-comment-pruning-v776"
     );
 
     if (

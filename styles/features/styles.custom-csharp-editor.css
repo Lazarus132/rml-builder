@@ -84,6 +84,7 @@ body.separate-window-editor .settings-picker-popover { top: calc(82px + env(safe
 .debug-views { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: var(--rml-panel-background); }
 .debug-view { --rml-editor-scrollbar-thumb: var(--rml-accent); --rml-editor-scrollbar-track: var(--rml-panel-background); position: absolute; inset: 0; margin: 0; padding: 9px 12px 14px; overflow: auto; background: var(--rml-panel-background); color: var(--rml-ui-text); font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .debug-view[hidden] { display: none; }
+
 .rml-graph-searchable-options::-webkit-scrollbar,
 textarea::-webkit-scrollbar,
 .debug-tabs::-webkit-scrollbar,

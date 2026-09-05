@@ -71,10 +71,7 @@
           value
         );
       }
-    } catch {
-      // A private or embedded context can deny storage. The in-memory
-      // preference still applies to every renderer created in this page.
-    }
+    } catch {}
   }
 
   function curveStepsForScale(
@@ -953,6 +950,7 @@
       this.onAvailabilityChange = null;
       this.clearScene();
       this.canvas.remove();
+
       this.canvas.width = 1;
       this.canvas.height = 1;
       this.canvas.dataset.rmlCssWidth = "1";

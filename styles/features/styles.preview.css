@@ -3450,12 +3450,12 @@ dialog.settings-preview-dialog {
 }
 
 @supports (-webkit-overflow-scrolling: touch) {
-  @media (hover: none), (pointer: coarse), (max-width: 780px) {
-  .rml-preview-content,
-  .rml-preview-settings {
-        -webkit-overflow-scrolling: touch;
-      }
-  }
+@media (hover: none), (pointer: coarse), (max-width: 780px) {
+.rml-preview-content,
+.rml-preview-settings {
+      -webkit-overflow-scrolling: touch;
+    }
+}
 }
 
 #settings-preview-dialog {

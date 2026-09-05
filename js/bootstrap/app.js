@@ -42,7 +42,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "responsive-panel-order-20260905-v773";
+  "source-comment-pruning-20260905-v776";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -2168,7 +2168,7 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=140-custom-csharp-exact-fallback-v764",
+      "../workers/graph_codegen_worker.js?v=142-source-comment-pruning-v776",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -31974,7 +31974,7 @@ function ensureSetupAssistantLoaded(firstRun = false) {
       .then(() => new Promise((resolve, reject) => {
         const script = document.createElement("script");
         script.src = new URL(
-          "../tour/setup_assistant.js?v=206-unified-file-import-v758",
+          "../tour/setup_assistant.js?v=207-source-comment-pruning-v776",
           APP_SCRIPT_BASE_URL
         ).href;
         script.async = true;

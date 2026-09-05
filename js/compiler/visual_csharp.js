@@ -19,7 +19,7 @@
     getTypeDefinitions
   } = registry;
 
-  const VERSION = 23;
+  const VERSION = 24;
   const CUSTOM_CSHARP_COORDINATE_SPACE_VERSION = 2;
   const SYNTAX_TYPE = "csharpSyntax";
   const GROUPS = {
@@ -633,7 +633,7 @@
         apiCompositeCustomCSharp: true,
         customCSharpFile: true,
         customCSharpLegacyRuntimeNode: false,
-        description: "A reusable C# source container. Its complete source stays persistently in this Runtime Graph node's Actions. Imported files synchronize changed source through Roslyn when opened; manually built file graphs remain graph-authoritative.",
+        description: "A reusable C# source container. Its complete source stays persistently in its owning Runtime or API Composite Graph node's Actions. Imported files use the same lossless Roslyn synchronization in either scope; manually built file graphs remain graph-authoritative.",
         parameters: customCSharpFileParameters(),
         inputs: node?.parameters?.legacyInlineContent === true
           ? [syntaxInput("content", "Legacy inline compilation unit")]
@@ -3689,39 +3689,157 @@
     };
   }
 
-  function importIntoCurrentGraph(source, options = {}) {
+  function resolveCSharpImportTarget(options = {}) {
     const host = window.RMLDynamicGraphHost;
-    const state = host?.getRootState?.() || host?.getState?.();
-    if (!state || !Array.isArray(state.nodes) || !Array.isArray(state.connections)) {
-      return { ok: false, diagnostics: ["The Runtime Graph is not ready."] };
+    const declared = host?.getCSharpImportTarget?.();
+    if (declared?.available === false) {
+      return {
+        ok: false,
+        diagnostics: [
+          String(
+            declared.reason ||
+            "Custom C# import is unavailable in the current editor."
+          )
+        ]
+      };
     }
+    const state =
+      declared?.state ||
+      host?.getState?.() ||
+      host?.getRootState?.();
+    if (
+      !state ||
+      !Array.isArray(state.nodes) ||
+      !Array.isArray(state.connections)
+    ) {
+      return {
+        ok: false,
+        diagnostics: [
+          "The active Runtime or API Composite Graph is not ready."
+        ]
+      };
+    }
+    const key = String(
+      declared?.key || "runtime-root"
+    );
+    const expectedKey = String(
+      options.expectedTargetKey || ""
+    );
+    if (expectedKey && expectedKey !== key) {
+      return {
+        ok: false,
+        diagnostics: [
+          "The active C# import target changed after validation. Select the file again in the graph where it should be imported."
+        ]
+      };
+    }
+    return {
+      ok: true,
+      host,
+      state,
+      key,
+      kind: String(
+        declared?.kind || "runtime-root"
+      ),
+      label: String(
+        declared?.label || "Runtime Graph"
+      )
+    };
+  }
+
+  function csharpImportUsedIds(
+    host,
+    state
+  ) {
+    const used = new Set([
+      ...state.nodes.map(node =>
+        String(node?.id || "")
+      ),
+      ...state.connections.map(connection =>
+        String(connection?.id || "")
+      )
+    ]);
+    const identities =
+      host?.getGraphIdentitySets?.();
+    for (const values of [
+      identities?.nodeIds,
+      identities?.connectionIds
+    ]) {
+      if (!values) continue;
+      for (const value of values) {
+        const id = String(value || "");
+        if (id) used.add(id);
+      }
+    }
+    return used;
+  }
+
+  function csharpImportPrefix(
+    source,
+    target,
+    options,
+    fallback
+  ) {
+    return `${options.prefix || fallback}-${stableHash(
+      `${target.key}\0${String(options.projectId || "main")}\0${String(options.fileName || "Imported.cs")}\0${source}`
+    )}`;
+  }
+
+  function importIntoCurrentGraph(source, options = {}) {
+    const target =
+      resolveCSharpImportTarget(options);
+    if (!target.ok) return target;
+    const { host, state } = target;
     let attempt = 0;
     let fragment;
-    const usedIds = new Set([...state.nodes.map(node => node.id), ...state.connections.map(connection => connection.id)]);
+    const usedIds = csharpImportUsedIds(
+      host,
+      state
+    );
+    const prefix = csharpImportPrefix(
+      source,
+      target,
+      options,
+      "csharp-import"
+    );
     do {
       fragment = createImportFragment(source, {
         ...options,
-        prefix: `${options.prefix || "csharp-import"}-${stableHash(source)}-${attempt || 1}`
+        prefix: `${prefix}-${attempt || 1}`
       });
       attempt += 1;
     } while (fragment.ok && [...fragment.nodes, ...fragment.connections].some(item => usedIds.has(item.id)) && attempt < 100);
     if (!fragment.ok) return fragment;
-    return storeCustomCSharpFragment(fragment, host, state, source);
+    return storeCustomCSharpFragment(
+      fragment,
+      host,
+      state,
+      source,
+      target
+    );
   }
 
   async function importRoslynIntoCurrentGraph(source, parseResult, options = {}) {
-    const host = window.RMLDynamicGraphHost;
-    const state = host?.getRootState?.() || host?.getState?.();
-    if (!state || !Array.isArray(state.nodes) || !Array.isArray(state.connections)) {
-      return { ok: false, diagnostics: ["The Runtime Graph is not ready."] };
-    }
+    const target =
+      resolveCSharpImportTarget(options);
+    if (!target.ok) return target;
+    const { host, state } = target;
     let attempt = 0;
     let fragment;
-    const usedIds = new Set([...state.nodes.map(node => node.id), ...state.connections.map(connection => connection.id)]);
+    const usedIds = csharpImportUsedIds(
+      host,
+      state
+    );
+    const prefix = csharpImportPrefix(
+      source,
+      target,
+      options,
+      "csharp14-roslyn-import"
+    );
     do {
       fragment = createRoslynImportFragment(source, parseResult, {
         ...options,
-        prefix: `${options.prefix || "csharp14-roslyn-import"}-${stableHash(source)}-${attempt || 1}`
+        prefix: `${prefix}-${attempt || 1}`
       });
       attempt += 1;
     } while (fragment.ok && [...fragment.nodes, ...fragment.connections].some(item => usedIds.has(item.id)) && attempt < 100);
@@ -3738,27 +3856,34 @@
     if (!await validateFragment(fragment)) {
       fragment = createRoslynImportFragment(source, parseResult, {
         ...options,
-        prefix: `${options.prefix || "csharp14-roslyn-import"}-${stableHash(source)}-semantic-${attempt}`,
+        prefix: `${prefix}-semantic-${attempt}`,
         disableCatalogNodes: true
       });
     }
     if (!fragment.ok || !await validateFragment(fragment)) {
       fragment = createRoslynImportFragment(source, parseResult, {
         ...options,
-        prefix: `${options.prefix || "csharp14-roslyn-import"}-${stableHash(source)}-exact-${attempt}`,
+        prefix: `${prefix}-exact-${attempt}`,
+        disableCatalogNodes: true,
         semanticOptimization: false
       });
       if (!fragment.ok || !await validateFragment(fragment)) {
         return {
           ok: false,
           diagnostics: [
-            "Roslyn accepted this file as valid C# 14, but this Builder version could not convert its complete token and meaningful-trivia stream into a lossless editable Custom C# graph. This is a visual-importer limitation, not a damaged source file. The Runtime Graph was left unchanged and no source data was discarded."
+            `Roslyn accepted this file as valid C# 14, but this Builder version could not convert its complete token and meaningful-trivia stream into a lossless editable Custom C# graph. This is a visual-importer limitation, not a damaged source file. ${target.label} was left unchanged and no source data was discarded.`
           ],
           nodes: [], connections: []
         };
       }
     }
-    return storeCustomCSharpFragment(fragment, host, state, source);
+    return storeCustomCSharpFragment(
+      fragment,
+      host,
+      state,
+      source,
+      target
+    );
   }
 
   function createCustomCSharpFileGraphFromFragment(fragment) {
@@ -3806,14 +3931,20 @@
     };
   }
 
-  function storeCustomCSharpFragment(fragment, host, state, originalSource = null) {
+  function storeCustomCSharpFragment(
+    fragment,
+    host,
+    state,
+    originalSource = null,
+    target = null
+  ) {
     const prepared = createCustomCSharpFileGraphFromFragment(fragment);
     if (!prepared.ok) {
       return { ...prepared, nodes: [], connections: [] };
     }
     const { mainFileNode, importedSyntaxNodeCount } = prepared;
     if (state.nodes.some(node => node?.id === mainFileNode.id)) {
-      return { ok: false, diagnostics: [`A Runtime Graph node with id '${mainFileNode.id}' already exists.`], nodes: [], connections: [] };
+      return { ok: false, diagnostics: [`A node with id '${mainFileNode.id}' already exists in ${target?.label || "the active graph"}.`], nodes: [], connections: [] };
     }
 
     state.customCSharpFiles = state.customCSharpFiles && typeof state.customCSharpFiles === "object"
@@ -3863,7 +3994,7 @@
     if (activation?.ok !== true) {
       return {
         ok: false,
-        diagnostics: [activation?.reason || "The Runtime Graph could not be opened after importing the C# file."],
+        diagnostics: [activation?.reason || `${target?.label || "The active graph"} could not be presented after importing the C# file.`],
         nodes: [],
         connections: []
       };
@@ -3876,7 +4007,16 @@
       importedSyntaxNodeCount,
       openedCustomCSharpGraph: false,
       replacedExistingFile: matchingFiles.length > 0,
-      removedDuplicateFileCount: duplicateIds.size
+      removedDuplicateFileCount: duplicateIds.size,
+      targetKey: String(
+        target?.key || "runtime-root"
+      ),
+      targetKind: String(
+        target?.kind || "runtime-root"
+      ),
+      targetLabel: String(
+        target?.label || "Runtime Graph"
+      )
     };
   }
 
@@ -3902,6 +4042,13 @@
       if (expertPanel.hidden) {
         expertPanel.open = false;
       }
+      const target =
+        resolveCSharpImportTarget();
+      expertPanel.dataset
+        .rmlCSharpImportTarget =
+        target.ok
+          ? target.kind
+          : "unavailable";
     };
 
     const summary = document.createElement("summary");
@@ -4020,6 +4167,13 @@
       const file = input.files?.[0];
       if (!file) return;
       try {
+        const target =
+          resolveCSharpImportTarget();
+        if (!target.ok) {
+          throw new Error(
+            target.diagnostics.join("\n")
+          );
+        }
         const source = await file.text();
         if (!window.RMLCSharp14Roslyn?.parse) {
           throw new Error("The local Roslyn C# 14 runtime loader is unavailable. Reload the complete Builder package.");
@@ -4031,9 +4185,17 @@
           throw new Error(formatRoslynDiagnostics(parseResult.diagnostics).join("\n"));
         }
         const syntaxItemCount = countRoslynSyntaxItems(parseResult.root);
-        pendingImport = { fileName: file.name, source, parseResult, syntaxItemCount };
+        pendingImport = {
+          fileName: file.name,
+          source,
+          parseResult,
+          syntaxItemCount,
+          targetKey: target.key,
+          targetKind: target.kind,
+          targetLabel: target.label
+        };
         pendingText.textContent =
-          `${file.name} passed Roslyn C# 14 syntax validation. One Custom C# File node will be added to the Runtime Graph with the complete persistent file text in its Actions and ${syntaxItemCount.toLocaleString()} editable AST, token and trivia elements in its automatically available Node Graph. Nothing has been imported yet.`;
+          `${file.name} passed Roslyn C# 14 syntax validation. One Custom C# File node will be added to ${target.label} with the complete persistent file text in its Actions and ${syntaxItemCount.toLocaleString()} editable AST, token and trivia elements in its automatically available Node Graph. Nothing has been imported yet.`;
         pending.hidden = false;
         localStatus.textContent = "Roslyn syntax validation passed. Review the conversion and confirm it explicitly.";
         localStatus.classList.remove("success", "error");
@@ -4058,7 +4220,9 @@
       try {
         const result = await importRoslynIntoCurrentGraph(pendingImport.source, pendingImport.parseResult, {
           fileName: pendingImport.fileName,
-          projectId: "main"
+          projectId: "main",
+          expectedTargetKey:
+            pendingImport.targetKey
         });
         if (!result.ok) throw new Error(result.diagnostics.join("\n"));
         const importedFileName = pendingImport.fileName;
@@ -4066,7 +4230,7 @@
         acknowledgement.checked = false;
         setImportButtonAvailability(false);
         localStatus.textContent =
-          `${result.replacedExistingFile ? "Updated" : "Imported"} ${importedFileName} as one Custom C# File node${result.removedDuplicateFileCount ? ` and removed ${result.removedDuplicateFileCount} obsolete same-name duplicate${result.removedDuplicateFileCount === 1 ? "" : "s"}` : ""}. Its Actions contain the complete persistent imported source text, and Open Node Graph directly opens its ${result.importedSyntaxNodeCount.toLocaleString()} Roslyn C# 14 syntax nodes. Semantic compile and Resonite runtime validation are still required.`;
+          `${result.replacedExistingFile ? "Updated" : "Imported"} ${importedFileName} as one Custom C# File node in ${result.targetLabel}${result.removedDuplicateFileCount ? ` and removed ${result.removedDuplicateFileCount} obsolete same-name duplicate${result.removedDuplicateFileCount === 1 ? "" : "s"}` : ""}. Its Actions contain the complete persistent imported source text, and Open Node Graph directly opens its ${result.importedSyntaxNodeCount.toLocaleString()} Roslyn C# 14 syntax nodes. The identical Roslyn roundtrip and lossless token/trivia checks apply in Runtime Root and API Composites. Semantic compile and Resonite runtime validation are still required.`;
         localStatus.classList.toggle("success", true);
         localStatus.classList.toggle("error", false);
       } catch (error) {

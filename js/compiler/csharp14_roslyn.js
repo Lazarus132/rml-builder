@@ -57,9 +57,7 @@
     channel.worker = null;
     try {
       failedWorker?.terminate();
-    } catch {
-      // The worker may already have terminated after a native runtime failure.
-    }
+    } catch {}
     rejectPending(channel, channel.failure);
     return channel.failure;
   }

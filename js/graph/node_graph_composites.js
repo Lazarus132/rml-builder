@@ -3378,6 +3378,8 @@ function graphIdentitySetsForSavedComposite() {
       }
     };
     append(graph);
+    append(apiCompositeEditor?.mainView);
+    append(customCSharpEditor?.mainView);
     return { nodeIds, connectionIds };
   }
 

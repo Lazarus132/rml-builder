@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  if (window.RMLScriptLoader?.version >= 19) {
+  if (window.RMLScriptLoader?.version >= 20) {
     return;
   }
 
@@ -21,7 +21,7 @@
       dependencies: Object.freeze([]),
       files: Object.freeze([
         Object.freeze({
-          url: "../compiler/csharp14_roslyn.js?v=10-physical-modules-v748",
+          url: "../compiler/csharp14_roslyn.js?v=11-source-comment-pruning-v776",
           ready: () =>
             typeof window.RMLCSharp14Roslyn?.validate === "function"
         }),
@@ -42,7 +42,7 @@
       dependencies: Object.freeze([]),
       files: Object.freeze([
         Object.freeze({
-          url: "../catalog/catalog_loader.js?v=188-custom-csharp-exact-fallback-v764",
+          url: "../catalog/catalog_loader.js?v=190-source-comment-pruning-v776",
           ready: () =>
             typeof window.RMLBaseModNodesReady?.then === "function" ||
             typeof window.RMLModNodesReady?.then === "function"
@@ -81,7 +81,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/node_graph_codegen.js?v=1-physical-modules-v748",
+          url: "../graph/node_graph_codegen.js?v=3-source-comment-pruning-v776",
           ready: () =>
             typeof window.RMLTypedNodeGraphGenerator?.build ===
               "function"
@@ -100,19 +100,19 @@
             typeof window.RMLRuntimeBridge?.subscribe === "function"
         }),
         Object.freeze({
-          url: "../graph/node_graph_composites.js?v=4-gzip-import-recovery-v757"
+          url: "../graph/node_graph_composites.js?v=5-custom-csharp-scope-parity-v774"
         }),
         Object.freeze({
-          url: "../graph/node_graph_custom_csharp.js?v=13-responsive-panel-order-v773"
+          url: "../graph/node_graph_custom_csharp.js?v=15-source-comment-pruning-v776"
         }),
         Object.freeze({
           url: "../graph/node_graph_guided.js?v=1-physical-modules-v748"
         }),
         Object.freeze({
-          url: "../graph/node_graph_view.js?v=10-new-project-preferences-v767"
+          url: "../graph/node_graph_view.js?v=12-source-comment-pruning-v776"
         }),
         Object.freeze({
-          url: "../graph/node_graph_bootstrap.js?v=1-physical-modules-v748",
+          url: "../graph/node_graph_bootstrap.js?v=2-custom-csharp-scope-parity-v774",
           ready: () =>
             typeof window.RMLDynamicGraphHost?.isReady === "function"
         })
@@ -130,7 +130,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/graph_gpu_renderer.js?v=21-wire-artifact-guard-v766",
+          url: "../graph/graph_gpu_renderer.js?v=22-source-comment-pruning-v776",
           ready: () =>
             typeof window.RMLGraphHybridRenderer?.create === "function"
         })
@@ -353,9 +353,6 @@
       await Promise.all(
         definition.dependencies.map(ensure)
       );
-      // Dynamic classic scripts with async=false execute in insertion order,
-      // while their downloads may proceed together. That preserves the
-      // shared lexical module contract without serial network round trips.
       await Promise.all(
         definition.files.map(loadFile)
       );
@@ -439,8 +436,6 @@
         unavailableReason
       );
     } else {
-      // Keep the native click channel alive while assets are warming.
-      // Disabling on pointerdown would suppress click on mobile.
       button.disabled = !available;
     }
     button.setAttribute(
@@ -685,7 +680,7 @@
 
   Object.defineProperty(window, "RMLScriptLoader", {
     value: Object.freeze({
-      version: 19,
+      version: 22,
       ensure,
       ensureMany(names) {
         return Promise.all(

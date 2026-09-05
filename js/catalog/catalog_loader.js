@@ -34,11 +34,11 @@
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "../compiler/visual_csharp.js?v=80-custom-csharp-exact-fallback-v764",
+    "../compiler/visual_csharp.js?v=82-source-comment-pruning-v776",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=67-runtime-prefetch-console-v763",
+    "api_nodes.js?v=68-source-comment-pruning-v776",
     scriptUrl
   ).href;
 

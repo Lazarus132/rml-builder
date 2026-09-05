@@ -931,7 +931,7 @@ function buildCustomCSharpFragmentInWorker(nodeId, source, parseResult, options)
     }
     const worker = new Worker(
       new URL(
-        "js/workers/graph_codegen_worker.js?v=140-custom-csharp-exact-fallback-v764",
+        "js/workers/graph_codegen_worker.js?v=142-source-comment-pruning-v776",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -1985,7 +1985,7 @@ function loadCustomCSharpDetachedEditorModule() {
         const script =
           document.createElement("script");
         script.src = new URL(
-          "js/editor/custom_csharp_editor.js?v=57-css-compatibility-v771",
+          "js/editor/custom_csharp_editor.js?v=58-source-comment-pruning-v776",
           document.baseURI
         ).href;
         script.async = true;
@@ -2547,9 +2547,7 @@ function createCustomCSharpOverlayFrame(
           titlebar.setPointerCapture?.(
             event.pointerId
           );
-        } catch {
-          // Pointer capture is optional in embedded browsers.
-        }
+        } catch {}
         event.preventDefault();
       }
     );
@@ -2602,9 +2600,7 @@ function createCustomCSharpOverlayFrame(
         titlebar.releasePointerCapture?.(
           event.pointerId
         );
-      } catch {
-        // The pointer may already have been released.
-      }
+      } catch {}
     };
     titlebar.addEventListener(
       "pointerup",
@@ -2722,7 +2718,7 @@ function prepareCustomCSharpEditorHost(
       hostWindow.document.createElement("link");
     stylesheet.rel = "stylesheet";
     stylesheet.href = new URL(
-      "styles/features/styles.runtime-graph.css?v=5-responsive-panel-order-v773",
+      "styles/features/styles.runtime-graph.css?v=6-source-comment-pruning-v776",
       window.location.href
     ).href;
     hostWindow.document.head.appendChild(
@@ -2786,9 +2782,7 @@ async function createCustomCSharpExternalHost(
         popupName,
         popupFeatures
       );
-    } catch {
-      // The blocked-window message below is the actionable result.
-    }
+    } catch {}
     if (!hostWindow) {
       showGraphMessage(
         "The native separate code-editor window was blocked. Allow pop-ups for this Builder and try again.",

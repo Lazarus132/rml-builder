@@ -256,7 +256,6 @@
     )?.node || null;
   }
 
-  /* This module is isolated from the editable-collection IIFE below. */
   function graphViewActive() {
     const graph =
       window.RMLDynamicGraphHost?.getState?.() ||

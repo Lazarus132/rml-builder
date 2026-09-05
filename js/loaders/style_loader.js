@@ -599,12 +599,12 @@
     window.location.href;
   const baseUrl = new URL(".", currentScriptUrl);
   const bundleFiles = Object.freeze({
-    preview: "../../styles/features/styles.preview.css?v=4-max-graph-performance-v755",
+    preview: "../../styles/features/styles.preview.css?v=5-source-comment-pruning-v776",
     information: "../../styles/features/styles.information.css?v=2-max-graph-performance-v755",
-    setup: "../../styles/features/styles.setup.css?v=4-max-graph-performance-v755",
+    setup: "../../styles/features/styles.setup.css?v=5-source-comment-pruning-v776",
     project: "../../styles/features/styles.project.css?v=4-max-graph-performance-v755",
     export: "../../styles/features/styles.export.css?v=2-max-graph-performance-v755",
-    "runtime-graph": "../../styles/features/styles.runtime-graph.css?v=5-responsive-panel-order-v773"
+    "runtime-graph": "../../styles/features/styles.runtime-graph.css?v=6-source-comment-pruning-v776"
   });
   const bundleOrder = Object.freeze([
     "preview",

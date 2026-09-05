@@ -4480,18 +4480,18 @@ pre {
   }
 
 @media (hover: none), (pointer: coarse), (max-width: 780px) {
-  .workspace,
-  #palette-content,
-  #builder-canvas,
-  #inspector-content,
-  .builder-work-card,
-  .builder-work-replacement-queue,
-  .builder-work-replacement-list,
-  [data-rml-scroll-layer],
-  pre {
-        scrollbar-color: rgba(166, 111, 255, .92) rgba(30, 23, 43, .78);
-      }
-  }
+.workspace,
+#palette-content,
+#builder-canvas,
+#inspector-content,
+.builder-work-card,
+.builder-work-replacement-queue,
+.builder-work-replacement-list,
+[data-rml-scroll-layer],
+pre {
+      scrollbar-color: rgba(166, 111, 255, .92) rgba(30, 23, 43, .78);
+    }
+}
 }
 
 @supports (-webkit-overflow-scrolling: touch) {

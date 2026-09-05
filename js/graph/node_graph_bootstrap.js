@@ -94,8 +94,69 @@ if (
 
 Object.defineProperty(window, "RMLDynamicGraphHost", {
     value: Object.freeze({
-      version: 67,
+      version: 68,
       getState() { return graph; },
+      getCSharpImportTarget() {
+        if (
+          !graph ||
+          !Array.isArray(graph.nodes) ||
+          !Array.isArray(graph.connections)
+        ) {
+          return Object.freeze({
+            available: false,
+            reason:
+              "The Runtime Graph is not ready."
+          });
+        }
+        if (customCSharpEditor) {
+          return Object.freeze({
+            available: false,
+            reason:
+              "Finish or close the current Custom C# File graph before importing another C# file."
+          });
+        }
+        const composite = Boolean(
+          apiCompositeEditor
+        );
+        const ownerId = composite
+          ? String(
+              apiCompositeEditor
+                .containerNodeId || ""
+            )
+          : "";
+        const title = composite
+          ? String(
+              apiCompositeEditor.title ||
+              "API Composite"
+            )
+          : "Runtime Graph";
+        return Object.freeze({
+          available: true,
+          key: composite
+            ? `project:${builderProjectEpoch}:api-composite:${ownerId}`
+            : `project:${builderProjectEpoch}:runtime-root`,
+          kind: composite
+            ? "api-composite"
+            : "runtime-root",
+          label: composite
+            ? `API Composite ‘${title}’`
+            : title,
+          ownerId,
+          state: graph
+        });
+      },
+      getGraphIdentitySets() {
+        const identities =
+          graphIdentitySetsForSavedComposite();
+        return Object.freeze({
+          nodeIds: new Set(
+            identities.nodeIds
+          ),
+          connectionIds: new Set(
+            identities.connectionIds
+          )
+        });
+      },
       getProjectEpoch() {
         return builderProjectEpoch;
       },

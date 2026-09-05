@@ -3,16 +3,27 @@
 // Headless Runtime Graph validation and C# generation.
 
 const EXTENSION_NAME = "typedNodeGraph";
+
 const GRAPH_SCHEMA_VERSION = 33;
+
 const GRAPH_STAGE_WIDTH = 5200;
+
 const GRAPH_STAGE_HEIGHT = 3400;
+
 const GRAPH_MIN_ZOOM = 0.005;
+
 const GRAPH_MAX_ZOOM = 1.65;
+
 const LEGACY_GRAPH_COORDINATE_LIMIT = 100000;
+
 const GRAPH_COORDINATE_LIMIT = 250000000;
+
 const CUSTOM_CSHARP_COORDINATE_SPACE_VERSION = 2;
+
 const GRAPH_NODE_MIN_WIDTH = 120;
+
 const GRAPH_NODE_MIN_HEIGHT = 96;
+
 const GRAPH_NODE_MAX_WIDTH =
     GRAPH_STAGE_WIDTH - 120;
 
@@ -1697,6 +1708,22 @@ function captureApiCompositeEditorView(
     const existing =
       graph.apiCompositeGraphs?.[ownerId] ||
       {};
+    if (customCSharpEditor) {
+      const compositeView =
+        customCSharpEditor.mainView;
+      const captured = {
+        ...existing,
+        customCSharpFiles:
+          customCSharpFilesForNodes(
+            compositeView.nodes,
+            graph.customCSharpFiles
+          ),
+        ...graphViewFrom(compositeView)
+      };
+      graph.apiCompositeGraphs[ownerId] =
+        captured;
+      return captured;
+    }
     if (
       options.synchronizeBoundaries ===
         false

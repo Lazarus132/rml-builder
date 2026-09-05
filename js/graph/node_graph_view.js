@@ -6589,6 +6589,13 @@ function createPaletteItem(
   }
 
 function definitionBelongsToCurrentGraph(definition) {
+    if (customCSharpEditor) {
+      return Boolean(
+        definition?.customCSharpSyntaxNode === true ||
+        definition?.customCSharpSubgraphOnly === true ||
+        definition?.customCSharpCatalogNode === true
+      );
+    }
     if (apiCompositeEditor) {
       return Boolean(
         definition?.unavailableApiContract !==
@@ -6596,13 +6603,6 @@ function definitionBelongsToCurrentGraph(definition) {
         apiCompositeInternalDefinitionAllowed(
           definition
         )
-      );
-    }
-    if (customCSharpEditor) {
-      return Boolean(
-        definition?.customCSharpSyntaxNode === true ||
-        definition?.customCSharpSubgraphOnly === true ||
-        definition?.customCSharpCatalogNode === true
       );
     }
     return !(
@@ -6649,9 +6649,11 @@ function renderGraphPalette() {
       document.createElement("input");
     search.type = "search";
     search.placeholder =
-      apiCompositeEditor
-        ? "Search API and logic nodes…"
-        : "Type at least 2 characters for API nodes…";
+      customCSharpEditor
+        ? "Search Roslyn C# nodes…"
+        : apiCompositeEditor
+          ? "Search API and logic nodes…"
+          : "Type at least 2 characters for API nodes…";
     search.autocomplete = "off";
     search.value = previousQuery;
     searchWrap.appendChild(search);
@@ -17196,7 +17198,10 @@ function deleteGraphNode(nodeId) {
       return;
     }
 
-    if (apiCompositeEditor) {
+    if (
+      apiCompositeEditor &&
+      !customCSharpEditor
+    ) {
       if (
         apiCompositeVerifiedCatalogNode(
           node

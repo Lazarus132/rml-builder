@@ -2843,7 +2843,6 @@ body.rml-node-graph-mode.rml-graph-edit-mode #inspector-content {
 }
 }
 
-/* Declarative runtime values: JavaScript updates data, CSS owns presentation. */
 :root {
   --rml-graph-edit-viewport-width:
     var(--rml-attr-rml-graph-edit-viewport-width, 100dvw);
