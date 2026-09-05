@@ -513,10 +513,7 @@
         definition?.unavailableApiContract !== true
       )
     );
-    // A scanner refresh is a complete snapshot. Never carry catalog types
-    // from the previous fingerprint into the next factory generation.
-    // apiCatalogType also identifies types created by pre-v711 factories,
-    // before the explicit catalogGenerated marker existed.
+
     const stagedTypes = structuredClone(
       Object.fromEntries(
         Object.entries(typeDefinitions).filter(

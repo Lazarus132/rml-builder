@@ -3590,10 +3590,6 @@
       const effectivePreserve = preserveExact || preserveWhitespaceContext > 0;
       if (preserveExact) preserveWhitespaceContext += 1;
       try {
-        // A raw Roslyn subtree is the fail-closed recovery path. Once exact
-        // preservation begins, none of its descendants may re-enter semantic
-        // optimization; otherwise the supposed exact fallback can reproduce
-        // the same token/trivia drift that it is meant to recover from.
         const semanticId = effectivePreserve
           ? null
           : tryAddSemanticNode(syntaxNode, depth);

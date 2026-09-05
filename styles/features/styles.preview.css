@@ -3450,15 +3450,14 @@ dialog.settings-preview-dialog {
 }
 
 @supports (-webkit-overflow-scrolling: touch) {
-@media (hover: none), (pointer: coarse), (max-width: 780px) {
-.rml-preview-content,
-.rml-preview-settings {
-      -webkit-overflow-scrolling: touch;
-    }
-}
+  @media (hover: none), (pointer: coarse), (max-width: 780px) {
+  .rml-preview-content,
+  .rml-preview-settings {
+        -webkit-overflow-scrolling: touch;
+      }
+  }
 }
 
-/* Adaptive preview values are declared here; JavaScript only updates data. */
 #settings-preview-dialog {
   --rml-visible-width:
     var(--rml-attr-rml-visible-width, 100dvw);

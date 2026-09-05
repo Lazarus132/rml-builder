@@ -22,10 +22,6 @@
   const REQUIRED_CATALOG_SCHEMA_VERSION = 8;
   const REQUIRED_METHOD_IDENTITY_VERSION = 2;
   const REQUIRED_SCANNER_FINGERPRINT_VERSION = 1;
-  // This is the reader implemented by this Builder. A newer scanner may
-  // publish any writer version/policy as long as its advertised reader range
-  // still contains v1. Incompatible reload metadata never rejects the API
-  // catalog; it only disables automatic reload approval.
   const SUPPORTED_RELOAD_SAFETY_READER_VERSION = 1;
   const REQUIRED_SCANNER_FINGERPRINT_ALGORITHM =
     "sha256-canonical-semantic-catalog-v1";

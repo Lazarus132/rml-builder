@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = 9;
+  const VERSION = 10;
   const IMPULSE_BUTTON_VALUE_TYPE =
     "button";
   const KINDS = Object.freeze({
@@ -256,10 +256,18 @@
     )?.node || null;
   }
 
+  /* This module is isolated from the editable-collection IIFE below. */
   function graphViewActive() {
+    const graph =
+      window.RMLDynamicGraphHost?.getState?.() ||
+      state?.extensions?.typedNodeGraph ||
+      null;
+
     return Boolean(
-      state?.extensions?.typedNodeGraph?.active === true ||
-      document.body.classList.contains("rml-node-graph-mode")
+      graph?.active === true ||
+      document.body.classList.contains(
+        "rml-node-graph-mode"
+      )
     );
   }
 

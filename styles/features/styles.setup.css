@@ -1178,14 +1178,13 @@ html:not(.rml-setup-tour-active) body.rml-node-graph-mode:not(.rml-graph-edit-mo
 }
 
 @supports (-webkit-overflow-scrolling: touch) {
-@media (hover: none), (pointer: coarse), (max-width: 780px) {
-#rml-setup-assistant {
-      -webkit-overflow-scrolling: touch;
-    }
-}
+  @media (hover: none), (pointer: coarse), (max-width: 780px) {
+  #rml-setup-assistant {
+        -webkit-overflow-scrolling: touch;
+      }
+  }
 }
 
-/* Setup tour presentation is class-driven; measurements live in data-* only. */
 .rml-setup-hidden {
   display: none !important;
 }

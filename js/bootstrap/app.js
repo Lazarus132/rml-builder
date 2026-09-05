@@ -42,7 +42,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "new-project-preferences-20260904-v767";
+  "dynamic-settings-scope-20260905-v772";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -28727,8 +28727,6 @@ function requestBrowserCompilerInputFiles(input) {
       settled = true;
       input.removeEventListener("change", changed);
       input.removeEventListener("cancel", cancelled);
-      // The copied File objects remain valid. Clearing the native input drops
-      // its potentially very large recursive FileList immediately.
       input.value = "";
       resolve(files);
     };
@@ -29544,8 +29542,6 @@ async function compileGeneratedBrowserDlls() {
     browserCompilerBuildCache = cache;
     return cache;
   })().finally(() => {
-    // Indirect Roslyn dependencies have now been discovered. Keep only the
-    // DLL File objects that are genuine compiler references.
     retainSelectedBrowserCompilerDirectoryFiles();
     browserCompilerBuilding = false;
     browserCompilerBuildPromise = null;

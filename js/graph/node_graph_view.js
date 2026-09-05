@@ -420,8 +420,6 @@ function detachGraphHybridRenderer() {
       return;
     }
 
-    // Compatibility with a cached pre-v7 renderer: it cannot be reused
-    // safely, so release it once and let the current renderer be created.
     graphHybridRenderer.dispose?.();
     graphHybridRenderer = null;
   }

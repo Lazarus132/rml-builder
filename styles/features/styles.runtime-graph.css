@@ -2801,16 +2801,15 @@ body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-toolbar {
   }
 
 @media (max-width: 780px) {
-body.rml-node-graph-mode .rml-graph-palette-scroll,
-body.rml-node-graph-mode.rml-graph-edit-mode .workspace,
-body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-palette-scroll,
-body.rml-node-graph-mode.rml-graph-edit-mode #inspector-content {
-      -webkit-overflow-scrolling: touch;
-    }
-}
+  body.rml-node-graph-mode .rml-graph-palette-scroll,
+  body.rml-node-graph-mode.rml-graph-edit-mode .workspace,
+  body.rml-node-graph-mode.rml-graph-edit-mode .rml-graph-palette-scroll,
+  body.rml-node-graph-mode.rml-graph-edit-mode #inspector-content {
+        -webkit-overflow-scrolling: touch;
+      }
+  }
 }
 
-/* Declarative runtime values: JavaScript updates data, CSS owns presentation. */
 :root {
   --rml-graph-edit-viewport-width:
     var(--rml-attr-rml-graph-edit-viewport-width, 100dvw);

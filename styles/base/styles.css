@@ -4049,7 +4049,6 @@ dialog[open] > * {
   }
 }
 
-/* Typed node graph */
 #pack-into-node {
   white-space: nowrap;
 }
@@ -4392,7 +4391,6 @@ dialog[open] > * {
   }
 }
 
-/* Static runtime helper elements */
 #rml-button-action-feedback {
   position: fixed;
   z-index: 2147483647;
@@ -4446,7 +4444,6 @@ dialog[open] > * {
   pointer-events: none !important;
 }
 
-/* Browser-gated visual enhancements. Every block has a functional base rule above. */
 @supports (border-color: color-mix(in srgb, red 50%, transparent)) {
 .custom-color-result {
     border-color: color-mix(in srgb, var(--result-glow, transparent) 45%, var(--line));
@@ -4457,7 +4454,6 @@ dialog[open] > * {
   }
 }
 
-/* Firefox/standards scrollbars; WebKit scrollbar pseudo-elements remain above. */
 @supports (scrollbar-width: thin) {
 .rml-graph-searchable-options {
     scrollbar-width: thin;
@@ -4484,21 +4480,20 @@ pre {
   }
 
 @media (hover: none), (pointer: coarse), (max-width: 780px) {
-.workspace,
-#palette-content,
-#builder-canvas,
-#inspector-content,
-.builder-work-card,
-.builder-work-replacement-queue,
-.builder-work-replacement-list,
-[data-rml-scroll-layer],
-pre {
-      scrollbar-color: rgba(166, 111, 255, .92) rgba(30, 23, 43, .78);
-    }
-}
+  .workspace,
+  #palette-content,
+  #builder-canvas,
+  #inspector-content,
+  .builder-work-card,
+  .builder-work-replacement-queue,
+  .builder-work-replacement-list,
+  [data-rml-scroll-layer],
+  pre {
+        scrollbar-color: rgba(166, 111, 255, .92) rgba(30, 23, 43, .78);
+      }
+  }
 }
 
-/* Momentum scrolling is requested only where the legacy iOS property exists. */
 @supports (-webkit-overflow-scrolling: touch) {
 .workspace .palette,
 .workspace .inspector,
@@ -4530,7 +4525,6 @@ pre {
     var(--rml-attr-rml-node-icon-color, #8fdcff);
 }
 
-/* Class-driven presentation channels. Runtime data never writes style=. */
 .rml-hit-test-transparent {
   pointer-events: none !important;
 }

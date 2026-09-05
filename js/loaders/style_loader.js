@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const CLASS_STYLE_VERSION = 1;
+  const CLASS_STYLE_VERSION = 2;
 
   function installClassStyleRuntime() {
     if (
@@ -63,6 +63,7 @@
       data-rml-popup-width
       data-rml-preview-glow-size
       data-rml-result-glow-size
+      data-rml-scroll-offset
       data-rml-swatch-glow-size
       data-rml-thumb-height
       data-rml-thumb-offset
@@ -90,20 +91,34 @@
     `.trim().split(/\s+/));
     const colorAttributes = new Set(`
       data-rml-alpha-color
+      data-rml-accent
+      data-rml-caret
+      data-rml-code-background
+      data-rml-code-text
+      data-rml-color
+      data-rml-gutter-background
+      data-rml-gutter-text
       data-rml-node-icon-color
+      data-rml-overlay-background
       data-rml-palette-color
+      data-rml-panel-background
       data-rml-port-color
       data-rml-preview-color
       data-rml-preview-glow
       data-rml-result-color
       data-rml-result-glow
+      data-rml-selection-background
       data-rml-setup-port-glow
+      data-rml-status-background
+      data-rml-status-text
       data-rml-swatch-alpha
       data-rml-swatch-glow
       data-rml-swatch-opaque
       data-rml-travel-color
       data-rml-type-color
+      data-rml-ui-text
       data-rml-wire-color
+      data-rml-workbench-background
     `.trim().split(/\s+/));
     const numberAttributes = new Set(`
       data-hue
@@ -834,7 +849,7 @@
 
   Object.defineProperty(window, "RMLStyleLoader", {
     value: Object.freeze({
-      version: 5,
+      version: 6,
       ensure,
       ensureMany,
       prefetch,

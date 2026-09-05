@@ -1985,7 +1985,7 @@ function loadCustomCSharpDetachedEditorModule() {
         const script =
           document.createElement("script");
         script.src = new URL(
-          "js/editor/custom_csharp_editor.js?v=53-max-graph-performance-v755",
+          "js/editor/custom_csharp_editor.js?v=57-css-compatibility-v771",
           document.baseURI
         ).href;
         script.async = true;
@@ -3514,7 +3514,7 @@ function mountCustomCSharpEditorPresentation({
     );
 
     void loadCustomCSharpDetachedEditorModule()
-      .then(editorModule => {
+      .then(async editorModule => {
         if (
           hostWindow.closed ||
           (mode === "inline" ||
@@ -3533,7 +3533,7 @@ function mountCustomCSharpEditorPresentation({
           );
         }
         let record;
-        const mounted = editorModule.mount({
+        const mounted = await editorModule.mount({
           popup: hostWindow,
           presentationMode: mode,
           initialSelection:
