@@ -21,7 +21,7 @@
       dependencies: Object.freeze([]),
       files: Object.freeze([
         Object.freeze({
-          url: "../compiler/csharp14_roslyn.js?v=12-editor-live-worker-v786",
+          url: "../compiler/csharp14_roslyn.js?v=13-graph-module-coherence-v788",
           ready: () =>
             typeof window.RMLCSharp14Roslyn?.validate === "function"
         }),
@@ -100,19 +100,19 @@
             typeof window.RMLRuntimeBridge?.subscribe === "function"
         }),
         Object.freeze({
-          url: "../graph/node_graph_composites.js?v=5-custom-csharp-scope-parity-v774"
+          url: "../graph/node_graph_composites.js?v=6-live-output-navigation-v790"
         }),
         Object.freeze({
-          url: "../graph/node_graph_custom_csharp.js?v=22-custom-csharp-drag-v787"
+          url: "../graph/node_graph_custom_csharp.js?v=23-live-output-navigation-v790"
         }),
         Object.freeze({
           url: "../graph/node_graph_guided.js?v=1-physical-modules-v748"
         }),
         Object.freeze({
-          url: "../graph/node_graph_view.js?v=16-custom-csharp-drag-v787"
+          url: "../graph/node_graph_view.js?v=19-live-output-navigation-v790"
         }),
         Object.freeze({
-          url: "../graph/node_graph_bootstrap.js?v=4-editor-live-worker-v786",
+          url: "../graph/node_graph_bootstrap.js?v=6-inspector-interaction-budget-v789",
           ready: () =>
             typeof window.RMLDynamicGraphHost?.isReady === "function"
         })
@@ -680,7 +680,7 @@
 
   Object.defineProperty(window, "RMLScriptLoader", {
     value: Object.freeze({
-      version: 27,
+      version: 29,
       ensure,
       ensureMany(names) {
         return Promise.all(

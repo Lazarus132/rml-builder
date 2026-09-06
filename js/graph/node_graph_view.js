@@ -17,41 +17,23 @@ const RML_GRAPH_TEST_STORAGE_SCOPE =
       : "rml-configuration-builder-visual-test-default";
 
 const GRAPH_GRID = 12;
-
 const GRAPH_AUTOPAN_EDGE = 54;
-
 const GRAPH_AUTOPAN_MAX_SPEED = 24;
-
 const GRAPH_NODE_MIN_BODY_HEIGHT = 48;
-
 const GRAPH_WIRE_DRAG_THRESHOLD = 4;
-
 const GRAPH_NODE_DRAG_THRESHOLD = 3;
-
 const GRAPH_WIRE_POINT_SNAP = 6;
-
 const GRAPH_WIRE_POINT_REUSE_DISTANCE = 18;
-
 const GRAPH_WIRE_PATH_SAMPLES = 36;
-
 const GRAPH_SVG_COMPATIBILITY_LIMIT = 700;
-
 const GRAPH_DOM_VIRTUALIZATION_THRESHOLD = 240;
-
 const GRAPH_FALLBACK_MAX_DETAILED_NODES = 220;
-
 const GRAPH_FALLBACK_MAX_SVG_CONNECTIONS = 600;
-
 const GRAPH_EAGER_CONNECTION_TARGET_NODE_LIMIT = 180;
-
 const GRAPH_EAGER_CONNECTION_TARGET_WIRE_LIMIT = 400;
-
 let runtimeGraphStylePromise = null;
-
 let runtimeGraphStyleActivationQueued = false;
-
 let runtimeGraphStyleFailureReported = false;
-
 let runtimeGraphStyleTransitionPending = false;
 
 function runtimeGraphStylesLoaded() {
@@ -147,32 +129,29 @@ function setGraphButtonAvailability(
   }
 
 const GRAPH_SEARCHABLE_RENDER_LIMIT = 200;
-
 const GRAPH_GPU_OVERVIEW_ENTER_ZOOM = 0.20;
-
 const GRAPH_GPU_OVERVIEW_EXIT_ZOOM = 0.24;
-
 const GRAPH_NODE_VIRTUAL_OVERSCAN_PIXELS = 260;
-
 const GRAPH_NODE_VIRTUALIZATION_PAN_STEP_PIXELS = 96;
-
 const GRAPH_NODE_SPATIAL_CELL_SIZE = 720;
-
 const GRAPH_NODE_SPATIAL_MAX_QUERY_CELLS = 4096;
-
 const GRAPH_NODE_SPATIAL_KEY_STRIDE = 1000003;
-
 const GRAPH_DOM_DETAIL_NODE_MINIMUM = 48;
-
 const GRAPH_DOM_DETAIL_NODE_MAXIMUM = 240;
-
 const GRAPH_DOM_DETAIL_PIXELS_PER_NODE = 8000;
-
 const GRAPH_VIEW_PERSIST_IDLE_MILLISECONDS = 180;
+const GRAPH_PARAMETER_PERSIST_IDLE_MILLISECONDS = 240;
+let graphParameterPersistTimer = 0;
+let graphParameterPersistenceDirty = false;
+let graphParameterPreviewFrame = 0;
+let graphParameterPointerTrackingInstalled = false;
+const graphParameterActivePointers = new Map();
 
 let graphInspectorRenderDeferred = false;
 
 let graphInspectorRenderedSelectionKey = "";
+
+let graphInspectorRenderedNode = null;
 
 let builderProjectEpoch = 0;
 
@@ -313,6 +292,9 @@ const graphWirePartialConnectionIds =
     new Set();
 
 let nodeResizeLimitRefreshFrame = 0;
+let nodeResizeLimitRefreshAll = false;
+const nodeResizeLimitRefreshIds = new Set();
+let nodeResizeLimitRefreshNodes = null;
 
 let lastNodeResizePress = null;
 
@@ -482,6 +464,12 @@ let graphConnectionDragTelemetry = {
   };
 
 function cancelProjectScopedGraphWork() {
+    cancelGraphParameterPersistence();
+    graphParameterActivePointers.clear();
+    if (graphParameterPreviewFrame) {
+      cancelAnimationFrame(graphParameterPreviewFrame);
+      graphParameterPreviewFrame = 0;
+    }
     const cancelFrame = value => {
       if (value) {
         cancelAnimationFrame(value);
@@ -505,6 +493,9 @@ function cancelProjectScopedGraphWork() {
       cancelFrame(graphStructuralCommitFrame);
     nodeResizeLimitRefreshFrame =
       cancelFrame(nodeResizeLimitRefreshFrame);
+    nodeResizeLimitRefreshAll = false;
+    nodeResizeLimitRefreshIds.clear();
+    nodeResizeLimitRefreshNodes = null;
     graphScrollLayerVisualFrame =
       cancelFrame(graphScrollLayerVisualFrame);
     graphScrollLayerVisualFollowFrame =
@@ -946,6 +937,161 @@ function savedApiContractSemanticKey(
         )
       })
     );
+  }
+
+let graphNavigationRestorePending = true;
+let graphNavigationRestoring = false;
+let graphNavigationStorageWarning = false;
+
+function graphNavigationStorageKey() {
+    return `${bridge?.getStorageContract?.().activeStorageKey || "rml-builder"}:graph-navigation-v1`;
+  }
+
+function readBrowserGraphNavigationStore() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(graphNavigationStorageKey()) || "null");
+      if (parsed?.version === 1 && parsed.projects && typeof parsed.projects === "object" &&
+          !Array.isArray(parsed.projects)) return parsed;
+    } catch {}
+    return { version: 1, projects: {} };
+  }
+
+function graphNavigationPathKey(path) {
+    return JSON.stringify(path.map(level => [level.kind, level.ownerId]));
+  }
+
+function currentBrowserGraphPath() {
+    const path = [];
+    if (apiCompositeEditor) path.push({
+      kind: "api-composite", ownerId: apiCompositeEditor.containerNodeId
+    });
+    if (customCSharpEditor) path.push({
+      kind: "custom-csharp-file", ownerId: customCSharpEditor.fileNodeId
+    });
+    return path;
+  }
+
+function browserGraphNavigationEntry() {
+    const id = bridge?.getProjectId?.();
+    const projects = readBrowserGraphNavigationStore().projects;
+    return id && Object.hasOwn(projects, id) ? projects[id] : null;
+  }
+
+function browserGraphViewState(path = currentBrowserGraphPath()) {
+    const entry = browserGraphNavigationEntry();
+    const key = graphNavigationPathKey(path);
+    return entry?.views && Object.hasOwn(entry.views, key) ? entry.views[key] : null;
+  }
+
+function validBrowserGraphViewport(viewport) {
+    return Boolean(viewport && [viewport.x, viewport.y, viewport.scale].every(Number.isFinite) && viewport.scale > 0);
+  }
+
+function applyBrowserGraphViewState(view, saved) {
+    if (!view || !saved || typeof saved !== "object") return false;
+    const v = saved.viewport;
+    if (!validBrowserGraphViewport(v)) return false;
+    view.viewport = { x: v.x, y: v.y, scale: nodeGraphClamp(v.scale, GRAPH_MIN_ZOOM, GRAPH_MAX_ZOOM) };
+    const nodes = new Set(view.nodes.map(n => n.id));
+    const connections = new Map(view.connections.map(w => [w.id, w]));
+    view.selectedNodeId = nodes.has(saved.selectedNodeId) ? saved.selectedNodeId : null;
+    view.selectedNodeIds = Array.isArray(saved.selectedNodeIds)
+      ? saved.selectedNodeIds.filter(id => nodes.has(id)) : view.selectedNodeId ? [view.selectedNodeId] : [];
+    view.selectedConnectionId = connections.has(saved.selectedConnectionId) ? saved.selectedConnectionId : null;
+    const point = saved.selectedWirePoint;
+    view.selectedWirePoint = point && connections.get(point.connectionId)?.points?.some(p => p.id === point.pointId)
+      ? { connectionId: point.connectionId, pointId: point.pointId } : null;
+    return true;
+  }
+
+function persistBrowserGraphNavigation() {
+    if (!graph?.active || graphNavigationRestorePending || graphNavigationRestoring ||
+        customCSharpRootOperation || apiCompositeRootOperation) return false;
+    const id = bridge?.getProjectId?.();
+    if (!id) return false;
+    const store = readBrowserGraphNavigationStore();
+    const existing = Object.hasOwn(store.projects, id) ? store.projects[id] : null;
+    const entry = {
+      path: currentBrowserGraphPath(),
+      views: existing?.views && typeof existing.views === "object" && !Array.isArray(existing.views)
+        ? { ...existing.views } : {},
+      usedAt: Date.now()
+    };
+    const saveView = (path, view) => {
+      if (!view) return;
+      entry.views[graphNavigationPathKey(path)] = {
+        viewport: { ...view.viewport },
+        selectedNodeId: view.selectedNodeId || null,
+        selectedNodeIds: [...(view.selectedNodeIds || [])],
+        selectedConnectionId: view.selectedConnectionId || null,
+        selectedWirePoint: view.selectedWirePoint ? { ...view.selectedWirePoint } : null,
+        usedAt: entry.usedAt
+      };
+    };
+    saveView([], rootRuntimeGraphView());
+    if (apiCompositeEditor) {
+      saveView(entry.path.slice(0, 1), customCSharpEditor?.mainView || graph);
+    }
+    if (customCSharpEditor) saveView(entry.path, graph);
+    const views = Object.entries(entry.views).sort((a, b) => (b[1]?.usedAt || 0) - (a[1]?.usedAt || 0));
+    entry.views = Object.fromEntries(views.slice(0, 256));
+    Object.defineProperty(store.projects, id, { value: entry, writable: true, enumerable: true, configurable: true });
+    store.projects = Object.fromEntries(Object.entries(store.projects)
+      .sort((a, b) => (b[1]?.usedAt || 0) - (a[1]?.usedAt || 0)).slice(0, 128));
+    try {
+      localStorage.setItem(graphNavigationStorageKey(), JSON.stringify(store));
+      graphNavigationStorageWarning = false;
+      return true;
+    } catch (error) {
+      if (!graphNavigationStorageWarning) {
+        console.warn("The browser-local graph navigation could not be saved.", error);
+        graphNavigationStorageWarning = true;
+      }
+      return false;
+    }
+  }
+
+function restoreBrowserGraphNavigation() {
+    if (!graphNavigationRestorePending || graphNavigationRestoring || !graph?.active ||
+        graphCatalogReadiness !== "ready") return false;
+    const entry = browserGraphNavigationEntry();
+    graphNavigationRestorePending = false;
+    if (!entry || !Array.isArray(entry.path)) return false;
+    graphNavigationRestoring = true;
+    let reached = 0;
+    let staleSource = false;
+    try {
+      applyBrowserGraphViewState(graph, entry.views?.[graphNavigationPathKey([])]);
+      for (const level of entry.path) {
+        if (!level || typeof level.ownerId !== "string" || !findGraphNode(level.ownerId)) break;
+        let opened = false;
+        if (level.kind === "api-composite") {
+          opened = openApiCompositeGraph(level.ownerId, { restoreNavigation: true });
+        } else if (level.kind === "custom-csharp-file") {
+          const fileGraph = graph.customCSharpFiles?.[level.ownerId];
+          if (!fileGraph) break;
+          const source = String(findGraphNode(level.ownerId)?.parameters?.source || "");
+          const sourceHash = window.RMLVisualCSharp?.sourceHash?.(source) || hashText(source);
+          if (fileGraph.sourceEditedInInspector === true ||
+              (fileGraph.sourceHash && fileGraph.sourceHash !== sourceHash)) {
+            staleSource = true;
+            break;
+          }
+          opened = openCustomCSharpFileGraph(level.ownerId, { restoreNavigation: true });
+        }
+        if (!opened) break;
+        reached += 1;
+      }
+    } finally {
+      graphNavigationRestoring = false;
+    }
+    persistBrowserGraphNavigation();
+    if (reached < entry.path.length) {
+      showGraphMessage(staleSource
+        ? "The C# source changed since its saved graph. Opened the parent; open the file graph to synchronize it with the current source."
+        : "The last graph path is not available in this project. Opened its nearest available parent.", "warning");
+    }
+    return reached > 0;
   }
 
 function rootRuntimeGraphView() {
@@ -1410,6 +1556,8 @@ function commitRootRuntimeGraphView(view) {
   }
 
 function handleProjectReplacement(event) {
+    graphNavigationRestorePending = true;
+    graphNavigationRestoring = false;
     const replacementProjectEpoch =
       Number(
         event?.detail?.projectEpoch
@@ -1447,6 +1595,7 @@ function handleProjectReplacement(event) {
     customCSharpEditorDraftValues.clear();
     customCSharpActiveEditorKey = "";
     graphInspectorRenderedSelectionKey = "";
+    graphInspectorRenderedNode = null;
 
     for (const controller of
       customCSharpSynchronizationControllers.values()) {
@@ -1504,8 +1653,7 @@ function handleProjectReplacement(event) {
     activeInteraction = null;
     stopAutoPan();
     clearConnectionTargetStates();
-
-    lastPersistedGraphReference = null;
+    lastPersistedGraphReference = undefined;
     typedGraphCodegenCacheKey = "";
     typedGraphCodegenCache = null;
     resetGraphRenderCaches();
@@ -2675,13 +2823,87 @@ function scheduleGeneratedOutputRefresh() {
     queueMicrotask(run);
   }
 
+function cancelGraphParameterPersistence() {
+    if (graphParameterPersistTimer) {
+      window.clearTimeout(graphParameterPersistTimer);
+      graphParameterPersistTimer = 0;
+    }
+    const dirty = graphParameterPersistenceDirty;
+    graphParameterPersistenceDirty = false;
+    return dirty;
+  }
+
+function flushGraphParameterPersistence() {
+    if (!graphParameterPersistenceDirty) return false;
+    persistGraph(true);
+    return true;
+  }
+
+function graphParameterGestureActive() {
+    for (const [pointerId, control] of graphParameterActivePointers) {
+      if (!control.isConnected) graphParameterActivePointers.delete(pointerId);
+    }
+    return graphParameterActivePointers.size > 0;
+  }
+
+function scheduleGraphParameterPersistence() {
+    if (!graphParameterPersistenceDirty) {
+      persistSchedule += 1;
+      graphParameterPersistenceDirty = true;
+      bridge.markGeneratedOutputPending?.();
+    }
+    cancelCustomCSharpEditorPersistence();
+    if (graphParameterPersistTimer) window.clearTimeout(graphParameterPersistTimer);
+    const epoch = builderProjectEpoch;
+    const commitWhenIdle = () => {
+      graphParameterPersistTimer = 0;
+      if (epoch !== builderProjectEpoch || !graphParameterPersistenceDirty) return;
+      if (graphParameterGestureActive() || activeInteraction || customCSharpEditorPersistenceDirty) {
+        graphParameterPersistTimer = window.setTimeout(
+          commitWhenIdle, GRAPH_PARAMETER_PERSIST_IDLE_MILLISECONDS
+        );
+        return;
+      }
+      flushGraphParameterPersistence();
+    };
+    graphParameterPersistTimer = window.setTimeout(
+      commitWhenIdle, GRAPH_PARAMETER_PERSIST_IDLE_MILLISECONDS
+    );
+  }
+
+function trackGraphParameterGesture(control) {
+    control.addEventListener("pointerdown", event => {
+      if (event.isPrimary === false || event.button !== 0) return;
+      graphParameterActivePointers.set(event.pointerId, control);
+    }, { capture: true, passive: true });
+    const finish = event => {
+      graphParameterActivePointers.delete(event.pointerId);
+    };
+    control.addEventListener("lostpointercapture", finish, { capture: true, passive: true });
+    if (graphParameterPointerTrackingInstalled) return;
+    graphParameterPointerTrackingInstalled = true;
+    document.addEventListener("pointerup", finish, { capture: true, passive: true });
+    document.addEventListener("pointercancel", finish, { capture: true, passive: true });
+    window.addEventListener("blur", () => graphParameterActivePointers.clear());
+  }
+
+function scheduleGraphParameterPreviewRefresh() {
+    if (graphParameterPreviewFrame) return;
+    graphParameterPreviewFrame = requestProjectAnimationFrame(() => {
+      graphParameterPreviewFrame = 0;
+      refreshDisplayValueNodes();
+    });
+  }
+
 function persistGraph(
     immediate = false,
     refreshGeneratedOutput = true,
     viewOnly = false,
     refreshCompositeActions = false
   ) {
-    if (cancelCustomCSharpEditorPersistence()) {
+    const sourceChanged = cancelCustomCSharpEditorPersistence();
+    const parametersChanged = cancelGraphParameterPersistence();
+    if (sourceChanged || parametersChanged) {
       viewOnly = false;
       refreshGeneratedOutput = true;
     }
@@ -2783,6 +3005,7 @@ function persistGraphView(
     }
 
     const commit = () => {
+      persistBrowserGraphNavigation();
       const refreshContent =
         graphViewPersistContentDirty;
       graphViewPersistContentDirty = false;
@@ -2811,7 +3034,7 @@ function persistGraphView(
           false;
         return;
       }
-      if (activeInteraction) {
+      if (activeInteraction || graphParameterPersistenceDirty || customCSharpEditorPersistenceDirty) {
         graphViewPersistTimer =
           window.setTimeout(
             commitWhenIdle,
@@ -2831,6 +3054,7 @@ function persistGraphView(
 function flushGraphViewPersistence(
     immediate = true
   ) {
+    persistBrowserGraphNavigation();
     if (!graphViewPersistTimer) {
       return false;
     }
@@ -3113,11 +3337,17 @@ function previewIncomingConnection(
     nodeId,
     portId
   ) {
-    return graph.connections.find(
-      connection =>
-        connection.toNode === nodeId &&
-        connection.toPort === portId
-    ) || null;
+    ensureGraphConnectionLookups();
+    const ids = graphIncidentConnectionLookupCache.get(nodeId);
+    if (ids) {
+      for (const id of ids) {
+        const connection = graphConnectionLookupCache.get(id);
+        if (connection?.toNode === nodeId && connection.toPort === portId) {
+          return connection;
+        }
+      }
+    }
+    return null;
   }
 
 function previewContext() {
@@ -4300,13 +4530,8 @@ function previewFormatValue(preview) {
   }
 
 function runtimeBridgeChannelForGraph() {
-    const stateSnapshot =
-      bridge?.getStateSnapshot?.() ||
-      {};
-    const metadata =
-      stateSnapshot.metadata ||
-      graph?.configSnapshot?.metadata ||
-      {};
+    const metadata = bridge?.getMetadataSnapshot?.() ||
+      graph?.configSnapshot?.metadata || {};
     const namespaceName =
       graphCsNamespace(
         metadata.namespaceName
@@ -4415,7 +4640,8 @@ function synchronizeRuntimeBridgeSubscription(
     scheduleRuntimeMonitorRefresh();
   }
 
-function runtimeBridgeState() {
+function runtimeBridgeState(context = null) {
+    if (context) return context.state;
     const runtimeBridge =
       window.RMLRuntimeBridge;
     const channel =
@@ -4432,16 +4658,14 @@ function runtimeBridgeState() {
   }
 
 function liveRuntimeRecordForNode(
-    node
+    node,
+    context = null
   ) {
     const runtimeBridge =
       window.RMLRuntimeBridge;
-    const channel =
-      runtimeBridgeChannel ||
+    const channel = context?.channel || runtimeBridgeChannel ||
       runtimeBridgeChannelForGraph();
-    const state =
-      runtimeBridge
-        ?.getState?.(channel);
+    const state = context?.state || runtimeBridge?.getState?.(channel);
 
     if (
       !runtimeBridge ||
@@ -4555,16 +4779,14 @@ function runtimeRecordPresentationText(
   }
 
 function runtimeMonitorPresentation(
-    node
+    node,
+    getPreviewContext = previewContext,
+    monitorContext = null
   ) {
     const definition =
       nodeDefinition(node);
-    const state =
-      runtimeBridgeState();
-    const record =
-      liveRuntimeRecordForNode(
-        node
-      );
+    const state = runtimeBridgeState(monitorContext);
+    const record = liveRuntimeRecordForNode(node, monitorContext);
 
     if (record) {
       const runtimeType =
@@ -4629,7 +4851,8 @@ function runtimeMonitorPresentation(
 
     const preview =
       displayPreviewForNode(
-        node
+        node,
+        getPreviewContext
       );
 
     return {
@@ -4651,7 +4874,7 @@ function runtimeMonitorPresentation(
     };
   }
 
-function displayPreviewForNode(node) {
+function displayPreviewForNode(node, getPreviewContext = previewContext) {
     const definition =
       nodeDefinition(node);
     const inputSpec =
@@ -4683,7 +4906,7 @@ function displayPreviewForNode(node) {
     return previewOutputValue(
       connection.fromNode,
       connection.fromPort,
-      previewContext()
+      getPreviewContext()
     );
   }
 
@@ -4696,7 +4919,11 @@ function refreshDisplayValueNodes() {
       dom.nodesHost,
       dom.inspectorContent
     ].filter(Boolean);
-    let sizeMayHaveChanged = false;
+    const changedNodeIds = new Set();
+    let monitorContext = null;
+    let sharedContext = null;
+    const getContext = () => sharedContext || (sharedContext = previewContext());
+    const presentations = new Map();
 
     for (const root of roots) {
       const monitors =
@@ -4708,26 +4935,35 @@ function refreshDisplayValueNodes() {
         const monitorId =
           host.dataset
             .runtimeMonitorId;
-        const node =
-          graph.nodes.find(
-            candidate =>
-              candidate.id ===
-              monitorId
-          );
+        const node = findGraphNode(monitorId);
 
         if (!node) {
           continue;
         }
 
-        const presentation =
-          runtimeMonitorPresentation(
-            node
-          );
+        let presentation = presentations.get(monitorId);
+        if (!presentation) {
+          if (!monitorContext) {
+            const channel = runtimeBridgeChannel || runtimeBridgeChannelForGraph();
+            monitorContext = {
+              channel,
+              state: window.RMLRuntimeBridge?.getState?.(channel) || {
+                connected: false, active: false
+              }
+            };
+          }
+          presentation = runtimeMonitorPresentation(node, getContext, monitorContext);
+          presentations.set(monitorId, presentation);
+        }
+        const graphArticle = host.closest(".rml-graph-node[data-graph-node-id]");
         const label =
           host.querySelector("span");
         const output =
           host.querySelector("output");
 
+        if (graphArticle && host.classList.contains("multiline") !== (presentation.multiline === true)) {
+          changedNodeIds.add(monitorId);
+        }
         host.classList.toggle(
           "live-runtime",
           presentation.live
@@ -4748,7 +4984,7 @@ function refreshDisplayValueNodes() {
         ) {
           label.textContent =
             presentation.label;
-          sizeMayHaveChanged = true;
+          if (graphArticle) changedNodeIds.add(monitorId);
         }
 
         if (
@@ -4758,22 +4994,18 @@ function refreshDisplayValueNodes() {
         ) {
           output.textContent =
             presentation.text;
-          sizeMayHaveChanged = true;
+          if (graphArticle) changedNodeIds.add(monitorId);
         }
 
-        if (output) {
-          output.title =
-            presentation.title ||
-            presentation.text;
-        }
-
-        host.title =
-          presentation.title || "";
+        const outputTitle = presentation.title || presentation.text;
+        if (output && output.title !== outputTitle) output.title = outputTitle;
+        const hostTitle = presentation.title || "";
+        if (host.title !== hostTitle) host.title = hostTitle;
       }
     }
 
-    if (sizeMayHaveChanged) {
-      scheduleRenderedNodeResizeLimitRefresh();
+    if (changedNodeIds.size > 0) {
+      scheduleRenderedNodeResizeLimitRefresh(changedNodeIds);
     }
   }
 
@@ -6318,6 +6550,7 @@ function activateGraphMode() {
       return false;
     }
 
+    restoreBrowserGraphNavigation();
     cacheDom();
 
     runtimeGraphViewActive = true;
@@ -9338,6 +9571,7 @@ function renderGraphCanvas() {
     if (
       graph.nodes.length >
         GRAPH_DOM_VIRTUALIZATION_THRESHOLD &&
+      !validBrowserGraphViewport(browserGraphViewState()?.viewport) &&
       !graphViewportHasVisibleNode()
     ) {
       centerGraph();
@@ -12257,44 +12491,46 @@ function scheduleGraphWireRender(
         ];
         graphWireFullRenderPending = false;
         graphWirePartialConnectionIds.clear();
-
-        if (!full && partial.length === 0) {
-          if (graphGpuSimplifiedNodesActive()) {
+        if (!full) {
+          if (graphHybridActive() && graphGpuSimplifiedNodesActive()) {
             synchronizeGpuOverviewNodes();
           }
-          return;
-        }
-        if (
-          !full &&
-          updateGraphWireConnections(
-            partial
-          )
-        ) {
-          return;
+          if (
+            partial.length === 0 ||
+            updateGraphWireConnections(partial, { geometryOnly: true })
+          ) {
+            return;
+          }
         }
         renderGraphWires();
       });
   }
 
-function scheduleRenderedNodeResizeLimitRefresh() {
-    if (nodeResizeLimitRefreshFrame) {
-      return;
+function scheduleRenderedNodeResizeLimitRefresh(nodeIds = null) {
+    if (nodeResizeLimitRefreshNodes !== graph?.nodes) {
+      nodeResizeLimitRefreshAll = false;
+      nodeResizeLimitRefreshIds.clear();
+      nodeResizeLimitRefreshNodes = graph?.nodes;
     }
-
-    const projectEpoch =
-      builderProjectEpoch;
-    nodeResizeLimitRefreshFrame =
-      requestProjectAnimationFrame(() => {
-        nodeResizeLimitRefreshFrame = 0;
-        if (
-          projectEpoch !==
-            builderProjectEpoch
-        ) {
-          return;
-        }
-        refreshRenderedNodeResizeLimits();
-        scheduleGraphWireRender();
-      });
+    if (nodeIds === null) nodeResizeLimitRefreshAll = true;
+    else for (const id of nodeIds) nodeResizeLimitRefreshIds.add(id);
+    if (nodeResizeLimitRefreshFrame) return;
+    const projectEpoch = builderProjectEpoch;
+    nodeResizeLimitRefreshFrame = requestProjectAnimationFrame(() => {
+      nodeResizeLimitRefreshFrame = 0;
+      const nodes = nodeResizeLimitRefreshNodes;
+      const ids = nodeResizeLimitRefreshAll ? null : new Set(nodeResizeLimitRefreshIds);
+      nodeResizeLimitRefreshAll = false;
+      nodeResizeLimitRefreshIds.clear();
+      nodeResizeLimitRefreshNodes = null;
+      if (projectEpoch !== builderProjectEpoch || nodes !== graph?.nodes) return;
+      const changed = refreshRenderedNodeResizeLimits(ids);
+      const connections = new Set();
+      for (const id of changed) {
+        for (const connectionId of incidentGraphConnectionIds(id)) connections.add(connectionId);
+      }
+      if (changed.size > 0) scheduleGraphWireRender(connections);
+    });
   }
 
 function rememberNodeBodyScroll(
@@ -12357,6 +12593,9 @@ function syncNodeBodyOverflow(article) {
 
     const hasY = body.scrollHeight > body.clientHeight + 1;
     const hasX = body.scrollWidth > body.clientWidth + 1;
+    const changed = body.classList.contains("rml-scroll-y") !== hasY ||
+      body.classList.contains("rml-scroll-x") !== hasX ||
+      (!hasY && body.scrollTop !== 0) || (!hasX && body.scrollLeft !== 0);
 
     body.classList.toggle(
       "rml-scroll-y",
@@ -12370,7 +12609,7 @@ function syncNodeBodyOverflow(article) {
     if (!hasY) body.scrollTop = 0;
     if (!hasX) body.scrollLeft = 0;
 
-    scheduleNodeBodyWireRefresh(
+    if (changed) scheduleNodeBodyWireRefresh(
       article.dataset.graphNodeId || null
     );
   }
@@ -12869,15 +13108,6 @@ function measureNodeResizeLimits(
         )
       );
 
-    if (
-      content &&
-      Number.isFinite(node.width)
-    ) {
-      content.dataset.rmlMinWidth =
-        String(bodyIntrinsicWidth);
-      window.RMLClassStyles?.sync(content);
-    }
-
     const headerHeight =
       header?.offsetHeight || 45;
     const contentHeight = Math.ceil(
@@ -12961,88 +13191,63 @@ function updateNodeResizeLimitData(
     return limits;
   }
 
-function refreshRenderedNodeResizeLimits() {
-    if (!dom.nodesHost) {
-      return;
+function graphNodeGeometryChanged(previous, next) {
+    if (!previous || !next) return true;
+    if (Math.abs(previous.width - next.width) > 0.01 ||
+        Math.abs(previous.height - next.height) > 0.01 ||
+        previous.sockets.size !== next.sockets.size) return true;
+    for (const [key, socket] of next.sockets) {
+      const old = previous.sockets.get(key);
+      if (!old || old.side !== socket.side || Math.abs(old.x - socket.x) > 0.01 ||
+          Math.abs(old.y - socket.y) > 0.01) return true;
     }
+    return false;
+  }
 
+function refreshRenderedNodeResizeLimits(nodeIds = null) {
+    const geometryChanged = new Set();
+    if (!dom.nodesHost) return geometryChanged;
+    const articles = nodeIds === null
+      ? dom.nodesHost.querySelectorAll(":scope > .rml-graph-node")
+      : [...nodeIds].map(id => dom.nodesHost.querySelector(
+          `.rml-graph-node[data-graph-node-id="${CSS.escape(id)}"]`
+        )).filter(Boolean);
+    const measurements = [];
+    for (const article of articles) {
+      const node = findGraphNode(article.dataset.graphNodeId);
+      if (!node) continue;
+      measurements.push({ article, node,
+        limits: measureNodeResizeLimits(article, node),
+        previous: graphNodeGeometryCache.get(node.id) });
+    }
     let changed = false;
-
-    for (
-      const article of
-      dom.nodesHost.querySelectorAll(
-        ":scope > .rml-graph-node"
-      )
-    ) {
-      const node = findGraphNode(
-        article.dataset.graphNodeId
-      );
-      if (!node) {
-        continue;
-      }
-
-      let limits = measureNodeResizeLimits(
-        article,
-        node
-      );
-
+    for (const {article, node, limits} of measurements) {
       if (Number.isFinite(node.width)) {
-        article._rmlAutomaticWidth =
-          null;
-
-        const width = nodeGraphClamp(
-          node.width,
-          limits.minimumWidth,
-          limits.maximumWidth
-        );
-        if (width !== node.width) {
-          node.width = width;
-          changed = true;
-        }
+        article._rmlAutomaticWidth = null;
+        const width = nodeGraphClamp(node.width, limits.minimumWidth, limits.maximumWidth);
+        if (width !== node.width) { node.width = width; changed = true; }
       } else {
-        article._rmlAutomaticWidth =
-          nodeGraphClamp(
-            Math.max(
-              nodeDefaultWidth(node),
-              limits.minimumWidth,
-              limits.bodyIntrinsicWidth + 2
-            ),
-            limits.minimumWidth,
-            limits.maximumWidth
-          );
-      }
-
-      if (Number.isFinite(node.height)) {
-        const height = nodeGraphClamp(
-          node.height,
-          limits.minimumHeight,
-          limits.maximumHeight
+        article._rmlAutomaticWidth = nodeGraphClamp(
+          Math.max(nodeDefaultWidth(node), limits.minimumWidth, limits.bodyIntrinsicWidth + 2),
+          limits.minimumWidth, limits.maximumWidth
         );
-        if (height !== node.height) {
-          node.height = height;
-          changed = true;
-        }
       }
-
-      applyNodeSizeStyles(
-        node,
-        article
-      );
-      updateNodeResizeLimitData(
-        article,
-        node,
-        limits
-      );
+      if (Number.isFinite(node.height)) {
+        const height = nodeGraphClamp(node.height, limits.minimumHeight, limits.maximumHeight);
+        if (height !== node.height) { node.height = height; changed = true; }
+      }
+      applyNodeSizeStyles(node, article);
+      updateNodeResizeLimitData(article, node, limits);
+      window.RMLClassStyles?.sync(article);
+      window.RMLClassStyles?.sync(limits.content);
+    }
+    for (const {article, node, previous} of measurements) {
+      const next = cacheGraphNodeGeometry(node, article);
+      if (graphNodeGeometryChanged(previous, next)) geometryChanged.add(node.id);
       scheduleNodeBodyOverflowSync(article);
-      cacheGraphNodeGeometry(
-        node,
-        article
-      );
     }
-
-    if (changed) {
-      persistGraphView(false, true);
-    }
+    if (changed) persistGraphView(false, true);
+    return geometryChanged;
   }
 
 function resetNodeSize(
@@ -14614,8 +14819,6 @@ function cacheGraphNodeGeometry(
       return null;
     }
 
-    window.RMLClassStyles?.sync?.(article);
-
     const rectangle =
       article.getBoundingClientRect();
     const scale = Math.max(
@@ -14854,11 +15057,8 @@ function populateGraphNodeHost(
         );
       }
 
-      refreshRenderedNodeResizeLimits();
-      if (
-        preserveExisting &&
-        geometryChangedNodeIds.size > 0
-      ) {
+      for (const id of refreshRenderedNodeResizeLimits()) geometryChangedNodeIds.add(id);
+      if (geometryChangedNodeIds.size > 0) {
         const connectionIds = new Set();
         for (const nodeId of geometryChangedNodeIds) {
           for (const connectionId of incidentGraphConnectionIds(nodeId)) {
@@ -16334,7 +16534,8 @@ function graphWireGeometryInteractionActive() {
   }
 
 function updateGraphWireConnections(
-    connectionIds
+    connectionIds,
+    { geometryOnly = false } = {}
   ) {
     const gpuPartialUpdate =
       graphHybridActive() &&
@@ -16346,7 +16547,7 @@ function updateGraphWireConnections(
     const svgInteractionUpdate =
       !graphHybridActive() &&
       !forceSvgWireVisuals() &&
-      graphWireGeometryInteractionActive();
+      (geometryOnly || graphWireGeometryInteractionActive());
     if (
       !gpuPartialUpdate &&
       !svgInteractionUpdate
@@ -17538,12 +17739,13 @@ function renderGraphInspector(options = {}) {
     const selectionChanged =
       selectionKey !==
         graphInspectorRenderedSelectionKey;
-
+    const selectedNode = findGraphNode(graph?.selectedNodeId);
     if (
       options.selectionOnly === true &&
       options.force !== true &&
       !selectionChanged &&
       !graphInspectorRenderDeferred &&
+      graphInspectorRenderedNode === selectedNode &&
       dom.inspectorContent.firstElementChild
     ) {
       return;
@@ -17560,6 +17762,7 @@ function renderGraphInspector(options = {}) {
     graphInspectorRenderDeferred = false;
     graphInspectorRenderedSelectionKey =
       selectionKey;
+    graphInspectorRenderedNode = selectedNode;
 
     dom.inspectorContent.replaceChildren();
 
@@ -20369,9 +20572,10 @@ function nodeInspectorCard(node) {
               definition.title;
           }
           scheduleRenderedNodeResizeLimitRefresh();
-          persistGraph();
+          scheduleGraphParameterPersistence();
         }
       );
+      trackGraphParameterGesture(input);
       label.appendChild(input);
       card.appendChild(label);
     }
@@ -20903,8 +21107,8 @@ function appendColorXParameterControl(
               refreshCustomCSharpEditorAppearance(
                 node
               );
-              persistGraph();
-              refreshDisplayValueNodes();
+              scheduleGraphParameterPersistence();
+              scheduleGraphParameterPreviewRefresh();
               return;
             }
             node.parameters[
@@ -20917,8 +21121,8 @@ function appendColorXParameterControl(
               .colorStrength =
               state.strength;
 
-            persistGraph();
-            refreshDisplayValueNodes();
+            scheduleGraphParameterPersistence();
+            scheduleGraphParameterPreviewRefresh();
           }
         }
       );
@@ -20927,6 +21131,7 @@ function appendColorXParameterControl(
       return false;
     }
 
+    trackGraphParameterGesture(editor);
     editor.classList.add(
       "rml-graph-colorx-editor"
     );
@@ -21082,10 +21287,13 @@ function appendNumericVectorParameterControl(
     const commitComponents = () => {
       node.parameters[specification.key] =
         components.join(", " );
-      persistGraph(
-        specification.commitImmediately === true
-      );
-      refreshDisplayValueNodes();
+      if (specification.commitImmediately === true) {
+        persistGraph(true);
+        refreshDisplayValueNodes();
+      } else {
+        scheduleGraphParameterPersistence();
+        scheduleGraphParameterPreviewRefresh();
+      }
     };
 
     for (
@@ -21158,6 +21366,7 @@ function appendNumericVectorParameterControl(
       fields.appendChild(componentLabel);
     }
 
+    trackGraphParameterGesture(editor);
     editor.append(
       title,
       fields
@@ -21582,10 +21791,13 @@ function appendParameterControl(
           currentAnalysis = null;
         }
 
-        persistGraph(
-          specification.commitImmediately ===
-            true
-        );
+        const structuralChange = specification.affectsPorts === true ||
+          specification.affectsNode === true || dropdownChange;
+        if (structuralChange || specification.commitImmediately === true) {
+          persistGraph(specification.commitImmediately === true);
+        } else {
+          scheduleGraphParameterPersistence();
+        }
 
         if (
           specification.affectsPorts ===
@@ -21597,7 +21809,11 @@ function appendParameterControl(
           renderGraphNodesAndWires();
         }
 
-        refreshDisplayValueNodes();
+        if (structuralChange || specification.commitImmediately === true) {
+          refreshDisplayValueNodes();
+        } else {
+          scheduleGraphParameterPreviewRefresh();
+        }
 
         if (
           dropdownChange &&
@@ -21607,6 +21823,7 @@ function appendParameterControl(
         }
       };
 
+      if (!customCSharpCodeControl) trackGraphParameterGesture(control);
       control.addEventListener(
         kind === "bool" ||
         kind === "select"
@@ -23312,13 +23529,13 @@ function beginNodeDrag(
     event.preventDefault();
     event.stopPropagation();
 
+    selectGraphNode(nodeId);
+
     const pointer =
       clientToGraph(
         event.clientX,
         event.clientY
       );
-
-    selectGraphNode(nodeId);
 
     activeInteraction = {
       kind: "node",
@@ -25522,6 +25739,9 @@ function handleBuilderRendered(event) {
         lastPersistedGraphReference &&
       !activeInteraction
     ) {
+      graphNavigationRestorePending = true;
+      apiCompositeEditor = null;
+      customCSharpEditor = null;
       graph = sanitizeBuilderProjectGraphState(
         incoming
       );
@@ -25676,6 +25896,10 @@ function initializeNodeGraphHost() {
       },
       { capture: true }
     );
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") persistBrowserGraphNavigation();
+    });
 
     window.addEventListener(
       "resize",

@@ -1505,7 +1505,8 @@ function apiCompositeNodeHasExposablePorts(
   }
 
 function openApiCompositeGraph(
-    containerNodeId
+    containerNodeId,
+    options = {}
   ) {
     if (
       !graph ||
@@ -1531,6 +1532,7 @@ function openApiCompositeGraph(
     ) {
       return false;
     }
+    persistBrowserGraphNavigation();
     graph.customCSharpFiles =
       mergeCustomCSharpFileRegistry(
         mergeCustomCSharpFileRegistry(
@@ -1564,12 +1566,17 @@ function openApiCompositeGraph(
     applyGraphView(
       graphViewFrom(composite)
     );
+    const restoredView = applyBrowserGraphViewState(graph, browserGraphViewState());
     resetGraphRenderCaches();
     pruneConnections();
+    if (options.restoreNavigation === true) return true;
     persistGraph(true);
+    persistBrowserGraphNavigation();
     activateGraphMode();
-    requestProjectAnimationFrame(() => {
+    if (!restoredView) requestProjectAnimationFrame(() => {
+      if (apiCompositeEditor?.containerNodeId !== containerNodeId || customCSharpEditor) return;
       centerGraph();
+      persistBrowserGraphNavigation();
     });
     showGraphMessage(
       `Opened ${apiCompositeEditor.title}.`,
@@ -1598,6 +1605,7 @@ function closeApiCompositeGraph({
       );
       return false;
     }
+    persistBrowserGraphNavigation();
     closeEmbeddedEditorForGraphReplacement();
     const title = apiCompositeEditor.title;
     const previousPresentation =
@@ -1619,6 +1627,7 @@ function closeApiCompositeGraph({
     resetGraphRenderCaches();
     pruneConnections();
     persistGraph(true);
+    persistBrowserGraphNavigation();
     activateGraphMode();
     showGraphMessage(
       emptyComposite

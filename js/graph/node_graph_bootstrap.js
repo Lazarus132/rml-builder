@@ -113,8 +113,12 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
     value: Object.freeze({
       version: 69,
       getState() { return graph; },
-      hasPendingEditorEdits() { return customCSharpEditorPersistenceDirty; },
-      flushPendingEditorEdits() { return flushCustomCSharpEditorPersistence(); },
+      hasPendingEditorEdits() {
+        return customCSharpEditorPersistenceDirty || graphParameterPersistenceDirty;
+      },
+      flushPendingEditorEdits() {
+        return flushGraphParameterPersistence() || flushCustomCSharpEditorPersistence();
+      },
       getCSharpImportTarget() {
         if (
           !graph ||

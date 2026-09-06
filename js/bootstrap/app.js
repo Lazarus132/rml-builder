@@ -42,7 +42,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "custom-csharp-node-drag-20260906-v787";
+  "live-output-navigation-20260906-v790";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -9468,25 +9468,7 @@ function parseProjectDocument(
   );
 }
 
-function applyProjectDocument(
-  project,
-  {
-    restoredPage = null,
-    reason = "project-apply"
-  } = {}
-) {
-  const projectEpoch =
-    ++projectApplicationEpoch;
-  recordPageState(
-    "project.apply-before",
-    {
-      reason,
-      projectPage:
-        project?.workspace?.activePage ||
-        null,
-      restoredPage
-    }
-  );
+function notifyProjectReplacement(project, reason, projectEpoch = ++projectApplicationEpoch) {
   document.dispatchEvent(
     new CustomEvent(
       "rml-builder:project-replacement",
@@ -9509,6 +9491,30 @@ function applyProjectDocument(
     )
   );
   resetGraphCodegenForProjectReplacement();
+
+  return projectEpoch;
+}
+
+function applyProjectDocument(
+  project,
+  {
+    restoredPage = null,
+    reason = "project-apply"
+  } = {}
+) {
+  const projectEpoch =
+    ++projectApplicationEpoch;
+  recordPageState(
+    "project.apply-before",
+    {
+      reason,
+      projectPage:
+        project?.workspace?.activePage ||
+        null,
+      restoredPage
+    }
+  );
+  notifyProjectReplacement(project, reason, projectEpoch);
 
   state.metadata =
     project.metadata;
@@ -9980,8 +9986,9 @@ function resetProjectState() {
     sanitizeBuilderPreferences(
       builderPreferences
     );
-  state.projectId =
-    createFreshProjectId();
+  const newProjectId = createFreshProjectId();
+  notifyProjectReplacement({ projectId: newProjectId }, "project-reset");
+  state.projectId = newProjectId;
   state.metadata = {
     ...DEFAULT_METADATA,
     includeGuide:
@@ -30723,13 +30730,14 @@ async function newBlank() {
       packButton?.click();
     }
 
+    const newProjectId = createFreshProjectId();
+    notifyProjectReplacement({ projectId: newProjectId }, "new-blank");
     state.metadata = {
       ...DEFAULT_METADATA,
       includeGuide:
         retainedPreferences.includeGuide
     };
-    state.projectId =
-      createFreshProjectId();
+    state.projectId = newProjectId;
     state.exportOptions = {
       ...retainedPreferences
         .exportOptions
@@ -33418,7 +33426,15 @@ function builderCodegenStateSnapshot() {
 
 function exposeBuilderBridge() {
   const bridge = {
-    version: 6,
+    version: 7,
+
+    getProjectId() {
+      return String(state.projectId || "");
+    },
+
+    getMetadataSnapshot() {
+      return { ...state.metadata };
+    },
 
     getStorageContract() {
       return {
