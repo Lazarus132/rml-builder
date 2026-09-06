@@ -39,8 +39,10 @@
 
   const generatedGuidance = (
     api,
-    value
+    key
   ) => {
+    if (api?.includeGuideComments !== true && api?.metadata?.includeGuide !== true) return "";
+    const value = window.RMLGuidance.text("runtime", key);
     if (
       typeof api?.guidanceComment ===
         "function"
@@ -54,8 +56,10 @@
 
   const reportGuidance = (
     api,
-    message
+    key
   ) => {
+    const message = generatedGuidance(api, key);
+    if (!message) return;
     if (typeof api?.guidance === "function") {
       api.guidance(message);
       return;
@@ -1079,410 +1083,7 @@
     api.addUsing("System.Threading");
     api.addMember(
       "configuration.runtimeMenu",
-      String.raw`
-internal sealed class RuntimeConfigurationMenuHandle
-{
-    private RuntimeConfigurationMenuHandle()
-    {
-    }
-
-    public static RuntimeConfigurationMenuHandle Instance { get; } =
-        new RuntimeConfigurationMenuHandle();
-}
-
-internal sealed class RuntimeConfigurationMenuItem
-{
-    private RuntimeConfigurationMenuItem(string itemId)
-    {
-        ItemId = itemId ?? string.Empty;
-    }
-
-    public string ItemId { get; }
-
-    public static RuntimeConfigurationMenuItem Empty { get; } =
-        new RuntimeConfigurationMenuItem(string.Empty);
-
-    public static RuntimeConfigurationMenuItem Create(string itemId) =>
-        new RuntimeConfigurationMenuItem(itemId);
-}
-
-private static readonly object _runtimeConfigurationMenuLock = new();
-private static readonly Dictionary<string, bool>
-    _runtimeConfigurationMenuVisibility =
-        new(StringComparer.Ordinal);
-private static readonly Dictionary<string, int>
-    _runtimeConfigurationMenuOrder =
-        new(StringComparer.Ordinal);
-private static readonly Dictionary<string, bool>
-    _runtimeConfigurationMenuHorizontalLayout =
-        new(StringComparer.Ordinal);
-private static readonly Dictionary<string, float>
-    _runtimeConfigurationMenuWidthPercent =
-        new(StringComparer.Ordinal);
-private static readonly Dictionary<string, bool>
-    _runtimeConfigurationMenuLabelVisibility =
-        new(StringComparer.Ordinal);
-private static Func<string, object?, bool, bool>?
-    _runtimeConfigurationMenuValueSetter;
-private static Func<bool>?
-    _runtimeConfigurationMenuDraftSaver;
-private static long _runtimeConfigurationMenuRevision;
-private static long _runtimeConfigurationValueRevision;
-
-public static long RuntimeConfigurationMenuRevision =>
-    Interlocked.Read(
-        ref _runtimeConfigurationMenuRevision);
-
-public static long RuntimeConfigurationValueRevision =>
-    Interlocked.Read(
-        ref _runtimeConfigurationValueRevision);
-
-public static void BindRuntimeConfigurationMenu(
-    Func<string, object?, bool, bool>? valueSetter,
-    Func<bool>? draftSaver)
-{
-    lock (_runtimeConfigurationMenuLock)
-    {
-        _runtimeConfigurationMenuValueSetter =
-            valueSetter;
-        _runtimeConfigurationMenuDraftSaver =
-            draftSaver;
-    }
-}
-
-private static bool SaveRuntimeConfigurationMenuSettings()
-{
-    Func<bool>? saver;
-
-    lock (_runtimeConfigurationMenuLock)
-    {
-        saver =
-            _runtimeConfigurationMenuDraftSaver;
-    }
-
-    try
-    {
-        return saver?.Invoke() == true;
-    }
-    catch
-    {
-        return false;
-    }
-}
-
-public static bool TryGetRuntimeConfigurationMenuVisibility(
-    string itemId,
-    out bool visible)
-{
-    lock (_runtimeConfigurationMenuLock)
-    {
-        return _runtimeConfigurationMenuVisibility.TryGetValue(
-            itemId ?? string.Empty,
-            out visible);
-    }
-}
-
-public static bool TryGetRuntimeConfigurationMenuOrder(
-    string itemId,
-    out int order)
-{
-    lock (_runtimeConfigurationMenuLock)
-    {
-        return _runtimeConfigurationMenuOrder.TryGetValue(
-            itemId ?? string.Empty,
-            out order);
-    }
-}
-
-public static bool TryGetRuntimeConfigurationMenuHorizontalLayout(
-    string itemId,
-    out bool horizontal)
-{
-    lock (_runtimeConfigurationMenuLock)
-    {
-        return _runtimeConfigurationMenuHorizontalLayout.TryGetValue(
-            itemId ?? string.Empty,
-            out horizontal);
-    }
-}
-
-public static bool TryGetRuntimeConfigurationMenuWidthPercent(
-    string itemId,
-    out float widthPercent)
-{
-    lock (_runtimeConfigurationMenuLock)
-    {
-        return _runtimeConfigurationMenuWidthPercent.TryGetValue(
-            itemId ?? string.Empty,
-            out widthPercent);
-    }
-}
-
-public static bool TryGetRuntimeConfigurationMenuLabelVisibility(
-    string itemId,
-    out bool visible)
-{
-    lock (_runtimeConfigurationMenuLock)
-    {
-        return _runtimeConfigurationMenuLabelVisibility.TryGetValue(
-            itemId ?? string.Empty,
-            out visible);
-    }
-}
-
-private static void SetRuntimeConfigurationMenuVisibility(
-    RuntimeConfigurationMenuItem item,
-    bool visible)
-{
-    if (item is null ||
-        string.IsNullOrEmpty(item.ItemId))
-    {
-        return;
-    }
-
-    bool changed;
-    lock (_runtimeConfigurationMenuLock)
-    {
-        changed =
-            !_runtimeConfigurationMenuVisibility.TryGetValue(
-                item.ItemId,
-                out bool current) ||
-            current != visible;
-
-        _runtimeConfigurationMenuVisibility[item.ItemId] =
-            visible;
-    }
-
-    if (changed)
-    {
-        Interlocked.Increment(
-            ref _runtimeConfigurationMenuRevision);
-    }
-}
-
-private static void SetRuntimeConfigurationMenuOrder(
-    RuntimeConfigurationMenuItem item,
-    int order)
-{
-    if (item is null ||
-        string.IsNullOrEmpty(item.ItemId))
-    {
-        return;
-    }
-
-    bool changed;
-    lock (_runtimeConfigurationMenuLock)
-    {
-        changed =
-            !_runtimeConfigurationMenuOrder.TryGetValue(
-                item.ItemId,
-                out int current) ||
-            current != order;
-
-        _runtimeConfigurationMenuOrder[item.ItemId] =
-            order;
-    }
-
-    if (changed)
-    {
-        Interlocked.Increment(
-            ref _runtimeConfigurationMenuRevision);
-    }
-}
-
-private static void SetRuntimeConfigurationMenuHorizontalLayout(
-    RuntimeConfigurationMenuItem item,
-    bool horizontal)
-{
-    if (item is null ||
-        string.IsNullOrEmpty(item.ItemId))
-    {
-        return;
-    }
-
-    bool changed;
-    lock (_runtimeConfigurationMenuLock)
-    {
-        changed =
-            !_runtimeConfigurationMenuHorizontalLayout.TryGetValue(
-                item.ItemId,
-                out bool current) ||
-            current != horizontal;
-
-        _runtimeConfigurationMenuHorizontalLayout[item.ItemId] =
-            horizontal;
-    }
-
-    if (changed)
-    {
-        Interlocked.Increment(
-            ref _runtimeConfigurationMenuRevision);
-    }
-}
-
-private static void SetRuntimeConfigurationMenuWidthPercent(
-    RuntimeConfigurationMenuItem item,
-    float widthPercent)
-{
-    if (item is null ||
-        string.IsNullOrEmpty(item.ItemId))
-    {
-        return;
-    }
-
-    float normalized =
-        float.IsNaN(widthPercent) ||
-        float.IsInfinity(widthPercent)
-            ? 1f
-            : Math.Max(
-                1f,
-                Math.Min(
-                    100f,
-                    widthPercent));
-    bool changed;
-    lock (_runtimeConfigurationMenuLock)
-    {
-        changed =
-            !_runtimeConfigurationMenuWidthPercent.TryGetValue(
-                item.ItemId,
-                out float current) ||
-            Math.Abs(current - normalized) > 0.0001f;
-
-        _runtimeConfigurationMenuWidthPercent[item.ItemId] =
-            normalized;
-    }
-
-    if (changed)
-    {
-        Interlocked.Increment(
-            ref _runtimeConfigurationMenuRevision);
-    }
-}
-
-private static void SetRuntimeConfigurationMenuLabelVisibility(
-    RuntimeConfigurationMenuItem item,
-    bool visible)
-{
-    if (item is null ||
-        string.IsNullOrEmpty(item.ItemId))
-    {
-        return;
-    }
-
-    bool changed;
-    lock (_runtimeConfigurationMenuLock)
-    {
-        changed =
-            !_runtimeConfigurationMenuLabelVisibility.TryGetValue(
-                item.ItemId,
-                out bool current) ||
-            current != visible;
-
-        _runtimeConfigurationMenuLabelVisibility[item.ItemId] =
-            visible;
-    }
-
-    if (changed)
-    {
-        Interlocked.Increment(
-            ref _runtimeConfigurationMenuRevision);
-    }
-}
-
-private static void SetRuntimeConfigurationMenuValue(
-    RuntimeConfigurationMenuItem item,
-    object? value,
-    bool save)
-{
-    if (item is null ||
-        string.IsNullOrEmpty(item.ItemId))
-    {
-        return;
-    }
-
-    Func<string, object?, bool, bool>? setter;
-    lock (_runtimeConfigurationMenuLock)
-    {
-        setter =
-            _runtimeConfigurationMenuValueSetter;
-    }
-
-    if (setter?.Invoke(
-            item.ItemId,
-            value,
-            save) == true)
-    {
-        Interlocked.Increment(
-            ref _runtimeConfigurationValueRevision);
-        Interlocked.Increment(
-            ref _runtimeConfigurationMenuRevision);
-    }
-}
-
-private static void ResetRuntimeConfigurationMenuItem(
-    RuntimeConfigurationMenuItem item)
-{
-    if (item is null ||
-        string.IsNullOrEmpty(item.ItemId))
-    {
-        return;
-    }
-
-    bool changed;
-    lock (_runtimeConfigurationMenuLock)
-    {
-        changed =
-            _runtimeConfigurationMenuVisibility.Remove(
-                item.ItemId) |
-            _runtimeConfigurationMenuOrder.Remove(
-                item.ItemId) |
-            _runtimeConfigurationMenuHorizontalLayout.Remove(
-                item.ItemId) |
-            _runtimeConfigurationMenuWidthPercent.Remove(
-                item.ItemId) |
-            _runtimeConfigurationMenuLabelVisibility.Remove(
-                item.ItemId);
-    }
-
-    if (changed)
-    {
-        Interlocked.Increment(
-            ref _runtimeConfigurationMenuRevision);
-    }
-}
-
-private static void ResetRuntimeConfigurationMenu(
-    RuntimeConfigurationMenuHandle menu)
-{
-    if (menu is null)
-    {
-        return;
-    }
-
-    bool changed;
-    lock (_runtimeConfigurationMenuLock)
-    {
-        changed =
-            _runtimeConfigurationMenuVisibility.Count > 0 ||
-            _runtimeConfigurationMenuOrder.Count > 0 ||
-            _runtimeConfigurationMenuHorizontalLayout.Count > 0 ||
-            _runtimeConfigurationMenuWidthPercent.Count > 0 ||
-            _runtimeConfigurationMenuLabelVisibility.Count > 0;
-
-        _runtimeConfigurationMenuVisibility.Clear();
-        _runtimeConfigurationMenuOrder.Clear();
-        _runtimeConfigurationMenuHorizontalLayout.Clear();
-        _runtimeConfigurationMenuWidthPercent.Clear();
-        _runtimeConfigurationMenuLabelVisibility.Clear();
-    }
-
-    if (changed)
-    {
-        Interlocked.Increment(
-            ref _runtimeConfigurationMenuRevision);
-    }
-}
-`
+      globalThis.RMLCodeTemplates.text("nodes", "Runtime_configuration_menu_helpers", [])
     );
   }
 
@@ -1873,588 +1474,7 @@ private static void ResetRuntimeConfigurationMenu(
     api.addUsing("System.Collections");
     api.addUsing("System.Linq");
 
-    api.addMember("universal.reflection", String.raw`
-private const BindingFlags GraphAllMembers =
-    BindingFlags.Public |
-    BindingFlags.NonPublic |
-    BindingFlags.Instance |
-    BindingFlags.Static |
-    BindingFlags.FlattenHierarchy;
-
-private static IEnumerable<Type> GraphTypeHierarchy(Type type)
-{
-    for (Type? current = type; current is not null; current = current.BaseType)
-    {
-        yield return current;
-    }
-}
-
-private static bool GraphAccessorMatchesTarget(
-    MethodInfo? accessor,
-    bool? staticTarget)
-{
-    return accessor is not null &&
-           (!staticTarget.HasValue || accessor.IsStatic == staticTarget.Value);
-}
-
-private static PropertyInfo? FindGraphProperty(
-    Type? type,
-    string? propertyName,
-    bool? staticTarget = null,
-    bool requireReadable = false,
-    bool requireWritable = false)
-{
-    if (type is null || string.IsNullOrWhiteSpace(propertyName))
-    {
-        return null;
-    }
-
-    foreach (Type current in GraphTypeHierarchy(type))
-    {
-        PropertyInfo? property = current
-            .GetProperties(GraphAllMembers | BindingFlags.DeclaredOnly)
-            .Where(candidate =>
-                string.Equals(candidate.Name, propertyName, StringComparison.Ordinal) &&
-                candidate.GetIndexParameters().Length == 0 &&
-                (!requireReadable || candidate.GetGetMethod(nonPublic: true) is not null) &&
-                (!requireWritable || candidate.GetSetMethod(nonPublic: true) is not null))
-            .Where(candidate =>
-                GraphAccessorMatchesTarget(
-                    candidate.GetGetMethod(nonPublic: true) ??
-                    candidate.GetSetMethod(nonPublic: true),
-                    staticTarget))
-            .OrderByDescending(candidate =>
-                candidate.GetGetMethod(nonPublic: true)?.IsPublic == true ||
-                candidate.GetSetMethod(nonPublic: true)?.IsPublic == true)
-            .ThenBy(candidate => candidate.MetadataToken)
-            .FirstOrDefault();
-
-        if (property is not null)
-        {
-            return property;
-        }
-    }
-
-    foreach (Type interfaceType in type
-        .GetInterfaces()
-        .OrderBy(candidate => candidate.FullName, StringComparer.Ordinal))
-    {
-        PropertyInfo? property = interfaceType
-            .GetProperties(GraphAllMembers | BindingFlags.DeclaredOnly)
-            .Where(candidate =>
-                string.Equals(candidate.Name, propertyName, StringComparison.Ordinal) &&
-                candidate.GetIndexParameters().Length == 0 &&
-                (!requireReadable || candidate.GetGetMethod(nonPublic: true) is not null) &&
-                (!requireWritable || candidate.GetSetMethod(nonPublic: true) is not null))
-            .Where(candidate =>
-                GraphAccessorMatchesTarget(
-                    candidate.GetGetMethod(nonPublic: true) ??
-                    candidate.GetSetMethod(nonPublic: true),
-                    staticTarget))
-            .OrderBy(candidate => candidate.MetadataToken)
-            .FirstOrDefault();
-
-        if (property is not null)
-        {
-            return property;
-        }
-    }
-
-    return null;
-}
-
-private static FieldInfo? FindGraphField(
-    Type? type,
-    string? fieldName,
-    bool? staticTarget = null,
-    bool requireWritable = false)
-{
-    if (type is null || string.IsNullOrWhiteSpace(fieldName))
-    {
-        return null;
-    }
-
-    foreach (Type current in GraphTypeHierarchy(type))
-    {
-        FieldInfo? field = current
-            .GetFields(GraphAllMembers | BindingFlags.DeclaredOnly)
-            .Where(candidate =>
-                string.Equals(candidate.Name, fieldName, StringComparison.Ordinal) &&
-                (!staticTarget.HasValue || candidate.IsStatic == staticTarget.Value) &&
-                (!requireWritable || (!candidate.IsInitOnly && !candidate.IsLiteral)))
-            .OrderByDescending(candidate => candidate.IsPublic)
-            .ThenBy(candidate => candidate.MetadataToken)
-            .FirstOrDefault();
-
-        if (field is not null)
-        {
-            return field;
-        }
-    }
-
-    return null;
-}
-
-private static EventInfo? FindGraphEvent(
-    Type? type,
-    string? eventName,
-    bool? staticTarget = null)
-{
-    if (type is null || string.IsNullOrWhiteSpace(eventName))
-    {
-        return null;
-    }
-
-    foreach (Type current in GraphTypeHierarchy(type))
-    {
-        EventInfo? eventInfo = current
-            .GetEvents(GraphAllMembers | BindingFlags.DeclaredOnly)
-            .Where(candidate =>
-                string.Equals(candidate.Name, eventName, StringComparison.Ordinal))
-            .Where(candidate =>
-                GraphAccessorMatchesTarget(
-                    candidate.GetAddMethod(nonPublic: true) ??
-                    candidate.GetRemoveMethod(nonPublic: true),
-                    staticTarget))
-            .OrderBy(candidate => candidate.MetadataToken)
-            .FirstOrDefault();
-
-        if (eventInfo is not null)
-        {
-            return eventInfo;
-        }
-    }
-
-    foreach (Type interfaceType in type
-        .GetInterfaces()
-        .OrderBy(candidate => candidate.FullName, StringComparer.Ordinal))
-    {
-        EventInfo? eventInfo = interfaceType
-            .GetEvents(GraphAllMembers | BindingFlags.DeclaredOnly)
-            .Where(candidate =>
-                string.Equals(candidate.Name, eventName, StringComparison.Ordinal))
-            .Where(candidate =>
-                GraphAccessorMatchesTarget(
-                    candidate.GetAddMethod(nonPublic: true) ??
-                    candidate.GetRemoveMethod(nonPublic: true),
-                    staticTarget))
-            .OrderBy(candidate => candidate.MetadataToken)
-            .FirstOrDefault();
-
-        if (eventInfo is not null)
-        {
-            return eventInfo;
-        }
-    }
-
-    return null;
-}
-
-private static Type? FindType(string? typeName)
-{
-    if (string.IsNullOrWhiteSpace(typeName))
-    {
-        return null;
-    }
-
-    Type? direct = Type.GetType(typeName, throwOnError: false, ignoreCase: false);
-    if (direct is not null)
-    {
-        return direct;
-    }
-
-    foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
-    {
-        Type? candidate = assembly.GetType(typeName, throwOnError: false, ignoreCase: false);
-        if (candidate is not null)
-        {
-            return candidate;
-        }
-    }
-
-    string shortName = typeName.Contains('.')
-        ? typeName[(typeName.LastIndexOf('.') + 1)..]
-        : typeName;
-
-    foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
-    {
-        try
-        {
-            Type? candidate = assembly
-                .GetTypes()
-                .FirstOrDefault(type =>
-                    string.Equals(type.Name, shortName, StringComparison.Ordinal) ||
-                    string.Equals(type.FullName, typeName, StringComparison.Ordinal));
-
-            if (candidate is not null)
-            {
-                return candidate;
-            }
-        }
-        catch (ReflectionTypeLoadException exception)
-        {
-            Type? candidate = exception.Types
-                .Where(type => type is not null)
-                .FirstOrDefault(type =>
-                    string.Equals(type!.Name, shortName, StringComparison.Ordinal) ||
-                    string.Equals(type.FullName, typeName, StringComparison.Ordinal));
-
-            if (candidate is not null)
-            {
-                return candidate;
-            }
-        }
-    }
-
-    return null;
-}
-
-private static Type[] ResolveTypeList(string? commaSeparatedTypeNames)
-{
-    if (string.IsNullOrWhiteSpace(commaSeparatedTypeNames))
-    {
-        return Type.EmptyTypes;
-    }
-
-    return commaSeparatedTypeNames
-        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-        .Select(name => FindType(name) ?? typeof(object))
-        .ToArray();
-}
-
-private static object? ReadMember(object? target, string? memberName)
-{
-    if (target is null || string.IsNullOrWhiteSpace(memberName))
-    {
-        return null;
-    }
-
-    Type type = target is Type staticType
-        ? staticType
-        : target.GetType();
-    object? instance = target is Type ? null : target;
-
-    bool staticTarget = target is Type;
-    PropertyInfo? property = FindGraphProperty(
-        type,
-        memberName,
-        staticTarget,
-        requireReadable: true);
-    if (property is not null)
-    {
-        return property.GetValue(instance);
-    }
-
-    FieldInfo? field = FindGraphField(type, memberName, staticTarget);
-    if (field is not null)
-    {
-        return field.GetValue(instance);
-    }
-
-    return null;
-}
-
-private static object? ReadMemberPath(object? target, string? memberPath)
-{
-    object? current = target;
-
-    foreach (string part in (memberPath ?? string.Empty)
-        .Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-    {
-        current = ReadMember(current, part);
-        if (current is null)
-        {
-            break;
-        }
-    }
-
-    return current;
-}
-
-private static bool WriteMember(object? target, string? memberName, object? value)
-{
-    if (target is null || string.IsNullOrWhiteSpace(memberName))
-    {
-        return false;
-    }
-
-    Type type = target is Type staticType
-        ? staticType
-        : target.GetType();
-    object? instance = target is Type ? null : target;
-
-    bool staticTarget = target is Type;
-    PropertyInfo? property = FindGraphProperty(
-        type,
-        memberName,
-        staticTarget,
-        requireWritable: true);
-    if (property is not null)
-    {
-        property.SetValue(instance, ConvertGraphValue(value, property.PropertyType));
-        return true;
-    }
-
-    FieldInfo? field = FindGraphField(
-        type,
-        memberName,
-        staticTarget,
-        requireWritable: true);
-    if (field is not null)
-    {
-        field.SetValue(instance, ConvertGraphValue(value, field.FieldType));
-        return true;
-    }
-
-    return false;
-}
-
-private static object? ConvertGraphValue(object? value, Type destinationType)
-{
-    Type targetType = Nullable.GetUnderlyingType(destinationType) ?? destinationType;
-
-    if (value is null)
-    {
-        return targetType.IsValueType
-            ? Activator.CreateInstance(targetType)
-            : null;
-    }
-
-    if (targetType.IsInstanceOfType(value))
-    {
-        return value;
-    }
-
-    if (targetType.IsEnum)
-    {
-        return value is string text
-            ? Enum.Parse(targetType, text, ignoreCase: true)
-            : Enum.ToObject(targetType, value);
-    }
-
-    if (targetType == typeof(Uri))
-    {
-        return new Uri(Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty,
-            UriKind.RelativeOrAbsolute);
-    }
-
-    return Convert.ChangeType(value, targetType, CultureInfo.InvariantCulture);
-}
-
-private static T ConvertGraphValue<T>(object? value)
-{
-    object? converted = ConvertGraphValue(value, typeof(T));
-    return converted is T typed ? typed : default!;
-}
-
-private static bool TryPrepareArguments(
-    ParameterInfo[] parameters,
-    object?[] supplied,
-    out object?[] prepared)
-{
-    prepared = Array.Empty<object?>();
-
-    int required = parameters.Count(parameter => !parameter.IsOptional);
-    if (supplied.Length < required || supplied.Length > parameters.Length)
-    {
-        return false;
-    }
-
-    prepared = new object?[parameters.Length];
-
-    try
-    {
-        for (int index = 0; index < parameters.Length; index++)
-        {
-            if (index < supplied.Length)
-            {
-                prepared[index] = ConvertGraphValue(
-                    supplied[index],
-                    parameters[index].ParameterType.IsByRef
-                        ? parameters[index].ParameterType.GetElementType()!
-                        : parameters[index].ParameterType);
-            }
-            else
-            {
-                prepared[index] = parameters[index].DefaultValue;
-            }
-        }
-
-        return true;
-    }
-    catch
-    {
-        prepared = Array.Empty<object?>();
-        return false;
-    }
-}
-
-private static MethodInfo? FindMethod(
-    Type? type,
-    string? methodName,
-    Type[]? parameterTypes = null)
-{
-    if (type is null || string.IsNullOrWhiteSpace(methodName))
-    {
-        return null;
-    }
-
-    foreach (Type current in GraphTypeHierarchy(type))
-    {
-        IEnumerable<MethodInfo> candidates = current
-            .GetMethods(GraphAllMembers | BindingFlags.DeclaredOnly)
-            .Where(method =>
-                string.Equals(method.Name, methodName, StringComparison.Ordinal));
-
-        if (parameterTypes is { Length: > 0 })
-        {
-            candidates = candidates.Where(method =>
-                method.GetParameters()
-                    .Select(parameter => parameter.ParameterType)
-                    .SequenceEqual(parameterTypes));
-        }
-
-        MethodInfo? match = candidates
-            .OrderBy(method => method.GetParameters().Length)
-            .ThenBy(method => method.MetadataToken)
-            .FirstOrDefault();
-
-        if (match is not null)
-        {
-            return match;
-        }
-    }
-
-    foreach (Type interfaceType in type
-        .GetInterfaces()
-        .OrderBy(candidate => candidate.FullName, StringComparer.Ordinal))
-    {
-        IEnumerable<MethodInfo> candidates = interfaceType
-            .GetMethods(GraphAllMembers | BindingFlags.DeclaredOnly)
-            .Where(method =>
-                string.Equals(method.Name, methodName, StringComparison.Ordinal));
-
-        if (parameterTypes is { Length: > 0 })
-        {
-            candidates = candidates.Where(method =>
-                method.GetParameters()
-                    .Select(parameter => parameter.ParameterType)
-                    .SequenceEqual(parameterTypes));
-        }
-
-        MethodInfo? match = candidates
-            .OrderBy(method => method.GetParameters().Length)
-            .ThenBy(method => method.MetadataToken)
-            .FirstOrDefault();
-
-        if (match is not null)
-        {
-            return match;
-        }
-    }
-
-    return null;
-}
-
-private static object? InvokeBest(
-    object? target,
-    string? methodName,
-    params object?[] arguments)
-{
-    if (target is null || string.IsNullOrWhiteSpace(methodName))
-    {
-        return null;
-    }
-
-    Type type = target is Type staticType
-        ? staticType
-        : target.GetType();
-    object? instance = target is Type ? null : target;
-
-    foreach (MethodInfo method in type
-        .GetMethods(GraphAllMembers)
-        .Where(method => string.Equals(method.Name, methodName, StringComparison.Ordinal))
-        .OrderBy(method => method.GetParameters().Length))
-    {
-        if (method.ContainsGenericParameters)
-        {
-            continue;
-        }
-
-        if (!TryPrepareArguments(method.GetParameters(), arguments, out object?[] prepared))
-        {
-            continue;
-        }
-
-        return method.Invoke(instance, prepared);
-    }
-
-    return null;
-}
-
-private static object? InvokeMethodInfo(
-    MethodInfo? method,
-    object? target,
-    object?[]? arguments)
-{
-    if (method is null)
-    {
-        return null;
-    }
-
-    object?[] supplied = arguments ?? Array.Empty<object?>();
-    if (!TryPrepareArguments(method.GetParameters(), supplied, out object?[] prepared))
-    {
-        throw new ArgumentException($"Arguments do not match {method.DeclaringType?.FullName}.{method.Name}.");
-    }
-
-    return method.Invoke(target, prepared);
-}
-
-private static object? CreateReflective(Type? type, object?[]? arguments)
-{
-    if (type is null)
-    {
-        return null;
-    }
-
-    object?[] supplied = arguments ?? Array.Empty<object?>();
-
-    foreach (ConstructorInfo constructor in type
-        .GetConstructors(GraphAllMembers)
-        .OrderBy(constructor => constructor.GetParameters().Length))
-    {
-        if (!TryPrepareArguments(constructor.GetParameters(), supplied, out object?[] prepared))
-        {
-            continue;
-        }
-
-        return constructor.Invoke(prepared);
-    }
-
-    return Activator.CreateInstance(type);
-}
-
-private static object?[] ToObjectArray(object? value)
-{
-    if (value is null)
-    {
-        return Array.Empty<object?>();
-    }
-
-    if (value is object?[] array)
-    {
-        return array;
-    }
-
-    if (value is IEnumerable enumerable && value is not string)
-    {
-        return enumerable.Cast<object?>().ToArray();
-    }
-
-    return new[] { value };
-}
-`);
+    api.addMember("universal.reflection", globalThis.RMLCodeTemplates.text("nodes", "General_reflection_helpers", []));
   }
 
   function ensureEventRuntime(api) {
@@ -2462,274 +1482,13 @@ private static object?[] ToObjectArray(object? value)
     api.addUsing("System.Linq.Expressions");
     api.addUsing("System.Threading");
     api.addUsing("System.Threading.Tasks");
-    api.addField(
-      "universal.event.subscriptions",
-      "private static readonly object _graphEventSubscriptionLock = new();\nprivate static readonly List<(object? Target, EventInfo Event, Delegate Handler)> _graphEventSubscriptions = new();\nprivate static readonly HashSet<string> _graphEventSubscriptionKeys = new(StringComparer.Ordinal);\nprivate static readonly CancellationTokenSource _graphEventSubscriptionCancellation = new();"
-    );
-    api.addMember("universal.event.helpers", String.raw`
-private static Delegate? SubscribeGraphEvent(
-    object? target,
-    string? eventName,
-    Action<object?[]> callback)
-{
-    if (target is null || string.IsNullOrWhiteSpace(eventName))
-    {
-        return null;
-    }
-
-    bool staticTarget = target is Type;
-    Type targetType = staticTarget
-        ? (Type)target
-        : target.GetType();
-    object? eventTarget = staticTarget
-        ? null
-        : target;
-
-    EventInfo? eventInfo = FindGraphEvent(
-        targetType,
-        eventName,
-        staticTarget);
-    Type? handlerType = eventInfo?.EventHandlerType;
-    MethodInfo? invoke = FindMethod(handlerType, "Invoke");
-
-    if (eventInfo is null || handlerType is null || invoke is null)
-    {
-        return null;
-    }
-
-    ParameterExpression[] parameters = invoke
-        .GetParameters()
-        .Select(parameter => Expression.Parameter(parameter.ParameterType, parameter.Name))
-        .ToArray();
-
-    NewArrayExpression values = Expression.NewArrayInit(
-        typeof(object),
-        parameters.Select(parameter => Expression.Convert(parameter, typeof(object))));
-
-    InvocationExpression body = Expression.Invoke(
-        Expression.Constant(callback),
-        values);
-
-    Delegate handler = Expression
-        .Lambda(handlerType, body, parameters)
-        .Compile();
-
-    eventInfo.AddEventHandler(eventTarget, handler);
-    lock (_graphEventSubscriptionLock)
-    {
-        _graphEventSubscriptions.Add((eventTarget, eventInfo, handler));
-    }
-    return handler;
-}
-
-private static void SubscribeGraphEventWhenAvailable(
-    string subscriptionKey,
-    Func<object?> targetProvider,
-    Func<string?> eventNameProvider,
-    Action<object?[]> callback)
-{
-    lock (_graphEventSubscriptionLock)
-    {
-        if (!_graphEventSubscriptionKeys.Add(subscriptionKey))
-        {
-            return;
-        }
-    }
-
-    if (TrySubscribeGraphEventProviders(
-        targetProvider,
-        eventNameProvider,
-        callback))
-    {
-        return;
-    }
-
-    CancellationToken cancellation =
-        _graphEventSubscriptionCancellation.Token;
-
-    _ = Task.Run(
-        async () =>
-        {
-            try
-            {
-                while (!cancellation.IsCancellationRequested)
-                {
-                    if (TrySubscribeGraphEventProviders(
-                        targetProvider,
-                        eventNameProvider,
-                        callback))
-                    {
-                        return;
-                    }
-
-                    await Task.Delay(50, cancellation)
-                        .ConfigureAwait(false);
-                }
-            }
-            catch (OperationCanceledException)
-            {
-            }
-        },
-        cancellation);
-}
-
-private static bool TrySubscribeGraphEventProviders(
-    Func<object?> targetProvider,
-    Func<string?> eventNameProvider,
-    Action<object?[]> callback)
-{
-    try
-    {
-        return SubscribeGraphEvent(
-            targetProvider(),
-            eventNameProvider(),
-            callback) is not null;
-    }
-    catch
-    {
-        return false;
-    }
-}
-
-private static void UnsubscribeGraphEvents()
-{
-    try
-    {
-        _graphEventSubscriptionCancellation.Cancel();
-    }
-    catch
-    {
-    }
-
-    List<(object? Target, EventInfo Event, Delegate Handler)> subscriptions;
-    lock (_graphEventSubscriptionLock)
-    {
-        subscriptions = new(_graphEventSubscriptions);
-        _graphEventSubscriptions.Clear();
-        _graphEventSubscriptionKeys.Clear();
-    }
-
-    foreach ((object? target, EventInfo eventInfo, Delegate handler) in subscriptions)
-    {
-        try
-        {
-            eventInfo.RemoveEventHandler(target, handler);
-        }
-        catch
-        {
-        }
-    }
-}
-`);
+    api.addMember("universal.event.helpers", globalThis.RMLCodeTemplates.text("nodes", "Event_helpers", []));
   }
 
   function ensureJsonRuntime(api) {
     api.addUsing("System.Text.Json");
     api.addUsing("System.Text.Json.Nodes");
-    api.addMember("universal.json.helpers", String.raw`
-private static JsonNode? ParseGraphJson(string? text)
-{
-    return string.IsNullOrWhiteSpace(text)
-        ? null
-        : JsonNode.Parse(text);
-}
-
-private static string SerializeGraphJson(object? value, bool indented = false)
-{
-    return JsonSerializer.Serialize(
-        value,
-        new JsonSerializerOptions
-        {
-            WriteIndented = indented
-        });
-}
-
-private static JsonNode? ReadGraphJsonProperty(JsonNode? node, string? path)
-{
-    JsonNode? current = node;
-
-    foreach (string part in (path ?? string.Empty)
-        .Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-    {
-        if (current is JsonObject jsonObject)
-        {
-            current = jsonObject[part];
-        }
-        else if (current is JsonArray jsonArray && int.TryParse(part, out int index) &&
-                 index >= 0 && index < jsonArray.Count)
-        {
-            current = jsonArray[index];
-        }
-        else
-        {
-            return null;
-        }
-    }
-
-    return current;
-}
-
-private static string GraphJsonAsString(JsonNode? node)
-{
-    if (node is null)
-    {
-        return string.Empty;
-    }
-
-    try
-    {
-        return node.GetValue<string>();
-    }
-    catch
-    {
-        return node.ToJsonString();
-    }
-}
-
-private static JsonNode? CloneGraphJsonValue(object? value)
-{
-    return value is JsonNode json
-        ? json.DeepClone()
-        : JsonSerializer.SerializeToNode(value);
-}
-
-private static bool SetGraphJsonProperty(
-    JsonNode? node,
-    string? property,
-    object? value)
-{
-    if (node is not JsonObject jsonObject ||
-        string.IsNullOrWhiteSpace(property))
-    {
-        return false;
-    }
-
-    jsonObject[property.Trim()] = CloneGraphJsonValue(value);
-    return true;
-}
-
-private static bool RemoveGraphJsonProperty(
-    JsonNode? node,
-    string? property)
-{
-    return node is JsonObject jsonObject &&
-           !string.IsNullOrWhiteSpace(property) &&
-           jsonObject.Remove(property.Trim());
-}
-
-private static bool AddGraphJsonArrayItem(
-    JsonNode? node,
-    object? value)
-{
-    if (node is not JsonArray jsonArray)
-    {
-        return false;
-    }
-
-    jsonArray.Add(CloneGraphJsonValue(value));
-    return true;
-}
-`);
+    api.addMember("universal.json.helpers", globalThis.RMLCodeTemplates.text("nodes", "JSON_helpers", []));
   }
 
   function ensureNetworkRuntime(api) {
@@ -2753,41 +1512,14 @@ private static bool AddGraphJsonArrayItem(
       "private static readonly HttpClient _graphHttpClient = new();"
     );
     if (includeResponseType) {
-      api.addMember("universal.network.response", String.raw`
-internal sealed record GraphHttpResponse(
-    int StatusCode,
-    string Body,
-    string ContentType,
-    bool Success,
-    string Error)
-{
-    public static readonly GraphHttpResponse Empty =
-        new(0, string.Empty, string.Empty, false, string.Empty);
-}
-`);
+      api.addMember("universal.network.response", globalThis.RMLCodeTemplates.text("nodes", "source_019", []));
     }
   }
 
   function ensureTaskRuntime(api) {
     api.addUsing("System.Threading");
     api.addUsing("System.Threading.Tasks");
-    api.addMember("universal.task.helpers", String.raw`
-private static void RunGraphBackground(Action action)
-{
-    _ = Task.Run(action);
-}
-
-private static async Task WaitForAnyGraphTask(params Task[] tasks)
-{
-    if (tasks.Length == 0)
-    {
-        return;
-    }
-
-    Task first = await Task.WhenAny(tasks).ConfigureAwait(false);
-    await first.ConfigureAwait(false);
-}
-`);
+    api.addMember("universal.task.helpers", globalThis.RMLCodeTemplates.text("nodes", "source_020", []));
   }
 
   function ensureHarmonyRuntime(api) {
@@ -2801,151 +1533,14 @@ private static async Task WaitForAnyGraphTask(params Task[] tasks)
     });
     api.addField(
       "universal.harmony.field",
-      `private static readonly Harmony _graphHarmony = new("${api.escapeString(
+      `private static readonly Harmony _graphHarmony = _rml.ConfigureHarmony("${api.escapeString(
         `${api.namespaceName}.${api.className}.GeneratedGraph`
       )}");`
     );
-    api.addMember("universal.harmony.context", String.raw`
-internal sealed class PatchContext
-{
-    public object? Instance { get; set; }
-    public object?[] Arguments { get; set; } = Array.Empty<object?>();
-    public MethodBase? OriginalMethod { get; set; }
-    public object? Result { get; set; }
-    public Exception? Exception { get; set; }
-    public bool SkipOriginal { get; set; }
-}
-`);
+    api.addMember("universal.harmony.context", globalThis.RMLCodeTemplates.text("nodes", "source_021", []));
     api.addMember(
       "universal.harmony.helpers",
-      String.raw`
-private static MethodBase? ResolveHarmonyTarget(
-    string? typeName,
-    string? methodName,
-    string? argumentTypeNames)
-{
-    Type? targetType = FindType(typeName);
-    if (targetType is null || string.IsNullOrWhiteSpace(methodName))
-    {
-        return null;
-    }
-
-    Type[] argumentTypes = ResolveTypeList(argumentTypeNames);
-
-    if (methodName is ".ctor" or "ctor")
-    {
-        return argumentTypes.Length > 0
-            ? targetType.GetConstructor(GraphAllMembers, null, argumentTypes, null)
-            : targetType.GetConstructors(GraphAllMembers).FirstOrDefault();
-    }
-
-    if (methodName is ".cctor" or "cctor")
-    {
-        return targetType.TypeInitializer;
-    }
-
-    return FindMethod(
-        targetType,
-        methodName,
-        argumentTypes.Length > 0 ? argumentTypes : null);
-}
-
-private static bool RegisterGeneratedHarmonyPatch(
-    string typeName,
-    string methodName,
-    string argumentTypeNames,
-    string patchKind,
-    string callbackMethod,
-    int priority)
-{
-    try
-    {
-        MethodBase? target = ResolveHarmonyTarget(typeName, methodName, argumentTypeNames);
-            MethodInfo? callback = FindMethod(
-                typeof(__GRAPH_CLASS__),
-                callbackMethod);
-
-        if (target is null || callback is null)
-        {
-            _display(
-                $"Harmony target not found: {typeName}.{methodName} / {callbackMethod}");
-            return false;
-        }
-
-        HarmonyMethod patch = new(callback)
-        {
-            priority = priority
-        };
-
-        switch ((patchKind ?? string.Empty).Trim().ToLowerInvariant())
-        {
-            case "prefix":
-                _graphHarmony.Patch(target, prefix: patch);
-                break;
-            case "postfix":
-                _graphHarmony.Patch(target, postfix: patch);
-                break;
-            case "finalizer":
-                _graphHarmony.Patch(target, finalizer: patch);
-                break;
-            case "transpiler":
-                _graphHarmony.Patch(target, transpiler: patch);
-                break;
-            default:
-                _display($"Unsupported Harmony patch kind: {patchKind}");
-                return false;
-        }
-
-        return true;
-    }
-    catch (Exception exception)
-    {
-        _display(
-            $"Harmony patch failed for {typeName}.{methodName}: {exception}");
-        return false;
-    }
-}
-
-private static int _generatedHarmonyAttributePatchesApplied;
-
-private static void RegisterGeneratedHarmonyAttributePatches()
-{
-    if (System.Threading.Interlocked.Exchange(
-            ref _generatedHarmonyAttributePatchesApplied,
-            1) != 0)
-    {
-        return;
-    }
-
-    _graphHarmony.PatchAll(
-        typeof(__GRAPH_CLASS__).Assembly);
-}
-
-private static void CreateGeneratedReversePatch(
-    string targetTypeName,
-    string targetMethodName,
-    string targetArgumentTypeNames,
-    string standInTypeName,
-    string standInMethodName)
-{
-    MethodBase? target = ResolveHarmonyTarget(
-        targetTypeName,
-        targetMethodName,
-        targetArgumentTypeNames);
-    Type? standInType = FindType(standInTypeName);
-    MethodInfo? standIn = FindMethod(standInType, standInMethodName);
-
-    if (target is null || standIn is null)
-    {
-        throw new MissingMethodException(
-            "The reverse-patch target or stand-in method could not be resolved.");
-    }
-
-    _graphHarmony
-        .CreateReversePatcher(target, new HarmonyMethod(standIn))
-        .Patch();
-}
-`.replaceAll("__GRAPH_CLASS__", api.graphClassName)
+      globalThis.RMLCodeTemplates.text("nodes", "Harmony_helpers", []).replaceAll("__GRAPH_CLASS__", api.graphClassName)
     );
   }
 
@@ -3631,38 +2226,7 @@ private static void CreateGeneratedReversePatch(
     ensureReflectionRuntime(api);
     api.addMember(
       "universal.vector.components",
-      String.raw`
-private static T ReadNumericComponent<T>(
-    object? value,
-    string memberName)
-{
-    if (value is null)
-    {
-        return default!;
-    }
-
-    object? component = ReadMember(value, memberName);
-
-    if (component is null)
-    {
-        return default!;
-    }
-
-    if (component is T typed)
-    {
-        return typed;
-    }
-
-    Type targetType =
-        Nullable.GetUnderlyingType(typeof(T)) ??
-        typeof(T);
-
-    return (T)Convert.ChangeType(
-        component,
-        targetType,
-        CultureInfo.InvariantCulture);
-}
-`
+      globalThis.RMLCodeTemplates.text("nodes", "source_022", [])
     );
   }
 
@@ -3907,29 +2471,14 @@ private static T ReadNumericComponent<T>(
     codegenAction(api) {
       const yes = api.emit("true");
       const no = api.emit("false");
-      return `if (${api.input("condition").code})\n        {\n            ${yes ? `${yes}();` : generatedGuidance(api, "// No True path.")}\n        }\n        else\n        {\n            ${no ? `${no}();` : generatedGuidance(api, "// No False path.")}\n        }`;
+      return `if (${api.input("condition").code})\n        {\n            ${yes ? `${yes}();` : generatedGuidance(api, "noTruePath")}\n        }\n        else\n        {\n            ${no ? `${no}();` : generatedGuidance(api, "noFalsePath")}\n        }`;
     }
   });
 
   function ensureStructuredFlowRuntime(api) {
     api.addMember(
       "universal.flow.control-signals",
-      String.raw`
-private sealed class GraphBreakSignal : Exception
-{
-    public override string StackTrace => string.Empty;
-}
-
-private sealed class GraphContinueSignal : Exception
-{
-    public override string StackTrace => string.Empty;
-}
-
-private sealed class GraphReturnSignal : Exception
-{
-    public override string StackTrace => string.Empty;
-}
-`
+      globalThis.RMLCodeTemplates.text("nodes", "source_023", [])
     );
   }
 
@@ -4161,71 +2710,9 @@ private sealed class GraphReturnSignal : Exception
     ensureStructuredFlowRuntime(api);
     api.addUsing("System.Threading");
     api.addUsing("System.Collections.Generic");
-    api.addField(
-      "universal.language.method-context",
-      "private static readonly AsyncLocal<Stack<GraphUserMethodFrame>?> _graphUserMethodFrames = new();"
-    );
     api.addMember(
       "universal.language.method-runtime",
-      String.raw`
-private sealed class GraphUserMethodFrame
-{
-    public GraphUserMethodFrame(object?[] arguments)
-    {
-        Arguments = arguments;
-    }
-
-    public object?[] Arguments { get; }
-    public object? Result { get; set; }
-}
-
-private static GraphUserMethodFrame PushGraphUserMethodFrame(object?[]? arguments)
-{
-    Stack<GraphUserMethodFrame>? stack = _graphUserMethodFrames.Value;
-
-    if (stack is null)
-    {
-        stack = new Stack<GraphUserMethodFrame>();
-        _graphUserMethodFrames.Value = stack;
-    }
-
-    GraphUserMethodFrame frame = new(arguments ?? Array.Empty<object?>());
-    stack.Push(frame);
-    return frame;
-}
-
-private static void PopGraphUserMethodFrame(GraphUserMethodFrame expected)
-{
-    Stack<GraphUserMethodFrame>? stack = _graphUserMethodFrames.Value;
-
-    if (stack is null || stack.Count == 0 || !ReferenceEquals(stack.Peek(), expected))
-    {
-        throw new InvalidOperationException("Visual method context stack is inconsistent.");
-    }
-
-    stack.Pop();
-    if (stack.Count == 0)
-    {
-        _graphUserMethodFrames.Value = null;
-    }
-}
-
-private static GraphUserMethodFrame CurrentGraphUserMethodFrame()
-{
-    Stack<GraphUserMethodFrame>? stack = _graphUserMethodFrames.Value;
-    return stack is not null && stack.Count > 0
-        ? stack.Peek()
-        : throw new InvalidOperationException("This node requires an active visual method call.");
-}
-
-private static T GraphUserMethodArgument<T>(int index)
-{
-    object?[] arguments = CurrentGraphUserMethodFrame().Arguments;
-    return index >= 0 && index < arguments.Length
-        ? ConvertGraphValue<T>(arguments[index])
-        : default!;
-}
-`
+      globalThis.RMLCodeTemplates.text("nodes", "Graph_user_method_frame_helpers", [])
     );
   }
 
@@ -4271,7 +2758,8 @@ private static T GraphUserMethodArgument<T>(int index)
         api.inlineMethod(api.node.id, "body");
       api.addMember(
         `${api.node.id}.visual-method`,
-        `private static object? UserMethod${token}(object?[]? arguments)\n{\n    GraphUserMethodFrame frame = PushGraphUserMethodFrame(arguments);\n\n    try\n    {${body ? `\n        ${body}();` : ""}\n    }\n    catch (GraphReturnSignal)\n    {\n    }\n    finally\n    {\n        PopGraphUserMethodFrame(frame);\n    }\n\n    return frame.Result;\n}`
+        globalThis.RMLCodeTemplates.text("nodes", "source_024", [token,
+body ? `\n        ${body}();` : ""])
       );
     },
     codegenExpression() {
@@ -4685,7 +3173,7 @@ private static T GraphUserMethodArgument<T>(int index)
       const body =
         api.inlineMethod(api.node.id, "body");
       const done = api.emit("completed");
-      return `for (${declaration}${field} = 0; ${field} < Math.Max(0, ${api.input("count").code}); ${field}++)\n        {\n            try\n            {\n                ${body ? `${body}();` : generatedGuidance(api, "// No Body path.")}\n            }\n            catch (GraphContinueSignal)\n            {\n                continue;\n            }\n            catch (GraphBreakSignal)\n            {\n                break;\n            }\n        }${done ? `\n        ${done}();` : ""}`;
+      return `for (${declaration}${field} = 0; ${field} < Math.Max(0, ${api.input("count").code}); ${field}++)\n        {\n            try\n            {\n                ${body ? `${body}();` : generatedGuidance(api, "noBodyPath")}\n            }\n            catch (GraphContinueSignal)\n            {\n                continue;\n            }\n            catch (GraphBreakSignal)\n            {\n                break;\n            }\n        }${done ? `\n        ${done}();` : ""}`;
     }
   });
 
@@ -4764,84 +3252,7 @@ private static T GraphUserMethodArgument<T>(int index)
       api.addUsing("System.Collections");
       api.addMember(
         "collection.foreach.runtime",
-        String.raw`
-private static System.Collections.IEnumerable GraphEnumerateCollection(object? collection)
-{
-    if (collection is null)
-    {
-        return System.Array.Empty<object>();
-    }
-
-    if (collection is System.Collections.IEnumerable enumerable)
-    {
-        return enumerable;
-    }
-
-    throw new System.InvalidOperationException(
-        $"The runtime value {collection.GetType().FullName} is not enumerable.");
-}
-
-private static T GraphCollectionItem<T>(object? value)
-{
-    if (value is null)
-    {
-        return default!;
-    }
-
-    if (value is T typed)
-    {
-        return typed;
-    }
-
-    System.Type targetType =
-        System.Nullable.GetUnderlyingType(typeof(T)) ??
-        typeof(T);
-
-    try
-    {
-        if (targetType.IsEnum)
-        {
-            object convertedEnum =
-                value is string text
-                    ? System.Enum.Parse(
-                        targetType,
-                        text,
-                        ignoreCase: true)
-                    : System.Enum.ToObject(
-                        targetType,
-                        value);
-
-            return (T)convertedEnum;
-        }
-
-        if (
-            value is System.IConvertible &&
-            typeof(System.IConvertible)
-                .IsAssignableFrom(targetType))
-        {
-            object? converted =
-                System.Convert.ChangeType(
-                    value,
-                    targetType,
-                    System.Globalization.CultureInfo.InvariantCulture);
-
-            if (converted is T convertedTyped)
-            {
-                return convertedTyped;
-            }
-        }
-    }
-    catch (System.Exception exception)
-    {
-        throw new System.InvalidCastException(
-            $"Collection item {value.GetType().FullName} cannot be converted to {typeof(T).FullName}.",
-            exception);
-    }
-
-    throw new System.InvalidCastException(
-        $"Collection item {value.GetType().FullName} cannot be used as {typeof(T).FullName}.");
-}
-`
+        globalThis.RMLCodeTemplates.text("nodes", "Collection_enumeration_helper", [])
       );
     },
     codegenExpression(api) {
@@ -4906,7 +3317,7 @@ private static T GraphCollectionItem<T>(object? value)
         ? `\n            ${indexField}++;`
         : "";
 
-      return `${initializeIndex}foreach (object? ${rawItem} in GraphEnumerateCollection(${api.input("collection").code}))\n        {\n            ${assignItem}\n            try\n            {\n                ${body ? `${body}();` : generatedGuidance(api, "// No Body path.")}\n            }\n            catch (GraphContinueSignal)\n            {${incrementIndex}\n                continue;\n            }\n            catch (GraphBreakSignal)\n            {\n                break;\n            }${incrementAfterBody}\n        }${completed ? `\n        ${completed}();` : ""}`;
+      return `${initializeIndex}foreach (object? ${rawItem} in GraphEnumerateCollection(${api.input("collection").code}))\n        {\n            ${assignItem}\n            try\n            {\n                ${body ? `${body}();` : generatedGuidance(api, "noBodyPath")}\n            }\n            catch (GraphContinueSignal)\n            {${incrementIndex}\n                continue;\n            }\n            catch (GraphBreakSignal)\n            {\n                break;\n            }${incrementAfterBody}\n        }${completed ? `\n        ${completed}();` : ""}`;
     },
     previewEvaluate({
       portId,
@@ -4962,144 +3373,7 @@ private static T GraphCollectionItem<T>(object? value)
       api.addUsing("System.Collections.Generic");
       api.addMember(
         "collection.item-at-index.runtime",
-        String.raw`
-private static int GraphCollectionCount(object? collection)
-{
-    if (collection is null)
-    {
-        return 0;
-    }
-
-    if (collection is System.Collections.ICollection direct)
-    {
-        return direct.Count;
-    }
-
-    if (collection is not System.Collections.IEnumerable enumerable ||
-        collection is string)
-    {
-        return 0;
-    }
-
-    int count = 0;
-
-    foreach (object? _ in enumerable)
-    {
-        count++;
-    }
-
-    return count;
-}
-
-private static bool GraphCollectionHasIndex(
-    object? collection,
-    int index)
-{
-    if (collection is null ||
-        collection is string ||
-        index < 0)
-    {
-        return false;
-    }
-
-    if (collection is System.Collections.IList list)
-    {
-        return index < list.Count;
-    }
-
-    if (collection is not System.Collections.IEnumerable enumerable)
-    {
-        return false;
-    }
-
-    int current = 0;
-
-    foreach (object? _ in enumerable)
-    {
-        if (current == index)
-        {
-            return true;
-        }
-
-        current++;
-    }
-
-    return false;
-}
-
-private static T GraphCollectionItemAt<T>(
-    object? collection,
-    int index)
-{
-    if (collection is null ||
-        collection is string ||
-        index < 0)
-    {
-        return default!;
-    }
-
-    object? value = null;
-    bool found = false;
-
-    if (collection is System.Collections.IList list)
-    {
-        if (index < list.Count)
-        {
-            value = list[index];
-            found = true;
-        }
-    }
-    else if (collection is System.Collections.IEnumerable enumerable)
-    {
-        int current = 0;
-
-        foreach (object? item in enumerable)
-        {
-            if (current == index)
-            {
-                value = item;
-                found = true;
-                break;
-            }
-
-            current++;
-        }
-    }
-
-    if (!found)
-    {
-        return default!;
-    }
-
-    if (value is null)
-    {
-        return default!;
-    }
-
-    if (value is T typed)
-    {
-        return typed;
-    }
-
-    System.Type target =
-        System.Nullable.GetUnderlyingType(
-            typeof(T)) ??
-        typeof(T);
-
-    if (
-        value is System.IConvertible &&
-        typeof(System.IConvertible)
-            .IsAssignableFrom(target))
-    {
-        return (T)System.Convert.ChangeType(
-            value,
-            target,
-            System.Globalization.CultureInfo.InvariantCulture);
-    }
-
-    return (T)value;
-}
-`
+        globalThis.RMLCodeTemplates.text("nodes", "Collection_count_helper", [])
       );
     },
     codegenExpression(api) {
@@ -5404,61 +3678,7 @@ private static T GraphCollectionItemAt<T>(
       );
       api.addMember(
         "universal.lifecycle.shutdown",
-        `public static void Shutdown()
-{
-    Volatile.Write(
-        ref _runtimeDisplayPumpStarted,
-        0);
-
-    if (Interlocked.Exchange(
-            ref _graphShutdownStarted,
-            1) != 0)
-    {
-        return;
-    }
-
-    try
-    {
-        bool dispatched =
-            TryDispatchGraphToWorld(
-                () =>
-                {
-                    ${emit}();
-                    RefreshDisplays();
-                });
-
-        if (!dispatched)
-        {
-            _display(
-                "Typed graph unload cleanup could not run because no usable Resonite world was available.");
-        }
-    }
-    catch (Exception exception)
-    {
-        ReportGraphRuntimeFailure(
-            "Mod unload cleanup",
-            exception);
-    }
-    finally
-    {
-        try
-        {
-            UnsubscribeGraphEvents();
-        }
-        catch
-        {
-        }
-
-        try
-        {
-            _graphHarmony.UnpatchAll(
-                _graphHarmony.Id);
-        }
-        catch
-        {
-        }
-    }
-}`
+        globalThis.RMLCodeTemplates.text("nodes", "source_025", [emit])
       );
     }
   });
@@ -5579,7 +3799,10 @@ private static T GraphCollectionItemAt<T>(
       );
       api.addMember(
         `${api.node.id}.startTimer`,
-        `private static void StartTimer${token}(int interval)\n{\n    int safeInterval = Math.Max(1, interval);\n    ${field}?.Dispose();\n    ${field} = new Timer(_ => ${emit ? `${emit}()` : "{ }"}, null, safeInterval, safeInterval);\n}`
+        globalThis.RMLCodeTemplates.text("nodes", "source_026", [token,
+field,
+field,
+emit ? `${emit}()` : "{ }"])
       );
     },
     codegenAction(api) {
@@ -5691,11 +3914,31 @@ private static T GraphCollectionItemAt<T>(
       let callbackCode;
 
       if (kind === "finalizer") {
-        callbackCode = `private static Exception? ${callback}(\n    object? __instance,\n    object?[] __args,\n    MethodBase __originalMethod,\n    Exception? __exception${resultParameter})\n{\n    try\n    {\n        using GraphExecutionScope scope = OpenGraphEntry();\n        ${field} = new PatchContext\n        {\n            Instance = __instance,\n            Arguments = __args,\n            OriginalMethod = __originalMethod,\n            Exception = __exception${resultInitializer}\n        };${emitStatement}${resultCommit}\n        return ${field}.Exception;\n    }\n    catch (Exception exception)\n    {\n        ReportGraphRuntimeFailure(\n            "${failureSource}",\n            exception);\n        return __exception;\n    }\n}`;
+        callbackCode = globalThis.RMLCodeTemplates.text("nodes", "source_027", [callback,
+resultParameter,
+field,
+resultInitializer,
+emitStatement,
+resultCommit,
+field,
+failureSource]);
       } else if (kind === "postfix") {
-        callbackCode = `private static void ${callback}(\n    object? __instance,\n    object?[] __args,\n    MethodBase __originalMethod${resultParameter})\n{\n    try\n    {\n        using GraphExecutionScope scope = OpenGraphEntry();\n        ${field} = new PatchContext\n        {\n            Instance = __instance,\n            Arguments = __args,\n            OriginalMethod = __originalMethod${resultInitializer}\n        };${emitStatement}${resultCommit}\n    }\n    catch (Exception exception)\n    {\n        ReportGraphRuntimeFailure(\n            "${failureSource}",\n            exception);\n    }\n}`;
+        callbackCode = globalThis.RMLCodeTemplates.text("nodes", "source_028", [callback,
+resultParameter,
+field,
+resultInitializer,
+emitStatement,
+resultCommit,
+failureSource]);
       } else {
-        callbackCode = `private static bool ${callback}(\n    object? __instance,\n    object?[] __args,\n    MethodBase __originalMethod${resultParameter})\n{\n    try\n    {\n        using GraphExecutionScope scope = OpenGraphEntry();\n        ${field} = new PatchContext\n        {\n            Instance = __instance,\n            Arguments = __args,\n            OriginalMethod = __originalMethod${resultInitializer}\n        };${emitStatement}${resultCommit}\n        return !${field}.SkipOriginal;\n    }\n    catch (Exception exception)\n    {\n        ReportGraphRuntimeFailure(\n            "${failureSource}",\n            exception);\n        return true;\n    }\n}`;
+        callbackCode = globalThis.RMLCodeTemplates.text("nodes", "source_029", [callback,
+resultParameter,
+field,
+resultInitializer,
+emitStatement,
+resultCommit,
+field,
+failureSource]);
       }
 
       api.addMember(
@@ -7000,17 +5243,24 @@ private static T GraphCollectionItemAt<T>(
       }
       api.addMember(
         `${api.node.id}.send`,
-        `private static async void SendHttp${token}(string url, string body)\n{\n    try\n    {\n        using HttpRequestMessage request = new(new HttpMethod(${quote(
+        globalThis.RMLCodeTemplates.text("nodes", "source_030", [token,
+quote(
           api,
           api.node.parameters.method || "GET"
-        )}), url);\n\n        if (!string.IsNullOrEmpty(body) && request.Method != HttpMethod.Get && request.Method != HttpMethod.Head)\n        {\n            request.Content = new StringContent(body, Encoding.UTF8, ${quote(
+        ),
+quote(
           api,
           api.node.parameters.contentType ||
             "application/json"
-        )});\n        }\n\n        foreach (string line in ${quote(
+        ),
+quote(
           api,
           api.node.parameters.headers || ""
-        )}.Split('\\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))\n        {\n            int separator = line.IndexOf(':');\n            if (separator <= 0) continue;\n            string name = line[..separator].Trim();\n            string value = line[(separator + 1)..].Trim();\n            if (!request.Headers.TryAddWithoutValidation(name, value))\n            {\n                request.Content?.Headers.TryAddWithoutValidation(name, value);\n            }\n        }\n\n        using HttpResponseMessage response = await _graphHttpClient.SendAsync(request).ConfigureAwait(false);${keepResponse ? `\n        string responseBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);` : `\n        _ = await response.Content.ReadAsStringAsync().ConfigureAwait(false);`}${keepResponse ? `\n        _httpResponse${token} = new GraphHttpResponse(\n            (int)response.StatusCode,\n            responseBody,\n            response.Content.Headers.ContentType?.ToString() ?? string.Empty,\n            response.IsSuccessStatusCode,\n            string.Empty);` : ""}\n    }\n    catch (Exception exception)\n    {${keepResponse ? `\n        _httpResponse${token} = new GraphHttpResponse(\n            0,\n            string.Empty,\n            string.Empty,\n            false,\n            exception.ToString());` : `\n        _ = exception;`}\n    }${emit ? `\n\n    ${emit}();` : ""}\n}`
+        ),
+keepResponse ? `\n        string responseBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);` : `\n        _ = await response.Content.ReadAsStringAsync().ConfigureAwait(false);`,
+keepResponse ? `\n        _httpResponse${token} = new GraphHttpResponse(\n            (int)response.StatusCode,\n            responseBody,\n            response.Content.Headers.ContentType?.ToString() ?? string.Empty,\n            response.IsSuccessStatusCode,\n            string.Empty);` : "",
+keepResponse ? `\n        _httpResponse${token} = new GraphHttpResponse(\n            0,\n            string.Empty,\n            string.Empty,\n            false,\n            exception.ToString());` : `\n        _ = exception;`,
+emit ? `\n\n    ${emit}();` : ""])
       );
     },
     codegenExpression(api) {
@@ -7138,10 +5388,34 @@ private static T GraphCollectionItemAt<T>(
       }
       api.addMember(
         `${api.node.id}.connect`,
-        `private static async void ConnectWebSocket${token}(string url)\n{\n    try\n    {\n        if (_webSocket${token} is not null)\n        {\n            _webSocket${token}.Dispose();\n        }\n\n        _webSocket${token} = new ClientWebSocket();${keepError ? `\n        _webSocketError${token} = string.Empty;` : ""}\n\n        foreach (string line in ${quote(
+        globalThis.RMLCodeTemplates.text("nodes", "source_031", [token,
+token,
+token,
+token,
+keepError ? `\n        _webSocketError${token} = string.Empty;` : "",
+quote(
           api,
           api.node.parameters.headers || ""
-        )}.Split('\\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))\n        {\n            int separator = line.IndexOf(':');\n            if (separator > 0)\n            {\n                _webSocket${token}.Options.SetRequestHeader(\n                    line[..separator].Trim(),\n                    line[(separator + 1)..].Trim());\n            }\n        }\n\n        await _webSocket${token}.ConnectAsync(new Uri(url), CancellationToken.None).ConfigureAwait(false);${keepConnected ? `\n        _webSocketConnected${token} = true;` : ""}${connected ? `\n        ${connected}();` : ""}\n\n        byte[] buffer = new byte[64 * 1024];\n\n        while (_webSocket${token}.State == WebSocketState.Open)\n        {${keepText || keepBytes ? `\n            using MemoryStream frame = new();` : ""}\n            WebSocketReceiveResult result;\n\n            do\n            {\n                result = await _webSocket${token}\n                    .ReceiveAsync(buffer, CancellationToken.None)\n                    .ConfigureAwait(false);\n${keepText || keepBytes ? `\n                if (result.Count > 0)\n                {\n                    frame.Write(buffer, 0, result.Count);\n                }` : ""}\n            }\n            while (!result.EndOfMessage);\n\n            if (result.MessageType == WebSocketMessageType.Close)\n            {\n                break;\n            }\n${keepText || keepBytes ? `\n            byte[] messageBytes = frame.ToArray();` : ""}${keepBytes ? `\n            _webSocketBytes${token} = messageBytes;` : ""}${keepText ? `\n            _webSocketText${token} = result.MessageType == WebSocketMessageType.Text\n                ? Encoding.UTF8.GetString(messageBytes)\n                : string.Empty;` : ""}${message ? `\n            ${message}();` : ""}\n        }\n    }\n    catch (Exception exception)\n    {${keepError ? `\n        _webSocketError${token} = exception.ToString();` : `\n        _ = exception;`}\n    }\n    finally\n    {${keepConnected ? `\n        _webSocketConnected${token} = false;` : ""}${closed ? `\n        ${closed}();` : ""}\n    }\n}\n\nprivate static async void CloseWebSocket${token}()\n{\n    try\n    {\n        if (_webSocket${token}?.State == WebSocketState.Open)\n        {\n            await _webSocket${token}\n                .CloseAsync(WebSocketCloseStatus.NormalClosure, "Graph close", CancellationToken.None)\n                .ConfigureAwait(false);\n        }\n    }\n    catch (Exception exception)\n    {${keepError ? `\n        _webSocketError${token} = exception.ToString();` : `\n        _ = exception;`}\n    }\n}`
+        ),
+token,
+token,
+keepConnected ? `\n        _webSocketConnected${token} = true;` : "",
+connected ? `\n        ${connected}();` : "",
+token,
+keepText || keepBytes ? `\n            using MemoryStream frame = new();` : "",
+token,
+keepText || keepBytes ? `\n                if (result.Count > 0)\n                {\n                    frame.Write(buffer, 0, result.Count);\n                }` : "",
+keepText || keepBytes ? `\n            byte[] messageBytes = frame.ToArray();` : "",
+keepBytes ? `\n            _webSocketBytes${token} = messageBytes;` : "",
+keepText ? `\n            _webSocketText${token} = result.MessageType == WebSocketMessageType.Text\n                ? Encoding.UTF8.GetString(messageBytes)\n                : string.Empty;` : "",
+message ? `\n            ${message}();` : "",
+keepError ? `\n        _webSocketError${token} = exception.ToString();` : `\n        _ = exception;`,
+keepConnected ? `\n        _webSocketConnected${token} = false;` : "",
+closed ? `\n        ${closed}();` : "",
+token,
+token,
+token,
+keepError ? `\n        _webSocketError${token} = exception.ToString();` : `\n        _ = exception;`])
       );
     },
     codegenExpression(api) {
@@ -7210,7 +5484,10 @@ private static T GraphCollectionItemAt<T>(
       }
       api.addMember(
         `${api.node.id}.send`,
-        `private static async void SendWebSocket${token}(ClientWebSocket? socket, string text)\n{\n    try\n    {${keepError ? `\n        _webSocketSendError${token} = string.Empty;` : ""}\n        ClientWebSocket activeSocket = socket ?? throw new InvalidOperationException("The WebSocket input is null.");\n        byte[] data = Encoding.UTF8.GetBytes(text ?? string.Empty);\n        await activeSocket.SendAsync(data, WebSocketMessageType.Text, true, CancellationToken.None).ConfigureAwait(false);\n    }\n    catch (Exception exception)\n    {${keepError ? `\n        _webSocketSendError${token} = exception.ToString();` : `\n        _ = exception;`}\n    }${done ? `\n\n    ${done}();` : ""}\n}`
+        globalThis.RMLCodeTemplates.text("nodes", "source_032", [token,
+keepError ? `\n        _webSocketSendError${token} = string.Empty;` : "",
+keepError ? `\n        _webSocketSendError${token} = exception.ToString();` : `\n        _ = exception;`,
+done ? `\n\n    ${done}();` : ""])
       );
     },
     codegenExpression(api) {
@@ -7262,7 +5539,10 @@ private static T GraphCollectionItemAt<T>(
       }
       api.addMember(
         `${api.node.id}.send`,
-        `private static async void SendTcp${token}(string host, int port, string text)\n{\n    try\n    {${keepError ? `\n        _tcpError${token} = string.Empty;` : ""}\n        using TcpClient client = new();\n        await client.ConnectAsync(host, port).ConfigureAwait(false);\n        byte[] data = Encoding.UTF8.GetBytes(text ?? string.Empty);\n        await client.GetStream().WriteAsync(data).ConfigureAwait(false);\n    }\n    catch (Exception exception)\n    {${keepError ? `\n        _tcpError${token} = exception.ToString();` : `\n        _ = exception;`}\n    }${done ? `\n\n    ${done}();` : ""}\n}`
+        globalThis.RMLCodeTemplates.text("nodes", "source_033", [token,
+keepError ? `\n        _tcpError${token} = string.Empty;` : "",
+keepError ? `\n        _tcpError${token} = exception.ToString();` : `\n        _ = exception;`,
+done ? `\n\n    ${done}();` : ""])
       );
     },
     codegenExpression(api) {
@@ -7314,7 +5594,10 @@ private static T GraphCollectionItemAt<T>(
       }
       api.addMember(
         `${api.node.id}.send`,
-        `private static async void SendUdp${token}(string host, int port, string text)\n{\n    try\n    {${keepError ? `\n        _udpError${token} = string.Empty;` : ""}\n        using UdpClient client = new();\n        byte[] data = Encoding.UTF8.GetBytes(text ?? string.Empty);\n        await client.SendAsync(data, data.Length, host, port).ConfigureAwait(false);\n    }\n    catch (Exception exception)\n    {${keepError ? `\n        _udpError${token} = exception.ToString();` : `\n        _ = exception;`}\n    }${done ? `\n\n    ${done}();` : ""}\n}`
+        globalThis.RMLCodeTemplates.text("nodes", "source_034", [token,
+keepError ? `\n        _udpError${token} = string.Empty;` : "",
+keepError ? `\n        _udpError${token} = exception.ToString();` : `\n        _ = exception;`,
+done ? `\n\n    ${done}();` : ""])
       );
     },
     codegenExpression(api) {
@@ -7464,7 +5747,11 @@ private static T GraphCollectionItemAt<T>(
       }
       api.addMember(
         `${api.node.id}.await`,
-        `private static async void AwaitTask${token}(Task task)\n{\n    try\n    {${keepException ? `\n        _awaitException${token} = null!;` : ""}\n        await task.ConfigureAwait(false);${done ? `\n        ${done}();` : ""}\n    }\n    catch (Exception exception)\n    {${keepException ? `\n        _awaitException${token} = exception;` : `\n        _ = exception;`}${faulted ? `\n        ${faulted}();` : ""}\n    }\n}`
+        globalThis.RMLCodeTemplates.text("nodes", "source_035", [token,
+keepException ? `\n        _awaitException${token} = null!;` : "",
+done ? `\n        ${done}();` : "",
+keepException ? `\n        _awaitException${token} = exception;` : `\n        _ = exception;`,
+faulted ? `\n        ${faulted}();` : ""])
       );
     },
     codegenExpression(api) {
@@ -8077,130 +6364,7 @@ private static T GraphCollectionItemAt<T>(
     api.addUsing("System.Globalization");
     api.addMember(
       "normal-core.conversion.helpers",
-      String.raw`
-private static bool NormalTryConvert<T>(object? value, out T result)
-{
-    try
-    {
-        if (value is T typed)
-        {
-            result = typed;
-            return true;
-        }
-
-        Type target = Nullable.GetUnderlyingType(typeof(T)) ?? typeof(T);
-
-        if (value is null)
-        {
-            result = default!;
-            return !target.IsValueType || Nullable.GetUnderlyingType(typeof(T)) is not null;
-        }
-
-        if (target == typeof(string))
-        {
-            result = (T)(object)(Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty);
-            return true;
-        }
-
-        if (target == typeof(Uri))
-        {
-            bool valid = Uri.TryCreate(
-                Convert.ToString(value, CultureInfo.InvariantCulture),
-                UriKind.RelativeOrAbsolute,
-                out Uri? uri);
-            result = valid ? (T)(object)uri! : default!;
-            return valid;
-        }
-
-        if (target.IsEnum)
-        {
-            object convertedEnum = value is string text
-                ? Enum.Parse(target, text, ignoreCase: true)
-                : Enum.ToObject(target, value);
-            result = (T)convertedEnum;
-            return true;
-        }
-
-        if (target == typeof(bool) && value is string booleanText)
-        {
-            bool valid = bool.TryParse(booleanText, out bool booleanValue);
-            result = valid ? (T)(object)booleanValue : default!;
-            return valid;
-        }
-
-        if (value is string numericText)
-        {
-            if (target == typeof(int))
-            {
-                bool valid = int.TryParse(numericText, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed);
-                result = valid ? (T)(object)parsed : default!;
-                return valid;
-            }
-            if (target == typeof(float))
-            {
-                bool valid = float.TryParse(numericText, NumberStyles.Float, CultureInfo.InvariantCulture, out float parsed);
-                result = valid ? (T)(object)parsed : default!;
-                return valid;
-            }
-            if (target == typeof(double))
-            {
-                bool valid = double.TryParse(numericText, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed);
-                result = valid ? (T)(object)parsed : default!;
-                return valid;
-            }
-        }
-
-        object? converted = Convert.ChangeType(
-            value,
-            target,
-            CultureInfo.InvariantCulture);
-        result = converted is null
-            ? default!
-            : (T)converted;
-        return converted is not null || !target.IsValueType;
-    }
-    catch
-    {
-        result = default!;
-        return false;
-    }
-}
-
-private static bool NormalTryCast<T>(object? value, out T result)
-{
-    if (value is T typed)
-    {
-        result = typed;
-        return true;
-    }
-
-    result = default!;
-    return false;
-}
-
-private static T NormalCastOrDefault<T>(object? value)
-{
-    return NormalTryCast<T>(value, out T result)
-        ? result
-        : default!;
-}
-
-private static T NormalConvertOrDefault<T>(object? value)
-{
-    return NormalTryConvert<T>(value, out T result)
-        ? result
-        : default!;
-}
-
-private static string NormalConversionError<T>(object? value)
-{
-    return NormalTryConvert<T>(value, out _)
-        ? string.Empty
-        : "Cannot convert '" +
-          (Convert.ToString(value, CultureInfo.InvariantCulture) ?? "null") +
-          "' to " + typeof(T).Name + ".";
-}
-`
+      globalThis.RMLCodeTemplates.text("nodes", "Normal_conversion_helpers", [])
     );
   }
 
@@ -10340,7 +8504,13 @@ private static string NormalConversionError<T>(object? value)
         : "catch (Exception)";
       api.addMember(
         `${api.node.id}.timeout`,
-        `private static async void WaitWithTimeout${token}(Task task, int milliseconds)\n{\n    try\n    {${keepException ? `\n        _normalTimeoutException${token} = null!;` : ""}\n        Task delay = Task.Delay(Math.Max(0, milliseconds));\n        Task winner = await Task.WhenAny(task, delay).ConfigureAwait(false);\n        if (ReferenceEquals(winner, delay))\n        {${timedOut ? `\n            ${timedOut}();` : ""}\n            return;\n        }\n\n        await task.ConfigureAwait(false);${completed ? `\n        ${completed}();` : ""}\n    }\n    ${catchClause}\n    {${keepException ? `\n        _normalTimeoutException${token} = caught;` : ""}${faulted ? `\n        ${faulted}();` : ""}\n    }\n}`
+        globalThis.RMLCodeTemplates.text("nodes", "source_036", [token,
+keepException ? `\n        _normalTimeoutException${token} = null!;` : "",
+timedOut ? `\n            ${timedOut}();` : "",
+completed ? `\n        ${completed}();` : "",
+catchClause,
+keepException ? `\n        _normalTimeoutException${token} = caught;` : "",
+faulted ? `\n        ${faulted}();` : ""])
       );
     },
     codegenExpression(api) {
@@ -10390,11 +8560,33 @@ private static string NormalConversionError<T>(object? value)
       );
       api.addField(
         `${api.node.id}.state`,
-        `private static int _normalRetryAttempt${token};\nprivate static int _normalRetryMaximum${token} = 1;\nprivate static int _normalRetryDelay${token};\nprivate static int _normalRetryGeneration${token};`
+        globalThis.RMLCodeTemplates.text("nodes", "source_037", [token,
+token,
+token,
+token])
       );
       api.addMember(
         `${api.node.id}.retry`,
-        `private static void StartRetry${token}(int maximum, int delay)\n{\n    _normalRetryGeneration${token}++;\n    _normalRetryMaximum${token} = Math.Max(1, maximum);\n    _normalRetryDelay${token} = Math.Max(0, delay);\n    _normalRetryAttempt${token} = 1;${attempt ? `\n    ${attempt}();` : ""}\n}\n\nprivate static void CompleteRetry${token}()\n{\n    _normalRetryGeneration${token}++;${completed ? `\n    ${completed}();` : ""}\n}\n\nprivate static async void FailRetry${token}()\n{\n    int generation = _normalRetryGeneration${token};\n    if (_normalRetryAttempt${token} >= _normalRetryMaximum${token})\n    {\n        _normalRetryGeneration${token}++;${exhausted ? `\n        ${exhausted}();` : ""}\n        return;\n    }\n\n    if (_normalRetryDelay${token} > 0)\n    {\n        await Task.Delay(_normalRetryDelay${token}).ConfigureAwait(false);\n    }\n\n    if (generation != _normalRetryGeneration${token})\n    {\n        return;\n    }\n\n    _normalRetryAttempt${token}++;${attempt ? `\n    ${attempt}();` : ""}\n}`
+        globalThis.RMLCodeTemplates.text("nodes", "source_038", [token,
+token,
+token,
+token,
+token,
+attempt ? `\n    ${attempt}();` : "",
+token,
+token,
+completed ? `\n    ${completed}();` : "",
+token,
+token,
+token,
+token,
+token,
+exhausted ? `\n        ${exhausted}();` : "",
+token,
+token,
+token,
+token,
+attempt ? `\n    ${attempt}();` : ""])
       );
     },
     codegenExpression(api) {
@@ -11566,7 +9758,7 @@ private static string NormalConversionError<T>(object? value)
               content:
 `${generatedGuidance(
   api,
-  "// Generated registration marker for the matching custom RML loader."
+  "patchRegistration"
 )}
 [assembly: ResoniteModLoader.RmlPatchAssembly(
     "${api.escapeString(harmonyId)}",
@@ -11655,7 +9847,7 @@ ${indented}
       if (advancedCodeUsed) {
         reportGuidance(
           api,
-          "Advanced C# nodes remove the expressiveness ceiling, but their source is intentionally exported verbatim and must be compiled against the target Resonite/RML assemblies."
+          "advancedSource"
         );
       }
 

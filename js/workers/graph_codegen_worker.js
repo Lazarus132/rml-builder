@@ -197,13 +197,13 @@ async function ensureRuntime(catalog) {
       "../graph/node_graph_registry.js?v=1-physical-modules-v748"
     );
     importScripts(
-      "../catalog/mod_nodes.js?v=70-javascript-integrity-audit-v737"
+      "../catalog/mod_nodes.js?v=794-shared-loader-runtime"
     );
     importScripts(
       "../compiler/visual_csharp.js?v=82-source-comment-pruning-v776"
     );
     importScripts(
-      "../catalog/api_nodes.js?v=68-source-comment-pruning-v776"
+      "../catalog/api_nodes.js?v=794-shared-loader-runtime"
     );
 
     if (
@@ -215,7 +215,7 @@ async function ensureRuntime(catalog) {
     }
 
     importScripts(
-      "../graph/node_graph_codegen.js?v=3-source-comment-pruning-v776"
+      "../graph/node_graph_codegen.js?v=794-shared-loader-runtime"
     );
 
     if (
@@ -282,6 +282,17 @@ self.addEventListener("message", event => {
         return;
       }
 
+      if (!self.RMLCodeTemplates) importScripts("../core/code_templates.js?v=794-shared-loader-runtime");
+      for (const pack of request.templates || []) self.RMLCodeTemplates.install(pack.package, pack);
+      await self.RMLCodeTemplates.ensure(["runtime", "nodes", "api"]);
+
+      const metadata = request.state?.metadata ||
+        request.state?.extensions?.typedNodeGraph?.configSnapshot?.metadata || {};
+      if (metadata.includeGuide === true) {
+        if (!self.RMLGuidance) importScripts("../core/guidance.js?v=793");
+        if (request.guidance) self.RMLGuidance.install("runtime", request.guidance);
+        await self.RMLGuidance.ensure(["runtime"]);
+      }
       const result =
         self.RMLTypedNodeGraphGenerator.build({
           state: request.state || {},

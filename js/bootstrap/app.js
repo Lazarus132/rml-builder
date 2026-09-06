@@ -42,7 +42,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "live-output-navigation-20260906-v790";
+  "manual-port-discovery-20260906-v797";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -868,6 +868,32 @@ function exportReadinessDiagnostics() {
     : [];
 }
 
+const GUIDANCE_PENDING_MESSAGE = "Guidance comments are loading…";
+let guidanceModulePromise = null;
+let guidanceModuleError = null;
+
+function generatedGuidanceStatus() {
+  const templateStatus = window.RMLCodeTemplates?.prepareOutput(state, requestGeneratedOutputUpdate) || (!window.RMLCodeTemplates ? "C# template loader is missing. Reload the Builder." : "");
+  if (templateStatus) return templateStatus;
+  if (state.metadata.includeGuide !== true) return "";
+  if (window.RMLGuidance) {
+    return window.RMLGuidance.prepareOutput(state, requestGeneratedOutputUpdate);
+  }
+  if (guidanceModuleError) return `Guidance comments: ${guidanceModuleError.message} Switch guidance comments off and on to retry.`;
+  if (!guidanceModulePromise) {
+    guidanceModulePromise = ensureLazyScriptBundle("guidance").then(
+      requestGeneratedOutputUpdate,
+      error => { guidanceModuleError = error; requestGeneratedOutputUpdate(); }
+    );
+  }
+  return GUIDANCE_PENDING_MESSAGE;
+}
+
+function requireGeneratedGuidance() {
+  const message = generatedGuidanceStatus();
+  if (message) throw new Error(message);
+}
+
 const LARGE_GRAPH_CODEGEN_PENDING_MESSAGE =
   "Large graph code generation is running in a background worker. Export becomes available automatically when it finishes.";
 const TYPED_GRAPH_MODULES_PENDING_MESSAGE =
@@ -880,6 +906,10 @@ function isAutomatedExportPreparationDiagnostic(
     diagnostic || ""
   ).trim();
   return (
+    message === "C# source templates are loading…" ||
+    message === "Node graph: C# source templates are loading…" ||
+    message === GUIDANCE_PENDING_MESSAGE ||
+    message === `Node graph: ${GUIDANCE_PENDING_MESSAGE}` ||
     message ===
       `Node graph: ${LARGE_GRAPH_CODEGEN_PENDING_MESSAGE}` ||
     message ===
@@ -2086,6 +2116,7 @@ function largeGraphCodegenKey(
       metadata.className || "",
     version:
       metadata.version || "",
+    includeGuide: metadata.includeGuide === true,
     catalog:
       graphCodegenCatalogKey(catalog),
     definitions:
@@ -2170,7 +2201,7 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=142-source-comment-pruning-v776",
+      "../workers/graph_codegen_worker.js?v=794-shared-loader-runtime",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -2316,6 +2347,8 @@ async function pumpGraphCodegenWorkerQueue() {
       id: build.id,
       operation: "build",
       catalog,
+      templates: window.RMLCodeTemplates.forWorker(worker),
+      guidance: window.RMLGuidance?.forWorker(worker, build.state.metadata?.includeGuide === true),
       state: build.state,
       entries: build.entries
     });
@@ -5264,10 +5297,10 @@ function settingDeclaration(
   const pathComment =
     includeGuideComments
       ? path.length > 0
-        ? `    // ${csharpSingleLineCommentText(
+      ? window.RMLGuidance.text("configuration", "settingPath", csharpSingleLineCommentText(
             path.join(" / ")
-          )}\n`
-        : "    // Always visible\n"
+          ))
+      : window.RMLGuidance.text("configuration", "alwaysVisible")
       : "";
   return `${pathComment}    [AutoRegisterConfigKey]
     public static readonly ModConfigurationKey<${type}>
@@ -5294,19 +5327,17 @@ function controllerDeclaration(
   const pathComment =
     includeGuideComments
       ? path.length > 0
-        ? `    // Nested navigation: ${csharpSingleLineCommentText(
+      ? window.RMLGuidance.text("configuration", "navigationPath", csharpSingleLineCommentText(
             path.join(" / ")
-          )}\n`
-        : "    // Top-level navigation\n"
+          ))
+      : window.RMLGuidance.text("configuration", "topLevelNavigation")
       : "";
-  return `${pathComment}    [AutoRegisterConfigKey]
-    public static readonly ModConfigurationKey<${enumName}>
-        ${field} =
-            new(
-                "${escapeCSharp(controller.keyName)}",
-                "${escapeCSharp(controller.description)}",
-                () => ${defaultOption});
-`;
+  return globalThis.RMLCodeTemplates.text("configuration", "source_001", [pathComment,
+enumName,
+field,
+escapeCSharp(controller.keyName),
+escapeCSharp(controller.description),
+defaultOption]);
 }
 
 function enumDeclarations(entries) {
@@ -5413,6 +5444,13 @@ function getTypedNodeGraphContribution() {
 
   if (!hasPackedRuntimeGraph) {
     return null;
+  }
+
+  const guidanceStatus = generatedGuidanceStatus();
+  if (guidanceStatus) {
+    return { ...pendingLargeGraphContribution(),
+      pending: guidanceStatus === GUIDANCE_PENDING_MESSAGE || guidanceStatus === "C# source templates are loading…",
+      diagnostics: [guidanceStatus] };
   }
 
   if (typedNodeGraphModulesState === "pending") {
@@ -5681,12 +5719,13 @@ function optimizeBuilderOwnedPrivateArrayReturns(
 }
 
 function generateCode() {
+  requireGeneratedGuidance();
   const metadata = state.metadata;
   const includeGuideComments =
     metadata.includeGuide === true;
-  const generatedGuidance = value =>
+  const generatedGuidance = (key, ...values) =>
     includeGuideComments
-      ? String(value || "")
+      ? window.RMLGuidance.text("configuration", key, ...values)
       : "";
   const outlineEntries = currentFlattenedNodes();
   const entries = outlineEntries.filter(
@@ -5841,46 +5880,14 @@ function generateCode() {
     `${className}.NodeGraph.cs`;
 
   const guide = includeGuideComments
-    ? `// RML configuration template version: 1.7
-
-/*
- * Generated by the RML Configuration Builder.
- *
- * [AutoRegisterConfigKey] is an existing standard RML feature. The builder
- * only generates its correct usage; it does not replace or redefine it.
- *
- * Numeric scalar settings use a slider when a maximum is provided.
- * Settings implement IModConfigurationOrderProvider, so the custom RML view
- * renders them in the exact top-to-bottom order defined in the builder.
- * Navigation enums only control RML visibility unless a runtime reaction was
- * explicitly enabled for them in the builder.
- * Whether navigation selections are persisted immediately or with Save
- * Settings is controlled globally by the user's RML Launcher preference.
- * Picker-created colors use an explicit color-to-colorX conversion and avoid
- * the ColorProfile-dependent colorX constructor.
-${usesColorX
-    ? ` * colorX settings add using Renderite.Shared and the generated .csproj
- * adds the matching Renderite.Shared.dll reference automatically.
-`
-    : ""}${usesCustomColorProfile
-    ? ` * A custom ColorProfile expression additionally requires Renderite.Shared.dll.
- * The builder's generated .csproj adds that assembly reference automatically.
-`
-    : ""}${graphRuntimeActive
-    ? ` * Typed node-graph runtime logic is generated separately in
- * ${graphFileName}. Every configuration value is synchronized for runtime
- * reads, while each Configuration Outline Runtime behavior exclusively
- * controls whether its typed socket emits at startup and/or after saved
- * changes. No manual replacement is required.
-`
-    : ` * Generated Apply... methods cache the latest runtime values in
- * Current... properties and deliberately retain the original TODO line.
- * Replace only that TODO line with mod-specific logic when no packed graph is
- * used.
-`} */
-
-`
-    : "";
+      ? generatedGuidance("header", usesColorX
+      ? generatedGuidance("colorReference")
+      : "", usesCustomColorProfile
+      ? generatedGuidance("profileReference")
+      : "", graphRuntimeActive
+      ? generatedGuidance("graphIntegration", graphFileName)
+      : generatedGuidance("applyIntegration"))
+      : "";
 
   const usingLines = [
     "using System;",
@@ -5968,25 +5975,7 @@ ${usesColorX
 
   const runtimeUnloadLifecycleBlock =
     supportsRuntimeReload
-      ? `
-    public bool CanUnload(
-        out string reason)
-    {
-        reason = string.Empty;
-        return true;
-    }
-
-    public System.Threading.Tasks.ValueTask StartAsync(
-        System.Threading.CancellationToken cancellationToken)
-    {
-        _ = cancellationToken;
-        return System.Threading.Tasks.ValueTask.CompletedTask;
-    }
-
-    public async System.Threading.Tasks.ValueTask StopAsync(
-        System.Threading.CancellationToken cancellationToken)
-    {
-${observedEntries.length > 0
+      ? globalThis.RMLCodeTemplates.text("configuration", "source_002", [observedEntries.length > 0
     ? `        if (_configuration is not null)
         {
             _configuration.OnThisConfigurationChanged -=
@@ -5994,15 +5983,13 @@ ${observedEntries.length > 0
         }
 
 `
-    : ""}${usesModUnloadLifecycle
+    : "",
+usesModUnloadLifecycle
     ? `        ${graphContribution.className}.Shutdown();
 `
-    : ""}        ${graphContribution.className}.BeginRuntimeDrain();
-        await ${graphContribution.className}
-            .DrainRuntimeAsync(cancellationToken)
-            .ConfigureAwait(false);
-    }
-`
+    : "",
+graphContribution.className,
+graphContribution.className])
       : "";
 
   const runtimeValueDeclarations =
@@ -6073,125 +6060,7 @@ ${observedEntries.length > 0
 
   const runtimeMenuValueSupport =
     usesRuntimeConfigurationMenu
-      ? `
-    private static Func<bool>?
-        _runtimeConfigurationDraftSaveHandler;
-
-    private static bool SaveRuntimeConfigurationDrafts()
-    {
-        Func<bool>? handler =
-            _runtimeConfigurationDraftSaveHandler;
-
-        return handler?.Invoke() == true;
-    }
-
-    private static bool SetRuntimeConfigurationMenuValue(
-        string itemId,
-        object? value,
-        bool save)
-    {
-${runtimeMenuValueBranches}
-
-        return false;
-    }
-
-    private static bool SetRuntimeConfigurationValue(
-        ModConfigurationKey key,
-        object? value,
-        bool save)
-    {
-        try
-        {
-            Type targetType =
-                key.ValueType();
-
-            object? convertedValue =
-                ConvertRuntimeConfigurationValue(
-                    value,
-                    targetType);
-
-            _configuration.Set(
-                key,
-                convertedValue!);
-
-            if (save)
-            {
-                _configuration.Save();
-            }
-
-            return true;
-        }
-        catch (Exception exception)
-        {
-            Msg(
-                "Runtime Configuration Menu could not set '" +
-                key.Name +
-                "': " +
-                exception.Message);
-
-            return false;
-        }
-    }
-
-    private static object? ConvertRuntimeConfigurationValue(
-        object? value,
-        Type targetType)
-    {
-        Type effectiveType =
-            Nullable.GetUnderlyingType(
-                targetType) ??
-            targetType;
-
-        if (value is null)
-        {
-            return effectiveType.IsValueType
-                ? Activator.CreateInstance(
-                    effectiveType)
-                : null;
-        }
-
-        if (effectiveType.IsInstanceOfType(
-                value))
-        {
-            return value;
-        }
-
-        if (effectiveType.IsEnum)
-        {
-            return value is string enumText
-                ? Enum.Parse(
-                    effectiveType,
-                    enumText,
-                    ignoreCase: true)
-                : Enum.ToObject(
-                    effectiveType,
-                    value);
-        }
-
-        if (effectiveType == typeof(Uri))
-        {
-            return new Uri(
-                Convert.ToString(
-                    value,
-                    CultureInfo.InvariantCulture) ??
-                string.Empty,
-                UriKind.RelativeOrAbsolute);
-        }
-
-        if (effectiveType == typeof(string))
-        {
-            return Convert.ToString(
-                       value,
-                       CultureInfo.InvariantCulture) ??
-                   string.Empty;
-        }
-
-        return Convert.ChangeType(
-            value,
-            effectiveType,
-            CultureInfo.InvariantCulture);
-    }
-`
+      ? globalThis.RMLCodeTemplates.text("configuration", "Runtime_configuration_value_support", [runtimeMenuValueBranches])
       : "";
 
   let runtimeBlock;
@@ -6349,7 +6218,7 @@ ${changedStatements}
           } else {
             statements.push(
               `_ = value;${generatedGuidance(
-                " // TODO: Replace only this line with mod-specific logic."
+                "applyTodo"
               )}`
             );
           }
@@ -6389,63 +6258,51 @@ ${statements
           ).trim()
         : "";
 
-    runtimeBlock = `${runtimeValueDeclarations}
-
-    private static ModConfiguration _configuration = null!;
-
-    public override void OnEngineInit()
-    {
-        _configuration =
-            GetConfiguration() ??
-            throw new InvalidOperationException(
-                "RML did not provide a mod configuration instance during OnEngineInit().");
-${graphInitializeStatement
+    runtimeBlock = globalThis.RMLCodeTemplates.text("configuration", "source_003", [runtimeValueDeclarations,
+graphInitializeStatement
     ? `\n${indentGeneratedStatement(
         graphInitializeStatement,
         8
       )}\n`
-    : ""}${observedEntries.length > 0
+    : "",
+observedEntries.length > 0
     ? `
         _configuration.OnThisConfigurationChanged +=
             OnConfigurationChanged;
 `
-    : ""}
-${startupSynchronizationCalls ||
+    : "",
+startupSynchronizationCalls ||
   generatedGuidance(
     graphRuntimeActive
-      ? "        // No configuration values require synchronization."
-      : "        // No startup value read was requested."
-  )}${graphEngineInitializedStatement
+      ? "noSynchronization"
+      : "noStartupRead"
+  ),
+graphEngineInitializedStatement
     ? `\n\n${indentGeneratedStatement(
         graphEngineInitializedStatement,
         8
       )}`
-    : ""}
-    }
-
-${observedEntries.length > 0
+    : "",
+observedEntries.length > 0
     ? `    private static void OnConfigurationChanged(
         ConfigurationChangedEvent configurationEvent)
     {
 ${configurationSynchronizationCalls ||
   generatedGuidance(
-    "        // No graph configuration values require synchronization."
+    "noGraphSynchronization"
   )}
 
 ${changedBranches}
     }
 
 `
-    : ""}${applyMethods}${runtimeMenuValueSupport}
-`;
+    : "",
+applyMethods,
+runtimeMenuValueSupport]);
   } else {
     runtimeBlock = `    public override void OnEngineInit()
     {
-${generatedGuidance(`        /*
-         * No automatic runtime reactions were selected.
-         * Read configuration values whenever the mod requires them.
-         */
-`)}
+${generatedGuidance("noReactions")}
     }
 `;
   }
@@ -6574,27 +6431,9 @@ ${runtimeVisibility}
         )
         .join(" ||\n            ") ||
       "false";
-    visibilityBlock = `
-    public bool IsConfigurationKeyVisible(
-        ModConfiguration configuration,
-        ModConfigurationKey key,
-        Func<ModConfigurationKey, object?>
-            getCurrentValue)
-    {
-${controllerValues}
-
-${keyBranches}
-
-        return false;
-    }
-
-    public bool IsConfigurationVisibilityController(
-        ModConfigurationKey key)
-    {
-        return
-            ${controllerChecks};
-    }
-`;
+    visibilityBlock = globalThis.RMLCodeTemplates.text("configuration", "source_004", [controllerValues,
+keyBranches,
+controllerChecks]);
   }
 
   const runtimeMenuProviderBlock =
@@ -6625,58 +6464,13 @@ ${keyBranches}
               })
               .join("\n\n");
 
-          return `
-    public void SetRuntimeConfigurationDraftSaveHandler(
-        Func<bool>? handler)
-    {
-        _runtimeConfigurationDraftSaveHandler =
-            handler;
-    }
-
-    public long RuntimeConfigurationMenuRevision =>
-        ${graphContribution.className}.RuntimeConfigurationMenuRevision;
-
-    public long RuntimeConfigurationValueRevision =>
-        ${graphContribution.className}.RuntimeConfigurationValueRevision;
-
-    public bool TryGetRuntimeConfigurationKeyVisibility(
-        ModConfigurationKey key,
-        out bool visible)
-    {
-${keyVisibilityBranches}
-
-        visible = false;
-        return false;
-    }
-
-    public bool TryGetRuntimeConfigurationItemVisibility(
-        string itemId,
-        out bool visible) =>
-            ${graphContribution.className}.TryGetRuntimeConfigurationMenuVisibility(
-                itemId,
-                out visible);
-
-    public bool TryGetRuntimeConfigurationItemOrder(
-        string itemId,
-        out int order) =>
-            ${graphContribution.className}.TryGetRuntimeConfigurationMenuOrder(
-                itemId,
-                out order);
-
-    public bool TryGetRuntimeConfigurationItemWidthPercent(
-        string itemId,
-        out float widthPercent) =>
-            ${graphContribution.className}.TryGetRuntimeConfigurationMenuWidthPercent(
-                itemId,
-                out widthPercent);
-
-    public bool TryGetRuntimeConfigurationItemLabelVisibility(
-        string itemId,
-        out bool visible) =>
-            ${graphContribution.className}.TryGetRuntimeConfigurationMenuLabelVisibility(
-                itemId,
-                out visible);
-`;
+          return globalThis.RMLCodeTemplates.text("configuration", "source_005", [graphContribution.className,
+graphContribution.className,
+keyVisibilityBranches,
+graphContribution.className,
+graphContribution.className,
+graphContribution.className,
+graphContribution.className]);
         })()
       : "";
 
@@ -6858,107 +6652,51 @@ ${keyVisibilityBranches}
 
           const runtimeLayoutHelper =
             usesRuntimeConfigurationMenu
-              ? `
-    private static bool GetRuntimeConfigurationLayoutOrDefault(
-        string itemId,
-        bool fallback) =>
-            ${graphContribution.className}.TryGetRuntimeConfigurationMenuHorizontalLayout(
-                itemId,
-                out bool horizontal)
-                ? horizontal
-                : fallback;
-`
+              ? globalThis.RMLCodeTemplates.text("configuration", "source_006", [graphContribution.className])
               : "";
 
-          return `
-${layoutGroupItemFields}
-
-    public System.Collections.Generic.IReadOnlyList<ModConfigurationLayoutGroup>
-        GetConfigurationLayoutGroups() =>
-        new ModConfigurationLayoutGroup[]
-        {
-${groups}
-        };
-
-    public bool TryGetConfigurationLayoutItemId(
-        ModConfigurationKey key,
-        out string itemId)
-    {
-${keyItemBranches}
-
-        itemId = string.Empty;
-        return false;
-    }
-
-    public bool TryGetConfigurationLayoutGroupVisibility(
-        string groupId,
-        out bool visible)
-    {
-${groupVisibilityBranches}
-
-        visible = true;
-        return false;
-    }
-
-    public bool TryGetConfigurationLayoutItemWidthPercent(
-        string itemId,
-        out float widthPercent)
-    {
-${widthBranches}
-
-        widthPercent = 0f;
-        return false;
-    }
-
-    public bool TryGetConfigurationLayoutItemLabelVisibility(
-        string itemId,
-        out bool visible)
-    {
-${labelBranches}
-
-        visible = true;
-        return false;
-    }
-${runtimeLayoutHelper}`;
+          return globalThis.RMLCodeTemplates.text("configuration", "source_007", [layoutGroupItemFields,
+groups,
+keyItemBranches,
+groupVisibilityBranches,
+widthBranches,
+labelBranches,
+runtimeLayoutHelper]);
         })()
       : "";
 
   const classDocumentation =
-    generatedGuidance(`/// <summary>
-/// ${csharpSingleLineCommentText(
+    generatedGuidance("classSummary", csharpSingleLineCommentText(
   metadata.description
-)}
-/// </summary>`);
+));
 
-  return optimizeBuilderOwnedPrivateArrayReturns(`${guide}${usingLines}
-
-namespace ${namespaceName};
-
-${enums ? `${enums}\n\n` : ""}${classDocumentation}
-public sealed partial class ${className}
-    : ResoniteMod${interfaceSuffix}
-{
-    public override string Name =>
-        "${escapeCSharp(
+  return optimizeBuilderOwnedPrivateArrayReturns(globalThis.RMLCodeTemplates.text("configuration", "source_008", [guide,
+usingLines,
+namespaceName,
+enums ? `${enums}\n\n` : "",
+classDocumentation,
+className,
+interfaceSuffix,
+escapeCSharp(
           metadata.modName
-        )}";
-
-    public override string Author =>
-        "${escapeCSharp(
+        ),
+escapeCSharp(
           metadata.author
-        )}";
-
-    public override string Version =>
-        "${escapeCSharp(
+        ),
+escapeCSharp(
           metadata.version
-        )}";
-
-${declarations}
-${runtimeBlock}${runtimeUnloadLifecycleBlock}${orderBlock}${visibilityBlock}${runtimeMenuProviderBlock}${layoutProviderBlock}}
-`);
+        ),
+declarations,
+runtimeBlock,
+runtimeUnloadLifecycleBlock,
+orderBlock,
+visibilityBlock,
+runtimeMenuProviderBlock,
+layoutProviderBlock]));
 }
 
 function generateProjectFile() {
+  requireGeneratedGuidance();
   const settings = currentFlattenedNodes()
     .filter(entry => entry.node.kind === "setting");
   const graphContribution =
@@ -7188,74 +6926,33 @@ function generateProjectFile() {
       : "net10.0";
   const projectGuidance =
     state.metadata.includeGuide === true
-      ? `  <!--
-    Current Resonite and RML 4.2/5.x use net10.0.
-    Older targets require matching older Resonite and RML assemblies.
-  -->
-`
+      ? window.RMLGuidance.text("configuration", "projectTarget")
       : "";
 
-  return `<Project Sdk="Microsoft.NET.Sdk">
-${projectGuidance}
-  <PropertyGroup>
-    <TargetFramework>${targetFramework}</TargetFramework>
-    <LangVersion>14.0</LangVersion>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>${allowUnsafeBlocks
+  return globalThis.RMLCodeTemplates.text("configuration", "source_009", [projectGuidance,
+targetFramework,
+allowUnsafeBlocks
       ? "\n    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>"
-      : ""}${useWindowsForms
+      : "",
+useWindowsForms
       ? "\n    <UseWindowsForms>true</UseWindowsForms>\n    <EnableWindowsTargeting>true</EnableWindowsTargeting>"
-      : ""}
-
-    <AssemblyName>${escapeXml(className)}</AssemblyName>
-    <RootNamespace>${escapeXml(namespaceName)}</RootNamespace>
-    <Version>${escapeXml(versionMetadata.version)}</Version>
-    <AssemblyVersion>${escapeXml(versionMetadata.assemblyVersion)}</AssemblyVersion>
-    <FileVersion>${escapeXml(versionMetadata.fileVersion)}</FileVersion>
-    <InformationalVersion>${escapeXml(versionMetadata.informationalVersion)}</InformationalVersion>
-    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
-
-    <ResonitePath Condition="'$(ResonitePath)' == ''">${resonitePath}</ResonitePath>
-    <ResonitePath>$([MSBuild]::NormalizeDirectory('$(ResonitePath)'))</ResonitePath>
-    <DeployToResonite Condition="'$(DeployToResonite)' == ''">true</DeployToResonite>
-  </PropertyGroup>
-
-  <ItemGroup>
-    <Reference Include="ResoniteModLoader">
-      <HintPath>$(ResonitePath)Libraries/ResoniteModLoader.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-
-    <Reference Include="FrooxEngine">
-      <HintPath>$(ResonitePath)FrooxEngine.dll</HintPath>
-      <Private>False</Private>
-    </Reference>${optionalReferences
+      : "",
+escapeXml(className),
+escapeXml(namespaceName),
+escapeXml(versionMetadata.version),
+escapeXml(versionMetadata.assemblyVersion),
+escapeXml(versionMetadata.fileVersion),
+escapeXml(versionMetadata.informationalVersion),
+resonitePath,
+optionalReferences
       ? `\n\n${optionalReferences}`
-      : ""}
-  </ItemGroup>${packageReferences
+      : "",
+packageReferences
     ? `\n\n  <ItemGroup>\n${packageReferences}\n  </ItemGroup>`
-    : ""}${frameworkReferences
+    : "",
+frameworkReferences
     ? `\n\n  <ItemGroup>\n${frameworkReferences}\n  </ItemGroup>`
-    : ""}
-
-  <Target
-    Name="DeployRmlMod"
-    AfterTargets="Build"
-    Condition="'$(DeployToResonite)' == 'true'">
-    <MakeDir Directories="$(ResonitePath)rml_mods" />
-    <MakeDir Directories="$(ResonitePath)rml_libs" />
-    <Copy
-      SourceFiles="$(TargetPath)"
-      DestinationFolder="$(ResonitePath)rml_mods"
-      SkipUnchangedFiles="true" />
-    <Copy
-      SourceFiles="@(ReferenceCopyLocalPaths)"
-      DestinationFolder="$(ResonitePath)rml_libs"
-      SkipUnchangedFiles="true" />
-  </Target>
-</Project>
-`;
+    : ""]);
 }
 
 function generateAuxiliaryProjectFile(
@@ -7455,67 +7152,42 @@ function generateAuxiliaryProjectFile(
       ? "net10.0-windows"
       : "net10.0";
 
-  return `<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <TargetFramework>${targetFramework}</TargetFramework>
-    <LangVersion>14.0</LangVersion>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>${requirements.allowUnsafeBlocks === true
+  return globalThis.RMLCodeTemplates.text("configuration", "source_010", [targetFramework,
+requirements.allowUnsafeBlocks === true
       ? "\n    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>"
-      : ""}${useWindowsForms
+      : "",
+useWindowsForms
       ? "\n    <UseWindowsForms>true</UseWindowsForms>\n    <EnableWindowsTargeting>true</EnableWindowsTargeting>"
-      : ""}
-
-    <AssemblyName>${escapeXml(
+      : "",
+escapeXml(
       assemblyName
-    )}</AssemblyName>
-    <RootNamespace>${escapeXml(
+    ),
+escapeXml(
       rootNamespace
-    )}</RootNamespace>
-    <Version>${escapeXml(versionMetadata.version)}</Version>
-    <AssemblyVersion>${escapeXml(versionMetadata.assemblyVersion)}</AssemblyVersion>
-    <FileVersion>${escapeXml(versionMetadata.fileVersion)}</FileVersion>
-    <InformationalVersion>${escapeXml(versionMetadata.informationalVersion)}</InformationalVersion>
-    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
-
-    <ResonitePath Condition="'$(ResonitePath)' == ''">${resonitePath}</ResonitePath>
-    <ResonitePath>$([MSBuild]::NormalizeDirectory('$(ResonitePath)'))</ResonitePath>
-    <DeployToResonite Condition="'$(DeployToResonite)' == ''">true</DeployToResonite>
-  </PropertyGroup>
-
-  <ItemGroup>
-${references}
-  </ItemGroup>${packageReferences
+    ),
+escapeXml(versionMetadata.version),
+escapeXml(versionMetadata.assemblyVersion),
+escapeXml(versionMetadata.fileVersion),
+escapeXml(versionMetadata.informationalVersion),
+resonitePath,
+references,
+packageReferences
     ? `\n\n  <ItemGroup>\n${packageReferences}\n  </ItemGroup>`
-    : ""}${frameworkReferences
+    : "",
+frameworkReferences
     ? `\n\n  <ItemGroup>\n${frameworkReferences}\n  </ItemGroup>`
-    : ""}
-
-  <Target
-    Name="DeployRmlLibrary"
-    AfterTargets="Build"
-    Condition="'$(DeployToResonite)' == 'true'">
-    <MakeDir Directories="$(ResonitePath)${escapeXml(
+    : "",
+escapeXml(
       deployDirectory
-    )}" />
-    <MakeDir Directories="$(ResonitePath)rml_libs" />
-    <Copy
-      SourceFiles="$(TargetPath)"
-      DestinationFolder="$(ResonitePath)${escapeXml(
+    ),
+escapeXml(
         deployDirectory
-      )}"
-      SkipUnchangedFiles="true" />
-    <Copy
-      SourceFiles="@(ReferenceCopyLocalPaths)"
-      DestinationFolder="$(ResonitePath)rml_libs"
-      SkipUnchangedFiles="true" />
-  </Target>
-</Project>
-`;
+      )]);
 }
 
 function getDiagnostics() {
+  const guidanceStatus = generatedGuidanceStatus();
+  if (guidanceStatus) return [guidanceStatus];
   const entries = currentFlattenedNodes();
   const errors = [];
   const fieldNames = new Map();
@@ -10146,7 +9818,6 @@ async function readJsonFileSource(
   }
 }
 
-
 async function readExampleProjectDocument() {
   const url = exampleProjectUrl();
 
@@ -10414,6 +10085,8 @@ function renderMetadata() {
   elements.includeGuide.checked = state.metadata.includeGuide;
   elements.includeGuide.onchange = () => {
     state.metadata.includeGuide = elements.includeGuide.checked;
+    if (guidanceModuleError) { guidanceModuleError = null; guidanceModulePromise = null; }
+    window.RMLGuidance?.retryFailed();
     updateBuilderPreferences({
       includeGuide:
         state.metadata.includeGuide
@@ -18286,6 +17959,11 @@ function bindCustomColorPickerInteractions(
         return;
       }
 
+      if ((event.pointerType === "mouse" || event.pointerType === "pen") &&
+          (event.buttons & 1) === 0) {
+        activePointerId = null;
+        return;
+      }
       event.preventDefault();
       setSurfaceValue(event);
     }
@@ -18306,6 +17984,10 @@ function bindCustomColorPickerInteractions(
   );
   surface.addEventListener(
     "pointercancel",
+    finishPointer
+  );
+  surface.addEventListener(
+    "lostpointercapture",
     finishPointer
   );
 }
@@ -19838,6 +19520,7 @@ function updateGeneratedOutput() {
   let errors;
   let output;
   try {
+    requireGeneratedGuidance();
     errors = getDiagnostics();
     output =
       generatedCodeForCurrentView();
@@ -19853,19 +19536,13 @@ function updateGeneratedOutput() {
       error instanceof Error
         ? error.message
         : String(error);
-    elements.generatedCode.textContent =
-      "// Generated output is not ready.\n";
-    elements.codeSummary.textContent =
-      "Generated project files are not ready.";
-    setExportReadiness(
-      "error",
-      {
-        diagnostics: [
-          `Generated project: ${message}`
-        ]
-      },
-      []
-    );
+    const pending = message === GUIDANCE_PENDING_MESSAGE || message === "C# source templates are loading…";
+    if (!pending) elements.generatedCode.textContent = "// Generated output is not ready.\n";
+    elements.generatedCode.setAttribute("aria-busy", String(pending));
+    elements.codeSummary.textContent = pending ? message : "Generated project files are not ready.";
+    setExportReadiness(pending ? "checking" : "error", {
+      diagnostics: pending ? [] : [`Generated project: ${message}`]
+    }, pending ? [message] : []);
     setExportControlAvailability(
       elements.exportCopySelectedFile,
       false
@@ -19874,8 +19551,10 @@ function updateGeneratedOutput() {
       elements.exportDownloadSelected,
       false
     );
+    if (elements.exportDialog?.open) updateExportDialog();
     return;
   }
+  elements.generatedCode.removeAttribute("aria-busy");
   const code = output.code;
   const selected =
     output.selectedArtifact;
@@ -25254,11 +24933,11 @@ async function ensureProjectRuntimePrerequisites(
       workSession,
       {
         title:
-          "Checking the scanner's source fingerprint…",
+          "Checking the available API catalog…",
         message:
-          `This project uses ${requiredCatalogNodes.length.toLocaleString("de-DE")} catalog operator${requiredCatalogNodes.length === 1 ? "" : "s"}. The scanner fingerprint is being compared with the cache before any replacement is selected; scanner v1.7 uses the authoritative semantic contract, while older scanners remain available in compatibility mode.`,
+          `This project uses ${requiredCatalogNodes.length.toLocaleString("de-DE")} catalog operator${requiredCatalogNodes.length === 1 ? "" : "s"}. The available catalog is checked for the required operator IDs and ports before any replacement is selected.`,
         detail:
-          "A matching source fingerprint reuses the Live-confirmed cache without downloading or rebuilding the catalog. A changed fingerprint downloads, verifies and replaces the cache exactly once.",
+          "A valid cached catalog is sufficient. This import does not initiate a scanner connection.",
         progress: 44
       }
     );
@@ -25280,16 +24959,16 @@ async function ensureProjectRuntimePrerequisites(
         await gate.ensureForImport({
           requiredNodes:
             requiredCatalogNodes,
-          onLiveLookup() {
+          onLiveLookup(detail) {
             updateBuilderWork(
               workSession,
               {
                 title:
-                  "Comparing source and cached fingerprints…",
+                  "Preparing available API contracts…",
                 message:
-                  "All already known scanner and Builder-bridge health paths are checked concurrently. The first verified Live fingerprint wins.",
+                  String(detail?.message || "Using the catalog available for the current connection mode."),
                 detail:
-                  "There is no serial URL wait. Port discovery remains manual, and the health phase never downloads the complete catalog.",
+                  "Only a click on Cached/Live can initiate a connection. Importing does not probe the scanner or retry a failed stream.",
                 progress: 48
               }
             );
@@ -25388,14 +25067,14 @@ async function ensureProjectRuntimePrerequisites(
               }
             );
           },
-          onCacheFallback() {
+          onCacheFallback(detail) {
             updateBuilderWork(
               workSession,
               {
                 title:
-                  "Live unavailable · activating cached fallback…",
+                  "Using cached API contracts…",
                 message:
-                  "No known Live health path returned a usable fingerprint. The last available cached scanner catalog is being activated immediately.",
+                  String(detail?.message || "Activating the available saved catalog."),
                 detail:
                   "No serial retry or port-range discovery delays this import.",
                 progress: 49
@@ -25405,7 +25084,7 @@ async function ensureProjectRuntimePrerequisites(
         });
     } catch (error) {
       throw new Error(
-        `The scanner source-fingerprint comparison and cached fallback failed: ${String(error?.message || error)} The JSON was not loaded.`
+        `The available API catalog could not be prepared: ${String(error?.message || error)} The JSON was not loaded.`
       );
     }
 
@@ -26952,6 +26631,11 @@ async function applyLoadedProjectWithFeedback(
       }
     );
 
+    if (!prerequisites.compatibilityMode && state.metadata.includeGuide === true) {
+      await ensureLazyScriptBundle("guidance");
+      await window.RMLGuidance.ensureFor(state);
+    }
+
     if (
       prerequisites.graph &&
       prerequisites.runtimeActive &&
@@ -28041,6 +27725,7 @@ function buildSelectedExportFiles(
   includeCs,
   includeCsproj
 ) {
+  requireGeneratedGuidance();
   const baseName = generatedBaseName();
   const graphFiles =
     getAdditionalGeneratedSourceFiles();
@@ -30094,6 +29779,14 @@ function updateExportDialog() {
     elements.exportDownloadSelected,
     false
   );
+  const guidanceStatus = generatedGuidanceStatus();
+  if (guidanceStatus) {
+    elements.exportPackageSummary.textContent = guidanceStatus;
+    elements.exportPackageMode.textContent = "Not ready";
+    elements.exportProjectSummary.replaceChildren();
+    elements.exportGeneratedFiles.textContent = guidanceStatus;
+    return;
+  }
   elements.exportDownloadHint.classList.remove("error");
   const platform =
     elements.exportPlatform.value;
@@ -33426,15 +33119,7 @@ function builderCodegenStateSnapshot() {
 
 function exposeBuilderBridge() {
   const bridge = {
-    version: 7,
-
-    getProjectId() {
-      return String(state.projectId || "");
-    },
-
-    getMetadataSnapshot() {
-      return { ...state.metadata };
-    },
+    version: 6,
 
     getStorageContract() {
       return {
@@ -33447,6 +33132,14 @@ function exposeBuilderBridge() {
 
     getStateSnapshot() {
       return builderStateSnapshot();
+    },
+
+    getProjectId() {
+      return String(state.projectId || "");
+    },
+
+    getMetadataSnapshot() {
+      return { ...state.metadata };
     },
 
     getBuilderPreferences() {
@@ -39453,14 +39146,12 @@ function rmlRuntimeDisplayInjectCSharp(
 
   const fields =
     runtimeValueFields.map(({ item, source }) =>
-`    [AutoRegisterConfigKey]
-    private static readonly ModConfigurationKey<string> ${source.field} =
-        new(
-            "${rmlRuntimeDisplayEscapeCSharp(source.key)}",
-            "${rmlRuntimeDisplayEscapeCSharp(item.label)} / ${rmlRuntimeDisplayEscapeCSharp(source.label)} — ${rmlRuntimeDisplayEscapeCSharp(item.description)} Read-only live value; manual edits are overwritten by the generated runtime.",
-            () => "${rmlRuntimeDisplayEscapeCSharp(item.fallback)}",
-            internalAccessOnly: true);
-`
+globalThis.RMLCodeTemplates.text("configuration", "source_011", [source.field,
+rmlRuntimeDisplayEscapeCSharp(source.key),
+rmlRuntimeDisplayEscapeCSharp(item.label),
+rmlRuntimeDisplayEscapeCSharp(source.label),
+rmlRuntimeDisplayEscapeCSharp(item.description),
+rmlRuntimeDisplayEscapeCSharp(item.fallback)])
     ).join("\n");
 
   const sourceText =
@@ -39540,329 +39231,14 @@ ${keys}
     }).join(",\n");
 
   const providerMembers =
-`    public System.Collections.Generic.IReadOnlyList<
-        ModConfigurationRuntimeDisplay>
-        GetRuntimeDisplays()
-    {
-        return new ModConfigurationRuntimeDisplay[]
-        {
-${providerDisplays}
-        };
-    }
-`;
+globalThis.RMLCodeTemplates.text("configuration", "source_012", [providerDisplays]);
 
 
   const runtimeMembers =
-`
-    // RML_RUNTIME_MENU_DISPLAY_BRIDGE_V4
-    private static object? _runtimeDisplayConfiguration;
-    private static int _runtimeDisplayBridgeStarted;
-
-${providerMembers}
-
-    private void InitializeRuntimeMenuDisplays()
-    {
-        _runtimeDisplayConfiguration =
-            GetConfiguration();
-
-        ${graphClassName}.DisplayValueChangedByMonitorId +=
-            OnRuntimeMenuDisplayChanged;
-
-        RefreshRuntimeMenuDisplays();
-
-        if (System.Threading.Interlocked.Exchange(
-                ref _runtimeDisplayBridgeStarted,
-                1) == 0)
-        {
-            _ = System.Threading.Tasks.Task.Run(
-                async () =>
-                {
-                    while (
-                        System.Threading.Volatile.Read(
-                            ref _runtimeDisplayBridgeStarted) != 0 &&
-                        FrooxEngine.Engine.Current is not null)
-                    {
-                        try
-                        {
-                            FrooxEngine.World? world =
-                                FrooxEngine.Engine.Current
-                                    ?.WorldManager
-                                    ?.FocusedWorld ??
-                                FrooxEngine.Userspace
-                                    .UserspaceWorld;
-
-                            if (
-                                world is not null &&
-                                !world.IsDisposed &&
-                                world.RootSlot is not null)
-                            {
-                                world.RunSynchronously(
-                                    RefreshRuntimeMenuDisplays,
-                                    immediatellyIfPossible: true);
-                            }
-                        }
-                        catch
-                        {
-                        }
-
-                        await System.Threading.Tasks.Task
-                            .Delay(750)
-                            .ConfigureAwait(false);
-                    }
-
-                    System.Threading.Interlocked.Exchange(
-                        ref _runtimeDisplayBridgeStarted,
-                        0);
-                });
-        }
-    }
-
-    private static void OnRuntimeMenuDisplayChanged(
-        string monitorId,
-        string label,
-        object? value)
-    {
-        switch (monitorId)
-        {
-${switchCases}
-        }
-    }
-
-    private static void RefreshRuntimeMenuDisplays()
-    {
-${refreshCalls}
-    }
-
-    private static System.Reflection.MethodInfo?
-        RuntimeDisplayConfigurationMethod(
-            object configuration,
-            string name,
-            ModConfigurationKey<string> key,
-            bool requiresValueParameter)
-    {
-        foreach (
-            System.Reflection.MethodInfo candidate in
-            configuration
-                .GetType()
-                .GetMethods(
-                    System.Reflection.BindingFlags.Public |
-                    System.Reflection.BindingFlags.Instance))
-        {
-            if (!string.Equals(
-                    candidate.Name,
-                    name,
-                    System.StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            System.Reflection.MethodInfo method =
-                candidate;
-
-            if (method.IsGenericMethodDefinition)
-            {
-                if (method
-                        .GetGenericArguments()
-                        .Length != 1)
-                {
-                    continue;
-                }
-
-                try
-                {
-                    method =
-                        method.MakeGenericMethod(
-                            typeof(string));
-                }
-                catch
-                {
-                    continue;
-                }
-            }
-
-            System.Reflection.ParameterInfo[] parameters =
-                method.GetParameters();
-
-            if (
-                parameters.Length <
-                    (requiresValueParameter
-                        ? 2
-                        : 1) ||
-                !parameters[0]
-                    .ParameterType
-                    .IsInstanceOfType(key))
-            {
-                continue;
-            }
-
-            if (
-                requiresValueParameter &&
-                !parameters[1]
-                    .ParameterType
-                    .IsAssignableFrom(
-                        typeof(string)))
-            {
-                continue;
-            }
-
-            bool supported = true;
-
-            for (
-                int index =
-                    requiresValueParameter
-                        ? 2
-                        : 1;
-                index < parameters.Length;
-                index++)
-            {
-                if (
-                    !parameters[index]
-                        .HasDefaultValue &&
-                    parameters[index]
-                        .ParameterType !=
-                        typeof(bool))
-                {
-                    supported = false;
-                    break;
-                }
-            }
-
-            if (supported)
-            {
-                return method;
-            }
-        }
-
-        return null;
-    }
-
-    private static string? RuntimeDisplayRead(
-        ModConfigurationKey<string> key)
-    {
-        object? configuration =
-            _runtimeDisplayConfiguration;
-
-        if (configuration is null)
-        {
-            return null;
-        }
-
-        try
-        {
-            System.Reflection.MethodInfo? method =
-                RuntimeDisplayConfigurationMethod(
-                    configuration,
-                    "GetValue",
-                    key,
-                    requiresValueParameter: false);
-
-            if (method is null)
-            {
-                return null;
-            }
-
-            System.Reflection.ParameterInfo[] parameters =
-                method.GetParameters();
-            object?[] arguments =
-                new object?[parameters.Length];
-
-            arguments[0] = key;
-
-            for (int index = 1;
-                 index < arguments.Length;
-                 index++)
-            {
-                arguments[index] =
-                    parameters[index].HasDefaultValue
-                        ? parameters[index].DefaultValue
-                        : parameters[index].ParameterType ==
-                              typeof(bool)
-                            ? false
-                            : parameters[index].ParameterType
-                                .IsValueType
-                                ? System.Activator.CreateInstance(
-                                    parameters[index].ParameterType)
-                                : null;
-            }
-
-            return method.Invoke(
-                       configuration,
-                       arguments) as string;
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static void RuntimeDisplayWrite(
-        ModConfigurationKey<string> key,
-        string value)
-    {
-        object? configuration =
-            _runtimeDisplayConfiguration;
-
-        if (configuration is null)
-        {
-            return;
-        }
-
-        if (string.Equals(
-                RuntimeDisplayRead(key),
-                value,
-                System.StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        try
-        {
-            System.Reflection.MethodInfo? method =
-                RuntimeDisplayConfigurationMethod(
-                    configuration,
-                    "Set",
-                    key,
-                    requiresValueParameter: true);
-
-            if (method is null)
-            {
-                return;
-            }
-
-            System.Reflection.ParameterInfo[] parameters =
-                method.GetParameters();
-            object?[] arguments =
-                new object?[parameters.Length];
-
-            arguments[0] = key;
-            arguments[1] = value;
-
-            for (int index = 2;
-                 index < arguments.Length;
-                 index++)
-            {
-                arguments[index] =
-                    parameters[index].ParameterType ==
-                        typeof(bool)
-                        ? false
-                        : parameters[index].HasDefaultValue
-                            ? parameters[index].DefaultValue
-                            : parameters[index].ParameterType
-                                .IsValueType
-                                ? System.Activator.CreateInstance(
-                                    parameters[index].ParameterType)
-                                : null;
-            }
-
-            method.Invoke(
-                configuration,
-                arguments);
-        }
-        catch
-        {
-        }
-    }
-`;
+globalThis.RMLCodeTemplates.text("configuration", "Runtime_menu_display_bridge", [providerMembers,
+graphClassName,
+switchCases,
+refreshCalls]);
 
   if (
     !source.includes(
@@ -40916,3 +40292,9 @@ Object.defineProperty(
     configurable: true
   }
 );
+
+window.addEventListener("rml-scanner-connection", () => {
+  if (typeof rmlRuntimeDisplayRenderPreviewRows === "function") {
+    rmlRuntimeDisplayRenderPreviewRows();
+  }
+});

@@ -12,8 +12,10 @@
   }
 
   const workerFiles = [
+    "../core/code_templates.js?v=794-shared-loader-runtime",
+    "../core/guidance.js?v=793",
     "node_graph_registry.js?v=1-physical-modules-v748",
-    "node_graph_codegen.js?v=3-source-comment-pruning-v776"
+    "node_graph_codegen.js?v=794-shared-loader-runtime"
   ];
 
   if (
@@ -85,6 +87,8 @@
     document.head.appendChild(link);
   });
   const files = [
+    ...(window.RMLCodeTemplates ? [] : ["../core/code_templates.js?v=794-shared-loader-runtime"]),
+    ...(window.RMLGuidance ? [] : ["../core/guidance.js?v=793"]),
     ...(
       window.RMLClassStyles
         ? []
@@ -93,13 +97,13 @@
           ]
     ),
     "node_graph_registry.js?v=1-physical-modules-v748",
-    "node_graph_codegen.js?v=3-source-comment-pruning-v776",
-    "runtime_bridge.js?v=5-physical-modules-v748",
-    "node_graph_composites.js?v=6-live-output-navigation-v790",
-    "node_graph_custom_csharp.js?v=23-live-output-navigation-v790",
+    "node_graph_codegen.js?v=794-shared-loader-runtime",
+    "runtime_bridge.js?v=796-manual-scanner-session",
+    "node_graph_composites.js?v=6-composite-navigation-coherence-v792",
+    "node_graph_custom_csharp.js?v=794-shared-loader-runtime",
     "node_graph_guided.js?v=1-physical-modules-v748",
-    "node_graph_view.js?v=19-live-output-navigation-v790",
-    "node_graph_bootstrap.js?v=6-inspector-interaction-budget-v789"
+    "node_graph_view.js?v=796-manual-scanner-session",
+    "node_graph_bootstrap.js?v=7-composite-navigation-coherence-v792"
   ];
 
   const ready = files.reduce(

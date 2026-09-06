@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const LOADER_VERSION = 74;
+  const LOADER_VERSION = 75;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
   const CATALOG_PATH = "/resonite_api_catalog.json";
@@ -10,7 +10,6 @@
     "/rml-scanner-status";
   const BUILDER_SCANNER_CATALOG_PATH =
     "/rml-scanner-catalog";
-  const BUILDER_PROBE_TIMEOUT_MS = 0;
   const CATALOG_FETCH_TIMEOUT_MS = 0;
   const CACHE_DATABASE_NAME =
     "rml-resonite-api-catalog";
@@ -30,7 +29,7 @@
     document.currentScript?.src ||
     window.location.href;
   const modNodesUrl = new URL(
-    "mod_nodes.js?v=70-javascript-integrity-audit-v737",
+    "mod_nodes.js?v=794-shared-loader-runtime",
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
@@ -38,7 +37,7 @@
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=68-source-comment-pruning-v776",
+    "api_nodes.js?v=794-shared-loader-runtime",
     scriptUrl
   ).href;
 
@@ -750,10 +749,8 @@
     return catalog;
   }
 
-  let scannerOnline = false;
-  let scannerChecking = false;
   let scannerCheckPromise = null;
-  let activeScannerCatalogUrl = "";
+  let scannerCheckGeneration = -1;
   let cachedCatalogRecord = null;
   let lastScannerFingerprintSync =
     Object.freeze({
@@ -772,166 +769,10 @@
     );
   }
 
-  function formatStatusCount(value) {
-    return Math.max(
-      0,
-      Number(value) || 0
-    ).toLocaleString("de-DE");
-  }
-
-  function catalogStatisticsTooltip(
-    catalog
-  ) {
-    const report =
-      window.RMLApiNodeFactoryReport;
-
-    if (
-      !catalog ||
-      !report ||
-      String(report.engineVersion || "") !==
-        String(catalog.engineVersion || "") ||
-      !Number.isFinite(
-        Number(report.totalGeneratedNodes)
-      )
-    ) {
-      return "";
-    }
-
-    return `${formatStatusCount(
-      catalogTypes(catalog).filter(type =>
-        type.isAttachableComponent === true
-      ).length
-    )} attachable components · ${formatStatusCount(
-      catalog.types?.length
-    )} API types · ${formatStatusCount(
-      report.totalGeneratedNodes
-    )} generated nodes`;
-  }
-
-  function setCatalogStatusContent(
-    element,
-    text,
-    catalog = null
-  ) {
-    element.textContent = text;
-
-    const tooltip =
-      catalogStatisticsTooltip(
-        catalog
-      );
-
-    if (tooltip) {
-      element.title = tooltip;
-      element.setAttribute(
-        "aria-label",
-        `${text}. ${tooltip}`
-      );
-    } else {
-      element.removeAttribute("title");
-      element.setAttribute(
-        "aria-label",
-        text
-      );
-    }
-  }
-
-  function updateStatus(
-    catalog = statusCatalog(),
-    options = {}
-  ) {
-    const element =
-      document.getElementById(
-        "api-catalog-state"
-      );
-
-    if (!element) {
-      return;
-    }
-
-    const checking =
-      options.checking === true ||
-      scannerChecking === true;
-    const online =
-      options.online === true ||
-      (
-        options.online !== false &&
-        scannerOnline === true
-      );
-
-    const version =
-      String(
-        catalog?.engineVersion ||
-        "unknown"
-      );
-
-    if (checking) {
-      element.dataset.source = "updating";
-      setCatalogStatusContent(
-        element,
-        catalog
-          ? `Resonite API ${version} · checking…`
-          : "Resonite API · checking…",
-        catalog
-      );
-      return;
-    }
-
-    if (online) {
-      const legacyLive =
-        catalog?.catalogSource ===
-          "scanner-legacy";
-      element.dataset.source =
-        legacyLive
-          ? "scanner-legacy"
-          : "scanner";
-      setCatalogStatusContent(
-        element,
-        catalog
-          ? `Resonite API ${version} · ${legacyLive ? "Live compatibility" : "Live"}`
-          : "Resonite API · Live",
-        catalog
-      );
-      return;
-    }
-
-    if (catalog) {
-      element.dataset.source = "cache";
-      setCatalogStatusContent(
-        element,
-        `Resonite API ${version} · cached`,
-        catalog
-      );
-      return;
-    }
-
-    element.dataset.source = "unavailable";
-    setCatalogStatusContent(
-      element,
-      "Resonite API · unavailable"
-    );
-  }
-
-  function updateUnavailableStatus(
-    message = "No live scanner connection or cached Resonite API catalog is available. Click to reconnect."
-  ) {
-    scannerOnline = false;
-    scannerChecking = false;
-
-    const element =
-      document.getElementById(
-        "api-catalog-state"
-      );
-
-    if (!element) {
-      return;
-    }
-
-    element.dataset.source = "unavailable";
-    setCatalogStatusContent(
-      element,
-      "Resonite API · unavailable"
-    );
-  }
+  // The RuntimeBridge owns the existing Cached/Live badge. A cache install,
+  // factory rebuild or catalog error must never override transport state.
+  function updateStatus() { window.RMLRuntimeBridge?.renderStatus?.(); }
+  function updateUnavailableStatus() { updateStatus(); }
 
   function safeLocalStorageValue(key) {
     try {
@@ -977,275 +818,27 @@
     );
   }
 
-  function configuredCatalogUrl() {
-    const query =
-      new URLSearchParams(
-        window.location.search
-      ).get("catalogUrl");
-
-    return String(
-      query ||
-      safeLocalStorageValue(
-        "rml-resonite-api-catalog-url"
-      ) ||
-      ""
-    ).trim();
-  }
-
-  function isPrivateIpv4Hostname(hostname) {
-    const parts = String(hostname || "")
-      .split(".")
-      .map(part => Number(part));
-
-    if (
-      parts.length !== 4 ||
-      parts.some(part =>
-        !Number.isInteger(part) ||
-        part < 0 ||
-        part > 255
-      )
-    ) {
-      return false;
-    }
-
-    return (
-      parts[0] === 10 ||
-      parts[0] === 127 ||
-      (parts[0] === 169 &&
-        parts[1] === 254) ||
-      (parts[0] === 172 &&
-        parts[1] >= 16 &&
-        parts[1] <= 31) ||
-      (parts[0] === 192 &&
-        parts[1] === 168)
-    );
-  }
-
-  function isLocalBuilderOrigin() {
-    if (
-      window.location.protocol !== "http:" &&
-      window.location.protocol !== "https:"
-    ) {
-      return false;
-    }
-
-    const hostname = String(
-      window.location.hostname || ""
-    )
-      .trim()
-      .toLowerCase()
-      .replace(/^\[|\]$/g, "");
-
-    return (
-      hostname === "localhost" ||
-      hostname === "::1" ||
-      hostname.endsWith(".localhost") ||
-      hostname.endsWith(".local") ||
-      (hostname.includes(":") &&
-        hostname.startsWith("fc")) ||
-      (hostname.includes(":") &&
-        hostname.startsWith("fd")) ||
-      hostname.startsWith("fe80:") ||
-      isPrivateIpv4Hostname(hostname)
-    );
-  }
-
-  function builderBridgeUrl(path) {
+  async function fetchJson(url, timeoutMs, signal = null) {
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    if (signal?.aborted) abort();
+    else signal?.addEventListener("abort", abort, { once: true });
+    const timeout = Number(timeoutMs) > 0
+      ? window.setTimeout(abort, Number(timeoutMs)) : 0;
     try {
-      if (!isLocalBuilderOrigin()) {
-        return "";
+      const response = await fetch(url, { cache: "no-store", mode: "cors",
+        credentials: "omit", redirect: "error", signal: controller.signal,
+        headers: { Accept: "application/json" } });
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+      const value = await response.json();
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw new TypeError("Catalog response is not a JSON object.");
       }
-
-      return new URL(
-        path,
-        window.location.origin
-      ).href;
-    } catch {
-      return "";
-    }
-  }
-
-  async function fetchJson(
-    url,
-    timeoutMs
-  ) {
-    const controller =
-      new AbortController();
-    const timeout =
-      Number(timeoutMs) > 0
-        ? window.setTimeout(
-            () => controller.abort(),
-            Number(timeoutMs)
-          )
-        : 0;
-
-    try {
-      const response = await fetch(
-        url,
-        {
-          cache: "no-store",
-          mode: "cors",
-          signal: controller.signal,
-          headers: {
-            Accept: "application/json"
-          }
-        }
-      );
-
-      if (!response.ok) {
-        const error = new Error(
-          `${response.status} ${response.statusText}`
-        );
-        error.rmlHttpResponseReceived = true;
-        throw error;
-      }
-
-      let value;
-
-      try {
-        value = await response.json();
-      } catch (cause) {
-        const error = new Error(
-          "The endpoint response is not valid JSON."
-        );
-        error.cause = cause;
-        error.rmlHttpResponseReceived = true;
-        throw error;
-      }
-
-      if (
-        !value ||
-        typeof value !== "object" ||
-        Array.isArray(value)
-      ) {
-        const error = new TypeError(
-          "Catalog response is not a JSON object."
-        );
-        error.rmlHttpResponseReceived = true;
-        throw error;
-      }
-
       return value;
     } finally {
-      if (timeout) {
-        window.clearTimeout(timeout);
-      }
+      signal?.removeEventListener("abort", abort);
+      if (timeout) window.clearTimeout(timeout);
     }
-  }
-
-  function healthUrlForCatalogUrl(
-    catalogUrl
-  ) {
-    const url = new URL(catalogUrl);
-    url.pathname = HEALTH_PATH;
-    url.search = "";
-    url.hash = "";
-    return url.href;
-  }
-
-  async function probeConfiguredScannerUrl(
-    catalogUrl,
-    timeoutMs = BUILDER_PROBE_TIMEOUT_MS
-  ) {
-    let health;
-
-    try {
-      health = await fetchJson(
-        healthUrlForCatalogUrl(
-          catalogUrl
-        ),
-        timeoutMs
-      );
-    } catch (cause) {
-      const error = new Error(
-        `Scanner endpoint ${catalogUrl} is unavailable.`,
-        { cause }
-      );
-      error.rmlScannerEndpointReached =
-        cause?.rmlHttpResponseReceived === true;
-      throw error;
-    }
-
-    if (
-      health.ok !== true ||
-      health.catalogReady !== true ||
-      health.catalogAvailable !== true
-    ) {
-      const error = new Error(
-        "The Live scanner catalog is not ready."
-      );
-      error.rmlScannerEndpointReached = true;
-      throw error;
-    }
-
-    const fingerprintContract =
-      scannerFingerprintContract(health);
-    const legacyFingerprint =
-      legacyScannerFingerprint(health);
-
-    if (
-      !fingerprintContract &&
-      !legacyFingerprint
-    ) {
-      const error = new Error(
-        `Live scanner health response provides neither fingerprint contract v${REQUIRED_SCANNER_FINGERPRINT_VERSION} nor a compatible legacy scanner fingerprint.`
-      );
-      error.rmlScannerEndpointReached = true;
-      throw error;
-    }
-
-    return {
-      health,
-      fingerprint:
-        fingerprintContract?.fingerprint ||
-        legacyFingerprint,
-      legacy:
-        !fingerprintContract,
-      url: catalogUrl,
-      catalogFetchUrl: catalogUrl
-    };
-  }
-
-  function directScannerUrls(
-    excludedUrls = []
-  ) {
-    const urls = [];
-    const excluded = new Set(
-      (Array.isArray(excludedUrls)
-        ? excludedUrls
-        : [])
-        .map(value =>
-          String(value || "").trim()
-        )
-        .filter(Boolean)
-    );
-
-    if (
-      activeScannerCatalogUrl &&
-      !excluded.has(
-        activeScannerCatalogUrl
-      )
-    ) {
-      urls.push(activeScannerCatalogUrl);
-    }
-
-    for (
-      let port = DEFAULT_PORT_FIRST;
-      port <= DEFAULT_PORT_LAST;
-      port += 1
-    ) {
-      const url =
-        `http://127.0.0.1:${port}${CATALOG_PATH}`;
-
-      if (
-        !excluded.has(url) &&
-        !urls.includes(url)
-      ) {
-        urls.push(url);
-      }
-    }
-
-    return urls;
   }
 
   function loopbackScannerCatalogUrl(
@@ -1283,257 +876,14 @@
     }
   }
 
-  async function probeDirectScannerUrl(
-    catalogUrl,
-    timeoutMs = BUILDER_PROBE_TIMEOUT_MS
-  ) {
-    return probeConfiguredScannerUrl(
-      catalogUrl,
-      timeoutMs
-    );
-  }
-
-  async function probeDirectScannerRange(
-    excludedUrls = []
-  ) {
-    const urls = directScannerUrls(
-      excludedUrls
-    );
-    if (urls.length === 0) {
-      return null;
-    }
-
-    try {
-      return await Promise.any(
-        urls.map(url =>
-          probeDirectScannerUrl(
-            url,
-            BUILDER_PROBE_TIMEOUT_MS
-          )
-        )
-      );
-    } catch (aggregate) {
-      const errors =
-        Array.isArray(aggregate?.errors)
-          ? aggregate.errors
-          : [];
-      const reached = errors.find(
-        error =>
-          error
-            ?.rmlScannerEndpointReached ===
-              true
-      );
-      if (reached) {
-        throw reached;
-      }
-      return null;
-    }
-  }
-
-  async function probeBuilderScannerBridge(
-    timeoutMs = BUILDER_PROBE_TIMEOUT_MS
-  ) {
-    const statusUrl = builderBridgeUrl(
-      BUILDER_SCANNER_STATUS_PATH
-    );
-
-    if (!statusUrl) {
-      return null;
-    }
-
-    const status = await fetchJson(
-      statusUrl,
-      timeoutMs
-    );
-    const scannerPort = Number(
-      status.port
-    );
-
-    if (
-      status.rmlScannerBridge !== 1 ||
-      status.available !== true ||
-      !Number.isInteger(scannerPort) ||
-      scannerPort < DEFAULT_PORT_FIRST ||
-      scannerPort > DEFAULT_PORT_LAST
-    ) {
-      return null;
-    }
-
-    const catalogBridgeUrl =
-      builderBridgeUrl(
-        `${BUILDER_SCANNER_CATALOG_PATH}?port=${scannerPort}`
-      );
-
-    if (!catalogBridgeUrl) {
-      return null;
-    }
-
-    const scannerUrl =
-      `http://127.0.0.1:${scannerPort}${CATALOG_PATH}`;
-    const statusContract =
-      scannerFingerprintContract(status);
-    const statusLegacyFingerprint =
-      legacyScannerFingerprint(status);
-
-    if (
-      statusContract &&
-      status.catalogReady === true
-    ) {
-      return {
-        health: status,
-        fingerprint:
-          statusContract.fingerprint,
-        url: scannerUrl,
-        catalogFetchUrl:
-          catalogBridgeUrl
-      };
-    }
-
-    if (
-      !statusContract &&
-      statusLegacyFingerprint &&
-      status.catalogReady !== false
-    ) {
-      return {
-        health: status,
-        fingerprint:
-          statusLegacyFingerprint,
-        legacy: true,
-        url: scannerUrl,
-        catalogFetchUrl:
-          catalogBridgeUrl
-      };
-    }
-
-    const error = new Error(
-      "The Builder bridge status does not expose a scanner fingerprint. A project import will not download the full catalog merely to discover one."
-    );
-    error.rmlScannerEndpointReached = true;
-    throw error;
-  }
-
-  async function tryScannerCatalog(
-    options = {}
-  ) {
-    const discoverPorts =
-      options.discoverPorts === true;
-    const configured =
-      configuredCatalogUrl();
-    const configuredLoopback =
-      loopbackScannerCatalogUrl(
-        configured
-      );
-
-    const attemptedUrls = new Set();
-    const candidates = [];
-    const addCandidate = url => {
-      const candidate =
-        String(url || "").trim();
-
-      if (
-        !candidate ||
-        candidates.includes(candidate)
-      ) {
-        return;
-      }
-
-      candidates.push(candidate);
-    };
-
-    if (configuredLoopback) {
-      addCandidate(
-        configuredLoopback
-      );
-    } else if (configured) {
-      addCandidate(configured);
-    }
-
-    addCandidate(
-      activeScannerCatalogUrl
-    );
-
-    addCandidate(
-      loopbackScannerCatalogUrl(
-        cachedCatalogRecord?.sourceUrl
-      )
-    );
-    addCandidate(
-      rememberedScannerCatalogUrl()
-    );
-
-    const probes = [];
-    for (const candidate of candidates) {
-      attemptedUrls.add(candidate);
-      probes.push(
-        probeConfiguredScannerUrl(
-          candidate,
-          BUILDER_PROBE_TIMEOUT_MS
-        )
-      );
-    }
-
-    if (isLocalBuilderOrigin()) {
-      probes.push(
-        probeBuilderScannerBridge(
-          BUILDER_PROBE_TIMEOUT_MS
-        ).then(value => {
-          if (value) return value;
-          throw new Error(
-            "The Builder bridge has no active scanner."
-          );
-        })
-      );
-    }
-
-    if (probes.length > 0) {
-      try {
-        return await Promise.any(probes);
-      } catch (aggregate) {
-        const errors =
-          Array.isArray(aggregate?.errors)
-            ? aggregate.errors
-            : [];
-        const reached = errors.find(
-          error =>
-            error
-              ?.rmlScannerEndpointReached ===
-                true
-        );
-        if (reached) {
-          console.warn(
-            "[RML API Catalog] A known scanner path was reached, but is not usable: " +
-            String(
-              reached?.message || reached
-            )
-          );
-        }
-      }
-    }
-
-    if (!discoverPorts) {
-      return null;
-    }
-
-    try {
-      return await probeDirectScannerRange(
-        [...attemptedUrls]
-      );
-    } catch (error) {
-      console.warn(
-        "[RML API Catalog] One-time discovery reached a scanner, but it is not usable: " +
-        String(error?.message || error)
-      );
-      return null;
-    }
-  }
-
   async function loadAndVerifyLiveCatalog(
     live
   ) {
     const fetched = live?.raw ||
       await fetchJson(
         live.catalogFetchUrl || live.url,
-        CATALOG_FETCH_TIMEOUT_MS
+        CATALOG_FETCH_TIMEOUT_MS,
+        live.signal
       );
     const raw =
       bridgeCatalogPayload(fetched);
@@ -1775,11 +1125,7 @@
 
     if (cached) {
       cachedCatalogRecord = cached;
-      scannerOnline = false;
-      activeScannerCatalogUrl =
-        loopbackScannerCatalogUrl(
-          cached.sourceUrl
-        );
+
 
       return installCatalog(
         normalizeCatalog(
@@ -1790,8 +1136,6 @@
       );
     }
 
-    scannerOnline = false;
-    scannerChecking = false;
     updateUnavailableStatus();
     return null;
   }
@@ -2026,83 +1370,57 @@
     return report;
   }
 
-  async function synchronizeScannerStatus(
-    options = {}
-  ) {
-    if (scannerCheckPromise) {
-      return scannerCheckPromise;
+  function currentScannerConnection() {
+    return window.RMLRuntimeBridge?.getConnectionState?.() || { mode: "cached", generation: -1 };
+  }
+
+  function demoteLiveFactoryReport() {
+    const report = window.RMLApiNodeFactoryReport;
+    if (!report || report.liveCatalogVerified !== true) return;
+    const next = Object.freeze({ ...report, liveCatalogVerified: false,
+      catalogSource: statusCatalog()?.catalogSource || "scanner-cache" });
+    window.RMLApiNodeFactoryReport = next;
+    window.dispatchEvent(new CustomEvent("rml-api-node-factory-ready", { detail: next }));
+  }
+
+  async function synchronizeScannerStatus(options = {}) {
+    const session = currentScannerConnection();
+    // Imports and renders may use the authorized cache but never initiate a
+    // scanner request. Only the Cached/Live button supplies manualSession.
+    if (session.mode !== "live") return false;
+    if (scannerCheckGeneration === session.generation) {
+      if (scannerCheckPromise) return scannerCheckPromise;
+      return lastScannerFingerprintSync.liveReached === true &&
+        window.RMLApiNodeFactoryReport?.liveCatalogVerified === true;
     }
-
-    const showChecking =
-      options.showChecking === true;
-    const throwOnFailure =
-      options.throwOnFailure === true;
-
-    scannerCheckPromise =
-      (async () => {
-        if (showChecking) {
-          scannerChecking = true;
-          updateStatus(
-            statusCatalog(),
-            {
-              checking: true,
-              online: scannerOnline
-            }
-          );
+    if (!options.manualSession || options.manualSession.generation !== session.generation) {
+      return false;
+    }
+    const signal = window.RMLRuntimeBridge.getSessionSignal();
+    const assertSession = () => {
+      const active = currentScannerConnection();
+      if (signal?.aborted || active.mode !== "live" || active.generation !== session.generation) {
+        throw new Error("Scanner session was closed.");
+      }
+    };
+    scannerCheckGeneration = session.generation;
+    const pending = Promise.resolve().then(async () => {
+      try {
+        assertSession();
+        const fingerprintContract = scannerFingerprintContract(session.health);
+        const legacyFingerprint = legacyScannerFingerprint(session.health);
+        if (session.health?.catalogReady !== true || session.health?.catalogAvailable !== true ||
+            (!fingerprintContract && !legacyFingerprint)) {
+          throw new Error("Scanner connected, but its catalog is not ready or lacks a compatible fingerprint. The existing cache remains available.");
         }
-
-        const activeBeforeSync =
-          statusCatalog();
-        let cached =
-          cachedCatalogRecord;
-        const live =
-          await tryScannerCatalog({
-            discoverPorts:
-              options.discoverPorts ===
-                true ||
-              (
-                !cached &&
-                !activeBeforeSync
-              )
-          });
-
-        scannerChecking = false;
-
-        if (!live) {
-          scannerOnline = false;
-          lastScannerFingerprintSync =
-            Object.freeze({
-              liveReached: false,
-              fingerprintMatchedCache:
-                false,
-              cacheUpdatedFromLive:
-                false,
-              cacheFallback: true,
-              fingerprint: String(
-                cachedCatalogRecord
-                  ?.fingerprint ||
-                ""
-              )
-            });
-          updateStatus(
-            statusCatalog(),
-            {
-              checking: false,
-              online: false
-            }
-          );
-          return false;
-        }
-
-        scannerOnline = true;
-        activeScannerCatalogUrl =
-          live.url;
-
-        if (!cached) {
-          cached =
-            await readCachedLiveCatalog();
-        }
-
+        const live = { health: session.health,
+          fingerprint: fingerprintContract?.fingerprint || legacyFingerprint,
+          legacy: !fingerprintContract,
+          url: `${session.scannerBaseUrl}/resonite_api_catalog.json`, signal };
+        const activeBeforeSync = statusCatalog();
+        let cached = cachedCatalogRecord;
+        if (!cached) cached = await readCachedLiveCatalog();
+        assertSession();
         const fingerprintMatchedCache =
           Boolean(
             cached?.catalog &&
@@ -2141,6 +1459,7 @@
             : await loadAndVerifyLiveCatalog(
                 live
               );
+        assertSession();
         if (!fingerprintMatchedCache) {
           notifyCatalogGate(
             options.onCatalogCacheWrite,
@@ -2166,6 +1485,7 @@
             "The changed Live catalog was verified, but its synchronized cache snapshot could not be persisted. The Builder did not activate the uncached Live payload."
           );
         }
+        assertSession();
         const synchronizedRaw =
           fingerprintMatchedCache
             ? cached.catalog
@@ -2204,6 +1524,7 @@
         await activateCatalogAndFactory(
           confirmedCatalog
         );
+        assertSession();
         promoteFactoryReportForCatalog(
           confirmedCatalog,
           {
@@ -2235,57 +1556,23 @@
         );
 
         return true;
-      })()
-        .catch(error => {
-          scannerChecking = false;
-          scannerOnline = false;
-          lastScannerFingerprintSync =
-            Object.freeze({
-              liveReached: false,
-              fingerprintMatchedCache:
-                false,
-              cacheUpdatedFromLive:
-                false,
-              cacheFallback: true,
-              fingerprint: String(
-                cachedCatalogRecord
-                  ?.fingerprint ||
-                ""
-              )
-            });
-
-          updateStatus(
-            statusCatalog(),
-            {
-              checking: false,
-              online: false
-            }
-          );
-
-          console.debug(
-            "Resonite scanner status check failed.",
-            error
-          );
-
-          if (throwOnFailure) {
-            throw error;
-          }
-
-          return false;
-        })
-        .finally(() => {
-          scannerCheckPromise = null;
-        });
-
-    return scannerCheckPromise;
-  }
-
-  async function refreshLiveCatalogManually() {
-    return synchronizeScannerStatus({
-      showChecking: true,
-      discoverPorts: true,
-      reloadOnChange: false
+      } catch (error) {
+        if (currentScannerConnection().generation === session.generation) {
+          demoteLiveFactoryReport();
+          lastScannerFingerprintSync = Object.freeze({ liveReached: false,
+            fingerprintMatchedCache: false, cacheUpdatedFromLive: false,
+            cacheFallback: true, fingerprint: String(cachedCatalogRecord?.fingerprint || ""),
+            error: error?.message || String(error) });
+          updateStatus();
+        }
+        if (options.throwOnFailure === true) throw error;
+        return false;
+      } finally {
+        if (scannerCheckGeneration === session.generation) scannerCheckPromise = null;
+      }
     });
+    scannerCheckPromise = pending;
+    return pending;
   }
 
   function normalizedRequiredApiNodes(
@@ -2684,7 +1971,9 @@
       {
         phase: "live",
         message:
-          "Comparing the scanner-provided Live fingerprint with the cached catalog fingerprint."
+          currentScannerConnection().mode === "live"
+            ? "Using available API contracts for the active scanner session."
+            : "Cached mode: using saved API contracts without a scanner request. Click Cached to connect."
       }
     );
 
@@ -2706,7 +1995,9 @@
         {
           phase: "cache",
           message:
-            "The parallel checks of all known Live health paths failed. Activating the last cached catalog immediately."
+            currentScannerConnection().mode === "live"
+              ? "The current scanner session has no verified catalog. Using the cached catalog."
+              : "Cached mode is active. Using the saved catalog without a live request."
         }
       );
     }
@@ -2720,7 +2011,7 @@
         available: false,
         live: false,
         cacheFallback: true,
-        liveAttempted: true,
+        liveAttempted: currentScannerConnection().mode === "live",
         source: "unavailable",
         catalogFingerprint: "",
         engineVersion: ""
@@ -2767,7 +2058,7 @@
       live,
       cacheFallback: !live,
       catalogBackedByCache: true,
-      liveAttempted: true,
+      liveAttempted: currentScannerConnection().mode === "live",
       source: live
         ? "scanner-verified-cache"
         : "scanner-cache",
@@ -3016,8 +2307,8 @@
           }),
         portMigrations:
           Object.freeze(structuredClone(portMigrations)),
-        liveFallbackAttempted: true,
-        liveAttempted: true,
+        liveFallbackAttempted: currentScannerConnection().mode === "live",
+        liveAttempted: currentScannerConnection().mode === "live",
         cacheFallback:
           replacementCatalog.cacheFallback ===
             true,
@@ -3169,8 +2460,8 @@
             requiredApiNodeFailureLabel
           )
         ),
-      liveFallbackAttempted: true,
-      liveAttempted: true,
+      liveFallbackAttempted: currentScannerConnection().mode === "live",
+      liveAttempted: currentScannerConnection().mode === "live",
       cacheFallback:
         replacementCatalog.cacheFallback ===
           true,
@@ -3184,69 +2475,21 @@
     });
   }
 
-  function installManualScannerRefresh() {
-    const status =
-      document.getElementById(
-        "api-catalog-state"
-      );
-
-    if (!status || status.dataset.manualScannerBound === "true") {
-      return;
+  function synchronizeConnectedSession(connection = currentScannerConnection()) {
+    if (connection.mode === "live") {
+      // Only the badge can open a session. Catalog initialization may reuse that
+      // session, but never opens or retries a transport connection itself.
+      void synchronizeScannerStatus({ manualSession: connection });
+    } else {
+      demoteLiveFactoryReport();
     }
-
-    status.dataset.manualScannerBound = "true";
-    status.tabIndex = 0;
-    status.setAttribute("role", "button");
-
-    const run = () => {
-      if (
-        (
-          scannerOnline &&
-          statusCatalog()
-            ?.catalogSource ===
-              "scanner"
-        ) ||
-        scannerChecking
-      ) {
-        return;
-      }
-
-      void refreshLiveCatalogManually();
-    };
-
-    status.addEventListener("click", run);
-    status.addEventListener("keydown", event => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        run();
-      }
-    });
+    updateStatus();
   }
 
-  window.addEventListener(
-    "rml-api-node-factory-ready",
-    () => {
-      updateStatus(
-        statusCatalog(),
-        {
-          checking: scannerChecking,
-          online: scannerOnline
-        }
-      );
-    }
-  );
-
-  if (window.RMLApiNodeFactoryReport) {
-    queueMicrotask(() => {
-      updateStatus(
-        statusCatalog(),
-        {
-          checking: scannerChecking,
-          online: scannerOnline
-        }
-      );
-    });
-  }
+  window.addEventListener("rml-scanner-connection", event => {
+    synchronizeConnectedSession(event.detail);
+  });
+  window.addEventListener("rml-api-node-factory-ready", updateStatus);
 
   const catalogReady =
     loadCatalog();
@@ -3331,7 +2574,7 @@
 
   catalogReady
     .then(() => {
-      installManualScannerRefresh();
+      synchronizeConnectedSession();
     })
     .catch(() => {});
 
@@ -3360,7 +2603,7 @@
     "RMLCatalogImportGate",
     {
       value: Object.freeze({
-        version: 11,
+        version: 12,
         ensureForImport:
           ensureCatalogForImport,
         ensureLive:

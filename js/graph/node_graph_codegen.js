@@ -6028,7 +6028,7 @@ function connectionProposal(
         return {
           valid: false,
           reason:
-            "This internal input is already supplied through a connected outer Composite port. Disconnect the outer wire before replacing it with an internal source."
+            globalThis.RMLCodeTemplates.text("runtime", "source_013", [])
         };
       }
     }
@@ -8960,9 +8960,12 @@ function buildTypedNodeGraphCSharpContribution(
       {};
     const includeGuideComments =
       metadata.includeGuide === true;
-    const generatedGuidance = value =>
+    if (includeGuideComments && !window.RMLGuidance?.ready(["runtime"])) {
+      throw new Error("Runtime guidance must be loaded before synchronous graph generation.");
+    }
+    const generatedGuidance = (key, ...values) =>
       includeGuideComments
-        ? String(value || "")
+        ? window.RMLGuidance.text("runtime", key, ...values)
         : "";
     const guidanceWarnings = new Set();
     const cacheKey =
@@ -10109,7 +10112,7 @@ function buildTypedNodeGraphCSharpContribution(
         }
       },
       guidanceComment(value) {
-        return generatedGuidance(value);
+        return includeGuideComments ? String(value || "") : "";
       },
       includeGuideComments,
       ...extra
@@ -11114,11 +11117,8 @@ function buildTypedNodeGraphCSharpContribution(
 
         return {
           item,
-          code: `    private static void ${item.method}()
-    {
-        try
-        {
-${actions.length > 0
+          code: globalThis.RMLCodeTemplates.text("runtime", "source_014", [item.method,
+actions.length > 0
   ? actions
       .map(action =>
         action
@@ -11128,14 +11128,9 @@ ${actions.length > 0
       )
       .join("\n")
   : generatedGuidance(
-      "            // No connected impulse targets."
-    )}
-        }
-        catch (Exception exception)
-        {
-            ReportGraphRuntimeFailure("${failureSource}", exception);
-        }
-    }`
+      "noImpulseTargetsIndented"
+    ),
+failureSource])
         };
       });
 
@@ -11191,7 +11186,7 @@ ${actions.length > 0
       )
       .join("\n")
   : generatedGuidance(
-      "        // No connected impulse targets."
+      "noImpulseTargets"
     )}
     }`
         };
@@ -11234,25 +11229,12 @@ ${actions.length > 0
             .filter(Boolean)
         : [];
     const configurationButtonTriggerCode =
-`${generatedGuidance(`    /// <summary>
-    /// Emits the direct Impulse output belonging to a Configuration Outline
-    /// Button. Unknown ids return false so the caller can report a stale
-    /// packed Outline instead of silently discarding the press.
-    /// </summary>
-`)}    public static bool TriggerConfigurationButton(
-        string itemId)
-    {
-        switch (itemId ?? string.Empty)
-        {
-${configurationButtonCases.length > 0
+globalThis.RMLCodeTemplates.text("runtime", "source_015", [generatedGuidance("outlineButtonSummary"),
+configurationButtonCases.length > 0
   ? configurationButtonCases.join("\n")
   : generatedGuidance(
-      "                // No packed Configuration Outline buttons."
-    )}
-            default:
-                return false;
-        }
-    }`;
+      "noOutlineButtons"
+    )]);
     const startupEmitters = [];
 
     if (configurationNode) {
@@ -11560,47 +11542,7 @@ ${updates}
 
     const dynamicChoiceRuntimeSupportCode =
       directDynamicChoiceFields.length > 0
-        ? `    private static string ResolveDynamicChoiceValue(
-        string current,
-        string preferredDefault,
-        IReadOnlyList<string> values,
-        bool allowEmpty)
-    {
-        values ??= Array.Empty<string>();
-
-        if (!string.IsNullOrEmpty(current) &&
-            values.Contains(current))
-        {
-            return current;
-        }
-
-        if (!string.IsNullOrEmpty(preferredDefault) &&
-            values.Contains(preferredDefault))
-        {
-            return preferredDefault;
-        }
-
-        if (!allowEmpty && values.Count > 0)
-        {
-            return values[0];
-        }
-
-        return string.Empty;
-    }
-
-    private static void RefreshDynamicChoiceSelectionsForSource(
-        string sourceNodeId,
-        bool emitReactions)
-    {
-        switch (sourceNodeId ?? string.Empty)
-        {
-${dynamicChoiceRefreshCases.join("\n")}
-            default:
-                break;
-        }
-    }
-
-`
+        ? globalThis.RMLCodeTemplates.text("runtime", "source_016", [dynamicChoiceRefreshCases.join("\n")])
         : "";
 
     const runtimeMonitorNodes = [
@@ -11870,21 +11812,13 @@ ${dynamicChoiceRefreshCases.join("\n")}
               ? `\n\n        RefreshDynamicChoiceSelectionsForSource(\n            "${graphCsEscapeString(item.dynamicChoiceSourceId)}",\n            emitReactions: false);`
               : "";
 
-          return `    public static void ${item.setter}(${item.csType} value)
-    {
-        lock (_configurationStateLock)
-        {
-            ${assignment}
-        }${refresh}
-    }
-
-    private static ${item.csType} ${item.getter}()
-    {
-        lock (_configurationStateLock)
-        {
-            return ${item.backing};
-        }
-    }`;
+          return globalThis.RMLCodeTemplates.text("runtime", "source_017", [item.setter,
+item.csType,
+assignment,
+refresh,
+item.csType,
+item.getter,
+item.backing]);
         })
         .join("\n\n");
     const reactionCode =
@@ -12038,8 +11972,8 @@ ${dynamicChoiceRefreshCases.join("\n")}
 
     const guideComment =
       includeGuideComments
-        ? `// RML typed runtime graph\n\n/*\n * Generated by the RML Configuration Builder.\n *\n * STEP 1 - Configuration values\n * The main mod source forwards the current RML configuration values into\n * this generated runtime class through the Set... methods below.\n *\n * STEP 2 - Runtime reactions\n * React... methods are entry points for Configuration sockets configured to\n * react when settings are saved. Startup-capable sockets are emitted from\n * OnEngineInit(). Stored-only sockets remain typed value sources.\n *\n * STEP 3 - Typed graph execution\n * Emit... methods are the generated impulse paths. Value inputs are resolved\n * from their connected typed sources when an impulse path executes.\n *\n * STEP 4 - Runtime state and outputs\n * Generated fields retain node state and action outputs. Display Value and\n * Display Impulse nodes publish through DisplayValues/DisplayValueChanged and\n * stream to the local scanner runtime bridge when that scanner is installed.\n *\n * This file is generated from the visual graph. Edit the graph rather than\n * editing this generated file manually.\n */\n\n`
-        : "";
+      ? generatedGuidance("header")
+      : "";
 
     const queuedImpulseMethods =
       impulseOutputs
@@ -12085,770 +12019,62 @@ ${dynamicChoiceRefreshCases.join("\n")}
         )
         .join("\n\n");
 
-    let source = `${guideComment}${usingLines}
-
-namespace ${namespaceName};
-${warningsComment}
-${generatedGuidance(`/// <summary>
-/// Generated executable runtime for the builder's typed node graph.
-/// The main mod source forwards current configuration values into this class.
-/// </summary>
-`)}internal static partial class ${graphClassName}
-{
-    private static readonly object _configurationStateLock = new();
-    private static readonly object _displayStateLock = new();
-    private static readonly object _runtimeBridgeResolverLock = new();
-    private static Action<string> _display = static _ => { };
-    private static readonly Dictionary<string, object?> _displayValues =
-        new(StringComparer.Ordinal);
-    private static readonly Dictionary<string, object?> _displayValuesByMonitorId =
-        new(StringComparer.Ordinal);
-    private static readonly Dictionary<string, string> _displayTextByMonitorId =
-        new(StringComparer.Ordinal);
-    private static readonly Dictionary<string, string> _displayFingerprints =
-        new(StringComparer.Ordinal);
-    private static readonly HashSet<string> _reportedRuntimeFailures =
-        new(StringComparer.Ordinal);
-    private const string RuntimeBridgeChannel =
-        "${graphCsEscapeString(runtimeBridgeChannel)}";
-    private static readonly string _runtimeBridgeSessionId =
-        DateTimeOffset.UtcNow
-            .ToUnixTimeMilliseconds()
-            .ToString(CultureInfo.InvariantCulture) +
-        "-" +
-        Guid.NewGuid().ToString("N");
-    private static MethodInfo? _runtimeBridgePublisher;
-    private static long _runtimeBridgeResolveAfter;
-    private static int _runtimeDisplayPumpStarted;
-    private static readonly object _graphRuntimeTasksLock = new();
-    private static readonly HashSet<Task> _graphRuntimeTasks = new();
-    private static readonly object _graphDispatchWorldsLock = new();
-    private static readonly HashSet<FrooxEngine.World> _graphDispatchWorlds =
-        new(ReferenceEqualityComparer.Instance);
-    private static readonly object _graphEntryDrainLock = new();
-    private static TaskCompletionSource<bool> _graphEntriesDrained =
-        CreateCompletedGraphDrainSignal();
-    private static int _graphRuntimeAcceptingEntries = 1;
-    private static int _graphActiveEntries;
-    private static readonly object _graphImpulseExecutionLock = new();
-    private static readonly object _graphRuntimeLastValuesLock = new();
-    private static readonly Dictionary<string, object?> _graphRuntimeLastValues =
-        new(StringComparer.Ordinal);
-    private static readonly AsyncLocal<GraphExecutionFrame?> _graphExecutionFrame =
-        new();
-
-${generatedGuidance(`    /// <summary>
-    /// Latest values published by Display Value and Display Impulse nodes, keyed by node label.
-    /// </summary>
-`)}    public static IReadOnlyDictionary<string, object?> DisplayValues =>
-        _displayValues;
-
-${generatedGuidance(`    /// <summary>
-    /// Raised whenever a display or impulse monitor publishes a value.
-    /// </summary>
-`)}    public static event Action<string, object?>? DisplayValueChanged;
-
-${generatedGuidance(`    /// <summary>
-    /// Raised with the stable graph monitor id whenever a Display Value changes.
-    /// This is used by generated read-only Runtime Display rows in the RML mod menu.
-    /// </summary>
-`)}    public static event Action<string, string, object?>?
-        DisplayValueChangedByMonitorId;
-
-${configFieldsCode || generatedGuidance(
-  "    // No configuration values."
-)}
-${storeFieldsCode ? `\n${storeFieldsCode}` : ""}${extensionFieldsCode ? `\n\n${extensionFieldsCode}` : ""}
-
-    public static void Initialize(Action<string>? display)
-    {
-        lock (_graphEntryDrainLock)
-        {
-            Volatile.Write(
-                ref _graphRuntimeAcceptingEntries,
-                1);
-        }
-        _display = display ?? (static _ => { });
-        lock (_displayStateLock)
-        {
-            _reportedRuntimeFailures.Clear();
-        }${extensionInitializeStatements.length > 0
+    let source = globalThis.RMLCodeTemplates.text("runtime", "Runtime_graph_main_class_template", [guideComment,
+usingLines,
+namespaceName,
+warningsComment,
+generatedGuidance("classSummary"),
+graphClassName,
+graphClassName,
+graphCsEscapeString(runtimeBridgeChannel),
+generatedGuidance("displayValuesSummary"),
+generatedGuidance("displayEventSummary"),
+generatedGuidance("monitorEventSummary"),
+configFieldsCode || generatedGuidance(
+  "noConfiguration"
+),
+storeFieldsCode ? `\n${storeFieldsCode}` : "",
+extensionFieldsCode ? `\n\n${extensionFieldsCode}` : "",
+extensionInitializeStatements.length > 0
   ? `\n${formatExtensionStatements(
       extensionInitializeStatements,
       "Initialize extension"
     )}`
-  : ""}
-    }
-
-    private static void TrackGraphTask(Task task)
-    {
-        if (task.IsCompleted)
-        {
-            return;
-        }
-
-        lock (_graphRuntimeTasksLock)
-        {
-            _graphRuntimeTasks.Add(task);
-        }
-
-        _ = task.ContinueWith(
-            completed =>
-            {
-                lock (_graphRuntimeTasksLock)
-                {
-                    _graphRuntimeTasks.Remove(completed);
-                }
-            },
-            CancellationToken.None,
-            TaskContinuationOptions.ExecuteSynchronously,
-            TaskScheduler.Default);
-    }
-
-    public static void BeginRuntimeDrain()
-    {
-        lock (_graphEntryDrainLock)
-        {
-            Volatile.Write(
-                ref _graphRuntimeAcceptingEntries,
-                0);
-        }
-        Volatile.Write(
-            ref _runtimeDisplayPumpStarted,
-            0);${extensionRuntimeDrainStatements.length > 0
+  : "",
+extensionRuntimeDrainStatements.length > 0
   ? `\n${formatExtensionStatements(
       extensionRuntimeDrainStatements,
       "Runtime drain extension"
     )}`
-  : ""}
-    }
+  : "",
+setterCode || generatedGuidance(
+  "noSetters"
+),
+reactionCode ? `
 
-    private static TaskCompletionSource<bool>
-        CreateCompletedGraphDrainSignal()
-    {
-        TaskCompletionSource<bool> signal =
-            new(TaskCreationOptions.RunContinuationsAsynchronously);
-        signal.TrySetResult(true);
-        return signal;
-    }
-
-    private static Task WaitForGraphEntriesDrainedAsync(
-        CancellationToken cancellationToken)
-    {
-        Task drainTask;
-        lock (_graphEntryDrainLock)
-        {
-            drainTask = _graphEntriesDrained.Task;
-        }
-
-        return drainTask.WaitAsync(cancellationToken);
-    }
-
-    private static async Task DrainWorldDispatchQueueAsync(
-        FrooxEngine.World? world,
-        CancellationToken cancellationToken)
-    {
-        if (world is null || world.IsDisposed)
-        {
-            return;
-        }
-
-        TaskCompletionSource<bool> barrier =
-            new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        try
-        {
-            world!.RunSynchronously(
-                () => barrier.TrySetResult(true),
-                immediatellyIfPossible: true);
-        }
-        catch
-        {
-${generatedGuidance(`            // A disposed/transitioning world cannot retain a runnable queue.
-`)}
-            barrier.TrySetResult(true);
-        }
-
-        await barrier.Task
-            .WaitAsync(cancellationToken)
-            .ConfigureAwait(false);
-    }
-
-    private static async Task DrainWorldDispatchQueuesAsync(
-        CancellationToken cancellationToken)
-    {
-        FrooxEngine.World? userspaceWorld =
-            FrooxEngine.Userspace.UserspaceWorld;
-        FrooxEngine.World? currentWorld =
-            GraphExecutionWorld();
-        FrooxEngine.World[] worlds;
-
-        lock (_graphDispatchWorldsLock)
-        {
-            if (currentWorld is not null && !currentWorld.IsDisposed)
-            {
-                _graphDispatchWorlds.Add(currentWorld!);
-            }
-            if (userspaceWorld is not null && !userspaceWorld.IsDisposed)
-            {
-                _graphDispatchWorlds.Add(userspaceWorld!);
-            }
-
-            worlds = _graphDispatchWorlds.ToArray();
-        }
-
-${generatedGuidance(`        // Drain non-userspace Worlds first. Their queued actions can enqueue
-        // follow-up work into Userspace; the Userspace barrier therefore runs
-        // last and also covers those nested dispatches.
-`)}
-        foreach (FrooxEngine.World world in worlds.Where(candidate =>
-                     !ReferenceEquals(candidate, userspaceWorld)))
-        {
-            await DrainWorldDispatchQueueAsync(
-                    world,
-                    cancellationToken)
-                .ConfigureAwait(false);
-        }
-
-        await DrainWorldDispatchQueueAsync(
-                userspaceWorld,
-                cancellationToken)
-            .ConfigureAwait(false);
-
-        lock (_graphDispatchWorldsLock)
-        {
-            _graphDispatchWorlds.Clear();
-        }
-    }
-
-    public static async Task DrainRuntimeAsync(
-        CancellationToken cancellationToken)
-    {
-        BeginRuntimeDrain();
-
-        await WaitForGraphEntriesDrainedAsync(
-                cancellationToken)
-            .ConfigureAwait(false);
-
-        await DrainWorldDispatchQueuesAsync(
-                cancellationToken)
-            .ConfigureAwait(false);
-
-${generatedGuidance(`        // Every queued graph delegate has now crossed a FIFO barrier. Wait
-        // once more for an entry that began immediately before its barrier.
-`)}
-        await WaitForGraphEntriesDrainedAsync(
-                cancellationToken)
-            .ConfigureAwait(false);
-
-        while (true)
-        {
-            Task[] pending;
-            lock (_graphRuntimeTasksLock)
-            {
-                _graphRuntimeTasks.RemoveWhere(
-                    task => task.IsCompleted);
-                pending = _graphRuntimeTasks.ToArray();
-            }
-
-            if (pending.Length == 0)
-            {
-                break;
-            }
-
-            try
-            {
-                await Task.WhenAll(pending)
-                    .WaitAsync(cancellationToken)
-                    .ConfigureAwait(false);
-            }
-            catch when (!cancellationToken.IsCancellationRequested)
-            {
-${generatedGuidance(`                // A finished faulted task is still fully drained. Its graph
-                // error was already reported at the execution boundary.
-`)}
-            }
-        }
-
-        _display = static _ => { };
-        DisplayValueChanged = null;
-        DisplayValueChangedByMonitorId = null;
-        lock (_runtimeBridgeResolverLock)
-        {
-            _runtimeBridgePublisher = null;
-        }
-        lock (_displayStateLock)
-        {
-            _displayValues.Clear();
-            _displayValuesByMonitorId.Clear();
-            _displayTextByMonitorId.Clear();
-            _displayFingerprints.Clear();
-        }
-        lock (_graphRuntimeLastValuesLock)
-        {
-            _graphRuntimeLastValues.Clear();
-        }
-        _graphExecutionFrame.Value = null;
-    }
-
-${setterCode || generatedGuidance(
-  "    // No configuration setters."
-)}${reactionCode ? `
-
-${reactionCode}` : ""}
-
-${configurationButtonTriggerCode}
-
-    public static void OnEngineInit()
-    {
-${startupEmitters.length > 0
+${reactionCode}` : "",
+configurationButtonTriggerCode,
+startupEmitters.length > 0
   ? "        BeginStartupWhenWorldReady();"
   : generatedGuidance(
-      "        // No connected startup impulse paths."
-    )}${extensionEngineInitStatements.length > 0
+      "noStartupPaths"
+    ),
+extensionEngineInitStatements.length > 0
   ? `\n${formatExtensionStatements(
       extensionEngineInitStatements,
       "Engine initialization extension"
     )}`
-  : ""}
-
-        _ = TryDispatchGraphToWorld(
-            RefreshDisplays);${runtimeMonitorNodes.length > 0
+  : "",
+runtimeMonitorNodes.length > 0
   ? `
         StartRuntimeDisplayPump();`
-  : ""}
-    }
-
-${generatedGuidance(`    // Graph entry points use the global CoroutineManager only to wait until a
-    // usable world exists. Actual graph execution is dispatched through
-    // World.RunSynchronously(), FrooxEngine's supported data-model mutation
-    // path for background threads and other worlds.
-`)}
-    private static FrooxEngine.World? GraphExecutionWorld()
-    {
-        return FrooxEngine.Engine.Current?.WorldManager?.FocusedWorld ??
-               FrooxEngine.Userspace.UserspaceWorld;
-    }
-
-    private static bool GraphWorldReady(FrooxEngine.World? world)
-    {
-        return world is not null &&
-               !world.IsDisposed &&
-               world.RootSlot is not null &&
-               world.LocalUser is not null;
-    }
-
-    private static bool TryDispatchGraphToWorld(Action action)
-    {
-        if (Volatile.Read(
-                ref _graphRuntimeAcceptingEntries) == 0)
-        {
-            return false;
-        }
-
-        FrooxEngine.World? world = GraphExecutionWorld();
-        if (!GraphWorldReady(world))
-        {
-            return false;
-        }
-
-        lock (_graphDispatchWorldsLock)
-        {
-            _graphDispatchWorlds.Add(world!);
-        }
-
-        try
-        {
-            world!.RunSynchronously(
-                () => ExecuteGraphSafely(
-                    "World dispatch",
-                    action),
-                immediatellyIfPossible: true);
-            return true;
-        }
-        catch (Exception exception)
-        {
-            ReportGraphRuntimeFailure(
-                "World dispatch infrastructure",
-                exception);
-            return false;
-        }
-    }
-
-    private static void DispatchGraphToWorld(Action action)
-    {
-        if (Volatile.Read(
-                ref _graphRuntimeAcceptingEntries) == 0)
-        {
-            return;
-        }
-
-        if (TryDispatchGraphToWorld(action))
-        {
-            return;
-        }
-
-        FrooxEngine.CoroutineManager? manager =
-            FrooxEngine.Engine.Current?.GlobalCoroutineManager;
-
-        if (manager is null)
-        {
-            ReportGraphRuntimeFailure(
-                "World dispatch scheduling",
-                new InvalidOperationException(
-                    "The Resonite GlobalCoroutineManager is not available while waiting for a world-safe graph execution context."));
-            return;
-        }
-
-        Task dispatchTask = manager.StartTask(
-            async () =>
-            {
-                while (
-                    Volatile.Read(
-                        ref _graphRuntimeAcceptingEntries) != 0 &&
-                    !TryDispatchGraphToWorld(action))
-                {
-${generatedGuidance(`                    // Updates is only a wait primitive. World.RunSynchronously
-                    // is what grants the valid world mutation context.
-`)}
-                    await new FrooxEngine.Updates(1);
-                }
-            });
-        TrackGraphTask(dispatchTask);
-    }
-
-    private static void ExecuteGraphSafely(
-        string source,
-        Action action)
-    {
-        try
-        {
-            action();
-        }
-        catch (Exception exception)
-        {
-            ReportGraphRuntimeFailure(
-                source,
-                exception);
-        }
-    }
-
-    private sealed class GraphExecutionFrame
-    {
-        internal readonly object Gate = new();
-        internal readonly Dictionary<string, object?> Values =
-            new(StringComparer.Ordinal);
-        internal readonly Queue<Action> Impulses =
-            new();
-        internal bool IsDraining;
-    }
-
-    private sealed class GraphExecutionScope : IDisposable
-    {
-        private readonly GraphExecutionFrame? _previous;
-        private bool _disposed;
-
-        internal bool Accepted { get; }
-
-        internal GraphExecutionScope()
-        {
-            _previous = _graphExecutionFrame.Value;
-            lock (_graphEntryDrainLock)
-            {
-                if (Volatile.Read(
-                        ref _graphRuntimeAcceptingEntries) == 0)
-                {
-                    return;
-                }
-
-                if (_graphActiveEntries == 0)
-                {
-                    _graphEntriesDrained =
-                        new TaskCompletionSource<bool>(
-                            TaskCreationOptions.RunContinuationsAsynchronously);
-                }
-                _graphActiveEntries++;
-                Accepted = true;
-            }
-
-            _graphExecutionFrame.Value =
-                new GraphExecutionFrame();
-        }
-
-        public void Dispose()
-        {
-            if (_disposed)
-            {
-                return;
-            }
-
-            _disposed = true;
-            if (Accepted)
-            {
-                _graphExecutionFrame.Value =
-                    _previous;
-            }
-            if (!Accepted)
-            {
-                return;
-            }
-
-            TaskCompletionSource<bool>? drainSignal = null;
-            lock (_graphEntryDrainLock)
-            {
-                _graphActiveEntries--;
-                if (_graphActiveEntries == 0)
-                {
-                    drainSignal = _graphEntriesDrained;
-                }
-            }
-            drainSignal?.TrySetResult(true);
-        }
-    }
-
-    private static GraphExecutionScope OpenGraphEntry()
-    {
-        return new GraphExecutionScope();
-    }
-
-    private static void BeginGraphEntry(Action action)
-    {
-        using GraphExecutionScope scope =
-            OpenGraphEntry();
-        if (!scope.Accepted)
-        {
-            return;
-        }
-        action();
-    }
-
-    private static T ReadGraphExecutionValue<T>(
-        string key,
-        T fallback)
-    {
-        GraphExecutionFrame? frame = _graphExecutionFrame.Value;
-        if (frame is not null)
-        {
-            lock (frame.Gate)
-            {
-                if (frame.Values.TryGetValue(
-                        key,
-                        out object? value))
-                {
-                    return value is null
-                        ? default!
-                        : (T)value;
-                }
-            }
-        }
-
-        return fallback;
-    }
-
-    private static void WriteGraphExecutionValue<T>(
-        string key,
-        T value)
-    {
-        GraphExecutionFrame? frame = _graphExecutionFrame.Value;
-        if (frame is null)
-        {
-            frame = new GraphExecutionFrame();
-            _graphExecutionFrame.Value = frame;
-        }
-
-        lock (frame.Gate)
-        {
-            frame.Values[key] = value;
-        }
-    }
-
-    private static T ReadGraphRuntimeValue<T>(
-        string key,
-        T fallback)
-    {
-        GraphExecutionFrame? frame = _graphExecutionFrame.Value;
-        if (frame is not null)
-        {
-            lock (frame.Gate)
-            {
-                if (frame.Values.TryGetValue(
-                        key,
-                        out object? framedValue))
-                {
-                    return framedValue is null
-                        ? default!
-                        : (T)framedValue;
-                }
-            }
-
-${generatedGuidance(`            // A new execution entry must never inherit another entry's
-            // transient output. The last-value snapshot below exists only
-            // for displays and diagnostics outside an active execution.
-`)}
-            return fallback;
-        }
-
-        lock (_graphRuntimeLastValuesLock)
-        {
-            if (_graphRuntimeLastValues.TryGetValue(
-                    key,
-                    out object? lastValue))
-            {
-                return lastValue is null
-                    ? default!
-                    : (T)lastValue;
-            }
-        }
-
-        return fallback;
-    }
-
-    private static void WriteGraphRuntimeValue<T>(
-        string key,
-        T value)
-    {
-        GraphExecutionFrame? frame = _graphExecutionFrame.Value;
-        if (frame is null)
-        {
-            frame = new GraphExecutionFrame();
-            _graphExecutionFrame.Value = frame;
-        }
-
-        lock (frame.Gate)
-        {
-            frame.Values[key] = value;
-        }
-        lock (_graphRuntimeLastValuesLock)
-        {
-            _graphRuntimeLastValues[key] = value;
-        }
-    }
-
-    private static Action CaptureGraphExecutionFrame(Action action)
-    {
-        GraphExecutionFrame? captured = _graphExecutionFrame.Value;
-        return () =>
-        {
-            GraphExecutionFrame? previous = _graphExecutionFrame.Value;
-            _graphExecutionFrame.Value = captured;
-            try
-            {
-                action();
-            }
-            finally
-            {
-                _graphExecutionFrame.Value = previous;
-            }
-        };
-    }
-
-${generatedGuidance(`    // Every generated graph uses the same stack-safe execution kernel.
-    // Each root event owns a frame with its own FIFO queue. Continuations are
-    // drained iteratively instead of recursively. The global lock serializes
-    // actual execution without ever merging the values of different roots.
-`)}
-    private static void EnqueueGraphImpulse(Action action)
-    {
-        GraphExecutionFrame? frame = _graphExecutionFrame.Value;
-        if (frame is null)
-        {
-            BeginGraphEntry(
-                () => EnqueueGraphImpulse(action));
-            return;
-        }
-
-        lock (_graphImpulseExecutionLock)
-        {
-            frame.Impulses.Enqueue(action);
-
-            if (frame.IsDraining)
-            {
-                return;
-            }
-
-            frame.IsDraining = true;
-            try
-            {
-                while (frame.Impulses.Count > 0)
-                {
-                    frame.Impulses.Dequeue()();
-                }
-            }
-            finally
-            {
-                frame.Impulses.Clear();
-                frame.IsDraining = false;
-            }
-        }
-    }
-
-    private static void ReportGraphRuntimeFailure(
-        string source,
-        Exception exception)
-    {
-        bool firstFailure;
-        lock (_displayStateLock)
-        {
-            firstFailure =
-                _reportedRuntimeFailures.Add(
-                    source);
-        }
-
-        if (!firstFailure)
-        {
-            return;
-        }
-
-        try
-        {
-            _display(
-                $"Typed graph runtime error in {source}: " +
-                exception);
-        }
-        catch
-        {
-${generatedGuidance(`            // Logging must never escape back into Resonite's host callback.
-`)}
-        }
-    }
-${startupEmitters.length > 0 ? `
-    private static int _startupWorldReadyState;
-
-    private static void BeginStartupWhenWorldReady()
-    {
-        if (System.Threading.Interlocked.CompareExchange(
-                ref _startupWorldReadyState, 1, 0) != 0)
-        {
-            return;
-        }
-
-        DispatchGraphToWorld(RunStartupOnce);
-    }
-
-    private static void RunStartupOnce()
-    {
-        if (System.Threading.Interlocked.CompareExchange(
-                ref _startupWorldReadyState, 2, 1) != 1)
-        {
-            return;
-        }
-
-${startupEmitters
+  : "",
+generatedGuidance("worldDispatch"),
+generatedGuidance("executionKernel"),
+startupEmitters.length > 0 ? globalThis.RMLCodeTemplates.text("runtime", "source_018", [startupEmitters
   .map(call => `        ${call}`)
-  .join("\n")}
-        RefreshDisplays();
-    }
-` : ""}
-
-    public static void OnConfigurationSynchronized()
-    {
-        _ = TryDispatchGraphToWorld(
-            RefreshDisplays);
-    }
-
-    private static void RefreshDisplays()
-    {
-${[
+  .join("\n")]) : "",
+[
   ...displayStatements,
   ...dynamicCollectionPublishStatements
 ].length > 0
@@ -12857,861 +12083,29 @@ ${[
       ...dynamicCollectionPublishStatements
     ].join("\n")
   : generatedGuidance(
-      "        // No runtime display or editable collection sources are present."
-    )}
-    }
-
-    public static IReadOnlyList<string> GetDynamicCollectionItemsBySourceId(
-        string sourceNodeId)
-    {
-        switch (sourceNodeId ?? string.Empty)
-        {
-${dynamicCollectionCases.length > 0
+      "noDisplaySources"
+    ),
+dynamicCollectionCases.length > 0
   ? dynamicCollectionCases.join("\n")
-  : '            default:\n                return Array.Empty<string>();'}
-${dynamicCollectionCases.length > 0
+  : '            default:\n                return Array.Empty<string>();',
+dynamicCollectionCases.length > 0
   ? `\n            default:\n                return Array.Empty<string>();`
-  : ""}
-        }
-    }
-
-${dynamicChoiceRuntimeSupportCode}    private static void PublishDynamicCollectionSource(
-        string sourceNodeId,
-        string label,
-        object? value)
-    {
-${directDynamicChoiceFields.length > 0
+  : "",
+dynamicChoiceRuntimeSupportCode,
+directDynamicChoiceFields.length > 0
   ? `        RefreshDynamicChoiceSelectionsForSource(
             sourceNodeId,
             emitReactions: true);
 
 `
-  : ""}        PublishRuntimeBridge(
-            $"dynamic-source:{sourceNodeId}",
-            label,
-            "dynamicCollection",
-            value);
-    }
-
-${entryImpulseMethods ? `${entryImpulseMethods}\n\n` : ""}${queuedImpulseMethods ? `${queuedImpulseMethods}\n\n` : ""}${inlineImpulseMethods ? `${inlineImpulseMethods}\n\n` : ""}${impulseMethods || generatedGuidance(
-  "    // No impulse outputs are present."
-)}${extensionMembersCode ? `\n\n${extensionMembersCode}` : ""}
-
-    private static T GraphAdd<T>(T left, T right)
-    {
-        return (T)GraphBinaryOperator(
-            "op_Addition",
-            left!,
-            right!);
-    }
-
-    private static T GraphSubtract<T>(T left, T right)
-    {
-        return (T)GraphBinaryOperator(
-            "op_Subtraction",
-            left!,
-            right!);
-    }
-
-    private static T GraphMultiply<T>(T left, T right)
-    {
-        return (T)GraphBinaryOperator(
-            "op_Multiply",
-            left!,
-            right!);
-    }
-
-    private static T GraphDivide<T>(T left, T right)
-    {
-        return (T)GraphBinaryOperator(
-            "op_Division",
-            left!,
-            right!);
-    }
-
-    private static T GraphNegate<T>(T value)
-    {
-        object result = value switch
-        {
-            int current => -current,
-            float current => -current,
-            double current => -current,
-            _ => GraphUnaryOperator(
-                "op_UnaryNegation",
-                value!)
-        };
-
-        return (T)result;
-    }
-
-    private static T GraphMinimum<T>(T left, T right)
-    {
-        return Comparer<T>.Default.Compare(left, right) <= 0
-            ? left
-            : right;
-    }
-
-    private static T GraphMaximum<T>(T left, T right)
-    {
-        return Comparer<T>.Default.Compare(left, right) >= 0
-            ? left
-            : right;
-    }
-
-    private static T GraphClamp<T>(T value, T minimum, T maximum)
-    {
-        return GraphMaximum(minimum, GraphMinimum(value, maximum));
-    }
-
-    private static T GraphAbsolute<T>(T value)
-    {
-        object result = value switch
-        {
-            int current => Math.Abs(current),
-            float current => MathF.Abs(current),
-            double current => Math.Abs(current),
-            _ => throw new InvalidOperationException(
-                $"Absolute is not supported for {typeof(T).FullName}.")
-        };
-
-        return (T)result;
-    }
-
-    private static T GraphLerp<T>(T left, T right, float factor)
-    {
-        if (left is int integerLeft && right is int integerRight)
-        {
-            return (T)(object)(int)(
-                integerLeft +
-                (integerRight - integerLeft) * factor);
-        }
-
-        if (left is float floatLeft && right is float floatRight)
-        {
-            return (T)(object)(
-                floatLeft +
-                (floatRight - floatLeft) * factor);
-        }
-
-        if (left is double doubleLeft && right is double doubleRight)
-        {
-            return (T)(object)(
-                doubleLeft +
-                (doubleRight - doubleLeft) * (double)factor);
-        }
-
-        object delta = GraphBinaryOperator(
-            "op_Subtraction",
-            right!,
-            left!);
-        object interpolationFactor =
-            typeof(T).Name.StartsWith(
-                "double",
-                StringComparison.Ordinal)
-                ? (double)factor
-                : factor;
-        object scaled = GraphBinaryOperator(
-            "op_Multiply",
-            delta,
-            interpolationFactor);
-
-        return (T)GraphBinaryOperator(
-            "op_Addition",
-            left!,
-            scaled);
-    }
-
-    private static object GraphBinaryOperator(
-        string operatorName,
-        object left,
-        object right)
-    {
-        if (left is int integerLeft && right is int integerRight)
-        {
-            return operatorName switch
-            {
-                "op_Addition" => integerLeft + integerRight,
-                "op_Subtraction" => integerLeft - integerRight,
-                "op_Multiply" => integerLeft * integerRight,
-                "op_Division" => integerLeft / integerRight,
-                _ => throw new InvalidOperationException(
-                    "Unsupported Int32 operator " + operatorName + ".")
-            };
-        }
-
-        if (left is float floatLeft && right is float floatRight)
-        {
-            return operatorName switch
-            {
-                "op_Addition" => floatLeft + floatRight,
-                "op_Subtraction" => floatLeft - floatRight,
-                "op_Multiply" => floatLeft * floatRight,
-                "op_Division" => floatLeft / floatRight,
-                _ => throw new InvalidOperationException(
-                    "Unsupported Single operator " + operatorName + ".")
-            };
-        }
-
-        if (left is double doubleLeft && right is double doubleRight)
-        {
-            return operatorName switch
-            {
-                "op_Addition" => doubleLeft + doubleRight,
-                "op_Subtraction" => doubleLeft - doubleRight,
-                "op_Multiply" => doubleLeft * doubleRight,
-                "op_Division" => doubleLeft / doubleRight,
-                _ => throw new InvalidOperationException(
-                    "Unsupported Double operator " + operatorName + ".")
-            };
-        }
-
-        MethodInfo? method = GraphOperatorMethod(
-            operatorName,
-            left,
-            right);
-        if (method is null)
-        {
-            throw new InvalidOperationException(
-                operatorName + " is not supported for " +
-                left.GetType().FullName + " and " +
-                right.GetType().FullName + ".");
-        }
-
-        return method.Invoke(
-                   null,
-                   new object?[] { left, right }) ??
-               throw new InvalidOperationException(
-                   operatorName + " returned null.");
-    }
-
-    private static object GraphUnaryOperator(
-        string operatorName,
-        object value)
-    {
-        Type type = value.GetType();
-        MethodInfo? method = type
-            .GetMethods(
-                BindingFlags.Public |
-                BindingFlags.Static)
-            .Where(candidate =>
-                string.Equals(
-                    candidate.Name,
-                    operatorName,
-                    StringComparison.Ordinal))
-            .Where(candidate =>
-            {
-                ParameterInfo[] parameters = candidate.GetParameters();
-                return parameters.Length == 1 &&
-                       parameters[0].ParameterType == type;
-            })
-            .OrderByDescending(candidate => candidate.DeclaringType == type)
-            .ThenBy(candidate => candidate.MetadataToken)
-            .FirstOrDefault();
-
-        if (method is null)
-        {
-            throw new InvalidOperationException(
-                operatorName + " is not supported for " +
-                type.FullName + ".");
-        }
-
-        return method.Invoke(
-                   null,
-                   new[] { value }) ??
-               throw new InvalidOperationException(
-                   operatorName + " returned null.");
-    }
-
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<
-        (string OperatorName, Type LeftType, Type RightType),
-        MethodInfo> GraphBinaryOperatorCache = new();
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<
-        (Type Type, string MemberName),
-        MemberInfo> GraphFloatComponentCache = new();
-
-    private static MethodInfo? GraphOperatorMethod(
-        string operatorName,
-        object left,
-        object right)
-    {
-        Type leftType = left.GetType();
-        Type rightType = right.GetType();
-        var cacheKey = (
-            OperatorName: operatorName,
-            LeftType: leftType,
-            RightType: rightType);
-        if (GraphBinaryOperatorCache.TryGetValue(
-                cacheKey,
-                out MethodInfo? cachedMethod))
-        {
-            return cachedMethod;
-        }
-        Type? candidateType = leftType;
-
-        for (int pass = 0; pass < 2; pass++)
-        {
-            if (candidateType is not null)
-            {
-                foreach (MethodInfo method in candidateType.GetMethods(
-                             BindingFlags.Public |
-                             BindingFlags.Static))
-                {
-                    if (!string.Equals(
-                            method.Name,
-                            operatorName,
-                            StringComparison.Ordinal))
-                    {
-                        continue;
-                    }
-
-                    ParameterInfo[] parameters =
-                        method.GetParameters();
-                    if (parameters.Length == 2 &&
-                        parameters[0].ParameterType.IsInstanceOfType(left) &&
-                        parameters[1].ParameterType.IsInstanceOfType(right))
-                    {
-                        GraphBinaryOperatorCache.TryAdd(cacheKey, method);
-                        return method;
-                    }
-                }
-            }
-
-            candidateType =
-                rightType == leftType
-                    ? null
-                    : rightType;
-        }
-
-        return null;
-    }
-
-    private static float ReadFloatComponent(object? value, string memberName)
-    {
-        if (value is null)
-        {
-            return 0f;
-        }
-
-        Type type = value.GetType();
-        var cacheKey = (
-            Type: type,
-            MemberName: memberName);
-        if (GraphFloatComponentCache.TryGetValue(
-                cacheKey,
-                out MemberInfo? cachedMember))
-        {
-            object? cachedValue = cachedMember switch
-            {
-                FieldInfo cachedField => cachedField.GetValue(value),
-                PropertyInfo cachedProperty => cachedProperty.GetValue(value),
-                _ => null
-            };
-            return Convert.ToSingle(
-                cachedValue,
-                CultureInfo.InvariantCulture);
-        }
-        BindingFlags flags =
-            BindingFlags.Instance |
-            BindingFlags.Public |
-            BindingFlags.NonPublic |
-            BindingFlags.IgnoreCase;
-
-        FieldInfo? field = type
-            .GetFields(flags)
-            .Where(candidate =>
-                string.Equals(
-                    candidate.Name,
-                    memberName,
-                    StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(candidate => candidate.DeclaringType == type)
-            .ThenBy(candidate => candidate.MetadataToken)
-            .FirstOrDefault();
-        if (field is not null)
-        {
-            GraphFloatComponentCache.TryAdd(cacheKey, field);
-            return Convert.ToSingle(
-                field.GetValue(value),
-                CultureInfo.InvariantCulture);
-        }
-
-        PropertyInfo? property = type
-            .GetProperties(flags)
-            .Where(candidate =>
-                string.Equals(
-                    candidate.Name,
-                    memberName,
-                    StringComparison.OrdinalIgnoreCase) &&
-                candidate.GetIndexParameters().Length == 0)
-            .OrderByDescending(candidate => candidate.DeclaringType == type)
-            .ThenBy(candidate => candidate.MetadataToken)
-            .FirstOrDefault();
-        if (property is not null)
-        {
-            GraphFloatComponentCache.TryAdd(cacheKey, property);
-            return Convert.ToSingle(
-                property.GetValue(value),
-                CultureInfo.InvariantCulture);
-        }
-
-        return 0f;
-    }
-
-    private static void StartRuntimeDisplayPump()
-    {
-        if (Interlocked.Exchange(
-                ref _runtimeDisplayPumpStarted,
-                1) != 0)
-        {
-            return;
-        }
-
-        TrackGraphTask(System.Threading.Tasks.Task.Run(
-            async () =>
-            {
-                while (
-                    Volatile.Read(
-                        ref _runtimeDisplayPumpStarted) != 0 &&
-                    FrooxEngine.Engine.Current is not null)
-                {
-                    try
-                    {
-                        TryDispatchGraphToWorld(
-                            RefreshDisplays);
-                    }
-                    catch
-                    {
-${generatedGuidance(`                        // A temporary world transition must not stop the monitor pump.
-`)}
-                    }
-
-                    await System.Threading.Tasks.Task
-                        .Delay(200)
-                        .ConfigureAwait(false);
-                }
-
-                Interlocked.Exchange(
-                    ref _runtimeDisplayPumpStarted,
-                    0);
-            }));
-    }
-
-    private static MethodInfo? ResolveRuntimeBridgePublisher()
-    {
-        lock (_runtimeBridgeResolverLock)
-        {
-            if (_runtimeBridgePublisher is not null)
-            {
-                return _runtimeBridgePublisher;
-            }
-
-            long now =
-                Environment.TickCount64;
-
-            if (now < _runtimeBridgeResolveAfter)
-            {
-                return null;
-            }
-
-            _runtimeBridgeResolveAfter =
-                now + 2000;
-
-            foreach (Assembly assembly in
-                     AppDomain.CurrentDomain.GetAssemblies())
-            {
-                Type? scannerType =
-                    assembly.GetType(
-                        "LazarusRmlBuilderCatalog.ResoniteApiCatalogScannerMod",
-                        throwOnError: false,
-                        ignoreCase: false);
-
-                MethodInfo? publisher = scannerType?
-                    .GetMethods(
-                        BindingFlags.Public |
-                        BindingFlags.Static)
-                    .Where(candidate =>
-                        string.Equals(
-                            candidate.Name,
-                            "PublishRuntimeDisplay",
-                            StringComparison.Ordinal))
-                    .Where(candidate =>
-                        candidate.GetParameters()
-                            .Select(parameter => parameter.ParameterType)
-                            .SequenceEqual(
-                            [
-                                typeof(string),
-                                typeof(string),
-                                typeof(string),
-                                typeof(string),
-                                typeof(string),
-                                typeof(object)
-                            ]))
-                    .OrderBy(candidate => candidate.MetadataToken)
-                    .FirstOrDefault();
-
-                if (publisher is not null)
-                {
-                    _runtimeBridgePublisher =
-                        publisher;
-                    return publisher;
-                }
-            }
-
-            return null;
-        }
-    }
-
-    private static object? PrepareRuntimeBridgeValue(
-        object? value,
-        int depth = 0)
-    {
-        if (value is null)
-        {
-            return null;
-        }
-
-        if (
-            value is string ||
-            value is bool ||
-            value is byte ||
-            value is sbyte ||
-            value is short ||
-            value is ushort ||
-            value is int ||
-            value is uint ||
-            value is long ||
-            value is ulong ||
-            value is float ||
-            value is double ||
-            value is decimal)
-        {
-            return value;
-        }
-
-        if (depth >= 3)
-        {
-            return FormatValue(value);
-        }
-
-        if (
-            value is System.Collections.IDictionary dictionary)
-        {
-            Dictionary<string, object?> result =
-                new(StringComparer.Ordinal);
-
-            int count = 0;
-
-            foreach (
-                System.Collections.DictionaryEntry entry
-                in dictionary)
-            {
-                if (count >= 64)
-                {
-                    result["…"] = "…";
-                    break;
-                }
-
-                string key =
-                    FormatValue(entry.Key);
-
-                result[key] =
-                    PrepareRuntimeBridgeValue(
-                        entry.Value,
-                        depth + 1);
-
-                count++;
-            }
-
-            return result;
-        }
-
-        if (
-            value is System.Collections.IEnumerable sequence &&
-            value is not string)
-        {
-            List<object?> result = new();
-
-            int count = 0;
-
-            foreach (object? item in sequence)
-            {
-                if (count >= 64)
-                {
-                    result.Add("…");
-                    break;
-                }
-
-                result.Add(
-                    PrepareRuntimeBridgeValue(
-                        item,
-                        depth + 1));
-
-                count++;
-            }
-
-            return result.ToArray();
-        }
-
-${generatedGuidance(`        // The scanner/runtime-display bridge lives outside this collectible
-        // mod generation and may cache the supplied object. Never let that
-        // cache receive a boxed enum, custom class, delegate or other object
-        // whose runtime Type belongs to the generated DLL. The bridge is a
-        // display-only contract, so an immutable string is the safe neutral
-        // representation for every remaining non-collection value.
-`)}
-        return FormatValue(value);
-    }
-
-    private static void PublishRuntimeBridge(
-        string monitorId,
-        string name,
-        string graphType,
-        object? value)
-    {
-        MethodInfo? publisher =
-            ResolveRuntimeBridgePublisher();
-
-        if (publisher is null)
-        {
-            return;
-        }
-
-        try
-        {
-            publisher.Invoke(
-              null,
-              [
-                  RuntimeBridgeChannel,
-                  _runtimeBridgeSessionId,
-                  monitorId,
-                  name,
-                  graphType,
-                  PrepareRuntimeBridgeValue(value)
-              ]);
-        }
-        catch
-        {
-            lock (_runtimeBridgeResolverLock)
-            {
-                if (ReferenceEquals(
-                        _runtimeBridgePublisher,
-                        publisher))
-                {
-                    _runtimeBridgePublisher =
-                        null;
-                    _runtimeBridgeResolveAfter =
-                        Environment.TickCount64 +
-                        500;
-                }
-            }
-        }
-    }
-
-    private static void PublishDisplay(
-        string monitorId,
-        string name,
-        string graphType,
-        object? value)
-    {
-        string formatted =
-            FormatValue(value);
-        string runtimeType =
-            value?.GetType().FullName ??
-            "null";
-        string fingerprint =
-            graphType + "\u001f" +
-            runtimeType + "\u001f" +
-            formatted;
-        bool changed;
-
-        lock (_displayStateLock)
-        {
-            _displayValues[name] =
-                value;
-            _displayValuesByMonitorId[
-                monitorId
-            ] = value;
-${generatedGuidance(`            // Keep an immutable display snapshot. Mutable collections such as
-            // List<T> can be cleared or changed after publication; RML menu
-            // text must represent the value at the moment it was published.
-`)}
-            _displayTextByMonitorId[
-                monitorId
-            ] = formatted;
-            changed =
-                !_displayFingerprints.TryGetValue(
-                    monitorId,
-                    out string? previous) ||
-                !string.Equals(
-                    previous,
-                    fingerprint,
-                    StringComparison.Ordinal);
-
-            if (changed)
-            {
-                _displayFingerprints[
-                    monitorId
-                ] = fingerprint;
-            }
-        }
-
-        if (changed)
-        {
-            DisplayValueChanged?.Invoke(
-                name,
-                value);
-            DisplayValueChangedByMonitorId
-                ?.Invoke(
-                    monitorId,
-                    name,
-                    value);
-            _display(
-                $"{name}: {formatted}");
-        }
-
-        PublishRuntimeBridge(
-            monitorId,
-            name,
-            graphType,
-            value);
-    }
-
-    public static bool TryGetDisplayValue(
-        string name,
-        out object? value)
-    {
-        lock (_displayStateLock)
-        {
-            return _displayValues.TryGetValue(
-                name,
-                out value);
-        }
-    }
-
-    public static bool TryGetDisplayValueByMonitorId(
-        string monitorId,
-        out object? value)
-    {
-        lock (_displayStateLock)
-        {
-            return _displayValuesByMonitorId
-                .TryGetValue(
-                    monitorId,
-                    out value);
-        }
-    }
-
-    public static string GetDisplayTextByMonitorId(
-        string monitorId,
-        string fallback = "")
-    {
-        lock (_displayStateLock)
-        {
-            return _displayTextByMonitorId
-                .TryGetValue(
-                    monitorId,
-                    out string? value)
-                ? value
-                : fallback;
-        }
-    }
-
-    private static string FormatValue(object? value)
-    {
-        return FormatValue(value, 0);
-    }
-
-    private static string FormatValue(
-        object? value,
-        int depth)
-    {
-        if (value is null)
-        {
-            return "<null>";
-        }
-
-        if (value is string text)
-        {
-            return text;
-        }
-
-        if (value is bool boolean)
-        {
-            return boolean ? "true" : "false";
-        }
-
-        if (value is byte[] bytes)
-        {
-            return $"byte[{bytes.Length}]";
-        }
-
-        if (
-            depth < 2 &&
-            value is System.Collections.IDictionary dictionary)
-        {
-            List<string> entries = new();
-            int count = 0;
-
-            foreach (
-                System.Collections.DictionaryEntry entry in
-                dictionary)
-            {
-                if (count >= 64)
-                {
-                    entries.Add("…");
-                    break;
-                }
-
-                entries.Add(
-                    $"{FormatValue(entry.Key, depth + 1)}: " +
-                    FormatValue(entry.Value, depth + 1));
-                count++;
-            }
-
-            return entries.Count > 0
-                ? string.Join(Environment.NewLine, entries)
-                : "{}";
-        }
-
-        if (
-            depth < 2 &&
-            value is System.Collections.IEnumerable sequence)
-        {
-            List<string> entries = new();
-            int count = 0;
-
-            foreach (object? item in sequence)
-            {
-                if (count >= 64)
-                {
-                    entries.Add("…");
-                    break;
-                }
-
-                entries.Add(
-                    FormatValue(
-                        item,
-                        depth + 1));
-                count++;
-            }
-
-            return entries.Count > 0
-                ? string.Join(Environment.NewLine, entries)
-                : "[]";
-        }
-
-        if (value is IFormattable formattable)
-        {
-            return formattable.ToString(
-                       null,
-                       CultureInfo.InvariantCulture) ??
-                   string.Empty;
-        }
-
-        return value.ToString() ??
-               string.Empty;
-    }
-}
-`;
+  : "",
+entryImpulseMethods ? `${entryImpulseMethods}\n\n` : "",
+queuedImpulseMethods ? `${queuedImpulseMethods}\n\n` : "",
+inlineImpulseMethods ? `${inlineImpulseMethods}\n\n` : "",
+impulseMethods || generatedGuidance(
+  "noImpulseOutputs"
+),
+extensionMembersCode ? `\n\n${extensionMembersCode}` : ""]);
     source =
       compactSingleUseQueuedImpulseWrappers(
         source,

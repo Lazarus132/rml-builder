@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  if (window.RMLScriptLoader?.version >= 27) {
+  if (window.RMLScriptLoader?.version >= 33) {
     return;
   }
 
@@ -17,6 +17,28 @@
   let runtimeViewLoadingNoticePromise = null;
 
   const bundles = Object.freeze({
+    "scanner-connection": Object.freeze({
+      dependencies: Object.freeze([]),
+      files: Object.freeze([Object.freeze({
+        url: "../graph/runtime_bridge.js?v=797-manual-port-discovery",
+        ready: () => window.RMLRuntimeBridge?.version >= 6 &&
+          typeof window.RMLRuntimeBridge?.connect === "function"
+      })])
+    }),
+    "code-templates": Object.freeze({
+      dependencies: Object.freeze([]),
+      files: Object.freeze([Object.freeze({
+        url: "../core/code_templates.js?v=794-shared-loader-runtime",
+        ready: () => window.RMLCodeTemplates?.version === 794
+      })])
+    }),
+    guidance: Object.freeze({
+      dependencies: Object.freeze([]),
+      files: Object.freeze([Object.freeze({
+        url: "../core/guidance.js?v=793",
+        ready: () => window.RMLGuidance?.version === 793
+      })])
+    }),
     compiler: Object.freeze({
       dependencies: Object.freeze([]),
       files: Object.freeze([
@@ -42,7 +64,7 @@
       dependencies: Object.freeze([]),
       files: Object.freeze([
         Object.freeze({
-          url: "../catalog/catalog_loader.js?v=190-source-comment-pruning-v776",
+          url: "../catalog/catalog_loader.js?v=796-manual-scanner-session",
           ready: () =>
             typeof window.RMLBaseModNodesReady?.then === "function" ||
             typeof window.RMLModNodesReady?.then === "function"
@@ -77,11 +99,12 @@
     }),
     "graph-codegen": Object.freeze({
       dependencies: Object.freeze([
+        "code-templates",
         "node-registry"
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/node_graph_codegen.js?v=3-source-comment-pruning-v776",
+          url: "../graph/node_graph_codegen.js?v=794-shared-loader-runtime",
           ready: () =>
             typeof window.RMLTypedNodeGraphGenerator?.build ===
               "function"
@@ -90,29 +113,25 @@
     }),
     "runtime-core": Object.freeze({
       dependencies: Object.freeze([
+        "scanner-connection",
         "compiler",
         "graph-codegen"
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/runtime_bridge.js?v=5-physical-modules-v748",
-          ready: () =>
-            typeof window.RMLRuntimeBridge?.subscribe === "function"
+          url: "../graph/node_graph_composites.js?v=6-composite-navigation-coherence-v792"
         }),
         Object.freeze({
-          url: "../graph/node_graph_composites.js?v=6-live-output-navigation-v790"
-        }),
-        Object.freeze({
-          url: "../graph/node_graph_custom_csharp.js?v=23-live-output-navigation-v790"
+          url: "../graph/node_graph_custom_csharp.js?v=794-shared-loader-runtime"
         }),
         Object.freeze({
           url: "../graph/node_graph_guided.js?v=1-physical-modules-v748"
         }),
         Object.freeze({
-          url: "../graph/node_graph_view.js?v=19-live-output-navigation-v790"
+          url: "../graph/node_graph_view.js?v=796-manual-scanner-session"
         }),
         Object.freeze({
-          url: "../graph/node_graph_bootstrap.js?v=6-inspector-interaction-budget-v789",
+          url: "../graph/node_graph_bootstrap.js?v=7-composite-navigation-coherence-v792",
           ready: () =>
             typeof window.RMLDynamicGraphHost?.isReady === "function"
         })
@@ -680,7 +699,7 @@
 
   Object.defineProperty(window, "RMLScriptLoader", {
     value: Object.freeze({
-      version: 29,
+      version: 33,
       ensure,
       ensureMany(names) {
         return Promise.all(
@@ -727,4 +746,62 @@
   } else {
     installRuntimeButton();
   }
+  function installScannerStatusControl() {
+    const status = document.getElementById("api-catalog-state");
+    if (!status || status.dataset.manualScannerBound === "true") return;
+    status.dataset.manualScannerBound = "true";
+    status.tabIndex = 0;
+    status.setAttribute("role", "button");
+    let loadIntent = 0;
+    let loading = false;
+    const run = async () => {
+      if (loading) {
+        ++loadIntent;
+        loading = false;
+        window.RMLRuntimeBridge?.disconnect?.();
+        status.dataset.source = "cache";
+        status.textContent = "Resonite API · Cached";
+        status.setAttribute("aria-busy", "false");
+        status.title = "Click to check the scanner once and connect. No automatic retries.";
+        status.setAttribute("aria-label", `${status.textContent}. ${status.title}`);
+        return;
+      }
+      if (window.RMLRuntimeBridge?.version >= 6) {
+        await window.RMLRuntimeBridge.toggle();
+        return;
+      }
+      const intent = ++loadIntent;
+      loading = true;
+      status.dataset.source = "updating";
+      status.textContent = "Resonite API · checking…";
+      status.setAttribute("aria-busy", "true");
+      status.title = "Click to cancel the connection attempt.";
+      status.setAttribute("aria-label", `${status.textContent}. ${status.title}`);
+      try {
+        await window.RMLScriptLoader.ensure("scanner-connection");
+        if (!loading || intent !== loadIntent) return;
+        loading = false;
+        await window.RMLRuntimeBridge.connect();
+      } catch (error) {
+        if (intent !== loadIntent) return;
+        loading = false;
+        if (window.RMLRuntimeBridge) window.RMLRuntimeBridge.disconnect(error);
+        else {
+          status.dataset.source = "cache";
+          status.textContent = "Resonite API · Cached";
+          status.setAttribute("aria-busy", "false");
+          status.title = `Connection module could not be loaded. Click to try again. ${error?.message || error}`;
+          status.setAttribute("aria-label", `${status.textContent}. ${status.title}`);
+        }
+      }
+    };
+    status.addEventListener("click", () => { void run(); });
+    status.addEventListener("keydown", event => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        if (!event.repeat) void run();
+      }
+    });
+  }
+  installScannerStatusControl();
 })();

@@ -1,406 +1,365 @@
 (() => {
   "use strict";
 
-  const BRIDGE_VERSION = 3;
+  const BRIDGE_VERSION = 6;
   const BRIDGE_PROTOCOL_VERSION = 1;
-  const HEALTH_PATH = "/health";
-  const SNAPSHOT_PATH = "/runtime/snapshot";
-  const EVENTS_PATH = "/runtime/events";
-  const PROBE_TIMEOUT_MS = 850;
-  const SNAPSHOT_TIMEOUT_MS = 1600;
-
-  function isLiveScannerCatalogSource(
-    value
-  ) {
-    return (
-      value === "scanner" ||
-      value === "scanner-legacy"
-    );
-  }
-
-  if (
-    window.RMLRuntimeBridge?.version >=
-    BRIDGE_VERSION
-  ) {
-    return;
-  }
+  const PROBE_TIMEOUT_MS = 3000;
+  const STREAM_OPEN_TIMEOUT_MS = 5000;
+  const SNAPSHOT_TIMEOUT_MS = 5000;
+  const PRESENCE_CHANNEL = "__rml_builder_scanner_connection__";
+  if (window.RMLRuntimeBridge?.version >= BRIDGE_VERSION) return;
 
   const channels = new Map();
-  let discoveredBaseUrl = "";
-  let discoveryPromise = null;
-  let discoveryEnabled =
-    isLiveScannerCatalogSource(
-      window.RMLResoniteApiCatalog
-        ?.catalogSource
-    ) ||
-    isLiveScannerCatalogSource(
-      window.RMLFrooxComponentCatalog
-        ?.catalogSource
-    );
+  let epoch = 0;
+  let mode = "cached";
+  let phase = "cached";
+  let scannerBaseUrl = "";
+  let health = null;
+  let lastError = "";
+  let controller = null;
+  let presenceSource = null;
+  let presenceTimer = null;
+  let settlePresence = null;
+  let connectPromise = null;
 
   function safeLocalStorageValue(key) {
-    try {
-      return window.localStorage
-        ?.getItem(key) || "";
-    } catch {
-      return "";
-    }
-  }
-
-  function configuredCatalogUrl() {
-    const query =
-      new URLSearchParams(
-        window.location.search
-      ).get("catalogUrl");
-
-    return String(
-      query ||
-      safeLocalStorageValue(
-        "rml-resonite-api-catalog-url"
-      ) ||
-      ""
-    ).trim();
+    try { return window.localStorage?.getItem(key) || ""; }
+    catch { return ""; }
   }
 
   function normalizeBaseUrl(value) {
-    const candidate =
-      String(value || "").trim();
-
-    if (!candidate) {
-      return "";
-    }
-
     try {
-      const url =
-        new URL(
-          candidate,
-          window.location.href
-        );
-
-      if (
-        url.protocol !== "http:" &&
-        url.protocol !== "https:"
-      ) {
-        return "";
-      }
-
-      return `${url.protocol}//${url.host}`;
-    } catch {
-      return "";
-    }
+      if (!String(value || "").trim()) return "";
+      const url = new URL(String(value).trim(), window.location.href);
+      if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) return "";
+      return url.origin;
+    } catch { return ""; }
   }
 
   function scannerBaseCandidates() {
-    if (!discoveryEnabled) {
-      return [];
-    }
-
-    const result = [];
-    const seen = new Set();
-
-    const add = value => {
-      const base =
-        normalizeBaseUrl(value);
-
-      if (
-        !base ||
-        seen.has(base)
-      ) {
-        return;
+    const configured = new URLSearchParams(window.location.search).get("catalogUrl") ||
+      safeLocalStorageValue("rml-resonite-api-catalog-url");
+    const preferred = configured ? normalizeBaseUrl(configured)
+      : normalizeBaseUrl(safeLocalStorageValue("rml-resonite-api-last-scanner-url")) ||
+        normalizeBaseUrl(window.RMLResoniteApiCatalog?.catalogSourceUrl) ||
+        normalizeBaseUrl(window.RMLFrooxComponentCatalog?.catalogSourceUrl) ||
+        "http://127.0.0.1:42719";
+    if (!preferred) return [];
+    const candidates = new Set([preferred]);
+    const url = new URL(preferred);
+    // One bounded discovery pass per click, not an automatic retry loop.
+    // A custom endpoint outside the scanner range remains explicitly pinned.
+    const first = 42719;
+    const last = 42729;
+    const port = Number(url.port);
+    if (port >= first && port <= last) {
+      for (let candidate = first; candidate <= last; candidate += 1) {
+        url.port = String(candidate);
+        candidates.add(url.origin);
       }
-
-      seen.add(base);
-      result.push(base);
-    };
-
-    add(
-      window.RMLResoniteApiCatalog
-        ?.catalogSourceUrl
-    );
-    add(
-      window.RMLFrooxComponentCatalog
-        ?.catalogSourceUrl
-    );
-    add(
-      configuredCatalogUrl()
-    );
-
-    return result;
+    }
+    return [...candidates];
   }
 
-  async function fetchJson(
-    url,
-    timeoutMs
-  ) {
-    const controller =
-      new AbortController();
-    const timeout =
-      window.setTimeout(
-        () => controller.abort(),
-        timeoutMs
-      );
-
-    try {
-      const response =
-        await fetch(
-          url,
-          {
-            cache: "no-store",
-            mode: "cors",
-            signal:
-              controller.signal,
-            headers: {
-              Accept:
-                "application/json"
-            }
-          }
-        );
-
-      if (!response.ok) {
-        throw new Error(
-          `${response.status} ${response.statusText}`
-        );
-      }
-
-      const value =
-        await response.json();
-
-      if (
-        !value ||
-        typeof value !== "object" ||
-        Array.isArray(value)
-      ) {
-        throw new TypeError(
-          "Runtime bridge response is not a JSON object."
-        );
-      }
-
-      return value;
-    } finally {
-      window.clearTimeout(
-        timeout
-      );
-    }
+  function getConnectionState() {
+    return Object.freeze({ mode, phase, connected: mode === "live", scannerBaseUrl,
+      health, lastError, generation: epoch, retrying: false });
   }
 
-  async function probeBaseUrl(baseUrl) {
-    const health =
-      await fetchJson(
-        `${baseUrl}${HEALTH_PATH}`,
-        PROBE_TIMEOUT_MS
-      );
-
-    if (
-      health.ok !== true ||
-      Number(
-        health.runtimeBridgeVersion
-      ) < BRIDGE_PROTOCOL_VERSION ||
-      health.runtimeBridgeReady !==
-        true
-    ) {
-      throw new Error(
-        "Scanner does not expose the required runtime bridge."
-      );
+  // One existing badge, one transport state. Catalog provenance is not a mode.
+  function renderStatus() {
+    const element = document.getElementById("api-catalog-state");
+    if (!element) return;
+    const catalog = window.RMLResoniteApiCatalog || window.RMLFrooxComponentCatalog;
+    const version = String(catalog?.engineVersion || "");
+    const prefix = version ? `Resonite API ${version}` : "Resonite API";
+    const checking = mode === "checking";
+    const live = mode === "live";
+    element.textContent = `${prefix} · ${checking ? "checking…" : live ? "Live" : "Cached"}`;
+    element.dataset.source = checking ? "updating" : live ? "scanner" : "cache";
+    element.setAttribute("aria-pressed", String(live));
+    element.setAttribute("aria-busy", String(checking));
+    const action = checking ? "Click to cancel the connection attempt."
+      : live ? "Click to disconnect and use Cached mode."
+      : "Click to find the scanner once and connect. Each candidate port is checked at most once; no automatic retries.";
+    const report = window.RMLApiNodeFactoryReport;
+    let statistics = "";
+    if (catalog && report && String(report.engineVersion || "") === version &&
+        Number.isFinite(Number(report.totalGeneratedNodes))) {
+      const types = Array.isArray(catalog.types) ? catalog.types : [];
+      const count = value => Math.max(0, Number(value) || 0).toLocaleString("de-DE");
+      statistics = `${count(types.filter(type => type?.isAttachableComponent === true).length)} attachable components · ${count(types.length)} API types · ${count(report.totalGeneratedNodes)} generated nodes`;
     }
-
-    return baseUrl;
+    element.title = [statistics, action, lastError].filter(Boolean).join(" · ");
+    element.setAttribute("aria-label", `${element.textContent}. ${element.title}`);
   }
 
-  async function discoverScanner() {
-    if (!discoveryEnabled) {
-      return "";
-    }
-
-    if (discoveredBaseUrl) {
-      try {
-        return await probeBaseUrl(
-          discoveredBaseUrl
-        );
-      } catch {
-        discoveredBaseUrl = "";
-      }
-    }
-
-    if (discoveryPromise) {
-      return discoveryPromise;
-    }
-
-    discoveryPromise =
-      Promise.all(
-        scannerBaseCandidates()
-          .map(async baseUrl => {
-            try {
-              return await probeBaseUrl(
-                baseUrl
-              );
-            } catch {
-              return "";
-            }
-          })
-      )
-        .then(results => {
-          const found =
-            results.find(Boolean) ||
-            "";
-
-          discoveredBaseUrl =
-            found;
-
-          if (!found) {
-            discoveryEnabled = false;
-          }
-
-          return found;
-        })
-        .finally(() => {
-          discoveryPromise = null;
-        });
-
-    return discoveryPromise;
+  function publishConnection() {
+    renderStatus();
+    window.dispatchEvent(new CustomEvent("rml-scanner-connection", {
+      detail: getConnectionState()
+    }));
   }
 
   function normalizeChannel(value) {
-    return String(value || "")
-      .trim()
-      .slice(0, 240);
+    return String(value || "").trim().slice(0, 240);
   }
 
   function createChannelState(channel) {
-    return {
-      channel,
-      listeners: new Set(),
-      values: new Map(),
-      connected: false,
-      active: false,
-      scannerBaseUrl: "",
-      sessionId: "",
-      lastSeenUtc: "",
-      eventSource: null,
-      generation: 0,
-      starting: false,
-      disposed: false
-    };
-  }
-
-  function stateFor(channel) {
-    const normalized =
-      normalizeChannel(
-        channel
-      );
-
-    if (!normalized) {
-      return null;
-    }
-
-    let state =
-      channels.get(
-        normalized
-      );
-
-    if (!state) {
-      state =
-        createChannelState(
-          normalized
-        );
-      channels.set(
-        normalized,
-        state
-      );
-    }
-
-    return state;
+    return { channel, listeners: new Set(), values: new Map(), connected: false,
+      active: false, scannerBaseUrl: "", sessionId: "", lastSeenUtc: "",
+      eventSource: null, generation: 0, streamTimer: null, requestController: null,
+      refreshPromise: null, phase: mode === "checking" ? phase : "cached",
+      lastError, disposed: false };
   }
 
   function publicState(state) {
-    return Object.freeze({
-      channel:
-        state.channel,
-      connected:
-        state.connected,
-      active:
-        state.active,
-      scannerBaseUrl:
-        state.scannerBaseUrl,
-      sessionId:
-        state.sessionId,
-      lastSeenUtc:
-        state.lastSeenUtc,
-      valueCount:
-        state.values.size
+    return Object.freeze({ channel: state.channel,
+      connected: mode === "live" && state.connected,
+      active: mode === "live" && state.connected && state.active,
+      scannerBaseUrl: state.scannerBaseUrl, sessionId: state.sessionId,
+      lastSeenUtc: state.lastSeenUtc, valueCount: state.values.size,
+      phase: state.phase, lastError: state.lastError, retrying: false });
+  }
+
+  function notify(state, kind = "state", record = null) {
+    const detail = Object.freeze({ kind, state: publicState(state), record });
+    for (const listener of [...state.listeners]) {
+      try { listener(detail); }
+      catch (error) { console.error("RML runtime bridge listener failed.", error); }
+    }
+    window.dispatchEvent(new CustomEvent("rml-runtime-bridge", { detail }));
+  }
+
+  function clearStreamTimer(state) {
+    if (state.streamTimer !== null) window.clearTimeout(state.streamTimer);
+    state.streamTimer = null;
+  }
+
+  function closeSource(source) {
+    if (!source) return;
+    source.onopen = source.onmessage = source.onerror = null;
+    source.close();
+  }
+
+  function stopChannel(state) {
+    state.generation += 1;
+    clearStreamTimer(state);
+    const source = state.eventSource;
+    state.eventSource = null;
+    closeSource(source);
+    state.requestController?.abort();
+    state.requestController = null;
+    state.refreshPromise = null;
+    state.connected = false;
+    state.active = false;
+    state.scannerBaseUrl = "";
+    state.phase = "cached";
+    state.lastError = lastError;
+  }
+
+  function disconnect(reason = "") {
+    ++epoch;
+    mode = "cached";
+    phase = "cached";
+    lastError = String(reason?.message || reason || "");
+    scannerBaseUrl = "";
+    health = null;
+    controller?.abort();
+    controller = null;
+    if (presenceTimer !== null) window.clearTimeout(presenceTimer);
+    presenceTimer = null;
+    const oldPresence = presenceSource;
+    presenceSource = null;
+    closeSource(oldPresence);
+    const settle = settlePresence;
+    settlePresence = null;
+    settle?.(false);
+    connectPromise = null;
+    // Stop every channel before any listener can observe the transition.
+    const affected = [...channels.values()];
+    for (const state of affected) stopChannel(state);
+    publishConnection();
+    for (const state of affected) if (!state.disposed) notify(state, "connection");
+    return false;
+  }
+
+  function isCurrent(token) {
+    return token === epoch && mode !== "cached" && !controller?.signal.aborted;
+  }
+
+  async function fetchJson(url, timeoutMs, signal) {
+    const request = new AbortController();
+    let timedOut = false;
+    const abort = () => request.abort();
+    if (signal?.aborted) abort();
+    else signal?.addEventListener("abort", abort, { once: true });
+    const timer = window.setTimeout(() => { timedOut = true; request.abort(); }, timeoutMs);
+    try {
+      const response = await fetch(url, { cache: "no-store", mode: "cors",
+        credentials: "omit", redirect: "error", signal: request.signal,
+        headers: { Accept: "application/json" } });
+      if (!response.ok) throw new Error(`Scanner request failed: ${response.status} ${response.statusText}`);
+      const value = await response.json();
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw new TypeError("Scanner response is not a JSON object.");
+      }
+      return value;
+    } catch (error) {
+      if (timedOut) throw new Error("Scanner request timed out. Click Cached to try again.");
+      throw error;
+    } finally {
+      signal?.removeEventListener("abort", abort);
+      window.clearTimeout(timer);
+    }
+  }
+
+  function channelIsCurrent(state, source, token, generation) {
+    return isCurrent(token) && mode === "live" && !state.disposed &&
+      state.eventSource === source && state.generation === generation;
+  }
+
+  function openChannel(state) {
+    if (mode !== "live" || state.disposed || !state.listeners.size || state.eventSource) return;
+    const token = epoch;
+    const generation = ++state.generation;
+    state.phase = "connecting";
+    state.lastError = "";
+    state.scannerBaseUrl = scannerBaseUrl;
+    let source;
+    try {
+      source = new EventSource(`${scannerBaseUrl}/runtime/events?channel=${encodeURIComponent(state.channel)}`);
+    } catch (error) { disconnect(error); return; }
+    state.eventSource = source;
+    source.onopen = () => {
+      if (!channelIsCurrent(state, source, token, generation)) return;
+      clearStreamTimer(state);
+      state.connected = true;
+      state.phase = "connected";
+      notify(state, "connection");
+    };
+    source.onmessage = event => {
+      if (!channelIsCurrent(state, source, token, generation)) return;
+      try {
+        const envelope = JSON.parse(event.data);
+        if (!validEnvelope(envelope, state.channel) ||
+            (envelope.kind === "snapshot" && !Array.isArray(envelope.values))) {
+          throw new Error("Scanner returned an invalid live event.");
+        }
+        applyEnvelope(state, envelope);
+      } catch (error) { disconnect(error); }
+    };
+    source.onerror = () => {
+      if (!channelIsCurrent(state, source, token, generation)) return;
+      // close() cancels EventSource's native retry, including readyState CONNECTING.
+      disconnect("Scanner stream interrupted. Click Cached to reconnect.");
+    };
+    state.streamTimer = window.setTimeout(() => {
+      if (channelIsCurrent(state, source, token, generation) && !state.connected) {
+        disconnect("Scanner stream did not open. Click Cached to reconnect.");
+      }
+    }, STREAM_OPEN_TIMEOUT_MS);
+    notify(state, "connection");
+  }
+
+  function openPresence(baseUrl, token) {
+    return new Promise(resolve => {
+      if (!isCurrent(token)) { resolve(false); return; }
+      settlePresence = resolve;
+      const source = new EventSource(`${baseUrl}/runtime/events?channel=${encodeURIComponent(PRESENCE_CHANNEL)}`);
+      presenceSource = source;
+      const current = () => isCurrent(token) && presenceSource === source;
+      source.onopen = () => {
+        if (!current()) return;
+        if (presenceTimer !== null) window.clearTimeout(presenceTimer);
+        presenceTimer = null;
+        mode = "live";
+        phase = "connected";
+        const settle = settlePresence;
+        settlePresence = null;
+        publishConnection();
+        for (const state of [...channels.values()]) {
+          if (!current()) break;
+          openChannel(state);
+        }
+        settle?.(current());
+      };
+      source.onmessage = event => {
+        if (!current()) return;
+        try {
+          const envelope = JSON.parse(event.data);
+          if (!validEnvelope(envelope, PRESENCE_CHANNEL) ||
+              (envelope.kind === "snapshot" && !Array.isArray(envelope.values))) {
+            throw new Error("Scanner returned an invalid connection event.");
+          }
+        } catch (error) { disconnect(error); }
+      };
+      source.onerror = () => {
+        if (current()) disconnect("Scanner stream interrupted. Click Cached to reconnect.");
+      };
+      presenceTimer = window.setTimeout(() => {
+        if (current() && mode !== "live") disconnect("Scanner stream did not open. Click Cached to reconnect.");
+      }, STREAM_OPEN_TIMEOUT_MS);
     });
   }
 
-  function notify(
-    state,
-    kind = "state",
-    record = null
-  ) {
-    const detail =
-      Object.freeze({
-        kind,
-        state:
-          publicState(state),
-        record
-      });
-
-    for (
-      const listener of
-      [...state.listeners]
-    ) {
+  function connect() {
+    if (connectPromise) return connectPromise;
+    if (mode === "live") return Promise.resolve(true);
+    const token = ++epoch;
+    controller = new AbortController();
+    mode = "checking";
+    phase = "checking";
+    lastError = "";
+    health = null;
+    const candidates = scannerBaseCandidates();
+    const sessionSignal = controller.signal;
+    for (const state of channels.values()) { state.phase = "checking"; state.lastError = ""; }
+    // Defer the task so reentrant listeners and rapid clicks share one promise.
+    const pending = Promise.resolve().then(async () => {
+      if (!isCurrent(token)) return false;
       try {
-        listener(detail);
-      } catch (error) {
-        console.error(
-          "RML runtime bridge listener failed.",
-          error
-        );
-      }
-    }
-
-    window.dispatchEvent(
-      new CustomEvent(
-        "rml-runtime-bridge",
-        {
-          detail
+        if (!candidates.length) throw new Error("The configured scanner URL is not a valid HTTP(S) endpoint.");
+        if (typeof EventSource !== "function") throw new Error("This browser does not provide EventSource.");
+        let base = "";
+        let result = null;
+        let probeError = "";
+        for (const candidate of candidates) {
+          if (!isCurrent(token)) return false;
+          try {
+            const response = await fetchJson(`${candidate}/health`, PROBE_TIMEOUT_MS, sessionSignal);
+            if (!isCurrent(token)) return false;
+            if (response.ok !== true || response.runtimeBridgeReady !== true ||
+                Number(response.runtimeBridgeVersion) !== BRIDGE_PROTOCOL_VERSION) {
+              throw new Error("Scanner does not expose the required runtime bridge protocol.");
+            }
+            base = candidate;
+            result = response;
+            break;
+          } catch (error) {
+            if (!isCurrent(token)) return false;
+            probeError = `${candidate}: ${error?.message || String(error)}`;
+          }
         }
-      )
-    );
-  }
-
-  function setConnectionState(
-    state,
-    connected,
-    baseUrl = state.scannerBaseUrl
-  ) {
-    const nextConnected =
-      Boolean(connected);
-    const nextBase =
-      nextConnected
-        ? String(baseUrl || "")
-        : "";
-
-    if (
-      state.connected ===
-        nextConnected &&
-      state.scannerBaseUrl ===
-        nextBase
-    ) {
-      return;
-    }
-
-    state.connected =
-      nextConnected;
-    state.scannerBaseUrl =
-      nextBase;
-
-    if (!nextConnected) {
-      state.active = false;
-    }
-
-    notify(
-      state,
-      "connection"
-    );
+        if (!base) throw new Error(`No compatible scanner found after checking ${candidates.length} endpoint(s). ${probeError}`);
+        health = Object.freeze({ ...result });
+        scannerBaseUrl = base;
+        phase = "connecting";
+        try { window.localStorage?.setItem("rml-resonite-api-last-scanner-url", `${base}/resonite_api_catalog.json`); } catch {}
+        publishConnection();
+        if (!isCurrent(token)) return false;
+        return await openPresence(base, token);
+      } catch (error) {
+        if (isCurrent(token)) disconnect(error?.message || "Scanner health check failed.");
+        return false;
+      } finally {
+        if (token === epoch) connectPromise = null;
+      }
+    });
+    connectPromise = pending;
+    publishConnection();
+    for (const state of [...channels.values()]) if (!state.disposed) notify(state, "connection");
+    return pending;
   }
 
   function normalizeRecord(
@@ -614,460 +573,100 @@
     }
   }
 
-  async function loadSnapshot(
-    state,
-    baseUrl,
-    generation
-  ) {
-    const envelope =
-      await fetchJson(
-        `${baseUrl}${SNAPSHOT_PATH}?channel=${encodeURIComponent(state.channel)}`,
-        SNAPSHOT_TIMEOUT_MS
-      );
-
-    if (
-      state.disposed ||
-      generation !==
-        state.generation
-    ) {
-      return;
-    }
-
-    applyEnvelope(
-      state,
-      envelope
-    );
-    setConnectionState(
-      state,
-      true,
-      baseUrl
-    );
+  function validEnvelope(envelope, channel, kind = null) {
+    return envelope && typeof envelope === "object" && !Array.isArray(envelope) &&
+      Number(envelope.bridgeVersion) === BRIDGE_PROTOCOL_VERSION &&
+      envelope.channel === channel &&
+      (kind ? envelope.kind === kind : ["snapshot", "display"].includes(envelope.kind));
   }
 
-  function closeEventSource(
-    state
-  ) {
-    const source =
-      state.eventSource;
 
-    state.eventSource =
-      null;
-
-    try {
-      source?.close();
-    } catch {
-    }
-  }
-
-  function markRuntimeUnavailable(
-    state,
-    generation
-  ) {
-    if (
-      state.disposed ||
-      generation !== state.generation
-    ) {
-      return;
-    }
-
-    const failedBase =
-      state.scannerBaseUrl;
-
-    closeEventSource(state);
-    setConnectionState(state, false);
-
-    if (
-      failedBase &&
-      failedBase === discoveredBaseUrl
-    ) {
-      discoveredBaseUrl = "";
-    }
-
-    discoveryEnabled = false;
-  }
-
-  function openEventStream(
-    state,
-    baseUrl,
-    generation
-  ) {
-    if (
-      typeof EventSource !==
-        "function"
-    ) {
-      notify(
-        state,
-        "events-unavailable"
-      );
-      return false;
-    }
-
-    closeEventSource(
-      state
-    );
-
-    const source =
-      new EventSource(
-        `${baseUrl}${EVENTS_PATH}?channel=${encodeURIComponent(state.channel)}`
-      );
-
-    state.eventSource =
-      source;
-
-    source.onopen =
-      () => {
-        if (
-          state.disposed ||
-          generation !==
-            state.generation
-        ) {
-          source.close();
-          return;
-        }
-
-        setConnectionState(
-          state,
-          true,
-          baseUrl
-        );
-      };
-
-    source.onmessage =
-      event => {
-        if (
-          state.disposed ||
-          generation !==
-            state.generation
-        ) {
-          return;
-        }
-
-        try {
-          applyEnvelope(
-            state,
-            JSON.parse(
-              event.data
-            )
-          );
-        } catch (error) {
-          console.warn(
-            "RML runtime bridge ignored an invalid SSE event.",
-            error
-          );
-        }
-      };
-
-    source.onerror =
-      () => {
-        if (
-          state.disposed ||
-          generation !==
-            state.generation
-        ) {
-          return;
-        }
-
-        markRuntimeUnavailable(
-          state,
-          generation
-        );
-      };
-
-    return true;
-  }
-
-  async function startState(
-    state
-  ) {
-    if (
-      state.starting ||
-      state.disposed ||
-      state.listeners.size === 0
-    ) {
-      return;
-    }
-
-    state.starting = true;
-    const generation =
-      ++state.generation;
-
-    try {
-      const baseUrl =
-        await discoverScanner();
-
-      if (
-        state.disposed ||
-        generation !==
-          state.generation
-      ) {
-        return;
-      }
-
-      if (!baseUrl) {
-        setConnectionState(
-          state,
-          false
-        );
-        return;
-      }
-
-      state.scannerBaseUrl =
-        baseUrl;
-
-      try {
-        await loadSnapshot(
-          state,
-          baseUrl,
-          generation
-        );
-      } catch {
-        if (
-          generation !==
-            state.generation
-        ) {
-          return;
-        }
-
-        markRuntimeUnavailable(
-          state,
-          generation
-        );
-        return;
-      }
-
-      setConnectionState(
-        state,
-        true,
-        baseUrl
-      );
-      openEventStream(
-        state,
-        baseUrl,
-        generation
-      );
-    } catch {
-      if (
-        generation ===
-          state.generation
-      ) {
-        setConnectionState(
-          state,
-          false
-        );
-        discoveredBaseUrl = "";
-      }
-    } finally {
-      if (
-        generation ===
-          state.generation
-      ) {
-        state.starting = false;
-      }
-    }
-  }
-
-  function disposeState(
-    state
-  ) {
-    state.disposed = true;
-    state.generation += 1;
-    closeEventSource(
-      state
-    );
-    state.connected = false;
-    state.active = false;
-    state.listeners.clear();
-    channels.delete(
-      state.channel
-    );
-  }
-
-  function subscribe(
-    channel,
-    listener
-  ) {
-    if (
-      typeof listener !==
-        "function"
-    ) {
-      throw new TypeError(
-        "Runtime bridge listener must be a function."
-      );
-    }
-
-    const state =
-      stateFor(channel);
-
-    if (!state) {
-      throw new TypeError(
-        "Runtime bridge channel must be non-empty."
-      );
-    }
-
-    state.disposed = false;
-    state.listeners.add(
-      listener
-    );
-
+  function subscribe(channel, listener) {
+    if (typeof listener !== "function") throw new TypeError("Runtime bridge listener must be a function.");
+    const key = normalizeChannel(channel);
+    if (!key || key === PRESENCE_CHANNEL) throw new TypeError("Runtime bridge channel must be a non-empty project channel.");
+    let state = channels.get(key);
+    if (!state) { state = createChannelState(key); channels.set(key, state); }
+    state.listeners.add(listener);
     queueMicrotask(() => {
-      if (
-        state.listeners.has(
-          listener
-        )
-      ) {
-        listener(
-          Object.freeze({
-            kind: "state",
-            state:
-              publicState(state),
-            record: null
-          })
-        );
+      if (!state.disposed && state.listeners.has(listener)) {
+        listener(Object.freeze({ kind: "state", state: publicState(state), record: null }));
       }
     });
-
-    void startState(
-      state
-    );
-
+    // Subscribing is local-only in Cached mode. Only connect() grants a session.
+    if (mode === "live") queueMicrotask(() => openChannel(state));
+    let unsubscribed = false;
     return () => {
-      state.listeners.delete(
-        listener
-      );
-
-      if (
-        state.listeners.size === 0
-      ) {
-        disposeState(
-          state
-        );
+      if (unsubscribed) return;
+      unsubscribed = true;
+      state.listeners.delete(listener);
+      if (!state.listeners.size) {
+        state.disposed = true;
+        stopChannel(state);
+        if (channels.get(key) === state) channels.delete(key);
       }
     };
   }
 
   function getState(channel) {
-    const state =
-      channels.get(
-        normalizeChannel(channel)
-      );
-
-    return state
-      ? publicState(state)
-      : Object.freeze({
-          channel:
-            normalizeChannel(channel),
-          connected: false,
-          active: false,
-          scannerBaseUrl: "",
-          sessionId: "",
-          lastSeenUtc: "",
-          valueCount: 0
-        });
+    const key = normalizeChannel(channel);
+    return publicState(channels.get(key) || createChannelState(key));
   }
 
-  function getValue(
-    channel,
-    monitorId
-  ) {
-    const state =
-      channels.get(
-        normalizeChannel(channel)
-      );
-
-    if (!state) {
-      return null;
-    }
-
-    return state.values.get(
-      String(
-        monitorId || ""
-      )
-    ) || null;
+  function getValue(channel, monitorId) {
+    const state = channels.get(normalizeChannel(channel));
+    // Keep cached records internally, but never present stale values as live.
+    if (mode !== "live" || !state?.connected || !state.active) return null;
+    return state.values.get(String(monitorId || "")) || null;
   }
 
   function refresh(channel) {
-    const state =
-      stateFor(channel);
-
-    if (!state) {
-      return Promise.resolve(
-        false
-      );
-    }
-
-    closeEventSource(
-      state
-    );
-    state.connected = false;
-    state.active = false;
-    discoveredBaseUrl = "";
-    state.starting = false;
-
-    return startState(state)
-      .then(() => true)
-      .catch(() => false);
+    const state = channels.get(normalizeChannel(channel));
+    if (mode !== "live" || !state?.connected || state.disposed || !state.listeners.size) return Promise.resolve(false);
+    if (state.refreshPromise) return state.refreshPromise;
+    const token = epoch;
+    const generation = state.generation;
+    const source = state.eventSource;
+    const request = new AbortController();
+    state.requestController = request;
+    const pending = Promise.resolve().then(async () => {
+      try {
+        if (!channelIsCurrent(state, source, token, generation)) return false;
+        const value = await fetchJson(`${scannerBaseUrl}/runtime/snapshot?channel=${encodeURIComponent(state.channel)}`,
+          SNAPSHOT_TIMEOUT_MS, request.signal);
+        if (!channelIsCurrent(state, source, token, generation)) return false;
+        if (!validEnvelope(value, state.channel, "snapshot") || !Array.isArray(value.values)) {
+          throw new Error("Scanner returned an invalid runtime snapshot.");
+        }
+        applyEnvelope(state, value);
+        return channelIsCurrent(state, source, token, generation);
+      } catch (error) {
+        if (channelIsCurrent(state, source, token, generation)) disconnect(error);
+        return false;
+      } finally {
+        if (state.requestController === request) { state.requestController = null; state.refreshPromise = null; }
+      }
+    });
+    state.refreshPromise = pending;
+    return pending;
   }
 
-  document.addEventListener(
-    "rml-catalog:loaded",
-    event => {
-      const sourceUrl =
-        event.detail
-          ?.catalogSourceUrl ||
-        event.detail
-          ?.endpoint ||
-        "";
+  function toggle() {
+    return mode === "cached" ? connect() : Promise.resolve(disconnect());
+  }
 
-      const base =
-        normalizeBaseUrl(
-          sourceUrl
-        );
+  document.addEventListener("rml-catalog:loaded", renderStatus);
+  // Returning online, rendering a monitor, loading a catalog or restoring a tab
+  // never authorizes another connection. Only the Cached/Live button does that.
+  window.addEventListener("offline", () => { if (mode !== "cached") disconnect("The browser is offline. Click Cached to reconnect."); });
+  window.addEventListener("pagehide", () => { if (mode !== "cached") disconnect(); });
 
-      const liveScanner =
-        isLiveScannerCatalogSource(
-          event.detail?.catalogSource
-        );
-
-      if (base && liveScanner) {
-        discoveryEnabled = true;
-        discoveredBaseUrl =
-          base;
-      } else {
-        return;
-      }
-
-      for (
-        const state of
-        channels.values()
-      ) {
-        if (
-          state.listeners.size > 0 &&
-          !state.connected
-        ) {
-          void startState(
-            state
-          );
-        }
-      }
-    }
-  );
-
-  Object.defineProperty(
-    window,
-    "RMLRuntimeBridge",
-    {
-      value: Object.freeze({
-        version:
-          BRIDGE_VERSION,
-        subscribe,
-        getState,
-        getValue,
-        refresh,
-        discoverScanner
-      }),
-      writable: false,
-      enumerable: true,
-      configurable: true
-    }
-  );
+  Object.defineProperty(window, "RMLRuntimeBridge", {
+    value: Object.freeze({ version: BRIDGE_VERSION, subscribe, getState, getValue, refresh,
+      connect, disconnect, toggle, renderStatus, getConnectionState,
+      getSessionSignal: () => controller?.signal || null,
+      discoverScanner: () => Promise.resolve(mode === "live" ? scannerBaseUrl : "") }),
+    writable: false, enumerable: true, configurable: true
+  });
+  renderStatus();
 })();

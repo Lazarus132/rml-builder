@@ -15,10 +15,12 @@ const CUSTOM_CSHARP_LIVE_INTERVAL_MS = 100;
 const CUSTOM_CSHARP_PERSIST_IDLE_MS = 320;
 const customCSharpDetachedEditors = new Map();
 const customCSharpEditorDraftValues = new Map();
+
 let customCSharpInlineEditorKey = "";
 let customCSharpActiveEditorKey = "";
 let customCSharpEditorOverlayZ = 2147482200;
 let customCSharpDetachedEditorModulePromise = null;
+
 const customCSharpBuildWorkers = new Map();
 const customCSharpSynchronizations = new Set();
 const customCSharpSynchronizationStatus = new Map();
@@ -27,7 +29,9 @@ const customCSharpSynchronizationTasks = new Map();
 const customCSharpForegroundSynchronizationTokens = new Map();
 const customCSharpDiagnostics = new Map();
 const customCSharpDebugOutput = new Map();
+
 let customCSharpBuildRequestSequence = 0;
+
 let customCSharpProjectEpoch = 0;
 let customCSharpDiagnosticClockEpoch = 0;
 const customCSharpDiagnosticClockFormatter = new Intl.DateTimeFormat([], {
@@ -72,14 +76,13 @@ function createEmptyCustomCSharpFileGraph(fileNode) {
     };
   }
 
-function openCustomCSharpFileGraph(fileNodeId, options = {}) {
+function openCustomCSharpFileGraph(fileNodeId) {
     if (!graph || customCSharpEditor) {
       return false;
     }
     const fileNode = findGraphNode(fileNodeId);
     const definition = fileNode ? nodeDefinition(fileNode) : null;
     if (!fileNode || definition?.customCSharpFile !== true) return false;
-    persistBrowserGraphNavigation();
     const previousPresentation =
       closeEmbeddedEditorForGraphReplacement();
 
@@ -98,16 +101,13 @@ function openCustomCSharpFileGraph(fileNodeId, options = {}) {
       mainView: graphViewFrom(graph)
     };
     applyGraphView(graphViewFrom(customGraph));
-    const restoredView = applyBrowserGraphViewState(graph, browserGraphViewState());
     resetGraphRenderCaches();
     pruneConnections();
-    if (options.restoreNavigation === true) return true;
     persistGraph(true);
-    persistBrowserGraphNavigation();
     activateGraphMode();
     const projectEpoch =
       builderProjectEpoch;
-    if (!restoredView) requestProjectAnimationFrame(() => requestProjectAnimationFrame(() => {
+    requestProjectAnimationFrame(() => requestProjectAnimationFrame(() => {
       if (
         projectEpoch !==
           builderProjectEpoch ||
@@ -119,7 +119,6 @@ function openCustomCSharpFileGraph(fileNodeId, options = {}) {
       if (graph.nodes.length <= 40) {
         centerGraph();
         renderGraphWires();
-        persistBrowserGraphNavigation();
         return;
       }
       const output = graph.nodes.find(node => node.id === customGraph.outputNodeId);
@@ -131,7 +130,6 @@ function openCustomCSharpFileGraph(fileNodeId, options = {}) {
       graph.viewport.y = rectangle.height / 2 - (output.y + geometry.height / 2) * graph.viewport.scale;
       applyViewportTransform();
       persistGraphView();
-      persistBrowserGraphNavigation();
       renderGraphWires();
     }));
     showGraphMessage(`Opened ${customCSharpEditor.fileName} in its separate C# graph.`, "success");
@@ -251,7 +249,6 @@ function closeCustomCSharpFileGraph({
     restorePreviousPresentation = true
   } = {}) {
     if (!customCSharpEditor || !graph) return false;
-    persistBrowserGraphNavigation();
     closeEmbeddedEditorForGraphReplacement();
     const fileName = customCSharpEditor.fileName;
     const previousPresentation =
@@ -264,7 +261,6 @@ function closeCustomCSharpFileGraph({
     resetGraphRenderCaches();
     pruneConnections();
     persistGraph(true);
-    persistBrowserGraphNavigation();
     activateGraphMode();
     showGraphMessage(`Returned from ${fileName} to the previous graph.`, "success");
     if (restorePreviousPresentation) {
@@ -608,6 +604,10 @@ function scheduleCustomCSharpEditorPersistence() {
     const epoch = customCSharpProjectEpoch;
     customCSharpEditorPersistenceTimer = window.setTimeout(() => {
       if (epoch !== customCSharpProjectEpoch) return;
+      if (graphParameterGestureActive()) {
+        scheduleGraphParameterPersistence();
+        return;
+      }
       flushCustomCSharpEditorPersistence();
     }, CUSTOM_CSHARP_PERSIST_IDLE_MS);
   }
@@ -861,7 +861,7 @@ function buildCustomCSharpFragmentInWorker(nodeId, source, parseResult, options)
     }
     const worker = new Worker(
       new URL(
-        "js/workers/graph_codegen_worker.js?v=142-source-comment-pruning-v776",
+        "js/workers/graph_codegen_worker.js?v=794-shared-loader-runtime",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -1916,7 +1916,7 @@ function loadCustomCSharpDetachedEditorModule() {
         const script =
           document.createElement("script");
         script.src = new URL(
-          "js/editor/custom_csharp_editor.js?v=65-graph-module-coherence-v788",
+          "js/editor/custom_csharp_editor.js?v=64-editor-live-worker-v786",
           document.baseURI
         ).href;
         script.async = true;
@@ -2661,7 +2661,7 @@ function prepareCustomCSharpEditorHost(
       hostWindow.document.createElement("link");
     stylesheet.rel = "stylesheet";
     stylesheet.href = new URL(
-      "styles/features/styles.runtime-graph.css?v=6-source-comment-pruning-v776",
+      "styles/features/styles.runtime-graph.css?v=7-custom-csharp-drag-v787",
       window.location.href
     ).href;
     hostWindow.document.head.appendChild(
@@ -3713,6 +3713,7 @@ function mountCustomCSharpEditorPresentation({
             "The Custom C# editor could not initialize its host."
           );
         }
+
         const latestNode = customCSharpEditorNode(nodeId);
         mounted.applySnapshot?.({
           value: customCSharpEditorCurrentValue(nodeId, parameterKey, initialValue),

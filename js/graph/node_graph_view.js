@@ -145,7 +145,14 @@ let graphParameterPersistTimer = 0;
 let graphParameterPersistenceDirty = false;
 let graphParameterPreviewFrame = 0;
 let graphParameterPointerTrackingInstalled = false;
+let graphParameterCommitReady = false;
+let graphParameterCommitFrame = 0;
+let graphParameterCommitTask = null;
+let graphParameterGestureObserver = null;
 const graphParameterActivePointers = new Map();
+const graphParameterActiveKeys = new Map();
+const graphParameterComposingControls = new Set();
+const graphParameterTrackedControls = new WeakSet();
 
 let graphInspectorRenderDeferred = false;
 
@@ -294,7 +301,6 @@ const graphWirePartialConnectionIds =
 let nodeResizeLimitRefreshFrame = 0;
 let nodeResizeLimitRefreshAll = false;
 const nodeResizeLimitRefreshIds = new Set();
-let nodeResizeLimitRefreshNodes = null;
 
 let lastNodeResizePress = null;
 
@@ -466,6 +472,9 @@ let graphConnectionDragTelemetry = {
 function cancelProjectScopedGraphWork() {
     cancelGraphParameterPersistence();
     graphParameterActivePointers.clear();
+    graphParameterActiveKeys.clear();
+    graphParameterComposingControls.clear();
+    graphParameterGestureObserver?.disconnect();
     if (graphParameterPreviewFrame) {
       cancelAnimationFrame(graphParameterPreviewFrame);
       graphParameterPreviewFrame = 0;
@@ -495,7 +504,6 @@ function cancelProjectScopedGraphWork() {
       cancelFrame(nodeResizeLimitRefreshFrame);
     nodeResizeLimitRefreshAll = false;
     nodeResizeLimitRefreshIds.clear();
-    nodeResizeLimitRefreshNodes = null;
     graphScrollLayerVisualFrame =
       cancelFrame(graphScrollLayerVisualFrame);
     graphScrollLayerVisualFollowFrame =
@@ -937,161 +945,6 @@ function savedApiContractSemanticKey(
         )
       })
     );
-  }
-
-let graphNavigationRestorePending = true;
-let graphNavigationRestoring = false;
-let graphNavigationStorageWarning = false;
-
-function graphNavigationStorageKey() {
-    return `${bridge?.getStorageContract?.().activeStorageKey || "rml-builder"}:graph-navigation-v1`;
-  }
-
-function readBrowserGraphNavigationStore() {
-    try {
-      const parsed = JSON.parse(localStorage.getItem(graphNavigationStorageKey()) || "null");
-      if (parsed?.version === 1 && parsed.projects && typeof parsed.projects === "object" &&
-          !Array.isArray(parsed.projects)) return parsed;
-    } catch {}
-    return { version: 1, projects: {} };
-  }
-
-function graphNavigationPathKey(path) {
-    return JSON.stringify(path.map(level => [level.kind, level.ownerId]));
-  }
-
-function currentBrowserGraphPath() {
-    const path = [];
-    if (apiCompositeEditor) path.push({
-      kind: "api-composite", ownerId: apiCompositeEditor.containerNodeId
-    });
-    if (customCSharpEditor) path.push({
-      kind: "custom-csharp-file", ownerId: customCSharpEditor.fileNodeId
-    });
-    return path;
-  }
-
-function browserGraphNavigationEntry() {
-    const id = bridge?.getProjectId?.();
-    const projects = readBrowserGraphNavigationStore().projects;
-    return id && Object.hasOwn(projects, id) ? projects[id] : null;
-  }
-
-function browserGraphViewState(path = currentBrowserGraphPath()) {
-    const entry = browserGraphNavigationEntry();
-    const key = graphNavigationPathKey(path);
-    return entry?.views && Object.hasOwn(entry.views, key) ? entry.views[key] : null;
-  }
-
-function validBrowserGraphViewport(viewport) {
-    return Boolean(viewport && [viewport.x, viewport.y, viewport.scale].every(Number.isFinite) && viewport.scale > 0);
-  }
-
-function applyBrowserGraphViewState(view, saved) {
-    if (!view || !saved || typeof saved !== "object") return false;
-    const v = saved.viewport;
-    if (!validBrowserGraphViewport(v)) return false;
-    view.viewport = { x: v.x, y: v.y, scale: nodeGraphClamp(v.scale, GRAPH_MIN_ZOOM, GRAPH_MAX_ZOOM) };
-    const nodes = new Set(view.nodes.map(n => n.id));
-    const connections = new Map(view.connections.map(w => [w.id, w]));
-    view.selectedNodeId = nodes.has(saved.selectedNodeId) ? saved.selectedNodeId : null;
-    view.selectedNodeIds = Array.isArray(saved.selectedNodeIds)
-      ? saved.selectedNodeIds.filter(id => nodes.has(id)) : view.selectedNodeId ? [view.selectedNodeId] : [];
-    view.selectedConnectionId = connections.has(saved.selectedConnectionId) ? saved.selectedConnectionId : null;
-    const point = saved.selectedWirePoint;
-    view.selectedWirePoint = point && connections.get(point.connectionId)?.points?.some(p => p.id === point.pointId)
-      ? { connectionId: point.connectionId, pointId: point.pointId } : null;
-    return true;
-  }
-
-function persistBrowserGraphNavigation() {
-    if (!graph?.active || graphNavigationRestorePending || graphNavigationRestoring ||
-        customCSharpRootOperation || apiCompositeRootOperation) return false;
-    const id = bridge?.getProjectId?.();
-    if (!id) return false;
-    const store = readBrowserGraphNavigationStore();
-    const existing = Object.hasOwn(store.projects, id) ? store.projects[id] : null;
-    const entry = {
-      path: currentBrowserGraphPath(),
-      views: existing?.views && typeof existing.views === "object" && !Array.isArray(existing.views)
-        ? { ...existing.views } : {},
-      usedAt: Date.now()
-    };
-    const saveView = (path, view) => {
-      if (!view) return;
-      entry.views[graphNavigationPathKey(path)] = {
-        viewport: { ...view.viewport },
-        selectedNodeId: view.selectedNodeId || null,
-        selectedNodeIds: [...(view.selectedNodeIds || [])],
-        selectedConnectionId: view.selectedConnectionId || null,
-        selectedWirePoint: view.selectedWirePoint ? { ...view.selectedWirePoint } : null,
-        usedAt: entry.usedAt
-      };
-    };
-    saveView([], rootRuntimeGraphView());
-    if (apiCompositeEditor) {
-      saveView(entry.path.slice(0, 1), customCSharpEditor?.mainView || graph);
-    }
-    if (customCSharpEditor) saveView(entry.path, graph);
-    const views = Object.entries(entry.views).sort((a, b) => (b[1]?.usedAt || 0) - (a[1]?.usedAt || 0));
-    entry.views = Object.fromEntries(views.slice(0, 256));
-    Object.defineProperty(store.projects, id, { value: entry, writable: true, enumerable: true, configurable: true });
-    store.projects = Object.fromEntries(Object.entries(store.projects)
-      .sort((a, b) => (b[1]?.usedAt || 0) - (a[1]?.usedAt || 0)).slice(0, 128));
-    try {
-      localStorage.setItem(graphNavigationStorageKey(), JSON.stringify(store));
-      graphNavigationStorageWarning = false;
-      return true;
-    } catch (error) {
-      if (!graphNavigationStorageWarning) {
-        console.warn("The browser-local graph navigation could not be saved.", error);
-        graphNavigationStorageWarning = true;
-      }
-      return false;
-    }
-  }
-
-function restoreBrowserGraphNavigation() {
-    if (!graphNavigationRestorePending || graphNavigationRestoring || !graph?.active ||
-        graphCatalogReadiness !== "ready") return false;
-    const entry = browserGraphNavigationEntry();
-    graphNavigationRestorePending = false;
-    if (!entry || !Array.isArray(entry.path)) return false;
-    graphNavigationRestoring = true;
-    let reached = 0;
-    let staleSource = false;
-    try {
-      applyBrowserGraphViewState(graph, entry.views?.[graphNavigationPathKey([])]);
-      for (const level of entry.path) {
-        if (!level || typeof level.ownerId !== "string" || !findGraphNode(level.ownerId)) break;
-        let opened = false;
-        if (level.kind === "api-composite") {
-          opened = openApiCompositeGraph(level.ownerId, { restoreNavigation: true });
-        } else if (level.kind === "custom-csharp-file") {
-          const fileGraph = graph.customCSharpFiles?.[level.ownerId];
-          if (!fileGraph) break;
-          const source = String(findGraphNode(level.ownerId)?.parameters?.source || "");
-          const sourceHash = window.RMLVisualCSharp?.sourceHash?.(source) || hashText(source);
-          if (fileGraph.sourceEditedInInspector === true ||
-              (fileGraph.sourceHash && fileGraph.sourceHash !== sourceHash)) {
-            staleSource = true;
-            break;
-          }
-          opened = openCustomCSharpFileGraph(level.ownerId, { restoreNavigation: true });
-        }
-        if (!opened) break;
-        reached += 1;
-      }
-    } finally {
-      graphNavigationRestoring = false;
-    }
-    persistBrowserGraphNavigation();
-    if (reached < entry.path.length) {
-      showGraphMessage(staleSource
-        ? "The C# source changed since its saved graph. Opened the parent; open the file graph to synchronize it with the current source."
-        : "The last graph path is not available in this project. Opened its nearest available parent.", "warning");
-    }
-    return reached > 0;
   }
 
 function rootRuntimeGraphView() {
@@ -1538,6 +1391,142 @@ function selectConnectedApiNodes(
     return selected.size > 1;
   }
 
+let graphNavigationRestorePending = true;
+let graphNavigationLastWrite = "";
+
+function graphNavigationStorageKey() {
+    const id = bridge?.getProjectId?.();
+    if (!id) return "";
+    const namespace = bridge?.getStorageContract?.()?.activeStorageKey || "rml-builder";
+    return `${namespace}:graph-navigation-v1:${encodeURIComponent(id)}`;
+  }
+
+function graphNavigationViewState(view) {
+    return {
+      viewport: { ...view.viewport },
+      selectedNodeId: view.selectedNodeId || null,
+      selectedNodeIds: Array.isArray(view.selectedNodeIds) ? [...view.selectedNodeIds] : [],
+      selectedConnectionId: view.selectedConnectionId || null,
+      selectedWirePoint: view.selectedWirePoint ? {
+        connectionId: view.selectedWirePoint.connectionId,
+        pointId: view.selectedWirePoint.pointId
+      } : null
+    };
+  }
+
+function persistGraphNavigation() {
+    if (!graph || graphNavigationRestorePending ||
+        customCSharpRootOperation || apiCompositeRootOperation) return false;
+    const key = graphNavigationStorageKey();
+    if (!key) return false;
+    const steps = [];
+    const views = [];
+    if (apiCompositeEditor) {
+      views.push(graphNavigationViewState(apiCompositeEditor.mainView));
+      steps.push({ kind: "api-composite", nodeId: apiCompositeEditor.containerNodeId });
+    }
+    if (customCSharpEditor) {
+      views.push(graphNavigationViewState(customCSharpEditor.mainView));
+      steps.push({ kind: "custom-csharp", nodeId: customCSharpEditor.fileNodeId });
+    }
+    views.push(graphNavigationViewState(graph));
+    const record = JSON.stringify({ version: 1, steps, views });
+    if (graphNavigationLastWrite === key + record) return true;
+    try {
+      localStorage.setItem(key, record);
+      graphNavigationLastWrite = key + record;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+function applyGraphNavigationViewState(saved) {
+    if (!saved || !graph) return;
+    const viewport = saved.viewport;
+    if (viewport && Number.isFinite(viewport.x) && Number.isFinite(viewport.y) &&
+        Number.isFinite(viewport.scale) && viewport.scale > 0) {
+      graph.viewport = {
+        x: viewport.x, y: viewport.y,
+        scale: nodeGraphClamp(viewport.scale, GRAPH_MIN_ZOOM, GRAPH_MAX_ZOOM)
+      };
+    }
+    if (Object.hasOwn(saved, "selectedNodeId")) {
+      const ids = new Set(graph.nodes.map(node => node.id));
+      const id = ids.has(saved.selectedNodeId) ? saved.selectedNodeId : null;
+      graph.selectedNodeId = id;
+      graph.selectedNodeIds = Array.isArray(saved.selectedNodeIds)
+        ? [...new Set(saved.selectedNodeIds.filter(selected => ids.has(selected)))]
+        : id ? [id] : [];
+      if (id && !graph.selectedNodeIds.includes(id)) graph.selectedNodeIds.push(id);
+    }
+    if (Object.hasOwn(saved, "selectedConnectionId")) {
+      graph.selectedConnectionId = graph.connections.some(wire => wire.id === saved.selectedConnectionId)
+        ? saved.selectedConnectionId : null;
+    }
+    const selectedPoint = saved.selectedWirePoint;
+    const pointConnection = selectedPoint && graph.connections.find(
+      wire => wire.id === selectedPoint.connectionId
+    );
+    graph.selectedWirePoint = pointConnection?.points?.some(point => point.id === selectedPoint.pointId)
+      ? { connectionId: selectedPoint.connectionId, pointId: selectedPoint.pointId } : null;
+  }
+
+function restoreGraphNavigation() {
+    if (!graph || !graphNavigationRestorePending || graphCatalogReadiness !== "ready") return false;
+    graphNavigationRestorePending = false;
+    graphNavigationLastWrite = "";
+    let saved = null;
+    try {
+      const key = graphNavigationStorageKey();
+      if (key) saved = JSON.parse(localStorage.getItem(key) || "null");
+    } catch { /* A corrupt local navigation record does not damage the project. */ }
+    if (saved?.version !== 1 || !Array.isArray(saved.steps) ||
+        saved.steps.length > 2 || !Array.isArray(saved.views)) return false;
+    applyGraphNavigationViewState(saved.views[0]);
+    let depth = 0;
+    for (const step of saved.steps) {
+      if (!step || typeof step.nodeId !== "string") break;
+      const owner = graph.nodes.find(node => node.id === step.nodeId);
+      const definition = owner ? nodeDefinition(owner) : null;
+      if (step.kind === "api-composite" && depth === 0 &&
+          !apiCompositeEditor && !customCSharpEditor &&
+          definition?.apiCompositeContainer === true) {
+        const composite = graph.apiCompositeGraphs?.[step.nodeId];
+        if (!composite || !Array.isArray(composite.nodes) || !Array.isArray(composite.connections)) break;
+        graph.customCSharpFiles = mergeCustomCSharpFileRegistry(
+          mergeCustomCSharpFileRegistry({}, composite.customCSharpFiles), graph.customCSharpFiles
+        );
+        apiCompositeEditor = {
+          containerNodeId: owner.id,
+          title: String(owner.parameters?.title || owner.label || "API Composite"),
+          initialNodeIds: new Set(composite.nodes.map(node => node.id)),
+          boundaryUpdate: { added: 0, removed: 0 },
+          previousPresentation: null,
+          mainView: graphViewFrom(graph)
+        };
+        applyGraphView(graphViewFrom(composite));
+      } else if (step.kind === "custom-csharp" && !customCSharpEditor &&
+                 definition?.customCSharpFile === true) {
+        const fileGraph = graph.customCSharpFiles?.[step.nodeId];
+        if (!fileGraph || !Array.isArray(fileGraph.nodes) || !Array.isArray(fileGraph.connections)) break;
+        customCSharpEditor = {
+          fileNodeId: owner.id,
+          fileName: String(owner.parameters?.fileName || "Custom C# File"),
+          previousPresentation: null,
+          mainView: graphViewFrom(graph)
+        };
+        applyGraphView(graphViewFrom(fileGraph));
+      } else break;
+      depth += 1;
+      applyGraphNavigationViewState(saved.views[depth]);
+    }
+    resetGraphRenderCaches();
+    persistGraphNavigation();
+    return depth > 0;
+  }
+
+
 function commitRootRuntimeGraphView(view) {
     const target =
       apiCompositeEditor?.mainView ||
@@ -1556,8 +1545,9 @@ function commitRootRuntimeGraphView(view) {
   }
 
 function handleProjectReplacement(event) {
+    persistGraphNavigation();
     graphNavigationRestorePending = true;
-    graphNavigationRestoring = false;
+    graphNavigationLastWrite = "";
     const replacementProjectEpoch =
       Number(
         event?.detail?.projectEpoch
@@ -2823,11 +2813,22 @@ function scheduleGeneratedOutputRefresh() {
     queueMicrotask(run);
   }
 
-function cancelGraphParameterPersistence() {
+function cancelGraphParameterCommit() {
     if (graphParameterPersistTimer) {
       window.clearTimeout(graphParameterPersistTimer);
       graphParameterPersistTimer = 0;
     }
+    if (graphParameterCommitFrame) {
+      window.cancelAnimationFrame(graphParameterCommitFrame);
+      graphParameterCommitFrame = 0;
+    }
+    graphParameterCommitTask?.cancel();
+    graphParameterCommitTask = null;
+    graphParameterCommitReady = false;
+  }
+
+function cancelGraphParameterPersistence() {
+    cancelGraphParameterCommit();
     const dirty = graphParameterPersistenceDirty;
     graphParameterPersistenceDirty = false;
     return dirty;
@@ -2843,7 +2844,70 @@ function graphParameterGestureActive() {
     for (const [pointerId, control] of graphParameterActivePointers) {
       if (!control.isConnected) graphParameterActivePointers.delete(pointerId);
     }
-    return graphParameterActivePointers.size > 0;
+    for (const [key, control] of graphParameterActiveKeys) {
+      if (!control.isConnected) graphParameterActiveKeys.delete(key);
+    }
+    for (const control of graphParameterComposingControls) {
+      if (!control.isConnected) graphParameterComposingControls.delete(control);
+    }
+    return graphParameterActivePointers.size > 0 ||
+      graphParameterActiveKeys.size > 0 || graphParameterComposingControls.size > 0;
+  }
+
+function requestGraphParameterCommit() {
+    const gestureActive = graphParameterGestureActive();
+    if (!gestureActive) graphParameterGestureObserver?.disconnect();
+    if (!graphParameterPersistenceDirty) return;
+    if (graphParameterPersistTimer) {
+      window.clearTimeout(graphParameterPersistTimer);
+      graphParameterPersistTimer = 0;
+    }
+    graphParameterCommitReady = true;
+    if (gestureActive) return;
+    if (graphParameterCommitFrame || graphParameterCommitTask) return;
+    const epoch = builderProjectEpoch;
+    const enqueue = () => {
+      graphParameterCommitFrame = 0;
+      if (epoch !== builderProjectEpoch || !graphParameterPersistenceDirty) return;
+      const task = { cancel: () => {} };
+      graphParameterCommitTask = task;
+      const run = () => {
+        if (graphParameterCommitTask !== task || epoch !== builderProjectEpoch) return;
+        graphParameterCommitTask = null;
+        if (!graphParameterPersistenceDirty) return;
+        if (graphParameterGestureActive() || activeInteraction ||
+            customCSharpEditorPersistenceDirty) return;
+        flushGraphParameterPersistence();
+      };
+      if (typeof window.scheduler?.postTask === "function") {
+        const controller = new AbortController();
+        task.cancel = () => controller.abort();
+        window.scheduler.postTask(run, {
+          priority: "background", signal: controller.signal
+        }).catch(error => {
+          if (error?.name === "AbortError") return;
+          console.error("[RML Builder] Inspector commit failed", error);
+          showGraphMessage("Inspector changes could not be saved: " +
+            String(error?.message || error), "error");
+        });
+      } else {
+        const channel = new MessageChannel();
+        task.cancel = () => {
+          channel.port1.close();
+          channel.port2.close();
+        };
+        channel.port1.onmessage = () => {
+          task.cancel();
+          run();
+        };
+        channel.port2.postMessage(null);
+      }
+    };
+    if (document.visibilityState === "hidden") {
+      enqueue();
+    } else {
+      graphParameterCommitFrame = window.requestAnimationFrame(enqueue);
+    }
   }
 
 function scheduleGraphParameterPersistence() {
@@ -2853,38 +2917,113 @@ function scheduleGraphParameterPersistence() {
       bridge.markGeneratedOutputPending?.();
     }
     cancelCustomCSharpEditorPersistence();
+    if (graphParameterGestureActive()) {
+      cancelGraphParameterCommit();
+      return;
+    }
+    if (graphParameterCommitReady) {
+      requestGraphParameterCommit();
+      return;
+    }
     if (graphParameterPersistTimer) window.clearTimeout(graphParameterPersistTimer);
     const epoch = builderProjectEpoch;
-    const commitWhenIdle = () => {
+    graphParameterPersistTimer = window.setTimeout(() => {
       graphParameterPersistTimer = 0;
-      if (epoch !== builderProjectEpoch || !graphParameterPersistenceDirty) return;
-      if (graphParameterGestureActive() || activeInteraction || customCSharpEditorPersistenceDirty) {
-        graphParameterPersistTimer = window.setTimeout(
-          commitWhenIdle, GRAPH_PARAMETER_PERSIST_IDLE_MILLISECONDS
-        );
-        return;
-      }
-      flushGraphParameterPersistence();
-    };
-    graphParameterPersistTimer = window.setTimeout(
-      commitWhenIdle, GRAPH_PARAMETER_PERSIST_IDLE_MILLISECONDS
-    );
+      if (epoch === builderProjectEpoch) requestGraphParameterCommit();
+    }, GRAPH_PARAMETER_PERSIST_IDLE_MILLISECONDS);
+  }
+
+function observeGraphParameterGesture() {
+    if (!graphParameterGestureObserver) {
+      graphParameterGestureObserver = new MutationObserver(() => {
+        if (!graphParameterGestureActive()) {
+          graphParameterGestureObserver.disconnect();
+          requestGraphParameterCommit();
+        }
+      });
+    }
+    if (dom.inspectorContent) {
+      graphParameterGestureObserver.observe(dom.inspectorContent, {
+        childList: true, subtree: true
+      });
+    }
   }
 
 function trackGraphParameterGesture(control) {
+    if (graphParameterTrackedControls.has(control)) return;
+    graphParameterTrackedControls.add(control);
     control.addEventListener("pointerdown", event => {
       if (event.isPrimary === false || event.button !== 0) return;
-      graphParameterActivePointers.set(event.pointerId, control);
+      cancelGraphParameterCommit();
+      graphParameterActivePointers.set(event.pointerId, event.target);
+      observeGraphParameterGesture();
     }, { capture: true, passive: true });
-    const finish = event => {
-      graphParameterActivePointers.delete(event.pointerId);
-    };
-    control.addEventListener("lostpointercapture", finish, { capture: true, passive: true });
+    control.addEventListener("keydown", event => {
+      if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return;
+      const target = event.target;
+      const stepKey = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
+        "PageUp", "PageDown", "Home", "End"].includes(event.key);
+      const stepControl = target.matches?.('input[type="range"], input[type="number"], [data-color-sv]');
+      if (stepKey && stepControl) {
+        cancelGraphParameterCommit();
+        graphParameterActiveKeys.set(event.code || event.key, target);
+        observeGraphParameterGesture();
+      } else if (event.key === "Enter" && target.tagName !== "TEXTAREA") {
+        requestGraphParameterCommit();
+      } else if (graphParameterCommitReady && event.key.length === 1) {
+        cancelGraphParameterCommit();
+        if (graphParameterPersistenceDirty) scheduleGraphParameterPersistence();
+      }
+    }, { capture: true, passive: true });
+    control.addEventListener("compositionstart", event => {
+      cancelGraphParameterCommit();
+      graphParameterComposingControls.add(event.target);
+      observeGraphParameterGesture();
+    }, { capture: true, passive: true });
+    control.addEventListener("compositionend", event => {
+      graphParameterComposingControls.delete(event.target);
+      requestGraphParameterCommit();
+    }, { capture: true, passive: true });
+    control.addEventListener("change", requestGraphParameterCommit);
+    control.addEventListener("click", event => {
+      if (event.target.closest?.("button")) requestGraphParameterCommit();
+    });
+    control.addEventListener("focusout", event => {
+      for (const [key, target] of graphParameterActiveKeys) {
+        if (target === event.target) graphParameterActiveKeys.delete(key);
+      }
+      graphParameterComposingControls.delete(event.target);
+      requestGraphParameterCommit();
+    }, { capture: true, passive: true });
     if (graphParameterPointerTrackingInstalled) return;
     graphParameterPointerTrackingInstalled = true;
-    document.addEventListener("pointerup", finish, { capture: true, passive: true });
-    document.addEventListener("pointercancel", finish, { capture: true, passive: true });
-    window.addEventListener("blur", () => graphParameterActivePointers.clear());
+    const finish = event => {
+      const tracked = graphParameterActivePointers.delete(event.pointerId);
+      if (tracked || graphParameterCommitReady) requestGraphParameterCommit();
+    };
+    window.addEventListener("pointerup", finish, { capture: true, passive: true });
+    window.addEventListener("pointercancel", finish, { capture: true, passive: true });
+    window.addEventListener("lostpointercapture", finish, { capture: true, passive: true });
+    window.addEventListener("keyup", event => {
+      if (graphParameterActiveKeys.delete(event.code || event.key)) requestGraphParameterCommit();
+    }, { capture: true, passive: true });
+    const release = () => {
+      graphParameterActivePointers.clear();
+      graphParameterActiveKeys.clear();
+      graphParameterComposingControls.clear();
+      graphParameterGestureObserver?.disconnect();
+      requestGraphParameterCommit();
+    };
+    window.addEventListener("blur", release);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState !== "hidden") return;
+      release();
+      if (graphParameterCommitFrame) {
+        window.cancelAnimationFrame(graphParameterCommitFrame);
+        graphParameterCommitFrame = 0;
+        requestGraphParameterCommit();
+      }
+    });
   }
 
 function scheduleGraphParameterPreviewRefresh() {
@@ -2907,8 +3046,8 @@ function persistGraph(
       viewOnly = false;
       refreshGeneratedOutput = true;
     }
-    if (!viewOnly && graphViewPersistTimer) {
-      clearTimeout(graphViewPersistTimer);
+    if (!viewOnly) {
+      if (graphViewPersistTimer) clearTimeout(graphViewPersistTimer);
       graphViewPersistTimer = 0;
       graphViewPersistContentDirty = false;
     }
@@ -2956,6 +3095,7 @@ function persistGraph(
       }
 
       graph.version = GRAPH_SCHEMA_VERSION;
+      persistGraphNavigation();
       const persistedGraph =
         graphSerializableState({
           viewOnly
@@ -3005,7 +3145,6 @@ function persistGraphView(
     }
 
     const commit = () => {
-      persistBrowserGraphNavigation();
       const refreshContent =
         graphViewPersistContentDirty;
       graphViewPersistContentDirty = false;
@@ -3034,7 +3173,10 @@ function persistGraphView(
           false;
         return;
       }
-      if (activeInteraction || graphParameterPersistenceDirty || customCSharpEditorPersistenceDirty) {
+      if (graphParameterPersistenceDirty || customCSharpEditorPersistenceDirty) {
+        return;
+      }
+      if (activeInteraction) {
         graphViewPersistTimer =
           window.setTimeout(
             commitWhenIdle,
@@ -3054,7 +3196,6 @@ function persistGraphView(
 function flushGraphViewPersistence(
     immediate = true
   ) {
-    persistBrowserGraphNavigation();
     if (!graphViewPersistTimer) {
       return false;
     }
@@ -4530,8 +4671,10 @@ function previewFormatValue(preview) {
   }
 
 function runtimeBridgeChannelForGraph() {
-    const metadata = bridge?.getMetadataSnapshot?.() ||
-      graph?.configSnapshot?.metadata || {};
+    const metadata =
+      bridge?.getMetadataSnapshot?.() ||
+      graph?.configSnapshot?.metadata ||
+      {};
     const namespaceName =
       graphCsNamespace(
         metadata.namespaceName
@@ -4640,8 +4783,7 @@ function synchronizeRuntimeBridgeSubscription(
     scheduleRuntimeMonitorRefresh();
   }
 
-function runtimeBridgeState(context = null) {
-    if (context) return context.state;
+function runtimeBridgeState() {
     const runtimeBridge =
       window.RMLRuntimeBridge;
     const channel =
@@ -4658,14 +4800,16 @@ function runtimeBridgeState(context = null) {
   }
 
 function liveRuntimeRecordForNode(
-    node,
-    context = null
+    node
   ) {
     const runtimeBridge =
       window.RMLRuntimeBridge;
-    const channel = context?.channel || runtimeBridgeChannel ||
+    const channel =
+      runtimeBridgeChannel ||
       runtimeBridgeChannelForGraph();
-    const state = context?.state || runtimeBridge?.getState?.(channel);
+    const state =
+      runtimeBridge
+        ?.getState?.(channel);
 
     if (
       !runtimeBridge ||
@@ -4780,13 +4924,16 @@ function runtimeRecordPresentationText(
 
 function runtimeMonitorPresentation(
     node,
-    getPreviewContext = previewContext,
-    monitorContext = null
+    getPreviewContext = previewContext
   ) {
     const definition =
       nodeDefinition(node);
-    const state = runtimeBridgeState(monitorContext);
-    const record = liveRuntimeRecordForNode(node, monitorContext);
+    const state =
+      runtimeBridgeState();
+    const record =
+      liveRuntimeRecordForNode(
+        node
+      );
 
     if (record) {
       const runtimeType =
@@ -4841,11 +4988,13 @@ function runtimeMonitorPresentation(
             ? state.active
               ? "0 · no pulse received yet"
               : "Waiting for the generated mod to run"
-            : "Scanner connection unavailable",
+            : ["checking", "connecting"].includes(state.phase)
+              ? "Connecting to scanner…"
+              : "Cached · click the API status to connect",
         title:
           state.connected && state.active
             ? "The matching generated mod is running. This Display Impulse monitor will update immediately when its impulse path fires; its generated runtime also publishes the current counter during monitor refresh."
-            : "The live Resonite pulse counter is used when the scanner and matching generated mod are running."
+            : state.lastError || "The live Resonite pulse counter is used when the scanner and matching generated mod are running."
       };
     }
 
@@ -4870,7 +5019,7 @@ function runtimeMonitorPresentation(
           ? state.active
             ? "No matching live monitor has been published yet. Rebuild and reload the generated mod if this node was added later."
             : "The scanner is connected, but the matching generated mod is not currently publishing."
-          : "No scanner connection is available; the local graph preview is shown as the fallback."
+          : state.lastError || "Cached mode: click the API status to connect. The local graph preview is shown until then."
     };
   }
 
@@ -4919,8 +5068,7 @@ function refreshDisplayValueNodes() {
       dom.nodesHost,
       dom.inspectorContent
     ].filter(Boolean);
-    const changedNodeIds = new Set();
-    let monitorContext = null;
+    const resizeNodeIds = new Set();
     let sharedContext = null;
     const getContext = () => sharedContext || (sharedContext = previewContext());
     const presentations = new Map();
@@ -4943,27 +5091,16 @@ function refreshDisplayValueNodes() {
 
         let presentation = presentations.get(monitorId);
         if (!presentation) {
-          if (!monitorContext) {
-            const channel = runtimeBridgeChannel || runtimeBridgeChannelForGraph();
-            monitorContext = {
-              channel,
-              state: window.RMLRuntimeBridge?.getState?.(channel) || {
-                connected: false, active: false
-              }
-            };
-          }
-          presentation = runtimeMonitorPresentation(node, getContext, monitorContext);
+          presentation = runtimeMonitorPresentation(node, getContext);
           presentations.set(monitorId, presentation);
         }
-        const graphArticle = host.closest(".rml-graph-node[data-graph-node-id]");
         const label =
           host.querySelector("span");
         const output =
           host.querySelector("output");
 
-        if (graphArticle && host.classList.contains("multiline") !== (presentation.multiline === true)) {
-          changedNodeIds.add(monitorId);
-        }
+        let sizeMayHaveChanged =
+          host.classList.contains("multiline") !== (presentation.multiline === true);
         host.classList.toggle(
           "live-runtime",
           presentation.live
@@ -4984,7 +5121,7 @@ function refreshDisplayValueNodes() {
         ) {
           label.textContent =
             presentation.label;
-          if (graphArticle) changedNodeIds.add(monitorId);
+          sizeMayHaveChanged = true;
         }
 
         if (
@@ -4994,18 +5131,20 @@ function refreshDisplayValueNodes() {
         ) {
           output.textContent =
             presentation.text;
-          if (graphArticle) changedNodeIds.add(monitorId);
+          sizeMayHaveChanged = true;
         }
 
-        const outputTitle = presentation.title || presentation.text;
-        if (output && output.title !== outputTitle) output.title = outputTitle;
-        const hostTitle = presentation.title || "";
-        if (host.title !== hostTitle) host.title = hostTitle;
+        const title = presentation.title || "";
+        if (output && output.title !== (title || presentation.text)) {
+          output.title = title || presentation.text;
+        }
+        if (host.title !== title) host.title = title;
+        if (sizeMayHaveChanged && root === dom.nodesHost) resizeNodeIds.add(node.id);
       }
     }
 
-    if (changedNodeIds.size > 0) {
-      scheduleRenderedNodeResizeLimitRefresh(changedNodeIds);
+    if (resizeNodeIds.size) {
+      scheduleRenderedNodeResizeLimitRefresh(resizeNodeIds);
     }
   }
 
@@ -6550,7 +6689,7 @@ function activateGraphMode() {
       return false;
     }
 
-    restoreBrowserGraphNavigation();
+    restoreGraphNavigation();
     cacheDom();
 
     runtimeGraphViewActive = true;
@@ -9571,7 +9710,6 @@ function renderGraphCanvas() {
     if (
       graph.nodes.length >
         GRAPH_DOM_VIRTUALIZATION_THRESHOLD &&
-      !validBrowserGraphViewport(browserGraphViewState()?.viewport) &&
       !graphViewportHasVisibleNode()
     ) {
       centerGraph();
@@ -12497,7 +12635,7 @@ function scheduleGraphWireRender(
           }
           if (
             partial.length === 0 ||
-            updateGraphWireConnections(partial, { geometryOnly: true })
+            updateGraphWireConnections(partial)
           ) {
             return;
           }
@@ -12507,29 +12645,34 @@ function scheduleGraphWireRender(
   }
 
 function scheduleRenderedNodeResizeLimitRefresh(nodeIds = null) {
-    if (nodeResizeLimitRefreshNodes !== graph?.nodes) {
-      nodeResizeLimitRefreshAll = false;
+    if (nodeIds === null) {
+      nodeResizeLimitRefreshAll = true;
       nodeResizeLimitRefreshIds.clear();
-      nodeResizeLimitRefreshNodes = graph?.nodes;
+    } else if (!nodeResizeLimitRefreshAll) {
+      for (const id of nodeIds) nodeResizeLimitRefreshIds.add(id);
     }
-    if (nodeIds === null) nodeResizeLimitRefreshAll = true;
-    else for (const id of nodeIds) nodeResizeLimitRefreshIds.add(id);
     if (nodeResizeLimitRefreshFrame) return;
+    if (!nodeResizeLimitRefreshAll && nodeResizeLimitRefreshIds.size === 0) return;
     const projectEpoch = builderProjectEpoch;
+    const scope = graph.nodes;
     nodeResizeLimitRefreshFrame = requestProjectAnimationFrame(() => {
       nodeResizeLimitRefreshFrame = 0;
-      const nodes = nodeResizeLimitRefreshNodes;
-      const ids = nodeResizeLimitRefreshAll ? null : new Set(nodeResizeLimitRefreshIds);
+      const all = nodeResizeLimitRefreshAll;
+      const ids = new Set(nodeResizeLimitRefreshIds);
       nodeResizeLimitRefreshAll = false;
       nodeResizeLimitRefreshIds.clear();
-      nodeResizeLimitRefreshNodes = null;
-      if (projectEpoch !== builderProjectEpoch || nodes !== graph?.nodes) return;
-      const changed = refreshRenderedNodeResizeLimits(ids);
-      const connections = new Set();
-      for (const id of changed) {
-        for (const connectionId of incidentGraphConnectionIds(id)) connections.add(connectionId);
+      if (projectEpoch !== builderProjectEpoch || scope !== graph.nodes) return;
+      const changed = refreshRenderedNodeResizeLimits(all ? null : ids);
+      if (all) {
+        scheduleGraphWireRender();
+      } else if (changed.size) {
+        ensureGraphConnectionLookups();
+        const wires = new Set();
+        for (const id of changed) {
+          for (const wire of graphIncidentConnectionLookupCache.get(id) || []) wires.add(wire);
+        }
+        scheduleGraphWireRender(wires);
       }
-      if (changed.size > 0) scheduleGraphWireRender(connections);
     });
   }
 
@@ -12593,9 +12736,6 @@ function syncNodeBodyOverflow(article) {
 
     const hasY = body.scrollHeight > body.clientHeight + 1;
     const hasX = body.scrollWidth > body.clientWidth + 1;
-    const changed = body.classList.contains("rml-scroll-y") !== hasY ||
-      body.classList.contains("rml-scroll-x") !== hasX ||
-      (!hasY && body.scrollTop !== 0) || (!hasX && body.scrollLeft !== 0);
 
     body.classList.toggle(
       "rml-scroll-y",
@@ -12609,9 +12749,12 @@ function syncNodeBodyOverflow(article) {
     if (!hasY) body.scrollTop = 0;
     if (!hasX) body.scrollLeft = 0;
 
-    if (changed) scheduleNodeBodyWireRefresh(
-      article.dataset.graphNodeId || null
-    );
+    const geometryKey = [body.clientWidth, body.clientHeight, body.scrollWidth,
+      body.scrollHeight, body.scrollLeft, body.scrollTop, hasX, hasY].join(":");
+    if (article._rmlBodyOverflowGeometryKey !== geometryKey) {
+      article._rmlBodyOverflowGeometryKey = geometryKey;
+      scheduleNodeBodyWireRefresh(article.dataset.graphNodeId || null);
+    }
   }
 
 function scheduleNodeBodyOverflowSync(article) {
@@ -13108,6 +13251,15 @@ function measureNodeResizeLimits(
         )
       );
 
+    if (
+      content &&
+      Number.isFinite(node.width)
+    ) {
+      content.dataset.rmlMinWidth =
+        String(bodyIntrinsicWidth);
+      window.RMLClassStyles?.sync(content);
+    }
+
     const headerHeight =
       header?.offsetHeight || 45;
     const contentHeight = Math.ceil(
@@ -13191,62 +13343,93 @@ function updateNodeResizeLimitData(
     return limits;
   }
 
-function graphNodeGeometryChanged(previous, next) {
-    if (!previous || !next) return true;
-    if (Math.abs(previous.width - next.width) > 0.01 ||
-        Math.abs(previous.height - next.height) > 0.01 ||
-        previous.sockets.size !== next.sockets.size) return true;
-    for (const [key, socket] of next.sockets) {
-      const old = previous.sockets.get(key);
-      if (!old || old.side !== socket.side || Math.abs(old.x - socket.x) > 0.01 ||
-          Math.abs(old.y - socket.y) > 0.01) return true;
-    }
-    return false;
-  }
-
 function refreshRenderedNodeResizeLimits(nodeIds = null) {
     const geometryChanged = new Set();
     if (!dom.nodesHost) return geometryChanged;
-    const articles = nodeIds === null
-      ? dom.nodesHost.querySelectorAll(":scope > .rml-graph-node")
-      : [...nodeIds].map(id => dom.nodesHost.querySelector(
-          `.rml-graph-node[data-graph-node-id="${CSS.escape(id)}"]`
-        )).filter(Boolean);
-    const measurements = [];
-    for (const article of articles) {
-      const node = findGraphNode(article.dataset.graphNodeId);
-      if (!node) continue;
-      measurements.push({ article, node,
-        limits: measureNodeResizeLimits(article, node),
-        previous: graphNodeGeometryCache.get(node.id) });
-    }
     let changed = false;
-    for (const {article, node, limits} of measurements) {
+
+    for (
+      const article of
+      dom.nodesHost.querySelectorAll(
+        ":scope > .rml-graph-node"
+      )
+    ) {
+      const id = article.dataset.graphNodeId;
+      if (nodeIds && !nodeIds.has(id)) continue;
+      const node = findGraphNode(id);
+      if (!node) {
+        continue;
+      }
+
+      const previousGeometry = graphNodeGeometryCache.get(node.id);
+      let limits = measureNodeResizeLimits(
+        article,
+        node
+      );
+
       if (Number.isFinite(node.width)) {
-        article._rmlAutomaticWidth = null;
-        const width = nodeGraphClamp(node.width, limits.minimumWidth, limits.maximumWidth);
-        if (width !== node.width) { node.width = width; changed = true; }
-      } else {
-        article._rmlAutomaticWidth = nodeGraphClamp(
-          Math.max(nodeDefaultWidth(node), limits.minimumWidth, limits.bodyIntrinsicWidth + 2),
-          limits.minimumWidth, limits.maximumWidth
+        article._rmlAutomaticWidth =
+          null;
+
+        const width = nodeGraphClamp(
+          node.width,
+          limits.minimumWidth,
+          limits.maximumWidth
         );
+        if (width !== node.width) {
+          node.width = width;
+          changed = true;
+        }
+      } else {
+        article._rmlAutomaticWidth =
+          nodeGraphClamp(
+            Math.max(
+              nodeDefaultWidth(node),
+              limits.minimumWidth,
+              limits.bodyIntrinsicWidth + 2
+            ),
+            limits.minimumWidth,
+            limits.maximumWidth
+          );
       }
+
       if (Number.isFinite(node.height)) {
-        const height = nodeGraphClamp(node.height, limits.minimumHeight, limits.maximumHeight);
-        if (height !== node.height) { node.height = height; changed = true; }
+        const height = nodeGraphClamp(
+          node.height,
+          limits.minimumHeight,
+          limits.maximumHeight
+        );
+        if (height !== node.height) {
+          node.height = height;
+          changed = true;
+        }
       }
-      applyNodeSizeStyles(node, article);
-      updateNodeResizeLimitData(article, node, limits);
-      window.RMLClassStyles?.sync(article);
-      window.RMLClassStyles?.sync(limits.content);
-    }
-    for (const {article, node, previous} of measurements) {
-      const next = cacheGraphNodeGeometry(node, article);
-      if (graphNodeGeometryChanged(previous, next)) geometryChanged.add(node.id);
+
+      applyNodeSizeStyles(
+        node,
+        article
+      );
+      updateNodeResizeLimitData(
+        article,
+        node,
+        limits
+      );
       scheduleNodeBodyOverflowSync(article);
+      const nextGeometry = cacheGraphNodeGeometry(node, article);
+      if (!previousGeometry || !nextGeometry ||
+          Math.abs(previousGeometry.width - nextGeometry.width) > 0.01 ||
+          Math.abs(previousGeometry.height - nextGeometry.height) > 0.01 ||
+          previousGeometry.sockets.size !== nextGeometry.sockets.size ||
+          [...nextGeometry.sockets].some(([key, socket]) => {
+            const old = previousGeometry.sockets.get(key);
+            return !old || Math.abs(old.x - socket.x) > 0.01 ||
+              Math.abs(old.y - socket.y) > 0.01 || old.side !== socket.side;
+          })) geometryChanged.add(node.id);
     }
-    if (changed) persistGraphView(false, true);
+
+    if (changed) {
+      persistGraphView(false, true);
+    }
     return geometryChanged;
   }
 
@@ -15057,8 +15240,11 @@ function populateGraphNodeHost(
         );
       }
 
-      for (const id of refreshRenderedNodeResizeLimits()) geometryChangedNodeIds.add(id);
-      if (geometryChangedNodeIds.size > 0) {
+      refreshRenderedNodeResizeLimits();
+      if (
+        preserveExisting &&
+        geometryChangedNodeIds.size > 0
+      ) {
         const connectionIds = new Set();
         for (const nodeId of geometryChangedNodeIds) {
           for (const connectionId of incidentGraphConnectionIds(nodeId)) {
@@ -16534,8 +16720,7 @@ function graphWireGeometryInteractionActive() {
   }
 
 function updateGraphWireConnections(
-    connectionIds,
-    { geometryOnly = false } = {}
+    connectionIds
   ) {
     const gpuPartialUpdate =
       graphHybridActive() &&
@@ -16547,7 +16732,7 @@ function updateGraphWireConnections(
     const svgInteractionUpdate =
       !graphHybridActive() &&
       !forceSvgWireVisuals() &&
-      (geometryOnly || graphWireGeometryInteractionActive());
+      (!activeInteraction || graphWireGeometryInteractionActive());
     if (
       !gpuPartialUpdate &&
       !svgInteractionUpdate
@@ -25739,9 +25924,9 @@ function handleBuilderRendered(event) {
         lastPersistedGraphReference &&
       !activeInteraction
     ) {
-      graphNavigationRestorePending = true;
-      apiCompositeEditor = null;
       customCSharpEditor = null;
+      apiCompositeEditor = null;
+      graphNavigationRestorePending = true;
       graph = sanitizeBuilderProjectGraphState(
         incoming
       );
@@ -25886,6 +26071,7 @@ function initializeNodeGraphHost() {
     window.addEventListener(
       "pagehide",
       event => {
+        persistGraphNavigation();
         flushGraphViewPersistence(true);
         captureGraphPaletteUiState();
         persistGraphPaletteUiState(true);
@@ -25896,10 +26082,6 @@ function initializeNodeGraphHost() {
       },
       { capture: true }
     );
-
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "hidden") persistBrowserGraphNavigation();
-    });
 
     window.addEventListener(
       "resize",
