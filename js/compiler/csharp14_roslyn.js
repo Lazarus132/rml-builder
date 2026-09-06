@@ -7,10 +7,20 @@
     validator: {
       label: "C# 14 validator",
       url: new URL(
-        "../workers/validator_worker.js?v=4-max-graph-performance-v755",
+        "../workers/validator_worker.js?v=5-editor-live-worker-v786",
         document.currentScript?.src || window.location.href
       ).href,
       name: "rml-csharp14-validator",
+      worker: null,
+      failure: null
+    },
+    liveValidator: {
+      label: "C# 14 live validator",
+      url: new URL(
+        "../workers/validator_worker.js?v=5-editor-live-worker-v786",
+        document.currentScript?.src || window.location.href
+      ).href,
+      name: "rml-csharp14-live-validator",
       worker: null,
       failure: null
     },
@@ -213,6 +223,12 @@
     );
   }
 
+  function validateEditor(parameterKey, source) {
+    return invoke(channels.liveValidator, "validateEditor", [
+      String(parameterKey || ""), String(source ?? "")
+    ]);
+  }
+
   function getSyntaxKinds() {
     return invoke(
       channels.validator,
@@ -262,7 +278,7 @@
     "RMLCSharp14Roslyn",
     {
       value: Object.freeze({
-        version: 9,
+        version: 10,
         name: "Roslyn C# 14 isolated browser compiler (.NET 9 host, .NET 10 target)",
         languageVersion: LANGUAGE_VERSION,
         assembly: ASSEMBLY,
@@ -270,6 +286,7 @@
         ensureReady,
         parse,
         validate,
+        validateEditor,
         getSyntaxKinds,
         compile,
         configureReferences,
@@ -280,6 +297,7 @@
           portablePdb: false,
           offline: true,
           isolatedWorker: true,
+          isolatedLiveDiagnostics: true,
           targetFramework: "net10.0"
         })
       }),

@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  if (window.RMLScrollHierarchy?.version >= 8) {
+  if (window.RMLScrollHierarchy?.version >= 9) {
     return;
   }
 
@@ -91,7 +91,9 @@
       return {
         descriptor,
         element,
-        rect: rectangleFor(element),
+        rect: typeof options.resolveRectangle === "function"
+          ? options.resolveRectangle(descriptor, element) || rectangleFor(element)
+          : rectangleFor(element),
         domDepth: elementDepth(element),
         index,
         parent: null,
@@ -226,7 +228,7 @@
 
 
   const api = Object.freeze({
-    version: 8,
+    version: 9,
     orderByReadingHierarchy,
     enforceParentBeforeDescendants
   });

@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  if (window.RMLScriptLoader?.version >= 20) {
+  if (window.RMLScriptLoader?.version >= 27) {
     return;
   }
 
@@ -21,7 +21,7 @@
       dependencies: Object.freeze([]),
       files: Object.freeze([
         Object.freeze({
-          url: "../compiler/csharp14_roslyn.js?v=11-source-comment-pruning-v776",
+          url: "../compiler/csharp14_roslyn.js?v=12-editor-live-worker-v786",
           ready: () =>
             typeof window.RMLCSharp14Roslyn?.validate === "function"
         }),
@@ -103,16 +103,16 @@
           url: "../graph/node_graph_composites.js?v=5-custom-csharp-scope-parity-v774"
         }),
         Object.freeze({
-          url: "../graph/node_graph_custom_csharp.js?v=15-source-comment-pruning-v776"
+          url: "../graph/node_graph_custom_csharp.js?v=22-custom-csharp-drag-v787"
         }),
         Object.freeze({
           url: "../graph/node_graph_guided.js?v=1-physical-modules-v748"
         }),
         Object.freeze({
-          url: "../graph/node_graph_view.js?v=12-source-comment-pruning-v776"
+          url: "../graph/node_graph_view.js?v=16-custom-csharp-drag-v787"
         }),
         Object.freeze({
-          url: "../graph/node_graph_bootstrap.js?v=2-custom-csharp-scope-parity-v774",
+          url: "../graph/node_graph_bootstrap.js?v=4-editor-live-worker-v786",
           ready: () =>
             typeof window.RMLDynamicGraphHost?.isReady === "function"
         })
@@ -680,7 +680,7 @@
 
   Object.defineProperty(window, "RMLScriptLoader", {
     value: Object.freeze({
-      version: 22,
+      version: 27,
       ensure,
       ensureMany(names) {
         return Promise.all(

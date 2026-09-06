@@ -2902,8 +2902,12 @@ body.rml-node-graph-mode.rml-graph-edit-mode #inspector-content {
 }
 
 .rml-graph-node {
-  left: var(--rml-attr-rml-node-x, 0px);
-  top: var(--rml-attr-rml-node-y, 0px);
+  left: 0;
+  top: 0;
+  transform: translate(
+    var(--rml-attr-rml-node-x, 0px),
+    var(--rml-attr-rml-node-y, 0px)
+  );
   width: var(--rml-attr-rml-node-width, 280px);
 }
 

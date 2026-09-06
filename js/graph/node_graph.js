@@ -70,7 +70,7 @@
     const link = document.createElement("link");
     link.rel = "stylesheet";
     link.href = new URL(
-      "../../styles/features/styles.runtime-graph.css?v=6-source-comment-pruning-v776",
+      "../../styles/features/styles.runtime-graph.css?v=7-custom-csharp-drag-v787",
       scriptUrl
     ).href;
     link.dataset.rmlStyleBundle = "runtime-graph";
@@ -89,17 +89,17 @@
       window.RMLClassStyles
         ? []
         : [
-            "../loaders/style_loader.js?v=8-source-comment-pruning-v776"
+            "../loaders/style_loader.js?v=9-custom-csharp-drag-v787"
           ]
     ),
     "node_graph_registry.js?v=1-physical-modules-v748",
     "node_graph_codegen.js?v=3-source-comment-pruning-v776",
     "runtime_bridge.js?v=5-physical-modules-v748",
     "node_graph_composites.js?v=5-custom-csharp-scope-parity-v774",
-    "node_graph_custom_csharp.js?v=15-source-comment-pruning-v776",
+    "node_graph_custom_csharp.js?v=22-custom-csharp-drag-v787",
     "node_graph_guided.js?v=1-physical-modules-v748",
-    "node_graph_view.js?v=12-source-comment-pruning-v776",
-    "node_graph_bootstrap.js?v=2-custom-csharp-scope-parity-v774"
+    "node_graph_view.js?v=16-custom-csharp-drag-v787",
+    "node_graph_bootstrap.js?v=4-editor-live-worker-v786"
   ];
 
   const ready = files.reduce(

@@ -42,7 +42,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "source-comment-pruning-20260905-v776";
+  "custom-csharp-node-drag-20260906-v787";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -930,6 +930,7 @@ function renderGeneratedDiagnostics(
 function exportPreflightReady(
   synchronousDiagnostics = null
 ) {
+  if (window.RMLDynamicGraphHost?.hasPendingEditorEdits?.()) return false;
   const diagnostics =
     synchronousDiagnostics === null
       ? getDiagnostics()
@@ -1162,6 +1163,7 @@ function currentTypedRuntimeGraphIsLarge() {
 }
 
 function requestGeneratedOutputUpdate() {
+  if (window.RMLDynamicGraphHost?.hasPendingEditorEdits?.()) return;
   if (
     currentTypedRuntimeGraphIsLarge() &&
     elements.generatedCode
@@ -8277,6 +8279,7 @@ function createProjectDocument(
     includePresentationState = true
   } = {}
 ) {
+  window.RMLDynamicGraphHost?.flushPendingEditorEdits?.();
   const snapshot = value =>
     detached
       ? clone(value)
@@ -9922,6 +9925,7 @@ function persist(immediate = false) {
       return;
     }
 
+    if (!immediate && window.RMLDynamicGraphHost?.hasPendingEditorEdits?.()) return;
     pendingProjectDraftWrite = {
       revision,
       project:
@@ -11092,7 +11096,13 @@ function dragViewportTop() {
       }
 
       const rectangle =
-        element.getBoundingClientRect();
+        descriptor.kind ===
+          "embedded"
+          ? embeddedTargetRectangle(
+              descriptor
+            ) ||
+            element.getBoundingClientRect()
+          : element.getBoundingClientRect();
 
       if (
         rectangle.width <= 0 ||
@@ -19106,6 +19116,7 @@ function startUniversalCustomSelectObserver() {
 }
 
 function generatedCodeForCurrentView() {
+  window.RMLDynamicGraphHost?.flushPendingEditorEdits?.();
   const graphViewActive =
     Boolean(
       isPlainObject(state.extensions) &&
@@ -19806,6 +19817,7 @@ function populateGeneratedArtifactSelect(
 }
 
 function updateGeneratedOutput() {
+  if (window.RMLDynamicGraphHost?.hasPendingEditorEdits?.()) return;
   invalidateBrowserCompilerBuild(false);
   setExportControlAvailability(
     elements.copyCodeBottom,
@@ -30355,6 +30367,7 @@ function syncEditedResonitePath() {
 let exportDialogOpenSequence = 0;
 
 async function openExportDialog() {
+  window.RMLDynamicGraphHost?.flushPendingEditorEdits?.();
   const sequence =
     ++exportDialogOpenSequence;
   const stylePromise =
@@ -33642,6 +33655,21 @@ function exposeBuilderBridge() {
       renderPalette();
     },
 
+    markGeneratedOutputPending() {
+      exportPreflightSequence += 1;
+      if (exportPreflightTimer) window.clearTimeout(exportPreflightTimer);
+      exportPreflightTimer = 0;
+      exportReadiness = Object.freeze({ ...exportReadiness, phase: "checking", fingerprint: "" });
+      setExportControlAvailability(elements.copyCodeBottom, false);
+      setExportControlAvailability(elements.downloadCode, false);
+      invalidateBrowserCompilerBuild(false);
+      projectDraftPersistSchedule += 1;
+      if (projectDraftPersistIdleHandle && typeof cancelIdleCallback === "function") {
+        cancelIdleCallback(projectDraftPersistIdleHandle);
+        projectDraftPersistIdleHandle = 0;
+      }
+    },
+
     requestGeneratedOutputRefresh() {
       requestGeneratedOutputUpdate();
 
@@ -33707,6 +33735,12 @@ function installUniversalScrollLayerSelector() {
   let indicatorTimer = 0;
   let outline = null;
   let indicator = null;
+  const embeddedLayersByWindow =
+    new WeakMap();
+  const embeddedLayersByHost =
+    new WeakMap();
+  const embeddedLayerRecords =
+    new Set();
 
   const sharedWheelClaims = (() => {
     const existing =
@@ -33880,6 +33914,57 @@ function installUniversalScrollLayerSelector() {
           (
             scrollableOverflow(
               style.overflowY
+            ) ||
+            programmatic
+          )
+      };
+    };
+
+  const scrollAxesForTarget =
+    element => {
+      if (element instanceof HTMLElement) {
+        return scrollAxesForElement(element);
+      }
+
+      if (
+        !element ||
+        element.nodeType !== 1 ||
+        element.isConnected === false
+      ) {
+        return {
+          x: false,
+          y: false
+        };
+      }
+
+      const view =
+        element.ownerDocument
+          ?.defaultView;
+      const style =
+        view?.getComputedStyle?.(
+          element
+        );
+      const programmatic =
+        scrollLayerProgrammatic(
+          element
+        );
+
+      return {
+        x:
+          element.scrollWidth >
+            element.clientWidth &&
+          (
+            scrollableOverflow(
+              style?.overflowX
+            ) ||
+            programmatic
+          ),
+        y:
+          element.scrollHeight >
+            element.clientHeight &&
+          (
+            scrollableOverflow(
+              style?.overflowY
             ) ||
             programmatic
           )
@@ -34296,6 +34381,23 @@ function installUniversalScrollLayerSelector() {
         : null;
     };
 
+  const graphDescriptorFromLayer = layer => layer ? {
+    kind: "graph",
+    key: `typed-graph:${layer.scrollContext}:${layer.key}`,
+    label: layer.label,
+    element: layer.element,
+    graphLayer: layer
+  } : null;
+
+  const viewportVisibleGraphDescriptors = () => {
+    const descriptor = graphDescriptorFromLayer(
+      window.RMLTypedNodeGraphScrollLayers?.getViewportLayer?.()
+    );
+    if (!descriptor) return [];
+    const rectangle = clippedRectangle(descriptor.element, descriptor);
+    return rectangle.width >= 1 && rectangle.height >= 1 ? [descriptor] : [];
+  };
+
   const descriptorFor =
     element => {
       if (!(element instanceof HTMLElement)) {
@@ -34328,6 +34430,11 @@ function installUniversalScrollLayerSelector() {
           element
         };
       }
+
+      const graphDescriptor = graphDescriptorFromLayer(
+        window.RMLTypedNodeGraphScrollLayers?.describeLayer?.(element)
+      );
+      if (graphDescriptor) return graphDescriptor;
 
       const stableIdentity =
         stableScrollLayerIdentity(
@@ -34364,10 +34471,500 @@ function installUniversalScrollLayerSelector() {
       };
     };
 
+  const embeddedHostFor =
+    ({
+      hostElement,
+      sourceWindow
+    } = {}) => {
+      if (
+        hostElement instanceof
+          HTMLIFrameElement &&
+        hostElement.isConnected
+      ) {
+        return hostElement;
+      }
+
+      if (
+        sourceWindow &&
+        (
+          typeof sourceWindow ===
+            "object" ||
+          typeof sourceWindow ===
+            "function"
+        )
+      ) {
+        const registered = [
+          ...(
+            embeddedLayersByWindow.get(
+              sourceWindow
+            ) || []
+          )
+        ].find(
+          record =>
+            record.hostElement
+              ?.isConnected
+        );
+        if (
+          registered?.hostElement
+            ?.isConnected
+        ) {
+          return registered.hostElement;
+        }
+
+        for (
+          const frame of
+          document.querySelectorAll(
+            "iframe"
+          )
+        ) {
+          try {
+            if (
+              frame.contentWindow ===
+              sourceWindow
+            ) {
+              return frame;
+            }
+          } catch {}
+        }
+      }
+
+      return null;
+    };
+
+  const disposeEmbeddedLayerRecord =
+    record => {
+      if (!record) {
+        return;
+      }
+
+      record.mutationObserver
+        ?.disconnect?.();
+      record.resizeObserver
+        ?.disconnect?.();
+      embeddedLayerRecords.delete(record);
+
+      if (record.sourceWindow) {
+        const records =
+          embeddedLayersByWindow.get(
+            record.sourceWindow
+          );
+        records?.delete(record);
+        if (records?.size === 0) {
+          embeddedLayersByWindow.delete(
+            record.sourceWindow
+          );
+        }
+      }
+      if (record.hostElement) {
+        const records =
+          embeddedLayersByHost.get(
+            record.hostElement
+          );
+        records?.delete(record);
+        if (records?.size === 0) {
+          embeddedLayersByHost.delete(
+            record.hostElement
+          );
+        }
+      }
+    };
+
+  const registerEmbeddedLayer =
+    ({
+      hostElement,
+      sourceWindow,
+      scrollElement,
+      key = "",
+      label = "Embedded editor",
+      snapshot = null,
+      onScroll = null
+    } = {}) => {
+      const host =
+        embeddedHostFor({
+          hostElement,
+          sourceWindow
+        });
+
+      if (
+        !host ||
+        !scrollElement ||
+        scrollElement.nodeType !== 1 ||
+        scrollElement.isConnected === false
+      ) {
+        return null;
+      }
+
+      let identity =
+        String(key || "").trim();
+      if (!identity) {
+        identity =
+          host.dataset
+            .rmlEmbeddedScrollLayerId ||
+          createId(
+            "embedded-scroll-layer"
+          );
+        host.dataset
+          .rmlEmbeddedScrollLayerId =
+          identity;
+      }
+
+      const normalizedLabel =
+        String(label || "Embedded editor")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 84);
+      const sourceRecords =
+        sourceWindow &&
+        (
+          typeof sourceWindow ===
+            "object" ||
+          typeof sourceWindow ===
+            "function"
+        )
+          ? embeddedLayersByWindow.get(
+              sourceWindow
+            )
+          : null;
+      const hostRecords =
+        embeddedLayersByHost.get(host);
+      const existing = [
+        ...(sourceRecords || []),
+        ...(hostRecords || [])
+      ].find(
+        record =>
+          record.identity === identity
+      );
+
+      if (
+        existing?.hostElement === host &&
+        existing.scrollElement ===
+          scrollElement &&
+        existing.identity === identity &&
+        existing.label === normalizedLabel
+      ) {
+        if (snapshot) existing.snapshot = snapshot;
+        if (onScroll) existing.onScroll = onScroll;
+        return existing;
+      }
+
+      disposeEmbeddedLayerRecord(existing);
+
+      const record = {
+        hostElement: host,
+        sourceWindow,
+        scrollElement,
+        identity,
+        label: normalizedLabel,
+        snapshot,
+        onScroll,
+        mutationObserver: null,
+        resizeObserver: null
+      };
+      const refresh = () => {
+        if (
+          !record.hostElement
+            ?.isConnected ||
+          record.scrollElement
+            ?.isConnected === false
+        ) {
+          const active =
+            session?.candidates?.[
+              session.index
+            ] || selection;
+          if (
+            active?.kind ===
+              "embedded" &&
+            active.sourceWindow ===
+              record.sourceWindow
+          ) {
+            clearSelection();
+          }
+          disposeEmbeddedLayerRecord(
+            record
+          );
+          return;
+        }
+        scheduleVisualRefresh();
+      };
+
+      if (
+        typeof MutationObserver ===
+          "function"
+      ) {
+        record.mutationObserver =
+          new MutationObserver(refresh);
+        const observed = new Set([
+          host,
+          host.parentElement,
+          host.closest?.(
+            ".rml-custom-csharp-editor-overlay"
+          )
+        ]);
+        for (const element of observed) {
+          if (
+            element instanceof
+              HTMLElement
+          ) {
+            record.mutationObserver
+              .observe(
+                element,
+                { attributes: true }
+              );
+          }
+        }
+      }
+
+      if (
+        typeof ResizeObserver ===
+          "function"
+      ) {
+        record.resizeObserver =
+          new ResizeObserver(refresh);
+        record.resizeObserver.observe(host);
+        const container =
+          host.closest?.(
+            ".rml-custom-csharp-editor-overlay"
+          );
+        if (
+          container instanceof
+            HTMLElement
+        ) {
+          record.resizeObserver.observe(
+            container
+          );
+        }
+      }
+
+      if (
+        sourceWindow &&
+        (
+          typeof sourceWindow ===
+            "object" ||
+          typeof sourceWindow ===
+            "function"
+        )
+      ) {
+        let records =
+          embeddedLayersByWindow.get(
+            sourceWindow
+          );
+        if (!records) {
+          records = new Set();
+          embeddedLayersByWindow.set(
+            sourceWindow,
+            records
+          );
+        }
+        records.add(record);
+      }
+      let hostRecordsForLayer =
+        embeddedLayersByHost.get(host);
+      if (!hostRecordsForLayer) {
+        hostRecordsForLayer = new Set();
+        embeddedLayersByHost.set(
+          host,
+          hostRecordsForLayer
+        );
+      }
+      hostRecordsForLayer.add(record);
+      embeddedLayerRecords.add(record);
+      scheduleVisualRefresh();
+      return record;
+    };
+
+  const embeddedDescriptorFromRecord =
+    record =>
+      record
+        ? {
+            kind: "embedded",
+            embeddedRecord: record,
+            key:
+              `embedded:${record.identity}`,
+            label: record.label,
+            element:
+              record.hostElement,
+            scrollTarget:
+              record.scrollElement,
+            sourceWindow:
+              record.sourceWindow
+          }
+        : null;
+
+  const embeddedDescriptorFor =
+    ({
+      hostElement,
+      sourceWindow,
+      scrollElement,
+      key = "",
+      label = "Embedded editor"
+    } = {}) => {
+      const record =
+        registerEmbeddedLayer({
+          hostElement,
+          sourceWindow,
+          scrollElement,
+          key,
+          label
+        });
+      if (!record) {
+        return null;
+      }
+
+      return embeddedDescriptorFromRecord(
+        record
+      );
+    };
+
+  const embeddedScrollTargetVisible =
+    target => {
+      if (
+        !target ||
+        target.nodeType !== 1 ||
+        target.isConnected === false ||
+        target.hidden === true
+      ) {
+        return false;
+      }
+
+      const view =
+        target.ownerDocument
+          ?.defaultView;
+      const style =
+        view?.getComputedStyle?.(
+          target
+        );
+      if (
+        style?.display === "none" ||
+        style?.visibility === "hidden"
+      ) {
+        return false;
+      }
+
+      const rectangle =
+        target.getBoundingClientRect?.();
+      return rectangle
+        ? rectangle.width > 0 &&
+            rectangle.height > 0
+        : target.clientWidth > 0 &&
+            target.clientHeight > 0;
+    };
+
+  const embeddedTargetRectangle = descriptor => {
+    const host = descriptor?.element;
+    const record = descriptor?.embeddedRecord;
+    const hostRectangle = host?.getBoundingClientRect?.();
+    const targetRectangle = record?.snapshot?.rectangle ||
+      descriptor?.scrollTarget?.getBoundingClientRect?.();
+    if (!hostRectangle || !targetRectangle) return hostRectangle;
+
+    const scaleX = hostRectangle.width / Math.max(1, host.offsetWidth);
+    const scaleY = hostRectangle.height / Math.max(1, host.offsetHeight);
+    const sourceWidth = Math.max(1, record?.snapshot?.viewport?.width || host.clientWidth);
+    const sourceHeight = Math.max(1, record?.snapshot?.viewport?.height || host.clientHeight);
+    const contentLeft = hostRectangle.left + host.clientLeft * scaleX;
+    const contentTop = hostRectangle.top + host.clientTop * scaleY;
+    const xScale = host.clientWidth * scaleX / sourceWidth;
+    const yScale = host.clientHeight * scaleY / sourceHeight;
+    const left = contentLeft + targetRectangle.left * xScale;
+    const top = contentTop + targetRectangle.top * yScale;
+    const width = targetRectangle.width * xScale;
+    const height = targetRectangle.height * yScale;
+    return { left, top, right: left + width, bottom: top + height, width, height };
+  };
+
+  const embeddedDescriptorSelectable = descriptor => {
+    const record = descriptor?.embeddedRecord;
+    if (!record || !embeddedLayerRecords.has(record) ||
+        !record.hostElement?.isConnected || !record.scrollElement?.isConnected) {
+      return false;
+    }
+    if (record.snapshot) {
+      return record.snapshot.visible === true &&
+        (record.snapshot.axes.x || record.snapshot.axes.y);
+    }
+    const axes = scrollAxesForTarget(record.scrollElement);
+    return embeddedScrollTargetVisible(record.scrollElement) && (axes.x || axes.y);
+  };
+
+  const hasVisibleEmbeddedHost = () => {
+    const seen = new Set();
+    for (const record of embeddedLayerRecords) {
+      const host = record.hostElement;
+      if (!host?.isConnected || record.scrollElement?.isConnected === false ||
+          seen.has(host)) continue;
+      seen.add(host);
+      if (!visibleElement(host)) continue;
+      const rectangle = clippedRectangle(host, { kind: "embedded-host" });
+      if (rectangle.width >= 1 && rectangle.height >= 1 &&
+          elementHasExposedPixels(host, rectangle)) return true;
+    }
+    return false;
+  };
+
+  const viewportVisibleEmbeddedDescriptors =
+    () => {
+      const descriptors = [];
+
+      for (const record of [
+        ...embeddedLayerRecords
+      ]) {
+        const host =
+          record.hostElement;
+        if (
+          !host?.isConnected ||
+          record.scrollElement
+            ?.isConnected === false
+        ) {
+          disposeEmbeddedLayerRecord(
+            record
+          );
+          continue;
+        }
+        if (!visibleElement(host)) {
+          continue;
+        }
+        const descriptor = embeddedDescriptorFromRecord(record);
+        if (!embeddedDescriptorSelectable(descriptor)) continue;
+        const rectangle =
+          clippedRectangle(
+            host,
+            descriptor
+          );
+        if (
+          rectangle.width < 1 ||
+          rectangle.height < 1 ||
+          !elementHasExposedPixels(
+            host,
+            rectangle
+          )
+        ) {
+          continue;
+        }
+
+        descriptors.push(descriptor);
+      }
+
+      return descriptors;
+    };
+
   const resolveDescriptor =
     descriptor => {
       if (!descriptor) {
         return null;
+      }
+
+      if (descriptor.kind === "graph") {
+        return window.RMLTypedNodeGraphScrollLayers
+          ?.resolveLayer?.(descriptor.graphLayer) || null;
+      }
+
+      if (
+        descriptor.kind ===
+          "embedded"
+      ) {
+        return embeddedDescriptorSelectable(descriptor)
+          ? descriptor.element
+          : null;
       }
 
       if (
@@ -34530,25 +35127,30 @@ function installUniversalScrollLayerSelector() {
       const candidates = [];
       const keys = new Set();
 
+      const addDescriptor =
+        descriptor => {
+          if (
+            descriptor &&
+            !keys.has(
+              descriptor.key
+            )
+          ) {
+            keys.add(
+              descriptor.key
+            );
+            candidates.push(
+              descriptor
+            );
+          }
+        };
+
       const add = element => {
         const descriptor =
           descriptorFor(
             element
           );
 
-        if (
-          descriptor &&
-          !keys.has(
-            descriptor.key
-          )
-        ) {
-          keys.add(
-            descriptor.key
-          );
-          candidates.push(
-            descriptor
-          );
-        }
+        addDescriptor(descriptor);
       };
 
       for (
@@ -34570,6 +35172,12 @@ function installUniversalScrollLayerSelector() {
       if (options.includeViewportWide === true) {
         for (const current of viewportVisibleScrollElements()) {
           add(current);
+        }
+        for (const descriptor of [
+          ...viewportVisibleGraphDescriptors(),
+          ...viewportVisibleEmbeddedDescriptors()
+        ]) {
+          addDescriptor(descriptor);
         }
       }
 
@@ -34651,6 +35259,11 @@ function installUniversalScrollLayerSelector() {
         descriptors,
         {
           resolveElement: resolveDescriptor,
+          resolveRectangle(descriptor, element) {
+            return descriptor?.kind === "embedded"
+              ? embeddedTargetRectangle(descriptor)
+              : element?.getBoundingClientRect();
+          },
           kindRank(descriptor) {
             return descriptor?.kind === "html-root"
               ? -5000
@@ -34685,6 +35298,16 @@ function installUniversalScrollLayerSelector() {
           ? descriptors
           : []
       ) {
+        if (descriptor?.kind === "embedded") {
+          if (embeddedDescriptorSelectable(descriptor)) add(descriptor);
+          continue;
+        }
+        if (descriptor?.kind === "graph") {
+          const element = resolveDescriptor(descriptor);
+          if (element) add(descriptorFor(element));
+          continue;
+        }
+
         const element =
           resolveDescriptor(descriptor);
         const rebound =
@@ -34789,8 +35412,9 @@ function installUniversalScrollLayerSelector() {
         };
       }
 
-      const rectangle =
-        element.getBoundingClientRect();
+      const rectangle = descriptor.kind === "embedded"
+        ? embeddedTargetRectangle(descriptor)
+        : element.getBoundingClientRect();
 
       let left =
         Math.max(
@@ -34906,6 +35530,11 @@ function installUniversalScrollLayerSelector() {
         descriptor
       );
 
+    if (descriptor.kind === "graph" && !element) {
+      clearSelection();
+      return;
+    }
+
     const renderable =
       element &&
       (
@@ -34915,10 +35544,10 @@ function installUniversalScrollLayerSelector() {
           "document-root" ||
         (
           visibleElement(element) &&
-          elementHasExposedPixels(
+          (descriptor.kind === "graph" || elementHasExposedPixels(
             element,
             clippedRectangle(element, descriptor)
-          )
+          ))
         )
       );
 
@@ -35140,7 +35769,10 @@ function installUniversalScrollLayerSelector() {
         {
           reason: "ctrl-scroll-commit",
           margin: 18,
-          behavior: "smooth"
+          behavior: "smooth",
+          resolveRectangle: descriptor.kind === "embedded"
+            ? () => embeddedTargetRectangle(descriptor)
+            : null
         }
       );
       return;
@@ -35217,7 +35849,12 @@ function installUniversalScrollLayerSelector() {
   };
 
   const cycleSelection =
-    event => {
+    (
+      event,
+      suppliedCandidates = null,
+      suppliedReference = null,
+      options = {}
+    ) => {
       if (!claimWheelEvent(event)) {
         return;
       }
@@ -35235,17 +35872,26 @@ function installUniversalScrollLayerSelector() {
       if (
         session?.candidates?.length
       ) {
-        candidates =
-          refreshCandidateChain(
-            session.candidates
-          );
+        candidates = refreshCandidateChain(session.candidates);
+        const keys = new Set(candidates.map(candidate => candidate.key));
+        const additions = (Array.isArray(suppliedCandidates)
+          ? suppliedCandidates
+          : [...viewportVisibleGraphDescriptors(), ...viewportVisibleEmbeddedDescriptors()])
+          .filter(candidate => !keys.has(candidate.key));
+        if (additions.length) {
+          candidates = orderCandidatesByReadingHierarchy([...candidates, ...additions]);
+        }
       } else {
         candidates =
-          candidatesFor(
-            event.target,
-            event.composedPath?.(),
-            { includeViewportWide: true }
-          );
+          Array.isArray(
+            suppliedCandidates
+          )
+            ? suppliedCandidates
+            : candidatesFor(
+                event.target,
+                event.composedPath?.(),
+                { includeViewportWide: true }
+              );
       }
 
       if (
@@ -35323,10 +35969,13 @@ function installUniversalScrollLayerSelector() {
       }
 
       const reference =
-        event.target instanceof
-          HTMLElement
-          ? event.target
-          : documentScrollElement();
+        suppliedReference ||
+        (
+          event.target instanceof
+            HTMLElement
+            ? event.target
+            : documentScrollElement()
+        );
       const delta =
         normalizedWheelDelta(
           event,
@@ -35413,6 +36062,13 @@ function installUniversalScrollLayerSelector() {
     element,
     options = {}
   ) => {
+    if (descriptor.kind === "graph") {
+      const result = window.RMLTypedNodeGraphScrollLayers
+        ?.scrollLayer?.(event, descriptor.graphLayer) || { moved: false, empty: true };
+      scheduleVisualRefresh();
+      return result;
+    }
+
     const delta =
       normalizedWheelDelta(
         event,
@@ -35435,7 +36091,10 @@ function installUniversalScrollLayerSelector() {
     }
 
     let target =
-      element;
+      descriptor.kind ===
+        "embedded"
+        ? descriptor.scrollTarget
+        : element;
     let allowsX;
     let allowsY;
     let blocked = false;
@@ -35504,10 +36163,9 @@ function installUniversalScrollLayerSelector() {
         target.scrollHeight >
         target.clientHeight + 1;
     } else {
-      const axes =
-        scrollAxesForElement(
-          target
-        );
+      const axes = descriptor.kind === "embedded" && descriptor.embeddedRecord?.snapshot
+        ? descriptor.embeddedRecord.snapshot.axes
+        : scrollAxesForTarget(target);
 
       allowsX = axes.x;
       allowsY = axes.y;
@@ -35543,6 +36201,7 @@ function installUniversalScrollLayerSelector() {
       horizontal;
     target.scrollTop +=
       vertical;
+    descriptor.embeddedRecord?.onScroll?.();
 
     const moved =
       Math.abs(
@@ -35662,6 +36321,8 @@ function installUniversalScrollLayerSelector() {
         );
 
       if (modifierCycling) {
+        const embeddedHostAvailable = hasVisibleEmbeddedHost();
+
         if (session) {
           cycleSelection(event);
           return;
@@ -35684,7 +36345,11 @@ function installUniversalScrollLayerSelector() {
             graphRectangle.top < visibleViewport.bottom
           );
 
-        if (insideGraph || graphVisible) {
+        if (
+          (insideGraph || graphVisible) &&
+          !embeddedHostAvailable &&
+          !universalOwnsWheel
+        ) {
           if (selection) {
             clearSelection();
           }
@@ -35692,7 +36357,12 @@ function installUniversalScrollLayerSelector() {
         }
 
         if (graphState?.cycling) {
-          return;
+          if (!embeddedHostAvailable) {
+            return;
+          }
+          window
+            .RMLTypedNodeGraphScrollLayers
+            ?.clear?.();
         }
 
         if (
@@ -35823,6 +36493,11 @@ function installUniversalScrollLayerSelector() {
         return false;
       }
 
+      if (descriptor.kind === "graph") {
+        return window.RMLTypedNodeGraphScrollLayers
+          ?.getLayerAxes?.(descriptor.graphLayer)?.x === true;
+      }
+
       let element =
         resolveDescriptor(
           descriptor
@@ -35861,8 +36536,11 @@ function installUniversalScrollLayerSelector() {
         );
       }
 
-      return scrollAxesForElement(
-        element
+      return scrollAxesForTarget(
+        descriptor.kind ===
+          "embedded"
+          ? descriptor.scrollTarget
+          : element
       ).x;
     };
 
@@ -36034,6 +36712,222 @@ function installUniversalScrollLayerSelector() {
       }
     );
 
+  const routeEmbeddedWheel =
+    ({
+      event,
+      hostElement,
+      sourceWindow,
+      scrollElement,
+      key = "",
+      label = "Embedded editor"
+    } = {}) => {
+      if (
+        !event ||
+        typeof event.preventDefault !==
+          "function"
+      ) {
+        return false;
+      }
+
+      if (
+        selection?.kind ===
+          "embedded" &&
+        !resolveDescriptor(
+          selection
+        )
+      ) {
+        clearSelection();
+      }
+
+      const embedded =
+        embeddedDescriptorFor({
+          hostElement,
+          sourceWindow,
+          scrollElement,
+          key,
+          label
+        });
+
+      if (!embedded) {
+        return false;
+      }
+
+      if (
+        event.ctrlKey ||
+        event.metaKey
+      ) {
+        window
+          .RMLTypedNodeGraphScrollLayers
+          ?.clear?.();
+
+        const candidates =
+          candidatesFor(
+            embedded.element,
+            [embedded.element],
+            {
+              includeViewportWide: true
+            }
+          );
+        cycleSelection(event, candidates, scrollElement);
+        return true;
+      }
+
+      if (session) {
+        commitSelection();
+      }
+
+      if (!selection) {
+        return false;
+      }
+
+      if (!claimWheelEvent(event)) {
+        return true;
+      }
+
+      const element =
+        resolveDescriptor(
+          selection
+        );
+      if (!element) {
+        scheduleVisualRefresh();
+        return true;
+      }
+
+      const result =
+        scrollDescriptor(
+          event,
+          selection,
+          element,
+          { overdrive: true }
+        );
+
+      showIndicator(
+        result.moved
+          ? "GLOBAL OVERRIDE · SCROLLING LOCKED LEVEL"
+          : result.empty
+            ? "GLOBAL OVERRIDE · LOCKED LEVEL EMPTY"
+            : "GLOBAL OVERRIDE · LOCKED LEVEL EDGE",
+        selection,
+        {
+          variant:
+            result.moved
+              ? "selected"
+              : result.empty
+                ? "empty"
+                : "edge",
+          duration: 900
+        }
+      );
+
+      return true;
+    };
+
+  const updateEmbeddedSnapshot = ({
+    hostElement, sourceWindow, layers = []
+  } = {}) => {
+    const host = embeddedHostFor({ hostElement, sourceWindow });
+    if (!host || !Array.isArray(layers)) return false;
+    const previous = [...(embeddedLayersByHost.get(host) || [])];
+    const retained = new Set();
+    for (const layer of layers) {
+      const record = registerEmbeddedLayer({
+        ...layer, hostElement: host, sourceWindow
+      });
+      if (record) retained.add(record);
+    }
+    for (const record of previous) {
+      if (!retained.has(record)) disposeEmbeddedLayerRecord(record);
+    }
+
+    const visible = viewportVisibleEmbeddedDescriptors();
+    const reconcile = chain => {
+      const retainedChain = refreshCandidateChain(chain);
+      const keys = new Set(retainedChain.map(candidate => candidate.key));
+      const additions = visible.filter(candidate => !keys.has(candidate.key));
+      return additions.length
+        ? orderCandidatesByReadingHierarchy([...retainedChain, ...additions])
+        : retainedChain;
+    };
+    if (session) {
+      const activeKey = session.candidates[session.index]?.key;
+      const candidates = reconcile(session.candidates);
+      const index = candidates.findIndex(candidate => candidate.key === activeKey);
+      session.candidates = candidates;
+      session.index = index >= 0 ? index : Math.max(0, Math.min(session.index, candidates.length - 1));
+      if (!candidates.length) session = null;
+    }
+    if (selection?.kind === "embedded" && !embeddedDescriptorSelectable(selection)) {
+      selection = null;
+      selectionCandidates = null;
+    } else if (selectionCandidates) {
+      selectionCandidates = reconcile(selectionCandidates);
+    }
+    scheduleVisualRefresh();
+    return true;
+  };
+
+  const releaseEmbedded =
+    input => {
+      const details =
+        input &&
+        typeof input === "object" &&
+        !(input instanceof
+          HTMLIFrameElement)
+          ? input
+          : { hostElement: input };
+      const hostElement =
+        embeddedHostFor(details);
+      const sourceWindow =
+        details.sourceWindow;
+      const records = new Set([
+        ...(
+          sourceWindow &&
+          (
+            typeof sourceWindow ===
+              "object" ||
+            typeof sourceWindow ===
+              "function"
+          )
+            ? embeddedLayersByWindow.get(
+                sourceWindow
+              ) || []
+            : []
+        ),
+        ...(
+          hostElement
+            ? embeddedLayersByHost.get(
+                hostElement
+              ) || []
+            : []
+        )
+      ]);
+      const active =
+        session?.candidates?.[
+          session.index
+        ] || selection;
+      const activeMatches =
+        active?.kind ===
+          "embedded" &&
+        (
+          active.element ===
+            hostElement ||
+          (
+            sourceWindow &&
+            active.sourceWindow ===
+              sourceWindow
+          )
+        );
+      if (activeMatches) {
+        clearSelection();
+      }
+      for (const record of records) {
+        disposeEmbeddedLayerRecord(record);
+      }
+      return Boolean(
+        activeMatches || records.size
+      );
+    };
+
   window.addEventListener(
     "blur",
     () => {
@@ -36061,6 +36955,19 @@ function installUniversalScrollLayerSelector() {
           scheduleVisualRefresh();
           return true;
         },
+        hasVisibleEmbeddedHost,
+        hasVisibleEmbedded() {
+          return (
+            viewportVisibleEmbeddedDescriptors()
+              .length > 0
+          );
+        },
+        registerEmbedded:
+          registerEmbeddedLayer,
+        updateEmbeddedSnapshot,
+        handleKeyDown: handleSelectionCancelKeyDown,
+        routeEmbeddedWheel,
+        releaseEmbedded,
         getState() {
           const preview =
             session
@@ -36092,7 +36999,12 @@ function installUniversalScrollLayerSelector() {
             globalOverride:
               Boolean(selection),
             outermost:
-              "<html> · Page ROOT"
+              "<html> · Page ROOT",
+            candidateOrder: Object.freeze(
+              (session?.candidates || selectionCandidates || []).map(descriptor => Object.freeze({
+                key: descriptor.key, label: descriptor.label, kind: descriptor.kind
+              }))
+            )
           });
         }
       }),

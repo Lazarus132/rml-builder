@@ -9,6 +9,23 @@ Object.defineProperty(
     "RMLTypedNodeGraphScrollLayers",
     {
       value: Object.freeze({
+        getViewportLayer() {
+          return sharedGraphScrollLayerDescriptor(dom.viewport);
+        },
+        describeLayer: sharedGraphScrollLayerDescriptor,
+        resolveLayer: resolveSharedGraphScrollLayer,
+        getLayerAxes(descriptor) {
+          const element = resolveSharedGraphScrollLayer(descriptor);
+          return !element ? { x: false, y: false }
+            : descriptor.kind === "root" ? { x: true, y: true }
+            : graphScrollLayerAxes(element);
+        },
+        scrollLayer(event, descriptor) {
+          const element = resolveSharedGraphScrollLayer(descriptor);
+          return element
+            ? scrollGraphLayerWithWheel(event, descriptor, element)
+            : { moved: false, empty: true };
+        },
         clear() {
           clearGraphScrollLayerSelection();
           return true;
@@ -94,8 +111,10 @@ if (
 
 Object.defineProperty(window, "RMLDynamicGraphHost", {
     value: Object.freeze({
-      version: 68,
+      version: 69,
       getState() { return graph; },
+      hasPendingEditorEdits() { return customCSharpEditorPersistenceDirty; },
+      flushPendingEditorEdits() { return flushCustomCSharpEditorPersistence(); },
       getCSharpImportTarget() {
         if (
           !graph ||

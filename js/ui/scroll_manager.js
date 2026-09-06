@@ -285,8 +285,8 @@
     return 0;
   }
 
-  function revealInsideScrollableAncestor(element, ancestor, margin, behavior) {
-    const targetRect = element.getBoundingClientRect();
+  function revealInsideScrollableAncestor(element, ancestor, margin, behavior, resolveRectangle) {
+    const targetRect = resolveRectangle?.() || element.getBoundingClientRect();
     const ancestorRect = ancestor.getBoundingClientRect();
     const axes = nativeScrollableAxes(ancestor);
 
@@ -326,8 +326,8 @@
     return true;
   }
 
-  function revealInsidePage(element, margin, topInset, behavior) {
-    const rect = element.getBoundingClientRect();
+  function revealInsidePage(element, margin, topInset, behavior, resolveRectangle) {
+    const rect = resolveRectangle?.() || element.getBoundingClientRect();
     const viewport = visibleViewportRectangle();
     const visibleTop = Math.max(viewport.top, topInset);
     const dx = nearestDelta(
@@ -362,6 +362,9 @@
       return false;
     }
 
+    const resolveRectangle = typeof options.resolveRectangle === "function"
+      ? options.resolveRectangle
+      : null;
     const margin = Math.max(0, Number(options.margin) || 18);
     const behavior =
       options.behavior === "auto"
@@ -396,7 +399,8 @@
         element,
         current,
         margin,
-        behavior
+        behavior,
+        resolveRectangle
       ) || moved;
       current = current.parentElement;
     }
@@ -405,7 +409,8 @@
       element,
       margin,
       topInset,
-      behavior
+      behavior,
+      resolveRectangle
     ) || moved;
 
     return moved;
@@ -509,7 +514,7 @@
 
   Object.defineProperty(window, "RMLScrollManager", {
     value: Object.freeze({
-      version: 8,
+      version: 9,
       registerWheelHandler,
       unregisterWheelHandler,
       createCyclicWheelStepper,

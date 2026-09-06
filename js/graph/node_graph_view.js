@@ -1422,6 +1422,10 @@ function handleProjectReplacement(event) {
       "";
     cancelProjectScopedGraphWork();
     customCSharpProjectEpoch += 1;
+    cancelCustomCSharpEditorPersistence();
+    customCSharpLiveDiagnosticJobs.clear();
+    customCSharpLiveValidatedValues.clear();
+    customCSharpLivePendingNodes.clear();
     persistSchedule += 1;
     persistGeneratedOutputDirty = false;
 
@@ -2677,6 +2681,10 @@ function persistGraph(
     viewOnly = false,
     refreshCompositeActions = false
   ) {
+    if (cancelCustomCSharpEditorPersistence()) {
+      viewOnly = false;
+      refreshGeneratedOutput = true;
+    }
     if (!viewOnly && graphViewPersistTimer) {
       clearTimeout(graphViewPersistTimer);
       graphViewPersistTimer = 0;
@@ -6360,6 +6368,7 @@ function activateGraphMode() {
     renderGraphPalette();
     renderGraphCanvas();
     renderGraphInspector();
+    window.RMLUniversalScrollLayers?.refresh?.();
     synchronizeRuntimeBridgeSubscription(
       true
     );
@@ -6380,6 +6389,7 @@ function activateGraphMode() {
 
 function deactivateGraphMode() {
     runtimeGraphViewActive = false;
+    window.RMLUniversalScrollLayers?.refresh?.();
     graphPaletteIndicatorCleanup?.();
     graphPaletteIndicatorCleanup = null;
     setGraphEditMode(false);
@@ -11703,6 +11713,54 @@ function selectedGraphScrollLayerFor(
     };
   }
 
+function sharedGraphScrollContext() {
+    return `${builderProjectEpoch}:${apiCompositeEditor?.containerNodeId || ""}:${customCSharpEditor?.fileNodeId || ""}`;
+  }
+
+function sharedGraphScrollLayerDescriptor(element) {
+    if (!graph?.active || !runtimeGraphViewActive ||
+        !graphElementBelongsToViewport(element) ||
+        !graphScrollLayerVisible(dom.viewport) ||
+        !graphScrollLayerCanScroll(element)) {
+      return null;
+    }
+    const descriptor = graphScrollLayerDescriptor(element);
+    return descriptor
+      ? { ...descriptor, scrollContext: sharedGraphScrollContext() }
+      : null;
+  }
+
+function resolveSharedGraphScrollLayer(descriptor) {
+    if (!descriptor || descriptor.scrollContext !== sharedGraphScrollContext() ||
+        !graph?.active || !runtimeGraphViewActive ||
+        !graphScrollLayerVisible(dom.viewport)) {
+      return null;
+    }
+    const element = resolveGraphScrollLayerElement(descriptor);
+    return graphElementBelongsToViewport(element) && graphScrollLayerVisible(element)
+      ? element
+      : null;
+  }
+
+function scrollGraphLayerWithWheel(event, descriptor, element) {
+    if (descriptor.kind === "root") {
+      const beforeX = graph.viewport.x;
+      const beforeY = graph.viewport.y;
+      panGraphWithWheel(event);
+      scheduleGraphScrollLayerVisualRefresh();
+      return {
+        moved: graph.viewport.x !== beforeX || graph.viewport.y !== beforeY,
+        empty: false
+      };
+    }
+    if (descriptor.kind === "html-root" || descriptor.kind === "document-root") {
+      return scrollGraphDocumentLayer(event, descriptor);
+    }
+    const moved = graphScrollElementWithWheel(event, descriptor, element);
+    const axes = graphScrollLayerAxes(element);
+    return { moved, empty: !axes.x && !axes.y };
+  }
+
 function handleGraphWheel(event) {
     if (
       !graph.active ||
@@ -11738,6 +11796,19 @@ function handleGraphWheel(event) {
         universalState?.cycling ||
         universalState?.selected
       );
+    const universalOffersEmbedded =
+      Boolean(
+        (event.ctrlKey || event.metaKey) &&
+        window.RMLUniversalScrollLayers
+          ?.hasVisibleEmbeddedHost?.()
+      );
+
+    if (universalOffersEmbedded) {
+      if (graphOwnsWheel) {
+        clearGraphScrollLayerSelection();
+      }
+      return;
+    }
 
     if (universalOwnsWheel) {
       return;
@@ -11817,40 +11888,7 @@ function handleGraphWheel(event) {
       return;
     }
 
-    let result = {
-      moved: true,
-      empty: false
-    };
-
-    if (descriptor.kind === "root") {
-      panGraphWithWheel(event);
-      scheduleGraphScrollLayerVisualRefresh();
-    } else if (
-      descriptor.kind ===
-        "html-root" ||
-      descriptor.kind ===
-        "document-root"
-    ) {
-      result =
-        scrollGraphDocumentLayer(
-          event,
-          descriptor
-        );
-    } else {
-      result.moved =
-        graphScrollElementWithWheel(
-          event,
-          descriptor,
-          element
-        );
-      result.empty =
-        !graphScrollLayerAxes(
-          element
-        ).x &&
-        !graphScrollLayerAxes(
-          element
-        ).y;
-    }
+    const result = scrollGraphLayerWithWheel(event, descriptor, element);
 
     if (selected.explicit) {
       showGraphScrollLayerIndicator(
@@ -12219,9 +12257,15 @@ function scheduleGraphWireRender(
         ];
         graphWireFullRenderPending = false;
         graphWirePartialConnectionIds.clear();
+
+        if (!full && partial.length === 0) {
+          if (graphGpuSimplifiedNodesActive()) {
+            synchronizeGpuOverviewNodes();
+          }
+          return;
+        }
         if (
           !full &&
-          partial.length > 0 &&
           updateGraphWireConnections(
             partial
           )
@@ -14570,6 +14614,8 @@ function cacheGraphNodeGeometry(
       return null;
     }
 
+    window.RMLClassStyles?.sync?.(article);
+
     const rectangle =
       article.getBoundingClientRect();
     const scale = Math.max(
@@ -16911,7 +16957,7 @@ function selectGraphNode(
       previousConnectionId
     );
     synchronizeGpuOverviewNodes();
-    renderGraphInspector();
+    renderGraphInspector({ selectionOnly: true });
     scheduleGraphNodeVirtualization();
   }
 
@@ -17492,6 +17538,16 @@ function renderGraphInspector(options = {}) {
     const selectionChanged =
       selectionKey !==
         graphInspectorRenderedSelectionKey;
+
+    if (
+      options.selectionOnly === true &&
+      options.force !== true &&
+      !selectionChanged &&
+      !graphInspectorRenderDeferred &&
+      dom.inspectorContent.firstElementChild
+    ) {
+      return;
+    }
     if (
       options.force !== true &&
       !selectionChanged &&
@@ -21471,6 +21527,15 @@ function appendParameterControl(
           value = control.value;
         }
 
+        if (customCSharpCodeControl) {
+          commitCustomCSharpEditorValue(node.id, specification, String(value));
+          const detached = customCSharpDetachedEditors.get(
+            customCSharpDetachedEditorKey(node.id, specification.key)
+          );
+          if (customCSharpEditorRecordActive(detached)) detached.setValue?.(String(value));
+          return;
+        }
+
         node.parameters[
           specification.key
         ] = value;
@@ -21483,61 +21548,6 @@ function appendParameterControl(
         ) {
           refreshCustomCSharpEditorAppearance(
             node
-          );
-        }
-
-        if (customCSharpCodeControl) {
-          const detached =
-            customCSharpDetachedEditors.get(
-              customCSharpDetachedEditorKey(
-                node.id,
-                specification.key
-              )
-            );
-          if (
-            customCSharpEditorRecordActive(detached) &&
-            typeof detached.setValue ===
-              "function"
-          ) {
-            rememberCustomCSharpEditorDraft(
-              node.id,
-              specification.key,
-              value
-            );
-            detached.setValue(
-              String(value)
-            );
-          } else {
-            customCSharpEditorDraftValues.delete(
-              customCSharpDetachedEditorKey(
-                node.id,
-                specification.key
-              )
-            );
-          }
-          scheduleCustomCSharpLiveDiagnostics(
-            node,
-            specification,
-            String(value)
-          );
-        }
-
-        if (
-          customCSharpSourceControl
-        ) {
-          graph.customCSharpFiles =
-            graph.customCSharpFiles &&
-            typeof graph.customCSharpFiles === "object"
-              ? graph.customCSharpFiles
-              : {};
-          const customGraph =
-            graph.customCSharpFiles[node.id] ||
-            createEmptyCustomCSharpFileGraph(node);
-          customGraph.sourceEditedInInspector = true;
-          customGraph.sourceHash = "";
-          graph.customCSharpFiles[node.id] = customGraph;
-          updateCustomCSharpSynchronizationControl(
-            node.id
           );
         }
 
@@ -23302,13 +23312,13 @@ function beginNodeDrag(
     event.preventDefault();
     event.stopPropagation();
 
-    selectGraphNode(nodeId);
-
     const pointer =
       clientToGraph(
         event.clientX,
         event.clientY
       );
+
+    selectGraphNode(nodeId);
 
     activeInteraction = {
       kind: "node",
@@ -25256,7 +25266,7 @@ function handleDocumentPointerUp(event) {
       scheduleGraphWireRender(
         connectionIds
       );
-      renderGraphInspector();
+      renderGraphInspector({ selectionOnly: true });
     } else if (
       activeInteraction.kind ===
       "node-resize"

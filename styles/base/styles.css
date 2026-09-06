@@ -2999,7 +2999,7 @@ body {
 
 .rml-scroll-layer-outline {
   position: fixed;
-  z-index: 9988;
+  z-index: 2147483600;
   pointer-events: none;
   border: 2px solid rgba(112, 207, 255, 0.96);
   opacity: 0;

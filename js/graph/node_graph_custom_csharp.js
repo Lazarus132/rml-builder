@@ -3,44 +3,40 @@
 // Custom C# graph integration and editor behavior.
 
 const customCSharpSourceSyncTimers = new Map();
-
 const customCSharpLiveDiagnosticTimers = new Map();
-
 const customCSharpLiveDiagnosticRevisions = new Map();
-
+const customCSharpLiveDiagnosticJobs = new Map();
+const customCSharpLiveValidatedValues = new Map();
+const customCSharpLivePendingNodes = new Set();
+let customCSharpLiveDiagnosticRunning = null;
+let customCSharpEditorPersistenceTimer = 0;
+let customCSharpEditorPersistenceDirty = false;
+const CUSTOM_CSHARP_LIVE_INTERVAL_MS = 100;
+const CUSTOM_CSHARP_PERSIST_IDLE_MS = 320;
 const customCSharpDetachedEditors = new Map();
-
 const customCSharpEditorDraftValues = new Map();
 
 let customCSharpInlineEditorKey = "";
-
 let customCSharpActiveEditorKey = "";
-
 let customCSharpEditorOverlayZ = 2147482200;
-
 let customCSharpDetachedEditorModulePromise = null;
 
 const customCSharpBuildWorkers = new Map();
-
 const customCSharpSynchronizations = new Set();
-
 const customCSharpSynchronizationStatus = new Map();
-
 const customCSharpSynchronizationControllers = new Map();
-
 const customCSharpSynchronizationTasks = new Map();
-
 const customCSharpForegroundSynchronizationTokens = new Map();
-
 const customCSharpDiagnostics = new Map();
-
 const customCSharpDebugOutput = new Map();
 
 let customCSharpBuildRequestSequence = 0;
 
 let customCSharpProjectEpoch = 0;
-
 let customCSharpDiagnosticClockEpoch = 0;
+const customCSharpDiagnosticClockFormatter = new Intl.DateTimeFormat([], {
+  hour: "2-digit", minute: "2-digit", second: "2-digit", fractionalSecondDigits: 3
+});
 
 function createEmptyCustomCSharpFileGraph(fileNode) {
     const outputNodeId = makeId("custom-csharp-output");
@@ -294,7 +290,8 @@ function appendCustomCSharpDebugOutput(
     message,
     {
       tone = "info",
-      source = ""
+      source = "",
+      notify = true
     } = {}
   ) {
     const id = String(nodeId || "");
@@ -310,14 +307,7 @@ function appendCustomCSharpDebugOutput(
         customCSharpDiagnosticClockEpoch + 1
       );
     const entry = Object.freeze({
-      time: new Date(
-        customCSharpDiagnosticClockEpoch
-      ).toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        fractionalSecondDigits: 3
-      }),
+      time: customCSharpDiagnosticClockFormatter.format(customCSharpDiagnosticClockEpoch),
       source:
         String(source || "").trim() ||
         customCSharpOutputSource(
@@ -342,6 +332,7 @@ function appendCustomCSharpDebugOutput(
       entries.splice(0, entries.length - 500);
     }
     customCSharpDebugOutput.set(id, entries);
+    if (!notify) return entry;
     for (const editor of
       customCSharpDetachedEditors.values()) {
       if (
@@ -386,7 +377,8 @@ function normalizedCustomCSharpDiagnostics(
 
 function commitCustomCSharpDiagnostics(
     nodeId,
-    groupedDiagnostics
+    groupedDiagnostics,
+    { output = [] } = {}
   ) {
     const id = String(nodeId || "");
     if (!id) return;
@@ -410,14 +402,19 @@ function commitCustomCSharpDiagnostics(
     } else {
       customCSharpDiagnostics.delete(id);
     }
-    for (const editor of
-      customCSharpDetachedEditors.values()) {
-      if (
-        editor?.nodeId === id &&
-        customCSharpEditorRecordActive(editor) &&
-        typeof editor.setDiagnostics === "function"
-      ) {
-        editor.setDiagnostics(grouped);
+    const appended = output.map(entry => appendCustomCSharpDebugOutput(
+      id, entry.message, { ...entry, notify: false }
+    )).filter(Boolean);
+    for (const editor of customCSharpDetachedEditors.values()) {
+      if (editor?.nodeId !== id || !customCSharpEditorRecordActive(editor)) continue;
+      if (typeof editor.applySnapshot === "function") {
+        editor.applySnapshot({
+          diagnostics: grouped,
+          ...(appended.length ? { output: customCSharpDebugOutput.get(id) || [] } : {})
+        });
+      } else {
+        editor.setDiagnostics?.(grouped);
+        for (const entry of appended) editor.appendOutput?.(entry);
       }
     }
   }
@@ -466,219 +463,149 @@ function setCustomCSharpDiagnostics(
 
 function setCustomCSharpLiveDiagnosticSnapshot(
     nodeId,
-    diagnostics
+    diagnostics,
+    { logOutput = false } = {}
   ) {
     const normalized =
       normalizedCustomCSharpDiagnostics(diagnostics);
+    const output = !logOutput ? [] : normalized.length
+      ? [
+          ...normalized.map(message => ({ source: "Roslyn", tone: "error", message })),
+          { source: "Builder", tone: "error", message: normalized[0] }
+        ]
+      : [{ source: "Roslyn", tone: "success", message: "C# 14 syntax check completed: no syntax errors." }];
     commitCustomCSharpDiagnostics(nodeId, {
       Builder: normalized.slice(0, 1),
       Roslyn: normalized
-    });
+    }, { output });
   }
 
-function customCSharpLiveValidationEnvelope(
-    parameterKey,
-    value
-  ) {
-    const key = String(parameterKey || "");
-    const raw = String(value || "");
-    const placeholders = raw.replace(
-      /\{([A-Z][A-Z0-9_]*)\}/g,
-      (_token, name) =>
-        name === "NEXT"
-          ? "__Next();"
-          : "default(object)"
-    );
-    if (key === "source") {
-      return { source: raw, lineOffset: 0 };
-    }
-    if (key === "actionCode") {
-      return {
-        source:
-          "class __RmlLiveValidation\n{\n  void __Action()\n  {\n" +
-          placeholders +
-          "\n  }\n  void __Next() {}\n}",
-        lineOffset: 4
-      };
-    }
-    if (key === "expressionCode") {
-      return {
-        source:
-          "class __RmlLiveValidation\n{\n  object __Expression() =>\n" +
-          placeholders +
-          ";\n}",
-        lineOffset: 3
-      };
-    }
-    if (key === "memberCode") {
-      return {
-        source:
-          "class __RmlLiveValidation\n{\n" +
-          placeholders +
-          "\n}",
-        lineOffset: 2
-      };
-    }
-    return null;
+function customCSharpSupportsLiveDiagnostics(parameterKey) {
+    return ["source", "actionCode", "expressionCode", "memberCode"].includes(parameterKey);
   }
 
-function formatCustomCSharpLiveDiagnostics(
-    diagnostics,
-    lineOffset = 0
-  ) {
-    return (Array.isArray(diagnostics)
-      ? diagnostics
-      : [])
-      .map(diagnostic => {
-        const physicalLine = Number(
-          diagnostic?.startLine
-        );
-        const line = physicalLine > 0
-          ? Math.max(
-              1,
-              physicalLine -
-                Math.max(0, Number(lineOffset) || 0)
-            )
-          : 0;
-        const location = line > 0
-          ? `line ${line}, column ${Number(diagnostic?.startColumn) || 1}`
-          : "unknown location";
-        return `${diagnostic?.id || "C#14"} at ${location}: ${diagnostic?.message || "Invalid C# 14 syntax."}`;
-      })
-      .filter(Boolean);
-  }
-
-async function validateCustomCSharpValueLive(
-    parameterKey,
-    value
-  ) {
-    const envelope =
-      customCSharpLiveValidationEnvelope(
-        parameterKey,
-        value
-      );
-    if (!envelope) return null;
+async function validateCustomCSharpValueLive(parameterKey, value) {
+    if (!customCSharpSupportsLiveDiagnostics(parameterKey)) return null;
     const roslyn = window.RMLCSharp14Roslyn;
-    if (typeof roslyn?.parse !== "function") {
-      return [
-        "Roslyn live diagnostics are unavailable."
-      ];
+    if (typeof roslyn?.validateEditor !== "function") {
+      throw new Error("The isolated Roslyn live-diagnostics worker is unavailable. Reload the Builder.");
     }
-    const result = await roslyn.parse(
-      envelope.source
-    );
-    const messages =
-      formatCustomCSharpLiveDiagnostics(
-        result?.diagnostics,
-        envelope.lineOffset
-      );
-    if (
-      result?.ok !== true &&
-      messages.length === 0
-    ) {
-      messages.push(
-        "C#14 at unknown location: Roslyn rejected the current source."
-      );
-    }
-    return messages;
+    return roslyn.validateEditor(parameterKey, value);
   }
 
-function cancelCustomCSharpLiveDiagnostics(
-    nodeId,
-    parameterKey
-  ) {
-    const key = customCSharpDetachedEditorKey(
-      nodeId,
-      parameterKey
-    );
-    const timer =
-      customCSharpLiveDiagnosticTimers.get(key);
+function setCustomCSharpLiveValidationPending(nodeId, pending) {
+    const id = String(nodeId || "");
+    if (pending) customCSharpLivePendingNodes.add(id);
+    else customCSharpLivePendingNodes.delete(id);
+    for (const editor of customCSharpDetachedEditors.values()) {
+      if (editor?.nodeId === id && customCSharpEditorRecordActive(editor)) {
+        editor.setValidationPending?.(pending);
+      }
+    }
+  }
+
+function customCSharpLiveJobCurrent(job) {
+    return customCSharpProjectEpoch === job.projectEpoch &&
+      customCSharpLiveDiagnosticRevisions.get(job.key) === job.revision &&
+      String(customCSharpEditorNode(job.nodeId)?.parameters?.[job.parameterKey] ?? "") === job.source;
+  }
+
+function drainCustomCSharpLiveDiagnostics() {
+    if (customCSharpLiveDiagnosticRunning) return;
+    const job = [...customCSharpLiveDiagnosticJobs.values()].find(candidate => candidate.ready);
+    if (!job) return;
+    customCSharpLiveDiagnosticJobs.delete(job.key);
+    if (!customCSharpLiveJobCurrent(job)) {
+      drainCustomCSharpLiveDiagnostics();
+      return;
+    }
+    customCSharpLiveDiagnosticRunning = job;
+    void validateCustomCSharpValueLive(job.parameterKey, job.source)
+      .then(diagnostics => {
+        if (diagnostics === null || !customCSharpLiveJobCurrent(job)) return;
+        customCSharpLiveValidatedValues.set(job.key, job.source);
+        setCustomCSharpLiveDiagnosticSnapshot(job.nodeId, diagnostics, { logOutput: true });
+        setCustomCSharpLiveValidationPending(job.nodeId, false);
+      })
+      .catch(error => {
+        if (!customCSharpLiveJobCurrent(job)) return;
+        setCustomCSharpLiveDiagnosticSnapshot(job.nodeId, [
+          `Roslyn live diagnostics failed: ${error instanceof Error ? error.message : String(error)}`
+        ], { logOutput: true });
+        setCustomCSharpLiveValidationPending(job.nodeId, false);
+      })
+      .finally(() => {
+        if (customCSharpLiveDiagnosticRunning === job) customCSharpLiveDiagnosticRunning = null;
+        drainCustomCSharpLiveDiagnostics();
+      });
+  }
+
+function cancelCustomCSharpLiveDiagnostics(nodeId, parameterKey) {
+    const key = customCSharpDetachedEditorKey(nodeId, parameterKey);
+    const timer = customCSharpLiveDiagnosticTimers.get(key);
     if (timer) window.clearTimeout(timer);
     customCSharpLiveDiagnosticTimers.delete(key);
-    customCSharpLiveDiagnosticRevisions.set(
-      key,
-      (customCSharpLiveDiagnosticRevisions.get(key) || 0) + 1
-    );
+    customCSharpLiveDiagnosticJobs.delete(key);
+    customCSharpLiveDiagnosticRevisions.set(key,
+      (customCSharpLiveDiagnosticRevisions.get(key) || 0) + 1);
+    setCustomCSharpLiveValidationPending(nodeId, false);
   }
 
 function scheduleCustomCSharpLiveDiagnostics(
-    node,
-    specification,
-    value,
-    delay = 0
+    node, specification, value, delay = CUSTOM_CSHARP_LIVE_INTERVAL_MS
   ) {
-    const parameterKey = String(
-      specification?.key || "code"
-    );
-    const envelope =
-      customCSharpLiveValidationEnvelope(
-        parameterKey,
-        value
-      );
-    if (!envelope) return false;
+    const parameterKey = String(specification?.key || "code");
+    if (!customCSharpSupportsLiveDiagnostics(parameterKey)) return false;
     const nodeId = String(node?.id || "");
-    const key = customCSharpDetachedEditorKey(
-      nodeId,
-      parameterKey
-    );
-    const previousTimer =
-      customCSharpLiveDiagnosticTimers.get(key);
-    if (previousTimer) {
-      window.clearTimeout(previousTimer);
+    const key = customCSharpDetachedEditorKey(nodeId, parameterKey);
+    const revision = (customCSharpLiveDiagnosticRevisions.get(key) || 0) + 1;
+    customCSharpLiveDiagnosticRevisions.set(key, revision);
+    const previous = customCSharpLiveDiagnosticJobs.get(key);
+    customCSharpLiveDiagnosticJobs.set(key, {
+      key, nodeId, parameterKey, revision, source: String(value ?? ""),
+      projectEpoch: customCSharpProjectEpoch, ready: previous?.ready === true
+    });
+    setCustomCSharpLiveValidationPending(nodeId, true);
+    if (!customCSharpLiveDiagnosticTimers.has(key)) {
+      const timer = window.setTimeout(() => {
+        customCSharpLiveDiagnosticTimers.delete(key);
+        const current = customCSharpLiveDiagnosticJobs.get(key);
+        if (current) current.ready = true;
+        drainCustomCSharpLiveDiagnostics();
+      }, Math.max(0, Number(delay) || 0));
+      customCSharpLiveDiagnosticTimers.set(key, timer);
     }
-    const revision =
-      (customCSharpLiveDiagnosticRevisions.get(key) || 0) + 1;
-    customCSharpLiveDiagnosticRevisions.set(
-      key,
-      revision
-    );
-    setCustomCSharpLiveDiagnosticSnapshot(
-      nodeId,
-      []
-    );
-    const source = String(value || "");
-    const projectEpoch = customCSharpProjectEpoch;
-    const timer = window.setTimeout(() => {
-      customCSharpLiveDiagnosticTimers.delete(key);
-      void validateCustomCSharpValueLive(
-        parameterKey,
-        source
-      )
-        .then(diagnostics => {
-          if (
-            diagnostics === null ||
-            customCSharpLiveDiagnosticRevisions.get(key) !== revision ||
-            customCSharpProjectEpoch !== projectEpoch ||
-            String(node?.parameters?.[parameterKey] ?? "") !== source
-          ) {
-            return;
-          }
-          setCustomCSharpLiveDiagnosticSnapshot(
-            nodeId,
-            diagnostics
-          );
-        })
-        .catch(error => {
-          if (
-            customCSharpLiveDiagnosticRevisions.get(key) !== revision ||
-            customCSharpProjectEpoch !== projectEpoch ||
-            String(node?.parameters?.[parameterKey] ?? "") !== source
-          ) {
-            return;
-          }
-          setCustomCSharpLiveDiagnosticSnapshot(
-            nodeId,
-            [
-              `Roslyn live diagnostics failed: ${error instanceof Error ? error.message : String(error)}`
-            ]
-          );
-        });
-    }, Math.max(0, Number(delay) || 0));
-    customCSharpLiveDiagnosticTimers.set(
-      key,
-      timer
-    );
     return true;
+  }
+
+function cancelCustomCSharpEditorPersistence() {
+    if (customCSharpEditorPersistenceTimer) window.clearTimeout(customCSharpEditorPersistenceTimer);
+    customCSharpEditorPersistenceTimer = 0;
+    const wasDirty = customCSharpEditorPersistenceDirty;
+    customCSharpEditorPersistenceDirty = false;
+    return wasDirty;
+  }
+
+function flushCustomCSharpEditorPersistence() {
+    if (!customCSharpEditorPersistenceDirty) return false;
+    cancelCustomCSharpEditorPersistence();
+    persistGraph(true);
+    refreshDisplayValueNodes();
+    return true;
+  }
+
+function scheduleCustomCSharpEditorPersistence() {
+    if (!customCSharpEditorPersistenceDirty) {
+      persistSchedule += 1;
+      customCSharpEditorPersistenceDirty = true;
+      bridge.markGeneratedOutputPending?.();
+    }
+    if (customCSharpEditorPersistenceTimer) window.clearTimeout(customCSharpEditorPersistenceTimer);
+    const epoch = customCSharpProjectEpoch;
+    customCSharpEditorPersistenceTimer = window.setTimeout(() => {
+      if (epoch !== customCSharpProjectEpoch) return;
+      flushCustomCSharpEditorPersistence();
+    }, CUSTOM_CSHARP_PERSIST_IDLE_MS);
   }
 
 function setCustomCSharpSynchronizationStatus(
@@ -780,10 +707,9 @@ function applyCustomCSharpSynchronizationControl(
       customCSharpFileNeedsOptimization(node)
         ? "Optimize & Open Node Graph"
         : "Open Node Graph";
-    setInspectorButtonContent(
-      button,
-      label
-    );
+    if (button.getAttribute("aria-label") !== label) {
+      setInspectorButtonContent(button, label);
+    }
     button.setAttribute(
       "aria-label",
       label
@@ -1094,6 +1020,7 @@ function customCSharpFileNeedsOptimization(node) {
     ) {
       return false;
     }
+    if (existing?.sourceEditedInInspector === true) return true;
     const visualCSharp = window.RMLVisualCSharp;
     if (!existing || !visualCSharp) return true;
     const stamp = currentCustomCSharpCatalogStamp();
@@ -1985,7 +1912,7 @@ function loadCustomCSharpDetachedEditorModule() {
         const script =
           document.createElement("script");
         script.src = new URL(
-          "js/editor/custom_csharp_editor.js?v=58-source-comment-pruning-v776",
+          "js/editor/custom_csharp_editor.js?v=64-editor-live-worker-v786",
           document.baseURI
         ).href;
         script.async = true;
@@ -2141,16 +2068,13 @@ function synchronizeCustomCSharpInspectorValue(
       ) {
         continue;
       }
-      const selectionStart =
-        control.selectionStart;
-      const selectionEnd =
-        control.selectionEnd;
-      const selectionDirection =
-        control.selectionDirection ||
-        "forward";
+      const active = document.activeElement === control;
+      const selectionStart = active ? control.selectionStart : null;
+      const selectionEnd = active ? control.selectionEnd : null;
+      const selectionDirection = active ? control.selectionDirection || "forward" : "forward";
       control.value = value;
       if (
-        document.activeElement === control &&
+        active &&
         Number.isFinite(selectionStart) &&
         Number.isFinite(selectionEnd)
       ) {
@@ -2167,7 +2091,8 @@ function synchronizeCustomCSharpInspectorValue(
 function commitCustomCSharpEditorValue(
     nodeId,
     specification,
-    value
+    value,
+    { validateUnchanged = true } = {}
   ) {
     const parameterKey = String(
       specification?.key || "code"
@@ -2180,6 +2105,11 @@ function commitCustomCSharpEditorValue(
     const nodes =
       customCSharpEditorNodeCandidates(nodeId);
     if (nodes.length === 0) return false;
+    if (!validateUnchanged && nodes.every(candidate =>
+      String(candidate.parameters?.[parameterKey] ?? "") === next)) {
+      synchronizeCustomCSharpInspectorValue(nodeId, parameterKey, next);
+      return true;
+    }
     for (const candidate of nodes) {
       candidate.parameters =
         candidate.parameters &&
@@ -2189,6 +2119,10 @@ function commitCustomCSharpEditorValue(
       candidate.parameters[parameterKey] = next;
     }
     const node = nodes[0];
+    const synchronization = customCSharpSynchronizationControllers.get(String(nodeId));
+    if (synchronization && !synchronization.signal.aborted) {
+      synchronization.abort(new DOMException("The source changed while its graph was being synchronized.", "AbortError"));
+    }
     synchronizeCustomCSharpInspectorValue(
       node.id,
       parameterKey,
@@ -2217,10 +2151,7 @@ function commitCustomCSharpEditorValue(
       graph.customCSharpFiles[node.id] = customGraph;
       updateCustomCSharpSynchronizationControl(node.id);
     }
-    persistGraph(
-      specification?.commitImmediately === true
-    );
-    refreshDisplayValueNodes();
+    scheduleCustomCSharpEditorPersistence();
     return true;
   }
 
@@ -2350,6 +2281,9 @@ function createCustomCSharpOverlayFrame(
       "aria-label",
       String(title || "Custom C# code editor")
     );
+    const refreshScrollLayerVisual = () =>
+      window.RMLUniversalScrollLayers
+        ?.refresh?.();
 
     const titlebar =
       document.createElement("div");
@@ -2443,6 +2377,7 @@ function createCustomCSharpOverlayFrame(
         bringCustomCSharpOverlayToFront(
           overlay
         );
+        refreshScrollLayerVisual();
       }
     );
     const maximize = windowButton(
@@ -2475,6 +2410,7 @@ function createCustomCSharpOverlayFrame(
         bringCustomCSharpOverlayToFront(
           overlay
         );
+        refreshScrollLayerVisual();
       }
     );
     const close = windowButton(
@@ -2585,6 +2521,7 @@ function createCustomCSharpOverlayFrame(
           String(left);
         overlay.dataset.rmlOverlayTop =
           String(top);
+        refreshScrollLayerVisual();
         event.preventDefault();
       }
     );
@@ -2601,6 +2538,7 @@ function createCustomCSharpOverlayFrame(
           event.pointerId
         );
       } catch {}
+      refreshScrollLayerVisual();
     };
     titlebar.addEventListener(
       "pointerup",
@@ -2671,6 +2609,7 @@ function closeCustomCSharpEditorRecord(
       customCSharpDetachedEditors.get(editorKey);
     if (!record) return;
     customCSharpDetachedEditors.delete(editorKey);
+    record.dispose?.();
     if (
       customCSharpActiveEditorKey === editorKey
     ) {
@@ -2718,7 +2657,7 @@ function prepareCustomCSharpEditorHost(
       hostWindow.document.createElement("link");
     stylesheet.rel = "stylesheet";
     stylesheet.href = new URL(
-      "styles/features/styles.runtime-graph.css?v=6-source-comment-pruning-v776",
+      "styles/features/styles.runtime-graph.css?v=7-custom-csharp-drag-v787",
       window.location.href
     ).href;
     hostWindow.document.head.appendChild(
@@ -3529,6 +3468,7 @@ function mountCustomCSharpEditorPresentation({
         let record;
         const mounted = await editorModule.mount({
           popup: hostWindow,
+          hostElement: frame,
           presentationMode: mode,
           initialSelection:
             editorState?.selection || null,
@@ -3544,6 +3484,10 @@ function mountCustomCSharpEditorPresentation({
           ariaLabel: String(
             specification?.label || "C# 14 source"
           ),
+          scrollLayerKey:
+            `custom-csharp:${editorKey}`,
+          scrollLayerLabel:
+            `${String(specification?.label || "Custom C#")} code and line numbers`,
           value: customCSharpEditorCurrentValue(
             nodeId,
             parameterKey,
@@ -3682,6 +3626,8 @@ function mountCustomCSharpEditorPresentation({
             );
           },
           onBlur() {
+            if (record?.presentationTransition ||
+                customCSharpDetachedEditors.get(editorKey) !== record) return;
             const liveNode =
               customCSharpEditorNode(nodeId);
             if (
@@ -3694,6 +3640,9 @@ function mountCustomCSharpEditorPresentation({
               return;
             }
             queueMicrotask(() => {
+              if (record?.presentationTransition ||
+                  customCSharpDetachedEditors.get(editorKey) !== record ||
+                  !customCSharpEditorRecordActive(record)) return;
               void openCustomCSharpFileGraphSynced(
                 nodeId,
                 {
@@ -3721,7 +3670,7 @@ function mountCustomCSharpEditorPresentation({
               );
             if (
               !current ||
-              current.popup !== hostWindow
+              (current !== pendingRecord && current !== record)
             ) {
               return;
             }
@@ -3750,11 +3699,25 @@ function mountCustomCSharpEditorPresentation({
             }
           }
         });
+        if (customCSharpDetachedEditors.get(editorKey) !== pendingRecord ||
+            hostWindow.closed || ((mode === "inline" || mode === "overlay") && !frame?.isConnected)) {
+          mounted?.dispose?.();
+          return;
+        }
         if (!mounted) {
           throw new Error(
             "The Custom C# editor could not initialize its host."
           );
         }
+
+        const latestNode = customCSharpEditorNode(nodeId);
+        mounted.applySnapshot?.({
+          value: customCSharpEditorCurrentValue(nodeId, parameterKey, initialValue),
+          appearance: customCSharpEditorAppearance(latestNode || node),
+          status: customCSharpSynchronizationStatus.get(nodeId) || "Synchronized with Builder",
+          output: customCSharpDebugOutput.get(nodeId) || [],
+          diagnostics: customCSharpDiagnostics.get(nodeId) || []
+        });
         record = {
           ...mounted,
           editorKey,
@@ -3787,14 +3750,23 @@ function mountCustomCSharpEditorPresentation({
         commitCustomCSharpEditorValue(
           nodeId,
           specification,
-          record.getValue()
+          record.getValue(),
+          { validateUnchanged: false }
         );
+        record.setValidationPending?.(customCSharpLivePendingNodes.has(nodeId));
+        if (customCSharpLiveValidatedValues.get(editorKey) !== record.getValue() &&
+            !customCSharpLiveDiagnosticTimers.has(editorKey) &&
+            !customCSharpLiveDiagnosticJobs.has(editorKey)) {
+          scheduleCustomCSharpLiveDiagnostics(
+            customCSharpEditorNode(nodeId), specification, record.getValue()
+          );
+        }
       })
       .catch(error => {
+        const current = customCSharpDetachedEditors.get(editorKey);
+        if (current !== pendingRecord && current?.popup !== hostWindow) return;
         if (
-          customCSharpDetachedEditors.get(
-            editorKey
-          ) === pendingRecord
+          current === pendingRecord
         ) {
           customCSharpDetachedEditors.delete(
             editorKey
@@ -3826,6 +3798,7 @@ function disposeCustomCSharpPresentation(
     record,
     editorKey
   ) {
+    record?.dispose?.();
     if (record?.mode === "inline") {
       record.frame?.remove();
       restoreGraphAfterCustomCSharpInlineEditor(
@@ -3893,104 +3866,110 @@ async function moveCustomCSharpEditorToMode(
       return false;
     }
 
-    const title =
-      `${String(existing.specification?.label || "Custom C#")} · Code editor`;
-    let externalHost = null;
-    if (targetMode === "external") {
-      externalHost =
-        await createCustomCSharpExternalHost(
+    existing.presentationTransition = true;
+    try {
+      const title =
+        `${String(existing.specification?.label || "Custom C#")} · Code editor`;
+      let externalHost = null;
+      if (targetMode === "external") {
+        externalHost =
+          await createCustomCSharpExternalHost(
+            editorKey,
+            title
+          );
+        if (!externalHost) return false;
+        if (
+          customCSharpDetachedEditors.get(
+            editorKey
+          ) !== existing ||
+          !customCSharpEditorRecordActive(
+            existing
+          )
+        ) {
+          externalHost.hostWindow.close?.();
+          return false;
+        }
+      }
+
+      if (
+        targetMode === "inline" &&
+        customCSharpInlineEditorKey &&
+        customCSharpInlineEditorKey !== editorKey
+      ) {
+        closeCustomCSharpEditorRecord(
+          customCSharpInlineEditorKey,
+          { restoreGraph: false }
+        );
+      }
+
+      const value = existing.getValue?.() || "";
+      const editorState =
+        customCSharpEditorViewState(existing);
+      commitCustomCSharpEditorValue(
+        existing.nodeId,
+        existing.specification,
+        value,
+        { validateUnchanged: false }
+      );
+
+      let frame = null;
+      let overlay = null;
+      let hostWindow;
+      if (targetMode === "inline") {
+        const liveNode =
+          customCSharpEditorNode(existing.nodeId);
+        if (
+          liveNode === findGraphNode(existing.nodeId)
+        ) {
+          graph.selectedNodeId = existing.nodeId;
+          graph.selectedNodeIds = [existing.nodeId];
+          graph.selectedConnectionId = null;
+          clearSelectedWirePoint();
+          renderGraphInspector({ force: true });
+        }
+        frame = createCustomCSharpInlineFrame(
           editorKey,
           title
         );
-      if (!externalHost) return false;
-      if (
-        customCSharpDetachedEditors.get(
-          editorKey
-        ) !== existing ||
-        !customCSharpEditorRecordActive(
-          existing
-        )
-      ) {
-        externalHost.hostWindow.close?.();
-        return false;
+        hostWindow = frame.contentWindow;
+      } else if (targetMode === "overlay") {
+        const overlayPresentation =
+          createCustomCSharpOverlayFrame(
+            editorKey,
+            title
+          );
+        overlay = overlayPresentation.overlay;
+        frame = overlayPresentation.frame;
+        hostWindow = frame.contentWindow;
+      } else {
+        hostWindow = externalHost.hostWindow;
       }
-    }
 
-    if (
-      targetMode === "inline" &&
-      customCSharpInlineEditorKey &&
-      customCSharpInlineEditorKey !== editorKey
-    ) {
-      closeCustomCSharpEditorRecord(
-        customCSharpInlineEditorKey,
-        { restoreGraph: false }
+      mountCustomCSharpEditorPresentation({
+        nodeId: existing.nodeId,
+        specification: existing.specification,
+        mode: targetMode,
+        hostWindow,
+        frame,
+        overlay,
+        editorState,
+        initialValue: value
+      });
+      disposeCustomCSharpPresentation(
+        existing,
+        editorKey
       );
-    }
 
-    const value = existing.getValue?.() || "";
-    const editorState =
-      customCSharpEditorViewState(existing);
-    commitCustomCSharpEditorValue(
-      existing.nodeId,
-      existing.specification,
-      value
-    );
-
-    let frame = null;
-    let overlay = null;
-    let hostWindow;
-    if (targetMode === "inline") {
-      const liveNode =
-        customCSharpEditorNode(existing.nodeId);
-      if (
-        liveNode === findGraphNode(existing.nodeId)
-      ) {
-        graph.selectedNodeId = existing.nodeId;
-        graph.selectedNodeIds = [existing.nodeId];
-        graph.selectedConnectionId = null;
-        clearSelectedWirePoint();
-        renderGraphInspector({ force: true });
-      }
-      frame = createCustomCSharpInlineFrame(
-        editorKey,
-        title
-      );
-      hostWindow = frame.contentWindow;
-    } else if (targetMode === "overlay") {
-      const overlayPresentation =
-        createCustomCSharpOverlayFrame(
-          editorKey,
-          title
+      if (targetMode === "external") {
+        showGraphMessage(
+          "Custom C# editor opened in a native separate browser window. Use its operating-system title bar to minimize, maximize, restore or close it.",
+          "success"
         );
-      overlay = overlayPresentation.overlay;
-      frame = overlayPresentation.frame;
-      hostWindow = frame.contentWindow;
-    } else {
-      hostWindow = externalHost.hostWindow;
+      }
+      return true;
+    } finally {
+      existing.presentationTransition = false;
     }
-
-    mountCustomCSharpEditorPresentation({
-      nodeId: existing.nodeId,
-      specification: existing.specification,
-      mode: targetMode,
-      hostWindow,
-      frame,
-      overlay,
-      editorState,
-      initialValue: value
-    });
-    disposeCustomCSharpPresentation(
-      existing,
-      editorKey
-    );
-
-    if (targetMode === "external") {
-      showGraphMessage(
-        "Custom C# editor opened in a native separate browser window. Use its operating-system title bar to minimize, maximize, restore or close it.",
-        "success"
-      );
-    }
-    return true;
   }
 
 function moveCustomCSharpEditorToInline(

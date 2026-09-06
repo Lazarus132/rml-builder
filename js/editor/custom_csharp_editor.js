@@ -9,7 +9,7 @@
     document.currentScript?.src ||
     document.baseURI;
   const EDITOR_STYLESHEET_URL = new URL(
-    "../../styles/features/styles.custom-csharp-editor.css?v=3-source-comment-pruning-v776",
+    "../../styles/features/styles.custom-csharp-editor.css?v=5-editor-live-worker-v786",
     EDITOR_MODULE_URL
   ).href;
 
@@ -147,19 +147,15 @@
   const RML_GRAPH_NODE_DRAG_TYPE =
     "application/x-rml-graph-node";
   let diagnosticClockEpoch = 0;
+  const diagnosticClockFormatter = new Intl.DateTimeFormat([], {
+    hour: "2-digit", minute: "2-digit", second: "2-digit", fractionalSecondDigits: 3
+  });
   const nextDiagnosticClock = () => {
     diagnosticClockEpoch = Math.max(
       Date.now(),
       diagnosticClockEpoch + 1
     );
-    return new Date(
-      diagnosticClockEpoch
-    ).toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      fractionalSecondDigits: 3
-    });
+    return diagnosticClockFormatter.format(diagnosticClockEpoch);
   };
   const normalizedDiagnosticSource = value =>
     /^builder$/i.test(String(value || ""))
@@ -176,11 +172,13 @@
     };
     const append = (source, entries) => {
       const target = groups[normalizedDiagnosticSource(source)];
+      const seen = new Set(target);
       for (const entry of Array.isArray(entries) ? entries : []) {
         const message = String(
           entry?.message || entry || ""
         );
-        if (message && !target.includes(message)) {
+        if (message && !seen.has(message)) {
+          seen.add(message);
           target.push(message);
         }
       }
@@ -276,27 +274,29 @@
     );
     editorStylesheet.dataset
       .rmlCustomCSharpEditorStyle = "true";
-    const editorStylesheetReady =
-      waitForStylesheet(
-        popup,
-        editorStylesheet
-      );
+    const stylesheetReadiness = [...styleLinks, editorStylesheet].map(
+      link => waitForStylesheet(popup, link)
+    );
     popupDocument.head.append(
       viewport,
       title,
       ...styleLinks,
       editorStylesheet
     );
-    await editorStylesheetReady;
+    await Promise.all(stylesheetReadiness);
     if (popup.closed) {
       return null;
     }
-    popupDocument.head.replaceChildren(
-      viewport,
-      title,
-      ...styleLinks,
-      editorStylesheet
-    );
+    const liveClassStyles = Array.from(popupDocument.head.querySelectorAll(
+      "style[data-rml-class-style-rules]"
+    ));
+    const retainedHeadNodes = new Set([
+      viewport, title, ...styleLinks, editorStylesheet, ...liveClassStyles
+    ]);
+    for (const child of [...popupDocument.head.childNodes]) {
+      if (!retainedHeadNodes.has(child)) child.remove();
+    }
+    window.RMLClassStyles?.observe(popupDocument);
     popupDocument.body.replaceChildren();
 
     const header = popupDocument.createElement("header");
@@ -693,6 +693,7 @@
     const textarea = popupDocument.createElement("textarea");
     textarea.value = String(options.value || "");
     textarea.spellcheck = false;
+    textarea.wrap = "off";
     textarea.autocomplete = "off";
     textarea.setAttribute("autocapitalize", "off");
     textarea.setAttribute("autocorrect", "off");
@@ -847,8 +848,10 @@
           diagnosticSource
         );
       } catch {}
-      renderDebugEntries();
-      renderDiagnostics();
+      updateEditorPresentation(() => {
+        renderDebugEntries();
+        renderDiagnostics();
+      });
     };
     for (const source of ["Builder", "Roslyn"]) {
       const button = popupDocument.createElement("button");
@@ -1047,6 +1050,11 @@
             viewId === activeView ? "true" : "false"
           );
         }
+        const selectedView = views.get(activeView);
+        if (followTail.get(activeView) !== false) {
+          selectedView.scrollTop = selectedView.scrollHeight;
+        }
+        publishScrollLayers();
       });
     }
     debugPanel.append(debugTabs, debugViews);
@@ -1057,6 +1065,251 @@
       statusBar,
       settingsOverlay
     );
+
+    const embeddedHostElement = () => {
+      if (
+        options.hostElement
+          ?.isConnected
+      ) {
+        return options.hostElement;
+      }
+      try {
+        return popup.frameElement;
+      } catch {
+        return null;
+      }
+    };
+    const embeddedLayerKey =
+      options.scrollLayerKey ||
+      "custom-csharp-editor";
+    const embeddedLayerDefinitions = [
+      {
+        scrollElement: textarea,
+        visualElement: editorShell,
+        key: embeddedLayerKey,
+        label:
+          options.scrollLayerLabel ||
+          "Custom C# code and line numbers"
+      },
+      {
+        scrollElement: debugTabs,
+        key:
+          `${embeddedLayerKey}:debug-tabs`,
+        label:
+          "Custom C# debug view tabs"
+      },
+      ...viewDefinitions.map(
+        ([id, label]) => ({
+          scrollElement: views.get(id),
+          key:
+            `${embeddedLayerKey}:${id}`,
+          label:
+            `Custom C# ${label.toLowerCase()}`
+        })
+      ),
+      {
+        scrollElement: settingsOverlay,
+        key:
+          `${embeddedLayerKey}:settings`,
+        label:
+          "Custom C# editor settings"
+      },
+      {
+        scrollElement: pickerPopover,
+        key:
+          `${embeddedLayerKey}:color-picker`,
+        label:
+          "Custom C# editor color picker"
+      },
+      ...Array.from(
+        popupDocument.querySelectorAll(
+          ".rml-graph-searchable-options"
+        ),
+        (scrollElement, index) => ({
+          scrollElement,
+          key:
+            `${embeddedLayerKey}:options:${index}`,
+          label:
+            "Custom C# editor options"
+        })
+      )
+    ].filter(
+      definition =>
+        definition.scrollElement
+    );
+    const embeddedLayerDetails =
+      definition => ({
+        hostElement:
+          embeddedHostElement(),
+        sourceWindow: popup,
+        scrollElement:
+          definition.scrollElement,
+        key: definition.key,
+        label: definition.label
+      });
+    const embeddedLayerForTarget =
+      target =>
+        embeddedLayerDefinitions.find(
+          definition =>
+            definition.scrollElement ===
+              target ||
+            definition.scrollElement
+              .contains?.(target)
+        ) ||
+        embeddedLayerDefinitions[0];
+    let presentationReady = false;
+    let presentationDisposed = false;
+    let presentationUpdateDepth = 0;
+    let scrollSnapshot = [];
+    let scrollSnapshotSignature = "";
+    let scrollSnapshotQueued = false;
+    let scrollMutationObserver = null;
+    let scrollResizeObserver = null;
+    let localScrollSession = null;
+    let localScrollSelection = null;
+    let localScrollOutline = null;
+    const localWheelStepper = window.RMLScrollManager?.createCyclicWheelStepper?.({ threshold: 40 });
+    const followTail = new Map(viewDefinitions.map(([id]) => [id, id !== "problems"]));
+
+    const localScrollableOverflow = value => /^(auto|scroll|overlay)$/.test(value);
+    const collectScrollLayers = () => {
+      const viewport = Object.freeze({ width: popup.innerWidth, height: popup.innerHeight });
+      return embeddedLayerDefinitions.map(definition => {
+        const target = definition.scrollElement;
+        const visual = definition.visualElement || target;
+        const style = popup.getComputedStyle(target);
+        const box = visual.getBoundingClientRect();
+        let left = Math.max(0, box.left);
+        let top = Math.max(0, box.top);
+        let right = Math.min(viewport.width, box.right);
+        let bottom = Math.min(viewport.height, box.bottom);
+
+        for (let parent = visual.parentElement; parent && parent !== popupDocument.body; parent = parent.parentElement) {
+          const parentStyle = popup.getComputedStyle(parent);
+          if (parentStyle.overflowX !== "visible" || parentStyle.overflowY !== "visible") {
+            const clip = parent.getBoundingClientRect();
+            if (parentStyle.overflowX !== "visible") {
+              left = Math.max(left, clip.left); right = Math.min(right, clip.right);
+            }
+            if (parentStyle.overflowY !== "visible") {
+              top = Math.max(top, clip.top); bottom = Math.min(bottom, clip.bottom);
+            }
+          }
+        }
+        const rectangle = Object.freeze({
+          left, top, right, bottom,
+          width: Math.max(0, right - left), height: Math.max(0, bottom - top)
+        });
+        let visible = target.isConnected && !target.hidden && target.getClientRects().length > 0 &&
+          style.display !== "none" && style.visibility !== "hidden" && style.visibility !== "collapse" &&
+          rectangle.width >= 1 && rectangle.height >= 1;
+        if (visible) {
+          visible = [0.1, 0.5, 0.9].some(y => [0.1, 0.5, 0.9].some(x => {
+            const hit = popupDocument.elementFromPoint(left + rectangle.width * x, top + rectangle.height * y);
+            return hit === visual || visual.contains(hit);
+          }));
+        }
+        const axes = Object.freeze({
+          x: visible && target.scrollWidth > target.clientWidth + 1 && localScrollableOverflow(style.overflowX),
+          y: visible && target.scrollHeight > target.clientHeight + 1 && localScrollableOverflow(style.overflowY)
+        });
+        return Object.freeze({
+          ...embeddedLayerDetails(definition),
+          snapshot: Object.freeze({ visible, axes, rectangle, viewport }),
+          onScroll() {
+            if (target === textarea) synchronizeGutterScroll();
+          }
+        });
+      });
+    };
+    const localScrollCandidates = () => scrollSnapshot.filter(layer =>
+      layer.snapshot.visible && (layer.snapshot.axes.x || layer.snapshot.axes.y));
+    const renderLocalScrollSelection = () => {
+      if (!separateWindow) return;
+      const key = localScrollSession?.candidates[localScrollSession.index]?.key || localScrollSelection?.key;
+      const active = localScrollCandidates().find(layer => layer.key === key);
+      if (!active) {
+        if (localScrollOutline) localScrollOutline.hidden = true;
+        return;
+      }
+      if (!localScrollOutline) {
+        localScrollOutline = popupDocument.createElement("div");
+        localScrollOutline.className = "rml-scroll-layer-outline rml-editor-scroll-outline";
+        localScrollOutline.setAttribute("aria-hidden", "true");
+        popupDocument.body.appendChild(localScrollOutline);
+      }
+      const rect = active.snapshot.rectangle;
+      Object.assign(localScrollOutline.dataset, {
+        rmlBoxLeft: String(rect.left), rmlBoxTop: String(rect.top),
+        rmlBoxWidth: String(rect.width), rmlBoxHeight: String(rect.height),
+        rmlBoxRadius: "8px", label: active.label, kind: "embedded"
+      });
+      localScrollOutline.classList.toggle("preview", Boolean(localScrollSession));
+      localScrollOutline.classList.toggle("selected", !localScrollSession);
+      localScrollOutline.hidden = false;
+      window.RMLClassStyles?.sync(localScrollOutline);
+    };
+    const clearLocalScrollSelection = () => {
+      localScrollSession = null;
+      localScrollSelection = null;
+      localWheelStepper?.reset();
+      if (localScrollOutline) localScrollOutline.hidden = true;
+    };
+    const reconcileLocalScrollSelection = () => {
+      const candidates = localScrollCandidates();
+      if (localScrollSession) {
+        const key = localScrollSession.candidates[localScrollSession.index]?.key;
+        const index = candidates.findIndex(layer => layer.key === key);
+        localScrollSession.candidates = candidates;
+        localScrollSession.index = index >= 0 ? index : Math.max(0, Math.min(localScrollSession.index, candidates.length - 1));
+        if (!candidates.length) localScrollSession = null;
+      }
+      if (localScrollSelection && !candidates.some(layer => layer.key === localScrollSelection.key)) {
+        localScrollSelection = null;
+      }
+      renderLocalScrollSelection();
+    };
+    const publishScrollLayers = () => {
+      if (!presentationReady || presentationDisposed || presentationUpdateDepth) return;
+      scrollSnapshotQueued = false;
+      scrollMutationObserver?.takeRecords();
+      const next = collectScrollLayers();
+      const signature = JSON.stringify(next.map(layer => [layer.key, layer.snapshot]));
+      if (signature === scrollSnapshotSignature) return;
+      scrollSnapshotSignature = signature;
+      scrollSnapshot = next;
+      if (separateWindow) {
+        reconcileLocalScrollSelection();
+      } else {
+        window.RMLUniversalScrollLayers?.updateEmbeddedSnapshot?.({
+          hostElement: embeddedHostElement(), sourceWindow: popup, layers: next
+        });
+      }
+    };
+    const queueScrollSnapshot = () => {
+      if (presentationDisposed || scrollSnapshotQueued) return;
+      scrollSnapshotQueued = true;
+      popup.requestAnimationFrame(() => {
+        if (scrollSnapshotQueued) publishScrollLayers();
+      });
+    };
+    const updateEditorPresentation = update => {
+      presentationUpdateDepth += 1;
+      try { return update(); }
+      finally {
+        presentationUpdateDepth -= 1;
+        if (!presentationUpdateDepth) publishScrollLayers();
+      }
+    };
+    const commitLocalScrollSelection = () => {
+      publishScrollLayers();
+      if (localScrollSession) {
+        localScrollSelection = localScrollSession.candidates[localScrollSession.index] || null;
+        localScrollSession = null;
+        localWheelStepper?.reset();
+      }
+      renderLocalScrollSelection();
+    };
 
     const outputEntries = [];
     let diagnostics = normalizedDiagnostics(options.diagnostics);
@@ -1075,7 +1328,11 @@
               entry.sourceGroup === requiredSource
           )
         : entries;
-      view.replaceChildren();
+      const keepTail = view.hidden
+        ? followTail.get(viewId) !== false
+        : view.scrollHeight - view.clientHeight - view.scrollTop <= 2;
+      const previousTop = view.scrollTop;
+      const fragment = popupDocument.createDocumentFragment();
       if (!visibleEntries.length) {
         const empty = popupDocument.createElement("span");
         empty.className = "debug-empty";
@@ -1083,8 +1340,7 @@
           viewId === "debug"
             ? "Waiting for Roslyn, worker or Builder debug output…"
             : "No output yet.";
-        view.appendChild(empty);
-        return;
+        fragment.appendChild(empty);
       }
       for (const entry of visibleEntries) {
         const row = popupDocument.createElement("div");
@@ -1098,9 +1354,11 @@
         const message = popupDocument.createElement("span");
         message.textContent = String(entry.message || "");
         row.append(time, source, message);
-        view.appendChild(row);
+        fragment.appendChild(row);
       }
-      view.scrollTop = view.scrollHeight;
+      view.replaceChildren(fragment);
+      followTail.set(viewId, keepTail);
+      if (!view.hidden) view.scrollTop = keepTail ? view.scrollHeight : previousTop;
     };
     const renderDebugEntries = () => {
       const view = views.get("debug");
@@ -1125,7 +1383,8 @@
       const view = views.get("problems");
       if (!view) return;
       view.dataset.source = diagnosticSource;
-      view.replaceChildren();
+      const fragment = popupDocument.createDocumentFragment();
+      const previousTop = view.scrollTop;
       const visibleDiagnostics =
         diagnostics[diagnosticSource] || [];
       if (!visibleDiagnostics.length) {
@@ -1133,16 +1392,18 @@
         empty.className = "debug-empty";
         empty.textContent =
           `No ${diagnosticSource} problems detected.`;
-        view.appendChild(empty);
+        fragment.appendChild(empty);
       } else {
         for (const diagnostic of visibleDiagnostics) {
           const row = popupDocument.createElement("div");
           row.className = "problem";
           row.dataset.source = diagnosticSource;
           row.textContent = String(diagnostic);
-          view.appendChild(row);
+          fragment.appendChild(row);
         }
       }
+      view.replaceChildren(fragment);
+      if (!view.hidden) view.scrollTop = previousTop;
       const count = tabs.get("problems")?.querySelector("output");
       if (count) {
         count.textContent = String(visibleDiagnostics.length);
@@ -1152,7 +1413,7 @@
         );
       }
     };
-    const appendOutput = entry => {
+    const storeOutputEntry = entry => {
       const normalized = Object.freeze({
         time: String(
           entry?.time ||
@@ -1180,43 +1441,69 @@
       }
       outputEntries.push(normalized);
       if (outputEntries.length > 500) outputEntries.shift();
+    };
+    const appendOutput = entry => updateEditorPresentation(() => {
+      storeOutputEntry(entry);
+      renderEntries("output", outputEntries);
+    });
+    const replaceOutput = entries => {
+      outputEntries.length = 0;
+      for (const entry of Array.isArray(entries) ? entries : []) storeOutputEntry(entry);
       renderEntries("output", outputEntries);
     };
     for (const entry of Array.isArray(options.output) ? options.output : []) {
-      appendOutput(entry);
+      storeOutputEntry(entry);
     }
     renderEntries("output", outputEntries);
     renderDebugEntries();
     renderDiagnostics();
 
+    let lineSource = null;
+    let lineStarts = [0];
+    let renderedLineCount = 0;
+    let validationPending = false;
     const refreshLineNumbers = () => {
-      const count = Math.max(1, textarea.value.split("\n").length);
-      lineNumbers.textContent = Array.from(
-        { length: count },
-        (_, index) => String(index + 1)
-      ).join("\n");
+      const source = textarea.value;
+      if (source !== lineSource) {
+        lineSource = source;
+        lineStarts = [0];
+        let at = -1;
+        while ((at = source.indexOf("\n", at + 1)) >= 0) lineStarts.push(at + 1);
+      }
+      const count = lineStarts.length;
+      if (count === renderedLineCount) return;
+      renderedLineCount = count;
+      gutter.style.setProperty("--rml-code-line-digits", String(Math.max(4, String(count).length)));
+      lineNumbers.textContent = Array.from({ length: count }, (_, index) => String(index + 1)).join("\n");
     };
     const refreshCursorPosition = () => {
       const offset = Math.max(0, textarea.selectionStart || 0);
-      const lines = textarea.value.slice(0, offset).split("\n");
-      cursorPosition.textContent =
-        `Ln ${lines.length}, Col ${lines.at(-1).length + 1}`;
+      let lower = 0, upper = lineStarts.length;
+      while (lower + 1 < upper) {
+        const middle = (lower + upper) >>> 1;
+        if (lineStarts[middle] <= offset) lower = middle;
+        else upper = middle;
+      }
+      const label = `Ln ${lower + 1}, Col ${offset - lineStarts[lower] + 1}`;
+      if (cursorPosition.textContent !== label) cursorPosition.textContent = label;
     };
     const synchronizeGutterScroll = () => {
-      lineNumbers.dataset.rmlScrollOffset =
-        String(-textarea.scrollTop);
+      if (gutter.scrollTop !== textarea.scrollTop) {
+        gutter.scrollTop = textarea.scrollTop;
+      }
     };
     const refresh = () => {
       refreshLineNumbers();
       refreshCursorPosition();
-      synchronizeGutterScroll();
+      queueScrollSnapshot();
     };
     refresh();
 
     let composing = false;
     const commit = () => {
       options.onInput?.(textarea.value);
-      statusMessage.textContent = "Synchronized with Builder";
+      const label = validationPending ? "Synchronized with Builder · Checking C# 14…" : "Synchronized with Builder";
+      if (statusMessage.textContent !== label) statusMessage.textContent = label;
       refresh();
       if (!findWidget.hidden) {
         refreshMatches(textarea.selectionStart);
@@ -1642,7 +1929,16 @@
     });
     popupDocument.addEventListener(
       "pointerdown",
-      () => options.onRequestForeground?.(),
+      () => {
+        clearLocalScrollSelection();
+        if (!separateWindow) {
+          window.RMLUniversalScrollLayers
+            ?.clear?.();
+          window.RMLTypedNodeGraphScrollLayers
+            ?.clear?.();
+        }
+        options.onRequestForeground?.();
+      },
       true
     );
     popup.addEventListener(
@@ -1662,6 +1958,11 @@
       }
     });
     popupDocument.addEventListener("keydown", event => {
+      if (event.key !== "Control" && event.key !== "Meta" &&
+          !(event.key === "Shift" && (localScrollSession?.candidates[localScrollSession.index] || localScrollSelection)?.snapshot.axes.x)) {
+        clearLocalScrollSelection();
+      }
+      if (!separateWindow) window.RMLUniversalScrollLayers?.handleKeyDown?.(event);
       const command = event.ctrlKey || event.metaKey;
       const key = event.key.toLowerCase();
       if (command && key === "f") {
@@ -1697,6 +1998,16 @@
           closeFind();
         }
       }
+    });
+    popupDocument.addEventListener("keyup", event => {
+      if (event.key === "Control" || event.key === "Meta") {
+        if (separateWindow) commitLocalScrollSelection();
+        else window.RMLUniversalScrollLayers?.commit?.();
+      }
+    });
+    popup.addEventListener("blur", () => {
+      if (separateWindow) commitLocalScrollSelection();
+      else window.RMLUniversalScrollLayers?.commit?.();
     });
     textarea.addEventListener("compositionstart", () => {
       composing = true;
@@ -1847,11 +2158,141 @@
     textarea.addEventListener("scroll", synchronizeGutterScroll, {
       passive: true
     });
+    const normalizedEditorWheelDelta = (
+      event,
+      referenceElement = textarea
+    ) => {
+      const unit =
+        event.deltaMode === 1
+          ? Number.parseFloat(
+              popup.getComputedStyle(
+                referenceElement
+              ).lineHeight
+            ) || 24
+          : event.deltaMode === 2
+            ? Math.max(
+                1,
+                referenceElement
+                  .clientHeight
+              )
+            : 1;
+      let x = (Number(event.deltaX) || 0) * unit;
+      let y = (Number(event.deltaY) || 0) * unit;
+      if (
+        event.shiftKey &&
+        Math.abs(x) < Math.abs(y)
+      ) {
+        x = y;
+        y = 0;
+      }
+      return { x, y };
+    };
+    const routeUnifiedEditorWheel = event => {
+      publishScrollLayers();
+      const target = event.target;
+      const overGutter =
+        target === gutter ||
+        gutter.contains(target);
+      const modifier =
+        event.ctrlKey || event.metaKey;
+      const layerDefinition =
+        embeddedLayerForTarget(target);
+      const layerDetails = embeddedLayerDetails(layerDefinition);
+      if (separateWindow && modifier) {
+        const candidates = localScrollCandidates();
+        const starting = !localScrollSession;
+        if (starting) {
+          localScrollSession = candidates.length ? { candidates, index: 0 } : null;
+          localWheelStepper?.reset();
+        } else if (candidates.length) {
+          const delta = normalizedEditorWheelDelta(event, layerDefinition.scrollElement);
+          const dominant = Math.abs(delta.y) >= Math.abs(delta.x) ? delta.y : delta.x;
+          const stepped = localWheelStepper?.step(localScrollSession.index, candidates.length, dominant);
+          localScrollSession.index = stepped ? stepped.index :
+            (localScrollSession.index + Math.sign(dominant) + candidates.length) % candidates.length;
+        }
+        renderLocalScrollSelection();
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
+      if (separateWindow && localScrollSession) commitLocalScrollSelection();
+      if (separateWindow && localScrollSelection) {
+        const selected = localScrollCandidates().find(layer => layer.key === localScrollSelection.key);
+        if (selected) {
+          const target = selected.scrollElement;
+          let { x, y } = normalizedEditorWheelDelta(event, target);
+          const axes = selected.snapshot.axes;
+          if (!axes.y && axes.x && Math.abs(x) < Math.abs(y)) { x = y; y = 0; }
+          if (axes.x) target.scrollLeft += x;
+          if (axes.y) target.scrollTop += y;
+          selected.onScroll();
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          return;
+        }
+        clearLocalScrollSelection();
+      }
+      const bridgeHandled =
+        !separateWindow &&
+        window.RMLUniversalScrollLayers
+          ?.routeEmbeddedWheel?.({
+            event,
+            ...layerDetails
+          }) === true;
+      if (bridgeHandled) {
+        synchronizeGutterScroll();
+        return;
+      }
+      if (
+        !overGutter &&
+        !(separateWindow && modifier)
+      ) {
+        return;
+      }
+      const scrollOwner =
+        overGutter
+          ? textarea
+          : layerDefinition
+              .scrollElement;
+      const delta =
+        normalizedEditorWheelDelta(
+          event,
+          scrollOwner
+        );
+      const previousTop =
+        scrollOwner.scrollTop;
+      const previousLeft =
+        scrollOwner.scrollLeft;
+      scrollOwner.scrollTop += delta.y;
+      scrollOwner.scrollLeft += delta.x;
+      if (scrollOwner === textarea) {
+        synchronizeGutterScroll();
+      }
+      if (
+        modifier ||
+        scrollOwner.scrollTop !==
+          previousTop ||
+        scrollOwner.scrollLeft !==
+          previousLeft
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    popupDocument.addEventListener(
+      "wheel",
+      routeUnifiedEditorWheel,
+      {
+        capture: true,
+        passive: false
+      }
+    );
     for (const eventName of ["click", "keyup", "select"]) {
       textarea.addEventListener(eventName, refreshCursorPosition);
     }
     textarea.addEventListener("blur", () => {
-      if (!composing) {
+      if (!composing && !presentationDisposed) {
         options.onBlur?.();
       }
     });
@@ -1982,12 +2423,39 @@
           String(state.tone || "info");
       },
       appendOutput,
+      setValidationPending(pending) {
+        const next = pending === true;
+        if (next === validationPending) return;
+        validationPending = next;
+        debugPanel.dataset.validationPending = String(next);
+        debugPanel.title = next ? "Checking the current source; the last completed diagnostic snapshot remains visible." : "";
+        statusMessage.textContent = next ? "Synchronized with Builder · Checking C# 14…" : "Synchronized with Builder";
+        statusMessage.dataset.tone = "info";
+      },
       setDiagnostics(values) {
-        diagnostics = normalizedDiagnostics(values);
-        diagnosticSnapshotTime =
-          nextDiagnosticClock();
-        renderDebugEntries();
-        renderDiagnostics();
+        updateEditorPresentation(() => {
+          diagnostics = normalizedDiagnostics(values);
+          diagnosticSnapshotTime = nextDiagnosticClock();
+          renderDebugEntries();
+          renderDiagnostics();
+        });
+      },
+      applySnapshot(snapshot = {}) {
+        updateEditorPresentation(() => {
+          if (Object.hasOwn(snapshot, "value")) record.setValue(snapshot.value);
+          if (Object.hasOwn(snapshot, "appearance")) record.setAppearance(snapshot.appearance);
+          if (Object.hasOwn(snapshot, "status")) record.setStatus(snapshot.status);
+          if (Object.hasOwn(snapshot, "output")) replaceOutput(snapshot.output);
+          if (Object.hasOwn(snapshot, "diagnostics")) record.setDiagnostics(snapshot.diagnostics);
+        });
+      },
+      getScrollState() {
+        return Object.freeze({
+          cycling: Boolean(localScrollSession),
+          selectedKey: localScrollSelection?.key || "",
+          previewKey: localScrollSession?.candidates[localScrollSession.index]?.key || "",
+          candidates: localScrollCandidates().map(layer => ({ key: layer.key, label: layer.label, ...layer.snapshot }))
+        });
       },
       setDiagnosticSource(source) {
         commitDiagnosticSource(source);
@@ -2008,7 +2476,21 @@
           textarea.focus();
         }
       },
+      dispose() {
+        if (presentationDisposed) return;
+        presentationDisposed = true;
+        scrollSnapshotQueued = false;
+        scrollMutationObserver?.disconnect();
+        scrollResizeObserver?.disconnect();
+        clearLocalScrollSelection();
+        if (!separateWindow) {
+          window.RMLUniversalScrollLayers?.releaseEmbedded?.({
+            hostElement: embeddedHostElement(), sourceWindow: popup
+          });
+        }
+      },
       close() {
+        record.dispose();
         if (!popup.closed) {
           popup.close();
         }
@@ -2020,6 +2502,7 @@
     const notifyClosed = () => {
       if (closedNotified) return;
       closedNotified = true;
+      record.dispose();
       options.onClosed?.(record);
     };
     popup.addEventListener(
@@ -2041,6 +2524,35 @@
       0,
       Number(options.initialScroll?.left) || 0
     );
+    for (const [id, view] of views) {
+      view.addEventListener("scroll", () => {
+        if (!view.hidden) followTail.set(id, view.scrollHeight - view.clientHeight - view.scrollTop <= 2);
+      }, { passive: true });
+    }
+    if (typeof popup.MutationObserver === "function") {
+      scrollMutationObserver = new popup.MutationObserver(records => {
+        if (records.some(change => change.target !== localScrollOutline &&
+            !(change.type === "childList" && [...change.addedNodes, ...change.removedNodes].every(node => node === localScrollOutline)))) {
+          queueScrollSnapshot();
+        }
+      });
+      scrollMutationObserver.observe(popupDocument.body, {
+        subtree: true, childList: true, characterData: true,
+        attributes: true, attributeFilter: ["hidden", "class", "style"]
+      });
+    }
+    if (typeof popup.ResizeObserver === "function") {
+      scrollResizeObserver = new popup.ResizeObserver(queueScrollSnapshot);
+      for (const target of new Set([popupDocument.body, editorShell, debugViews,
+        ...embeddedLayerDefinitions.map(definition => definition.scrollElement)])) {
+        scrollResizeObserver.observe(target);
+      }
+    }
+    popup.addEventListener("resize", queueScrollSnapshot, { passive: true });
+    popupDocument.addEventListener("scroll", queueScrollSnapshot, { capture: true, passive: true });
+    popupDocument.fonts?.ready.then(queueScrollSnapshot);
+    presentationReady = true;
+    publishScrollLayers();
     record.focus();
     return record;
   }
@@ -2050,7 +2562,7 @@
     "RMLCustomCSharpDetachedEditor",
     {
       value: Object.freeze({
-        version: 29,
+        version: 35,
         mount
       }),
       writable: false,
