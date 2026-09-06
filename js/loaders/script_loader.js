@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  if (window.RMLScriptLoader?.version >= 33) {
+  if (window.RMLScriptLoader?.version >= 34) {
     return;
   }
 
@@ -119,19 +119,19 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/node_graph_composites.js?v=6-composite-navigation-coherence-v792"
+          url: "../graph/node_graph_composites.js?v=799-ready-graph-entry"
         }),
         Object.freeze({
-          url: "../graph/node_graph_custom_csharp.js?v=794-shared-loader-runtime"
+          url: "../graph/node_graph_custom_csharp.js?v=799-ready-graph-entry"
         }),
         Object.freeze({
           url: "../graph/node_graph_guided.js?v=1-physical-modules-v748"
         }),
         Object.freeze({
-          url: "../graph/node_graph_view.js?v=796-manual-scanner-session"
+          url: "../graph/node_graph_view.js?v=800-consistent-graph-lod"
         }),
         Object.freeze({
-          url: "../graph/node_graph_bootstrap.js?v=7-composite-navigation-coherence-v792",
+          url: "../graph/node_graph_bootstrap.js?v=799-ready-graph-entry",
           ready: () =>
             typeof window.RMLDynamicGraphHost?.isReady === "function"
         })
@@ -149,23 +149,13 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/graph_gpu_renderer.js?v=22-source-comment-pruning-v776",
+          url: "../graph/graph_gpu_renderer.js?v=799-ready-graph-entry",
           ready: () =>
             typeof window.RMLGraphHybridRenderer?.create === "function"
         })
       ]),
       settle: async () => {
-        await Promise.race([
-          Promise.resolve(
-            window.RMLGraphHybridRenderer?.ready
-          ),
-          new Promise(resolve =>
-            window.setTimeout(
-              () => resolve(false),
-              2500
-            )
-          )
-        ]);
+        await Promise.resolve(window.RMLGraphHybridRenderer?.ready);
       }
     })
   });
@@ -699,7 +689,7 @@
 
   Object.defineProperty(window, "RMLScriptLoader", {
     value: Object.freeze({
-      version: 33,
+      version: 34,
       ensure,
       ensureMany(names) {
         return Promise.all(

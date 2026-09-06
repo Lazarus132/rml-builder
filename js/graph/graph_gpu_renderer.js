@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = 13;
+  const VERSION = 14;
   const WIRE_CULL_CELL_SIZE = 960;
   const NODE_CELL_SIZE = 360;
   const WIRE_LINEAR_PICK_LIMIT = 512;
@@ -2654,8 +2654,42 @@
       this.draw();
     }
 
+    async whenSceneReady() {
+      if (this.disposed || !this.viewport || !this.available) return false;
+      this.buildWireCullSpatialIndex();
+      this.buildNodeSpatialIndex();
+      this.drawNow();
+      await this.whenSubmittedWorkDone();
+      return !this.disposed && Boolean(this.viewport);
+    }
+
     whenSubmittedWorkDone() {
-      return Promise.resolve(true);
+      const gl = this.gl;
+      const viewport = this.viewport;
+      if (!gl || !this.available || !viewport || !gl.fenceSync) return Promise.resolve(false);
+      const fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+      if (!fence) return Promise.resolve(false);
+      gl.flush();
+      return new Promise((resolve, reject) => {
+        const inspect = () => {
+          if (this.disposed || this.contextLost || this.gl !== gl || this.viewport !== viewport) {
+            gl.deleteSync(fence);
+            resolve(false);
+            return;
+          }
+          const state = gl.clientWaitSync(fence, 0, 0);
+          if (state === gl.ALREADY_SIGNALED || state === gl.CONDITION_SATISFIED) {
+            gl.deleteSync(fence);
+            resolve(true);
+          } else if (state === gl.WAIT_FAILED) {
+            gl.deleteSync(fence);
+            reject(new Error("The initial WebGL graph submission failed."));
+          } else {
+            requestAnimationFrame(inspect);
+          }
+        };
+        inspect();
+      });
     }
 
     draw() {
@@ -3960,8 +3994,9 @@
         existing.records === records &&
         existing.revision === revision
       ) {
-        return;
+        return existing.promise;
       }
+      existing?.finish?.(false);
       const task = {
         records,
         revision,
@@ -3973,28 +4008,26 @@
         spatialKeys: new Array(records.length),
         workMilliseconds: 0
       };
+      task.promise = new Promise((resolve, reject) => {
+        task.finish = resolve;
+        task.fail = reject;
+      });
+      task.promise.catch(() => {});
       this.gpuSpatialBuildTasks[kind] = task;
       this.stats.gpuSpatialIndexBuilding = true;
 
       const schedule = callback => {
-        if (
-          typeof globalThis.requestIdleCallback ===
-          "function"
-        ) {
-          globalThis.requestIdleCallback(
-            callback,
-            { timeout: 80 }
-          );
+        if (typeof globalThis.requestIdleCallback === "function") {
+          globalThis.requestIdleCallback(callback);
           return;
         }
-        globalThis.setTimeout(
-          () => callback({
-            timeRemaining: () => 4
-          }),
-          0
-        );
+        globalThis.requestAnimationFrame(() => {
+          const started = performance.now();
+          callback({ timeRemaining: () => Math.max(0, 4 - (performance.now() - started)) });
+        });
       };
       const runBatch = deadline => {
+        try {
         if (
           this.disposed ||
           this.gpuSpatialBuildTasks[kind] !== task ||
@@ -4023,6 +4056,7 @@
               this.gpuSpatialBuildTasks.wire ||
               this.gpuSpatialBuildTasks.node
             );
+          task.finish(false);
           return;
         }
         const started = performance.now();
@@ -4127,13 +4161,21 @@
             task.workMilliseconds;
         }
         this.gpuSpatialBuildTasks[kind] = null;
+        task.finish(true);
         this.stats.gpuSpatialIndexBuilding =
           Boolean(
             this.gpuSpatialBuildTasks.wire ||
             this.gpuSpatialBuildTasks.node
           );
+        } catch (error) {
+          if (this.gpuSpatialBuildTasks[kind] === task) this.gpuSpatialBuildTasks[kind] = null;
+          this.stats.gpuSpatialIndexBuilding = Boolean(
+            this.gpuSpatialBuildTasks.wire || this.gpuSpatialBuildTasks.node);
+          task.fail(error);
+        }
       };
       schedule(runBatch);
+      return task.promise;
     }
 
     gpuWireCullPlan(bounds) {
@@ -4930,6 +4972,34 @@
         this.drawSamples;
     }
 
+    async whenSceneReady() {
+      const viewport = this.viewport;
+      while (!this.disposed && this.available && this.viewport === viewport && viewport) {
+        const wireRevision = this.wireDataRevision;
+        const nodeRevision = this.nodeDataRevision;
+        const work = [];
+        if (this.wireCullSpatialIndexDirty) {
+          if (this.wireRecords.length >= WEBGPU_ASYNC_INDEX_THRESHOLD) {
+            work.push(this.scheduleGpuSpatialIndexBuild("wire"));
+          } else { this.buildWireCullSpatialIndex(); }
+        }
+        if (this.nodeSpatialIndexDirty) {
+          if (this.nodeRecords.length >= WEBGPU_ASYNC_INDEX_THRESHOLD) {
+            work.push(this.scheduleGpuSpatialIndexBuild("node"));
+          } else { this.buildNodeSpatialIndex(); }
+        }
+        await Promise.all(work);
+        if (this.disposed || !this.available || this.viewport !== viewport) return false;
+        if (wireRevision !== this.wireDataRevision || nodeRevision !== this.nodeDataRevision) continue;
+        this.invalidateGpuCulling();
+        this.drawNow();
+        await this.whenSubmittedWorkDone();
+        if (wireRevision === this.wireDataRevision && nodeRevision === this.nodeDataRevision &&
+            !this.wireCullSpatialIndexDirty && !this.nodeSpatialIndexDirty) return true;
+      }
+      return false;
+    }
+
     whenSubmittedWorkDone() {
       return this.gpuDevice?.queue
         ?.onSubmittedWorkDone?.() ||
@@ -4937,6 +5007,8 @@
     }
 
     clearScene() {
+      for (const task of Object.values(this.gpuSpatialBuildTasks || {})) task?.finish?.(false);
+      this.gpuSpatialBuildTasks = { wire: null, node: null };
       super.clearScene();
       this.invalidateGpuCulling();
       this.gpuWireCandidateCount = 0;
@@ -4972,6 +5044,7 @@
       this.gpuBufferSizes = Object.create(null);
       this.gpuBindGroups = Object.create(null);
       this.gpuResourcesReady = false;
+      for (const task of Object.values(this.gpuSpatialBuildTasks || {})) task?.finish?.(false);
       this.gpuSpatialBuildTasks = {
         wire: null,
         node: null

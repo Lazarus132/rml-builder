@@ -72,7 +72,7 @@
     const link = document.createElement("link");
     link.rel = "stylesheet";
     link.href = new URL(
-      "../../styles/features/styles.runtime-graph.css?v=6-source-comment-pruning-v776",
+      "../../styles/features/styles.runtime-graph.css?v=799-ready-graph-entry",
       scriptUrl
     ).href;
     link.dataset.rmlStyleBundle = "runtime-graph";
@@ -93,17 +93,18 @@
       window.RMLClassStyles
         ? []
         : [
-            "../loaders/style_loader.js?v=8-source-comment-pruning-v776"
+            "../loaders/style_loader.js?v=799-ready-graph-entry"
           ]
     ),
     "node_graph_registry.js?v=1-physical-modules-v748",
     "node_graph_codegen.js?v=794-shared-loader-runtime",
-    "runtime_bridge.js?v=796-manual-scanner-session",
-    "node_graph_composites.js?v=6-composite-navigation-coherence-v792",
-    "node_graph_custom_csharp.js?v=794-shared-loader-runtime",
+    "runtime_bridge.js?v=797-manual-port-discovery",
+    "node_graph_composites.js?v=799-ready-graph-entry",
+    "node_graph_custom_csharp.js?v=799-ready-graph-entry",
     "node_graph_guided.js?v=1-physical-modules-v748",
-    "node_graph_view.js?v=796-manual-scanner-session",
-    "node_graph_bootstrap.js?v=7-composite-navigation-coherence-v792"
+    "node_graph_view.js?v=800-consistent-graph-lod",
+    "graph_gpu_renderer.js?v=799-ready-graph-entry",
+    "node_graph_bootstrap.js?v=799-ready-graph-entry"
   ];
 
   const ready = files.reduce(

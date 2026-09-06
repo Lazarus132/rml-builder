@@ -1568,9 +1568,7 @@ function openApiCompositeGraph(
     pruneConnections();
     persistGraph(true);
     activateGraphMode();
-    requestProjectAnimationFrame(() => {
-      centerGraph();
-    });
+    requestInitialGraphViewport(centerGraph);
     showGraphMessage(
       `Opened ${apiCompositeEditor.title}.`,
       "success"

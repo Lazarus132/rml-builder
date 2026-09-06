@@ -42,7 +42,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "manual-port-discovery-20260906-v797";
+  "consistent-graph-lod-20260906-v800";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -9817,6 +9817,7 @@ async function readJsonFileSource(
     throw error;
   }
 }
+
 
 async function readExampleProjectDocument() {
   const url = exampleProjectUrl();
@@ -26276,9 +26277,10 @@ function waitForImportedGraphUi(
         window.clearTimeout(timer);
       }
       document.removeEventListener(
-        "rml-graph:render-complete",
+        "rml-graph:presentation-complete",
         handleComplete
       );
+      document.removeEventListener("rml-graph:presentation-failed", handleFailure);
       document.removeEventListener(
         "rml-builder:rendered",
         handleBuilderRendered
@@ -26333,6 +26335,8 @@ function waitForImportedGraphUi(
         nodeCount,
         connectionCount,
         hostProjectEpoch,
+        requestedGraphView:
+          host?.getPresentationState?.()?.savedPage === "runtime-graph",
         graphViewActive:
           host
             ?.getPresentationState?.()
@@ -26361,7 +26365,8 @@ function waitForImportedGraphUi(
 
       if (
         current.matches &&
-        !current.graphViewActive
+        !current.graphViewActive &&
+        !current.requestedGraphView
       ) {
 
 
@@ -26395,6 +26400,13 @@ function waitForImportedGraphUi(
       const current = hostStateMatches();
       if (current.matches) {
         finish(false);
+      }
+    };
+    const handleFailure = event => {
+      const detail = event.detail || {};
+      if (expectedProjectEpoch > 0 && Number(detail.projectEpoch) !== expectedProjectEpoch) return;
+      if (hostStateMatches().matches) {
+        finish(false, new Error(`The Runtime Graph could not be prepared: ${detail.error || "Unknown error"}. The JSON was not loaded.`));
       }
     };
     const handleReplacement = event => {
@@ -26439,9 +26451,10 @@ function waitForImportedGraphUi(
     }
 
     document.addEventListener(
-      "rml-graph:render-complete",
+      "rml-graph:presentation-complete",
       handleComplete
     );
+    document.addEventListener("rml-graph:presentation-failed", handleFailure);
     document.addEventListener(
       "rml-builder:rendered",
       handleBuilderRendered

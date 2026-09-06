@@ -107,7 +107,7 @@ function openCustomCSharpFileGraph(fileNodeId) {
     activateGraphMode();
     const projectEpoch =
       builderProjectEpoch;
-    requestProjectAnimationFrame(() => requestProjectAnimationFrame(() => {
+    requestInitialGraphViewport(() => {
       if (
         projectEpoch !==
           builderProjectEpoch ||
@@ -131,7 +131,7 @@ function openCustomCSharpFileGraph(fileNodeId) {
       applyViewportTransform();
       persistGraphView();
       renderGraphWires();
-    }));
+    });
     showGraphMessage(`Opened ${customCSharpEditor.fileName} in its separate C# graph.`, "success");
     return true;
   }

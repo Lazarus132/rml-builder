@@ -604,7 +604,7 @@
     setup: "../../styles/features/styles.setup.css?v=5-source-comment-pruning-v776",
     project: "../../styles/features/styles.project.css?v=4-max-graph-performance-v755",
     export: "../../styles/features/styles.export.css?v=2-max-graph-performance-v755",
-    "runtime-graph": "../../styles/features/styles.runtime-graph.css?v=7-custom-csharp-drag-v787"
+    "runtime-graph": "../../styles/features/styles.runtime-graph.css?v=799-ready-graph-entry"
   });
   const bundleOrder = Object.freeze([
     "preview",

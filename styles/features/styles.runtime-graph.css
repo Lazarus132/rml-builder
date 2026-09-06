@@ -2972,3 +2972,16 @@ body.rml-node-graph-mode.rml-graph-edit-mode #inspector-content {
   color: #cccccc;
   font: 13px system-ui, sans-serif;
 }
+
+.rml-graph-root[data-rml-graph-phase="preparing"] > .rml-graph-viewport,
+.rml-graph-root[data-rml-graph-phase="failed"] > .rml-graph-viewport {
+  visibility: hidden;
+  pointer-events: none;
+}
+.rml-graph-preparation-status {
+  position: absolute;
+  inset: 50% 12px auto;
+  text-align: center;
+  color: var(--muted);
+  pointer-events: none;
+}

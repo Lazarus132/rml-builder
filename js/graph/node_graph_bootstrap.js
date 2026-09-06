@@ -1,7 +1,5 @@
 "use strict";
 
-// v792 coherent graph modules: bootstrapped with the matching Composite, C# and view files.
-
 // Runtime Graph public view contracts and startup.
 
 installGraphRevealProvider();
@@ -115,11 +113,11 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
     value: Object.freeze({
       version: 69,
       getState() { return graph; },
+      whenViewReady: whenGraphViewReady,
       hasPendingEditorEdits() {
         return customCSharpEditorPersistenceDirty || graphParameterPersistenceDirty;
       },
       flushPendingEditorEdits() {
-        // A single commit consumes both sources; avoid duplicate full snapshots.
         return flushGraphParameterPersistence() || flushCustomCSharpEditorPersistence();
       },
       getCSharpImportTarget() {
@@ -1135,6 +1133,9 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
             graph?.active === true,
           graphViewActive:
             runtimeGraphViewActive === true,
+          viewReady: graphViewPreparationCurrent() && !graphViewPreparation?.pending &&
+            dom.root?.dataset.rmlGraphPhase === "ready",
+          preparing: graphViewPreparing(),
           savedPage:
             savedPresentationPage(),
           page:
