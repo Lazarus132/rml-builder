@@ -1957,33 +1957,57 @@
         replaceActiveMatch();
       }
     });
-    popupDocument.addEventListener("keydown", event => {
+    const handledEditorShortcutKeys = new Set();
+    const editorShortcutAbort = new popup.AbortController();
+    const editorShortcutKey = event => event.code || String(event.key || "").toLowerCase();
+    const consumeEditorShortcut = event => {
+      if (event.cancelable) event.preventDefault();
+      event.stopImmediatePropagation();
+      if (event.type === "keydown") handledEditorShortcutKeys.add(editorShortcutKey(event));
+    };
+    const clearEditorScrollForKey = event => {
       if (event.key !== "Control" && event.key !== "Meta" &&
           !(event.key === "Shift" && (localScrollSession?.candidates[localScrollSession.index] || localScrollSelection)?.snapshot.axes.x)) {
         clearLocalScrollSelection();
       }
       if (!separateWindow) window.RMLUniversalScrollLayers?.handleKeyDown?.(event);
+    };
+    popupDocument.addEventListener("keydown", event => {
+      if (event.defaultPrevented) return;
+      const identity = editorShortcutKey(event);
+      if (event.repeat && handledEditorShortcutKeys.has(identity)) {
+        consumeEditorShortcut(event);
+        if (event.key === "F3" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+          if (findWidget.hidden) openFind(false);
+          else stepMatch(event.shiftKey ? -1 : 1);
+        }
+        return;
+      }
+      handledEditorShortcutKeys.delete(identity);
+      if (event.isComposing) return;
       const command = event.ctrlKey || event.metaKey;
-      const key = event.key.toLowerCase();
-      if (command && key === "f") {
-        event.preventDefault();
-        openFind(false);
-        return;
-      }
-      if (
-        command && key === "h" ||
-        event.metaKey && event.altKey && key === "f"
-      ) {
-        event.preventDefault();
-        openFind(true);
-        return;
-      }
-      if (event.key === "F3") {
-        event.preventDefault();
-        if (findWidget.hidden) openFind(false);
-        else stepMatch(event.shiftKey ? -1 : 1);
-        return;
-      }
+      const key = String(event.key || "").toLowerCase();
+      const replace = !event.shiftKey && (
+        (command && !event.altKey && key === "h") ||
+        (event.metaKey && event.altKey && key === "f")
+      );
+      const find = command && !event.altKey && !event.shiftKey && key === "f";
+      const next = event.key === "F3" && !command && !event.altKey;
+      if (!replace && !find && !next) return;
+      consumeEditorShortcut(event);
+      clearEditorScrollForKey(event);
+      if (event.repeat) return;
+      if (replace || find) openFind(replace);
+      else if (findWidget.hidden) openFind(false);
+      else stepMatch(event.shiftKey ? -1 : 1);
+    }, { capture: true, passive: false, signal: editorShortcutAbort.signal });
+    popupDocument.addEventListener("keyup", event => {
+      if (handledEditorShortcutKeys.delete(editorShortcutKey(event))) consumeEditorShortcut(event);
+    }, { capture: true, passive: false, signal: editorShortcutAbort.signal });
+    popup.addEventListener("blur", () => handledEditorShortcutKeys.clear(), { signal: editorShortcutAbort.signal });
+    popupDocument.addEventListener("keydown", event => {
+      clearEditorScrollForKey(event);
+      if (event.defaultPrevented) return;
       if (event.key === "Escape") {
         if (presentationDropdown.isOpen()) {
           event.preventDefault();
@@ -1998,17 +2022,17 @@
           closeFind();
         }
       }
-    });
+    }, { passive: false, signal: editorShortcutAbort.signal });
     popupDocument.addEventListener("keyup", event => {
       if (event.key === "Control" || event.key === "Meta") {
         if (separateWindow) commitLocalScrollSelection();
         else window.RMLUniversalScrollLayers?.commit?.();
       }
-    });
+    }, { signal: editorShortcutAbort.signal });
     popup.addEventListener("blur", () => {
       if (separateWindow) commitLocalScrollSelection();
       else window.RMLUniversalScrollLayers?.commit?.();
-    });
+    }, { signal: editorShortcutAbort.signal });
     textarea.addEventListener("compositionstart", () => {
       composing = true;
     });
@@ -2479,6 +2503,8 @@
       dispose() {
         if (presentationDisposed) return;
         presentationDisposed = true;
+        editorShortcutAbort.abort();
+        handledEditorShortcutKeys.clear();
         scrollSnapshotQueued = false;
         scrollMutationObserver?.disconnect();
         scrollResizeObserver?.disconnect();

@@ -128,10 +128,10 @@
           url: "../graph/node_graph_guided.js?v=1-physical-modules-v748"
         }),
         Object.freeze({
-          url: "../graph/node_graph_view.js?v=800-consistent-graph-lod"
+          url: "../graph/node_graph_view.js?v=1.5-search-node-zoom"
         }),
         Object.freeze({
-          url: "../graph/node_graph_bootstrap.js?v=799-ready-graph-entry",
+          url: "../graph/node_graph_bootstrap.js?v=1.4-shortcut-svg-safety",
           ready: () =>
             typeof window.RMLDynamicGraphHost?.isReady === "function"
         })
@@ -149,7 +149,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/graph_gpu_renderer.js?v=799-ready-graph-entry",
+          url: "../graph/graph_gpu_renderer.js?v=801-atomic-graph-camera",
           ready: () =>
             typeof window.RMLGraphHybridRenderer?.create === "function"
         })

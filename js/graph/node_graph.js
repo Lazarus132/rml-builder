@@ -72,7 +72,7 @@
     const link = document.createElement("link");
     link.rel = "stylesheet";
     link.href = new URL(
-      "../../styles/features/styles.runtime-graph.css?v=799-ready-graph-entry",
+      "../../styles/features/styles.runtime-graph.css?v=1.4-shortcut-svg-safety",
       scriptUrl
     ).href;
     link.dataset.rmlStyleBundle = "runtime-graph";
@@ -93,7 +93,7 @@
       window.RMLClassStyles
         ? []
         : [
-            "../loaders/style_loader.js?v=799-ready-graph-entry"
+            "../loaders/style_loader.js?v=1.4-shortcut-svg-safety"
           ]
     ),
     "node_graph_registry.js?v=1-physical-modules-v748",
@@ -102,9 +102,9 @@
     "node_graph_composites.js?v=799-ready-graph-entry",
     "node_graph_custom_csharp.js?v=799-ready-graph-entry",
     "node_graph_guided.js?v=1-physical-modules-v748",
-    "node_graph_view.js?v=800-consistent-graph-lod",
-    "graph_gpu_renderer.js?v=799-ready-graph-entry",
-    "node_graph_bootstrap.js?v=799-ready-graph-entry"
+    "node_graph_view.js?v=1.5-search-node-zoom",
+    "graph_gpu_renderer.js?v=801-atomic-graph-camera",
+    "node_graph_bootstrap.js?v=1.4-shortcut-svg-safety"
   ];
 
   const ready = files.reduce(

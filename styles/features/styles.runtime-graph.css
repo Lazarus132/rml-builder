@@ -2973,6 +2973,7 @@ body.rml-node-graph-mode.rml-graph-edit-mode #inspector-content {
   font: 13px system-ui, sans-serif;
 }
 
+/* v799: measurable, non-interactive staging until real scene readiness. */
 .rml-graph-root[data-rml-graph-phase="preparing"] > .rml-graph-viewport,
 .rml-graph-root[data-rml-graph-phase="failed"] > .rml-graph-viewport {
   visibility: hidden;
@@ -2985,3 +2986,56 @@ body.rml-node-graph-mode.rml-graph-edit-mode #inspector-content {
   color: var(--muted);
   pointer-events: none;
 }
+
+/* 1.5: SVG capacity is a settled, non-rendered view, not an endless loading state. */
+.rml-graph-root[data-rml-graph-phase="blocked-svg"] > .rml-graph-viewport {
+  visibility: hidden;
+  pointer-events: none;
+}
+.rml-graph-root[data-rml-graph-phase="blocked-svg"] > .rml-graph-preparation-status {
+  inset: 30% 24px auto;
+  max-width: 760px;
+  margin-inline: auto;
+  padding: 20px;
+  border: 1px solid #bd8b34;
+  border-radius: 12px;
+  background: #211d16;
+  color: #ffdf9c;
+  line-height: 1.5;
+}
+.rml-graph-root[data-rml-graph-phase="blocked-svg"] > .rml-graph-preparation-status strong {
+  display: block;
+  font-size: 1.15rem;
+}
+.rml-graph-svg-warning {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2147482400;
+  width: min(780px, calc(100vw - 24px));
+  box-sizing: border-box;
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 16px 18px;
+  border: 1px solid #bd8b34;
+  border-radius: 12px;
+  background: #211d16;
+  color: #ffdf9c;
+  box-shadow: 0 6px 24px #0008;
+  font: 14px/1.5 system-ui, sans-serif;
+}
+.rml-graph-svg-warning p { margin: 6px 0 0; }
+.rml-graph-svg-warning button {
+  flex: none;
+  margin-left: auto;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+.rml-graph-svg-warning button:focus-visible { outline: 2px solid currentColor; }

@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = 14;
+  const VERSION = 15;
   const WIRE_CULL_CELL_SIZE = 960;
   const NODE_CELL_SIZE = 360;
   const WIRE_LINEAR_PICK_LIMIT = 512;
@@ -712,6 +712,7 @@
     constructor(options = {}) {
       this.viewport = null;
       this.onAvailabilityChange = null;
+      this.onCameraCommitted = null;
       this.canvas = document.createElement("canvas");
       this.canvas.className = "rml-graph-gpu-canvas";
       this.canvas.setAttribute("aria-hidden", "true");
@@ -918,6 +919,10 @@
         typeof options.onAvailabilityChange === "function"
           ? options.onAvailabilityChange
           : null;
+      this.onCameraCommitted =
+        typeof options.onCameraCommitted === "function"
+          ? options.onCameraCommitted
+          : null;
 
       if (
         typeof ResizeObserver === "function" &&
@@ -948,6 +953,7 @@
       this.resizeObserver = null;
       this.viewport = null;
       this.onAvailabilityChange = null;
+      this.onCameraCommitted = null;
       this.clearScene();
       this.canvas.remove();
 
@@ -2642,8 +2648,22 @@
       }
       this.frame = requestAnimationFrame(() => {
         this.frame = 0;
-        this.draw();
+        this.drawFrame();
       });
+    }
+    drawFrame() {
+      const viewport = this.viewport;
+      const commit = this.onCameraCommitted;
+      if (!viewport || !this.available || this.contextLost || this.disposed) {
+        return false;
+      }
+      const camera = { ...this.camera };
+      if (this.draw() === false) return false;
+      if (this.viewport === viewport && this.onCameraCommitted === commit &&
+          this.available && !this.contextLost && !this.disposed) {
+        commit?.(camera);
+      }
+      return true;
     }
 
     drawNow() {
@@ -2651,7 +2671,7 @@
         cancelAnimationFrame(this.frame);
         this.frame = 0;
       }
-      this.draw();
+      return this.drawFrame();
     }
 
     async whenSceneReady() {
@@ -2701,7 +2721,7 @@
         !this.viewport ||
         this.disposed
       ) {
-        return;
+        return false;
       }
       const started = performance.now();
       this.prepareVisibleInstances();
@@ -2836,6 +2856,7 @@
       this.stats.averageDrawMilliseconds +=
         (elapsed - this.stats.averageDrawMilliseconds) /
         this.drawSamples;
+      return true;
     }
 
     clientToGraph(clientX, clientY) {
@@ -3075,6 +3096,7 @@
       );
       this.viewport = null;
       this.onAvailabilityChange = null;
+      this.onCameraCommitted = null;
       this.gl = null;
       this.disposed = true;
     }
@@ -4763,7 +4785,7 @@
         !this.viewport ||
         this.disposed
       ) {
-        return;
+        return false;
       }
       const started = performance.now();
       const device = this.gpuDevice;
@@ -4970,6 +4992,7 @@
       this.stats.averageDrawMilliseconds +=
         (elapsed - this.stats.averageDrawMilliseconds) /
         this.drawSamples;
+      return true;
     }
 
     async whenSceneReady() {

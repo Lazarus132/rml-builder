@@ -1,5 +1,7 @@
 "use strict";
 
+// v792 coherent graph modules: bootstrapped with the matching Composite, C# and view files.
+
 // Runtime Graph public view contracts and startup.
 
 installGraphRevealProvider();
@@ -118,7 +120,19 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
         return customCSharpEditorPersistenceDirty || graphParameterPersistenceDirty;
       },
       flushPendingEditorEdits() {
+        // A single commit consumes both sources; avoid duplicate full snapshots.
         return flushGraphParameterPersistence() || flushCustomCSharpEditorPersistence();
+      },
+      hasUncommittedGraphChanges() {
+        return Boolean(activeInteraction) || customCSharpEditorPersistenceDirty || graphParameterPersistenceDirty;
+      },
+      prepareForExport() {
+        if (!graph || !graphHostInitialized || !bridge) return false;
+        if (activeInteraction) cancelInteraction(true);
+        // One commit captures pending node parameters / Custom C# and composite
+        // views, cancels queued commits and refreshes code caches for this click.
+        persistGraph(true);
+        return true;
       },
       getCSharpImportTarget() {
         if (
@@ -1135,6 +1149,8 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
             runtimeGraphViewActive === true,
           viewReady: graphViewPreparationCurrent() && !graphViewPreparation?.pending &&
             dom.root?.dataset.rmlGraphPhase === "ready",
+          renderingBlocked: graphSvgRenderBlocked(),
+          renderingBlockReason: graphSvgRenderBlocked() ? "svg-capacity" : "",
           preparing: graphViewPreparing(),
           savedPage:
             savedPresentationPage(),

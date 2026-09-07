@@ -1916,7 +1916,7 @@ function loadCustomCSharpDetachedEditorModule() {
         const script =
           document.createElement("script");
         script.src = new URL(
-          "js/editor/custom_csharp_editor.js?v=64-editor-live-worker-v786",
+          "js/editor/custom_csharp_editor.js?v=1.4-exclusive-shortcuts",
           document.baseURI
         ).href;
         script.async = true;

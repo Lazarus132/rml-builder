@@ -42,7 +42,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "consistent-graph-lod-20260906-v800";
+  "search-node-zoom-20260907-v1.5";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -822,9 +822,10 @@ let browserCompilerDirectoryMatchCount = 0;
 let browserCompilerReferencePaths = new WeakMap();
 let browserCompilerReferenceSearchRunning = false;
 let browserCompilerReferenceDragDepth = 0;
-const EXPORT_PREFLIGHT_DELAY = 180;
-let exportPreflightTimer = 0;
 let exportPreflightSequence = 0;
+let exportPreflightRequest = null;
+let exportDialogOpenPromise = null;
+let exportDeliveryBusy = false;
 let exportReadiness = Object.freeze({
   phase: "idle",
   fingerprint: "",
@@ -895,11 +896,11 @@ function requireGeneratedGuidance() {
 }
 
 const LARGE_GRAPH_CODEGEN_PENDING_MESSAGE =
-  "Large graph code generation is running in a background worker. Export becomes available automatically when it finishes.";
+  "Large graph code generation is running in a background worker. An export request waits for its current result.";
 const TYPED_GRAPH_MODULES_PENDING_MESSAGE =
   "Node graph: the C# generator modules are still initializing.";
 
-function isAutomatedExportPreparationDiagnostic(
+function isGeneratedSourcePendingDiagnostic(
   diagnostic
 ) {
   const message = String(
@@ -926,31 +927,20 @@ function renderGeneratedDiagnostics(
       : []),
     ...exportReadinessDiagnostics()
   ];
-  const preparationMessages =
-    diagnostics.filter(
-      isAutomatedExportPreparationDiagnostic
-    );
   const blockingDiagnostics =
     diagnostics.filter(
       diagnostic =>
-        !isAutomatedExportPreparationDiagnostic(
+        !isGeneratedSourcePendingDiagnostic(
           diagnostic
         )
     );
   elements.diagnostics.hidden =
-    diagnostics.length === 0;
+    blockingDiagnostics.length === 0;
   elements.diagnostics.innerHTML = [
     blockingDiagnostics.length > 0
       ? `<strong>Fix these issues before exporting:</strong><ul>${blockingDiagnostics
           .map(error =>
             `<li>${escapeHtml(error)}</li>`
-          )
-          .join("")}</ul>`
-      : "",
-    preparationMessages.length > 0
-      ? `<strong>Preparing export:</strong><ul>${preparationMessages
-          .map(message =>
-            `<li>${escapeHtml(message)}</li>`
           )
           .join("")}</ul>`
       : ""
@@ -971,23 +961,19 @@ function exportPreflightReady(
   );
 }
 
-function applyPrimaryExportAvailability(
-  synchronousDiagnostics = getDiagnostics()
-) {
-  const ready = exportPreflightReady(
-    synchronousDiagnostics
-  );
-  setExportControlAvailability(
-    elements.copyCodeBottom,
-    ready
-  );
-  setExportControlAvailability(
-    elements.downloadCode,
-    ready
-  );
-  renderGeneratedDiagnostics(
-    synchronousDiagnostics
-  );
+function applyPrimaryExportAvailability(synchronousDiagnostics = getDiagnostics()) {
+  const busy = Boolean(exportPreflightRequest) || exportDeliveryBusy;
+  for (const button of [elements.copyCodeBottom, elements.downloadCode]) {
+    setExportControlAvailability(button, !busy);
+    if (button) button.setAttribute("aria-busy", String(busy));
+  }
+  if (busy) {
+    setExportControlAvailability(elements.exportDownloadSelected, false);
+    setExportControlAvailability(elements.exportCopySelectedFile, false);
+  }
+  const label = elements.downloadCode?.querySelector(".top-action-label");
+  if (label) label.textContent = busy ? "Checking…" : "Export Project";
+  renderGeneratedDiagnostics(synchronousDiagnostics);
 }
 
 function formatExportPreflightDiagnostics(
@@ -1038,142 +1024,201 @@ function setExportReadiness(
   );
 }
 
-function scheduleExportPreflight(
-  artifacts,
-  synchronousDiagnostics
-) {
-  const sequence =
-    ++exportPreflightSequence;
-  if (exportPreflightTimer) {
-    window.clearTimeout(
-      exportPreflightTimer
-    );
-    exportPreflightTimer = 0;
+function updateExportPreviewStatus(_artifacts, synchronousDiagnostics = []) {
+  if (!exportPreflightRequest) {
+    exportReadiness = Object.freeze({
+      phase: synchronousDiagnostics.length ? "blocked" : "idle",
+      fingerprint: "", diagnostics: Object.freeze([]), fileCount: 0
+    });
   }
+  applyPrimaryExportAvailability(synchronousDiagnostics);
+}
 
-  if (synchronousDiagnostics.length > 0) {
-    setExportReadiness(
-      "blocked",
-      {},
-      synchronousDiagnostics
-    );
-    return;
+function exportInputSnapshot() {
+  return JSON.stringify({
+    projectId: state.projectId,
+    metadata: state.metadata, exportOptions: state.exportOptions,
+    nodes: state.nodes, extensions: state.extensions,
+    definitions: Number(window.__RMLNodeDefinitionRevision) || 0,
+    apiFactory: Number(window.__RMLApiNodeFactoryVersion) || 0,
+    apiReport: window.RMLApiNodeFactoryReport,
+    catalog: graphCodegenCatalogKey(window.RMLResoniteApiCatalog ||
+      window.RMLFrooxComponentCatalog || null)
+  });
+}
+
+function exportRequestChanged(message = "The project changed during export preparation. Click Export again to check the current project.") {
+  const error = new Error(message);
+  error.code = "RML_EXPORT_CHANGED";
+  return error;
+}
+
+function assertExportRequestCurrent(request, compareSnapshot = false) {
+  if (request.controller.signal.aborted) throw request.controller.signal.reason;
+  if (request.projectEpoch !== projectApplicationEpoch ||
+      (request.inputRevision !== null &&
+        (request.inputRevision !== projectDraftPersistRevision ||
+         window.RMLDynamicGraphHost?.hasPendingEditorEdits?.() ||
+         window.RMLDynamicGraphHost?.hasUncommittedGraphChanges?.()))) {
+    throw exportRequestChanged();
   }
+  if (compareSnapshot && request.snapshot !== exportInputSnapshot()) {
+    throw exportRequestChanged();
+  }
+}
 
-  const files = generatedCSharpFiles(
-    artifacts
-  );
-  setExportReadiness(
-    "checking",
-    {
-      fileCount: files.length
-    },
-    synchronousDiagnostics
-  );
+function awaitExportStep(request, promise) {
+  const signal = request.controller.signal;
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason || exportRequestChanged());
+    if (signal.aborted) { abort(); return; }
+    signal.addEventListener("abort", abort, { once: true });
+    Promise.resolve(promise).then(resolve, reject).finally(() =>
+      signal.removeEventListener("abort", abort));
+  });
+}
 
-  exportPreflightTimer =
-    window.setTimeout(() => {
-      exportPreflightTimer = 0;
-      void ensureLazyScriptBundle("compiler")
-        .then(() => {
-          if (
-            sequence !==
-              exportPreflightSequence
-          ) {
-            return null;
-          }
-          const compiler =
-            window.RMLCompile;
-          if (
-            typeof compiler?.fingerprint !==
-              "function" ||
-            typeof compiler?.validate !==
-              "function"
-          ) {
-            throw new Error(
-              "The browser C# preflight module is unavailable."
-            );
-          }
-          const fingerprint =
-            compiler.fingerprint(files);
-          const inspected =
-            compiler.inspect?.(files);
-          if (
-            inspected?.fingerprint ===
-              fingerprint &&
-            (
-              inspected.phase === "ready" ||
-              inspected.phase === "error"
-            )
-          ) {
-            return {
-              result: inspected,
-              fingerprint
-            };
-          }
-          return compiler
-            .validate(files)
-            .then(result => ({
-              result,
-              fingerprint
-            }));
-        })
-        .then(envelope => {
-          if (!envelope) return;
-          const {
-            result,
-            fingerprint
-          } = envelope;
-          if (
-            sequence !==
-              exportPreflightSequence ||
-            result?.fingerprint !==
-              fingerprint
-          ) {
-            return;
-          }
-          const latestDiagnostics =
-            getDiagnostics();
-          setExportReadiness(
-            result.phase,
-            {
-              fingerprint,
-              diagnostics:
-                formatExportPreflightDiagnostics(
-                  result
-                ),
-              fileCount: files.length
-            },
-            latestDiagnostics
-          );
-          if (elements.exportDialog?.open) {
-            updateExportDialog();
-          }
-        })
-        .catch(error => {
-          if (
-            sequence !==
-              exportPreflightSequence
-          ) {
-            return;
-          }
-          const latestDiagnostics =
-            getDiagnostics();
-          setExportReadiness(
-            "error",
-            {
-              diagnostics: [
-                `Generated C#: Roslyn validation failed: ${error instanceof Error ? error.message : String(error)}`
-              ],
-              fileCount: files.length
-            },
-            latestDiagnostics
-          );
-          if (elements.exportDialog?.open) {
-            updateExportDialog();
-          }
-        });
-    }, EXPORT_PREFLIGHT_DELAY);
+function waitForExportGraphSettlement(request) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      document.removeEventListener("rml-builder:graph-codegen-settled", settled);
+      request.controller.signal.removeEventListener("abort", cancelled);
+    };
+    const settled = event => {
+      if (Number(event.detail?.projectEpoch) !== request.projectEpoch) return;
+      cleanup(); resolve(event.detail);
+    };
+    const cancelled = () => { cleanup(); reject(request.controller.signal.reason); };
+    if (request.controller.signal.aborted) { cancelled(); return; }
+    document.addEventListener("rml-builder:graph-codegen-settled", settled);
+    request.controller.signal.addEventListener("abort", cancelled, { once: true });
+  });
+}
+
+function cancelExportPreflight(message = "Export preparation was cancelled.") {
+  if (!exportPreflightRequest) return false;
+  const error = exportRequestChanged(message);
+  error.code = "RML_EXPORT_CANCELLED";
+  exportPreflightRequest.controller.abort(error);
+  return true;
+}
+
+function requestExportPreflight({ prepareStyles = false } = {}) {
+  if (exportPreflightRequest) return exportPreflightRequest.promise;
+  const request = {
+    id: ++exportPreflightSequence, projectEpoch: projectApplicationEpoch,
+    inputRevision: null, snapshot: "", controller: new AbortController(), promise: null
+  };
+  exportPreflightRequest = request;
+  const replaced = () => {
+    if (request.projectEpoch !== projectApplicationEpoch) {
+      request.controller.abort(exportRequestChanged("The project was replaced. No previous-project export was opened."));
+    }
+  };
+  const escape = event => {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    cancelExportPreflight();
+  };
+  document.addEventListener("rml-builder:project-replacement", replaced);
+  window.addEventListener("keydown", escape, true);
+  setExportReadiness("checking", {}, []);
+  request.promise = (async () => {
+    await awaitExportStep(request, nextBuilderVisualFrame());
+    await awaitExportStep(request, yieldBuilderTask());
+    assertExportRequestCurrent(request);
+    const host = window.RMLDynamicGraphHost;
+    if (host?.prepareForExport?.() !== true) {
+      host?.flushPendingEditorEdits?.();
+      const stored = state.extensions?.typedNodeGraph;
+      if (stored) state.extensions.typedNodeGraph = {
+        ...stored, revision: (Number(stored.revision) || 0) + 1
+      };
+    }
+    graphCodegenFingerprintSource = null;
+    graphCodegenWorkerCachedKey = "";
+    graphCodegenWorkerCachedResult = null;
+    request.inputRevision = projectDraftPersistRevision;
+    await awaitExportStep(request, Promise.all([
+      ensureLazyScriptBundle("code-templates"),
+      prepareStyles ? ensureLazyStyleBundle("export") : Promise.resolve(true)
+    ]));
+    assertExportRequestCurrent(request);
+    if (typeof window.RMLCodeTemplates?.ensureFor !== "function") {
+      throw new Error("The C# template loader is unavailable.");
+    }
+    await awaitExportStep(request, window.RMLCodeTemplates.ensureFor(state));
+    assertExportRequestCurrent(request);
+    if (state.metadata.includeGuide === true) {
+      await awaitExportStep(request, ensureLazyScriptBundle("guidance"));
+      assertExportRequestCurrent(request);
+      if (typeof window.RMLGuidance?.ensureFor !== "function") throw new Error("The guidance loader is unavailable.");
+      await awaitExportStep(request, window.RMLGuidance.ensureFor(state));
+    }
+    assertExportRequestCurrent(request);
+    if (state.extensions?.typedNodeGraph?.configSnapshot) {
+      await awaitExportStep(request, ensureLazyScriptBundle("graph-codegen"));
+      assertExportRequestCurrent(request);
+      if (typeof window.RMLTypedNodeGraphGenerator?.build !== "function") {
+        throw new Error("The typed graph C# generator is unavailable.");
+      }
+      typedNodeGraphModulesState = "ready";
+      typedNodeGraphModulesError = null;
+      while (getTypedNodeGraphContribution()?.pending === true) {
+        await waitForExportGraphSettlement(request);
+        assertExportRequestCurrent(request);
+      }
+    }
+    const diagnostics = getDiagnostics();
+    if (diagnostics.length) throw new Error(diagnostics.slice(0, 8).join(" | "));
+    const output = generatedCodeForCurrentView();
+    const files = Object.freeze(generatedCSharpFiles(output.artifacts)
+      .map(file => Object.freeze({ ...file })));
+    if (!files.length) throw new Error("No generated C# source files are available for validation.");
+    assertExportRequestCurrent(request);
+    request.snapshot = exportInputSnapshot();
+    await awaitExportStep(request, ensureLazyScriptBundle("compiler"));
+    assertExportRequestCurrent(request);
+    const compiler = window.RMLCompile;
+    if (typeof compiler?.fingerprint !== "function" || typeof compiler?.validate !== "function") {
+      throw new Error("The browser C# preflight module is unavailable.");
+    }
+    const fingerprint = compiler.fingerprint(files);
+    const result = await awaitExportStep(request, compiler.validate(files));
+    assertExportRequestCurrent(request, true);
+    if (result?.fingerprint !== fingerprint) throw new Error("The validator returned a result for different generated files.");
+    if (result?.phase !== "ready") throw new Error(
+      formatExportPreflightDiagnostics(result).slice(0, 8).join(" | ") || "C# 14 export validation failed."
+    );
+    const latestDiagnostics = getDiagnostics();
+    if (latestDiagnostics.length) throw new Error(latestDiagnostics.slice(0, 8).join(" | "));
+    setExportReadiness("ready", { fingerprint, fileCount: files.length }, []);
+    return Object.freeze({ request, files, code: output.code, fingerprint });
+  })().catch(error => {
+    if (exportPreflightRequest === request) {
+      if (["RML_EXPORT_CHANGED", "RML_EXPORT_CANCELLED"].includes(error?.code)) setExportReadiness("idle", {}, []);
+      else setExportReadiness("error", { diagnostics: [String(error?.message || error)] }, []);
+    }
+    throw error;
+  }).finally(() => {
+    document.removeEventListener("rml-builder:project-replacement", replaced);
+    window.removeEventListener("keydown", escape, true);
+    if (exportPreflightRequest === request) {
+      exportPreflightRequest = null;
+      applyPrimaryExportAvailability([]);
+    }
+  });
+  return request.promise;
+}
+
+function showExportPreparationFailure(error) {
+  return showBuilderNotice({
+    tone: "warning", kicker: "Export not opened", title: "Export preparation did not complete",
+    message: String(error?.message || error),
+    details: "No file was downloaded. Correct the reported issue and click Export again.",
+    confirmLabel: "OK"
+  });
 }
 function currentTypedRuntimeGraphIsLarge() {
   const graph =
@@ -19509,14 +19554,6 @@ function populateGeneratedArtifactSelect(
 function updateGeneratedOutput() {
   if (window.RMLDynamicGraphHost?.hasPendingEditorEdits?.()) return;
   invalidateBrowserCompilerBuild(false);
-  setExportControlAvailability(
-    elements.copyCodeBottom,
-    false
-  );
-  setExportControlAvailability(
-    elements.downloadCode,
-    false
-  );
 
   let errors;
   let output;
@@ -19526,13 +19563,6 @@ function updateGeneratedOutput() {
     output =
       generatedCodeForCurrentView();
   } catch (error) {
-    exportPreflightSequence += 1;
-    if (exportPreflightTimer) {
-      window.clearTimeout(
-        exportPreflightTimer
-      );
-      exportPreflightTimer = 0;
-    }
     const message =
       error instanceof Error
         ? error.message
@@ -19541,9 +19571,7 @@ function updateGeneratedOutput() {
     if (!pending) elements.generatedCode.textContent = "// Generated output is not ready.\n";
     elements.generatedCode.setAttribute("aria-busy", String(pending));
     elements.codeSummary.textContent = pending ? message : "Generated project files are not ready.";
-    setExportReadiness(pending ? "checking" : "error", {
-      diagnostics: pending ? [] : [`Generated project: ${message}`]
-    }, pending ? [message] : []);
+    updateExportPreviewStatus([], [pending ? message : `Generated project: ${message}`]);
     setExportControlAvailability(
       elements.exportCopySelectedFile,
       false
@@ -19605,7 +19633,7 @@ function updateGeneratedOutput() {
       `Copy ${path} to the clipboard.`;
   }
 
-  scheduleExportPreflight(
+  updateExportPreviewStatus(
     output.artifacts,
     errors
   );
@@ -22802,16 +22830,15 @@ async function copyText(text, button) {
 }
 
 
-function copyGeneratedCodeForCurrentView(
-  button
-) {
-  if (!exportPreflightReady()) {
-    return Promise.resolve();
+async function copyGeneratedCodeForCurrentView(button) {
+  if (exportPreflightRequest || exportDeliveryBusy) return;
+  try {
+    const checked = await requestExportPreflight();
+    assertExportRequestCurrent(checked.request, true);
+    await copyText(checked.code, button);
+  } catch (error) {
+    if (error?.code !== "RML_EXPORT_CANCELLED") void showExportPreparationFailure(error);
   }
-  return copyText(
-    generatedCodeForCurrentView().code,
-    button
-  );
 }
 
 
@@ -26463,6 +26490,8 @@ function waitForImportedGraphUi(
       "rml-builder:project-replacement",
       handleReplacement
     );
+    if (window.RMLDynamicGraphHost?.getPresentationState?.()?.renderBlocked === true &&
+        hostStateMatches().matches) finish(false);
 
   });
 }
@@ -29298,7 +29327,7 @@ function addBrowserCompilerReferenceFiles(
           true,
           true
         );
-      scheduleExportPreflight(
+      updateExportPreviewStatus(
         completeCatalog.artifacts,
         getDiagnostics()
       );
@@ -29531,8 +29560,7 @@ function updateExportCopyButtonState(
       ? getDiagnostics().length > 0
       : existingHasDiagnostics;
   const exportReady =
-    !hasDiagnostics &&
-    exportReadiness.phase === "ready";
+    !hasDiagnostics && !exportPreflightRequest && !exportDeliveryBusy;
 
   elements.exportGeneratedFiles
     ?.querySelectorAll(
@@ -29625,40 +29653,23 @@ function setExportValidationFailure(error) {
   elements.exportDownloadHint.classList.add("error");
 }
 
-async function copySelectedExportArtifact(
-  button
-) {
-  const { artifact } =
-    currentExportCopyArtifact();
-
-  if (
-    !artifact ||
-    !exportControlAvailable(
-      button
-    ) ||
-    !exportPreflightReady()
-  ) {
-    return;
-  }
-
-  const originalLabel = button.textContent;
-  let failed = false;
+async function copySelectedExportArtifact(button) {
+  if (exportPreflightRequest || exportDeliveryBusy || !exportControlAvailable(button)) return;
+  const selectedKey = exportCopyArtifactKey;
+  exportDeliveryBusy = true;
   try {
-    setExportControlAvailability(
-      button,
-      false
-    );
-    button.textContent = "Checking…";
-    elements.exportDownloadHint.classList.remove("error");
-    const complete = buildSelectedExportFiles(true, false);
-    await validateGeneratedCSharp14Files(complete.files);
+    const checked = await requestExportPreflight();
+    assertExportRequestCurrent(checked.request, true);
+    exportCopyArtifactKey = selectedKey;
+    const { artifact } = currentExportCopyArtifact();
+    if (!artifact) throw new Error("No generated file is selected.");
     await copyText(artifact.content, button);
   } catch (error) {
-    failed = true;
     setExportValidationFailure(error);
   } finally {
-    button.textContent = originalLabel;
-    if (!failed) updateExportDialog();
+    exportDeliveryBusy = false;
+    applyPrimaryExportAvailability([]);
+    if (elements.exportDialog?.open) updateExportDialog();
   }
 }
 
@@ -29848,8 +29859,7 @@ function updateExportDialog() {
   const hasDiagnostics =
     getDiagnostics().length > 0;
   const exportReady =
-    !hasDiagnostics &&
-    exportReadiness.phase === "ready";
+    !hasDiagnostics && !exportPreflightRequest && !exportDeliveryBusy;
   const compilerStatus =
     updateBrowserCompilerStatus(
       completeCatalog
@@ -29950,6 +29960,12 @@ function updateExportDialog() {
   elements.exportCompatibilityHint.innerHTML =
     platformNotes[platform] ||
     platformNotes.custom;
+
+  if (exportReadiness.phase === "error" && exportReadiness.diagnostics.length) {
+    elements.exportDownloadHint.textContent = exportReadiness.diagnostics.join(" | ");
+    elements.exportDownloadHint.classList.add("error");
+    return;
+  }
 
   if (!hasSelection) {
     elements.exportDownloadSelected.textContent =
@@ -30079,129 +30095,45 @@ function syncEditedResonitePath() {
 
 let exportDialogOpenSequence = 0;
 
-async function openExportDialog() {
-  window.RMLDynamicGraphHost?.flushPendingEditorEdits?.();
-  const sequence =
-    ++exportDialogOpenSequence;
-  const stylePromise =
-    ensureLazyStyleBundle("export");
-
-  elements.exportPlatform.value =
-    state.exportOptions.platform ||
-    inferExportPlatform(
-      state.exportOptions.resonitePath
-    );
-  elements.exportResonitePath.value =
-    state.exportOptions.resonitePath;
-  elements.exportIncludeCs.checked =
-    Boolean(state.exportOptions.includeCs);
-  elements.exportIncludeCsproj.checked =
-    Boolean(state.exportOptions.includeCsproj);
-  elements.exportIncludeCompiled.checked =
-    Boolean(
-      state.exportOptions.includeCompiled
-    );
-  elements.exportDialog.classList.add(
-    "rml-dialog-loading"
-  );
-  elements.exportPackageSummary.textContent =
-    "Preparing generated files…";
-  elements.exportPackageMode.textContent =
-    "Please wait";
-  elements.exportProjectSummary.replaceChildren();
-  elements.exportGeneratedFiles.innerHTML =
-    '<div class="rml-inline-dialog-loading">Preparing the exact generated package…</div>';
-  setExportControlAvailability(
-    elements.exportCopySelectedFile,
-    false
-  );
-  setExportControlAvailability(
-    elements.exportDownloadSelected,
-    false
-  );
-
-  try {
-    updateExportDialog();
-    const exportSelectUi =
-      ensureUniversalCustomSelect(
-        elements.exportPlatform
-      );
-    exportSelectUi?.refresh?.();
-  } catch (error) {
-    console.error(
-      "Export dialog preparation failed.",
-      error
-    );
-    elements.exportGeneratedFiles.innerHTML =
-      '<div class="rml-inline-dialog-loading">The export summary could not be prepared. Close this dialog and review Diagnostics.</div>';
-    setExportControlAvailability(
-      elements.exportCopySelectedFile,
-      false
-    );
-    setExportControlAvailability(
-      elements.exportDownloadSelected,
-      false
-    );
-  }
-
-  try {
-    await stylePromise;
-  } catch (error) {
-    console.error("Export styles could not be loaded.", error);
-    void showBuilderNotice({
-      tone: "warning",
-      kicker: "Export unavailable",
-      title: "The export dialog could not be opened",
-      message:
-        error instanceof Error
-          ? error.message
-          : String(error),
-      details:
-        "No generated files or project data were changed.",
-      confirmLabel: "OK"
-    });
-    return;
-  }
-
-  if (sequence !== exportDialogOpenSequence) {
-    return;
-  }
-
-  if (typeof elements.exportDialog.showModal === "function") {
-    elements.exportDialog.showModal();
-  } else {
-    elements.exportDialog.setAttribute("open", "");
-  }
-
-  stabilizeDialogFocus(
-    elements.exportDialog
-  );
-
-  await paintBuilderUi();
-
-  if (
-    sequence !==
-      exportDialogOpenSequence ||
-    !elements.exportDialog.open
-  ) {
-    return;
-  }
-
-  elements.exportDialog.classList.remove(
-    "rml-dialog-loading"
-  );
-
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      updateAdaptiveUtilityDialog(
-        elements.exportDialog
-      );
-    });
-  });
+function openExportDialog() {
+  if (exportDialogOpenPromise) return exportDialogOpenPromise;
+  if (exportPreflightRequest || exportDeliveryBusy) return Promise.resolve(false);
+  const sequence = ++exportDialogOpenSequence;
+  exportDialogOpenPromise = (async () => {
+    try {
+      const checked = await requestExportPreflight({ prepareStyles: true });
+      if (sequence !== exportDialogOpenSequence) return false;
+      assertExportRequestCurrent(checked.request, true);
+      elements.exportPlatform.value = state.exportOptions.platform || inferExportPlatform(state.exportOptions.resonitePath);
+      elements.exportResonitePath.value = state.exportOptions.resonitePath;
+      elements.exportIncludeCs.checked = Boolean(state.exportOptions.includeCs);
+      elements.exportIncludeCsproj.checked = Boolean(state.exportOptions.includeCsproj);
+      elements.exportIncludeCompiled.checked = Boolean(state.exportOptions.includeCompiled);
+      updateExportDialog();
+      ensureUniversalCustomSelect(elements.exportPlatform)?.refresh?.();
+      elements.exportDialog.classList.remove("rml-dialog-loading");
+      if (typeof elements.exportDialog.showModal === "function") elements.exportDialog.showModal();
+      else elements.exportDialog.setAttribute("open", "");
+      stabilizeDialogFocus(elements.exportDialog);
+      requestAnimationFrame(() => {
+        if (sequence === exportDialogOpenSequence && elements.exportDialog.open) {
+          updateAdaptiveUtilityDialog(elements.exportDialog);
+        }
+      });
+      return true;
+    } catch (error) {
+      if (sequence === exportDialogOpenSequence && error?.code !== "RML_EXPORT_CANCELLED") {
+        void showExportPreparationFailure(error);
+      }
+      return false;
+    }
+  })().finally(() => { exportDialogOpenPromise = null; });
+  return exportDialogOpenPromise;
 }
 
 function closeExportDialog() {
   exportDialogOpenSequence += 1;
+  cancelExportPreflight();
   elements.exportDialog.classList.remove(
     "mobile-full-modal",
     "rml-dialog-loading"
@@ -30215,17 +30147,12 @@ function closeExportDialog() {
 }
 
 async function downloadSelectedExport() {
+  if (exportPreflightRequest || exportDeliveryBusy || !exportControlAvailable(elements.exportDownloadSelected)) return;
   syncExportOptions();
-
-  if (
-    !exportControlAvailable(
-      elements.exportDownloadSelected
-    ) ||
-    !exportPreflightReady()
-  ) {
-    return;
-  }
-
+  exportDeliveryBusy = true;
+  try {
+    const checked = await requestExportPreflight();
+    assertExportRequestCurrent(checked.request, true);
   const baseName =
     generatedBaseName();
   const originalLabel = elements.exportDownloadSelected.textContent;
@@ -30253,11 +30180,12 @@ async function downloadSelectedExport() {
           completeCatalog
         );
       await referencePromise;
+      assertExportRequestCurrent(checked.request, true);
       resolvingReferences = false;
       elements.exportDownloadSelected.textContent =
         "Checking…";
     }
-    await validateGeneratedCSharp14Files(complete.files);
+    assertExportRequestCurrent(checked.request, true);
     result = buildSelectedExportFiles(
       state.exportOptions.includeCs,
       state.exportOptions.includeCsproj
@@ -30267,6 +30195,7 @@ async function downloadSelectedExport() {
         "Building…";
       const compiled =
         await compileGeneratedBrowserDlls();
+      assertExportRequestCurrent(checked.request, true);
       result.files.push(
         ...compiledBrowserOutputFiles(
           result,
@@ -30331,8 +30260,14 @@ async function downloadSelectedExport() {
   );
   elements.exportDownloadSelected.textContent = originalLabel;
   updateExportDialog();
+  } catch (error) {
+    setExportValidationFailure(error);
+  } finally {
+    exportDeliveryBusy = false;
+    applyPrimaryExportAvailability([]);
+    if (elements.exportDialog?.open) updateExportDialog();
+  }
 }
-
 async function loadExampleProject() {
   closeProjectDialog();
   const workSession = beginBuilderWork({
@@ -31488,8 +31423,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "../../templates/help_template.html?v=93-wgsl-frame-pacing-v760",
-    "../templates/help_template.js?v=93-wgsl-frame-pacing-v760",
+    "../../templates/help_template.html?v=1.5-search-node-zoom",
+    "../templates/help_template.js?v=1.5-search-node-zoom",
     "help-template",
     "RMLHelpTemplateMarkup"
   )
@@ -33378,12 +33313,10 @@ function exposeBuilderBridge() {
     },
 
     markGeneratedOutputPending() {
-      exportPreflightSequence += 1;
-      if (exportPreflightTimer) window.clearTimeout(exportPreflightTimer);
-      exportPreflightTimer = 0;
-      exportReadiness = Object.freeze({ ...exportReadiness, phase: "checking", fingerprint: "" });
-      setExportControlAvailability(elements.copyCodeBottom, false);
-      setExportControlAvailability(elements.downloadCode, false);
+      if (!exportPreflightRequest) {
+        exportReadiness = Object.freeze({ ...exportReadiness, phase: "idle", fingerprint: "", diagnostics: Object.freeze([]) });
+      }
+      applyPrimaryExportAvailability([]);
       invalidateBrowserCompilerBuild(false);
       projectDraftPersistSchedule += 1;
       if (projectDraftPersistIdleHandle && typeof cancelIdleCallback === "function") {
@@ -36006,6 +35939,9 @@ function installUniversalScrollLayerSelector() {
 
   const handleWheel =
     event => {
+      if (event.altKey && !event.ctrlKey && !event.metaKey) {
+        return;
+      }
       const target =
         event.target instanceof
           Element
@@ -36448,6 +36384,10 @@ function installUniversalScrollLayerSelector() {
         typeof event.preventDefault !==
           "function"
       ) {
+        return false;
+      }
+
+      if (event.altKey && !event.ctrlKey && !event.metaKey) {
         return false;
       }
 

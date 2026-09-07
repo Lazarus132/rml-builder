@@ -201,6 +201,123 @@ function requestInitialGraphViewport(callback) {
     if (graphViewPreparing()) graphViewPreparation.geometryDirty = true;
   }
 
+const GRAPH_SVG_RENDER_LIMITS = Object.freeze({ nodes: 1000, connections: 1500, segments: 3000 });
+let graphSvgBlockedView = null;
+let graphSvgFallbackWarningShown = false;
+let graphSvgSafetyUpdating = false;
+
+function graphSvgViewBlocked() {
+    return Boolean(graphSvgBlockedView && graphSvgBlockedView.graph === graph &&
+      graphSvgBlockedView.root === dom.root && graphSvgBlockedView.viewport === dom.viewport);
+  }
+
+function graphSvgSafetyAssessment() {
+    if (graphHybridActive()) return null;
+    const nodes = graph?.nodes?.length || 0;
+    const connections = graph?.connections?.length || 0;
+    if (nodes > GRAPH_SVG_RENDER_LIMITS.nodes || connections > GRAPH_SVG_RENDER_LIMITS.connections) {
+      return { nodes, connections, segments: null, reason: "graph-size" };
+    }
+    let segments = connections;
+    for (const connection of graph?.connections || []) {
+      segments += Array.isArray(connection.points) ? connection.points.length : 0;
+      if (segments > GRAPH_SVG_RENDER_LIMITS.segments) {
+        return { nodes, connections, segments, reason: "routing-complexity" };
+      }
+    }
+    return null;
+  }
+
+function showGraphSvgFallbackWarning() {
+    if (!dom.root || !graphHybridRenderer) return;
+    let banner = dom.root.querySelector(":scope > .rml-graph-svg-warning");
+    if (graphHybridActive()) { banner?.remove(); return; }
+    if (!banner) {
+      banner = document.createElement("div");
+      banner.className = "rml-graph-svg-warning";
+      banner.setAttribute("role", "status");
+      banner.textContent = "SVG-only rendering: WebGPU and WebGL are unavailable or disabled. Large graphs cannot be displayed in this mode; their canvas is hidden for browser safety.";
+      dom.root.appendChild(banner);
+    }
+    if (graphSvgFallbackWarningShown) return;
+    graphSvgFallbackWarningShown = true;
+    if (typeof window.RMLBuilderDialog?.notice === "function") {
+      void Promise.resolve(window.RMLBuilderDialog.notice({
+        tone: "warning", kicker: "Runtime Graph renderer", title: "Only SVG rendering is available",
+        message: "WebGPU and WebGL are unavailable or disabled. Large or heavily routed graphs cannot be displayed safely with SVG and will remain hidden.",
+        details: "Your project data is retained. Use a session with WebGPU or WebGL available, or open a smaller graph. Saving and export are independent of this display restriction.",
+        confirmLabel: "OK"
+      })).catch(() => {});
+    }
+  }
+
+function enforceGraphSvgSafety() {
+    if (!dom.root || !dom.viewport || !runtimeGraphViewActive ||
+        graphViewPreparation?.root !== dom.root || graphViewPreparation.graph !== graph) return false;
+    if (graphSvgSafetyUpdating) return graphSvgViewBlocked();
+    const assessment = graphSvgSafetyAssessment();
+    if (!assessment) {
+      if (graphSvgViewBlocked()) {
+        renderGraphCanvas();
+        return true;
+      }
+      return false;
+    }
+    if (graphSvgViewBlocked()) return true;
+    graphSvgSafetyUpdating = true;
+    try {
+      const preparation = graphViewPreparation;
+      graphSvgBlockedView = { graph, root: dom.root, viewport: dom.viewport, ...assessment };
+      if (preparation) {
+        preparation.blocked = true;
+        preparation.pending = false;
+        preparation.controller.abort();
+      }
+      cancelInteraction(true);
+      cancelGraphWireHandleWork(true);
+      for (const frame of [graphNodeVirtualizationFrame, graphWireRenderFrame, nodeResizeLimitRefreshFrame]) {
+        if (frame) cancelAnimationFrame(frame);
+      }
+      graphNodeVirtualizationFrame = graphWireRenderFrame = nodeResizeLimitRefreshFrame = 0;
+      graphWireFullRenderPending = false;
+      graphWirePartialConnectionIds.clear();
+      nodeResizeLimitRefreshAll = false;
+      nodeResizeLimitRefreshIds.clear();
+      dom.nodesHost?.replaceChildren();
+      dom.wires?.replaceChildren();
+      graphSocketElementCache.clear();
+      graphSvgWirePathCache.clear();
+      graphSvgWirePointCache.clear();
+      graphNodeVirtualizationSignature = "";
+      graphHybridRenderer?.clearScene?.();
+      dom.root.dataset.rmlGraphPhase = "svg-blocked";
+      dom.root.removeAttribute("aria-busy");
+      dom.viewport.inert = true;
+      if (dom.toolbar) dom.toolbar.inert = true;
+      let status = dom.root.querySelector(":scope > .rml-graph-preparation-status");
+      if (!status) {
+        status = document.createElement("div");
+        status.className = "rml-graph-preparation-status";
+        dom.root.appendChild(status);
+      }
+      status.setAttribute("role", "status");
+      const title = document.createElement("strong");
+      title.textContent = "This graph is too large to render safely with SVG.";
+      const detail = document.createElement("p");
+      detail.textContent = `${assessment.nodes.toLocaleString()} nodes · ${assessment.connections.toLocaleString()} connections. Graph elements are hidden; no nodes or connections have been deleted.`;
+      const hint = document.createElement("p");
+      hint.textContent = "Use WebGPU/WebGL and reload, or open a smaller graph. Saving and export remain available.";
+      status.replaceChildren(title, detail, hint);
+      runtimeGraphPresentationPending = false;
+      updatePackButton();
+      showGraphSvgFallbackWarning();
+      document.dispatchEvent(new CustomEvent("rml-graph:presentation-complete", {
+        detail: { ...graphRenderCompleteDetail(), presentation: "svg-blocked", renderBlocked: true,
+          reason: assessment.reason, limits: GRAPH_SVG_RENDER_LIMITS }
+      }));
+      return true;
+    } finally { graphSvgSafetyUpdating = false; }
+  }
 
 function graphViewPreparationCurrent(preparation = graphViewPreparation) {
     return Boolean(preparation && graphViewPreparation === preparation &&
@@ -215,6 +332,7 @@ function graphViewPreparing() {
   }
 
 function cancelGraphViewPreparation() {
+    graphSvgBlockedView = null;
     cancelGraphWireHandleWork(true);
     const previous = graphViewPreparation;
     graphViewPreparation = null;
@@ -320,11 +438,16 @@ function graphViewLayoutSignature(preparation) {
 
 async function prepareGraphView(preparation) {
     try {
+      await awaitGraphViewWork(window.RMLGraphHybridRenderer?.ready, preparation);
+      if (!graphViewPreparationCurrent(preparation)) return preparation.blocked === true;
+      showGraphSvgFallbackWarning();
+      if (enforceGraphSvgSafety()) return true;
       await nextGraphViewLayout(preparation);
       await waitForGraphViewSize(preparation);
       let previousLayout = "";
       let wiresNeeded = true;
       while (graphViewPreparationCurrent(preparation)) {
+        if (enforceGraphSvgSafety()) return true;
         await awaitGraphViewWork(document.fonts?.ready, preparation);
         if (!graphViewPreparationCurrent(preparation)) return false;
         const viewportRequest = graphInitialViewportRequest;
@@ -413,6 +536,7 @@ async function prepareGraphView(preparation) {
       }
       return false;
     } catch (error) {
+      if (preparation.blocked && graphSvgViewBlocked()) return true;
       if (error?.name === "AbortError" || !graphViewPreparationCurrent(preparation)) {
         return false;
       }
@@ -6823,9 +6947,11 @@ function updateGraphEditModeButton() {
       exitIcon.hidden = !active;
     }
     dom.editModeButton.title =
-      active
+      (active
         ? "Show the normal page areas above and below the Runtime Graph"
-        : "Hide only the page areas above and below the Runtime Graph";
+        : "Hide only the page areas above and below the Runtime Graph") +
+      " (Ctrl/Command + F)";
+    dom.editModeButton.setAttribute("aria-keyshortcuts", "Control+f Meta+f");
     dom.editModeButton.dataset.help =
       dom.editModeButton.title;
     dom.editModeButton.setAttribute(
@@ -9475,7 +9601,37 @@ function graphNodeSearchText(node) {
     ].filter(Boolean).join(" ").toLowerCase();
   }
 
+function frameGraphSearchNode(node, preferredScale, element = null) {
+    const rectangle = dom.viewport?.getBoundingClientRect();
+    if (!rectangle || rectangle.width <= 0 || rectangle.height <= 0) {
+      return false;
+    }
+    const estimated = estimatedGraphNodeGeometry(node);
+    const width = Math.max(1, element?.offsetWidth || estimated.width);
+    const height = Math.max(1, element?.offsetHeight || estimated.height);
+    const marginX = Math.min(32, rectangle.width * 0.1);
+    const marginY = Math.min(32, rectangle.height * 0.1);
+    const scale = nodeGraphClamp(
+      Math.min(
+        preferredScale,
+        (rectangle.width - 2 * marginX) / width,
+        (rectangle.height - 2 * marginY) / height
+      ),
+      GRAPH_MIN_ZOOM,
+      GRAPH_MAX_ZOOM
+    );
+    graph.viewport.scale = scale;
+    graph.viewport.x = rectangle.width / 2 - (node.x + width / 2) * scale;
+    graph.viewport.y = rectangle.height / 2 - (node.y + height / 2) * scale;
+    return true;
+  }
+
 function focusGraphNodeSearch(query, advance = true) {
+    if (!graph?.active || !runtimeGraphViewActive || !dom.viewport?.isConnected ||
+        graphViewPreparing() || graphSvgViewBlocked() || activeInteraction) {
+      return 0;
+    }
+
     const normalized = String(query || "").trim().toLowerCase();
     if (!normalized) {
       graphNodeSearchQuery = "";
@@ -9503,28 +9659,30 @@ function focusGraphNodeSearch(query, advance = true) {
     }
 
     const node = matches[graphNodeSearchIndex];
+    const preferredScale = Math.max(1, graph.viewport.scale);
+    if (graphRevealAnimationFrame) {
+      cancelAnimationFrame(graphRevealAnimationFrame);
+      graphRevealAnimationFrame = 0;
+    }
     graph.selectedNodeId = node.id;
     graph.selectedNodeIds = [node.id];
     graph.selectedConnectionId = null;
     clearSelectedWirePoint();
-    renderGraphNodesAndWires();
     renderGraphInspector();
 
-    const element = dom.nodesHost?.querySelector(
-      `[data-graph-node-id="${CSS.escape(node.id)}"]`
-    );
-    const rectangle = dom.viewport?.getBoundingClientRect();
-    if (rectangle) {
-      const estimated =
-        estimatedGraphNodeGeometry(node);
-      const width =
-        element?.offsetWidth ||
-        estimated.width;
-      const height =
-        element?.offsetHeight ||
-        estimated.height;
-      graph.viewport.x = rectangle.width / 2 - (node.x + width / 2) * graph.viewport.scale;
-      graph.viewport.y = rectangle.height / 2 - (node.y + height / 2) * graph.viewport.scale;
+    if (frameGraphSearchNode(node, preferredScale)) {
+      renderGraphNodesAndWires();
+      const element = dom.nodesHost?.querySelector(
+        `[data-graph-node-id="${CSS.escape(node.id)}"]`
+      );
+      if (element) {
+        refreshRenderedNodeResizeLimits(new Set([node.id]));
+        window.RMLClassStyles?.sync?.(element);
+        const content = element.querySelector(".rml-graph-node-body-content");
+        if (content) window.RMLClassStyles?.sync?.(content);
+        cacheGraphNodeGeometry(node, element);
+      }
+      frameGraphSearchNode(node, preferredScale, element);
       applyViewportTransform();
       persistGraphView();
       scheduleGraphNodeVirtualization();
@@ -9573,9 +9731,6 @@ function renderGraphCanvas() {
     updatePackButton();
 
     cancelInteraction(false);
-    if (!currentAnalysis) {
-      pruneConnections();
-    }
 
     releaseGraphToolbarResizeTracking();
     for (const frame of [graphNodeVirtualizationFrame, graphWireRenderFrame,
@@ -9669,7 +9824,7 @@ function renderGraphCanvas() {
         )
     );
     nodeSearchNext.title =
-      "Jump to the next matching node";
+      "Zoom to the next matching node";
     nodeSearchNext.dataset.help =
       nodeSearchNext.title;
     nodeSearchNext.setAttribute(
@@ -9739,7 +9894,7 @@ function renderGraphCanvas() {
         </div>
         <div class="rml-graph-search-overlay-body">
           <input type="search" autocomplete="off" placeholder="Find node in graph…">
-          <button class="button secondary rml-graph-icon-button rml-graph-search-overlay-next" type="button" title="Jump to the next matching node" aria-label="Jump to the next matching node">
+          <button class="button secondary rml-graph-icon-button rml-graph-search-overlay-next" type="button" title="Zoom to the next matching node" aria-label="Zoom to the next matching node">
             ${GRAPH_TOOLBAR_ICONS.next}
             <span class="rml-graph-toolbar-sr-label">Next</span>
           </button>
@@ -9871,11 +10026,19 @@ function renderGraphCanvas() {
     let lastAvailability = null;
     const rendererAttachment = {
       viewport,
+      onCameraCommitted(camera) {
+        if (dom.viewport === viewport && dom.stage === stage && runtimeGraphViewActive) {
+          commitGraphViewportTransform(camera, stage);
+        }
+      },
       onAvailabilityChange(available) {
         const changed = lastAvailability !== Boolean(available);
         lastAvailability = Boolean(available);
         root.classList.toggle("rml-graph-hybrid-active", Boolean(available));
         if (!attachmentReady || !changed || dom.viewport !== viewport) return;
+        if (!available) commitGraphViewportTransform(graph.viewport, stage);
+        showGraphSvgFallbackWarning();
+        if (enforceGraphSvgSafety()) return;
         if (graphViewPreparing()) {
           graphViewPreparation.geometryDirty = true;
           graphWireFullRenderPending = true;
@@ -9991,7 +10154,9 @@ function renderGraphCanvas() {
         { passive: true }
       );
     }
-
+    viewport.addEventListener("pointerdown", handleGraphMiddlePointerDown, { capture: true });
+    viewport.addEventListener("mousedown", preventGraphMiddleMouseDefault, { capture: true });
+    viewport.addEventListener("auxclick", preventGraphMiddleMouseDefault, { capture: true });
     viewport.addEventListener(
       "pointerdown",
       beginViewportPan
@@ -10002,6 +10167,14 @@ function renderGraphCanvas() {
         event.preventDefault()
     );
 
+    showGraphSvgFallbackWarning();
+    if (enforceGraphSvgSafety()) {
+      preparation.promise = Promise.resolve(true);
+      if (dom.itemCount) dom.itemCount.textContent = String(graph.nodes.length);
+      updateSourceBadge();
+      return;
+    }
+    if (!currentAnalysis) pruneConnections();
     if (
       graph.nodes.length >
         GRAPH_DOM_VIRTUALIZATION_THRESHOLD &&
@@ -10021,6 +10194,26 @@ function renderGraphCanvas() {
     }
   }
 
+function commitGraphViewportTransform(camera, stage = dom.stage) {
+    if (!stage || stage !== dom.stage) return;
+    const x = String(camera.x);
+    const y = String(camera.y);
+    const scale = String(camera.scale);
+    if (stage.dataset.rmlViewportX === x && stage.dataset.rmlViewportY === y &&
+        stage.dataset.rmlViewportScale === scale) return;
+    stage.dataset.rmlViewportX = x;
+    stage.dataset.rmlViewportY = y;
+    stage.dataset.rmlViewportScale = scale;
+    window.RMLClassStyles?.sync?.(stage);
+  }
+
+function displayedGraphViewport() {
+    const data = dom.stage?.dataset;
+    if (data?.rmlViewportScale === undefined) return graph.viewport;
+    return { x: Number(data.rmlViewportX), y: Number(data.rmlViewportY),
+      scale: Number(data.rmlViewportScale) };
+  }
+
 function applyViewportTransform() {
     if (!dom.stage) {
       return;
@@ -10031,16 +10224,12 @@ function applyViewportTransform() {
     const overview =
       graphGpuOverviewActive();
 
-    dom.stage.dataset.rmlViewportX =
-      String(graph.viewport.x);
-    dom.stage.dataset.rmlViewportY =
-      String(graph.viewport.y);
-    dom.stage.dataset.rmlViewportScale =
-      String(graph.viewport.scale);
-
     graphHybridRenderer?.setCamera?.(
       graph.viewport
     );
+    if (!graphHybridActive() || graphViewPreparing()) {
+      commitGraphViewportTransform(graph.viewport);
+    }
     const viewportPanActive =
       activeInteraction?.kind === "pan";
     const liveNodeVirtualizationRequired =
@@ -10237,7 +10426,8 @@ function graphToClient(
 
 function clientToGraph(
     clientX,
-    clientY
+    clientY,
+    camera = graph.viewport
   ) {
     const rectangle =
       dom.viewport
@@ -10255,16 +10445,16 @@ function clientToGraph(
         (
           clientX -
           rectangle.left -
-          graph.viewport.x
+          camera.x
         ) /
-        graph.viewport.scale,
+        camera.scale,
       y:
         (
           clientY -
           rectangle.top -
-          graph.viewport.y
+          camera.y
         ) /
-        graph.viewport.scale
+        camera.scale
     };
   }
 
@@ -12430,6 +12620,53 @@ function scrollGraphLayerWithWheel(event, descriptor, element) {
     return { moved, empty: !axes.x && !axes.y };
   }
 
+function zoomGraphWithAltWheel(event) {
+    if (
+      event.defaultPrevented ||
+      !dom.viewport?.isConnected ||
+      !Number.isFinite(event.clientX) ||
+      !Number.isFinite(event.clientY)
+    ) {
+      return;
+    }
+
+    const rectangle = dom.viewport.getBoundingClientRect();
+    if (
+      event.clientX < rectangle.left ||
+      event.clientX >= rectangle.right ||
+      event.clientY < rectangle.top ||
+      event.clientY >= rectangle.bottom ||
+      !graphElementBelongsToViewport(
+        document.elementFromPoint(event.clientX, event.clientY)
+      )
+    ) {
+      return;
+    }
+
+    const delta = normalizedWheelDelta(event, dom.viewport);
+    const amount = delta.y || (event.shiftKey ? delta.x : 0);
+    if (!Number.isFinite(amount) || amount === 0) {
+      return;
+    }
+    if (!claimGraphWheelEvent(event)) {
+      return;
+    }
+
+    const nextScale = nodeGraphClamp(
+      graph.viewport.scale * Math.exp(-amount * 0.0015),
+      GRAPH_MIN_ZOOM,
+      GRAPH_MAX_ZOOM
+    );
+    if (nextScale === graph.viewport.scale) {
+      return;
+    }
+    if (graphRevealAnimationFrame) {
+      cancelAnimationFrame(graphRevealAnimationFrame);
+      graphRevealAnimationFrame = 0;
+    }
+    setGraphZoomAt(nextScale, event.clientX, event.clientY);
+  }
+
 function handleGraphWheel(event) {
     if (graphViewPreparing()) return;
     if (
@@ -12437,6 +12674,11 @@ function handleGraphWheel(event) {
       !runtimeGraphViewActive ||
       !dom.viewport
     ) {
+      return;
+    }
+
+    if (event.altKey && !event.ctrlKey && !event.metaKey) {
+      zoomGraphWithAltWheel(event);
       return;
     }
 
@@ -12883,6 +13125,7 @@ function scheduleNodeBodyWireRefresh(
 function scheduleGraphWireRender(
     connectionIds = null
   ) {
+    if (enforceGraphSvgSafety()) return;
     if (
       connectionIds === null ||
       connectionIds === undefined
@@ -12943,6 +13186,7 @@ function scheduleGraphWireRender(
   }
 
 function scheduleRenderedNodeResizeLimitRefresh(nodeIds = null) {
+    if (graphSvgViewBlocked()) return;
     if (graphViewPreparing()) {
       if (!graphViewPreparation.measuring) graphViewPreparation.geometryDirty = true;
       return;
@@ -13091,6 +13335,7 @@ function scheduleNodeBodyOverflowSync(article) {
   }
 
 function renderGraphNodesAndWires() {
+    if (enforceGraphSvgSafety()) return;
     if (
       !dom.nodesHost ||
       !dom.wires
@@ -13887,12 +14132,13 @@ function beginNodeResize(
       node
     );
     const rectangle = article.getBoundingClientRect();
+    const displayedScale = displayedGraphViewport().scale;
     const startWidth =
       rectangle.width /
-      graph.viewport.scale;
+      displayedScale;
     const startHeight =
       rectangle.height /
-      graph.viewport.scale;
+      displayedScale;
 
     activeInteraction = {
       kind: "node-resize",
@@ -14101,7 +14347,10 @@ function finishNodeResize(
     activeInteraction = null;
     persistGraphView(
       false,
-      commit === true
+      Boolean(node && (
+        node.width !== interaction.originalWidth ||
+        node.height !== interaction.originalHeight
+      ))
     );
     renderGraphNodesAndWires();
     renderGraphInspector();
@@ -15294,9 +15543,10 @@ function cacheGraphNodeGeometry(
 
     const rectangle =
       article.getBoundingClientRect();
+    const camera = displayedGraphViewport();
     const scale = Math.max(
       GRAPH_MIN_ZOOM,
-      graph.viewport.scale
+      camera.scale
     );
     const sockets = new Map();
 
@@ -15312,7 +15562,8 @@ function cacheGraphNodeGeometry(
         socketRectangle.left +
           socketRectangle.width / 2,
         socketRectangle.top +
-          socketRectangle.height / 2
+          socketRectangle.height / 2,
+        camera
       );
       sockets.set(
         `${socket.dataset.direction}:${socket.dataset.portId}`,
@@ -15378,6 +15629,7 @@ function populateGraphNodeHost(
     nodes,
     preserveExisting = false
   ) {
+    if (enforceGraphSvgSafety()) return false;
     const projectEpoch =
       builderProjectEpoch;
     if (!dom.nodesHost) {
@@ -15552,6 +15804,7 @@ function populateGraphNodeHost(
   }
 
 function scheduleGraphNodeVirtualization() {
+    if (enforceGraphSvgSafety()) return;
     if (graphViewPreparing()) return;
     if (
       graphNodeVirtualizationFrame ||
@@ -15606,6 +15859,7 @@ function forceGraphNodesRendered(
   }
 
 function renderGraphNodes() {
+    if (enforceGraphSvgSafety()) return;
     if (graphViewPreparing() && !graphViewPreparation.allowNodeBuild) {
       graphViewPreparation.rebuildNodes = true;
       return;
@@ -15871,7 +16125,8 @@ function socketGraphCenter(
     return {
       ...clientToGraph(
         clientX,
-        clientY
+        clientY,
+        displayedGraphViewport()
       ),
       side
     };
@@ -16603,6 +16858,7 @@ function desiredGraphWireHandles() {
   }
 
 function synchronizeGraphWireHandles() {
+    if (enforceGraphSvgSafety()) return false;
     cancelGraphWireHandleWork();
     if (!dom.wires || graphWireHandleSource !== graph?.connections) return;
     const desired = desiredGraphWireHandles();
@@ -17151,6 +17407,7 @@ function graphWireGeometryInteractionActive() {
 function updateGraphWireConnections(
     connectionIds
   ) {
+    if (enforceGraphSvgSafety()) return false;
     const gpuPartialUpdate =
       graphHybridActive() &&
       !forceSvgWireVisuals() &&
@@ -17247,7 +17504,9 @@ function graphRenderCompleteDetail() {
       connections: graph?.connections?.length || 0,
       rootNodes: rootView?.nodes?.length || 0,
       rootConnections: rootView?.connections?.length || 0,
-      projectEpoch: builderProjectEpoch
+      projectEpoch: builderProjectEpoch,
+      presentation: graphSvgViewBlocked() ? "svg-blocked" : "rendered",
+      renderBlocked: graphSvgViewBlocked()
     };
   }
 
@@ -17298,6 +17557,7 @@ function renderCompleteHybridGraphWires({
   }
 
 function renderGraphWires() {
+    if (enforceGraphSvgSafety()) return;
     if (graphViewPreparing() && !graphViewPreparation.allowWireBuild) {
       graphWireFullRenderPending = true;
       return;
@@ -22946,7 +23206,7 @@ function removeWirePoint(
     normalizeConnectionRouting(
       graph.connections
     );
-    persistGraph(true);
+    persistGraphView(true, true);
     renderGraphWires();
     renderGraphInspector();
 
@@ -22997,7 +23257,7 @@ function straightenWire(
     normalizeConnectionRouting(
       graph.connections
     );
-    persistGraph(true);
+    persistGraphView(true, true);
     renderGraphWires();
     renderGraphInspector();
 
@@ -23022,7 +23282,7 @@ function detachWireBranch(
     }
 
     connection.branchFrom = null;
-    persistGraph(true);
+    persistGraphView(true, true);
     renderGraphWires();
     renderGraphInspector();
     showGraphMessage(
@@ -23067,7 +23327,7 @@ function addWirePointAtPath(
         connection.id,
       pointId: point.id
     };
-    persistGraph(true);
+    persistGraphView(true, true);
     renderGraphWires();
     renderGraphInspector();
     return point;
@@ -23602,7 +23862,7 @@ function detachWirePointBranches(
     normalizeConnectionRouting(
       graph.connections
     );
-    persistGraph(true);
+    persistGraphView(true, true);
     renderGraphWires();
     renderGraphInspector();
 
@@ -23878,10 +24138,43 @@ function connectionInspectorCard(
     return card;
   }
 
+function graphNavigationShortcutsReady() {
+    return graph?.active === true && runtimeGraphViewActive === true &&
+      !graphViewPreparing() && !dom.viewport?.inert &&
+      graphScrollLayerVisible(dom.viewport) &&
+      !document.querySelector("dialog[open]");
+  }
+
+function graphMiddleMouseSurface(event) {
+    return event.button === 1 && graphNavigationShortcutsReady() &&
+      graphElementBelongsToViewport(event.target) &&
+      !event.target?.closest?.('[role="dialog"], .rml-custom-csharp-editor-overlay');
+  }
+
+function preventGraphMiddleMouseDefault(event) {
+    if (!graphMiddleMouseSurface(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+function handleGraphMiddlePointerDown(event) {
+    if (event.defaultPrevented || !graphMiddleMouseSurface(event)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (activeInteraction || (event.buttons & ~4) !== 0) return;
+    customCSharpActiveEditorKey = "";
+    activeInteraction = {
+      kind: "pan", pointerId: event.pointerId,
+      startX: event.clientX, startY: event.clientY,
+      originalX: graph.viewport.x, originalY: graph.viewport.y,
+      centerOnClick: true, middleMoved: false, captureViewport: dom.viewport
+    };
+    try { dom.viewport.setPointerCapture(event.pointerId); } catch { }
+  }
+
 function beginViewportPan(event) {
     if (
-      event.button !== 0 &&
-      event.button !== 1
+      event.button !== 0
     ) {
       return;
     }
@@ -24188,6 +24481,7 @@ function beginConnectionDrag(event) {
       );
 
     let detachedConnection = null;
+    let detachedConnectionIndex = -1;
     let effectiveStart = startRef;
 
     if (startRef.direction === "input") {
@@ -24201,6 +24495,7 @@ function beginConnectionDrag(event) {
         ) || null;
 
       if (detachedConnection) {
+        detachedConnectionIndex = graph.connections.indexOf(detachedConnection);
         graph.connections =
           graph.connections.filter(
             connection =>
@@ -24221,6 +24516,7 @@ function beginConnectionDrag(event) {
       originalStart: startRef,
       startType,
       detachedConnection,
+      detachedConnectionIndex,
       hoveredTargetElement: null,
       hoveredTargetKey: "",
       clientX: event.clientX,
@@ -24997,9 +25293,10 @@ function finishConnectionDrag(
       !connected &&
       interaction.detachedConnection
     ) {
-      graph.connections.push(
-        interaction.detachedConnection
-      );
+      const originalIndex = Number.isInteger(interaction.detachedConnectionIndex)
+        ? interaction.detachedConnectionIndex : graph.connections.length;
+      graph.connections.splice(Math.max(0, Math.min(graph.connections.length, originalIndex)),
+        0, interaction.detachedConnection);
     }
 
     stopAutoPan();
@@ -25597,6 +25894,13 @@ function applyGraphInteractionMotion(
     const clientY = motion.clientY;
 
     if (activeInteraction.kind === "pan") {
+      if (activeInteraction.centerOnClick) {
+        if (!activeInteraction.middleMoved) return;
+        if (!activeInteraction.middlePanStarted) {
+          activeInteraction.middlePanStarted = true;
+          dom.viewport?.classList.add("panning");
+        }
+      }
       graph.viewport.x =
         activeInteraction.originalX +
         clientX -
@@ -25761,6 +26065,14 @@ function handleDocumentPointerMove(event) {
     event.preventDefault();
     event.stopImmediatePropagation();
 
+    if (activeInteraction.kind === "pan" && activeInteraction.centerOnClick) {
+      activeInteraction.middleMoved ||= Math.hypot(
+        event.clientX - activeInteraction.startX,
+        event.clientY - activeInteraction.startY
+      ) >= 4;
+      if (!activeInteraction.middleMoved) return;
+    }
+
     if (
       activeInteraction.kind ===
       "palette"
@@ -25798,6 +26110,12 @@ function handleDocumentPointerUp(event) {
 
     event.preventDefault();
     event.stopImmediatePropagation();
+    if (activeInteraction.kind === "pan" && activeInteraction.centerOnClick) {
+      activeInteraction.middleMoved ||= Math.hypot(
+        event.clientX - activeInteraction.startX,
+        event.clientY - activeInteraction.startY
+      ) >= 4;
+    }
     flushGraphInteractionMotion(
       event.pointerId
     );
@@ -25806,6 +26124,18 @@ function handleDocumentPointerUp(event) {
       activeInteraction.kind ===
       "pan"
     ) {
+      const pan = activeInteraction;
+      if (pan.centerOnClick) {
+        try { pan.captureViewport?.releasePointerCapture(event.pointerId); } catch { }
+        if (!pan.middleMoved) {
+          dom.viewport?.classList.remove("panning");
+          activeInteraction = null;
+          if (pan.captureViewport === dom.viewport && graphNavigationShortcutsReady()) {
+            centerGraph();
+          }
+          return;
+        }
+      }
       dom.viewport?.classList.remove(
         "panning"
       );
@@ -26015,6 +26345,9 @@ function cancelInteraction(
     if (
       interaction.kind === "pan"
     ) {
+      if (interaction.centerOnClick) {
+        try { interaction.captureViewport?.releasePointerCapture(interaction.pointerId); } catch { }
+      }
       if (restoreOriginal) {
         graph.viewport.x =
           interaction.originalX;
@@ -26083,98 +26416,99 @@ function cancelInteraction(
       interaction.kind ===
       "palette"
     ) {
-      interaction.ghost?.remove();
-      activeInteraction = null;
+      finishPaletteDrag(false, interaction.clientX, interaction.clientY);
     }
 
     stopAutoPan();
     clearConnectionTargetStates();
-    persistGraph();
+    if (
+      interaction.kind === "node" ||
+      interaction.kind === "pan" ||
+      interaction.kind === "palette"
+    ) {
+      persistGraphView(
+        false,
+        interaction.kind === "node" &&
+          !restoreOriginal &&
+          interaction.dragging === true
+      );
+    } else if (
+      interaction.kind !== "node-resize" &&
+      interaction.kind !== "wire-segment" &&
+      interaction.kind !== "wire-point" &&
+      interaction.kind !== "connection"
+    ) {
+      persistGraph();
+    }
     return true;
   }
 
+const graphClaimedShortcutKeys = new Set();
+function graphShortcutKey(event) {
+    return String(event.code || event.key || "").toLowerCase();
+  }
+
+function claimGraphShortcut(event) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    graphClaimedShortcutKeys.add(graphShortcutKey(event));
+  }
+
+function releaseGraphShortcutKey(event) {
+    if (!graphClaimedShortcutKeys.delete(graphShortcutKey(event))) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }
+
+function graphShortcutHasTextOwner(event) {
+    const path = typeof event.composedPath === "function" ? event.composedPath() : [event.target];
+    const ownsInput = element => element instanceof Element && (
+      element.matches("input, textarea, select, iframe") || element.isContentEditable ||
+      element.closest('[role="dialog"], [role="textbox"], .rml-custom-csharp-editor-overlay')
+    );
+    return ownsInput(document.activeElement) || path.some(ownsInput) ||
+      Boolean(document.querySelector("dialog[open]")) ||
+      Boolean(dom.root?.querySelector(":scope > .rml-graph-search-overlay:not([hidden])"));
+  }
+
 function handleGraphKeyDown(event) {
-    if (graphViewPreparing()) return;
-    if (
-      !graph?.active ||
-      !runtimeGraphViewActive
-    ) {
+    if (event.defaultPrevented || event.isComposing) return;
+    if (event.repeat && graphClaimedShortcutKeys.has(graphShortcutKey(event))) {
+      claimGraphShortcut(event);
       return;
     }
+    if (!graph?.active || !runtimeGraphViewActive) return;
 
     if (event.key === "Escape") {
       if (cancelInteraction(true)) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
+        claimGraphShortcut(event);
         return;
       }
-
-      const searchOverlayOpen =
-        Boolean(
-          dom.root?.querySelector(
-            ":scope > .rml-graph-search-overlay:not([hidden])"
-          )
-        );
-      const nestedEditorOpen =
-        Boolean(
-          event.target?.closest?.(
-            ".rml-graph-searchable-select.open"
-          )
-        );
-      const dialogOpen =
-        Boolean(
-          document.querySelector(
-            "dialog[open]"
-          )
-        );
-
-      if (
-        graphEditModeActive() &&
-        !searchOverlayOpen &&
-        !nestedEditorOpen &&
-        !dialogOpen
-      ) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        setGraphEditMode(false);
+      if (graphShortcutHasTextOwner(event) ||
+          event.target?.closest?.(".rml-graph-searchable-select.open")) return;
+      if (graphEditModeActive()) {
+        claimGraphShortcut(event);
+        if (!event.repeat) setGraphEditMode(false);
       }
       return;
     }
+    if (graphShortcutHasTextOwner(event)) return;
 
-    const active =
-      document.activeElement;
-
-    if (
-      active instanceof HTMLInputElement ||
-      active instanceof HTMLTextAreaElement ||
-      active instanceof HTMLSelectElement ||
-      active?.isContentEditable
-    ) {
+    const command = (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey;
+    const key = String(event.key).toLowerCase();
+    if (command && (key === "f" || key === "0")) {
+      claimGraphShortcut(event);
+      if (event.repeat || activeInteraction || !graphNavigationShortcutsReady()) return;
+      releaseGraphScrollLayerFromInput();
+      if (key === "f") toggleGraphEditMode();
+      else centerGraph();
       return;
     }
-
-    if (
-      event.key === "Delete" ||
-      event.key === "Backspace"
-    ) {
-      if (
-        graph.selectedNodeId ||
-        graph.selectedConnectionId ||
-        graph.selectedWirePoint
-      ) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        deleteSelectedGraphItem();
-      }
-      return;
-    }
-
-    if (
-      (event.ctrlKey || event.metaKey) &&
-      event.key === "0"
-    ) {
-      event.preventDefault();
-      centerGraph();
+    if (event.key === "Delete" || event.key === "Backspace") {
+      claimGraphShortcut(event);
+      if (event.repeat || activeInteraction || graphViewPreparing() || graphSvgViewBlocked()) return;
+      if (graph.selectedNodeId || graph.selectedNodeIds?.length ||
+          graph.selectedConnectionId || graph.selectedWirePoint) deleteSelectedGraphItem();
     }
   }
 
@@ -26485,14 +26819,9 @@ function initializeNodeGraphHost() {
         capture: true
       }
     );
-
-    document.addEventListener(
-      "keydown",
-      handleGraphKeyDown,
-      {
-        capture: true
-      }
-    );
+    document.addEventListener("keydown", handleGraphKeyDown, { capture: true, passive: false });
+    window.addEventListener("keyup", releaseGraphShortcutKey, { capture: true, passive: false });
+    window.addEventListener("blur", () => graphClaimedShortcutKeys.clear());
 
     document.addEventListener(
       "keyup",

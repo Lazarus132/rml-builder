@@ -981,10 +981,13 @@
                 <span class="information-kicker">Typed node graph</span>
                 <h3>Editing shortcuts</h3>
                 <div class="shortcut-grid">
+                  <div><kbd>Alt</kbd><span class="shortcut-plus">+</span><kbd>Wheel</kbd><span>Zoom the graph under the pointer: wheel up zooms in, wheel down zooms out, keeping the graph position beneath the mouse fixed. Works over nodes and wires in the main graph and nested graphs. Outside the graph, Alt + Wheel keeps native scrolling instead of routing to a locked level. Ctrl/Command + Wheel keeps its existing scroll-level selection.</span></div>
                   <div><kbd>Esc</kbd><span>Cancel the current node, wire, bend-point or palette interaction.</span></div>
                   <div><kbd>Delete</kbd><span>Delete the selected graph node, wire or bend point.</span></div>
                   <div><kbd>Backspace</kbd><span>Same as Delete when focus is not inside an editable field.</span></div>
                   <div><kbd>Ctrl</kbd><span class="shortcut-plus">+</span><kbd>0</kbd><span>Center the graph. On macOS use Command + 0.</span></div>
+                  <div><kbd>Wheel click</kbd><span>Press and release the scroll wheel to center the current graph, including nested graphs. Holding the wheel and dragging still pans; releasing after a drag does not center. Esc cancels the gesture. Works over the graph background, nodes and wires.</span></div>
+                  <div><kbd>Ctrl</kbd><span class="shortcut-plus">+</span><kbd>F</kbd><span>Toggle Edit Mode while the Runtime Graph or a nested graph is open. On macOS use Command + F. Text fields, code editors and dialogs keep their own Find behavior; holding the key does not repeatedly toggle.</span></div>
                 </div>
               </section>
               <section id="shortcut-code-editor" class="information-section">
@@ -1007,7 +1010,7 @@
                 <span class="information-kicker">Search & selection</span>
                 <h3>Keyboard navigation</h3>
                 <div class="shortcut-grid">
-                  <div><kbd>Enter</kbd><span>Run “Find node in graph” and jump to the next match.</span></div>
+                  <div><kbd>Enter</kbd><span>Run “Find node in graph” and center/zoom to the next match. The node is fitted at a readable size; a closer zoom is retained when it fits.</span></div>
                   <div><kbd>Esc</kbd><span>Close the compact graph-search overlay or an open searchable selector.</span></div>
                   <div><kbd>↑</kbd><kbd>↓</kbd><span>Move through searchable selector options.</span></div>
                   <div><kbd>Home</kbd><kbd>End</kbd><span>Jump to the first or last option in an open selector.</span></div>
