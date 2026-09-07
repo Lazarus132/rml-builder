@@ -2987,12 +2987,12 @@ body.rml-node-graph-mode.rml-graph-edit-mode #inspector-content {
   pointer-events: none;
 }
 
-/* 1.5: SVG capacity is a settled, non-rendered view, not an endless loading state. */
-.rml-graph-root[data-rml-graph-phase="blocked-svg"] > .rml-graph-viewport {
+/* 1.9: SVG capacity is a settled view; the fallback notice stays in the toolbar flow. */
+.rml-graph-root[data-rml-graph-phase="svg-blocked"] > .rml-graph-viewport {
   visibility: hidden;
   pointer-events: none;
 }
-.rml-graph-root[data-rml-graph-phase="blocked-svg"] > .rml-graph-preparation-status {
+.rml-graph-root[data-rml-graph-phase="svg-blocked"] > .rml-graph-preparation-status {
   inset: 30% 24px auto;
   max-width: 760px;
   margin-inline: auto;
@@ -3003,39 +3003,29 @@ body.rml-node-graph-mode.rml-graph-edit-mode #inspector-content {
   color: #ffdf9c;
   line-height: 1.5;
 }
-.rml-graph-root[data-rml-graph-phase="blocked-svg"] > .rml-graph-preparation-status strong {
+.rml-graph-root[data-rml-graph-phase="svg-blocked"] > .rml-graph-preparation-status strong {
   display: block;
   font-size: 1.15rem;
 }
 .rml-graph-svg-warning {
-  position: fixed;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 2147482400;
-  width: min(780px, calc(100vw - 24px));
+  position: static;
+  min-width: 0;
+  max-width: min(390px, 42vw);
+  flex: 0 1 auto;
   box-sizing: border-box;
-  display: flex;
-  align-items: flex-start;
-  gap: 16px;
-  padding: 16px 18px;
-  border: 1px solid #bd8b34;
-  border-radius: 12px;
-  background: #211d16;
+  display: block;
+  overflow: hidden;
+  padding: 4px 8px;
+  border: 1px solid rgba(189, 139, 52, 0.58);
+  border-radius: 999px;
+  background: rgba(33, 29, 22, 0.72);
   color: #ffdf9c;
-  box-shadow: 0 6px 24px #0008;
-  font: 14px/1.5 system-ui, sans-serif;
+  font: 10px/1.25 system-ui, sans-serif;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: help;
 }
-.rml-graph-svg-warning p { margin: 6px 0 0; }
-.rml-graph-svg-warning button {
-  flex: none;
-  margin-left: auto;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: inherit;
-  font-size: 24px;
-  line-height: 1;
-  cursor: pointer;
+.rml-graph-root.rml-graph-compact-toolbar .rml-graph-svg-warning,
+.rml-graph-root.rml-graph-tiny-toolbar .rml-graph-svg-warning {
+  display: none;
 }
-.rml-graph-svg-warning button:focus-visible { outline: 2px solid currentColor; }

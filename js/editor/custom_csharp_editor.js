@@ -1,8 +1,168 @@
 (() => {
   "use strict";
 
-  if (window.RMLCustomCSharpDetachedEditor) {
+  if (
+    window.RMLCustomCSharpDetachedEditor?.version >= 37 &&
+    typeof window.RMLCustomCSharpDetachedEditor?.mount === "function"
+  ) {
     return;
+  }
+
+  const CUSTOM_CSHARP_SHORTCUT_BOOTSTRAP_VERSION = 18;
+
+  function customCSharpSearchNavigationDirection(event) {
+    const key = String(event?.key || "").toLowerCase();
+    const code = String(event?.code || "").toLowerCase();
+    const legacy = Number(event?.keyCode) || 0;
+    const f3 = key === "f3" || code === "f3" || legacy === 114;
+    const g = key === "g" || code === "keyg" || legacy === 71;
+    if (
+      f3 &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey
+    ) {
+      return event.shiftKey ? -1 : 1;
+    }
+    if (
+      g &&
+      (event.ctrlKey || event.metaKey) &&
+      !event.altKey
+    ) {
+      return event.shiftKey ? -1 : 1;
+    }
+    return 0;
+  }
+
+  function ensureCustomCSharpShortcutBootstrap(popup) {
+    const property =
+      "RMLCustomCSharpSearchShortcutBootstrap";
+    const existing = popup?.[property];
+    if (
+      existing?.version >=
+        CUSTOM_CSHARP_SHORTCUT_BOOTSTRAP_VERSION &&
+      typeof existing.enqueue === "function" &&
+      typeof existing.activate === "function"
+    ) {
+      return existing;
+    }
+
+    existing?.dispose?.();
+    const claimedKeys = new Set();
+    const pendingDirections = [];
+    let delegate = null;
+    let disposed = false;
+    let broker = null;
+    const shortcutKey = event =>
+      String(
+        event.code ||
+        event.key ||
+        event.keyCode ||
+        ""
+      ).toLowerCase();
+    const claim = event => {
+      if (event.cancelable) event.preventDefault();
+      try {
+        event.returnValue = false;
+      } catch {}
+      event.stopImmediatePropagation();
+    };
+    const enqueue = (direction, event = null) => {
+      const normalized = direction < 0 ? -1 : 1;
+      if (typeof delegate === "function") {
+        delegate(normalized, event);
+        return true;
+      }
+      if (
+        event?.repeat !== true &&
+        event?.isComposing !== true
+      ) {
+        pendingDirections.push(normalized);
+        if (pendingDirections.length > 8) {
+          pendingDirections.shift();
+        }
+      }
+      return true;
+    };
+    const handleKeyDown = event => {
+      const direction =
+        customCSharpSearchNavigationDirection(event);
+      if (direction === 0) return;
+      claim(event);
+      claimedKeys.add(shortcutKey(event));
+      if (!event.isComposing) enqueue(direction, event);
+    };
+    const handleKeyUp = event => {
+      if (!claimedKeys.delete(shortcutKey(event))) return;
+      claim(event);
+    };
+    const clearClaims = () => claimedKeys.clear();
+    const listenerOptions = {
+      capture: true,
+      passive: false
+    };
+
+    popup.addEventListener(
+      "keydown",
+      handleKeyDown,
+      listenerOptions
+    );
+    popup.addEventListener(
+      "keyup",
+      handleKeyUp,
+      listenerOptions
+    );
+    popup.addEventListener("blur", clearClaims);
+
+    broker = Object.freeze({
+      version:
+        CUSTOM_CSHARP_SHORTCUT_BOOTSTRAP_VERSION,
+      enqueue,
+      activate(callback) {
+        if (disposed) return false;
+        delegate =
+          typeof callback === "function"
+            ? callback
+            : null;
+        if (!delegate) return false;
+        const queued = pendingDirections.splice(0);
+        for (const direction of queued) {
+          delegate(direction, null);
+        }
+        return true;
+      },
+      dispose() {
+        if (disposed) return;
+        disposed = true;
+        delegate = null;
+        pendingDirections.length = 0;
+        claimedKeys.clear();
+        popup.removeEventListener(
+          "keydown",
+          handleKeyDown,
+          true
+        );
+        popup.removeEventListener(
+          "keyup",
+          handleKeyUp,
+          true
+        );
+        popup.removeEventListener("blur", clearClaims);
+        if (popup[property] === broker) {
+          try {
+            delete popup[property];
+          } catch {}
+        }
+      }
+    });
+
+    Object.defineProperty(popup, property, {
+      value: broker,
+      writable: false,
+      enumerable: false,
+      configurable: true
+    });
+    return broker;
   }
 
   const EDITOR_MODULE_URL =
@@ -240,6 +400,9 @@
     if (!popup || popup.closed) {
       return null;
     }
+
+    const shortcutBootstrap =
+      ensureCustomCSharpShortcutBootstrap(popup);
 
     const popupDocument = popup.document;
     popupDocument.documentElement.lang =
@@ -777,6 +940,12 @@
     const previousMatch = createFindButton("Previous match", "↑");
     const nextMatch = createFindButton("Next match", "↓");
     const hideFind = createFindButton("Close find and replace", "×");
+    previousMatch.title = "Previous match (Shift+F3 or Ctrl/Command+Shift+G)";
+    previousMatch.setAttribute("aria-label", previousMatch.title);
+    previousMatch.setAttribute("aria-keyshortcuts", "Shift+F3 Control+Shift+G Meta+Shift+G");
+    nextMatch.title = "Next match (F3 or Ctrl/Command+G)";
+    nextMatch.setAttribute("aria-label", nextMatch.title);
+    nextMatch.setAttribute("aria-keyshortcuts", "F3 Control+G Meta+G");
     findActions.append(previousMatch, nextMatch, hideFind);
     const replaceActions = popupDocument.createElement("div");
     replaceActions.className = "find-replace-actions";
@@ -1957,11 +2126,86 @@
         replaceActiveMatch();
       }
     });
+    showFind.setAttribute("aria-keyshortcuts", "Control+F Meta+F");
+    showReplace.setAttribute("aria-keyshortcuts", "Control+H Meta+Alt+F");
     const handledEditorShortcutKeys = new Set();
     const editorShortcutAbort = new popup.AbortController();
-    const editorShortcutKey = event => event.code || String(event.key || "").toLowerCase();
+    const editorShortcutKey = event =>
+      String(
+        event.code ||
+        event.key ||
+        event.keyCode ||
+        ""
+      ).toLowerCase();
+    const editorShortcutAction = event => {
+      const command =
+        event.ctrlKey || event.metaKey;
+      const key =
+        String(event.key || "")
+          .toLowerCase();
+      const code =
+        String(event.code || "")
+          .toLowerCase();
+      const legacy =
+        Number(event.keyCode) || 0;
+      const f3 =
+        key === "f3" ||
+        code === "f3" ||
+        legacy === 114;
+      const f =
+        key === "f" ||
+        code === "keyf" ||
+        legacy === 70;
+      const g =
+        key === "g" ||
+        code === "keyg" ||
+        legacy === 71;
+      const h =
+        key === "h" ||
+        code === "keyh" ||
+        legacy === 72;
+      if (
+        f3 &&
+        !command &&
+        !event.altKey
+      ) {
+        return event.shiftKey
+          ? "previous"
+          : "next";
+      }
+      if (
+        command &&
+        g &&
+        !event.altKey
+      ) {
+        return event.shiftKey
+          ? "previous"
+          : "next";
+      }
+      if (
+        command &&
+        f &&
+        !event.altKey &&
+        !event.shiftKey
+      ) {
+        return "find";
+      }
+      if (
+        !event.shiftKey &&
+        (
+          (command && !event.altKey && h) ||
+          (event.metaKey && event.altKey && f)
+        )
+      ) {
+        return "replace";
+      }
+      return "";
+    };
     const consumeEditorShortcut = event => {
       if (event.cancelable) event.preventDefault();
+      try {
+        event.returnValue = false;
+      } catch {}
       event.stopImmediatePropagation();
       if (event.type === "keydown") handledEditorShortcutKeys.add(editorShortcutKey(event));
     };
@@ -1972,38 +2216,87 @@
       }
       if (!separateWindow) window.RMLUniversalScrollLayers?.handleKeyDown?.(event);
     };
-    popupDocument.addEventListener("keydown", event => {
-      if (event.defaultPrevented) return;
-      const identity = editorShortcutKey(event);
-      if (event.repeat && handledEditorShortcutKeys.has(identity)) {
-        consumeEditorShortcut(event);
-        if (event.key === "F3" && !event.ctrlKey && !event.metaKey && !event.altKey) {
-          if (findWidget.hidden) openFind(false);
-          else stepMatch(event.shiftKey ? -1 : 1);
+    const runEditorSearchNavigation = (
+      direction,
+      event = null
+    ) => {
+      if (event) {
+        clearEditorScrollForKey(event);
+      } else {
+        clearLocalScrollSelection();
+        if (!separateWindow) {
+          window.RMLUniversalScrollLayers?.clear?.();
+          window.RMLTypedNodeGraphScrollLayers?.clear?.();
         }
+      }
+      if (findWidget.hidden) {
+        openFind(false);
+      } else {
+        stepMatch(direction < 0 ? -1 : 1);
+      }
+      return true;
+    };
+    const handleEditorShortcutKeyDown = event => {
+      const action =
+        editorShortcutAction(event);
+      if (!action) return;
+      const identity = editorShortcutKey(event);
+      consumeEditorShortcut(event);
+      if (event.isComposing) return;
+      if (
+        event.repeat &&
+        (
+          action === "find" ||
+          action === "replace"
+        )
+      ) {
         return;
       }
-      handledEditorShortcutKeys.delete(identity);
-      if (event.isComposing) return;
-      const command = event.ctrlKey || event.metaKey;
-      const key = String(event.key || "").toLowerCase();
-      const replace = !event.shiftKey && (
-        (command && !event.altKey && key === "h") ||
-        (event.metaKey && event.altKey && key === "f")
-      );
-      const find = command && !event.altKey && !event.shiftKey && key === "f";
-      const next = event.key === "F3" && !command && !event.altKey;
-      if (!replace && !find && !next) return;
-      consumeEditorShortcut(event);
-      clearEditorScrollForKey(event);
-      if (event.repeat) return;
-      if (replace || find) openFind(replace);
-      else if (findWidget.hidden) openFind(false);
-      else stepMatch(event.shiftKey ? -1 : 1);
-    }, { capture: true, passive: false, signal: editorShortcutAbort.signal });
-    popupDocument.addEventListener("keyup", event => {
+      if (action === "find") {
+        clearEditorScrollForKey(event);
+        openFind(false);
+      } else if (action === "replace") {
+        clearEditorScrollForKey(event);
+        openFind(true);
+      } else {
+        runEditorSearchNavigation(
+          action === "previous" ? -1 : 1,
+          event
+        );
+      }
+      handledEditorShortcutKeys.add(identity);
+    };
+    const handleEditorShortcutKeyUp = event => {
       if (handledEditorShortcutKeys.delete(editorShortcutKey(event))) consumeEditorShortcut(event);
-    }, { capture: true, passive: false, signal: editorShortcutAbort.signal });
+    };
+    const editorShortcutListenerOptions = {
+      capture: true,
+      passive: false,
+      signal: editorShortcutAbort.signal
+    };
+    popup.addEventListener(
+      "keydown",
+      handleEditorShortcutKeyDown,
+      editorShortcutListenerOptions
+    );
+    popup.addEventListener(
+      "keyup",
+      handleEditorShortcutKeyUp,
+      editorShortcutListenerOptions
+    );
+    popupDocument.addEventListener(
+      "keydown",
+      handleEditorShortcutKeyDown,
+      editorShortcutListenerOptions
+    );
+    popupDocument.addEventListener(
+      "keyup",
+      handleEditorShortcutKeyUp,
+      editorShortcutListenerOptions
+    );
+    shortcutBootstrap?.activate?.(
+      runEditorSearchNavigation
+    );
     popup.addEventListener("blur", () => handledEditorShortcutKeys.clear(), { signal: editorShortcutAbort.signal });
     popupDocument.addEventListener("keydown", event => {
       clearEditorScrollForKey(event);
@@ -2488,6 +2781,9 @@
         pageAreasHidden = hidden === true;
         synchronizePageAreasButton();
       },
+      runSearchShortcut(direction) {
+        return shortcutBootstrap?.enqueue?.(direction) === true;
+      },
       insertNodeSnippet,
       bringToFront() {
         popup.focus();
@@ -2503,6 +2799,7 @@
       dispose() {
         if (presentationDisposed) return;
         presentationDisposed = true;
+        shortcutBootstrap?.dispose?.();
         editorShortcutAbort.abort();
         handledEditorShortcutKeys.clear();
         scrollSnapshotQueued = false;
@@ -2588,7 +2885,7 @@
     "RMLCustomCSharpDetachedEditor",
     {
       value: Object.freeze({
-        version: 35,
+        version: 37,
         mount
       }),
       writable: false,

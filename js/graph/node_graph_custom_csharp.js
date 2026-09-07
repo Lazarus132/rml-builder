@@ -20,6 +20,7 @@ let customCSharpInlineEditorKey = "";
 let customCSharpActiveEditorKey = "";
 let customCSharpEditorOverlayZ = 2147482200;
 let customCSharpDetachedEditorModulePromise = null;
+const CUSTOM_CSHARP_SHORTCUT_BOOTSTRAP_VERSION = 18;
 
 const customCSharpBuildWorkers = new Map();
 const customCSharpSynchronizations = new Set();
@@ -1898,8 +1899,8 @@ function customCSharpEditorRecordActive(
 
 function loadCustomCSharpDetachedEditorModule() {
     if (
-      window.RMLCustomCSharpDetachedEditor
-        ?.mount
+      window.RMLCustomCSharpDetachedEditor?.version >= 37 &&
+      typeof window.RMLCustomCSharpDetachedEditor?.mount === "function"
     ) {
       return Promise.resolve(
         window.RMLCustomCSharpDetachedEditor
@@ -1916,7 +1917,7 @@ function loadCustomCSharpDetachedEditorModule() {
         const script =
           document.createElement("script");
         script.src = new URL(
-          "js/editor/custom_csharp_editor.js?v=1.4-exclusive-shortcuts",
+          "js/editor/custom_csharp_editor.js?v=1.8-native-search-shortcut-ownership",
           document.baseURI
         ).href;
         script.async = true;
@@ -1925,7 +1926,10 @@ function loadCustomCSharpDetachedEditorModule() {
           () => {
             const editor =
               window.RMLCustomCSharpDetachedEditor;
-            if (typeof editor?.mount === "function") {
+            if (
+              editor?.version >= 37 &&
+              typeof editor.mount === "function"
+            ) {
               resolve(editor);
             } else {
               reject(
@@ -2648,10 +2652,185 @@ function closeCustomCSharpEditorRecord(
     }
   }
 
+function customCSharpFindNavigationDirection(
+    event
+  ) {
+    const key = String(event?.key || "").toLowerCase();
+    const code = String(event?.code || "").toLowerCase();
+    const legacy = Number(event?.keyCode) || 0;
+    const f3 = key === "f3" || code === "f3" || legacy === 114;
+    const g = key === "g" || code === "keyg" || legacy === 71;
+    if (
+      f3 &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey
+    ) {
+      return event.shiftKey ? -1 : 1;
+    }
+    if (
+      g &&
+      (event.ctrlKey || event.metaKey) &&
+      !event.altKey
+    ) {
+      return event.shiftKey ? -1 : 1;
+    }
+    return 0;
+  }
+
+function installCustomCSharpShortcutBootstrap(
+    hostWindow
+  ) {
+    const property =
+      "RMLCustomCSharpSearchShortcutBootstrap";
+    const previous = hostWindow?.[property];
+    previous?.dispose?.();
+
+    const claimedKeys = new Set();
+    const pendingDirections = [];
+    let delegate = null;
+    let disposed = false;
+    let broker = null;
+
+    const shortcutKey = event =>
+      String(
+        event.code ||
+        event.key ||
+        event.keyCode ||
+        ""
+      ).toLowerCase();
+    const claim = event => {
+      if (event.cancelable) {
+        event.preventDefault();
+      }
+      try {
+        event.returnValue = false;
+      } catch {}
+      event.stopImmediatePropagation();
+    };
+    const enqueue = (
+      direction,
+      event = null
+    ) => {
+      const normalized = direction < 0 ? -1 : 1;
+      if (typeof delegate === "function") {
+        delegate(normalized, event);
+        return true;
+      }
+      if (
+        event?.repeat !== true &&
+        event?.isComposing !== true
+      ) {
+        pendingDirections.push(normalized);
+        if (pendingDirections.length > 8) {
+          pendingDirections.shift();
+        }
+      }
+      return true;
+    };
+    const handleKeyDown = event => {
+      const direction =
+        customCSharpFindNavigationDirection(event);
+      if (direction === 0) return;
+      claim(event);
+      claimedKeys.add(shortcutKey(event));
+      if (!event.isComposing) {
+        enqueue(direction, event);
+      }
+    };
+    const handleKeyUp = event => {
+      if (!claimedKeys.delete(shortcutKey(event))) {
+        return;
+      }
+      claim(event);
+    };
+    const clearClaims = () => claimedKeys.clear();
+    const listenerOptions = {
+      capture: true,
+      passive: false
+    };
+
+    hostWindow.addEventListener(
+      "keydown",
+      handleKeyDown,
+      listenerOptions
+    );
+    hostWindow.addEventListener(
+      "keyup",
+      handleKeyUp,
+      listenerOptions
+    );
+    hostWindow.addEventListener(
+      "blur",
+      clearClaims
+    );
+
+    broker = Object.freeze({
+      version:
+        CUSTOM_CSHARP_SHORTCUT_BOOTSTRAP_VERSION,
+      enqueue,
+      activate(callback) {
+        if (disposed) return false;
+        delegate =
+          typeof callback === "function"
+            ? callback
+            : null;
+        if (!delegate) return false;
+        const queued = pendingDirections.splice(0);
+        for (const direction of queued) {
+          delegate(direction, null);
+        }
+        return true;
+      },
+      dispose() {
+        if (disposed) return;
+        disposed = true;
+        delegate = null;
+        pendingDirections.length = 0;
+        claimedKeys.clear();
+        hostWindow.removeEventListener(
+          "keydown",
+          handleKeyDown,
+          true
+        );
+        hostWindow.removeEventListener(
+          "keyup",
+          handleKeyUp,
+          true
+        );
+        hostWindow.removeEventListener(
+          "blur",
+          clearClaims
+        );
+        if (hostWindow[property] === broker) {
+          try {
+            delete hostWindow[property];
+          } catch {}
+        }
+      }
+    });
+
+    Object.defineProperty(
+      hostWindow,
+      property,
+      {
+        value: broker,
+        writable: false,
+        enumerable: false,
+        configurable: true
+      }
+    );
+    return broker;
+  }
+
 function prepareCustomCSharpEditorHost(
     hostWindow,
     title
   ) {
+    const shortcutBootstrap =
+      installCustomCSharpShortcutBootstrap(
+        hostWindow
+      );
     hostWindow.document.title = title;
     hostWindow.document.body.replaceChildren();
     window.RMLClassStyles?.observe(
@@ -2661,7 +2840,7 @@ function prepareCustomCSharpEditorHost(
       hostWindow.document.createElement("link");
     stylesheet.rel = "stylesheet";
     stylesheet.href = new URL(
-      "styles/features/styles.runtime-graph.css?v=7-custom-csharp-drag-v787",
+      "styles/features/styles.runtime-graph.css?v=1.9-svg-status-pill",
       window.location.href
     ).href;
     hostWindow.document.head.appendChild(
@@ -2674,6 +2853,7 @@ function prepareCustomCSharpEditorHost(
     loading.textContent =
       "Loading Custom C# editor…";
     hostWindow.document.body.appendChild(loading);
+    return shortcutBootstrap;
   }
 
 async function createCustomCSharpExternalHost(
@@ -3401,7 +3581,7 @@ function mountCustomCSharpEditorPresentation({
     );
     const title =
       `${String(specification?.label || "Custom C#")} · Code editor`;
-    prepareCustomCSharpEditorHost(
+    const shortcutBootstrap = prepareCustomCSharpEditorHost(
       hostWindow,
       title
     );
@@ -3427,6 +3607,11 @@ function mountCustomCSharpEditorPresentation({
       appendOutput() {},
       setDiagnostics() {},
       setPageAreasHidden() {},
+      runSearchShortcut(direction) {
+        shortcutBootstrap?.enqueue?.(direction);
+        hostWindow.focus?.();
+        return true;
+      },
       insertNodeSnippet() {
         return false;
       },
@@ -3443,6 +3628,9 @@ function mountCustomCSharpEditorPresentation({
           editorKey,
           options
         );
+      },
+      dispose() {
+        shortcutBootstrap?.dispose?.();
       }
     };
     customCSharpDetachedEditors.set(
@@ -3461,6 +3649,7 @@ function mountCustomCSharpEditorPresentation({
             editorKey
           ) !== pendingRecord
         ) {
+          shortcutBootstrap?.dispose?.();
           return;
         }
         const node = customCSharpEditorNode(nodeId);
@@ -3767,6 +3956,7 @@ function mountCustomCSharpEditorPresentation({
         }
       })
       .catch(error => {
+        shortcutBootstrap?.dispose?.();
         const current = customCSharpDetachedEditors.get(editorKey);
         if (current !== pendingRecord && current?.popup !== hostWindow) return;
         if (

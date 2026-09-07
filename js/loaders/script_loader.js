@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  if (window.RMLScriptLoader?.version >= 34) {
+  if (window.RMLScriptLoader?.version >= 38) {
     return;
   }
 
@@ -15,6 +15,105 @@
   let runtimeViewPreparationPromise = null;
   let runtimeViewOpenAfterLoadPromise = null;
   let runtimeViewLoadingNoticePromise = null;
+  const GRAPH_SEARCH_SHORTCUT_CAPTURE_VERSION = 18;
+  const provisionalGraphShortcutKeys = new Set();
+
+  function graphSearchShortcutDirection(event) {
+    const key = String(event.key || "").toLowerCase();
+    const code = String(event.code || "").toLowerCase();
+    const legacy = Number(event.keyCode) || 0;
+    const f3 = key === "f3" || code === "f3" || legacy === 114;
+    const g = key === "g" || code === "keyg" || legacy === 71;
+    if (
+      f3 &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey
+    ) {
+      return event.shiftKey ? -1 : 1;
+    }
+    if (
+      g &&
+      (event.ctrlKey || event.metaKey) &&
+      !event.altKey
+    ) {
+      return event.shiftKey ? -1 : 1;
+    }
+    return 0;
+  }
+
+  function provisionalGraphShortcutKey(event) {
+    return String(
+      event.code ||
+      event.key ||
+      event.keyCode ||
+      ""
+    ).toLowerCase();
+  }
+
+  function claimProvisionalGraphShortcut(event) {
+    if (event.cancelable) {
+      event.preventDefault();
+    }
+    try {
+      event.returnValue = false;
+    } catch {}
+    event.stopImmediatePropagation();
+  }
+
+  function provisionalGraphShortcutContextOwned() {
+    const graph = runtimeGraphState();
+    const page =
+      window.RMLBuilderBridge?.getActivePage?.() ||
+      graph?.lastOpenPage ||
+      "configuration-outline";
+    const button = runtimeButton();
+    return Boolean(
+      runtimeViewPreparationPromise !== null ||
+      runtimeViewOpenAfterLoadPromise !== null ||
+      button?.getAttribute("aria-busy") === "true" ||
+      (graph?.active === true && page === "runtime-graph")
+    );
+  }
+
+  function handleProvisionalGraphShortcutKeyDown(event) {
+    if (
+      Number(window.RMLGraphSearchShortcutCaptureVersion) >=
+        GRAPH_SEARCH_SHORTCUT_CAPTURE_VERSION ||
+      event.defaultPrevented ||
+      graphSearchShortcutDirection(event) === 0 ||
+      !provisionalGraphShortcutContextOwned()
+    ) {
+      return;
+    }
+    claimProvisionalGraphShortcut(event);
+    provisionalGraphShortcutKeys.add(
+      provisionalGraphShortcutKey(event)
+    );
+  }
+
+  function handleProvisionalGraphShortcutKeyUp(event) {
+    const key = provisionalGraphShortcutKey(event);
+    if (!provisionalGraphShortcutKeys.delete(key)) {
+      return;
+    }
+    claimProvisionalGraphShortcut(event);
+  }
+
+  window.addEventListener(
+    "keydown",
+    handleProvisionalGraphShortcutKeyDown,
+    { capture: true, passive: false }
+  );
+  window.addEventListener(
+    "keyup",
+    handleProvisionalGraphShortcutKeyUp,
+    { capture: true, passive: false }
+  );
+  window.addEventListener(
+    "blur",
+    () => provisionalGraphShortcutKeys.clear()
+  );
 
   const bundles = Object.freeze({
     "scanner-connection": Object.freeze({
@@ -122,17 +221,18 @@
           url: "../graph/node_graph_composites.js?v=799-ready-graph-entry"
         }),
         Object.freeze({
-          url: "../graph/node_graph_custom_csharp.js?v=799-ready-graph-entry"
+          url: "../graph/node_graph_custom_csharp.js?v=1.9-svg-status-pill"
         }),
         Object.freeze({
           url: "../graph/node_graph_guided.js?v=1-physical-modules-v748"
         }),
         Object.freeze({
-          url: "../graph/node_graph_view.js?v=1.5-search-node-zoom"
+          url: "../graph/node_graph_view.js?v=1.9-svg-status-pill"
         }),
         Object.freeze({
-          url: "../graph/node_graph_bootstrap.js?v=1.4-shortcut-svg-safety",
+          url: "../graph/node_graph_bootstrap.js?v=1.8-project-load-svg-guard",
           ready: () =>
+            window.RMLDynamicGraphHost?.version >= 70 &&
             typeof window.RMLDynamicGraphHost?.isReady === "function"
         })
       ]),
@@ -689,7 +789,7 @@
 
   Object.defineProperty(window, "RMLScriptLoader", {
     value: Object.freeze({
-      version: 34,
+      version: 38,
       ensure,
       ensureMany(names) {
         return Promise.all(

@@ -113,7 +113,7 @@ if (
 
 Object.defineProperty(window, "RMLDynamicGraphHost", {
     value: Object.freeze({
-      version: 69,
+      version: 70,
       getState() { return graph; },
       whenViewReady: whenGraphViewReady,
       hasPendingEditorEdits() {
@@ -1142,6 +1142,7 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
         };
       },
       getPresentationState() {
+        const renderBlocked = graphSvgViewBlocked();
         return Object.freeze({
           graphExportActive:
             graph?.active === true,
@@ -1149,8 +1150,9 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
             runtimeGraphViewActive === true,
           viewReady: graphViewPreparationCurrent() && !graphViewPreparation?.pending &&
             dom.root?.dataset.rmlGraphPhase === "ready",
-          renderingBlocked: graphSvgRenderBlocked(),
-          renderingBlockReason: graphSvgRenderBlocked() ? "svg-capacity" : "",
+          renderBlocked,
+          renderingBlocked: renderBlocked,
+          renderingBlockReason: renderBlocked ? "svg-capacity" : "",
           preparing: graphViewPreparing(),
           savedPage:
             savedPresentationPage(),

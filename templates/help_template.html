@@ -195,6 +195,11 @@
                   <code>"svg"</code> or <code>"auto"</code> to select the other modes, and
                   <code>RMLGraphHybridRenderer.getBackend()</code> to inspect the stored and
                   active backend. Changing the backend reloads the page automatically.
+                  The SVG fallback continues to render small and medium-sized graphs normally.
+                  Only graphs exceeding 1,000 nodes, 1,500 connections or 3,000 routed
+                  segments are hidden for browser stability; the compact SVG status in the
+                  graph toolbar never covers graph controls. Saving and export remain available
+                  when a graph exceeds these display-only safety limits.
                   WGSL caches a 384-pixel overscan selection while panning and sends only
                   the affected Spatial-Tile indices to its compute shader when that cache
                   must be rebuilt. Very large indexes warm up in idle batches so opening
@@ -971,59 +976,71 @@
                 <span class="information-kicker">Global</span>
                 <h3>Keyboard & wheel shortcuts</h3>
                 <div class="shortcut-grid">
-                  <div><kbd>Esc</kbd><span>Cancel an active Outline drag and restore the scroll position from before the drag.</span></div>
-                  <div><kbd>Wheel</kbd><span>Scroll the innermost visible scrollable level under the pointer. If a global level is locked, Wheel scrolls only that locked level.</span></div>
-                  <div><kbd>Ctrl</kbd><span class="shortcut-plus">+</span><kbd>Wheel</kbd><span>Select visible scroll levels in reading hierarchy: start at the outermost level, then follow the real layout like reading a page: parent before descendants, then sibling regions top to bottom and same-row siblings left to right; each region is completed depth-first before moving on. Wheel down advances; Wheel up goes backward. There is no hard beginning or end: keep scrolling in the same direction and the hierarchy wraps around and repeats. Release Ctrl to lock the glowing level. Press Ctrl again later to capture the currently visible hierarchy again without clicking first. Use Command on macOS.</span></div>
-                  <div><kbd>Shift</kbd><span class="shortcut-plus">+</span><kbd>Wheel</kbd><span>Scroll the locked level horizontally only when that selected level actually has a horizontal scroll axis. In that case Shift does not release the lock; otherwise Shift releases it like any other non-Ctrl/Command key.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Esc</kbd></span><span>Cancel an active Outline drag and restore the scroll position from before the drag.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Wheel</kbd></span><span>Scroll the innermost visible scrollable level under the pointer. If a global level is locked, Wheel scrolls only that locked level.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Ctrl</kbd><span class="shortcut-plus">+</span><kbd>Wheel</kbd></span><span>Select visible scroll levels in reading hierarchy: start at the outermost level, then follow the real layout like reading a page: parent before descendants, then sibling regions top to bottom and same-row siblings left to right; each region is completed depth-first before moving on. Wheel down advances; Wheel up goes backward. There is no hard beginning or end: keep scrolling in the same direction and the hierarchy wraps around and repeats. Release Ctrl to lock the glowing level. Press Ctrl again later to capture the currently visible hierarchy again without clicking first. Use Command on macOS.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Shift</kbd><span class="shortcut-plus">+</span><kbd>Wheel</kbd></span><span>Scroll the locked level horizontally only when that selected level actually has a horizontal scroll axis. In that case Shift does not release the lock; otherwise Shift releases it like any other non-Ctrl/Command key.</span></div>
                 </div>
               </section>
               <section id="shortcut-graph" class="information-section">
                 <span class="information-kicker">Typed node graph</span>
                 <h3>Editing shortcuts</h3>
                 <div class="shortcut-grid">
-                  <div><kbd>Alt</kbd><span class="shortcut-plus">+</span><kbd>Wheel</kbd><span>Zoom the graph under the pointer: wheel up zooms in, wheel down zooms out, keeping the graph position beneath the mouse fixed. Works over nodes and wires in the main graph and nested graphs. Outside the graph, Alt + Wheel keeps native scrolling instead of routing to a locked level. Ctrl/Command + Wheel keeps its existing scroll-level selection.</span></div>
-                  <div><kbd>Esc</kbd><span>Cancel the current node, wire, bend-point or palette interaction.</span></div>
-                  <div><kbd>Delete</kbd><span>Delete the selected graph node, wire or bend point.</span></div>
-                  <div><kbd>Backspace</kbd><span>Same as Delete when focus is not inside an editable field.</span></div>
-                  <div><kbd>Ctrl</kbd><span class="shortcut-plus">+</span><kbd>0</kbd><span>Center the graph. On macOS use Command + 0.</span></div>
-                  <div><kbd>Wheel click</kbd><span>Press and release the scroll wheel to center the current graph, including nested graphs. Holding the wheel and dragging still pans; releasing after a drag does not center. Esc cancels the gesture. Works over the graph background, nodes and wires.</span></div>
-                  <div><kbd>Ctrl</kbd><span class="shortcut-plus">+</span><kbd>F</kbd><span>Toggle Edit Mode while the Runtime Graph or a nested graph is open. On macOS use Command + F. Text fields, code editors and dialogs keep their own Find behavior; holding the key does not repeatedly toggle.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Alt</kbd><span class="shortcut-plus">+</span><kbd>Wheel</kbd></span><span>Zoom the graph under the pointer: wheel up zooms in, wheel down zooms out, keeping the graph position beneath the mouse fixed. Works over nodes and wires in the main graph and nested graphs. Outside the graph, Alt + Wheel keeps native scrolling instead of routing to a locked level. Ctrl/Command + Wheel keeps its existing scroll-level selection.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Esc</kbd></span><span>Cancel the current node, wire, bend-point or palette interaction. With no active interaction, leave Edit Mode.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Delete</kbd></span><span>Delete the selected graph node, wire or bend point.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Backspace</kbd></span><span>Same as Delete when focus is not inside an editable field.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Ctrl</kbd><span class="shortcut-plus">+</span><kbd>Click</kbd></span><span>Add or remove an individual node from the graph's multiple selection. On macOS use Command + Click.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Ctrl</kbd><span class="shortcut-plus">+</span><kbd>0</kbd></span><span>Center the graph. On macOS use Command + 0.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Wheel click</kbd></span><span>Press and release the scroll wheel to center the current graph, including nested graphs. Holding the wheel and dragging still pans; releasing after a drag does not center. Esc cancels the gesture. Works over the graph background, nodes and wires.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Double-click</kbd></span><span>Add a manual bend point on a wire segment; double-click an existing bend point or junction to remove it without disconnecting the typed wire.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Double-click</kbd></span><span>Reset width, height or both dimensions from the corresponding node resize handle.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Ctrl</kbd><span class="shortcut-plus">+</span><kbd>F</kbd></span><span>Toggle Edit Mode while the Runtime Graph or a nested graph is open. On macOS use Command + F. Text fields, code editors and dialogs keep their own Find behavior; holding the key does not repeatedly toggle.</span></div>
                 </div>
               </section>
               <section id="shortcut-code-editor" class="information-section">
                 <span class="information-kicker">Custom C# code editor</span>
                 <h3>Find, replace and indentation</h3>
                 <div class="shortcut-grid">
-                  <div><kbd>Ctrl</kbd><span class="shortcut-plus">+</span><kbd>F</kbd><span>Open Find. On macOS use Command + F. The Find toolbar button itself toggles the panel closed on a second click.</span></div>
-                  <div><kbd>Ctrl</kbd><span class="shortcut-plus">+</span><kbd>H</kbd><span>Open Find and Replace. On macOS use Command + Option + F. The Replace toolbar button toggles it closed on a second click.</span></div>
-                  <div><kbd>F3</kbd><span>Open Find when closed, otherwise select the next match in the editor.</span></div>
-                  <div><kbd>Shift</kbd><span class="shortcut-plus">+</span><kbd>F3</kbd><span>Select the previous match.</span></div>
-                  <div><kbd>Enter</kbd><span>In the Find field, select the next match; use Shift + Enter for the previous match.</span></div>
-                  <div><kbd>Enter</kbd><span>In the Replace field, replace the currently selected match.</span></div>
-                  <div><kbd>Esc</kbd><span>Close Editor Settings first, or close Find/Replace when Settings is not open.</span></div>
-                  <div><kbd>Tab</kbd><span>Indent the caret or every selected line by four spaces.</span></div>
-                  <div><kbd>Shift</kbd><span class="shortcut-plus">+</span><kbd>Tab</kbd><span>Remove up to four leading spaces from the caret position or every selected line.</span></div>
-                  <div><kbd>Space</kbd><span>When text is selected, indent every selected line by exactly one space.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Ctrl</kbd><span class="shortcut-plus">+</span><kbd>F</kbd></span><span>Open Find. On macOS use Command + F. The Find toolbar button itself toggles the panel closed on a second click.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Ctrl</kbd><span class="shortcut-plus">+</span><kbd>H</kbd></span><span>Open Find and Replace. On macOS use Command + Option + F. The Replace toolbar button toggles it closed on a second click.</span></div>
+                  <div><span class="shortcut-keys"><kbd>F3</kbd></span><span>Select the next match while the Custom C# editor owns the keyboard context. If Find is closed, it opens first.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Shift</kbd><span class="shortcut-plus">+</span><kbd>F3</kbd></span><span>Select the previous match while the Custom C# editor owns the keyboard context.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Ctrl</kbd><span class="shortcut-plus">+</span><kbd>G</kbd></span><span>Select the next editor match in Embedded, Overlay and Separate Window modes. On macOS use Command + G. The editor consumes the shortcut instead of opening browser Find.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Ctrl</kbd><span class="shortcut-plus">+</span><kbd>Shift</kbd><span class="shortcut-plus">+</span><kbd>G</kbd></span><span>Select the previous editor match in every editor presentation mode. On macOS use Command + Shift + G. The editor consumes the shortcut instead of opening browser Find.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Enter</kbd></span><span>In the Find field, select the next match.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Shift</kbd><span class="shortcut-plus">+</span><kbd>Enter</kbd></span><span>In the Find field, select the previous match.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Enter</kbd></span><span>In the Replace field, replace the currently selected match.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Esc</kbd></span><span>Close the presentation menu first, then Editor Settings, then Find/Replace.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Double-click</kbd></span><span>On the Overlay title bar, toggle between maximized and restored overlay size.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Tab</kbd></span><span>Indent the caret or every selected line by four spaces.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Shift</kbd><span class="shortcut-plus">+</span><kbd>Tab</kbd></span><span>Remove up to four leading spaces from the caret position or every selected line.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Space</kbd></span><span>When text is selected, indent every selected line by exactly one space.</span></div>
                 </div>
               </section>
               <section id="shortcut-search" class="information-section">
                 <span class="information-kicker">Search & selection</span>
                 <h3>Keyboard navigation</h3>
                 <div class="shortcut-grid">
-                  <div><kbd>Enter</kbd><span>Run “Find node in graph” and center/zoom to the next match. The node is fitted at a readable size; a closer zoom is retained when it fits.</span></div>
-                  <div><kbd>Esc</kbd><span>Close the compact graph-search overlay or an open searchable selector.</span></div>
-                  <div><kbd>↑</kbd><kbd>↓</kbd><span>Move through searchable selector options.</span></div>
-                  <div><kbd>Home</kbd><kbd>End</kbd><span>Jump to the first or last option in an open selector.</span></div>
-                  <div><kbd>Enter</kbd><kbd>Space</kbd><span>Choose the focused selector option.</span></div>
+                  <div><span class="shortcut-keys"><kbd>F3</kbd></span><span>Center/zoom to the next “Find node in graph” match in the current Root, API Composite or Custom C# File Graph. If compact search is closed or the query is empty, the search control opens or receives focus first.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Shift</kbd><span class="shortcut-plus">+</span><kbd>F3</kbd></span><span>Center/zoom to the previous graph-search match. Navigation wraps at both ends.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Ctrl</kbd><span class="shortcut-plus">+</span><kbd>G</kbd></span><span>Center/zoom to the next graph-search match in Root, API Composite and Custom C# File Graph contexts. On macOS use Command + G. The graph consumes the shortcut instead of opening browser Find.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Ctrl</kbd><span class="shortcut-plus">+</span><kbd>Shift</kbd><span class="shortcut-plus">+</span><kbd>G</kbd></span><span>Center/zoom to the previous graph-search match. On macOS use Command + Shift + G. Navigation wraps and browser Find remains closed.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Enter</kbd></span><span>In “Find node in graph”, center/zoom to the next match. The node is fitted at a readable size; a closer zoom is retained when it fits.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Shift</kbd><span class="shortcut-plus">+</span><kbd>Enter</kbd></span><span>In “Find node in graph”, center/zoom to the previous match.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Esc</kbd></span><span>Close the compact graph-search overlay or an open searchable selector.</span></div>
+                  <div><span class="shortcut-keys"><kbd>↑</kbd><kbd>↓</kbd></span><span>Move through searchable selector options.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Home</kbd><kbd>End</kbd></span><span>Jump to the first or last option in an open selector.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Enter</kbd><kbd>Space</kbd></span><span>Choose the focused selector option.</span></div>
                 </div>
               </section>
               <section id="shortcut-color" class="information-section">
                 <span class="information-kicker">Full Color Picker</span>
                 <h3>Precise saturation/value adjustment</h3>
                 <div class="shortcut-grid">
-                  <div><kbd>←</kbd><kbd>→</kbd><span>Decrease / increase saturation by 0.01.</span></div>
-                  <div><kbd>↓</kbd><kbd>↑</kbd><span>Decrease / increase value by 0.01.</span></div>
-                  <div><kbd>Shift</kbd><span class="shortcut-plus">+</span><kbd>Arrow</kbd><span>Use a larger 0.05 step.</span></div>
+                  <div><span class="shortcut-keys"><kbd>←</kbd><kbd>→</kbd></span><span>Decrease / increase saturation by 0.01.</span></div>
+                  <div><span class="shortcut-keys"><kbd>↓</kbd><kbd>↑</kbd></span><span>Decrease / increase value by 0.01.</span></div>
+                  <div><span class="shortcut-keys"><kbd>Shift</kbd><span class="shortcut-plus">+</span><kbd>Arrow</kbd></span><span>Use a larger 0.05 step.</span></div>
                 </div>
               </section>
             </article>

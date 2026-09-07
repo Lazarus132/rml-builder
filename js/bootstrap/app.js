@@ -42,7 +42,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "search-node-zoom-20260907-v1.5";
+  "help-shortcut-key-groups-20260907-v1.10";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -31423,8 +31423,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "../../templates/help_template.html?v=1.5-search-node-zoom",
-    "../templates/help_template.js?v=1.5-search-node-zoom",
+    "../../templates/help_template.html?v=1.10-nonwrapping-shortcut-key-groups",
+    "../templates/help_template.js?v=1.10-nonwrapping-shortcut-key-groups",
     "help-template",
     "RMLHelpTemplateMarkup"
   )

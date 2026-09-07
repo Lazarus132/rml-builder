@@ -600,11 +600,11 @@
   const baseUrl = new URL(".", currentScriptUrl);
   const bundleFiles = Object.freeze({
     preview: "../../styles/features/styles.preview.css?v=5-source-comment-pruning-v776",
-    information: "../../styles/features/styles.information.css?v=2-max-graph-performance-v755",
+    information: "../../styles/features/styles.information.css?v=1.10-shortcut-key-groups",
     setup: "../../styles/features/styles.setup.css?v=5-source-comment-pruning-v776",
     project: "../../styles/features/styles.project.css?v=4-max-graph-performance-v755",
     export: "../../styles/features/styles.export.css?v=2-max-graph-performance-v755",
-    "runtime-graph": "../../styles/features/styles.runtime-graph.css?v=1.5-svg-capacity-guard"
+    "runtime-graph": "../../styles/features/styles.runtime-graph.css?v=1.9-svg-status-pill"
   });
   const bundleOrder = Object.freeze([
     "preview",
@@ -849,7 +849,7 @@
 
   Object.defineProperty(window, "RMLStyleLoader", {
     value: Object.freeze({
-      version: 7,
+      version: 9,
       ensure,
       ensureMany,
       prefetch,

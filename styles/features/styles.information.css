@@ -665,7 +665,7 @@
 
 .shortcut-grid > div {
   display: grid;
-  grid-template-columns: minmax(72px, auto) minmax(0, 1fr);
+  grid-template-columns: max-content minmax(0, 1fr);
   align-items: center;
   gap: 9px;
   padding: 10px 11px;
@@ -678,7 +678,7 @@
 }
 
 .shortcut-grid kbd,
-.shortcut-grid > div > span:first-child:not(:last-child) {
+.shortcut-grid > div > span:first-child:not(:last-child):not(.shortcut-keys) {
   display: inline-grid;
   min-width: 38px;
   min-height: 27px;
@@ -695,10 +695,14 @@
   white-space: nowrap;
 }
 
-.shortcut-grid > div:has(> kbd + kbd),
-.shortcut-grid > div:has(.shortcut-plus) {
-  grid-template-columns: auto auto auto minmax(0, 1fr);
-  justify-content: start;
+.shortcut-keys {
+  display: inline-flex;
+  width: max-content;
+  max-width: 100%;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 6px;
+  white-space: nowrap;
 }
 
 .shortcut-plus {
@@ -707,9 +711,7 @@
 }
 
 @media (max-width: 780px) {
-.shortcut-grid > div,
-.shortcut-grid > div:has(> kbd + kbd),
-.shortcut-grid > div:has(.shortcut-plus) {
+.shortcut-grid > div {
     grid-template-columns: 1fr;
     justify-items: start;
   }

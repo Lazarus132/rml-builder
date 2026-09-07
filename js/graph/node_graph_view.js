@@ -202,8 +202,9 @@ function requestInitialGraphViewport(callback) {
   }
 
 const GRAPH_SVG_RENDER_LIMITS = Object.freeze({ nodes: 1000, connections: 1500, segments: 3000 });
+const GRAPH_SVG_FALLBACK_MESSAGE =
+  "SVG-only rendering: WebGPU and WebGL are unavailable or disabled. Small and medium-sized graphs remain available. Only graphs exceeding 1,000 nodes, 1,500 connections or 3,000 routed segments are hidden to protect browser stability.";
 let graphSvgBlockedView = null;
-let graphSvgFallbackWarningShown = false;
 let graphSvgSafetyUpdating = false;
 
 function graphSvgViewBlocked() {
@@ -230,24 +231,27 @@ function graphSvgSafetyAssessment() {
 
 function showGraphSvgFallbackWarning() {
     if (!dom.root || !graphHybridRenderer) return;
-    let banner = dom.root.querySelector(":scope > .rml-graph-svg-warning");
+    let banner = dom.root.querySelector(".rml-graph-svg-warning");
     if (graphHybridActive()) { banner?.remove(); return; }
     if (!banner) {
       banner = document.createElement("div");
       banner.className = "rml-graph-svg-warning";
       banner.setAttribute("role", "status");
-      banner.textContent = "SVG-only rendering: WebGPU and WebGL are unavailable or disabled. Large graphs cannot be displayed in this mode; their canvas is hidden for browser safety.";
-      dom.root.appendChild(banner);
+      banner.setAttribute("aria-live", "polite");
+      banner.textContent = "SVG only · safety limits apply only to exceptionally large graphs";
     }
-    if (graphSvgFallbackWarningShown) return;
-    graphSvgFallbackWarningShown = true;
-    if (typeof window.RMLBuilderDialog?.notice === "function") {
-      void Promise.resolve(window.RMLBuilderDialog.notice({
-        tone: "warning", kicker: "Runtime Graph renderer", title: "Only SVG rendering is available",
-        message: "WebGPU and WebGL are unavailable or disabled. Large or heavily routed graphs cannot be displayed safely with SVG and will remain hidden.",
-        details: "Your project data is retained. Use a session with WebGPU or WebGL available, or open a smaller graph. Saving and export are independent of this display restriction.",
-        confirmLabel: "OK"
-      })).catch(() => {});
+    banner.title = GRAPH_SVG_FALLBACK_MESSAGE;
+    banner.setAttribute(
+      "aria-label",
+      GRAPH_SVG_FALLBACK_MESSAGE
+    );
+    const host = dom.toolbar || dom.root;
+    if (banner.parentElement !== host) {
+      if (dom.sourceBadge?.parentElement === host) {
+        host.insertBefore(banner, dom.sourceBadge);
+      } else {
+        host.appendChild(banner);
+      }
     }
   }
 
@@ -302,9 +306,18 @@ function enforceGraphSvgSafety() {
       }
       status.setAttribute("role", "status");
       const title = document.createElement("strong");
-      title.textContent = "This graph is too large to render safely with SVG.";
+      title.textContent = "This graph exceeds the SVG safety limits.";
       const detail = document.createElement("p");
-      detail.textContent = `${assessment.nodes.toLocaleString()} nodes · ${assessment.connections.toLocaleString()} connections. Graph elements are hidden; no nodes or connections have been deleted.`;
+      const metrics = [
+        `${assessment.nodes.toLocaleString()} nodes`,
+        `${assessment.connections.toLocaleString()} connections`
+      ];
+      if (assessment.segments !== null) {
+        metrics.push(
+          `${assessment.segments.toLocaleString()} routed segments`
+        );
+      }
+      detail.textContent = `${metrics.join(" · ")}. Graph elements are hidden; no nodes or connections have been deleted.`;
       const hint = document.createElement("p");
       hint.textContent = "Use WebGPU/WebGL and reload, or open a smaller graph. Saving and export remain available.";
       status.replaceChildren(title, detail, hint);
@@ -603,6 +616,10 @@ let graphMessageTimer = 0;
 let graphNodeSearchQuery = "";
 
 let graphNodeSearchIndex = -1;
+
+let graphNodeSearchNodes = null;
+
+let graphNodeSearchNodeId = "";
 
 let graphEditModeScrollY = 0;
 
@@ -9601,6 +9618,10 @@ function graphNodeSearchText(node) {
     ].filter(Boolean).join(" ").toLowerCase();
   }
 
+function normalizeGraphNodeSearchQuery(value) {
+    return String(value || "").trim().toLowerCase();
+  }
+
 function frameGraphSearchNode(node, preferredScale, element = null) {
     const rectangle = dom.viewport?.getBoundingClientRect();
     if (!rectangle || rectangle.width <= 0 || rectangle.height <= 0) {
@@ -9626,16 +9647,31 @@ function frameGraphSearchNode(node, preferredScale, element = null) {
     return true;
   }
 
-function focusGraphNodeSearch(query, advance = true) {
+function graphNodeSearchDirection(direction) {
+    if (direction === -1) return -1;
+    if (direction === true || direction === 1) return 1;
+    return 0;
+  }
+
+function focusGraphNodeSearch(query, direction = 1) {
     if (!graph?.active || !runtimeGraphViewActive || !dom.viewport?.isConnected ||
         graphViewPreparing() || graphSvgViewBlocked() || activeInteraction) {
       return 0;
     }
 
-    const normalized = String(query || "").trim().toLowerCase();
+    const step = graphNodeSearchDirection(direction);
+    if (graphNodeSearchNodes !== graph.nodes) {
+      graphNodeSearchNodes = graph.nodes;
+      graphNodeSearchQuery = "";
+      graphNodeSearchIndex = -1;
+      graphNodeSearchNodeId = "";
+    }
+
+    const normalized = normalizeGraphNodeSearchQuery(query);
     if (!normalized) {
       graphNodeSearchQuery = "";
       graphNodeSearchIndex = -1;
+      graphNodeSearchNodeId = "";
       return 0;
     }
 
@@ -9645,20 +9681,30 @@ function focusGraphNodeSearch(query, advance = true) {
     if (matches.length === 0) {
       graphNodeSearchQuery = normalized;
       graphNodeSearchIndex = -1;
+      graphNodeSearchNodeId = "";
       showGraphMessage("No graph node matches this search.", "error");
       return 0;
     }
 
     if (graphNodeSearchQuery !== normalized) {
       graphNodeSearchQuery = normalized;
-      graphNodeSearchIndex = 0;
-    } else if (advance) {
-      graphNodeSearchIndex = (graphNodeSearchIndex + 1) % matches.length;
+      graphNodeSearchIndex = step < 0 ? matches.length - 1 : 0;
+    } else if (step !== 0) {
+      const currentIndex = matches.findIndex(
+        node => node.id === graphNodeSearchNodeId
+      );
+      graphNodeSearchIndex =
+        currentIndex < 0
+          ? step < 0
+            ? matches.length - 1
+            : 0
+          : (currentIndex + step + matches.length) % matches.length;
     } else if (graphNodeSearchIndex < 0 || graphNodeSearchIndex >= matches.length) {
       graphNodeSearchIndex = 0;
     }
 
     const node = matches[graphNodeSearchIndex];
+    graphNodeSearchNodeId = node.id;
     const preferredScale = Math.max(1, graph.viewport.scale);
     if (graphRevealAnimationFrame) {
       cancelAnimationFrame(graphRevealAnimationFrame);
@@ -9693,6 +9739,83 @@ function focusGraphNodeSearch(query, advance = true) {
       "success"
     );
     return matches.length;
+  }
+
+function graphNodeSearchControls() {
+    const root = dom.root;
+    if (!root?.isConnected) return null;
+    const toolbarInput = root.querySelector(
+      ":scope > .rml-graph-toolbar .rml-graph-node-search input"
+    );
+    const overlay = root.querySelector(
+      ":scope > .rml-graph-search-overlay"
+    );
+    const overlayInput = overlay?.querySelector("input") || null;
+    return {
+      root,
+      toolbarInput:
+        toolbarInput instanceof HTMLInputElement
+          ? toolbarInput
+          : null,
+      overlay,
+      overlayInput:
+        overlayInput instanceof HTMLInputElement
+          ? overlayInput
+          : null
+    };
+  }
+
+function focusGraphNodeSearchControl(controls = graphNodeSearchControls()) {
+    if (!controls) return null;
+    const useOverlay =
+      controls.overlay &&
+      (
+        controls.overlay.hidden === false ||
+        controls.root.classList.contains("rml-graph-compact-toolbar")
+      );
+    let input = controls.toolbarInput;
+    if (useOverlay && controls.overlayInput) {
+      if (controls.overlay.hidden) {
+        controls.overlay.hidden = false;
+        controls.overlayInput.value = controls.toolbarInput?.value || "";
+      }
+      input = controls.overlayInput;
+    }
+    if (!input) return null;
+    requestProjectAnimationFrame(() => {
+      input.focus({ preventScroll: true });
+      input.select();
+    });
+    return input;
+  }
+
+function runGraphNodeSearchShortcut(direction) {
+    const controls = graphNodeSearchControls();
+    if (!controls) return false;
+    const compactSearchClosed =
+      controls.root.classList.contains("rml-graph-compact-toolbar") &&
+      controls.overlay?.hidden !== false;
+    if (compactSearchClosed) {
+      return Boolean(focusGraphNodeSearchControl(controls));
+    }
+    const input =
+      controls.overlay?.hidden === false
+        ? controls.overlayInput
+        : controls.toolbarInput;
+    if (!input) return false;
+    const query = input.value;
+    if (input === controls.overlayInput && controls.toolbarInput) {
+      controls.toolbarInput.value = query;
+    }
+    if (!query.trim()) {
+      graphNodeSearchQuery = "";
+      graphNodeSearchIndex = -1;
+      graphNodeSearchNodeId = "";
+      focusGraphNodeSearchControl(controls);
+      return true;
+    }
+    focusGraphNodeSearch(query, direction);
+    return true;
   }
 
 function renderGraphCanvas() {
@@ -9814,17 +9937,25 @@ function renderGraphCanvas() {
     nodeSearchInput.type = "search";
     nodeSearchInput.placeholder = "Find node in graph…";
     nodeSearchInput.autocomplete = "off";
+    nodeSearchInput.setAttribute(
+      "aria-label",
+      "Find node in graph"
+    );
+    nodeSearchInput.setAttribute(
+      "aria-keyshortcuts",
+      "F3 Shift+F3 Control+G Control+Shift+G Meta+G Meta+Shift+G"
+    );
     const nodeSearchNext = createToolbarIconButton(
       GRAPH_TOOLBAR_ICONS.next,
       "Next",
       () =>
         focusGraphNodeSearch(
           nodeSearchInput.value,
-          true
+          1
         )
     );
     nodeSearchNext.title =
-      "Zoom to the next matching node";
+      "Next matching node (F3 or Ctrl/Command+G)";
     nodeSearchNext.dataset.help =
       nodeSearchNext.title;
     nodeSearchNext.setAttribute(
@@ -9834,12 +9965,19 @@ function renderGraphCanvas() {
     nodeSearchInput.addEventListener("keydown", event => {
       if (event.key === "Enter") {
         event.preventDefault();
-        focusGraphNodeSearch(nodeSearchInput.value, true);
+        focusGraphNodeSearch(
+          nodeSearchInput.value,
+          event.shiftKey ? -1 : 1
+        );
       }
     });
     nodeSearchInput.addEventListener("input", () => {
-      if (nodeSearchInput.value.trim() !== graphNodeSearchQuery) {
+      if (
+        normalizeGraphNodeSearchQuery(nodeSearchInput.value) !==
+        graphNodeSearchQuery
+      ) {
         graphNodeSearchIndex = -1;
+        graphNodeSearchNodeId = "";
       }
     });
     nodeSearch.append(nodeSearchInput, nodeSearchNext);
@@ -9879,6 +10017,10 @@ function renderGraphCanvas() {
       "aria-label",
       "Find node in graph"
     );
+    compactSearchButton.setAttribute(
+      "aria-keyshortcuts",
+      "F3 Shift+F3 Control+G Control+Shift+G Meta+G Meta+Shift+G"
+    );
     toolbar.appendChild(compactSearchButton);
 
     const searchOverlay =
@@ -9893,8 +10035,8 @@ function renderGraphCanvas() {
           <button class="rml-graph-search-overlay-close" type="button" aria-label="Close search">×</button>
         </div>
         <div class="rml-graph-search-overlay-body">
-          <input type="search" autocomplete="off" placeholder="Find node in graph…">
-          <button class="button secondary rml-graph-icon-button rml-graph-search-overlay-next" type="button" title="Zoom to the next matching node" aria-label="Zoom to the next matching node">
+          <input type="search" autocomplete="off" placeholder="Find node in graph…" aria-label="Find node in graph" aria-keyshortcuts="F3 Shift+F3 Control+G Control+Shift+G Meta+G Meta+Shift+G">
+          <button class="button secondary rml-graph-icon-button rml-graph-search-overlay-next" type="button" title="Next matching node (F3 or Ctrl/Command+G)" aria-label="Next matching node (F3 or Ctrl/Command+G)" aria-keyshortcuts="F3 Control+G Meta+G">
             ${GRAPH_TOOLBAR_ICONS.next}
             <span class="rml-graph-toolbar-sr-label">Next</span>
           </button>
@@ -9919,7 +10061,7 @@ function renderGraphCanvas() {
       });
     };
 
-    const runOverlaySearch = () => {
+    const runOverlaySearch = (direction = 1) => {
       if (!(overlayInput instanceof HTMLInputElement)) {
         return;
       }
@@ -9927,7 +10069,7 @@ function renderGraphCanvas() {
       nodeSearchInput.value = overlayInput.value;
       focusGraphNodeSearch(
         overlayInput.value,
-        true
+        direction
       );
     };
 
@@ -9939,11 +10081,13 @@ function renderGraphCanvas() {
         }
 
         if (
-          overlayInput.value.trim() !==
+          normalizeGraphNodeSearchQuery(overlayInput.value) !==
           graphNodeSearchQuery
         ) {
           graphNodeSearchIndex = -1;
+          graphNodeSearchNodeId = "";
         }
+        nodeSearchInput.value = overlayInput.value;
       }
     );
     overlayInput?.addEventListener(
@@ -9951,7 +10095,9 @@ function renderGraphCanvas() {
       event => {
         if (event.key === "Enter") {
           event.preventDefault();
-          runOverlaySearch();
+          runOverlaySearch(
+            event.shiftKey ? -1 : 1
+          );
         } else if (event.key === "Escape") {
           event.preventDefault();
           closeSearchOverlay();
@@ -9960,7 +10106,7 @@ function renderGraphCanvas() {
     );
     overlayNext?.addEventListener(
       "click",
-      runOverlaySearch
+      () => runOverlaySearch(1)
     );
     overlayClose?.addEventListener(
       "click",
@@ -26445,19 +26591,55 @@ function cancelInteraction(
 
 const graphClaimedShortcutKeys = new Set();
 function graphShortcutKey(event) {
-    return String(event.code || event.key || "").toLowerCase();
+    return String(event.code || event.key || event.keyCode || "").toLowerCase();
   }
 
 function claimGraphShortcut(event) {
-    event.preventDefault();
+    if (event.cancelable) event.preventDefault();
+    try {
+      event.returnValue = false;
+    } catch {}
     event.stopImmediatePropagation();
     graphClaimedShortcutKeys.add(graphShortcutKey(event));
   }
 
 function releaseGraphShortcutKey(event) {
     if (!graphClaimedShortcutKeys.delete(graphShortcutKey(event))) return;
-    event.preventDefault();
+    if (event.cancelable) event.preventDefault();
+    try {
+      event.returnValue = false;
+    } catch {}
     event.stopImmediatePropagation();
+  }
+
+let graphSearchShortcutHandlersInstalled = false;
+function installGraphSearchShortcutHandlers() {
+    if (graphSearchShortcutHandlersInstalled) return;
+    graphSearchShortcutHandlersInstalled = true;
+    window.addEventListener(
+      "keydown",
+      handleGraphSearchKeyDown,
+      { capture: true, passive: false }
+    );
+    window.addEventListener(
+      "keyup",
+      releaseGraphShortcutKey,
+      { capture: true, passive: false }
+    );
+    window.addEventListener(
+      "blur",
+      () => graphClaimedShortcutKeys.clear()
+    );
+    Object.defineProperty(
+      window,
+      "RMLGraphSearchShortcutCaptureVersion",
+      {
+        value: 18,
+        writable: false,
+        enumerable: false,
+        configurable: true
+      }
+    );
   }
 
 function graphShortcutHasTextOwner(event) {
@@ -26469,6 +26651,119 @@ function graphShortcutHasTextOwner(event) {
     return ownsInput(document.activeElement) || path.some(ownsInput) ||
       Boolean(document.querySelector("dialog[open]")) ||
       Boolean(dom.root?.querySelector(":scope > .rml-graph-search-overlay:not([hidden])"));
+  }
+
+function graphSearchShortcutDirection(event) {
+    const key = String(event.key || "").toLowerCase();
+    const code = String(event.code || "").toLowerCase();
+    const legacy = Number(event.keyCode) || 0;
+    const f3 = key === "f3" || code === "f3" || legacy === 114;
+    const g = key === "g" || code === "keyg" || legacy === 71;
+    if (
+      f3 &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey
+    ) {
+      return event.shiftKey ? -1 : 1;
+    }
+    if (
+      g &&
+      (event.ctrlKey || event.metaKey) &&
+      !event.altKey
+    ) {
+      return event.shiftKey ? -1 : 1;
+    }
+    return 0;
+  }
+
+function graphSearchShortcutHasOwner(event) {
+    const controls = graphNodeSearchControls();
+    if (!controls) return false;
+    if (controls.overlay?.hidden === false) return true;
+    const path = typeof event.composedPath === "function"
+      ? event.composedPath()
+      : [event.target];
+    return [controls.toolbarInput, controls.overlayInput].some(input =>
+      input &&
+      (
+        document.activeElement === input ||
+        path.includes(input)
+      )
+    );
+  }
+
+function parentCustomCSharpSearchShortcutOwner(event) {
+    const activeRecord = editorKey => {
+      const record = customCSharpDetachedEditors.get(editorKey);
+      return customCSharpEditorRecordActive(record) &&
+        typeof record?.runSearchShortcut === "function"
+        ? record
+        : null;
+    };
+    const inlineRecord = customCSharpInlineEditorKey
+      ? activeRecord(customCSharpInlineEditorKey)
+      : null;
+    if (inlineRecord) return inlineRecord;
+
+    const path = typeof event.composedPath === "function"
+      ? event.composedPath()
+      : [event.target];
+    const activeElement = document.activeElement;
+    const overlayRecords = [
+      ...customCSharpDetachedEditors.values()
+    ].filter(record =>
+      record?.mode === "overlay" &&
+      customCSharpEditorRecordActive(record) &&
+      typeof record.runSearchShortcut === "function"
+    );
+    return overlayRecords.find(record =>
+      record.editorKey === customCSharpActiveEditorKey ||
+      record.overlay?.contains?.(activeElement) ||
+      path.some(element => record.overlay?.contains?.(element))
+    ) || null;
+  }
+
+function handleGraphSearchKeyDown(event) {
+    if (event.defaultPrevented) return;
+    const searchDirection = graphSearchShortcutDirection(event);
+    if (searchDirection === 0) return;
+    if (
+      event.repeat &&
+      graphClaimedShortcutKeys.has(graphShortcutKey(event))
+    ) {
+      claimGraphShortcut(event);
+      return;
+    }
+    const editorOwner =
+      parentCustomCSharpSearchShortcutOwner(event);
+    const graphContextOwned = graph?.active === true && (
+      runtimeGraphViewActive === true ||
+      graphViewPreparing() ||
+      savedPresentationPage() === "runtime-graph"
+    );
+    if (!editorOwner && !graphContextOwned) return;
+    claimGraphShortcut(event);
+    if (event.isComposing || event.repeat) return;
+    if (editorOwner) {
+      editorOwner.runSearchShortcut(searchDirection);
+      return;
+    }
+    if (!runtimeGraphViewActive) return;
+    if (
+      document.querySelector("dialog[open]") &&
+      !graphSearchShortcutHasOwner(event)
+    ) {
+      return;
+    }
+    if (
+      activeInteraction ||
+      !graphNavigationShortcutsReady()
+    ) {
+      return;
+    }
+    releaseGraphScrollLayerFromInput();
+    runGraphNodeSearchShortcut(searchDirection);
   }
 
 function handleGraphKeyDown(event) {
@@ -26820,8 +27115,6 @@ function initializeNodeGraphHost() {
       }
     );
     document.addEventListener("keydown", handleGraphKeyDown, { capture: true, passive: false });
-    window.addEventListener("keyup", releaseGraphShortcutKey, { capture: true, passive: false });
-    window.addEventListener("blur", () => graphClaimedShortcutKeys.clear());
 
     document.addEventListener(
       "keyup",
@@ -27992,3 +28285,5 @@ async function initializeImmediately() {
         updateGraphCatalogReadiness(error);
       });
   }
+
+installGraphSearchShortcutHandlers();
