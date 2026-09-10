@@ -5,6 +5,9 @@ function savedApiCompositeCompareWorkerMain(
 ) {
 const self = workerScope;
 
+// Keep this worker self-contained.  It is intentionally a classic worker so
+// the same file can be loaded by the packaged/file:// application without an
+// import graph or a server-only module resolver.
 const SAVED_API_COMPOSITE_COMPARE_WORKER_MODULE_ID =
   "1.20.31-universal-presentation-dev23";
 const SAVED_API_COMPOSITE_CANONICAL_SCHEMA_VERSION = 4;
@@ -12,6 +15,10 @@ const MESSAGE_TYPE = "rml-saved-api-composite-compare";
 const RESULT_TYPE = `${MESSAGE_TYPE}-result`;
 
 const GRAPH_CACHE_KEYS = new Set([
+  // Transaction bookkeeping is not Composite content. Real mutations still
+  // differ through their complete node, wire, boundary, registry or source
+  // JSON; ignoring this counter prevents cache-only revisions from creating
+  // a false Update state.
   "revision",
   "contentFingerprint",
   "fingerprintNameKey",
@@ -26,6 +33,11 @@ const GRAPH_PRESENTATION_KEYS = new Set([
   "selectedWirePoint"
 ]);
 const CUSTOM_CSHARP_GRAPH_DERIVED_KEYS = new Set([
+  // These values describe how an already-materialized Custom C# graph was
+  // produced or migrated.  The authoritative source lives on its csharp.file
+  // owner and the complete nodes/connections below describe the result.
+  // Rebuilding the same graph from a live instead of cached catalog must not
+  // manufacture a Saved Composite update.
   "catalogFingerprint",
   "catalogEngineVersion",
   "catalogSource",
@@ -36,6 +48,8 @@ const COMPOSITE_LINK_PARAMETER_KEYS = new Set([
   "savedApiCompositeId",
   "savedApiCompositeUpdatedAt",
   "apiCompositeFingerprint",
+  // These two values are mirrors of the owned Composite JSON.  The owned
+  // boundaryPorts and nodes remain part of the comparison in full.
   "boundaryPorts",
   "memberCount"
 ]);
@@ -76,6 +90,9 @@ const STREAM_PAGE_TOKEN = Object.freeze({
   stringPart: 14,
   endString: 15
 });
+// A valid project may occupy the complete 512 MiB project-file allowance.
+// This is a validity ceiling, not a retention budget.  Soft budgets below may
+// evict/retry, but can never reject one otherwise valid Composite.
 const MAX_STREAMED_JSON_CHARACTERS = Math.max(
   512 * 1024 * 1024,
   positiveWorkerLimit(
@@ -148,6 +165,8 @@ function assertJsonScalar(value, path) {
     case "undefined":
     case "function":
     case "symbol":
+      // Object callers omit these before canonicalization. Array callers
+      // preserve the positional shape by passing null, as JSON.stringify does.
       return null;
     default:
       throw jsonError(
@@ -349,6 +368,8 @@ function canonicalNode(node, index, state, path, scopes) {
         ) {
           continue;
         }
+        // Missing and the normal non-mirrored layout are the same node
+        // contract.  Only mirrored changes socket orientation.
         if (
           parameterKey === "portLayout" &&
           parameters[parameterKey] !== "mirrored"
@@ -383,6 +404,9 @@ function canonicalNode(node, index, state, path, scopes) {
       ]);
       continue;
     }
+    // The sanitizer writes explicit null while older/live graph records may
+    // omit natural dimensions.  Neither changes rendered or generated graph
+    // content.
     if (
       (key === "width" || key === "height") &&
       node[key] === null
@@ -500,6 +524,8 @@ function canonicalConnection(connection, index, state, path, scopes) {
           )
     ]);
   }
+  // Retain the source identity only for resolving point references above; it
+  // never enters the canonical JSON itself.
   void sourceConnectionId;
   return canonicalPropertyEntries(entries, path);
 }
@@ -747,6 +773,10 @@ function canonicalGraph(
     const scopes = [scope, ...ancestorScopes];
     const entries = [];
     for (const key of Object.keys(graph)) {
+      // These fields are stored in the real project JSON, but they describe
+      // only how a graph is being viewed.  Exclude them at every canonical
+      // graph boundary (root, nested Composite and Custom C#) without
+      // suppressing same-named data inside nodes, parameters or metadata.
       if (
         GRAPH_CACHE_KEYS.has(key) ||
         GRAPH_PRESENTATION_KEYS.has(key) ||
@@ -757,6 +787,10 @@ function canonicalGraph(
       ) {
         continue;
       }
+      // Old/live Custom C# registries may materialize a redundant source copy
+      // beside the authoritative csharp.file owner.  Missing/null and an exact
+      // copy are one representation.  A divergent registry source remains in
+      // the canonical JSON and therefore can never be hidden by this rule.
       if (
         graphKind === "custom-csharp" &&
         key === "source" &&
@@ -1550,6 +1584,7 @@ function installRetainedBaseline(key, baseline) {
 function retainedBaseline(key) {
   const baseline = baselineByIdentity.get(key);
   if (!baseline) return null;
+  // Map insertion order provides a bounded, allocation-free LRU policy.
   baselineByIdentity.delete(key);
   baselineByIdentity.set(key, baseline);
   return baseline;
@@ -1700,6 +1735,8 @@ function executeCompositeOperation(
       ok: true,
       stale: false,
       transport,
+      // This exact string comparison decides equality.  Fingerprints are
+      // diagnostic/cache indices only and can never hide a hash collision.
       equivalent: baseline.serialized === candidate.serialized,
       baselineRevision: baseline.revision,
       baselineFingerprint: baseline.fingerprint,
@@ -1770,6 +1807,9 @@ function processRequest(request) {
         `Unsupported streamed Composite target operation '${String(request.targetOperation)}'.`
       );
     }
+    // One in-progress candidate per placed instance/record controller.  A new
+    // begin is itself a control message that releases any abandoned previous
+    // stream for that identity, including another ID at the same revision.
     for (const [activeKey, snapshot] of streamedSnapshots) {
       if (snapshot.identityKey === key) {
         discardStreamedSnapshot(activeKey);
@@ -1986,6 +2026,9 @@ function processRequest(request) {
         reason: "staged-baseline-not-installed"
       });
     }
+    // Promotion happens only after the caller's durable transaction commits.
+    // Move the already-canonical exact string instead of retransmitting or
+    // canonicalizing a multi-megabyte graph on the UI thread.
     dropRetainedBaseline(sourceBaselineKey);
     const baseline = {
       ...staged,
@@ -2088,6 +2131,8 @@ function handleWorkerMessage(event) {
 
 self.addEventListener("message", handleWorkerMessage);
 
+// The frozen test seam executes the exact production request path.  It also
+// makes the protocol inspectable without adding an import/module dependency.
 Object.defineProperty(self, "RMLSavedApiCompositeCompareWorker", {
   value: Object.freeze({
     moduleId: SAVED_API_COMPOSITE_COMPARE_WORKER_MODULE_ID,
@@ -2165,6 +2210,10 @@ if (savedApiCompositeCompareWorkerThread) {
   typeof savedApiCompositeCompareWorkerScope ===
     "object"
 ) {
+  // Browsers do not agree on direct classic Worker loading from file://.
+  // Loading this same file as an ordinary script during startup supplies a
+  // byte-for-byte worker bootstrap for a Blob URL.  Canonicalization still
+  // runs only inside that worker; the page merely holds the source string.
   Object.defineProperty(
     savedApiCompositeCompareWorkerScope,
     "RMLSavedApiCompositeCompareWorkerBootstrap",

@@ -177,6 +177,12 @@
     ].join("|");
   }
 
+  // Graph-codegen deliberately uses a slightly less opinionated type
+  // normalizer than the graph registry: a nullable suffix is meaningful to
+  // catalog projection even though the registry usually resolves it to the
+  // underlying graph type. Keep this identity local to the index so moving
+  // projection preparation off the interaction path does not change which
+  // catalog rows are selected.
   function catalogProjectionTypeName(value) {
     return String(value || "")
       .trim()
@@ -3130,6 +3136,10 @@
         );
       }
 
+      // No callback or yield occurs between the verified registry/catalog
+      // commit and this final publication. Consumers therefore see either
+      // the preceding complete index or this complete matching index, never
+      // one belonging to a factory transaction that has not verified.
       publishCatalogProjectionIndex(
         stagedCatalogProjectionIndex
       );
@@ -3460,6 +3470,10 @@
       }
       return factoryReady;
     }
+
+    // Initial boot and later rebuilds use the same staged publication path.
+    // That keeps live catalogs, preserved placeholders and type definitions
+    // behind one epoch/lease instead of exposing a partially built registry.
     factoryBuildPromise =
       queueFactoryOperation(
         lease =>

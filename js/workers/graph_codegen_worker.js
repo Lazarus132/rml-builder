@@ -664,6 +664,9 @@ async function ensureRuntime(
       self.RMLFrooxComponentCatalog =
         catalog;
     } else {
+      // No Live/cache catalog is a supported portable-import state. Do not
+      // impersonate one with an empty catalog: api_nodes would correctly try
+      // to verify it and report a bogus zero-node factory failure.
       delete self.RMLResoniteApiCatalog;
       delete self.RMLFrooxComponentCatalog;
     }
@@ -997,6 +1000,9 @@ function customCSharpCatalogDefinitions(support) {
     return definitions;
   }
 
+  // Visual C# uses the complete catalog type-name set to disambiguate short
+  // C# names.  Keep that semantic input without cloning the catalog itself:
+  // these small type-index records are never emitted as graph nodes.
   for (let index = 0; index < typeNames.length; index += 1) {
     const typeName = String(
       typeNames[index] || ""

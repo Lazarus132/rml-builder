@@ -307,6 +307,9 @@
     }
     let encodedPayload =
       new TextEncoder().encode(payload);
+    // The encoded bytes are all WebCrypto needs. Drop the potentially very
+    // large UTF-16 JSON string before awaiting the digest so it can be
+    // reclaimed instead of staying live for the full hash operation.
     payload = "";
     const digest = await subtle.digest(
       "SHA-256",
@@ -347,6 +350,10 @@
     return bytes;
   }
 
+  // Serialize only a bounded JSON value. Unlike JSON.stringify(raw), this
+  // stops as soon as a leaf cannot fit in a cache record, so a malformed
+  // single catalog entry cannot create another catalog-sized temporary
+  // string merely to discover that it is too large.
   function boundedCatalogJson(
     value,
     maximumBytes = CACHE_CHUNK_MAX_BYTES
@@ -1278,6 +1285,8 @@
     );
   }
 
+  // The RuntimeBridge owns the existing Cached/Live badge. A cache install,
+  // factory rebuild or catalog error must never override transport state.
   function updateStatus() { window.RMLRuntimeBridge?.renderStatus?.(); }
   function updateUnavailableStatus() { updateStatus(); }
 
@@ -2476,6 +2485,8 @@
           staleGeneration ===
             activeGeneration
         ) {
+          // A committed generation may leave only its tiny staging marker if
+          // the browser closed between the atomic commit and housekeeping.
           await clearOwnedCatalogStaging(
             database,
             staleGeneration
@@ -2548,6 +2559,9 @@
       manifest.contentHash =
         integrity.hash;
 
+      // This is the only activation step. Until this small manifest commits,
+      // every chunk in the new generation is unreachable and the previous
+      // complete generation remains authoritative.
       await commitCatalogCacheManifest(
         database,
         manifest
@@ -2645,6 +2659,9 @@
         "The verified legacy catalog cache could not be migrated to chunks.",
         error
       );
+      // A v2 record already has its legacy full-payload SHA-256 and remains a
+      // valid fallback if migration runs out of space. An unhashed v1 record
+      // is admitted only after the protected chunk generation commits.
       return verifiedV2;
     }
   }
@@ -3102,6 +3119,9 @@
       );
     }
 
+    // Initial cache discovery can still be in flight here. Let it settle
+    // before committing the requested catalog so an older cache snapshot
+    // cannot overwrite the active catalog while this activation is waiting.
     await baseModNodesReady;
     await ensureApiNodesModuleLoaded();
 
@@ -3184,6 +3204,8 @@
 
   async function synchronizeScannerStatus(options = {}) {
     const session = currentScannerConnection();
+    // Imports and renders may use the authorized cache but never initiate a
+    // scanner request. Only the Cached/Live button supplies manualSession.
     if (session.mode !== "live") return false;
     if (scannerCheckGeneration === session.generation) {
       if (scannerCheckPromise) return scannerCheckPromise;
@@ -3656,6 +3678,9 @@
       }
     }
 
+    // Mixed cached modules may expose the correct version metadata without the
+    // newer verifier. Keep the loader fail-closed and independently validate
+    // the live registry in that case.
     const registry =
       window.RMLModNodeRegistry;
     const definitions =
@@ -4174,6 +4199,9 @@
     const activeReport =
       window.RMLApiNodeFactoryReport;
 
+    // Repeated imports must reuse the already committed catalog/factory pair.
+    // Re-reading and normalizing the roughly 160 MB scanner cache here creates
+    // a second short-lived catalog tree without improving verification.
     if (
       activeCatalog &&
       factoryMatchesCatalog(
@@ -4947,6 +4975,8 @@
 
   function synchronizeConnectedSession(connection = currentScannerConnection()) {
     if (connection.mode === "live") {
+      // Only the badge can open a session. Catalog initialization may reuse that
+      // session, but never opens or retries a transport connection itself.
       void synchronizeScannerStatus({ manualSession: connection });
     } else {
       demoteLiveFactoryReport();
@@ -4979,6 +5009,10 @@
           "visual-csharp-nodes",
           "visual_csharp.js"
         );
+        // The lightweight API module publishes the preserved-contract
+        // controller synchronously. Loading it as part of the base set makes
+        // that controller available before a restored graph is sanitized,
+        // even when no live or cached catalog exists.
         await ensureApiNodesModuleLoaded();
 
         return true;

@@ -4613,6 +4613,7 @@ pre {
     var(--rml-attr-rml-load-progress, 8%);
 }
 
+/* Native Windows 32-bit Easter egg and pre-bootstrap architecture gate. */
 html[data-rml-architecture-gate="pending"],
 html[data-rml-architecture-gate="blocked"] {
   background: #030912;

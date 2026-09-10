@@ -5,6 +5,9 @@ const DEFAULT_PROJECT_MAX_BYTES =
 const GZIP_MAGIC_FIRST = 0x1f;
 const GZIP_MAGIC_SECOND = 0x8b;
 
+// Large draft snapshots arrive as the same bounded token stream used by the
+// graph-code-generation transport.  Rebuilding the value in this worker keeps
+// the browser's main thread away from one monolithic structured-clone step.
 const PROJECT_STREAM_TOKEN = Object.freeze({
   null: 1,
   false: 2,

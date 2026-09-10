@@ -1861,6 +1861,13 @@ function apiCompositeVisibleDocument() {
 function activeGraphCustomCSharpFileRegistry({
     create = false
   } = {}) {
+    // While a Custom C# graph is visible, `graph` is that graph's working
+    // view; its registry belongs to the document containing the csharp.file
+    // owner.  Using the visible canvas here made the Root case read/create a
+    // registry on the Custom C# graph itself, while nested API Composite cases
+    // happened to work through apiCompositeVisibleDocument().  The editor
+    // already carries the exact owner-document identity, so use it for every
+    // caller (capture, reopen certificates, Optimize/Open state and codegen).
     const customOwnerDocument =
       typeof customCSharpEditor !==
           "undefined" &&
@@ -2448,6 +2455,12 @@ function apiCompositeBoundaryPortSpecification(
     if (currentSpecification) {
       return currentSpecification;
     }
+
+    // A real current definition is authoritative. Its missing port means the
+    // contract no longer publishes that endpoint; an older portable contract
+    // on the node must never resurrect it as a ghost Composite boundary.
+    // The stored fallback is only for a definition that is genuinely absent
+    // or for the deliberately registered offline/unavailable placeholder.
     if (
       definition &&
       definition.unavailableApiContract !==
@@ -2456,6 +2469,12 @@ function apiCompositeBoundaryPortSpecification(
       return null;
     }
 
+    // A locally restored project can be opened before its catalog-generated
+    // definitions have been rebuilt. The portable contract saved on the node
+    // is authoritative enough to preserve the existing Composite boundary
+    // until the normal, confirmed catalog-replacement flow can run. Without
+    // this fallback, sanitizing an offline graph would destructively remove a
+    // valid exposed boundary simply because the live registry is not ready.
     const storedContract =
       node.apiContract &&
       typeof node.apiContract === "object" &&
@@ -2893,6 +2912,10 @@ function reconcileApiCompositeBoundaryTree(
               ? child.nodes.length
               : 0;
 
+          // Every real child contract remains published through every
+          // unconnected ancestor. This also repairs partially stored chains
+          // and restores the outer contract after an internal wire is
+          // removed; user wires are deliberately never recreated.
           if (!isRoot) {
             for (const childBoundary of
               childBoundaries) {
@@ -4088,6 +4111,11 @@ function captureApiCompositeEditorView(
         ...existing,
         ...graphViewFrom(graph)
       };
+      // This is the trusted no-content-change capture path. Preserve an
+      // existing identity payload byte-for-byte via the spread above, and do
+      // not materialize a multi-megabyte identity map on legacy documents
+      // merely because the user navigated away and back. The mutating/default
+      // path below still sanitizes and creates the required identity map.
       return apiCompositeEditorCommitDocument(
         apiCompositeEditor,
         captured
@@ -4791,6 +4819,9 @@ function withRuntimeRootGraph(callback) {
           customCSharpEditor = null;
         }
       }
+      // Root/codegen graph swaps are synchronous computation only. Restore the
+      // visible level's certified analysis and leave its DOM, geometry and GPU
+      // presentation untouched.
       currentAnalysis =
         savedPresentationAnalysis;
       customCSharpRootOperation = false;
@@ -7481,6 +7512,10 @@ function graphAnalysisSemanticToken(
     ) {
       return identityCached.token;
     }
+
+    // Materialize canonical collector types before taking the registry
+    // snapshot. This is also done by analysis and keeps the first and later
+    // tokens identical.
     graphConcreteTypes();
 
     const fingerprint =
@@ -9566,11 +9601,16 @@ async function analyzeGraphConnectionsAsync(
         total: 1
       }
     );
+    // The callback is user code and can synchronously mutate the active
+    // graph or start a newer request. Re-check before entering the otherwise
+    // uninterrupted solver section.
     assertCurrent();
     const result = analyzeWithAutoVectors(
       requestedConnections,
       null
     );
+    // Analysis is synchronous after the yielded task, so no application
+    // mutation can interleave before this identity/abort commit guard.
     assertCurrent({
       verifySemanticToken: false
     });
@@ -10977,6 +11017,10 @@ function synchronizeGraphForCodegen(
     typedGraphCodegenCacheKey = "";
     typedGraphCodegenCache = null;
     if (acceptedAnalysisCertificate) {
+      // The certificate is checked against the exact active semantic token
+      // by the first analysis call. Defer pruning so an expanded composite
+      // certificate can be consumed after expansion instead of validating
+      // both the container view and its generated runtime graph.
       normalizeConnectionRouting(
         graph.connections
       );
@@ -16724,6 +16768,8 @@ Object.defineProperty(
         acceptTransferredAnalysisCertificate(
           certificate
         ) {
+          // Callers must source this only from a live validation result or a
+          // graph-codegen worker response, never from project/file fields.
           return acceptGraphAnalysisCertificate(
             certificate,
             { transferred: true }

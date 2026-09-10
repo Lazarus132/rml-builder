@@ -1278,6 +1278,9 @@ function closeCustomCSharpFileGraph({
             !contentUnchanged ||
             Boolean(openPreparation),
           refreshCompositeActions: true,
+          // The Custom document was committed and published while its stable
+          // owner path was still active.  This parent pass only persists the
+          // complete tree and must not create a second parent revision.
           mutationClass: "view",
           acceptedMutation:
             currentAcceptedGraphDocumentMutation(
@@ -4437,6 +4440,13 @@ function startCustomCSharpSourceGraphSynchronization(
     if (!customCSharpOwnerBindingCurrent(binding)) {
       return Promise.resolve(false);
     }
+    // Source-driven and button-driven graph builds are one operation.  Going
+    // directly to the worker here used to bypass the shared task/controller
+    // registry: the inspector button reported aria-busy="false" and clicking
+    // it could start a second synchronization for the same owner.  Route every
+    // source build through the same lifecycle so its visible state, promotion
+    // to "open after sync", cancellation and newest-edit-wins guarantee all
+    // describe the same task.
     return openCustomCSharpFileGraphSynced(
       binding.owner.id,
       {

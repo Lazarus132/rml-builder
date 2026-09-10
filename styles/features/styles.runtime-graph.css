@@ -68,6 +68,10 @@
   z-index: 9990;
   pointer-events: none;
   border: 2px solid rgba(112, 207, 255, 0.96);
+  /* A non-zero compositor opacity keeps the already-painted layer resident;
+     exact zero lets Chromium discard it and repaint the whole stage when the
+     editable overlay returns. At 0.001 it is visually imperceptible behind
+     the complete GPU image while remaining hit-testable. */
   opacity: 0.001;
   box-shadow:
     0 0 0 1px rgba(8, 12, 18, 0.9),
@@ -3083,6 +3087,7 @@ body.rml-node-graph-mode.rml-graph-edit-mode #inspector-content {
   font: 13px system-ui, sans-serif;
 }
 
+/* v799: measurable, non-interactive staging until real scene readiness. */
 .rml-graph-root[data-rml-graph-phase="preparing"] > .rml-graph-viewport,
 .rml-graph-root[data-rml-graph-phase="failed"] > .rml-graph-viewport {
   visibility: hidden;
@@ -3096,6 +3101,7 @@ body.rml-node-graph-mode.rml-graph-edit-mode #inspector-content {
   pointer-events: none;
 }
 
+/* 1.9: SVG capacity is a settled view; the fallback notice stays in the toolbar flow. */
 .rml-graph-root[data-rml-graph-phase="svg-blocked"] > .rml-graph-viewport {
   visibility: hidden;
   pointer-events: none;

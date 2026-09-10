@@ -1163,6 +1163,9 @@ function requestExportPreflight({ prepareStyles = false } = {}) {
           })
         );
       } else {
+        // A tab can contain same-release cached modules from before the export
+        // integrity gate existed. Rebuild once from its already active catalog;
+        // never admit portable placeholders as export definitions.
         const catalog =
           window.RMLResoniteApiCatalog ||
           window.RMLFrooxComponentCatalog;
@@ -2216,6 +2219,10 @@ function recoverProjectIoRequest(
   }
 
   if (pending.recoveryAttempted) {
+    // Two independent Worker generations failed.  Keep project I/O
+    // functional by using the compatible fallback instead of leaving the
+    // builder unable to save or load.  The fallback is only reached after
+    // both isolated Worker attempts have failed.
     dispatchProjectIoRequestOnMainThread(
       pending
     );
@@ -2719,6 +2726,9 @@ let graphCodegenWorkerCachedKey = "";
 let graphCodegenWorkerCachedResult = null;
 let graphCodegenWorkerLastError = null;
 let graphCodegenWorkerFailedKey = "";
+// This certificate only ever comes from the live validator in this page. It
+// is deliberately kept outside project state/IndexedDB and is consumed by
+// the first matching code-generation request after import.
 let pendingImportedGraphAnalysisCertificate = null;
 let graphCodegenProjectEpoch = 1;
 
@@ -2816,6 +2826,10 @@ function largeGraphCodegenKey(
     window.RMLFrooxComponentCatalog ||
     null;
 
+  // The accepted document revision is the transaction identity.  A content
+  // walk here used to stringify the complete graph inside the caller's rAF.
+  // Project replacement has its own monotonically increasing epoch, so this
+  // constant-time key cannot reuse a result from an earlier document.
   return JSON.stringify({
     projectEpoch:
       Number(projectApplicationEpoch) || 0,
@@ -3450,6 +3464,9 @@ function graphCodegenContractsMatch(
   if (!semanticIdentityMatches) {
     return false;
   }
+  // Stable-contract IDs are versioned implementation details. Older project
+  // files may carry a preceding ID algorithm even though the complete API
+  // owner, member kind and signature are unchanged.
   return true;
 }
 
@@ -4209,6 +4226,8 @@ function releaseIdleGraphCodegenWorker() {
   ) {
     return false;
   }
+  // The generated result stays cached on the main thread. Only the idle
+  // worker runtime and its small used-definition projection are discarded.
   terminateGraphCodegenWorker();
   return true;
 }
@@ -11819,6 +11838,12 @@ function clearLegacyLocalDraft(revision) {
   ) {
     return false;
   }
+
+  // IndexedDB is the durable draft store.  Mirroring a complete project to
+  // localStorage would synchronously clone/encode the document and can stall
+  // an otherwise idle interaction frame.  Old localStorage records remain
+  // readable during restore, but every successful modern write removes the
+  // stale compatibility copy.
   try {
     localStorage.removeItem(
       ACTIVE_STORAGE_KEY
@@ -12081,6 +12106,9 @@ function flushProjectDraftForLifecycle() {
   projectDraftDiagnostics
     .lifecycleFlushes += 1;
 
+  // Commit any editor-local delta first.  A real mutation advances the
+  // project revision through its normal persist() path; lifecycle events do
+  // not invent another revision of their own.
   window.RMLDynamicGraphHost
     ?.flushPendingEditorEdits?.();
 
@@ -29223,6 +29251,14 @@ async function ensureProjectRuntimePrerequisites(
 
   }
 
+  // The project-level Replace confirmation has already happened before this
+  // prerequisite pass. Normalize the real Composite contracts now, while the
+  // imported document is still isolated from the open project. This must run
+  // in portable/offline mode too: an internally connected endpoint is not an
+  // outer port, and its outer wire/branch descendants are intentionally
+  // removed by the confirmed replacement. Planning and preservation hashes
+  // below are derived from this reconciled document, never from the stale
+  // pre-reconciliation topology.
   const compositeTopology =
     window.RMLTypedNodeGraphGenerator
       ?.reconcileCompositeBoundaries;
@@ -31305,6 +31341,11 @@ async function openProjectDialog() {
   if (sequence !== projectDialogOpenSequence) {
     return;
   }
+
+  // A Runtime Graph operation can enqueue a Builder notice immediately
+  // before this dialog is reopened. Let every already queued message finish
+  // first; otherwise the later Project dialog enters the native top layer
+  // above that notice and makes its buttons physically unreachable.
   await waitForBuilderMessageQueueIdle();
 
   if (sequence !== projectDialogOpenSequence) {
@@ -31359,6 +31400,8 @@ let builderMessageQueueTail =
   Promise.resolve();
 
 async function waitForBuilderMessageQueueIdle() {
+  // New entries may be appended while an older one is resolving. Observe
+  // the tail until the same promise remains current after it settles.
   while (true) {
     const observedTail =
       builderMessageQueueTail;
@@ -31470,6 +31513,9 @@ function presentBuilderMessage({
 }
 
 function showBuilderMessage(options = {}) {
+  // Every caller shares one physical <dialog>. Serialize presentations so
+  // an unawaited informational notice cannot cancel, overwrite or consume
+  // the confirmation click of the message queued immediately after it.
   const present = () =>
     presentBuilderMessage(options);
   const queued =
@@ -31671,6 +31717,9 @@ async function loadProjectJsonFile(
       );
     }
 
+    // File import is a high-allocation boundary. Release only replaceable,
+    // idle caches and worker runtimes; active editor/compiler work is never
+    // interrupted and no browser-specific forced-GC hook is used.
     releaseIdleBuilderMemory({
       discardGeneratedBuild: true
     });
@@ -31741,6 +31790,9 @@ async function loadProjectJsonFile(
         host.importSavedApiComposites(
           projectSource
         );
+      // The importer immediately sanitizes its own detached records. Drop the
+      // original worker-transfer tree while catalog resolution and dialogs
+      // are still running instead of retaining both complete trees.
       projectFile.value = null;
       projectSource = null;
       const imported = await importPromise;
@@ -31881,6 +31933,10 @@ async function loadProjectJsonFile(
           confirmLabel: "OK"
         });
       }
+      // Keep the Project dialog out of the native top layer until every
+      // import notice has been acknowledged. Edge and Firefox otherwise
+      // disagree about which of two simultaneous modal dialogs receives
+      // physical pointer events.
       await openProjectDialog();
       return;
     }
@@ -42245,6 +42301,10 @@ async function initialize() {
   elements.builderMessageDialog.addEventListener(
     "close",
     () => {
+      // Chromium dispatches <dialog>'s close event asynchronously. A FIFO
+      // successor can already have reopened this same element by then; that
+      // stale event belongs to the previous presentation and must not cancel
+      // the new one.
       if (
         !elements.builderMessageDialog.open &&
         activeBuilderMessageResolver
