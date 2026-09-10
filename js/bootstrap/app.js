@@ -32,17 +32,17 @@ const SAVED_API_COMPOSITE_IMPORT_MAX_BYTES =
 const PROJECT_FILE_MAX_BYTES = 512 * 1024 * 1024;
 const PROJECT_TREE_MAX_DEPTH = 32;
 const PROJECT_TREE_MAX_ITEMS = 1000000;
-const PROJECT_LOCAL_STORAGE_MAX_BYTES =
-  2 * 1024 * 1024;
 const PROJECT_DRAFT_DATABASE_NAME =
   "rml-builder-project-drafts";
 const PROJECT_DRAFT_DATABASE_VERSION = 1;
 const PROJECT_DRAFT_STORE_NAME = "drafts";
+const PROJECT_DRAFT_ENCODING =
+  "json-gzip-token-stream-v1";
 const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "help-shortcut-key-groups-20260907-v1.10";
+  "1.20.31-universal-presentation-dev23";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -193,18 +193,34 @@ function removeLegacyHelpHashFromAddress() {
 removeLegacyHelpHashFromAddress();
 
 function exposeRmlBuilderBuildId() {
+  const hasPublishedBuildId =
+    Object.hasOwn(
+      window,
+      "RMLBuilderBuildId"
+    );
+  if (
+    hasPublishedBuildId &&
+    window.RMLBuilderBuildId !==
+      RML_BUILDER_BUILD_ID
+  ) {
+    throw new Error(
+      `Builder module version mismatch: index.html published '${String(window.RMLBuilderBuildId || "missing")}', but app.js is '${RML_BUILDER_BUILD_ID}'. Reload the Builder without cached files. No project data was changed.`
+    );
+  }
+  if (!hasPublishedBuildId) {
+    Object.defineProperty(
+      window,
+      "RMLBuilderBuildId",
+      {
+        value: RML_BUILDER_BUILD_ID,
+        writable: false,
+        enumerable: true,
+        configurable: false
+      }
+    );
+  }
   document.documentElement.dataset
     .rmlBuilderBuild = RML_BUILDER_BUILD_ID;
-  Object.defineProperty(
-    window,
-    "RMLBuilderBuildId",
-    {
-      value: RML_BUILDER_BUILD_ID,
-      writable: false,
-      enumerable: true,
-      configurable: true
-    }
-  );
 }
 
 exposeRmlBuilderBuildId();
@@ -947,20 +963,6 @@ function renderGeneratedDiagnostics(
   ].join("");
 }
 
-function exportPreflightReady(
-  synchronousDiagnostics = null
-) {
-  if (window.RMLDynamicGraphHost?.hasPendingEditorEdits?.()) return false;
-  const diagnostics =
-    synchronousDiagnostics === null
-      ? getDiagnostics()
-      : synchronousDiagnostics;
-  return (
-    diagnostics.length === 0 &&
-    exportReadiness.phase === "ready"
-  );
-}
-
 function applyPrimaryExportAvailability(synchronousDiagnostics = getDiagnostics()) {
   const busy = Boolean(exportPreflightRequest) || exportDeliveryBusy;
   for (const button of [elements.copyCodeBottom, elements.downloadCode]) {
@@ -1136,10 +1138,110 @@ function requestExportPreflight({ prepareStyles = false } = {}) {
         ...stored, revision: (Number(stored.revision) || 0) + 1
       };
     }
-    graphCodegenFingerprintSource = null;
     graphCodegenWorkerCachedKey = "";
     graphCodegenWorkerCachedResult = null;
     request.inputRevision = projectDraftPersistRevision;
+    const requiredExportCatalogNodes =
+      projectRequiredCatalogNodes({
+        extensions: state.extensions
+      }).filter(requirement =>
+        requirement.catalogScope === "api"
+      );
+    if (requiredExportCatalogNodes.length > 0) {
+      const gate =
+        window.RMLCatalogImportGate;
+      let catalogResult = null;
+      if (
+        typeof gate?.ensureForExport ===
+          "function"
+      ) {
+        catalogResult = await awaitExportStep(
+          request,
+          gate.ensureForExport({
+            requiredNodes:
+              requiredExportCatalogNodes
+          })
+        );
+      } else {
+        const catalog =
+          window.RMLResoniteApiCatalog ||
+          window.RMLFrooxComponentCatalog;
+        const controller =
+          window.RMLApiNodeFactoryController;
+        const expectedCatalogFingerprint =
+          String(
+            catalog?.catalogFingerprint || ""
+          );
+        const expectedCatalog = [
+          expectedCatalogFingerprint,
+          String(
+            catalog?.engineVersion || ""
+          )
+        ].join("|");
+        if (
+          !catalog ||
+          !expectedCatalogFingerprint ||
+          typeof controller?.rebuild !==
+            "function" ||
+          typeof gate?.ensureForImport !==
+            "function"
+        ) {
+          throw new Error(
+            "The verified API catalog export gate is unavailable. Reload the Builder and try Export again."
+          );
+        }
+        await awaitExportStep(
+          request,
+          controller.rebuild(catalog)
+        );
+        const activeCatalog =
+          window.RMLResoniteApiCatalog ||
+          window.RMLFrooxComponentCatalog;
+        const activeIdentity = [
+          String(
+            activeCatalog
+              ?.catalogFingerprint || ""
+          ),
+          String(
+            activeCatalog
+              ?.engineVersion || ""
+          )
+        ].join("|");
+        if (
+          activeCatalog !== catalog ||
+          activeIdentity !== expectedCatalog
+        ) {
+          throw new Error(
+            "The active API catalog changed while the export registry was being repaired. Export was not prepared."
+          );
+        }
+        catalogResult = await awaitExportStep(
+          request,
+          gate.ensureForImport({
+            requiredNodes:
+              requiredExportCatalogNodes
+          })
+        );
+      }
+      assertExportRequestCurrent(request);
+      if (
+        catalogResult?.verified !== true ||
+        catalogResult?.available !== true ||
+        Number(catalogResult?.unresolved) > 0
+      ) {
+        const failures = Array.isArray(
+          catalogResult?.failureLabels
+        )
+          ? catalogResult.failureLabels
+              .slice(0, 8)
+          : [];
+        throw new Error(
+          failures.length > 0
+            ? `The API definitions required by this export are not verified: ${failures.join(", ")}.`
+            : "The API definitions required by this export are not verified."
+        );
+      }
+    }
     await awaitExportStep(request, Promise.all([
       ensureLazyScriptBundle("code-templates"),
       prepareStyles ? ensureLazyStyleBundle("export") : Promise.resolve(true)
@@ -1237,7 +1339,37 @@ function currentTypedRuntimeGraphIsLarge() {
   );
 }
 
+let generatedOutputRefreshPendingBeforeDom = false;
+
+function generatedOutputDomReady() {
+  return Boolean(
+    elements.generatedCode &&
+    elements.codeSummary
+  );
+}
+
+function deferGeneratedOutputUntilDomReady() {
+  if (generatedOutputDomReady()) {
+    return false;
+  }
+  generatedOutputRefreshPendingBeforeDom = true;
+  return true;
+}
+
+function flushGeneratedOutputRefreshAfterDomReady() {
+  if (
+    !generatedOutputRefreshPendingBeforeDom ||
+    !generatedOutputDomReady()
+  ) {
+    return;
+  }
+  generatedOutputRefreshPendingBeforeDom = false;
+  requestGeneratedOutputUpdate();
+}
+
 function requestGeneratedOutputUpdate() {
+  if (deferGeneratedOutputUntilDomReady()) return;
+  generatedOutputRefreshPendingBeforeDom = false;
   if (window.RMLDynamicGraphHost?.hasPendingEditorEdits?.()) return;
   if (
     currentTypedRuntimeGraphIsLarge() &&
@@ -1418,8 +1550,13 @@ const APP_SCRIPT_BASE_URL =
   window.location.href;
 
 let projectIoWorker = null;
+let projectIoWorkerGeneration = 0;
 let projectIoRequestSequence = 1;
 const projectIoPendingRequests = new Map();
+let projectIoWorkerIdleTimer = 0;
+const PROJECT_IO_WORKER_IDLE_RELEASE_MS = 1500;
+const PROJECT_IO_REQUEST_TIMEOUT_MS =
+  120000;
 const PROJECT_GZIP_MAGIC_FIRST = 0x1f;
 const PROJECT_GZIP_MAGIC_SECOND = 0x8b;
 let projectGzipFallbackLoadPromise = null;
@@ -1583,6 +1720,7 @@ async function readProjectBlobTextOnMainThread(
     if (error instanceof RangeError) {
       throw error;
     }
+    parts.length = 0;
     try {
       const codec =
         await projectGzipFallbackCodec();
@@ -1612,8 +1750,10 @@ async function readProjectBlobTextOnMainThread(
     reader.releaseLock();
   }
 
+  const text = parts.join("");
+  parts.length = 0;
   return {
-    text: parts.join(""),
+    text,
     uncompressedBytes,
     compression: "gzip"
   };
@@ -1666,6 +1806,10 @@ async function compressProjectJsonOnMainThread(
 }
 
 function projectIoWorkerInstance() {
+  if (projectIoWorkerIdleTimer) {
+    clearTimeout(projectIoWorkerIdleTimer);
+    projectIoWorkerIdleTimer = 0;
+  }
   if (projectIoWorker) {
     return projectIoWorker;
   }
@@ -1677,13 +1821,15 @@ function projectIoWorkerInstance() {
   try {
     const worker = new Worker(
       new URL(
-        "../workers/project_io_worker.js?v=11-gzip-import-recovery-v757",
+        "../workers/project_io_worker.js?v=12-streamed-draft-v758",
         APP_SCRIPT_BASE_URL
       ),
       {
         name: "rml-project-io"
       }
     );
+    const workerGeneration =
+      ++projectIoWorkerGeneration;
 
     worker.addEventListener(
       "message",
@@ -1694,7 +1840,33 @@ function projectIoWorkerInstance() {
             response.id
           );
 
-        if (!pending) {
+        if (
+          !pending ||
+          pending.worker !== worker ||
+          pending.workerGeneration !==
+            workerGeneration
+        ) {
+          return;
+        }
+
+        if (
+          response.ok !== true &&
+          pending.streamed === true &&
+          response.error?.recoverable ===
+            true
+        ) {
+          const error = new Error(
+            response.error?.message ||
+            "Project I/O worker failed while finishing the streamed draft."
+          );
+          error.name =
+            response.error?.name ||
+            "Error";
+          retireFailedProjectIoWorker(
+            worker,
+            workerGeneration,
+            error
+          );
           return;
         }
 
@@ -1703,7 +1875,30 @@ function projectIoWorkerInstance() {
         );
 
         if (response.ok === true) {
-          pending.resolve(response);
+          if (
+            pending.streamed === true &&
+            pending.streamPromise
+          ) {
+            void pending.streamPromise.then(
+              metrics => {
+                completeProjectIoRequest(
+                  pending,
+                  "resolve",
+                  {
+                    ...response,
+                    streamMetrics:
+                      metrics || null
+                  }
+                );
+              }
+            );
+          } else {
+            completeProjectIoRequest(
+              pending,
+              "resolve",
+              response
+            );
+          }
         } else {
           const error = new Error(
             response.error?.message ||
@@ -1712,7 +1907,11 @@ function projectIoWorkerInstance() {
           error.name =
             response.error?.name ||
             "Error";
-          pending.reject(error);
+          completeProjectIoRequest(
+            pending,
+            "reject",
+            error
+          );
         }
       }
     );
@@ -1720,19 +1919,35 @@ function projectIoWorkerInstance() {
     worker.addEventListener(
       "error",
       event => {
+        event.preventDefault?.();
         const error = new Error(
           event.message ||
+          event.error?.message ||
           "Project I/O worker failed."
         );
+        error.name =
+          event.error?.name || "Error";
 
-        for (const pending of
-          projectIoPendingRequests.values()) {
-          pending.reject(error);
-        }
+        retireFailedProjectIoWorker(
+          worker,
+          workerGeneration,
+          error
+        );
+      }
+    );
 
-        projectIoPendingRequests.clear();
-        worker.terminate();
-        projectIoWorker = null;
+    worker.addEventListener(
+      "messageerror",
+      () => {
+        const error = new Error(
+          "Project I/O worker returned data that could not be decoded."
+        );
+        error.name = "DataCloneError";
+        retireFailedProjectIoWorker(
+          worker,
+          workerGeneration,
+          error
+        );
       }
     );
 
@@ -1747,125 +1962,629 @@ function projectIoWorkerInstance() {
   }
 }
 
-function projectIoRequest(
+function completeProjectIoRequest(
+  pending,
+  completion,
+  value
+) {
+  if (pending.settled) {
+    return false;
+  }
+
+  if (pending.watchdogTimer) {
+    clearTimeout(pending.watchdogTimer);
+    pending.watchdogTimer = 0;
+  }
+  pending.settled = true;
+  pending[completion](value);
+  return true;
+}
+
+function armProjectIoRequestWatchdog(
+  pending,
+  worker,
+  workerGeneration,
+  id
+) {
+  const watchdogEpoch =
+    (Number(pending.watchdogEpoch) || 0) +
+    1;
+  pending.watchdogEpoch = watchdogEpoch;
+  if (pending.watchdogTimer) {
+    clearTimeout(pending.watchdogTimer);
+  }
+  pending.watchdogTimer = setTimeout(
+    () => {
+      if (
+        pending.watchdogEpoch !==
+          watchdogEpoch
+      ) {
+        return;
+      }
+      pending.watchdogTimer = 0;
+      if (
+        pending.settled ||
+        pending.worker !== worker ||
+        pending.workerGeneration !==
+          workerGeneration ||
+        projectIoPendingRequests.get(id) !==
+          pending
+      ) {
+        return;
+      }
+      const error = new Error(
+        "Project I/O worker did not respond within the bounded request time."
+      );
+      error.name = "TimeoutError";
+      retireFailedProjectIoWorker(
+        worker,
+        workerGeneration,
+        error
+      );
+    },
+    PROJECT_IO_REQUEST_TIMEOUT_MS
+  );
+}
+
+function runProjectIoRequestOnMainThread(
   operation,
   payload
 ) {
+  return new Promise((resolve, reject) => {
+    queueMicrotask(() => {
+      void (async () => {
+        if (operation === "parse") {
+          const text =
+            String(payload.text ?? "");
+          const value = JSON.parse(text);
+          return {
+            ok: true,
+            value
+          };
+        }
+
+        if (operation === "parseFile") {
+          if (
+            !payload.file ||
+            typeof payload.file.text !==
+              "function"
+          ) {
+            throw new TypeError(
+              "The project file is not a readable Blob."
+            );
+          }
+
+          const decoded =
+            await readProjectBlobTextOnMainThread(
+              payload.file,
+              Number(
+                payload.maximumBytes
+              ) || PROJECT_FILE_MAX_BYTES
+            );
+          const value =
+            JSON.parse(decoded.text);
+          if (
+            value &&
+            typeof value === "object" &&
+            !Array.isArray(value) &&
+            !(
+              payload.projectFormat &&
+              value.format ===
+                payload.projectFormat
+            ) &&
+            value.schema ===
+              payload.savedCompositeSchema &&
+            decoded.uncompressedBytes >
+              (
+                Number(
+                  payload
+                    .savedCompositeMaximumBytes
+                ) ||
+                SAVED_API_COMPOSITE_IMPORT_MAX_BYTES
+              )
+          ) {
+            throw new RangeError(
+              "The decompressed Saved API Composite JSON is larger than 32 MiB."
+            );
+          }
+          return {
+            ok: true,
+            value,
+            uncompressedBytes:
+              decoded.uncompressedBytes,
+            compressedBytes:
+              payload.file.size,
+            compression:
+              decoded.compression
+          };
+        }
+
+        if (
+          operation ===
+            "stringifyGzip" ||
+          operation ===
+            "streamStringifyGzip"
+        ) {
+          const result =
+            await compressProjectJsonOnMainThread(
+              payload.value
+            );
+          const maximumBytes = Number(
+            payload.maximumBytes
+          );
+          if (
+            Number.isFinite(maximumBytes) &&
+            maximumBytes > 0 &&
+            result.jsonBytes > maximumBytes
+          ) {
+            throw new RangeError(
+              "The project JSON exceeds the configured project limit."
+            );
+          }
+          return {
+            ok: true,
+            ...result,
+            transport:
+              operation ===
+                "streamStringifyGzip"
+                ? "main-thread-fallback"
+                : "main-fallback"
+          };
+        }
+
+        if (operation === "stringify") {
+          return {
+            ok: true,
+            text: JSON.stringify(
+              payload.value,
+              null,
+              Number(payload.space) || 0
+            )
+          };
+        }
+
+        throw new Error(
+          `Unsupported project I/O operation '${operation}'.`
+        );
+      })().then(resolve, reject);
+    });
+  });
+}
+
+function dispatchProjectIoRequestOnMainThread(
+  pending
+) {
+  if (pending.watchdogTimer) {
+    clearTimeout(pending.watchdogTimer);
+    pending.watchdogTimer = 0;
+  }
+  pending.worker = null;
+  pending.workerGeneration = 0;
+  void runProjectIoRequestOnMainThread(
+    pending.operation,
+    pending.payload
+  ).then(
+    response => {
+      completeProjectIoRequest(
+        pending,
+        "resolve",
+        response
+      );
+    },
+    error => {
+      completeProjectIoRequest(
+        pending,
+        "reject",
+        error
+      );
+    }
+  );
+}
+
+function recoverProjectIoRequest(
+  pending,
+  error,
+  {
+    preferMainThread = false
+  } = {}
+) {
+  if (pending.settled) {
+    return;
+  }
+
+  if (pending.watchdogTimer) {
+    clearTimeout(pending.watchdogTimer);
+    pending.watchdogTimer = 0;
+  }
+
+  if (
+    typeof pending.isCurrent ===
+      "function" &&
+    !pending.isCurrent()
+  ) {
+    const staleError = new Error(
+      "The project changed while its background draft snapshot was being prepared."
+    );
+    staleError.code =
+      "RML_PROJECT_DRAFT_STALE";
+    completeProjectIoRequest(
+      pending,
+      "reject",
+      staleError
+    );
+    return;
+  }
+
+  if (pending.recoveryAttempted) {
+    dispatchProjectIoRequestOnMainThread(
+      pending
+    );
+    return;
+  }
+
+  pending.recoveryAttempted = true;
+  if (preferMainThread) {
+    dispatchProjectIoRequestOnMainThread(
+      pending
+    );
+    return;
+  }
+
+  dispatchProjectIoRequest(pending);
+}
+
+function retireFailedProjectIoWorker(
+  worker,
+  workerGeneration,
+  error
+) {
+  const ownedRequests = [];
+
+  for (const [id, pending] of
+    projectIoPendingRequests) {
+    if (
+      pending.worker !== worker ||
+      pending.workerGeneration !==
+        workerGeneration
+    ) {
+      continue;
+    }
+
+    projectIoPendingRequests.delete(id);
+    if (pending.watchdogTimer) {
+      clearTimeout(pending.watchdogTimer);
+      pending.watchdogTimer = 0;
+    }
+    ownedRequests.push(pending);
+  }
+
+  worker.terminate();
+  if (projectIoWorker === worker) {
+    projectIoWorker = null;
+  }
+
+  for (const pending of ownedRequests) {
+    recoverProjectIoRequest(
+      pending,
+      error
+    );
+  }
+
+  if (ownedRequests.length === 0) {
+    scheduleProjectIoWorkerIdleRelease();
+  }
+}
+
+function dispatchStreamedProjectIoRequest(
+  pending
+) {
+  if (pending.settled) {
+    return;
+  }
+
+  if (
+    typeof pending.isCurrent ===
+      "function" &&
+    !pending.isCurrent()
+  ) {
+    const error = new Error(
+      "The project changed before its background draft snapshot started."
+    );
+    error.code =
+      "RML_PROJECT_DRAFT_STALE";
+    completeProjectIoRequest(
+      pending,
+      "reject",
+      error
+    );
+    return;
+  }
+
+  const worker = projectIoWorkerInstance();
+  if (!worker) {
+    dispatchProjectIoRequestOnMainThread(
+      pending
+    );
+    return;
+  }
+
+  const id = projectIoRequestSequence++;
+  const workerGeneration =
+    projectIoWorkerGeneration;
+  pending.worker = worker;
+  pending.workerGeneration =
+    workerGeneration;
+  projectIoPendingRequests.set(id, pending);
+  armProjectIoRequestWatchdog(
+    pending,
+    worker,
+    workerGeneration,
+    id
+  );
+
+  const streamIsCurrent = () =>
+    !pending.settled &&
+    pending.worker === worker &&
+    pending.workerGeneration ===
+      workerGeneration &&
+    projectIoPendingRequests.get(id) ===
+      pending &&
+    (
+      typeof pending.isCurrent !==
+        "function" ||
+      pending.isCurrent()
+    );
+
+  pending.streamPromise =
+    postGraphCodegenTokenStream(
+      worker,
+      id,
+      "project-draft",
+      pending.payload.value,
+      {
+        isCurrent: streamIsCurrent,
+        startFields: {
+          maximumBytes:
+            pending.payload.maximumBytes
+        },
+        onProgress: () => {
+          if (streamIsCurrent()) {
+            armProjectIoRequestWatchdog(
+              pending,
+              worker,
+              workerGeneration,
+              id
+            );
+          }
+        }
+      }
+    ).then(metrics => {
+      if (streamIsCurrent()) {
+        pending.streamMetrics = metrics;
+      }
+      return metrics;
+    }).catch(error => {
+      if (
+        projectIoPendingRequests.get(id) !==
+          pending ||
+        pending.worker !== worker ||
+        pending.workerGeneration !==
+          workerGeneration
+      ) {
+        return;
+      }
+
+      if (
+        error?.code ===
+          "RML_GRAPH_CODEGEN_STALE" ||
+        error instanceof TypeError
+      ) {
+        projectIoPendingRequests.delete(id);
+        if (pending.watchdogTimer) {
+          clearTimeout(
+            pending.watchdogTimer
+          );
+          pending.watchdogTimer = 0;
+        }
+        try {
+          worker.postMessage({
+            id,
+            operation: "streamCancel"
+          });
+        } catch {
+        }
+        if (
+          error?.code ===
+            "RML_GRAPH_CODEGEN_STALE"
+        ) {
+          error.code =
+            "RML_PROJECT_DRAFT_STALE";
+        }
+        completeProjectIoRequest(
+          pending,
+          "reject",
+          error
+        );
+        return;
+      }
+
+      retireFailedProjectIoWorker(
+        worker,
+        workerGeneration,
+        error
+      );
+    });
+}
+
+function dispatchProjectIoRequest(pending) {
+  if (pending.settled) {
+    return;
+  }
+
+  if (pending.streamed === true) {
+    dispatchStreamedProjectIoRequest(
+      pending
+    );
+    return;
+  }
+
   const worker =
     projectIoWorkerInstance();
-
   if (!worker) {
-    return new Promise(
-      (resolve, reject) => {
-        queueMicrotask(() => {
-          try {
-            if (operation === "parse") {
-              const text =
-                String(payload.text ?? "");
-              const value = JSON.parse(text);
-              resolve({
-                ok: true,
-                value,
-                fingerprint:
-                  projectIdentityFingerprint(
-                    projectIdFromSource(value)
-                  )
-              });
-              return;
-            }
-
-            if (operation === "parseFile") {
-              if (
-                !payload.file ||
-                typeof payload.file.text !== "function"
-              ) {
-                throw new TypeError(
-                  "The project file is not a readable Blob."
-                );
-              }
-
-              void readProjectBlobTextOnMainThread(
-                payload.file,
-                Number(
-                  payload.maximumBytes
-                ) || PROJECT_FILE_MAX_BYTES
-              )
-                .then(decoded => {
-                  try {
-                    const value =
-                      JSON.parse(
-                        decoded.text
-                      );
-                    resolve({
-                      ok: true,
-                      value,
-                      uncompressedBytes:
-                        decoded.uncompressedBytes,
-                      compressedBytes:
-                        payload.file.size,
-                      compression:
-                        decoded.compression,
-                      fingerprint:
-                        projectIdentityFingerprint(
-                          projectIdFromSource(value)
-                        )
-                    });
-                  } catch (error) {
-                    reject(error);
-                  }
-                }, reject);
-              return;
-            }
-
-            if (
-              operation ===
-                "stringifyGzip"
-            ) {
-              void compressProjectJsonOnMainThread(
-                payload.value
-              ).then(resolve, reject);
-              return;
-            }
-
-            if (operation === "stringify") {
-              resolve({
-                ok: true,
-                text: JSON.stringify(
-                  payload.value,
-                  null,
-                  Number(payload.space) || 0
-                )
-              });
-              return;
-            }
-
-            throw new Error(
-              `Unsupported project I/O operation '${operation}'.`
-            );
-          } catch (error) {
-            reject(error);
-          }
-        });
-      }
+    dispatchProjectIoRequestOnMainThread(
+      pending
     );
+    return;
   }
 
   const id =
     projectIoRequestSequence++;
+  const workerGeneration =
+    projectIoWorkerGeneration;
 
+  pending.worker = worker;
+  pending.workerGeneration =
+    workerGeneration;
+  projectIoPendingRequests.set(id, pending);
+  armProjectIoRequestWatchdog(
+    pending,
+    worker,
+    workerGeneration,
+    id
+  );
+
+  try {
+    worker.postMessage({
+      id,
+      operation: pending.operation,
+      ...pending.payload
+    });
+  } catch (error) {
+    if (
+      projectIoPendingRequests.get(id) !==
+        pending ||
+      pending.worker !== worker ||
+      pending.workerGeneration !==
+        workerGeneration
+    ) {
+      return;
+    }
+
+    if (error?.name === "DataCloneError") {
+      projectIoPendingRequests.delete(id);
+      if (pending.watchdogTimer) {
+        clearTimeout(
+          pending.watchdogTimer
+        );
+        pending.watchdogTimer = 0;
+      }
+      recoverProjectIoRequest(
+        pending,
+        error,
+        { preferMainThread: true }
+      );
+      return;
+    }
+
+    retireFailedProjectIoWorker(
+      worker,
+      workerGeneration,
+      error
+    );
+  }
+}
+
+function releaseProjectIoWorkerIfIdle() {
+  if (
+    !projectIoWorker ||
+    projectIoPendingRequests.size > 0
+  ) {
+    return false;
+  }
+
+  projectIoWorker.terminate();
+  projectIoWorker = null;
+  if (projectIoWorkerIdleTimer) {
+    clearTimeout(projectIoWorkerIdleTimer);
+    projectIoWorkerIdleTimer = 0;
+  }
+  return true;
+}
+
+function scheduleProjectIoWorkerIdleRelease() {
+  if (projectIoWorkerIdleTimer) {
+    clearTimeout(projectIoWorkerIdleTimer);
+  }
+  projectIoWorkerIdleTimer = setTimeout(() => {
+    projectIoWorkerIdleTimer = 0;
+    releaseProjectIoWorkerIfIdle();
+  }, PROJECT_IO_WORKER_IDLE_RELEASE_MS);
+}
+
+function projectIoRequest(
+  operation,
+  payload
+) {
   return new Promise(
     (resolve, reject) => {
-      projectIoPendingRequests.set(
-        id,
-        { resolve, reject }
-      );
-      worker.postMessage({
-        id,
+      const pending = {
         operation,
-        ...payload
-      });
+        payload,
+        resolve,
+        reject,
+        worker: null,
+        workerGeneration: 0,
+        recoveryAttempted: false,
+        settled: false,
+        watchdogTimer: 0,
+        watchdogEpoch: 0
+      };
+      dispatchProjectIoRequest(pending);
     }
-  );
+  ).finally(() => {
+    scheduleProjectIoWorkerIdleRelease();
+  });
+}
+
+function projectIoStreamedGzipRequest(
+  value,
+  {
+    maximumBytes =
+      PROJECT_FILE_MAX_BYTES,
+    isCurrent = null
+  } = {}
+) {
+  return new Promise(
+    (resolve, reject) => {
+      const pending = {
+        operation:
+          "streamStringifyGzip",
+        payload: {
+          value,
+          maximumBytes
+        },
+        resolve,
+        reject,
+        worker: null,
+        workerGeneration: 0,
+        recoveryAttempted: false,
+        settled: false,
+        streamed: true,
+        isCurrent:
+          typeof isCurrent ===
+            "function"
+            ? isCurrent
+            : null,
+        streamPromise: null,
+        streamMetrics: null,
+        watchdogTimer: 0,
+        watchdogEpoch: 0
+      };
+      dispatchProjectIoRequest(pending);
+    }
+  ).finally(() => {
+    scheduleProjectIoWorkerIdleRelease();
+  });
 }
 
 async function createCompressedJsonBlob(
@@ -1916,13 +2635,82 @@ function formatProjectByteLimit(value) {
   })} MiB`;
 }
 
+function releaseIdleBuilderMemory({
+  discardGeneratedBuild = false
+} = {}) {
+  const graphWorkerReleased =
+    releaseIdleGraphCodegenWorker();
+  const projectWorkerReleased =
+    releaseProjectIoWorkerIfIdle();
+  const compilerWorkers =
+    window.RMLCSharp14Roslyn
+      ?.releaseIdleWorkers?.() ||
+    Object.freeze({ released: 0, busy: 0 });
+  const validationCacheReleased =
+    window.RMLCompile
+      ?.releaseCaches?.() === true;
+  let generatedBuildReleased = false;
+
+  if (
+    discardGeneratedBuild &&
+    !browserCompilerBuilding &&
+    browserCompilerBuildCache
+  ) {
+    invalidateBrowserCompilerBuild(false);
+    generatedBuildReleased = true;
+  }
+
+  const result = Object.freeze({
+    graphWorkerReleased,
+    projectWorkerReleased,
+    compilerWorkersReleased:
+      Math.max(
+        0,
+        Number(
+          compilerWorkers.released
+        ) || 0
+      ),
+    compilerWorkersBusy:
+      Math.max(
+        0,
+        Number(compilerWorkers.busy) || 0
+      ),
+    validationCacheReleased,
+    generatedBuildReleased
+  });
+  document.dispatchEvent(
+    new CustomEvent(
+      "rml-builder:idle-memory-released",
+      { detail: result }
+    )
+  );
+  return result;
+}
+
+Object.defineProperty(
+  window,
+  "RMLMemoryController",
+  {
+    value: Object.freeze({
+      version: 1,
+      releaseIdle: options =>
+        releaseIdleBuilderMemory(options)
+    }),
+    writable: false,
+    enumerable: false,
+    configurable: true
+  }
+);
+
 const LARGE_GRAPH_BACKGROUND_CODEGEN_NODE_THRESHOLD =
   1000;
 const LARGE_GRAPH_BACKGROUND_CODEGEN_CONNECTION_THRESHOLD =
   2000;
 let graphCodegenWorker = null;
 let graphCodegenWorkerCatalogKey = "";
-let graphCodegenWorkerNeedsCatalog = false;
+let graphCodegenWorkerIdleTimer = 0;
+const GRAPH_CODEGEN_WORKER_IDLE_RELEASE_MS =
+  10000;
 let graphCodegenWorkerSequence = 1;
 let graphCodegenWorkerRunning = false;
 let graphCodegenWorkerQueuedBuild = null;
@@ -1930,12 +2718,31 @@ let graphCodegenWorkerActiveBuild = null;
 let graphCodegenWorkerCachedKey = "";
 let graphCodegenWorkerCachedResult = null;
 let graphCodegenWorkerLastError = null;
+let graphCodegenWorkerFailedKey = "";
+let pendingImportedGraphAnalysisCertificate = null;
 let graphCodegenProjectEpoch = 1;
-let graphCodegenFingerprintSource = null;
-let graphCodegenFingerprintRevision = -1;
-let graphCodegenFingerprintNodeCount = -1;
-let graphCodegenFingerprintConnectionCount = -1;
-let graphCodegenFingerprintValue = "";
+
+const GRAPH_CODEGEN_STREAM_SLICE_MS = 1.25;
+const GRAPH_CODEGEN_STREAM_MAX_TOKENS = 512;
+const GRAPH_CODEGEN_STREAM_MAX_CHARACTERS = 48 * 1024;
+const GRAPH_CODEGEN_STREAM_STRING_PART_CHARACTERS = 16 * 1024;
+const GRAPH_CODEGEN_STREAM_TOKEN = Object.freeze({
+  null: 1,
+  false: 2,
+  true: 3,
+  number: 4,
+  string: 5,
+  array: 6,
+  object: 7,
+  key: 8,
+  end: 9,
+  longString: 10,
+  stringPart: 11,
+  endString: 12,
+  longKey: 13,
+  keyPart: 14,
+  endKey: 15
+});
 
 function largeGraphUsesBackgroundCodegen(
   extensionState
@@ -1973,148 +2780,31 @@ function largeGraphUsesBackgroundCodegen(
   );
 }
 
+function graphCodegenWorkerSupportedForCurrentProtocol() {
+  return typeof Worker === "function";
+}
+
 function graphCodegenCatalogKey(catalog) {
+  const projectionIndex =
+    window.RMLApiCatalogProjectionIndex;
+  const factoryReport =
+    window.RMLApiNodeFactoryReport;
+  const projectionRevision =
+    graphCodegenCatalogIndexMatches(
+      catalog,
+      projectionIndex,
+      factoryReport
+    )
+      ? Number(projectionIndex.revision) || 0
+      : 0;
   return [
     catalog?.catalogFingerprint ||
       catalog?.assemblyFingerprint ||
       catalog?.engineVersion ||
       "unknown",
-    catalog?.catalogSource || "unknown"
+    catalog?.catalogSource || "unknown",
+    projectionRevision
   ].join("|");
-}
-
-function largeGraphCodegenContentFingerprint(
-  extensionState
-) {
-  const revision =
-    Number(extensionState?.revision) || 0;
-  const views =
-    projectRuntimeGraphViews(
-      extensionState
-    );
-  const nodes = views.flatMap(view =>
-    Array.isArray(view.graph.nodes)
-      ? view.graph.nodes
-      : []
-  );
-  const connections = views.flatMap(view =>
-    Array.isArray(view.graph.connections)
-      ? view.graph.connections
-      : []
-  );
-
-  if (
-    graphCodegenFingerprintSource ===
-      extensionState &&
-    graphCodegenFingerprintRevision ===
-      revision &&
-    graphCodegenFingerprintNodeCount ===
-      nodes.length &&
-    graphCodegenFingerprintConnectionCount ===
-      connections.length
-  ) {
-    return graphCodegenFingerprintValue;
-  }
-
-  let first = 0x811c9dc5;
-  let second = 0x9e3779b9;
-  let position = 0;
-
-  const append = value => {
-    const text = String(value ?? "");
-
-    for (
-      let index = 0;
-      index < text.length;
-      index += 1
-    ) {
-      const code = text.charCodeAt(index);
-      first ^= code;
-      first = Math.imul(
-        first,
-        0x01000193
-      ) >>> 0;
-      second ^= code + position;
-      second = Math.imul(
-        second,
-        0x85ebca6b
-      ) >>> 0;
-      position += 1;
-    }
-
-    first ^= 0xff;
-    first = Math.imul(
-      first,
-      0x01000193
-    ) >>> 0;
-    second ^= position + 0x9e37;
-    second = Math.imul(
-      second,
-      0x85ebca6b
-    ) >>> 0;
-  };
-
-  append(extensionState?.sourceSignature);
-  append(
-    JSON.stringify(
-      extensionState?.configSnapshot ||
-        null
-    )
-  );
-
-  for (const node of nodes) {
-    append(node?.id);
-    append(node?.kind);
-    append(node?.operatorId);
-    append(node?.label);
-    append(
-      JSON.stringify(
-        node?.apiContract || null
-      )
-    );
-    append(
-      JSON.stringify(
-        node?.parameters || {}
-      )
-    );
-  }
-
-  for (const view of views) {
-    append(view.path);
-    const composite = view.graph;
-    append(
-      JSON.stringify(
-        composite?.boundaryPorts || []
-      )
-    );
-    append(
-      JSON.stringify(
-        composite?.branchRouting || {}
-      )
-    );
-  }
-
-  for (const connection of connections) {
-    append(connection?.id);
-    append(connection?.fromNode);
-    append(connection?.fromPort);
-    append(connection?.toNode);
-    append(connection?.toPort);
-  }
-
-  graphCodegenFingerprintSource =
-    extensionState;
-  graphCodegenFingerprintRevision =
-    revision;
-  graphCodegenFingerprintNodeCount =
-    nodes.length;
-  graphCodegenFingerprintConnectionCount =
-    connections.length;
-  graphCodegenFingerprintValue =
-    first.toString(16).padStart(8, "0") +
-    second.toString(16).padStart(8, "0");
-
-  return graphCodegenFingerprintValue;
 }
 
 function largeGraphCodegenKey(
@@ -2126,34 +2816,16 @@ function largeGraphCodegenKey(
     window.RMLFrooxComponentCatalog ||
     null;
 
-  const views =
-    projectRuntimeGraphViews(
-      extensionState
-    );
-  const totalNodes = views.reduce(
-    (total, view) =>
-      total +
-      (view.graph.nodes?.length || 0),
-    0
-  );
-  const totalConnections = views.reduce(
-    (total, view) =>
-      total +
-      (view.graph.connections?.length ||
-        0),
-    0
-  );
-
   return JSON.stringify({
+    projectEpoch:
+      Number(projectApplicationEpoch) || 0,
+    codegenProjectEpoch:
+      Number(graphCodegenProjectEpoch) || 0,
     revision:
       Number(extensionState?.revision) || 0,
-    nodes:
-      totalNodes,
-    connections:
-      totalConnections,
-    content:
-      largeGraphCodegenContentFingerprint(
-        extensionState
+    sourceSignature:
+      String(
+        extensionState?.sourceSignature || ""
       ),
     namespaceName:
       metadata.namespaceName || "",
@@ -2175,11 +2847,1370 @@ function largeGraphCodegenKey(
   });
 }
 
+function graphCodegenStreamCursor(
+  value,
+  onObject = null
+) {
+  return {
+    ancestors: new WeakSet(),
+    frames: [],
+    hasPendingValue: true,
+    pendingValue: value,
+    pendingLongKeyValue: undefined,
+    onObject:
+      typeof onObject === "function"
+        ? onObject
+        : null,
+    code: 0,
+    value: undefined
+  };
+}
+
+function graphCodegenEmitStreamToken(
+  cursor,
+  code,
+  value = undefined
+) {
+  cursor.code = code;
+  cursor.value = value;
+  return true;
+}
+
+function graphCodegenNextStreamToken(cursor) {
+  while (
+    cursor.hasPendingValue ||
+    cursor.frames.length > 0
+  ) {
+    if (cursor.hasPendingValue) {
+      const value = cursor.pendingValue;
+      cursor.pendingValue = undefined;
+      cursor.hasPendingValue = false;
+      if (Array.isArray(value)) {
+        if (cursor.ancestors.has(value)) {
+          throw new TypeError(
+            "Graph code-generation input contains a cyclic array."
+          );
+        }
+        cursor.ancestors.add(value);
+        cursor.frames.push({
+          kind: "array",
+          value,
+          index: 0
+        });
+        return graphCodegenEmitStreamToken(
+          cursor,
+          GRAPH_CODEGEN_STREAM_TOKEN.array
+        );
+      }
+      if (value && typeof value === "object") {
+        if (cursor.ancestors.has(value)) {
+          throw new TypeError(
+            "Graph code-generation input contains a cyclic object."
+          );
+        }
+        cursor.onObject?.(value);
+        cursor.ancestors.add(value);
+        cursor.frames.push({
+          kind: "object",
+          value,
+          keys: Object.keys(value),
+          index: 0,
+          longKey: null,
+          keyOffset: 0
+        });
+        return graphCodegenEmitStreamToken(
+          cursor,
+          GRAPH_CODEGEN_STREAM_TOKEN.object
+        );
+      }
+      if (
+        typeof value === "string" &&
+        value.length >
+          GRAPH_CODEGEN_STREAM_STRING_PART_CHARACTERS
+      ) {
+        cursor.frames.push({
+          kind: "string",
+          value,
+          offset: 0
+        });
+        return graphCodegenEmitStreamToken(
+          cursor,
+          GRAPH_CODEGEN_STREAM_TOKEN.longString
+        );
+      }
+      if (
+        value === null ||
+        value === undefined ||
+        (
+          typeof value === "number" &&
+          !Number.isFinite(value)
+        )
+      ) {
+        return graphCodegenEmitStreamToken(
+          cursor,
+          GRAPH_CODEGEN_STREAM_TOKEN.null,
+          null
+        );
+      }
+      if (value === false || value === true) {
+        return graphCodegenEmitStreamToken(
+          cursor,
+          value
+            ? GRAPH_CODEGEN_STREAM_TOKEN.true
+            : GRAPH_CODEGEN_STREAM_TOKEN.false,
+          value
+        );
+      }
+      if (typeof value === "number") {
+        return graphCodegenEmitStreamToken(
+          cursor,
+          GRAPH_CODEGEN_STREAM_TOKEN.number,
+          value
+        );
+      }
+      if (typeof value === "string") {
+        return graphCodegenEmitStreamToken(
+          cursor,
+          GRAPH_CODEGEN_STREAM_TOKEN.string,
+          value
+        );
+      }
+      throw new TypeError(
+        "Graph code-generation input contains an unsupported scalar value."
+      );
+    }
+
+    const frame =
+      cursor.frames[cursor.frames.length - 1];
+    if (frame.kind === "array") {
+      if (frame.index >= frame.value.length) {
+        cursor.frames.pop();
+        cursor.ancestors.delete(frame.value);
+        return graphCodegenEmitStreamToken(
+          cursor,
+          GRAPH_CODEGEN_STREAM_TOKEN.end
+        );
+      }
+      const item = frame.value[frame.index];
+      frame.index += 1;
+      if (
+        item === undefined ||
+        typeof item === "function" ||
+        typeof item === "symbol" ||
+        (
+          typeof item === "number" &&
+          !Number.isFinite(item)
+        )
+      ) {
+        return graphCodegenEmitStreamToken(
+          cursor,
+          GRAPH_CODEGEN_STREAM_TOKEN.null,
+          null
+        );
+      }
+      cursor.pendingValue = item;
+      cursor.hasPendingValue = true;
+      continue;
+    }
+    if (frame.kind === "string") {
+      if (frame.offset < frame.value.length) {
+        const part = frame.value.slice(
+          frame.offset,
+          frame.offset +
+            GRAPH_CODEGEN_STREAM_STRING_PART_CHARACTERS
+        );
+        frame.offset +=
+          GRAPH_CODEGEN_STREAM_STRING_PART_CHARACTERS;
+        return graphCodegenEmitStreamToken(
+          cursor,
+          GRAPH_CODEGEN_STREAM_TOKEN.stringPart,
+          part
+        );
+      }
+      cursor.frames.pop();
+      return graphCodegenEmitStreamToken(
+        cursor,
+        GRAPH_CODEGEN_STREAM_TOKEN.endString
+      );
+    }
+    if (frame.longKey !== null) {
+      if (frame.keyOffset < frame.longKey.length) {
+        const part = frame.longKey.slice(
+          frame.keyOffset,
+          frame.keyOffset +
+            GRAPH_CODEGEN_STREAM_STRING_PART_CHARACTERS
+        );
+        frame.keyOffset +=
+          GRAPH_CODEGEN_STREAM_STRING_PART_CHARACTERS;
+        return graphCodegenEmitStreamToken(
+          cursor,
+          GRAPH_CODEGEN_STREAM_TOKEN.keyPart,
+          part
+        );
+      }
+      frame.longKey = null;
+      frame.keyOffset = 0;
+      cursor.pendingValue =
+        cursor.pendingLongKeyValue;
+      cursor.pendingLongKeyValue = undefined;
+      cursor.hasPendingValue = true;
+      return graphCodegenEmitStreamToken(
+        cursor,
+        GRAPH_CODEGEN_STREAM_TOKEN.endKey
+      );
+    }
+
+    let key = null;
+    let item;
+    while (frame.index < frame.keys.length) {
+      key = frame.keys[frame.index];
+      frame.index += 1;
+      item = frame.value[key];
+      if (
+        item !== undefined &&
+        typeof item !== "function" &&
+        typeof item !== "symbol"
+      ) {
+        break;
+      }
+      key = null;
+    }
+    if (key === null) {
+      cursor.frames.pop();
+      cursor.ancestors.delete(frame.value);
+      return graphCodegenEmitStreamToken(
+        cursor,
+        GRAPH_CODEGEN_STREAM_TOKEN.end
+      );
+    }
+    if (
+      key.length >
+        GRAPH_CODEGEN_STREAM_STRING_PART_CHARACTERS
+    ) {
+      cursor.pendingLongKeyValue = item;
+      frame.longKey = key;
+      frame.keyOffset = 0;
+      return graphCodegenEmitStreamToken(
+        cursor,
+        GRAPH_CODEGEN_STREAM_TOKEN.longKey
+      );
+    }
+    cursor.pendingValue = item;
+    cursor.hasPendingValue = true;
+    return graphCodegenEmitStreamToken(
+      cursor,
+      GRAPH_CODEGEN_STREAM_TOKEN.key,
+      key
+    );
+  }
+
+  cursor.code = 0;
+  cursor.value = undefined;
+  return false;
+}
+
+function graphCodegenStreamDecoder() {
+  return {
+    root: undefined,
+    hasRoot: false,
+    frames: [],
+    longStringParts: null,
+    longKeyParts: null,
+    complete: false
+  };
+}
+
+function graphCodegenAssignDecodedValue(
+  decoder,
+  value
+) {
+  const parent =
+    decoder.frames[decoder.frames.length - 1];
+  if (!parent) {
+    if (decoder.hasRoot) {
+      throw new Error(
+        "Graph code-generation stream contains more than one root value."
+      );
+    }
+    decoder.root = value;
+    decoder.hasRoot = true;
+    return;
+  }
+  if (parent.kind === "array") {
+    parent.value.push(value);
+    return;
+  }
+  if (typeof parent.key !== "string") {
+    throw new Error(
+      "Graph code-generation object value has no key."
+    );
+  }
+  Object.defineProperty(
+    parent.value,
+    parent.key,
+    {
+      value,
+      writable: true,
+      enumerable: true,
+      configurable: true
+    }
+  );
+  parent.key = null;
+}
+
+function graphCodegenDecodeStreamTokens(
+  decoder,
+  tokens
+) {
+  const values = Array.isArray(tokens)
+    ? tokens
+    : [];
+  for (
+    let index = 0;
+    index + 1 < values.length;
+    index += 2
+  ) {
+    const code = values[index];
+    const value = values[index + 1];
+    if (code === GRAPH_CODEGEN_STREAM_TOKEN.null) {
+      graphCodegenAssignDecodedValue(decoder, null);
+    } else if (
+      code === GRAPH_CODEGEN_STREAM_TOKEN.false ||
+      code === GRAPH_CODEGEN_STREAM_TOKEN.true ||
+      code === GRAPH_CODEGEN_STREAM_TOKEN.number ||
+      code === GRAPH_CODEGEN_STREAM_TOKEN.string
+    ) {
+      graphCodegenAssignDecodedValue(decoder, value);
+    } else if (
+      code === GRAPH_CODEGEN_STREAM_TOKEN.array ||
+      code === GRAPH_CODEGEN_STREAM_TOKEN.object
+    ) {
+      const container =
+        code === GRAPH_CODEGEN_STREAM_TOKEN.array
+          ? []
+          : {};
+      graphCodegenAssignDecodedValue(
+        decoder,
+        container
+      );
+      decoder.frames.push({
+        kind:
+          code === GRAPH_CODEGEN_STREAM_TOKEN.array
+            ? "array"
+            : "object",
+        value: container,
+        key: null
+      });
+    } else if (code === GRAPH_CODEGEN_STREAM_TOKEN.key) {
+      const frame =
+        decoder.frames[decoder.frames.length - 1];
+      if (frame?.kind !== "object") {
+        throw new Error(
+          "Graph code-generation key is outside an object."
+        );
+      }
+      frame.key = String(value || "");
+    } else if (code === GRAPH_CODEGEN_STREAM_TOKEN.end) {
+      if (decoder.frames.length === 0) {
+        throw new Error(
+          "Graph code-generation stream closes no container."
+        );
+      }
+      decoder.frames.pop();
+    } else if (
+      code === GRAPH_CODEGEN_STREAM_TOKEN.longString
+    ) {
+      decoder.longStringParts = "";
+    } else if (
+      code === GRAPH_CODEGEN_STREAM_TOKEN.stringPart
+    ) {
+      if (decoder.longStringParts === null) {
+        throw new Error(
+          "Graph code-generation string part has no open string."
+        );
+      }
+      decoder.longStringParts +=
+        String(value || "");
+    } else if (
+      code === GRAPH_CODEGEN_STREAM_TOKEN.endString
+    ) {
+      if (decoder.longStringParts === null) {
+        throw new Error(
+          "Graph code-generation stream closes no string."
+        );
+      }
+      graphCodegenAssignDecodedValue(
+        decoder,
+        decoder.longStringParts
+      );
+      decoder.longStringParts = null;
+    } else if (
+      code === GRAPH_CODEGEN_STREAM_TOKEN.longKey
+    ) {
+      decoder.longKeyParts = "";
+    } else if (
+      code === GRAPH_CODEGEN_STREAM_TOKEN.keyPart
+    ) {
+      if (decoder.longKeyParts === null) {
+        throw new Error(
+          "Graph code-generation key part has no open key."
+        );
+      }
+      decoder.longKeyParts += String(value || "");
+    } else if (
+      code === GRAPH_CODEGEN_STREAM_TOKEN.endKey
+    ) {
+      const frame =
+        decoder.frames[decoder.frames.length - 1];
+      if (
+        decoder.longKeyParts === null ||
+        frame?.kind !== "object"
+      ) {
+        throw new Error(
+          "Graph code-generation stream closes no object key."
+        );
+      }
+      frame.key = decoder.longKeyParts;
+      decoder.longKeyParts = null;
+    } else {
+      throw new Error(
+        `Unknown graph code-generation stream token '${code}'.`
+      );
+    }
+  }
+}
+
+function graphCodegenFinishStreamDecoder(decoder) {
+  if (
+    !decoder.hasRoot ||
+    decoder.frames.length > 0 ||
+    decoder.longStringParts !== null ||
+    decoder.longKeyParts !== null
+  ) {
+    throw new Error(
+      "Graph code-generation stream ended before its root value was complete."
+    );
+  }
+  decoder.complete = true;
+  return decoder.root;
+}
+
+async function postGraphCodegenTokenStream(
+  worker,
+  id,
+  channel,
+  value,
+  {
+    onObject = null,
+    isCurrent = null,
+    startFields = null,
+    onProgress = null
+  } = {}
+) {
+  const cursor = graphCodegenStreamCursor(
+    value,
+    onObject
+  );
+  const metrics = {
+    chunks: 0,
+    tokens: 0,
+    characters: 0,
+    maximumMainSliceMs: 0
+  };
+  worker.postMessage({
+    ...(
+      startFields &&
+      typeof startFields === "object"
+        ? startFields
+        : {}
+    ),
+    id,
+    operation: "streamStart",
+    channel
+  });
+  onProgress?.({ phase: "start" });
+
+  let complete = false;
+  while (!complete) {
+    if (isCurrent && !isCurrent()) {
+      const error = new Error(
+        "The Runtime Graph changed while its background code-generation snapshot was being streamed."
+      );
+      error.code = "RML_GRAPH_CODEGEN_STALE";
+      throw error;
+    }
+    const started = performance.now();
+    const tokens = [];
+    let tokenCount = 0;
+    let characters = 0;
+    while (
+      tokenCount < GRAPH_CODEGEN_STREAM_MAX_TOKENS &&
+      characters <
+        GRAPH_CODEGEN_STREAM_MAX_CHARACTERS
+    ) {
+      if (!graphCodegenNextStreamToken(cursor)) {
+        complete = true;
+        break;
+      }
+      tokens.push(cursor.code, cursor.value);
+      tokenCount += 1;
+      if (typeof cursor.value === "string") {
+        characters += cursor.value.length;
+      }
+      if (
+        (tokenCount & 31) === 0 &&
+        performance.now() - started >=
+          GRAPH_CODEGEN_STREAM_SLICE_MS
+      ) {
+        break;
+      }
+    }
+    if (tokens.length > 0) {
+      worker.postMessage({
+        id,
+        operation: "streamChunk",
+        channel,
+        tokens
+      });
+      onProgress?.({
+        phase: "chunk",
+        chunks: metrics.chunks + 1
+      });
+      metrics.chunks += 1;
+      metrics.tokens += tokenCount;
+      metrics.characters += characters;
+    }
+    metrics.maximumMainSliceMs = Math.max(
+      metrics.maximumMainSliceMs,
+      performance.now() - started
+    );
+    if (!complete) {
+      await yieldBuilderTask();
+    }
+  }
+
+  worker.postMessage({
+    id,
+    operation: "streamEnd",
+    channel
+  });
+  onProgress?.({
+    phase: "end",
+    chunks: metrics.chunks
+  });
+  return Object.freeze(metrics);
+}
+
+function graphCodegenNormalizeCsType(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^global::/, "")
+    .replace(/\s+/g, " ");
+}
+
+function graphCodegenContractsMatch(
+  expected,
+  available
+) {
+  if (!expected || !available) return false;
+  const expectedFingerprint = String(
+    expected.contractFingerprint || ""
+  );
+  const availableFingerprint = String(
+    available.contractFingerprint || ""
+  );
+  if (expectedFingerprint && availableFingerprint) {
+    return expectedFingerprint === availableFingerprint;
+  }
+  const expectedKind = String(expected.kind || "");
+  const expectedMemberName = String(
+    expected.memberName || ""
+  );
+  const memberNameMayBeEmpty =
+    expectedKind === "type" ||
+    expectedKind === "enum";
+  const expectedOwnerType =
+    graphCodegenNormalizeCsType(expected.ownerType);
+  const semanticIdentityMatches = Boolean(
+    expectedKind &&
+    expectedKind ===
+      String(available.kind || "") &&
+    expectedOwnerType &&
+    expectedOwnerType ===
+      graphCodegenNormalizeCsType(
+        available.ownerType
+      ) &&
+    (memberNameMayBeEmpty || expectedMemberName) &&
+    expectedMemberName ===
+      String(available.memberName || "") &&
+    String(expected.signature || "") &&
+    String(expected.signature || "") ===
+      String(available.signature || "")
+  );
+  if (!semanticIdentityMatches) {
+    return false;
+  }
+  return true;
+}
+
+function graphCodegenCollectRequirement(
+  requirements,
+  value
+) {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value)
+  ) {
+    return;
+  }
+  const operatorId = String(
+    value.operatorId || ""
+  ).trim();
+  if (!operatorId) return;
+  const registered =
+    window.RMLModNodeRegistry
+      ?.getNodeDefinition?.(operatorId);
+  const contract =
+    value.apiContract &&
+    typeof value.apiContract === "object" &&
+    !Array.isArray(value.apiContract)
+      ? value.apiContract
+      : registered?.apiVerification;
+  if (
+    !contract ||
+    typeof contract !== "object" ||
+    !String(contract.ownerType || "").trim() ||
+    !String(contract.kind || "").trim()
+  ) {
+    return;
+  }
+  const identity = [
+    operatorId,
+    contract.contractFingerprint || "",
+    contract.stableContractId || "",
+    contract.kind || "",
+    contract.ownerType || "",
+    contract.memberName || "",
+    contract.signature || ""
+  ].join("\u0000");
+  if (!requirements.has(identity)) {
+    const availableContract =
+      registered?.apiVerification;
+    const verifiedAvailable = Boolean(
+      registered?.catalogGenerated === true &&
+      registered?.unavailableApiContract !== true &&
+      graphCodegenContractsMatch(
+        contract,
+        availableContract
+      )
+    );
+    requirements.set(identity, {
+      operatorId,
+      apiContract: contract,
+      availability:
+        verifiedAvailable
+          ? "verified"
+          : "unavailable",
+      inputPorts:
+        (Array.isArray(contract.inputPorts)
+          ? contract.inputPorts
+          : []).map(port =>
+          String(port?.id || "")
+        ).filter(Boolean),
+      outputPorts:
+        (Array.isArray(contract.outputPorts)
+          ? contract.outputPorts
+          : []).map(port =>
+          String(port?.id || "")
+        ).filter(Boolean)
+    });
+  }
+}
+
+function graphCodegenCatalogIndexMatches(
+  catalog,
+  index,
+  report
+) {
+  if (!catalog || typeof catalog !== "object") {
+    return false;
+  }
+  const fingerprint = String(
+    report?.catalogFingerprint || ""
+  );
+  const revision = Number(
+    report?.catalogProjectionRevision
+  ) || 0;
+  const definitionRevision = Number(
+    window.__RMLNodeDefinitionRevision
+  ) || 0;
+  const maps = [
+    index?.typeByName,
+    index?.enumByName,
+    index?.genericTypeByShape,
+    index?.assemblyByName
+  ];
+  return Boolean(
+    index?.version === 1 &&
+    index.catalog === catalog &&
+    index.report === report &&
+    fingerprint &&
+    index.catalogFingerprint === fingerprint &&
+    index.engineVersion ===
+      String(report?.engineVersion || "") &&
+    revision > 0 &&
+    Number(index.revision) === revision &&
+    definitionRevision > 0 &&
+    Number(index.definitionRevision) ===
+      definitionRevision &&
+    maps.every(map =>
+      map &&
+      typeof map.get === "function" &&
+      typeof map.has === "function"
+    )
+  );
+}
+
+function graphCodegenCatalogIndex(
+  catalog
+) {
+  if (!catalog || typeof catalog !== "object") {
+    return null;
+  }
+  const report =
+    window.RMLApiNodeFactoryReport;
+  const index =
+    window.RMLApiCatalogProjectionIndex;
+  if (
+    graphCodegenCatalogIndexMatches(
+      catalog,
+      index,
+      report
+    )
+  ) {
+    return index;
+  }
+
+  throw new Error(
+    "The active API catalog has no matching prepared graph-codegen projection index. Retry after the API node factory is ready."
+  );
+}
+
+function graphCodegenGenericTypeShape(value) {
+  const text = graphCodegenNormalizeCsType(value);
+  const open = text.indexOf("<");
+  if (open < 0) return "";
+  let depth = 0;
+  let close = -1;
+  let argumentsCount = 1;
+  for (let index = open; index < text.length; index += 1) {
+    const character = text[index];
+    if (character === "<") {
+      depth += 1;
+    } else if (character === ">") {
+      depth -= 1;
+      if (depth === 0) {
+        close = index;
+        break;
+      }
+    } else if (character === "," && depth === 1) {
+      argumentsCount += 1;
+    }
+  }
+  if (close < 0) return "";
+  return [
+    text.slice(0, open).replace(/\s+/g, ""),
+    text.slice(close + 1).replace(/\s+/g, ""),
+    argumentsCount
+  ].join("|");
+}
+
+function graphCodegenMemberContractId(
+  member,
+  kind
+) {
+  if (kind === "property-get" || kind === "field-get") {
+    return String(member?.readContractId || "");
+  }
+  if (kind === "property-set" || kind === "field-set") {
+    return String(member?.writeContractId || "");
+  }
+  return String(member?.stableContractId || "");
+}
+
+function graphCodegenMemberMatchesContract(
+  member,
+  kind,
+  contract
+) {
+  const expectedId = String(
+    contract?.stableContractId || ""
+  );
+  const actualId = graphCodegenMemberContractId(
+    member,
+    kind
+  );
+  if (
+    expectedId &&
+    actualId &&
+    expectedId === actualId
+  ) {
+    return true;
+  }
+  if (
+    String(member?.name || "") !==
+      String(contract?.memberName || "")
+  ) {
+    return false;
+  }
+  const expectedSignature = String(
+    contract?.signature || ""
+  );
+  const actualSignature = String(
+    member?.signature || ""
+  );
+  if (expectedSignature && actualSignature) {
+    return expectedSignature === actualSignature;
+  }
+  const indexedParameters = Array.isArray(
+    member?.indexParameters
+  )
+    ? member.indexParameters
+    : [];
+  const valueParameter = {
+    type: member?.type,
+    isByRef: false,
+    isOut: false
+  };
+  const parameters = kind === "property-set"
+    ? [...indexedParameters, valueParameter]
+    : kind === "property-get"
+      ? indexedParameters
+      : kind === "field-set"
+        ? [valueParameter]
+        : kind === "field-get"
+          ? []
+          : Array.isArray(member?.parameters)
+            ? member.parameters
+            : indexedParameters;
+  const expectedParameters = Array.isArray(
+    contract?.parameters
+  )
+    ? contract.parameters
+    : [];
+  return parameters.length === expectedParameters.length &&
+    parameters.every((parameter, index) =>
+      graphCodegenNormalizeCsType(
+        parameter?.elementType || parameter?.type
+      ) ===
+        graphCodegenNormalizeCsType(
+          expectedParameters[index]?.elementType ||
+          expectedParameters[index]?.type
+        ) &&
+      Boolean(parameter?.isByRef || parameter?.isOut) ===
+        Boolean(
+          expectedParameters[index]?.isByRef ||
+          expectedParameters[index]?.isOut
+        )
+    );
+}
+
+function graphCodegenCatalogMemberList(kind) {
+  if (kind === "constructor") return "constructors";
+  if (kind === "method") return "methods";
+  if (
+    kind === "property-get" ||
+    kind === "property-set"
+  ) {
+    return "properties";
+  }
+  if (kind === "field-get" || kind === "field-set") {
+    return "fields";
+  }
+  if (kind === "event") return "events";
+  return "";
+}
+
+function graphCodegenTypeNamesInExpression(
+  value,
+  index
+) {
+  const text = graphCodegenNormalizeCsType(value);
+  const types = new Set();
+  const enums = new Set();
+  const remember = name => {
+    if (index.typeByName.has(name)) {
+      types.add(name);
+    }
+    if (index.enumByName.has(name)) {
+      enums.add(name);
+    }
+  };
+  remember(text);
+  for (const match of text.match(
+    /[A-Za-z_][A-Za-z0-9_]*(?:[.+][A-Za-z_][A-Za-z0-9_]*)+/g
+  ) || []) {
+    const normalized =
+      graphCodegenNormalizeCsType(match);
+    remember(normalized);
+  }
+  const generic = index.genericTypeByShape.get(
+    graphCodegenGenericTypeShape(text)
+  );
+  if (generic?.row) {
+    types.add(
+      graphCodegenNormalizeCsType(
+        generic.row.fullName
+      )
+    );
+  }
+  return { types, enums };
+}
+
+async function graphCodegenFindCatalogMember(
+  members,
+  kind,
+  contract
+) {
+  const rows = Array.isArray(members)
+    ? members
+    : [];
+  let sliceStarted = performance.now();
+  for (let index = 0; index < rows.length; index += 1) {
+    if (
+      graphCodegenMemberMatchesContract(
+        rows[index],
+        kind,
+        contract
+      )
+    ) {
+      return { member: rows[index], index };
+    }
+    if (
+      (index & 63) === 0 &&
+      performance.now() - sliceStarted >=
+        GRAPH_CODEGEN_STREAM_SLICE_MS
+    ) {
+      await yieldBuilderTask();
+      sliceStarted = performance.now();
+    }
+  }
+  return null;
+}
+
+async function graphCodegenCatalogProjection(
+  catalog,
+  requirements
+) {
+  if (
+    !catalog ||
+    typeof catalog !== "object" ||
+    (
+      (!Array.isArray(catalog.types) ||
+        catalog.types.length === 0) &&
+      (!Array.isArray(catalog.enums) ||
+        catalog.enums.length === 0)
+    )
+  ) {
+    return null;
+  }
+  const index = await graphCodegenCatalogIndex(catalog);
+  const required = Array.isArray(requirements)
+    ? requirements
+    : [];
+  const owners = new Map();
+  const enumRows = new Map();
+  const typeQueue = [];
+  const queuedTypes = new Set();
+  const enqueueType = value => {
+    const names = graphCodegenTypeNamesInExpression(
+      value,
+      index
+    );
+    for (const name of names.types) {
+      if (!queuedTypes.has(name)) {
+        queuedTypes.add(name);
+        typeQueue.push(name);
+      }
+    }
+    for (const name of names.enums) {
+      const enumEntry = index.enumByName.get(name);
+      if (enumEntry?.row) {
+        enumRows.set(name, enumEntry);
+      }
+    }
+  };
+  const ownerFor = name => {
+    if (owners.has(name)) return owners.get(name);
+    const indexed = index.typeByName.get(name);
+    if (!indexed?.row) return null;
+    const value = {
+      row: indexed.row,
+      index: indexed.index,
+      constructors: new Map(),
+      methods: new Map(),
+      properties: new Map(),
+      fields: new Map(),
+      events: new Map()
+    };
+    owners.set(name, value);
+    return value;
+  };
+
+  let sliceStarted = performance.now();
+  for (
+    let requirementIndex = 0;
+    requirementIndex < required.length;
+    requirementIndex += 1
+  ) {
+    const contract =
+      required[requirementIndex]?.apiContract;
+    if (
+      required[requirementIndex]?.availability ===
+        "unavailable"
+    ) {
+      if (
+        (requirementIndex & 63) === 0 &&
+        performance.now() - sliceStarted >=
+          GRAPH_CODEGEN_STREAM_SLICE_MS
+      ) {
+        await yieldBuilderTask();
+        sliceStarted = performance.now();
+      }
+      continue;
+    }
+    const kind = String(contract?.kind || "");
+    const ownerName = graphCodegenNormalizeCsType(
+      contract?.ownerType
+    );
+    enqueueType(ownerName);
+    enqueueType(contract?.returnType);
+    for (const parameter of
+      Array.isArray(contract?.parameters)
+        ? contract.parameters
+        : []) {
+      enqueueType(
+        parameter?.elementType || parameter?.type
+      );
+    }
+    if (kind === "enum") {
+      const enumEntry =
+        index.enumByName.get(ownerName);
+      if (enumEntry?.row) {
+        enumRows.set(ownerName, enumEntry);
+      }
+    } else if (kind !== "type") {
+      const owner = ownerFor(ownerName);
+      const listName =
+        graphCodegenCatalogMemberList(kind);
+      const members = listName && owner
+        ? owner.row[listName]
+        : null;
+      const found =
+        owner && listName
+          ? await graphCodegenFindCatalogMember(
+              members,
+              kind,
+              contract
+            )
+          : null;
+      if (!owner || !listName || !found) {
+        throw new Error(
+          `The verified API contract '${required[requirementIndex]?.operatorId || ownerName}' could not be projected from the active catalog.`
+        );
+      }
+      const member = found.member;
+      owner[listName].set(
+        member,
+        found.index
+      );
+      enqueueType(member?.type);
+      enqueueType(member?.returnType);
+      enqueueType(member?.declaringType);
+      enqueueType(member?.handlerType);
+      for (const parameter of [
+        ...(Array.isArray(member?.parameters)
+          ? member.parameters
+          : []),
+        ...(Array.isArray(member?.indexParameters)
+          ? member.indexParameters
+          : [])
+      ]) {
+        enqueueType(
+          parameter?.elementType || parameter?.type
+        );
+      }
+    }
+    if (
+      (requirementIndex & 63) === 0 &&
+      performance.now() - sliceStarted >=
+        GRAPH_CODEGEN_STREAM_SLICE_MS
+    ) {
+      await yieldBuilderTask();
+      sliceStarted = performance.now();
+    }
+  }
+
+  for (
+    let queueIndex = 0;
+    queueIndex < typeQueue.length;
+    queueIndex += 1
+  ) {
+    const name = typeQueue[queueIndex];
+    const owner = ownerFor(name);
+    if (!owner) continue;
+    enqueueType(owner.row?.baseType);
+    for (const implemented of
+      Array.isArray(owner.row?.interfaces)
+        ? owner.row.interfaces
+        : []) {
+      enqueueType(implemented);
+    }
+    if (
+      (queueIndex & 63) === 0 &&
+      performance.now() - sliceStarted >=
+        GRAPH_CODEGEN_STREAM_SLICE_MS
+    ) {
+      await yieldBuilderTask();
+      sliceStarted = performance.now();
+    }
+  }
+
+  const selectedMembers = values =>
+    [...values.entries()]
+      .sort((left, right) =>
+        left[1] - right[1]
+      )
+      .map(([member]) => member);
+  const selectedTypeOccurrences = [];
+  for (const [name, owner] of owners) {
+    const indexed =
+      index.typeByName.get(name);
+    const occurrences =
+      Array.isArray(indexed?.occurrences)
+        ? indexed.occurrences
+        : indexed
+          ? [indexed]
+          : [];
+    for (const occurrence of
+      occurrences) {
+      selectedTypeOccurrences.push({
+        owner,
+        index: occurrence.index
+      });
+    }
+  }
+  selectedTypeOccurrences.sort(
+    (left, right) =>
+      left.index - right.index
+  );
+  const projectedTypes = [];
+  sliceStarted = performance.now();
+  for (
+    let selectedIndex = 0;
+    selectedIndex <
+      selectedTypeOccurrences.length;
+    selectedIndex += 1
+  ) {
+    const owner =
+      selectedTypeOccurrences[
+        selectedIndex
+      ].owner;
+    projectedTypes.push({
+      ...owner.row,
+      constructors:
+        selectedMembers(owner.constructors),
+      methods: selectedMembers(owner.methods),
+      properties:
+        selectedMembers(owner.properties),
+      fields: selectedMembers(owner.fields),
+      events: selectedMembers(owner.events)
+    });
+    if (
+      (selectedIndex & 127) === 0 &&
+      performance.now() - sliceStarted >=
+        GRAPH_CODEGEN_STREAM_SLICE_MS
+    ) {
+      await yieldBuilderTask();
+      sliceStarted = performance.now();
+    }
+  }
+  const selectedEnumOccurrences = [];
+  for (const name of enumRows.keys()) {
+    const indexed =
+      index.enumByName.get(name);
+    const occurrences =
+      Array.isArray(indexed?.occurrences)
+        ? indexed.occurrences
+        : indexed
+          ? [indexed]
+          : [];
+    for (const occurrence of
+      occurrences) {
+      selectedEnumOccurrences.push(
+        occurrence
+      );
+    }
+  }
+  selectedEnumOccurrences.sort(
+    (left, right) =>
+      left.index - right.index
+  );
+  const projectedEnums = [];
+  for (const occurrence of
+    selectedEnumOccurrences) {
+    projectedEnums.push(occurrence.row);
+  }
+  const assemblyNames = new Set(
+    [...projectedTypes, ...projectedEnums]
+      .map(row => String(row?.assembly || ""))
+      .filter(Boolean)
+  );
+  const selectedAssemblyOccurrences = [];
+  for (const name of assemblyNames) {
+    const indexed =
+      index.assemblyByName.get(name);
+    const occurrences =
+      Array.isArray(indexed?.occurrences)
+        ? indexed.occurrences
+        : indexed
+          ? [indexed]
+          : [];
+    for (const occurrence of
+      occurrences) {
+      selectedAssemblyOccurrences.push(
+        occurrence
+      );
+    }
+  }
+  selectedAssemblyOccurrences.sort(
+    (left, right) =>
+      left.index - right.index
+  );
+  const projectedAssemblies = [];
+  for (const occurrence of
+    selectedAssemblyOccurrences) {
+    projectedAssemblies.push(
+      occurrence.row
+    );
+  }
+
+  if (
+    graphCodegenCatalogIndex(catalog) !==
+      index
+  ) {
+    throw new Error(
+      "The active API catalog changed while its graph-codegen projection was being prepared."
+    );
+  }
+
+  return {
+    schemaVersion: catalog.schemaVersion,
+    catalogKind: catalog.catalogKind,
+    scannerVersion: catalog.scannerVersion,
+    catalogFingerprintVersion:
+      catalog.catalogFingerprintVersion,
+    catalogFingerprintAlgorithm:
+      catalog.catalogFingerprintAlgorithm,
+    methodIdentityVersion:
+      catalog.methodIdentityVersion,
+    methodIdentityAlgorithm:
+      catalog.methodIdentityAlgorithm,
+    reloadSafetyContractVersion:
+      catalog.reloadSafetyContractVersion,
+    reloadSafetyPolicy:
+      catalog.reloadSafetyPolicy,
+    reloadSafetyMinimumReaderVersion:
+      catalog.reloadSafetyMinimumReaderVersion,
+    reloadSafetyMaximumReaderVersion:
+      catalog.reloadSafetyMaximumReaderVersion,
+    reloadSafetyCompatible:
+      catalog.reloadSafetyCompatible === true,
+    engineVersion: catalog.engineVersion,
+    assemblyFingerprint:
+      catalog.assemblyFingerprint,
+    catalogFingerprint:
+      catalog.catalogFingerprint ||
+      window.RMLApiNodeFactoryReport
+        ?.catalogFingerprint,
+    catalogSource:
+      catalog.catalogSource ||
+      window.RMLApiNodeFactoryReport
+        ?.catalogSource ||
+      required[0]?.apiContract
+        ?.catalogSource ||
+      window.RMLApiCatalogInfo?.source ||
+      window.RMLApiCatalogSource ||
+      "unknown",
+    sourceAssembly: catalog.sourceAssembly,
+    assemblies: projectedAssemblies,
+    enums: projectedEnums,
+    types: projectedTypes
+  };
+}
+
+Object.defineProperty(
+  window,
+  "RMLGraphCodegenTransport",
+  {
+    value: Object.freeze({
+      version: 1,
+      stream:
+        postGraphCodegenTokenStream,
+      createDecoder:
+        graphCodegenStreamDecoder,
+      decode:
+        graphCodegenDecodeStreamTokens,
+      finish:
+        graphCodegenFinishStreamDecoder,
+      projectCatalog:
+        graphCodegenCatalogProjection
+    }),
+    writable: false,
+    enumerable: false,
+    configurable: true
+  }
+);
+
 function terminateGraphCodegenWorker() {
+  if (graphCodegenWorkerIdleTimer) {
+    clearTimeout(
+      graphCodegenWorkerIdleTimer
+    );
+    graphCodegenWorkerIdleTimer = 0;
+  }
   graphCodegenWorker?.terminate?.();
   graphCodegenWorker = null;
   graphCodegenWorkerCatalogKey = "";
-  graphCodegenWorkerNeedsCatalog = false;
+}
+
+function scheduleGraphCodegenWorkerIdleRelease() {
+  if (graphCodegenWorkerIdleTimer) {
+    clearTimeout(
+      graphCodegenWorkerIdleTimer
+    );
+  }
+  graphCodegenWorkerIdleTimer = setTimeout(
+    () => {
+      graphCodegenWorkerIdleTimer = 0;
+      releaseIdleGraphCodegenWorker();
+    },
+    GRAPH_CODEGEN_WORKER_IDLE_RELEASE_MS
+  );
+}
+
+function releaseIdleGraphCodegenWorker() {
+  if (
+    !graphCodegenWorker ||
+    graphCodegenWorkerRunning ||
+    graphCodegenWorkerActiveBuild ||
+    graphCodegenWorkerQueuedBuild
+  ) {
+    return false;
+  }
+  terminateGraphCodegenWorker();
+  return true;
 }
 
 function announceGraphCodegenSettlement(
@@ -2217,26 +4248,21 @@ function resetGraphCodegenForProjectReplacement() {
   graphCodegenWorkerCachedKey = "";
   graphCodegenWorkerCachedResult = null;
   graphCodegenWorkerLastError = null;
-  graphCodegenFingerprintSource = null;
-  graphCodegenFingerprintRevision = -1;
-  graphCodegenFingerprintNodeCount = -1;
-  graphCodegenFingerprintConnectionCount = -1;
-  graphCodegenFingerprintValue = "";
+  graphCodegenWorkerFailedKey = "";
+  pendingImportedGraphAnalysisCertificate = null;
 }
 
-function ensureGraphCodegenWorker(catalog) {
-  const catalogKey =
-    graphCodegenCatalogKey(catalog);
+function takeImportedGraphAnalysisCertificate() {
+  const certificate =
+    pendingImportedGraphAnalysisCertificate;
+  pendingImportedGraphAnalysisCertificate = null;
+  return certificate;
+}
 
-  if (
-    graphCodegenWorker &&
-    graphCodegenWorkerCatalogKey ===
-      catalogKey
-  ) {
+function ensureGraphCodegenWorker() {
+  if (graphCodegenWorker) {
     return graphCodegenWorker;
   }
-
-  terminateGraphCodegenWorker();
 
   if (typeof Worker !== "function") {
     throw new Error(
@@ -2246,7 +4272,7 @@ function ensureGraphCodegenWorker(catalog) {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=794-shared-loader-runtime",
+      "../workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev23",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -2257,6 +4283,37 @@ function ensureGraphCodegenWorker(catalog) {
     graphCodegenProjectEpoch;
   const workerApplicationEpoch =
     projectApplicationEpoch;
+  const retireWorkerForFailure = message => {
+    if (
+      worker !== graphCodegenWorker ||
+      workerProjectEpoch !==
+        graphCodegenProjectEpoch ||
+      workerApplicationEpoch !==
+        projectApplicationEpoch
+    ) {
+      return;
+    }
+    graphCodegenWorkerLastError =
+      new Error(
+        message ||
+        "Background graph code generation worker failed."
+      );
+    graphCodegenWorkerFailedKey =
+      graphCodegenWorkerActiveBuild?.key || "";
+    graphCodegenWorkerActiveBuild = null;
+    graphCodegenWorkerRunning = false;
+    terminateGraphCodegenWorker();
+    announceGraphCodegenSettlement({
+      projectEpoch:
+        workerApplicationEpoch,
+      codegenProjectEpoch:
+        workerProjectEpoch,
+      ok: false,
+      error:
+        graphCodegenWorkerLastError.message
+    });
+    void pumpGraphCodegenWorkerQueue();
+  };
 
   worker.addEventListener(
     "message",
@@ -2278,20 +4335,74 @@ function ensureGraphCodegenWorker(catalog) {
         return;
       }
 
+      if (response.operation === "resultStart") {
+        active.resultDecoder =
+          graphCodegenStreamDecoder();
+        return;
+      }
+
+      if (response.operation === "resultChunk") {
+        try {
+          if (!active.resultDecoder) {
+            active.resultDecoder =
+              graphCodegenStreamDecoder();
+          }
+          graphCodegenDecodeStreamTokens(
+            active.resultDecoder,
+            response.tokens
+          );
+        } catch (error) {
+          retireWorkerForFailure(
+            `The background graph code-generation result could not be decoded: ${error instanceof Error ? error.message : String(error)}`
+          );
+        }
+        return;
+      }
+
+      let completedResponse = response;
+      if (response.operation === "resultEnd") {
+        try {
+          completedResponse = {
+            ...response,
+            ok: true,
+            result:
+              graphCodegenFinishStreamDecoder(
+                active.resultDecoder
+              )
+          };
+        } catch (error) {
+          completedResponse = {
+            ...response,
+            ok: false,
+            error: {
+              message:
+                error instanceof Error
+                  ? error.message
+                  : String(error)
+            }
+          };
+        }
+      }
+
       graphCodegenWorkerActiveBuild = null;
 
-      if (response.ok === true) {
+      if (completedResponse.ok === true) {
         graphCodegenWorkerCachedKey =
           active.key;
         graphCodegenWorkerCachedResult =
-          response.result;
+          completedResponse.result;
         graphCodegenWorkerLastError = null;
+        graphCodegenWorkerFailedKey = "";
+        graphCodegenWorkerCatalogKey =
+          active.catalogKey;
       } else {
         graphCodegenWorkerLastError =
           new Error(
-            response.error?.message ||
+            completedResponse.error?.message ||
             "Background graph code generation failed."
           );
+        graphCodegenWorkerFailedKey =
+          active.key;
       }
 
       graphCodegenWorkerRunning = false;
@@ -2302,7 +4413,9 @@ function ensureGraphCodegenWorker(catalog) {
         codegenProjectEpoch:
           active.projectEpoch,
         key: active.key,
-        ok: response.ok === true
+        ok: completedResponse.ok === true,
+        transport:
+          active.transport || null
       });
 
       queueMicrotask(() => {
@@ -2317,47 +4430,29 @@ function ensureGraphCodegenWorker(catalog) {
       });
 
       void pumpGraphCodegenWorkerQueue();
+      scheduleGraphCodegenWorkerIdleRelease();
     }
   );
 
   worker.addEventListener(
     "error",
     event => {
-      if (
-        worker !==
-          graphCodegenWorker ||
-        workerProjectEpoch !==
-          graphCodegenProjectEpoch ||
-        workerApplicationEpoch !==
-          projectApplicationEpoch
-      ) {
-        return;
-      }
-      graphCodegenWorkerLastError =
-        new Error(
-          event.message ||
-          "Background graph code generation worker failed."
-        );
-      graphCodegenWorkerActiveBuild = null;
-      graphCodegenWorkerRunning = false;
-      terminateGraphCodegenWorker();
-      announceGraphCodegenSettlement({
-        projectEpoch:
-          workerApplicationEpoch,
-        codegenProjectEpoch:
-          workerProjectEpoch,
-        ok: false,
-        error:
-          graphCodegenWorkerLastError.message
-      });
-      void pumpGraphCodegenWorkerQueue();
+      retireWorkerForFailure(
+        event.message ||
+        "Background graph code generation worker failed."
+      );
+    }
+  );
+  worker.addEventListener(
+    "messageerror",
+    () => {
+      retireWorkerForFailure(
+        "The background graph code-generation worker returned data that could not be decoded."
+      );
     }
   );
 
   graphCodegenWorker = worker;
-  graphCodegenWorkerCatalogKey =
-    catalogKey;
-  graphCodegenWorkerNeedsCatalog = true;
   return worker;
 }
 
@@ -2377,33 +4472,120 @@ async function pumpGraphCodegenWorkerQueue() {
     build;
 
   try {
-    const worker =
-      ensureGraphCodegenWorker(
-        build.catalog
+    if (
+      graphCodegenWorker &&
+      graphCodegenWorkerCatalogKey &&
+      graphCodegenWorkerCatalogKey !==
+        build.catalogKey
+    ) {
+      terminateGraphCodegenWorker();
+    }
+    const worker = ensureGraphCodegenWorker();
+    const current = () => Boolean(
+      graphCodegenWorker === worker &&
+      graphCodegenWorkerActiveBuild === build &&
+      build.extensionState ===
+        state.extensions?.typedNodeGraph &&
+      build.projectEpoch ===
+        graphCodegenProjectEpoch &&
+      build.applicationProjectEpoch ===
+        projectApplicationEpoch &&
+      largeGraphCodegenKey(
+        state.extensions?.typedNodeGraph
+      ) === build.key
+    );
+    const requirements = new Map();
+    const payload = {
+      state: build.state,
+      entries: build.entries,
+      analysisCertificate:
+        build.analysisCertificate || null,
+      templates:
+        window.RMLCodeTemplates.forWorker(
+          worker
+        ),
+      guidance:
+        window.RMLGuidance?.forWorker(
+          worker,
+          build.state.metadata?.includeGuide === true
+        ) || null
+    };
+    const payloadTransport =
+      await postGraphCodegenTokenStream(
+        worker,
+        build.id,
+        "payload",
+        payload,
+        {
+          isCurrent: current,
+          onObject: value =>
+            graphCodegenCollectRequirement(
+              requirements,
+              value
+            )
+        }
       );
-
-    const catalog =
-      graphCodegenWorkerNeedsCatalog
-        ? build.catalog
-        : null;
-    graphCodegenWorkerNeedsCatalog = false;
-
+    const requirementList =
+      [...requirements.values()];
+    const projection =
+      await graphCodegenCatalogProjection(
+        build.catalog,
+        requirementList
+      );
+    if (!current()) {
+      const error = new Error(
+        "The Runtime Graph changed while its API definition projection was being prepared."
+      );
+      error.code = "RML_GRAPH_CODEGEN_STALE";
+      throw error;
+    }
+    const supportTransport =
+      await postGraphCodegenTokenStream(
+        worker,
+        build.id,
+        "support",
+        {
+          catalog: projection,
+          requirements: requirementList
+        },
+        { isCurrent: current }
+      );
+    if (!current()) {
+      const error = new Error(
+        "The Runtime Graph changed before its background code-generation transaction committed."
+      );
+      error.code = "RML_GRAPH_CODEGEN_STALE";
+      throw error;
+    }
+    build.transport = Object.freeze({
+      payload: payloadTransport,
+      support: supportTransport,
+      projectedCatalogTypes:
+        projection?.types?.length || 0,
+      projectedCatalogEnums:
+        projection?.enums?.length || 0,
+      portableRequirements:
+        requirementList.length
+    });
     worker.postMessage({
       id: build.id,
-      operation: "build",
-      catalog,
-      templates: window.RMLCodeTemplates.forWorker(worker),
-      guidance: window.RMLGuidance?.forWorker(worker, build.state.metadata?.includeGuide === true),
-      state: build.state,
-      entries: build.entries
+      operation: "buildStreamCommit"
     });
   } catch (error) {
+    const stale =
+      error?.code ===
+        "RML_GRAPH_CODEGEN_STALE";
     graphCodegenWorkerLastError =
-      error instanceof Error
+      stale
+        ? null
+        : error instanceof Error
         ? error
         : new Error(String(error));
+    graphCodegenWorkerFailedKey =
+      stale ? "" : build.key;
     graphCodegenWorkerActiveBuild = null;
     graphCodegenWorkerRunning = false;
+    terminateGraphCodegenWorker();
     announceGraphCodegenSettlement({
       projectEpoch:
         build.applicationProjectEpoch,
@@ -2411,9 +4593,24 @@ async function pumpGraphCodegenWorkerQueue() {
         build.projectEpoch,
       key: build.key,
       ok: false,
+      stale,
       error:
-        graphCodegenWorkerLastError.message
+        graphCodegenWorkerLastError?.message ||
+        "The Runtime Graph changed before background code generation completed."
     });
+    if (stale) {
+      const extensionState =
+        state.extensions?.typedNodeGraph;
+      if (extensionState) {
+        requestLargeGraphCodegen(
+          extensionState,
+          largeGraphCodegenKey(
+            extensionState
+          )
+        );
+      }
+    }
+    void pumpGraphCodegenWorkerQueue();
   }
 }
 
@@ -2421,12 +4618,57 @@ function requestLargeGraphCodegen(
   extensionState,
   key
 ) {
+  if (graphCodegenWorkerIdleTimer) {
+    clearTimeout(
+      graphCodegenWorkerIdleTimer
+    );
+    graphCodegenWorkerIdleTimer = 0;
+  }
   if (
     graphCodegenWorkerActiveBuild?.key ===
-      key ||
-    graphCodegenWorkerQueuedBuild?.key ===
       key
   ) {
+    return;
+  }
+  if (
+    graphCodegenWorkerQueuedBuild?.key === key
+  ) {
+    if (!graphCodegenWorkerRunning) {
+      void pumpGraphCodegenWorkerQueue();
+    }
+    return;
+  }
+  if (
+    graphCodegenWorkerLastError &&
+    graphCodegenWorkerFailedKey === key
+  ) {
+    return;
+  }
+  if (
+    graphCodegenWorkerFailedKey &&
+    graphCodegenWorkerFailedKey !== key
+  ) {
+    graphCodegenWorkerFailedKey = "";
+    graphCodegenWorkerLastError = null;
+  }
+
+  if (!graphCodegenWorkerSupportedForCurrentProtocol()) {
+    graphCodegenWorkerLastError = new Error(
+      "This browser does not provide the Worker required for non-blocking large-graph code generation."
+    );
+    graphCodegenWorkerFailedKey = key;
+    queueMicrotask(() =>
+      announceGraphCodegenSettlement({
+        projectEpoch:
+          projectApplicationEpoch,
+        codegenProjectEpoch:
+          graphCodegenProjectEpoch,
+        key,
+        ok: false,
+        error:
+          graphCodegenWorkerLastError.message
+      })
+    );
     return;
   }
 
@@ -2442,11 +4684,16 @@ function requestLargeGraphCodegen(
       graphCodegenProjectEpoch,
     applicationProjectEpoch:
       projectApplicationEpoch,
+    extensionState,
+    catalogKey:
+      graphCodegenCatalogKey(catalog),
     catalog,
     state:
       builderCodegenStateSnapshot(),
     entries:
-      currentFlattenedNodes()
+      currentFlattenedNodes(),
+    analysisCertificate:
+      takeImportedGraphAnalysisCertificate()
   };
   graphCodegenWorkerLastError = null;
   void pumpGraphCodegenWorkerQueue();
@@ -5586,7 +7833,9 @@ function getTypedNodeGraphContribution() {
         entries:
           clone(
             currentFlattenedNodes()
-          )
+          ),
+        analysisCertificate:
+          takeImportedGraphAnalysisCertificate()
       });
 
     if (
@@ -9014,6 +11263,12 @@ function assertProjectDocumentEnvelope(
 function projectModalJsonDocumentKind(
   source
 ) {
+  if (
+    isPlainObject(source) &&
+    source.format === PROJECT_FORMAT
+  ) {
+    return "project";
+  }
   return (
     isPlainObject(source) &&
     source.schema ===
@@ -9283,7 +11538,10 @@ function applyProjectDocument(
   );
   window.RMLDynamicGraphHost
     ?.synchronizeProjectState?.(
-      projectEpoch
+      projectEpoch,
+      {
+        importedDocument: true
+      }
     );
   return projectEpoch;
 }
@@ -9292,9 +11550,46 @@ let projectDraftPersistIdleHandle = 0;
 let projectDraftPersistSchedule = 0;
 let projectDraftPersistRevision = 0;
 let pendingProjectDraftWrite = null;
+let projectDraftActiveWrite = null;
 let projectDraftWriteRunning = false;
 let projectDraftFlushPromise =
   Promise.resolve();
+let projectDraftLastWriteError = null;
+const projectDraftDiagnostics = {
+  streamAttempts: 0,
+  staleSnapshots: 0,
+  completedWrites: 0,
+  lastRevision: 0,
+  lastJsonBytes: 0,
+  lastCompressedBytes: 0,
+  lastMaximumMainSliceMs: 0,
+  lastTransport: "",
+  lifecycleFlushes: 0,
+  lifecycleDeduplications: 0
+};
+
+Object.defineProperty(
+  window,
+  "RMLProjectDraftDiagnostics",
+  {
+    value: Object.freeze({
+      getSnapshot() {
+        return Object.freeze({
+          ...projectDraftDiagnostics,
+          queuedRevision:
+            projectDraftPersistRevision,
+          writeRunning:
+            projectDraftWriteRunning,
+          hasPendingWrite:
+            pendingProjectDraftWrite !== null
+        });
+      }
+    }),
+    writable: false,
+    enumerable: false,
+    configurable: true
+  }
+);
 
 function openProjectDraftDatabase() {
   return new Promise((resolve, reject) => {
@@ -9312,6 +11607,7 @@ function openProjectDraftDatabase() {
         PROJECT_DRAFT_DATABASE_NAME,
         PROJECT_DRAFT_DATABASE_VERSION
       );
+    let settled = false;
 
     request.onupgradeneeded = () => {
       const database = request.result;
@@ -9327,28 +11623,58 @@ function openProjectDraftDatabase() {
         );
       }
     };
-    request.onsuccess = () =>
+    request.onsuccess = () => {
+      if (settled) {
+        request.result?.close?.();
+        return;
+      }
+      settled = true;
       resolve(request.result);
-    request.onerror = () =>
+    };
+    request.onerror = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
       reject(
         request.error ||
         new Error(
           "Project draft database could not be opened."
         )
       );
-    request.onblocked = () =>
+    };
+    request.onblocked = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
       reject(
         new Error(
           "Project draft database upgrade is blocked."
         )
       );
+    };
   });
 }
 
 async function writeProjectDraftRecord(
-  project,
+  compressed,
   revision
 ) {
+  if (
+    !(compressed?.buffer instanceof
+      ArrayBuffer) ||
+    compressed.compression !== "gzip"
+  ) {
+    throw new TypeError(
+      "The compressed project draft payload is invalid."
+    );
+  }
+
+  const projectBlob = new Blob(
+    [compressed.buffer],
+    { type: "application/gzip" }
+  );
   let database;
 
   try {
@@ -9371,7 +11697,16 @@ async function writeProjectDraftRecord(
           revision,
           savedAtUtc:
             new Date().toISOString(),
-          project
+          encoding:
+            PROJECT_DRAFT_ENCODING,
+          compression: "gzip",
+          jsonBytes:
+            Number(
+              compressed.jsonBytes
+            ) || 0,
+          compressedBytes:
+            projectBlob.size,
+          projectBlob
         });
 
       transaction.oncomplete = () =>
@@ -9403,7 +11738,7 @@ async function readProjectDraftRecord() {
     database =
       await openProjectDraftDatabase();
 
-    return await new Promise(
+    const record = await new Promise(
       (resolve, reject) => {
         const transaction =
           database.transaction(
@@ -9418,13 +11753,7 @@ async function readProjectDraftRecord() {
             .get(ACTIVE_STORAGE_KEY);
 
         request.onsuccess = () =>
-          resolve(
-            isPlainObject(
-              request.result?.project
-            )
-              ? request.result
-              : null
-          );
+          resolve(request.result || null);
         request.onerror = () =>
           reject(
             request.error ||
@@ -9434,6 +11763,44 @@ async function readProjectDraftRecord() {
           );
       }
     );
+
+    if (isPlainObject(record?.project)) {
+      return record;
+    }
+
+    if (
+      record?.encoding !==
+        PROJECT_DRAFT_ENCODING ||
+      record?.compression !== "gzip" ||
+      !record.projectBlob ||
+      typeof record.projectBlob.slice !==
+        "function" ||
+      typeof record.projectBlob.text !==
+        "function"
+    ) {
+      return null;
+    }
+
+    const response = await projectIoRequest(
+      "parseFile",
+      {
+        file: record.projectBlob,
+        maximumBytes:
+          PROJECT_FILE_MAX_BYTES,
+        projectFormat: PROJECT_FORMAT,
+        savedCompositeSchema:
+          SAVED_API_COMPOSITE_IMPORT_SCHEMA,
+        savedCompositeMaximumBytes:
+          SAVED_API_COMPOSITE_IMPORT_MAX_BYTES
+      }
+    );
+    if (!isPlainObject(response?.value)) {
+      return null;
+    }
+    return {
+      ...record,
+      project: response.value
+    };
   } catch (error) {
     console.debug(
       "No IndexedDB project draft is available.",
@@ -9445,66 +11812,20 @@ async function readProjectDraftRecord() {
   }
 }
 
-function graphNodeCountInProject(project) {
-  const nodes =
-    project?.extensions
-      ?.typedNodeGraph
-      ?.nodes;
-
-  return Array.isArray(nodes)
-    ? nodes.length
-    : 0;
-}
-
-async function updateLegacyLocalDraft(
-  project
-) {
-  const graphNodeCount =
-    graphNodeCountInProject(project);
-
-  if (graphNodeCount > 2000) {
-    try {
-      localStorage.removeItem(
-        ACTIVE_STORAGE_KEY
-      );
-    } catch {
-    }
-    return;
+function clearLegacyLocalDraft(revision) {
+  if (
+    revision !==
+      projectDraftPersistRevision
+  ) {
+    return false;
   }
-
   try {
-    const response =
-      await projectIoRequest(
-        "stringify",
-        {
-          value: project,
-          space: 0
-        }
-      );
-    const text = String(
-      response.text || ""
+    localStorage.removeItem(
+      ACTIVE_STORAGE_KEY
     );
-
-    if (
-      new TextEncoder().encode(text)
-        .byteLength <=
-      PROJECT_LOCAL_STORAGE_MAX_BYTES
-    ) {
-      localStorage.setItem(
-        ACTIVE_STORAGE_KEY,
-        text
-      );
-    } else {
-      localStorage.removeItem(
-        ACTIVE_STORAGE_KEY
-      );
-    }
-  } catch (error) {
-    console.debug(
-      "The compatibility localStorage draft was skipped.",
-      error
-    );
+  } catch {
   }
+  return true;
 }
 
 function flushProjectDraftWrites() {
@@ -9520,29 +11841,102 @@ function flushProjectDraftWrites() {
           const current =
             pendingProjectDraftWrite;
           pendingProjectDraftWrite = null;
+          projectDraftActiveWrite =
+            current;
 
           try {
+            projectDraftDiagnostics
+              .streamAttempts += 1;
+            const compressed =
+              await projectIoStreamedGzipRequest(
+                current.project,
+                {
+                  maximumBytes:
+                    PROJECT_FILE_MAX_BYTES,
+                  isCurrent: () =>
+                    current.revision ===
+                      projectDraftPersistRevision
+                }
+              );
+
+            if (
+              current.revision !==
+                projectDraftPersistRevision
+            ) {
+              projectDraftDiagnostics
+                .staleSnapshots += 1;
+              continue;
+            }
+
             await writeProjectDraftRecord(
-              current.project,
+              compressed,
               current.revision
+            );
+            projectDraftLastWriteError =
+              null;
+            projectDraftDiagnostics
+              .completedWrites += 1;
+            projectDraftDiagnostics
+              .lastRevision =
+              current.revision;
+            projectDraftDiagnostics
+              .lastJsonBytes =
+              Number(
+                compressed.jsonBytes
+              ) || 0;
+            projectDraftDiagnostics
+              .lastCompressedBytes =
+              Number(
+                compressed.compressedBytes
+              ) || 0;
+            projectDraftDiagnostics
+              .lastMaximumMainSliceMs =
+              Number(
+                compressed.streamMetrics
+                  ?.maximumMainSliceMs
+              ) || 0;
+            projectDraftDiagnostics
+              .lastTransport = String(
+              compressed.transport || ""
             );
 
             if (
               current.revision ===
               projectDraftPersistRevision
             ) {
-              await updateLegacyLocalDraft(
-                current.project
+              clearLegacyLocalDraft(
+                current.revision
               );
             }
           } catch (error) {
+            if (
+              error?.code ===
+                "RML_PROJECT_DRAFT_STALE"
+            ) {
+              projectDraftDiagnostics
+                .staleSnapshots += 1;
+              continue;
+            }
+            projectDraftLastWriteError =
+              error instanceof Error
+                ? error
+                : new Error(String(error));
             console.warn(
               "Could not save the IndexedDB builder draft.",
               error
             );
+          } finally {
+            if (
+              projectDraftActiveWrite ===
+                current
+            ) {
+              projectDraftActiveWrite =
+                null;
+            }
           }
         }
       } finally {
+        projectDraftActiveWrite = null;
         projectDraftWriteRunning = false;
       }
     })();
@@ -9683,9 +12077,59 @@ function persist(immediate = false) {
   }
 }
 
+function flushProjectDraftForLifecycle() {
+  projectDraftDiagnostics
+    .lifecycleFlushes += 1;
+
+  window.RMLDynamicGraphHost
+    ?.flushPendingEditorEdits?.();
+
+  if (
+    projectDraftPersistIdleHandle &&
+    typeof cancelIdleCallback ===
+      "function"
+  ) {
+    cancelIdleCallback(
+      projectDraftPersistIdleHandle
+    );
+    projectDraftPersistIdleHandle = 0;
+  }
+  projectDraftPersistSchedule += 1;
+
+  if (projectDraftPersistRevision <= 0) {
+    projectDraftPersistRevision = 1;
+  }
+  const revision =
+    projectDraftPersistRevision;
+
+  if (
+    pendingProjectDraftWrite?.revision ===
+      revision ||
+    projectDraftActiveWrite?.revision ===
+      revision ||
+    projectDraftDiagnostics.lastRevision ===
+      revision
+  ) {
+    projectDraftDiagnostics
+      .lifecycleDeduplications += 1;
+    void flushProjectDraftWrites();
+    return;
+  }
+
+  pendingProjectDraftWrite = {
+    revision,
+    project:
+      createProjectDocument(
+        false,
+        false
+      )
+  };
+  void flushProjectDraftWrites();
+}
+
 window.addEventListener(
   "pagehide",
-  () => persist(true),
+  flushProjectDraftForLifecycle,
   { capture: true }
 );
 
@@ -9693,7 +12137,7 @@ document.addEventListener(
   "visibilitychange",
   () => {
     if (document.visibilityState === "hidden") {
-      persist(true);
+      flushProjectDraftForLifecycle();
     }
   }
 );
@@ -9830,7 +12274,12 @@ async function readJsonFileSource(
         {
           file,
           maximumBytes:
-            PROJECT_FILE_MAX_BYTES
+            PROJECT_FILE_MAX_BYTES,
+          savedCompositeSchema:
+            SAVED_API_COMPOSITE_IMPORT_SCHEMA,
+          savedCompositeMaximumBytes:
+            SAVED_API_COMPOSITE_IMPORT_MAX_BYTES,
+          projectFormat: PROJECT_FORMAT
         }
       );
     return {
@@ -9868,8 +12317,23 @@ async function readExampleProjectDocument() {
   const url = exampleProjectUrl();
 
   if (url.protocol === "file:") {
-    throw new Error(
-      "The browser blocks project JSON files in file:// mode. Start the builder with 'Start Builder.cmd' so assets/data/Load Example.json can be read locally from 127.0.0.1."
+    const payloads = await window
+      .RMLCodeTemplates
+      ?.ensureStaticPayloads?.();
+    if (
+      !payloads?.exampleProject ||
+      typeof payloads.exampleProject !==
+        "object"
+    ) {
+      throw new Error(
+        "The built-in example project payload is unavailable."
+      );
+    }
+    return await parseProjectJsonText(
+      JSON.stringify(
+        payloads.exampleProject
+      ),
+      EXAMPLE_PROJECT_FILE_NAME
     );
   }
 
@@ -19552,6 +22016,8 @@ function populateGeneratedArtifactSelect(
 }
 
 function updateGeneratedOutput() {
+  if (deferGeneratedOutputUntilDomReady()) return;
+  generatedOutputRefreshPendingBeforeDom = false;
   if (window.RMLDynamicGraphHost?.hasPendingEditorEdits?.()) return;
   invalidateBrowserCompilerBuild(false);
 
@@ -23079,6 +25545,8 @@ function resetBuilderReplacementUi() {
   if (elements.builderWorkReplacementConfirm) {
     elements.builderWorkReplacementConfirm.onclick =
       null;
+    elements.builderWorkReplacementConfirm.textContent =
+      "Use selected replacement";
     setAlwaysClickableButtonAvailability(
       elements.builderWorkReplacementConfirm,
       true
@@ -23331,23 +25799,50 @@ async function requestBuilderReplacementChoice(
       )
         ? selected.unmappedRequiredInputs
         : [];
+    const disconnectedPorts = [
+      ...(selected
+        ?.unmappedReferencedInputs || [])
+        .map(portId =>
+          `input '${String(portId)}'`
+        ),
+      ...(selected
+        ?.unmappedReferencedOutputs || [])
+        .map(portId =>
+          `output '${String(portId)}'`
+        )
+    ];
     const matchCount =
       visibleCandidates.length;
     const base =
       `${matchCount.toLocaleString("de-DE")} visible candidate${matchCount === 1 ? "" : "s"} · source: ${sourceDescription}.`;
     if (!selected) {
+      confirm.textContent =
+        "Use selected replacement";
       summary.textContent = base;
+      return;
+    }
+    confirm.textContent =
+      disconnectedPorts.length > 0
+        ? "Replace and disconnect affected wires"
+        : "Use selected replacement";
+    if (disconnectedPorts.length > 0) {
+      summary.textContent =
+        `${base} Warning: this confirmed replacement removes the existing wire(s) and branch descendants attached to ${disconnectedPorts.join(", ")} because those old endpoints do not exist or cannot be mapped unambiguously on the selected node.${missingInputs.length > 0 ? ` The new node also adds ${missingInputs.length.toLocaleString("de-DE")} unconnected required input${missingInputs.length === 1 ? "" : "s"}: ${missingInputs.map(port => port.label || port.id).join(", ")}.` : ""}`;
       return;
     }
     if (missingInputs.length > 0) {
       summary.textContent =
-        `${base} The selected node adds ${missingInputs.length.toLocaleString("de-DE")} unconnected required input${missingInputs.length === 1 ? "" : "s"}: ${missingInputs.map(port => port.label || port.id).join(", ")}. Existing wires are preserved; configure these inputs after import.`;
+        `${base} The selected node adds ${missingInputs.length.toLocaleString("de-DE")} unconnected required input${missingInputs.length === 1 ? "" : "s"}: ${missingInputs.map(port => port.label || port.id).join(", ")}. Configure these new inputs after import.`;
       return;
     }
     summary.textContent =
-      selected.matchMode === "strict"
-        ? `${base} Exact stored port contract.`
-        : `${base} Manual structural mapping; every existing connected port is mapped.`;
+      selected.semanticProof ===
+        "exact-contract"
+        ? `${base} Exact semantic operation contract; every corresponding stored port is mapped compatibly.`
+        : selected.semanticProof ===
+            "exact-name"
+          ? `${base} Same API operation kind and semantic name; every corresponding stored port is mapped compatibly.`
+          : `${base} Manual same-kind replacement; every corresponding stored port is mapped compatibly.`;
   };
 
   const selectCandidate = (
@@ -23493,15 +25988,31 @@ async function requestBuilderReplacementChoice(
           ? candidate
               .unmappedRequiredInputs
           : [];
+      const disconnectedPortCount =
+        (
+          candidate
+            .unmappedReferencedInputs || []
+        ).length +
+        (
+          candidate
+            .unmappedReferencedOutputs || []
+        ).length;
       match.dataset.warning = String(
-        missingInputs.length > 0
+        missingInputs.length > 0 ||
+        disconnectedPortCount > 0
       );
       match.textContent =
-        candidate.matchMode === "strict"
-          ? "Exact port contract"
-          : missingInputs.length > 0
-            ? `Structural mapping · ${missingInputs.length} new input${missingInputs.length === 1 ? "" : "s"} to configure`
-            : "Structural mapping · all connected ports mapped";
+        disconnectedPortCount > 0
+          ? `Same operation kind · warning: ${disconnectedPortCount} old used endpoint${disconnectedPortCount === 1 ? "" : "s"} will be disconnected`
+          : candidate.semanticProof ===
+              "exact-contract"
+            ? "Exact semantic operation contract"
+            : candidate.semanticProof ===
+                "exact-name"
+              ? "Same operation kind and semantic name"
+              : missingInputs.length > 0
+                ? `Same operation kind · ${missingInputs.length} new input${missingInputs.length === 1 ? "" : "s"} to configure`
+                : "Same operation kind · compatible corresponding ports";
       copy.append(
         title,
         group,
@@ -24532,6 +27043,70 @@ function validateRuntimeGraphViewsFast(
   return [...new Set(diagnostics)];
 }
 
+function runtimeCatalogResolutionEpochToken() {
+  return JSON.stringify({
+    catalogFingerprint: String(
+      window.RMLResoniteApiCatalog
+        ?.catalogFingerprint || ""
+    ),
+    engineVersion: String(
+      window.RMLResoniteApiCatalog
+        ?.engineVersion || ""
+    ),
+    definitionRevision: Number(
+      window
+        .__RMLNodeDefinitionRevision ||
+      0
+    ),
+    factoryVersion: Number(
+      window.RMLApiNodeFactoryReport
+        ?.factoryVersion || 0
+    ),
+    factoryFingerprint: String(
+      window.RMLApiNodeFactoryReport
+        ?.catalogFingerprint || ""
+    )
+  });
+}
+
+function runtimeCatalogResolutionBatchEpochToken() {
+  const definitionRevision =
+    Number(
+      window
+        .__RMLNodeDefinitionRevision
+    ) || 0;
+  const compatibleLegacyAliasRevision =
+    Math.max(
+      0,
+      Number(
+        window
+          .RMLApiNodeFactoryController
+          ?.compatibleLegacyAliasRevision?.()
+      ) || 0
+    );
+  return JSON.stringify({
+    catalogFingerprint: String(
+      window.RMLResoniteApiCatalog
+        ?.catalogFingerprint || ""
+    ),
+    engineVersion: String(
+      window.RMLResoniteApiCatalog
+        ?.engineVersion || ""
+    ),
+    definitionContractRevision:
+      definitionRevision -
+      compatibleLegacyAliasRevision,
+    factoryVersion: Number(
+      window.RMLApiNodeFactoryReport
+        ?.factoryVersion || 0
+    ),
+    factoryFingerprint: String(
+      window.RMLApiNodeFactoryReport
+        ?.catalogFingerprint || ""
+    )
+  });
+}
+
 function projectRequiredCatalogNodes(
   project
 ) {
@@ -24548,8 +27123,26 @@ function projectRequiredCatalogNodes(
     registry
       ?.getNodeDefinitions?.() || {};
   const requirements = new Map();
+  const stableFamilyValue = value =>
+    value &&
+    typeof value === "object"
+      ? Array.isArray(value)
+        ? value.map(stableFamilyValue)
+        : Object.fromEntries(
+            Object.keys(value)
+              .sort((left, right) =>
+                left.localeCompare(right)
+              )
+              .map(key => [
+                key,
+                stableFamilyValue(
+                  value[key]
+                )
+              ])
+          )
+      : value ?? null;
   for (const view of graphViews) {
-    const operatorByNodeId = new Map();
+    const requirementByNodeId = new Map();
     const nodes = Array.isArray(
       view.graph.nodes
     )
@@ -24614,13 +27207,32 @@ function projectRequiredCatalogNodes(
         continue;
       }
 
-      operatorByNodeId.set(
+      const nodeParameters =
+        node?.parameters &&
+        typeof node.parameters ===
+          "object" &&
+        !Array.isArray(node.parameters)
+          ? clone(node.parameters)
+          : {};
+      const requirementKey = JSON.stringify({
+        operatorId,
+        apiContract:
+          stableFamilyValue(
+            apiContract
+          ),
+        nodeParameters:
+          stableFamilyValue(
+            nodeParameters
+          )
+      });
+      requirementByNodeId.set(
         String(node.id || ""),
-        operatorId
+        requirementKey
       );
 
-      if (!requirements.has(operatorId)) {
-        requirements.set(operatorId, {
+      if (!requirements.has(requirementKey)) {
+        requirements.set(requirementKey, {
+          requirementKey,
           operatorId,
           apiContract:
             apiContract
@@ -24632,27 +27244,27 @@ function projectRequiredCatalogNodes(
             hasPortableApiIdentity
               ? "api"
               : "all",
-          nodeParameters:
-            node?.parameters &&
-            typeof node.parameters ===
-              "object" &&
-            !Array.isArray(
-              node.parameters
-            )
-              ? clone(node.parameters)
-              : {},
+          nodeParameters,
+          nodeReferences: [],
           nodeLabels: new Set(),
           inputPorts: new Set(),
           outputPorts: new Set()
         });
       }
 
+      requirements
+        .get(requirementKey)
+        .nodeReferences.push({
+          nodeId: String(node.id || ""),
+          path: view.path
+        });
+
       const storedLabel = String(
         node?.label || ""
       ).trim();
       if (storedLabel) {
         requirements
-          .get(operatorId)
+          .get(requirementKey)
           .nodeLabels.add(storedLabel);
       }
     }
@@ -24661,22 +27273,22 @@ function projectRequiredCatalogNodes(
       Array.isArray(view.graph.connections)
         ? view.graph.connections
         : []) {
-      const sourceOperator =
-        operatorByNodeId.get(
+      const sourceRequirement =
+        requirementByNodeId.get(
           String(
             connection?.fromNode || ""
           )
         );
-      const targetOperator =
-        operatorByNodeId.get(
+      const targetRequirement =
+        requirementByNodeId.get(
           String(
             connection?.toNode || ""
           )
         );
 
-      if (sourceOperator) {
+      if (sourceRequirement) {
         requirements
-          .get(sourceOperator)
+          .get(sourceRequirement)
           .outputPorts.add(
             String(
               connection?.fromPort || ""
@@ -24684,9 +27296,9 @@ function projectRequiredCatalogNodes(
           );
       }
 
-      if (targetOperator) {
+      if (targetRequirement) {
         requirements
-          .get(targetOperator)
+          .get(targetRequirement)
           .inputPorts.add(
             String(
               connection?.toPort || ""
@@ -24701,8 +27313,8 @@ function projectRequiredCatalogNodes(
       )
         ? view.graph.boundaryPorts
         : []) {
-      const operatorId =
-        operatorByNodeId.get(
+      const requirementKey =
+        requirementByNodeId.get(
           String(
             boundary?.internalNodeId ||
             ""
@@ -24711,20 +27323,20 @@ function projectRequiredCatalogNodes(
       const portId = String(
         boundary?.internalPortId || ""
       );
-      if (!operatorId || !portId) {
+      if (!requirementKey || !portId) {
         continue;
       }
       if (
         boundary.direction === "input"
       ) {
         requirements
-          .get(operatorId)
+          .get(requirementKey)
           ?.inputPorts.add(portId);
       } else if (
         boundary.direction === "output"
       ) {
         requirements
-          .get(operatorId)
+          .get(requirementKey)
           ?.outputPorts.add(portId);
       }
     }
@@ -24732,6 +27344,8 @@ function projectRequiredCatalogNodes(
 
   return [...requirements.values()]
     .map(requirement => ({
+      requirementKey:
+        requirement.requirementKey,
       operatorId:
         requirement.operatorId,
       apiContract:
@@ -24745,6 +27359,16 @@ function projectRequiredCatalogNodes(
         clone(
           requirement.nodeParameters || {}
         ),
+      nodeReferences:
+        requirement.nodeReferences
+          .map(reference => ({
+            nodeId: String(
+              reference.nodeId || ""
+            ),
+            path: String(
+              reference.path || "runtime-root"
+            )
+          })),
       nodeLabels:
         [...requirement.nodeLabels]
           .filter(Boolean)
@@ -24767,8 +27391,134 @@ function projectRequiredCatalogNodes(
     .sort((left, right) =>
       left.operatorId.localeCompare(
         right.operatorId
+      ) ||
+      left.requirementKey.localeCompare(
+        right.requirementKey
       )
     );
+}
+
+function runtimeGraphPortablePreservationSignature(
+  graph
+) {
+  const stableObject = value =>
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+      ? Object.fromEntries(
+          Object.keys(value)
+            .sort((left, right) =>
+              left.localeCompare(right)
+            )
+            .map(key => [
+              key,
+              stableObject(value[key])
+            ])
+        )
+      : Array.isArray(value)
+        ? value.map(stableObject)
+        : value ?? null;
+  return JSON.stringify(
+    projectRuntimeGraphViews(graph)
+      .map(view => ({
+        path: view.path,
+        nodes: (view.graph.nodes || [])
+          .map(node => ({
+            id: String(node?.id || ""),
+            operatorId: String(
+              node?.operatorId || ""
+            ),
+            x: Number(node?.x),
+            y: Number(node?.y),
+            width:
+              node?.width == null
+                ? null
+                : Number(node.width),
+            height:
+              node?.height == null
+                ? null
+                : Number(node.height),
+            compositeBoundaryPorts:
+              stableObject(
+                Array.isArray(
+                  node?.parameters
+                    ?.boundaryPorts
+                )
+                  ? node.parameters
+                      .boundaryPorts
+                  : []
+              ),
+            compositeMemberCount:
+              node?.parameters
+                ?.memberCount == null
+                ? null
+                : Number(
+                    node.parameters
+                      .memberCount
+                  )
+          }))
+          .sort((left, right) =>
+            left.id.localeCompare(right.id)
+          ),
+        connections:
+          (view.graph.connections || [])
+            .map(connection => ({
+              id: String(
+                connection?.id || ""
+              ),
+              fromNode: String(
+                connection?.fromNode || ""
+              ),
+              fromPort: String(
+                connection?.fromPort || ""
+              ),
+              toNode: String(
+                connection?.toNode || ""
+              ),
+              toPort: String(
+                connection?.toPort || ""
+              ),
+              points: stableObject(
+                Array.isArray(
+                  connection?.points
+                )
+                  ? connection.points
+                  : []
+              ),
+              branchFrom: stableObject(
+                connection?.branchFrom || null
+              )
+            }))
+            .sort((left, right) =>
+              left.id.localeCompare(right.id)
+            ),
+        boundaryPorts: stableObject(
+          (Array.isArray(
+            view.graph.boundaryPorts
+          )
+            ? view.graph.boundaryPorts
+            : [])
+            .map(boundary =>
+              stableObject(boundary)
+            )
+            .sort((left, right) =>
+              String(left?.id || "")
+                .localeCompare(
+                  String(right?.id || "")
+                )
+            )
+        ),
+        branchRouting: stableObject(
+          view.graph.branchRouting || {}
+        ),
+        viewport: stableObject(
+          view.graph.viewport || null
+        )
+      }))
+      .sort((left, right) =>
+        left.path.localeCompare(right.path)
+      )
+  );
 }
 
 function promiseWithBuilderTimeout(
@@ -24799,12 +27549,153 @@ function promiseWithBuilderTimeout(
   );
 }
 
+function assertProjectRuntimeModuleCoherence() {
+  const expectedModuleId =
+    "1.20.31-universal-presentation-dev23";
+  const requiredFactoryVersion = 38;
+  const mismatches = [];
+  const requireModuleId = (
+    name,
+    actual
+  ) => {
+    if (actual !== expectedModuleId) {
+      mismatches.push(
+        `${name}=${String(actual || "missing")}`
+      );
+    }
+  };
+
+  requireModuleId(
+    "Builder",
+    window.RMLBuilderBuildId
+  );
+  requireModuleId(
+    "script_loader.js",
+    window.RMLScriptLoader?.moduleId
+  );
+  requireModuleId(
+    "style_loader.js",
+    window.RMLStyleLoader?.moduleId
+  );
+  requireModuleId(
+    "catalog_loader.js",
+    window.RMLCatalogImportGate?.moduleId
+  );
+  requireModuleId(
+    "api_nodes.js",
+    window.RMLApiNodeFactoryController
+      ?.moduleId
+  );
+  requireModuleId(
+    "node_graph_codegen.js",
+    window.RMLTypedNodeGraphGenerator
+      ?.moduleId
+  );
+  requireModuleId(
+    "node_graph_composites.js",
+    window.RMLNodeGraphCompositesModuleId
+  );
+  requireModuleId(
+    "node_graph_custom_csharp.js",
+    window.RMLNodeGraphCustomCSharpModuleId
+  );
+  requireModuleId(
+    "node_graph_view.js",
+    window.RMLNodeGraphViewModuleId
+  );
+  requireModuleId(
+    "node_graph_bootstrap.js",
+    window.RMLDynamicGraphHost?.moduleId
+  );
+
+  const indexBuildId =
+    typeof document !== "undefined" &&
+    typeof document.querySelector ===
+      "function"
+      ? document.querySelector(
+          'meta[name="rml-builder-build"]'
+        )?.content
+      : "";
+  if (
+    indexBuildId &&
+    indexBuildId !== expectedModuleId
+  ) {
+    mismatches.push(
+      `index.html=${indexBuildId}`
+    );
+  }
+
+  if (
+    Number(
+      window.RMLCatalogImportGate
+        ?.loaderVersion
+    ) !== 84 ||
+    Number(
+      window.RMLCatalogImportGate
+        ?.requiredApiFactoryVersion
+    ) !== requiredFactoryVersion
+  ) {
+    mismatches.push(
+      "catalog contract is not loader v84 / factory v38"
+    );
+  }
+  if (
+    Number(
+      window.RMLApiNodeFactoryController
+        ?.factoryVersion
+    ) !== requiredFactoryVersion
+  ) {
+    mismatches.push(
+      `API factory controller=v${Number(window.RMLApiNodeFactoryController?.factoryVersion) || 0}`
+    );
+  }
+
+  const activeFactoryVersion =
+    Number(
+      window.__RMLApiNodeFactoryVersion
+    ) || 0;
+  if (
+    activeFactoryVersion !== 0 &&
+    activeFactoryVersion !==
+      requiredFactoryVersion
+  ) {
+    mismatches.push(
+      `active API factory=v${activeFactoryVersion}`
+    );
+  }
+  const factoryReport =
+    window.RMLApiNodeFactoryReport;
+  if (
+    factoryReport &&
+    (
+      factoryReport.moduleId !==
+        expectedModuleId ||
+      Number(factoryReport.factoryVersion) !==
+        requiredFactoryVersion
+    )
+  ) {
+    mismatches.push(
+      `API factory report=v${Number(factoryReport.factoryVersion) || 0}/${String(factoryReport.moduleId || "missing")}`
+    );
+  }
+
+  if (mismatches.length > 0) {
+    throw new Error(
+      `Runtime module version mismatch: cached files from different Builder releases are active (${mismatches.join("; ")}). Reload the Builder without cached files. The JSON was not loaded and the previous project remains unchanged.`
+    );
+  }
+
+  return true;
+}
+
 async function ensureProjectRuntimePrerequisites(
   project,
   workSession,
   {
     catalogOnly = false,
-    catalogPreflight = null
+    catalogPreflight = null,
+    allowOfflineCompatibility = true,
+    allowAutomaticLiveRetry = true
   } = {}
 ) {
   const graph =
@@ -24816,8 +27707,27 @@ async function ensureProjectRuntimePrerequisites(
     return {
       graph: null,
       catalog: null,
-      runtimeActive: false
+      runtimeActive: false,
+      catalogResolutionEpochToken:
+        runtimeCatalogResolutionEpochToken(),
+      catalogResolutionBatchEpochToken:
+        runtimeCatalogResolutionBatchEpochToken()
     };
+  }
+
+  const prevalidatedCatalogEpoch = String(
+    catalogPreflight
+      ?.catalogResolutionEpochToken ||
+    ""
+  );
+  if (
+    prevalidatedCatalogEpoch &&
+    prevalidatedCatalogEpoch !==
+      runtimeCatalogResolutionEpochToken()
+  ) {
+    throw new Error(
+      "The available API catalog or node-definition epoch changed after pre-import validation. The stale isolated plan was discarded; retry the import against the current catalog. The open project remains unchanged."
+    );
   }
 
   updateBuilderWork(
@@ -24883,6 +27793,42 @@ async function ensureProjectRuntimePrerequisites(
         ?.appliedPortMigrations ||
       {}
     );
+  let appliedNodeMigrations =
+    structuredClone(
+      catalogPreflight
+        ?.appliedNodeMigrations ||
+      []
+    );
+  let removedUnavailableApiNodes =
+    structuredClone(
+      catalogPreflight
+        ?.removedUnavailableApiNodes ||
+      []
+    );
+  let compatibilityMode =
+    catalogPreflight
+      ?.compatibilityMode === true;
+  let unresolvedNodeCount = Math.max(
+    0,
+    Number(
+      catalogPreflight
+        ?.unresolvedNodeCount
+    ) || 0
+  );
+  let offlinePortablePlan =
+    catalogPreflight
+      ?.offlinePortablePlan || null;
+  let offlinePortableAdmissionToken =
+    null;
+  let portablePreservationSignature =
+    String(
+      catalogPreflight
+        ?.portablePreservationSignature ||
+      ""
+    );
+  let compositeReconciliation =
+    catalogPreflight
+      ?.compositeReconciliation || null;
 
   if (!catalogPreflight) {
 
@@ -24924,6 +27870,8 @@ async function ensureProjectRuntimePrerequisites(
     "The Runtime Graph modules did not become ready within 60 seconds. The JSON was not loaded."
   );
 
+  assertProjectRuntimeModuleCoherence();
+
   const legacyMigration =
     window.RMLDynamicGraphHost
       ?.migrateLegacyOperatorsForImport?.(
@@ -24963,9 +27911,9 @@ async function ensureProjectRuntimePrerequisites(
         title:
           "Checking the available API catalog…",
         message:
-          `This project uses ${requiredCatalogNodes.length.toLocaleString("de-DE")} catalog operator${requiredCatalogNodes.length === 1 ? "" : "s"}. The available catalog is checked for the required operator IDs and ports before any replacement is selected.`,
+          `This project uses ${requiredCatalogNodes.length.toLocaleString("de-DE")} catalog contract famil${requiredCatalogNodes.length === 1 ? "y" : "ies"}. The available catalog is checked for every stored operator identity, parameter set and referenced port before any replacement is selected.`,
         detail:
-          "A valid cached catalog is sufficient. This import does not initiate a scanner connection.",
+          "The verified cache is tried first. If it cannot resolve every stored contract, the import performs one bounded Live scanner attempt before replacement or omission is decided.",
         progress: 44
       }
     );
@@ -24982,9 +27930,8 @@ async function ensureProjectRuntimePrerequisites(
       throw new Error(
         "The API catalog import gate is unavailable. The JSON was not loaded."
       );
-    } else try {
-      catalogResult =
-        await gate.ensureForImport({
+    } else {
+      const catalogGateOptions = {
           requiredNodes:
             requiredCatalogNodes,
           onLiveLookup(detail) {
@@ -24996,7 +27943,7 @@ async function ensureProjectRuntimePrerequisites(
                 message:
                   String(detail?.message || "Using the catalog available for the current connection mode."),
                 detail:
-                  "Only a click on Cached/Live can initiate a connection. Importing does not probe the scanner or retry a failed stream.",
+                  "The verified cache is activated first. A single bounded Live scanner attempt is made only if required contracts remain unresolved.",
                 progress: 48
               }
             );
@@ -25104,16 +28051,164 @@ async function ensureProjectRuntimePrerequisites(
                 message:
                   String(detail?.message || "Activating the available saved catalog."),
                 detail:
-                  "No serial retry or port-range discovery delays this import.",
+                  "This cache-first pass performs no scanner request. One bounded scanner discovery pass follows only if required contracts remain unresolved.",
                 progress: 49
               }
             );
           }
+        };
+
+      let cachePreparationError = null;
+      let livePreparationError = null;
+      try {
+        catalogResult =
+          await gate.ensureForImport(
+            catalogGateOptions
+          );
+      } catch (error) {
+        cachePreparationError = error;
+      }
+
+      const unresolvedBeforeLive =
+        Array.isArray(
+          catalogResult
+            ?.unresolvedRequirements
+        )
+          ? catalogResult
+              .unresolvedRequirements
+              .length
+          : requiredCatalogNodes.length;
+      const bridge =
+        window.RMLRuntimeBridge;
+      const connectionBeforeLive =
+        bridge?.getConnectionState?.();
+      const shouldTryLive =
+        allowAutomaticLiveRetry === true &&
+        (
+          cachePreparationError ||
+          catalogResult?.available !== true ||
+          catalogResult?.verified !== true ||
+          unresolvedBeforeLive > 0
+        ) &&
+        connectionBeforeLive?.mode !==
+          "live" &&
+        typeof bridge?.connect ===
+          "function";
+
+      if (shouldTryLive) {
+        updateBuilderWork(
+          workSession,
+          {
+            title:
+              "Cached contracts are incomplete · trying Live once…",
+            message:
+              `${unresolvedBeforeLive.toLocaleString("de-DE")} stored catalog contract${unresolvedBeforeLive === 1 ? " remains" : "s remain"} unresolved after the cache-first pass.`,
+            detail:
+              "The Builder checks each configured scanner endpoint at most once. If no scanner is available, import continues with the usable cached or portable information instead of retrying in a loop.",
+            progress: 49
+          }
+        );
+        await paintBuilderUi();
+
+        let connected = false;
+        try {
+          connected =
+            await bridge.connect();
+        } catch (error) {
+          livePreparationError = error;
+        }
+        if (!connected) {
+          livePreparationError =
+            livePreparationError ||
+            new Error(
+              String(
+                bridge
+                  .getConnectionState?.()
+                  ?.lastError ||
+                "No compatible Live scanner was found."
+              )
+            );
+        } else {
+          updateBuilderWork(
+            workSession,
+            {
+              title:
+                "Live scanner found · synchronizing contracts…",
+              message:
+                "The scanner catalog is being fingerprint-checked and persisted to the verified cache before it is used.",
+              detail:
+                "Replacement matching starts only after the synchronized cached factory has finished activating.",
+              progress: 50
+            }
+          );
+          await paintBuilderUi();
+          try {
+            catalogResult =
+              await gate.ensureForImport(
+                catalogGateOptions
+              );
+            cachePreparationError = null;
+          } catch (error) {
+            livePreparationError = error;
+          }
+        }
+      }
+
+      if (!catalogResult) {
+        const failureMessage = [
+          cachePreparationError
+            ? `cache: ${String(cachePreparationError?.message || cachePreparationError)}`
+            : "cache: no verified catalog was available",
+          livePreparationError
+            ? `Live: ${String(livePreparationError?.message || livePreparationError)}`
+            : "Live: no successful scanner synchronization"
+        ].join("; ");
+        catalogResult = Object.freeze({
+          required: true,
+          verified: false,
+          available: false,
+          live: false,
+          cacheSatisfied: false,
+          cacheFallback: true,
+          liveAttempted:
+            shouldTryLive ||
+            connectionBeforeLive?.mode ===
+              "live",
+          source: "unavailable",
+          catalogFingerprint: "",
+          engineVersion: "",
+          unresolved:
+            requiredCatalogNodes.length,
+          unresolvedRequirements:
+            Object.freeze(
+              requiredCatalogNodes.map(
+                requirement =>
+                  Object.freeze({
+                    ...structuredClone(
+                      requirement
+                    ),
+                    failure:
+                      Object.freeze({
+                        reason:
+                          failureMessage,
+                        missingInputs:
+                          Object.freeze([
+                            ...(requirement.inputPorts || [])
+                          ]),
+                        missingOutputs:
+                          Object.freeze([
+                            ...(requirement.outputPorts || [])
+                          ])
+                      })
+                  })
+              )
+            ),
+          failureLabels:
+            Object.freeze([
+              failureMessage
+            ])
         });
-    } catch (error) {
-      throw new Error(
-        `The available API catalog could not be prepared: ${String(error?.message || error)} The JSON was not loaded.`
-      );
+      }
     }
 
     const migrations =
@@ -25157,7 +28252,7 @@ async function ensureProjectRuntimePrerequisites(
       transaction.commit();
     }
 
-    const unresolvedRequirements =
+    let unresolvedRequirements =
       Array.isArray(
         catalogResult
           ?.unresolvedRequirements
@@ -25168,10 +28263,369 @@ async function ensureProjectRuntimePrerequisites(
 
     if (unresolvedRequirements.length > 0) {
       if (catalogResult?.available !== true) {
-        throw new Error(
-          "Neither the Live scanner nor its cached fallback could provide a usable API node factory. The JSON was not loaded."
+        const activeCatalog =
+          window.RMLResoniteApiCatalog ||
+          window.RMLFrooxComponentCatalog ||
+          null;
+        const factoryReport =
+          window.RMLApiNodeFactoryReport ||
+          null;
+        const planner =
+          window.RMLDynamicGraphHost
+            ?.planPreservedCatalogOperatorsForImport;
+        const catalogStatePresent =
+          Boolean(
+            activeCatalog ||
+            String(
+              factoryReport
+                ?.catalogFingerprint ||
+              ""
+            ).trim() ||
+            factoryReport
+              ?.verificationPassed === true
+          );
+        if (
+          allowOfflineCompatibility !==
+            true ||
+          catalogStatePresent ||
+          typeof planner !== "function"
+        ) {
+          throw new Error(
+            "Neither the Live scanner nor its cached fallback could provide a usable API node factory. The JSON was not loaded."
+          );
+        }
+        let planned = planner(
+          graph,
+          unresolvedRequirements
         );
-      }
+        if (planned?.ready !== true) {
+          const portableRequirements = [];
+          const omittedRequirements = [];
+          for (const requirement of
+            unresolvedRequirements) {
+            const isolatedPlan = planner(
+              graph,
+              [requirement]
+            );
+            if (
+              isolatedPlan?.ready === true
+            ) {
+              portableRequirements.push(
+                requirement
+              );
+            } else {
+              omittedRequirements.push({
+                requirement,
+                issues:
+                  Array.isArray(
+                    isolatedPlan?.issues
+                  )
+                    ? isolatedPlan.issues
+                    : []
+              });
+            }
+          }
+
+          if (
+            omittedRequirements.length > 0
+          ) {
+            const replacementTransaction =
+              window.RMLDynamicGraphHost
+                ?.applyCatalogMigrationsPreservingGeometry;
+            if (
+              typeof replacementTransaction !==
+                "function"
+            ) {
+              throw new Error(
+                "The atomic unavailable-node omission transaction is unavailable. The JSON was not loaded."
+              );
+            }
+
+            const nodesByLocation =
+              new Map();
+            for (const view of
+              projectRuntimeGraphViews(
+                graph
+              )) {
+              for (const node of
+                view.graph.nodes || []) {
+                nodesByLocation.set(
+                  `${view.path}\u0000${String(node?.id || "")}`,
+                  {
+                    node,
+                    path: view.path
+                  }
+                );
+              }
+            }
+            const omittedNodes = [];
+            const nodeMigrations = [];
+            const seenLocations =
+              new Set();
+            for (const entry of
+              omittedRequirements) {
+              const requirement =
+                entry.requirement;
+              for (const reference of
+                Array.isArray(
+                  requirement
+                    ?.nodeReferences
+                )
+                  ? requirement
+                      .nodeReferences
+                  : []) {
+                const path = String(
+                  reference?.path ||
+                  "runtime-root"
+                );
+                const nodeId = String(
+                  reference?.nodeId ||
+                  ""
+                );
+                const key =
+                  `${path}\u0000${nodeId}`;
+                if (
+                  !nodeId ||
+                  seenLocations.has(key)
+                ) {
+                  continue;
+                }
+                const located =
+                  nodesByLocation.get(key);
+                if (!located) continue;
+                seenLocations.add(key);
+                omittedNodes.push({
+                  node: located.node,
+                  path,
+                  operatorId:
+                    String(
+                      requirement
+                        ?.operatorId ||
+                      located.node
+                        ?.operatorId ||
+                      ""
+                    )
+                });
+                nodeMigrations.push({
+                  path,
+                  nodeId,
+                  removeNode: true
+                });
+              }
+            }
+            if (nodeMigrations.length === 0) {
+              throw irreparableProjectJsonError(
+                "an unavailable operator has no path-scoped stored node reference that can be omitted safely.",
+                omittedRequirements.flatMap(
+                  entry => entry.issues
+                )
+              );
+            }
+
+            const transaction =
+              replacementTransaction(
+                graph,
+                {},
+                {},
+                nodeMigrations
+              );
+            let committed = false;
+            try {
+              transaction.assertGeometry();
+              const repairability =
+                validateProjectStructureForRepair({
+                  extensions: {
+                    typedNodeGraph: graph
+                  }
+                });
+              if (!repairability.valid) {
+                throw irreparableProjectJsonError(
+                  "omitting incomplete offline API contracts would damage the remaining graph structure.",
+                  repairability.diagnostics
+                );
+              }
+              transaction.commit();
+              committed = true;
+            } finally {
+              if (!committed) {
+                transaction.rollback();
+              }
+            }
+
+            const removalDetails =
+              Array.isArray(
+                transaction
+                  .removedNodeDetails
+              )
+                ? transaction
+                    .removedNodeDetails
+                : [];
+            removedUnavailableApiNodes =
+              omittedNodes.map(item => {
+                const nodeId = String(
+                  item.node?.id || ""
+                );
+                const detail =
+                  removalDetails.find(
+                    value =>
+                      String(
+                        value?.path || ""
+                      ) === item.path &&
+                      String(
+                        value?.nodeId || ""
+                      ) === nodeId
+                  );
+                const disconnectedConnectionIds =
+                  (Array.isArray(
+                    detail
+                      ?.disconnectedConnectionIds
+                  )
+                    ? detail
+                        .disconnectedConnectionIds
+                    : [])
+                    .map(value => ({
+                      path: String(
+                        typeof value === "string"
+                          ? item.path
+                          : value?.path ||
+                              item.path
+                      ),
+                      connectionId:
+                        String(
+                          typeof value === "string"
+                            ? value
+                            : value
+                                ?.connectionId ||
+                              ""
+                        )
+                    }))
+                    .filter(value =>
+                      Boolean(
+                        value.connectionId
+                      )
+                    );
+                return {
+                  nodeId,
+                  nodeName: String(
+                    item.node?.label ||
+                    nodeId ||
+                    item.operatorId
+                  ),
+                  operatorId:
+                    item.operatorId,
+                  path: item.path,
+                  disconnectedConnectionIds
+                };
+              });
+            appliedNodeMigrations = [
+              ...appliedNodeMigrations,
+              ...structuredClone(
+                nodeMigrations
+              )
+            ];
+            unresolvedRequirements =
+              portableRequirements;
+            planned =
+              portableRequirements.length >
+                0
+                ? planner(
+                    graph,
+                    portableRequirements
+                  )
+                : null;
+
+            updateBuilderWork(
+              workSession,
+              {
+                title:
+                  "Incomplete offline API nodes omitted…",
+                message:
+                  `${removedUnavailableApiNodes.length.toLocaleString("de-DE")} unavailable API node${removedUnavailableApiNodes.length === 1 ? " had" : "s had"} no complete stored contract and ${removedUnavailableApiNodes.length === 1 ? "was" : "were"} removed without rejecting the remaining graph.`,
+                detail:
+                  "Only those nodes, their incident wires, branch descendants and causal exposed boundary chain were removed. Complete portable contracts remain preserved for later catalog reconciliation.",
+                progress: 52.5
+              }
+            );
+            await paintBuilderUi();
+          }
+
+          if (
+            unresolvedRequirements.length >
+              0 &&
+            planned?.ready !== true
+          ) {
+            throw irreparableProjectJsonError(
+              "the remaining portable API contract set is internally conflicting after unsafe nodes were omitted.",
+              Array.isArray(planned?.issues)
+                ? planned.issues
+                : []
+            );
+          }
+        }
+        compatibilityMode =
+          unresolvedRequirements.length > 0;
+        unresolvedNodeCount =
+          compatibilityMode
+            ? Number(planned.nodeCount) || 0
+            : 0;
+        offlinePortablePlan =
+          compatibilityMode
+            ? planned
+            : null;
+        portablePreservationSignature =
+          compatibilityMode
+            ? runtimeGraphPortablePreservationSignature(
+                graph
+              )
+            : "";
+        catalogResult = Object.freeze({
+          ...catalogResult,
+          verified: false,
+          offlinePortable:
+            compatibilityMode,
+          compatibilityMode,
+          unresolved:
+            unresolvedRequirements.length,
+          unresolvedRequirements:
+            Object.freeze(
+              unresolvedRequirements
+                .map(requirement =>
+                  Object.freeze({
+                    ...requirement
+                  })
+                )
+            ),
+          omittedUnavailableNodes:
+            Object.freeze(
+              structuredClone(
+                removedUnavailableApiNodes
+              )
+            ),
+          nodeMigrations:
+            Object.freeze(
+              structuredClone(
+                appliedNodeMigrations
+              )
+            )
+        });
+        updateBuilderWork(
+          workSession,
+          {
+            title:
+              compatibilityMode
+                ? "Stored API contracts are complete…"
+                : "Remaining graph is catalog-independent…",
+            message:
+              compatibilityMode
+                ? `${unresolvedNodeCount.toLocaleString("de-DE")} unavailable node${unresolvedNodeCount === 1 ? " can" : "s can"} be opened from their portable contracts without a Live or cached catalog.`
+                : `Every API node without a complete portable contract was omitted; the remaining graph can be imported without a catalog.`,
+            detail:
+              "The preflight remains read-only. Exact unavailable definitions are installed only after the new project is taken over; export stays blocked until verified replacements exist.",
+            progress: 53
+          }
+        );
+        await paintBuilderUi();
+      } else {
 
       const graphHost =
         window.RMLDynamicGraphHost;
@@ -25193,9 +28647,11 @@ async function ensureProjectRuntimePrerequisites(
         );
       }
 
-      const manualMigrations = {};
-      const manualPortMigrations = {};
+      const replacementEpoch =
+        runtimeCatalogResolutionEpochToken();
       const matchingNodesByOperator =
+        new Map();
+      const matchingNodesByLocation =
         new Map();
       for (const view of
         projectRuntimeGraphViews(graph)) {
@@ -25225,6 +28681,13 @@ async function ensureProjectRuntimePrerequisites(
               node,
               path: view.path
             });
+          matchingNodesByLocation.set(
+            `${view.path}\u0000${String(node.id || "")}`,
+            {
+              node,
+              path: view.path
+            }
+          );
         }
       }
 
@@ -25260,6 +28723,14 @@ async function ensureProjectRuntimePrerequisites(
           }
         );
         await paintBuilderUi();
+        if (
+          runtimeCatalogResolutionEpochToken() !==
+          replacementEpoch
+        ) {
+          throw new Error(
+            "The available API catalog changed while replacement candidates were being prepared. The isolated import was discarded; retry it against the current catalog. The open project remains unchanged."
+          );
+        }
         let resolution = null;
         let resolutionError = null;
         try {
@@ -25270,22 +28741,69 @@ async function ensureProjectRuntimePrerequisites(
         } catch (error) {
           resolutionError = error;
         }
-        const candidates =
-          Array.isArray(
-            resolution?.candidates
+        if (resolutionError) {
+          console.warn(
+            `Replacement candidate resolution failed for '${operatorId}'. The affected stored nodes will use the safe omission path instead of aborting the remaining import.`,
+            resolutionError
+          );
+          resolution = {
+            candidates: [],
+            failureReason:
+              String(
+                resolutionError?.message ||
+                resolutionError
+              )
+          };
+        }
+        if (
+          !resolution ||
+          !Array.isArray(
+            resolution.candidates
           )
-            ? resolution.candidates
-            : [];
+        ) {
+          console.warn(
+            `Replacement candidate resolution returned no usable candidate list for '${operatorId}'. The affected stored nodes will use the safe omission path instead of aborting the remaining import.`
+          );
+          resolutionError =
+            resolutionError ||
+            new Error(
+              "The replacement resolver returned no usable candidate list."
+            );
+          resolution = {
+            candidates: [],
+            failureReason:
+              String(
+                resolutionError.message
+              )
+          };
+        }
+        const candidates =
+          resolution.candidates;
+        const referencedNodes =
+          (Array.isArray(
+            requirement?.nodeReferences
+          )
+            ? requirement.nodeReferences
+            : [])
+            .map(reference =>
+              matchingNodesByLocation.get(
+                `${String(reference?.path || "runtime-root")}\u0000${String(reference?.nodeId || "")}`
+              )
+            )
+            .filter(Boolean);
         const matchingNodes =
-          matchingNodesByOperator.get(
-            operatorId
-          ) || [];
+          referencedNodes.length > 0
+            ? referencedNodes
+            : matchingNodesByOperator.get(
+                operatorId
+              ) || [];
         replacementQueue.push({
           requirement,
           operatorId,
           candidates,
           resolution,
           resolutionError,
+          matchingNodes,
           instanceCount:
             matchingNodes.length,
           nodeLabels:
@@ -25302,34 +28820,46 @@ async function ensureProjectRuntimePrerequisites(
       for (const entry of replacementQueue) {
         const exactCandidates =
           entry.candidates.filter(candidate =>
+            candidate
+              ?.autoReconstructable === true &&
             candidate?.semanticProof ===
               "exact-contract"
           );
-        if (
-          entry.candidates.length !== 1 ||
-          exactCandidates.length !== 1
-        ) {
+        const exactNameCandidates =
+          entry.candidates.filter(candidate =>
+            candidate
+              ?.autoReconstructable === true &&
+            candidate?.semanticProof ===
+              "exact-name"
+          );
+        const selected =
+          exactCandidates.length === 1
+            ? exactCandidates[0]
+            : exactCandidates.length === 0 &&
+                exactNameCandidates.length === 1
+              ? exactNameCandidates[0]
+              : null;
+        const removesReferencedEndpoint =
+          Boolean(
+            selected &&
+            (
+              (
+                selected
+                  .unmappedReferencedInputs || []
+              ).length > 0 ||
+              (
+                selected
+                  .unmappedReferencedOutputs || []
+              ).length > 0
+            )
+          );
+        if (!selected || removesReferencedEndpoint) {
           continue;
         }
 
-        const selected = exactCandidates[0];
-        manualMigrations[
-          entry.operatorId
-        ] = selected.operatorId;
-        manualPortMigrations[
-          entry.operatorId
-        ] = {
-          input:
-            structuredClone(
-              selected.inputMap || {}
-            ),
-          output:
-            structuredClone(
-              selected.outputMap || {}
-            )
-        };
         entry.status = "selected";
         entry.autoSelected = true;
+        entry.selectedCandidate = selected;
         entry.selectedOperatorId =
           selected.operatorId;
       }
@@ -25338,22 +28868,35 @@ async function ensureProjectRuntimePrerequisites(
         replacementQueue.filter(entry =>
           entry.candidates.length === 0
         );
+      for (const entry of
+        unresolvedWithoutCandidates) {
+        entry.status = "omitted";
+        entry.autoSelected = true;
+        entry.omitUnavailableNode = true;
+      }
       if (
         unresolvedWithoutCandidates.length > 0
       ) {
-        const details =
+        const omittedLabels =
           unresolvedWithoutCandidates
-            .map(entry => {
-              const reason = String(
-                entry.resolutionError
-                  ?.message || ""
-              ).trim();
-              return `'${entry.operatorId}' (${Math.max(1, entry.instanceCount).toLocaleString("de-DE")} node${entry.instanceCount === 1 ? "" : "s"})${reason ? `: ${reason}` : ""}`;
-            });
-        throw irreparableProjectJsonError(
-          `${unresolvedWithoutCandidates.length.toLocaleString("de-DE")} of ${replacementQueue.length.toLocaleString("de-DE")} missing operator families have no semantically proven replacement with a complete port contract. No replacement dialog was opened.`,
-          details
+            .flatMap(entry =>
+              entry.matchingNodes.map(item =>
+                `'${item.node.label || item.node.id || entry.operatorId}' [${entry.operatorId}] at ${item.path}`
+              )
+            );
+        updateBuilderWork(
+          workSession,
+          {
+            title:
+              "Unavailable API nodes will be omitted…",
+            message:
+              `${omittedLabels.length.toLocaleString("de-DE")} node${omittedLabels.length === 1 ? " has" : "s have"} no same-kind replacement with compatible corresponding port types in the verified catalog: ${omittedLabels.slice(0, 4).join(", ")}${omittedLabels.length > 4 ? ` and ${(omittedLabels.length - 4).toLocaleString("de-DE")} more` : ""}.`,
+            detail:
+              "The Builder will not guess a different API operation or data type. Only these nodes, their incident wires, branch descendants and exposed outer boundary chain will be omitted; the completed import warning lists the removed connection IDs.",
+            progress: 60
+          }
         );
+        await paintBuilderUi();
       }
 
       let selectedPlanDiagnostics = [];
@@ -25397,29 +28940,91 @@ async function ensureProjectRuntimePrerequisites(
                   selectedPlanDiagnostics
               }
             );
-
-          manualMigrations[operatorId] =
-            selected.operatorId;
-          manualPortMigrations[operatorId] = {
-            input:
-              structuredClone(
-                selected.inputMap || {}
-              ),
-            output:
-              structuredClone(
-                selected.outputMap || {}
-              )
-          };
+          if (
+            runtimeCatalogResolutionEpochToken() !==
+            replacementEpoch
+          ) {
+            throw new Error(
+              "The available API catalog changed while the replacement dialog was open. The isolated import and its stale choices were discarded; retry it against the current catalog. The open project remains unchanged."
+            );
+          }
           entry.status = "selected";
+          entry.selectedCandidate =
+            selected;
           entry.selectedOperatorId =
             selected.operatorId;
         }
 
+        if (
+          runtimeCatalogResolutionEpochToken() !==
+          replacementEpoch
+        ) {
+          throw new Error(
+            "The available API catalog changed before the confirmed replacements could be applied. The isolated import was discarded; retry it against the current catalog. The open project remains unchanged."
+          );
+        }
+
+        const nodeMigrations =
+          replacementQueue.flatMap(entry =>
+            entry.matchingNodes.map(item => {
+              if (
+                entry
+                  .omitUnavailableNode ===
+                true
+              ) {
+                return {
+                  path: item.path,
+                  nodeId: String(
+                    item.node.id || ""
+                  ),
+                  removeNode: true
+                };
+              }
+              const selected =
+                entry.selectedCandidate;
+              return {
+                path: item.path,
+                nodeId: String(
+                  item.node.id || ""
+                ),
+                operatorId:
+                  selected.operatorId,
+                ...(selected.apiContract
+                  ? {
+                      apiContract:
+                        structuredClone(
+                          selected.apiContract
+                        )
+                    }
+                  : {}),
+                inputMap:
+                  structuredClone(
+                    selected.inputMap || {}
+                  ),
+                outputMap:
+                  structuredClone(
+                    selected.outputMap || {}
+                  ),
+                removeInputPorts:
+                  structuredClone(
+                    selected
+                      .unmappedInputPorts || []
+                  ),
+                removeOutputPorts:
+                  structuredClone(
+                    selected
+                      .unmappedOutputPorts || []
+                  )
+              };
+            })
+          );
+
         const transaction =
           replacementTransaction(
             graph,
-            manualMigrations,
-            manualPortMigrations
+            {},
+            {},
+            nodeMigrations
           );
         let geometryVerified;
         try {
@@ -25434,6 +29039,86 @@ async function ensureProjectRuntimePrerequisites(
               0
           ) {
             transaction.commit();
+            appliedNodeMigrations =
+              structuredClone(
+                nodeMigrations
+              );
+            const transactionRemovalDetails =
+              Array.isArray(
+                transaction
+                  .removedNodeDetails
+              )
+                ? transaction
+                    .removedNodeDetails
+                : [];
+            removedUnavailableApiNodes =
+              replacementQueue
+                .filter(entry =>
+                  entry
+                    .omitUnavailableNode ===
+                    true
+                )
+                .flatMap(entry =>
+                  entry.matchingNodes.map(
+                    item => {
+                      const detail =
+                        transactionRemovalDetails
+                          .find(value =>
+                            String(
+                              value?.path || ""
+                            ) === item.path &&
+                            String(
+                              value?.nodeId || ""
+                            ) === String(
+                              item.node.id || ""
+                            )
+                          );
+                      const disconnectedConnectionIds =
+                        (Array.isArray(
+                          detail
+                            ?.disconnectedConnectionIds
+                        )
+                          ? detail
+                              .disconnectedConnectionIds
+                          : [])
+                          .map(value => ({
+                            path: String(
+                              typeof value === "string"
+                                ? item.path
+                                : value?.path ||
+                                    item.path
+                            ),
+                            connectionId: String(
+                              typeof value === "string"
+                                ? value
+                                : value
+                                    ?.connectionId ||
+                                  ""
+                            )
+                          }))
+                          .filter(value =>
+                            Boolean(
+                              value.connectionId
+                            )
+                          );
+                      return {
+                      nodeId: String(
+                        item.node.id || ""
+                      ),
+                      nodeName: String(
+                        item.node.label ||
+                        item.node.id ||
+                        entry.operatorId
+                      ),
+                      operatorId:
+                        entry.operatorId,
+                      path: item.path,
+                      disconnectedConnectionIds:
+                        disconnectedConnectionIds
+                      };
+                    }
+                  )
+                );
             selectedPlanAccepted = true;
           }
         } finally {
@@ -25446,15 +29131,39 @@ async function ensureProjectRuntimePrerequisites(
           geometryVerified &&
           !selectedPlanAccepted
         ) {
-          const hasManualChoice =
+          let hasManualChoice =
             replacementQueue.some(entry =>
               entry.autoSelected !== true
             );
           if (!hasManualChoice) {
-            throw irreparableProjectJsonError(
-              "The unique exact API-contract migration did not produce a valid Runtime Graph. The JSON was not imported.",
-              selectedPlanDiagnostics
-            );
+            const automaticReplacements =
+              replacementQueue.filter(
+                entry =>
+                  entry
+                    .omitUnavailableNode !==
+                    true &&
+                  entry.candidates.length > 0
+              );
+            for (const entry of
+              automaticReplacements) {
+              entry.autoSelected = false;
+              entry.status = "pending";
+              entry.selectedOperatorId =
+                String(
+                  entry.selectedCandidate
+                    ?.operatorId ||
+                  ""
+                );
+            }
+            hasManualChoice =
+              automaticReplacements.length >
+              0;
+            if (!hasManualChoice) {
+              throw irreparableProjectJsonError(
+                "Omitting every unavailable API node still leaves an invalid remaining Runtime Graph.",
+                selectedPlanDiagnostics
+              );
+            }
           }
           updateBuilderWork(
             workSession,
@@ -25472,14 +29181,6 @@ async function ensureProjectRuntimePrerequisites(
         }
       }
 
-      Object.assign(
-        appliedCatalogMigrations,
-        manualMigrations
-      );
-      Object.assign(
-        appliedPortMigrations,
-        manualPortMigrations
-      );
       catalogResult = Object.freeze({
         ...catalogResult,
         verified: true,
@@ -25487,7 +29188,16 @@ async function ensureProjectRuntimePrerequisites(
         unresolvedRequirements:
           Object.freeze([]),
         userConfirmedReplacements:
-          unresolvedRequirements.length,
+          replacementQueue.filter(entry =>
+            entry
+              .omitUnavailableNode !== true
+          ).length,
+        omittedUnavailableNodes:
+          Object.freeze(
+            structuredClone(
+              removedUnavailableApiNodes
+            )
+          ),
         migrations:
           Object.freeze(
             structuredClone(
@@ -25499,11 +29209,245 @@ async function ensureProjectRuntimePrerequisites(
             structuredClone(
               appliedPortMigrations
             )
+          ),
+        nodeMigrations:
+          Object.freeze(
+            structuredClone(
+              appliedNodeMigrations
+            )
           )
       });
+      }
     }
   }
 
+  }
+
+  const compositeTopology =
+    window.RMLTypedNodeGraphGenerator
+      ?.reconcileCompositeBoundaries;
+  const currentCompositeReconciliation =
+    typeof compositeTopology === "function"
+      ? compositeTopology(graph)
+      : null;
+  const topologyChanged = Boolean(
+    Number(
+      compositeReconciliation
+        ?.addedBoundaries || 0
+    ) > 0 ||
+    Number(
+      currentCompositeReconciliation
+        ?.addedBoundaries || 0
+    ) > 0 ||
+    Number(
+      compositeReconciliation
+        ?.removedBoundaries || 0
+    ) > 0 ||
+    Number(
+      currentCompositeReconciliation
+        ?.removedBoundaries || 0
+    ) > 0 ||
+    Number(
+      compositeReconciliation
+        ?.disconnectedWires || 0
+    ) > 0 ||
+    Number(
+      currentCompositeReconciliation
+        ?.disconnectedWires || 0
+    ) > 0 ||
+    Number(
+      compositeReconciliation
+        ?.synchronizedOwners || 0
+    ) > 0 ||
+    Number(
+      currentCompositeReconciliation
+        ?.synchronizedOwners || 0
+    ) > 0
+  );
+  if (currentCompositeReconciliation) {
+    const previousDisconnectedIds =
+      Array.isArray(
+        compositeReconciliation
+          ?.disconnectedConnectionIds
+      )
+        ? compositeReconciliation
+            .disconnectedConnectionIds
+        : [];
+    const currentDisconnectedIds =
+      Array.isArray(
+        currentCompositeReconciliation
+          .disconnectedConnectionIds
+      )
+        ? currentCompositeReconciliation
+            .disconnectedConnectionIds
+        : [];
+    const disconnectedConnectionIds = [
+      ...new Set(
+        [
+          ...previousDisconnectedIds,
+          ...currentDisconnectedIds
+        ]
+          .map(value =>
+            String(value || "")
+          )
+          .filter(Boolean)
+      )
+    ];
+    const previousDisconnectedCount =
+      Math.max(
+        0,
+        Number(
+          compositeReconciliation
+            ?.disconnectedWires
+        ) || 0
+      );
+    const currentDisconnectedCount =
+      Math.max(
+        0,
+        Number(
+          currentCompositeReconciliation
+            .disconnectedWires
+        ) || 0
+      );
+    compositeReconciliation =
+      Object.freeze({
+        addedBoundaries: Math.max(
+          0,
+          Number(
+            compositeReconciliation
+              ?.addedBoundaries
+          ) || 0
+        ) + Math.max(
+          0,
+          Number(
+            currentCompositeReconciliation
+              .addedBoundaries
+          ) || 0
+        ),
+        removedBoundaries: Math.max(
+          0,
+          Number(
+            compositeReconciliation
+              ?.removedBoundaries
+          ) || 0
+        ) + Math.max(
+          0,
+          Number(
+            currentCompositeReconciliation
+              .removedBoundaries
+          ) || 0
+        ),
+        disconnectedWires:
+          disconnectedConnectionIds.length > 0
+            ? Math.max(
+                disconnectedConnectionIds.length,
+                previousDisconnectedCount,
+                currentDisconnectedCount
+              )
+            : previousDisconnectedCount +
+              currentDisconnectedCount,
+        disconnectedConnectionIds:
+          Object.freeze(
+            disconnectedConnectionIds
+          ),
+        synchronizedOwners: Math.max(
+          0,
+          Number(
+            compositeReconciliation
+              ?.synchronizedOwners
+          ) || 0
+        ) + Math.max(
+          0,
+          Number(
+            currentCompositeReconciliation
+              .synchronizedOwners
+          ) || 0
+        )
+      });
+  }
+
+  if (compatibilityMode) {
+    const activeCatalog =
+      window.RMLResoniteApiCatalog ||
+      window.RMLFrooxComponentCatalog ||
+      null;
+    const planner =
+      window.RMLDynamicGraphHost
+        ?.planPreservedCatalogOperatorsForImport;
+    const unresolvedRequirements =
+      Array.isArray(
+        catalogResult
+          ?.unresolvedRequirements
+      )
+        ? catalogResult
+            .unresolvedRequirements
+        : [];
+    if (
+      activeCatalog ||
+      typeof planner !== "function"
+    ) {
+      throw new Error(
+        "The API catalog state changed while the portable offline import was pending. Retry the JSON import. The JSON was not loaded."
+      );
+    }
+    const revalidatedPlan = planner(
+      graph,
+      unresolvedRequirements
+    );
+    if (
+      revalidatedPlan?.ready !== true ||
+      (
+        !topologyChanged &&
+        offlinePortablePlan?.planKey &&
+        revalidatedPlan.planKey !==
+          offlinePortablePlan.planKey
+      )
+    ) {
+      throw irreparableProjectJsonError(
+        "its portable API contract plan changed or became incomplete before project construction.",
+        Array.isArray(
+          revalidatedPlan?.issues
+        )
+          ? revalidatedPlan.issues
+          : []
+      );
+    }
+    offlinePortablePlan =
+      revalidatedPlan;
+    unresolvedNodeCount =
+      Number(revalidatedPlan.nodeCount) ||
+      0;
+    const currentSignature =
+      runtimeGraphPortablePreservationSignature(
+        graph
+      );
+    if (
+      !topologyChanged &&
+      portablePreservationSignature &&
+      currentSignature !==
+        portablePreservationSignature
+    ) {
+      throw new Error(
+        "The Runtime Graph routing or geometry changed between portable-contract preflight and construction. The JSON was not loaded."
+      );
+    }
+    portablePreservationSignature =
+      currentSignature;
+    const createAdmissionToken =
+      window.RMLDynamicGraphHost
+        ?.createPreservedCatalogAdmissionToken;
+    if (
+      typeof createAdmissionToken !==
+        "function"
+    ) {
+      throw new Error(
+        "The portable API contract admission gate is unavailable. The JSON was not loaded."
+      );
+    }
+    offlinePortableAdmissionToken =
+      createAdmissionToken(
+        revalidatedPlan
+      );
   }
 
   if (catalogOnly) {
@@ -25512,14 +29456,35 @@ async function ensureProjectRuntimePrerequisites(
       catalog: catalogResult,
       runtimeActive:
         graph.active === true,
-      compatibilityMode: false,
-      unresolvedNodeCount: 0,
+      compatibilityMode,
+      unresolvedNodeCount,
+      offlinePortablePlan,
+      offlinePortableAdmissionToken,
+      portablePreservationSignature,
       requiredCatalogNodes,
       appliedCatalogMigrations,
       appliedPortMigrations,
+      appliedNodeMigrations,
+      removedUnavailableApiNodes,
       structuralRepairability,
+      compositeReconciliation,
+      catalogResolutionEpochToken:
+        runtimeCatalogResolutionEpochToken(),
+      catalogResolutionBatchEpochToken:
+        runtimeCatalogResolutionBatchEpochToken(),
       catalogOnly: true
     };
+  }
+
+  if (
+    compatibilityMode &&
+    runtimeGraphPortablePreservationSignature(
+      graph
+    ) !== portablePreservationSignature
+  ) {
+    throw new Error(
+      "Composite reconciliation changed a portable Runtime Graph wire, boundary, branch or geometry record. The JSON was not loaded."
+    );
   }
 
   if (
@@ -25590,8 +29555,11 @@ async function ensureProjectRuntimePrerequisites(
       }));
 
   if (
-    unavailable.length > 0 ||
-    unresolvedApiNodes.length > 0
+    !compatibilityMode &&
+    (
+      unavailable.length > 0 ||
+      unresolvedApiNodes.length > 0
+    )
   ) {
     const visible = [
       ...unavailable.map(item =>
@@ -25610,56 +29578,121 @@ async function ensureProjectRuntimePrerequisites(
     );
   }
 
-  const compatibilityEntry = {
-    schemaVersion: 1,
-    catalogFingerprint: String(
-      window.RMLResoniteApiCatalog
-        ?.catalogFingerprint || ""
-    ),
-    engineVersion: String(
-      window.RMLResoniteApiCatalog
-        ?.engineVersion || ""
-    ),
-    catalogRevision: String(
-      window.RMLResoniteApiCatalog?.contractRevision ||
-      window.RMLResoniteApiCatalog?.catalogFingerprint ||
-      "unavailable"
-    ),
-    operatorMigrations: appliedCatalogMigrations,
-    portMigrations: appliedPortMigrations,
-    unresolvedApiNodes,
-    status:
-      Object.keys(
-        appliedCatalogMigrations
-      ).length > 0
-        ? "migrated"
-        : "verified"
-  };
-  const compatibility = graph.apiCompatibility && typeof graph.apiCompatibility === "object"
-    ? graph.apiCompatibility
-    : { schemaVersion: 1, history: [] };
-  const history = Array.isArray(compatibility.history) ? compatibility.history : [];
-  const entryKey = JSON.stringify(compatibilityEntry);
-  if (!history.some(entry => JSON.stringify(entry) === entryKey)) history.push(compatibilityEntry);
-  graph.apiCompatibility = {
-    schemaVersion: 1,
-    history: history.slice(-32)
-  };
-  const integratedNodeCompatibility =
-    window.RMLModNodeRegistry
-      ?.getIntegratedNodeContract?.();
-  if (integratedNodeCompatibility) {
-    graph.integratedNodeCompatibility =
-      structuredClone(
-        integratedNodeCompatibility
+  if (compatibilityMode) {
+    const plannedOperatorIds = new Set(
+      Array.isArray(
+        offlinePortablePlan?.operatorIds
+      )
+        ? offlinePortablePlan.operatorIds
+        : []
+    );
+    const unexpectedUnavailable = [
+      ...unavailable,
+      ...unresolvedApiNodes
+    ].filter(item =>
+      !plannedOperatorIds.has(
+        item.operatorId
+      )
+    );
+    if (
+      plannedOperatorIds.size === 0 ||
+      unexpectedUnavailable.length > 0
+    ) {
+      throw new Error(
+        "The project contains unavailable operators outside the approved portable-contract plan. The JSON was not loaded."
       );
+    }
+    unresolvedNodeCount = graphNodes
+      .filter(item =>
+        plannedOperatorIds.has(
+          String(
+            item.node?.operatorId || ""
+          )
+        )
+      )
+      .length;
+  }
+
+  if (!compatibilityMode) {
+    const compatibilityEntry = {
+      schemaVersion: 1,
+      catalogFingerprint: String(
+        window.RMLResoniteApiCatalog
+          ?.catalogFingerprint || ""
+      ),
+      engineVersion: String(
+        window.RMLResoniteApiCatalog
+          ?.engineVersion || ""
+      ),
+      catalogRevision: String(
+        window.RMLResoniteApiCatalog?.contractRevision ||
+        window.RMLResoniteApiCatalog?.catalogFingerprint ||
+        "unavailable"
+      ),
+      operatorMigrations:
+        appliedCatalogMigrations,
+      portMigrations:
+        appliedPortMigrations,
+      nodeMigrations:
+        appliedNodeMigrations,
+      omittedUnavailableNodes:
+        removedUnavailableApiNodes,
+      unresolvedApiNodes,
+      status:
+        Object.keys(
+          appliedCatalogMigrations
+        ).length > 0 ||
+        appliedNodeMigrations.length > 0 ||
+        removedUnavailableApiNodes.length > 0
+          ? "migrated"
+          : "verified"
+    };
+    const compatibility =
+      graph.apiCompatibility &&
+      typeof graph.apiCompatibility ===
+        "object"
+        ? graph.apiCompatibility
+        : {
+            schemaVersion: 1,
+            history: []
+          };
+    const history = Array.isArray(
+      compatibility.history
+    )
+      ? compatibility.history
+      : [];
+    const entryKey = JSON.stringify(
+      compatibilityEntry
+    );
+    if (
+      !history.some(entry =>
+        JSON.stringify(entry) === entryKey
+      )
+    ) {
+      history.push(compatibilityEntry);
+    }
+    graph.apiCompatibility = {
+      schemaVersion: 1,
+      history: history.slice(-32)
+    };
+    const integratedNodeCompatibility =
+      window.RMLModNodeRegistry
+        ?.getIntegratedNodeContract?.();
+    if (integratedNodeCompatibility) {
+      graph.integratedNodeCompatibility =
+        structuredClone(
+          integratedNodeCompatibility
+        );
+    }
   }
 
   const graphValidation =
-    window.RMLTypedNodeGraphGenerator
-      .validateDocument?.({
-        state: project
-      });
+    compatibilityMode
+      ? null
+      : window.RMLTypedNodeGraphGenerator
+          .validateDocument?.({
+            state: project
+          });
   const graphValidationDiagnostics =
     Array.isArray(
       graphValidation?.diagnostics
@@ -25680,8 +29713,21 @@ async function ensureProjectRuntimePrerequisites(
     catalog: catalogResult,
     runtimeActive:
       graph.active === true,
-    compatibilityMode: false,
-    unresolvedNodeCount: 0
+    compatibilityMode,
+    unresolvedNodeCount,
+    offlinePortablePlan,
+    offlinePortableAdmissionToken,
+    portablePreservationSignature,
+    compositeReconciliation,
+    appliedNodeMigrations,
+    removedUnavailableApiNodes,
+    analysisCertificate:
+      graphValidation?.analysisCertificate ||
+      null,
+    catalogResolutionEpochToken:
+      runtimeCatalogResolutionEpochToken(),
+    catalogResolutionBatchEpochToken:
+      runtimeCatalogResolutionBatchEpochToken()
   };
 }
 
@@ -25689,7 +29735,8 @@ async function resolveSavedApiCompositeGraph(
   graphDocument,
   {
     name = "Saved API Composite",
-    context = "saved-composite"
+    context = "saved-composite",
+    includeResolutionDetails = false
   } = {}
 ) {
   const openGraph =
@@ -25732,7 +29779,13 @@ async function resolveSavedApiCompositeGraph(
       await ensureProjectRuntimePrerequisites(
         project,
         workSession,
-        { catalogOnly: true }
+        {
+          catalogOnly: true,
+          allowOfflineCompatibility:
+            true,
+          allowAutomaticLiveRetry:
+            true
+        }
       );
     updateBuilderWork(
       workSession,
@@ -25744,7 +29797,17 @@ async function resolveSavedApiCompositeGraph(
         title:
           "Catalog contracts verified…",
         message:
-          "Every internal API node and exposed boundary port is compatible with the current catalog.",
+          Array.isArray(
+            result
+              .removedUnavailableApiNodes
+          ) &&
+          result
+            .removedUnavailableApiNodes
+            .length > 0
+            ? `${result.removedUnavailableApiNodes.length.toLocaleString("de-DE")} unavailable API node${result.removedUnavailableApiNodes.length === 1 ? " was" : "s were"} omitted; the remaining graph is ready.`
+            : result.compatibilityMode
+              ? "Stored portable API contracts were preserved because no verified catalog could be activated."
+              : "Every internal API node and exposed boundary port is compatible with the current catalog.",
         detail:
           openGraph
             ? "The open Runtime Graph has not been changed yet. The resolved copy now awaits the graph-level atomic confirmation."
@@ -25753,11 +29816,64 @@ async function resolveSavedApiCompositeGraph(
       }
     );
     await paintBuilderUi();
-    finishBuilderWork(workSession);
-    return structuredClone(
+    if (
+      String(
+        result
+          .catalogResolutionEpochToken ||
+        ""
+      ) !==
+      runtimeCatalogResolutionEpochToken()
+    ) {
+      throw new Error(
+        "The available API catalog changed after the Saved API Composite was resolved. Its stale isolated copy was discarded; retry against the current catalog."
+      );
+    }
+    const resolvedGraph = structuredClone(
       result.graph ||
       project.extensions.typedNodeGraph
     );
+    const resolution = Object.freeze({
+      catalogResolutionEpochToken:
+        String(
+          result
+            .catalogResolutionEpochToken ||
+          ""
+        ),
+      catalogResolutionBatchEpochToken:
+        String(
+          result
+            .catalogResolutionBatchEpochToken ||
+          runtimeCatalogResolutionBatchEpochToken()
+        ),
+      compatibilityMode:
+        result.compatibilityMode === true,
+      unresolvedNodeCount:
+        Math.max(
+          0,
+          Number(
+            result.unresolvedNodeCount
+          ) || 0
+        ),
+      removedUnavailableApiNodes:
+        Object.freeze(
+          structuredClone(
+            Array.isArray(
+              result
+                .removedUnavailableApiNodes
+            )
+              ? result
+                  .removedUnavailableApiNodes
+              : []
+          )
+        )
+    });
+    finishBuilderWork(workSession);
+    return includeResolutionDetails
+      ? Object.freeze({
+          graph: resolvedGraph,
+          resolution
+        })
+      : resolvedGraph;
   } catch (error) {
     finishBuilderWork(workSession);
     const message = String(
@@ -25793,9 +29909,25 @@ Object.defineProperty(
   "RMLSavedApiCompositeResolver",
   {
     value: Object.freeze({
-      version: 1,
+      version: 2,
       resolveGraph:
-        resolveSavedApiCompositeGraph
+        resolveSavedApiCompositeGraph,
+      resolveGraphDetailed: (
+        graphDocument,
+        options = {}
+      ) =>
+        resolveSavedApiCompositeGraph(
+          graphDocument,
+          {
+            ...options,
+            includeResolutionDetails:
+              true
+          }
+        ),
+      catalogEpochToken:
+        runtimeCatalogResolutionEpochToken,
+      catalogBatchEpochToken:
+        runtimeCatalogResolutionBatchEpochToken
     }),
     writable: false,
     enumerable: true,
@@ -26260,7 +30392,7 @@ async function waitForImportedCodegen(
 function waitForImportedGraphUi(
   expectedNodes,
   expectedConnections,
-  timeout = 30000,
+  timeout = 120000,
   {
     strict = false,
     projectEpoch =
@@ -26269,22 +30401,21 @@ function waitForImportedGraphUi(
 ) {
   const graph =
     state.extensions?.typedNodeGraph;
+  const requestedPage =
+    state.activePage ||
+    graph?.lastOpenPage ||
+    "configuration-outline";
 
   if (
     graph?.active !== true ||
-    !window.RMLDynamicGraphHost
+    requestedPage !== "runtime-graph"
   ) {
-    if (strict && graph?.active === true) {
-      return Promise.reject(
-        new Error(
-          "The Runtime Graph host is unavailable. The JSON was not loaded."
-        )
-      );
-    }
-
     return Promise.resolve({
       ready: true,
-      timedOut: false
+      timedOut: false,
+      modelReady: true,
+      presentationFailed: false,
+      presentationError: ""
     });
   }
 
@@ -26293,10 +30424,16 @@ function waitForImportedGraphUi(
     let timer = 0;
     const expectedProjectEpoch =
       Number(projectEpoch) || 0;
+    const effectiveTimeout =
+      Number.isFinite(Number(timeout)) &&
+      Number(timeout) > 0
+        ? Number(timeout)
+        : 120000;
 
     const finish = (
       timedOut,
-      error = null
+      error = null,
+      presentation = null
     ) => {
       if (settled) return;
       settled = true;
@@ -26307,7 +30444,6 @@ function waitForImportedGraphUi(
         "rml-graph:presentation-complete",
         handleComplete
       );
-      document.removeEventListener("rml-graph:presentation-failed", handleFailure);
       document.removeEventListener(
         "rml-builder:rendered",
         handleBuilderRendered
@@ -26321,15 +30457,28 @@ function waitForImportedGraphUi(
         return;
       }
 
+      const presentationError = String(
+        presentation?.error || ""
+      );
       resolve({
-        ready: !timedOut,
-        timedOut
+        ready:
+          !timedOut &&
+          presentation?.failed !== true,
+        timedOut,
+        modelReady:
+          presentation?.modelReady !== false,
+        presentationFailed:
+          presentation?.failed === true,
+        presentationError
       });
     };
 
     const hostStateMatches = () => {
       const host =
         window.RMLDynamicGraphHost;
+      const presentation =
+        host?.getPresentationState?.() ||
+        {};
       const hostGraph =
         host?.getRootState?.() ||
         host?.getState?.();
@@ -26363,15 +30512,58 @@ function waitForImportedGraphUi(
         connectionCount,
         hostProjectEpoch,
         requestedGraphView:
-          host?.getPresentationState?.()?.savedPage === "runtime-graph",
+          presentation.savedPage ===
+            "runtime-graph",
         graphViewActive:
-          host
-            ?.getPresentationState?.()
-            ?.graphViewActive === true ||
+          presentation.graphViewActive ===
+            true ||
           document.body.classList.contains(
             "rml-node-graph-mode"
-          )
+          ),
+        viewReady:
+          presentation.viewReady === true,
+        viewFailed:
+          presentation.viewFailed === true,
+        viewError:
+          String(
+            presentation.viewError ||
+            ""
+          ),
+        renderBlocked:
+          presentation.renderBlocked === true
       };
+    };
+
+    const inspectNow = () => {
+      if (!window.RMLDynamicGraphHost) {
+        return false;
+      }
+      const current = hostStateMatches();
+      if (
+        current.matches &&
+        current.viewFailed
+      ) {
+        const message =
+          `The Runtime Graph presentation could not be prepared: ${current.viewError || "Unknown error"}. The validated project remains loaded while presentation recovery continues.`;
+        console.error(message);
+        finish(false, null, {
+          failed: true,
+          modelReady: true,
+          error: message
+        });
+        return true;
+      }
+      if (
+        current.matches &&
+        (
+          current.viewReady ||
+          current.renderBlocked
+        )
+      ) {
+        finish(false);
+        return true;
+      }
+      return false;
     };
 
     const handleBuilderRendered = event => {
@@ -26390,16 +30582,12 @@ function waitForImportedGraphUi(
       const current =
         hostStateMatches();
 
+      if (inspectNow()) {
+        return;
+      }
       if (
-        current.matches &&
-        !current.graphViewActive &&
-        !current.requestedGraphView
-      ) {
-
-
-        finish(false);
-      } else if (
         strict &&
+        window.RMLDynamicGraphHost &&
         !current.matches
       ) {
         finish(
@@ -26429,13 +30617,6 @@ function waitForImportedGraphUi(
         finish(false);
       }
     };
-    const handleFailure = event => {
-      const detail = event.detail || {};
-      if (expectedProjectEpoch > 0 && Number(detail.projectEpoch) !== expectedProjectEpoch) return;
-      if (hostStateMatches().matches) {
-        finish(false, new Error(`The Runtime Graph could not be prepared: ${detail.error || "Unknown error"}. The JSON was not loaded.`));
-      }
-    };
     const handleReplacement = event => {
       const replacementProjectEpoch =
         Number(
@@ -26449,39 +30630,30 @@ function waitForImportedGraphUi(
       ) {
         return;
       }
-      return strict
-        ? finish(
-            false,
-            new Error(
-              "The project changed while the Runtime Graph was initializing."
-            )
-          )
-        : finish(false);
+      finish(
+        false,
+        new Error(
+          `The project changed while the Runtime Graph was initializing.${strict ? " The JSON was not loaded." : ""}`
+        )
+      );
     };
 
-    if (
-      Number.isFinite(Number(timeout)) &&
-      Number(timeout) > 0
-    ) {
-      timer = window.setTimeout(
-        () =>
-          strict
-            ? finish(
-                true,
-                new Error(
-                  `The Runtime Graph did not finish rendering within ${Math.round(Number(timeout) / 1000)} seconds. The JSON was not loaded.`
-                )
-              )
-            : finish(true),
-        Number(timeout)
-      );
-    }
+    timer = window.setTimeout(() => {
+      const current = hostStateMatches();
+      const message =
+        `The Runtime Graph presentation did not finish within ${Math.round(effectiveTimeout / 1000)} seconds. The validated project remains loaded and presentation recovery may continue.`;
+      console.error(message);
+      finish(true, null, {
+        failed: true,
+        modelReady: current.matches,
+        error: message
+      });
+    }, effectiveTimeout);
 
     document.addEventListener(
       "rml-graph:presentation-complete",
       handleComplete
     );
-    document.addEventListener("rml-graph:presentation-failed", handleFailure);
     document.addEventListener(
       "rml-builder:rendered",
       handleBuilderRendered
@@ -26490,8 +30662,76 @@ function waitForImportedGraphUi(
       "rml-builder:project-replacement",
       handleReplacement
     );
-    if (window.RMLDynamicGraphHost?.getPresentationState?.()?.renderBlocked === true &&
-        hostStateMatches().matches) finish(false);
+
+    if (inspectNow()) {
+      return;
+    }
+
+    const prepareRuntimeView = async () => {
+      if (
+        settled ||
+        (
+          expectedProjectEpoch > 0 &&
+          expectedProjectEpoch !==
+            projectApplicationEpoch
+        )
+      ) {
+        return;
+      }
+      if (
+        window.RMLStyleLoader?.ensure
+      ) {
+        await window.RMLStyleLoader.ensure(
+          "runtime-graph"
+        );
+      }
+      if (
+        settled ||
+        (
+          expectedProjectEpoch > 0 &&
+          expectedProjectEpoch !==
+            projectApplicationEpoch
+        )
+      ) {
+        return;
+      }
+      if (
+        !window.RMLScriptLoader?.ensure
+      ) {
+        throw new Error(
+          "The Runtime Graph module loader is unavailable."
+        );
+      }
+      await window.RMLScriptLoader.ensure(
+        "runtime-view"
+      );
+      if (
+        settled ||
+        (
+          expectedProjectEpoch > 0 &&
+          expectedProjectEpoch !==
+            projectApplicationEpoch
+        )
+      ) {
+        return;
+      }
+      inspectNow();
+    };
+
+    void prepareRuntimeView().catch(error => {
+      if (settled) {
+        return;
+      }
+      const current = hostStateMatches();
+      const message =
+        `The Runtime Graph presentation module could not be prepared: ${error instanceof Error ? error.message : String(error)}. The validated project remains loaded while presentation recovery continues.`;
+      console.error(message);
+      finish(false, null, {
+        failed: true,
+        modelReady: current.matches,
+        error: message
+      });
+    });
 
   });
 }
@@ -26518,6 +30758,8 @@ async function applyLoadedProjectWithFeedback(
     });
   let previousProject = null;
   let projectApplied = false;
+  let portableRegistryTransaction =
+    null;
 
   try {
     updateBuilderWork(
@@ -26544,8 +30786,19 @@ async function applyLoadedProjectWithFeedback(
               catalogPreflight:
                 prevalidatedPrerequisites
             }
-          : {}
+              : {}
       );
+    const omittedUnavailableNodeCount =
+      Array.isArray(
+        prerequisites
+          .removedUnavailableApiNodes
+      )
+        ? prerequisites
+            .removedUnavailableApiNodes
+            .length
+        : 0;
+    const intentionallyDegradedGraph =
+      omittedUnavailableNodeCount > 0;
 
     updateBuilderWork(
       session,
@@ -26553,7 +30806,11 @@ async function applyLoadedProjectWithFeedback(
         title:
           "Installing the validated project…",
         message:
-          "All required modules and catalog contracts are available. The project can now be installed atomically.",
+          prerequisites.compatibilityMode
+            ? `${Number(prerequisites.compositeReconciliation?.disconnectedWires || 0) > 0 ? `${Number(prerequisites.compositeReconciliation.disconnectedWires).toLocaleString("de-DE")} obsolete outer wire${Number(prerequisites.compositeReconciliation.disconnectedWires) === 1 ? " was" : "s were"} removed by the confirmed Composite contract update. ` : ""}Every unavailable operator has a portable contract. The project and its offline definitions can now be installed atomically.`
+            : intentionallyDegradedGraph
+              ? `${omittedUnavailableNodeCount.toLocaleString("de-DE")} unavailable API node${omittedUnavailableNodeCount === 1 ? " was" : "s were"} omitted from the isolated project together with only their dependent connection chains. The repairable remainder can now be installed atomically.`
+              : "All required modules and catalog contracts are available. The project can now be installed atomically.",
         detail:
           "If any later Runtime Graph or generator check fails, the previous project is restored automatically.",
         progress: 55
@@ -26561,18 +30818,79 @@ async function applyLoadedProjectWithFeedback(
     );
     await paintBuilderUi();
 
+    const validatedCatalogEpoch = String(
+      prerequisites
+        .catalogResolutionEpochToken ||
+      ""
+    );
+    if (
+      !validatedCatalogEpoch ||
+      validatedCatalogEpoch !==
+        runtimeCatalogResolutionEpochToken()
+    ) {
+      throw new Error(
+        "The available API catalog or node-definition epoch changed after validation and before project installation. The stale isolated import was discarded; retry against the current catalog. The open project remains unchanged."
+      );
+    }
+    let installationCatalogEpoch =
+      validatedCatalogEpoch;
+
     previousProject =
       createProjectDocument(
         false,
         true
       );
 
+    if (prerequisites.compatibilityMode) {
+      const createTransaction =
+        window.RMLDynamicGraphHost
+          ?.createPreservedCatalogInstallTransaction;
+      if (
+        typeof createTransaction !==
+          "function"
+      ) {
+        throw new Error(
+          "The atomic portable API contract installer is unavailable. The JSON was not loaded."
+        );
+      }
+      portableRegistryTransaction =
+        await createTransaction(
+          prerequisites.offlinePortablePlan,
+          prerequisites
+            .offlinePortableAdmissionToken
+        );
+      if (
+        await Promise.resolve(
+          portableRegistryTransaction
+            .commit?.()
+        ) !== true
+      ) {
+        throw new Error(
+          "The portable API contracts could not be installed atomically. The JSON was not loaded."
+        );
+      }
+      installationCatalogEpoch =
+        runtimeCatalogResolutionEpochToken();
+    }
+
+    if (
+      installationCatalogEpoch !==
+        runtimeCatalogResolutionEpochToken()
+    ) {
+      throw new Error(
+        "The available API catalog or node-definition epoch changed immediately before project installation. The stale isolated import was discarded; retry against the current catalog. The open project remains unchanged."
+      );
+    }
+
+    projectApplied = true;
     const importedProjectEpoch =
       applyLoadedProject(
         project,
         { render: false }
       );
-    projectApplied = true;
+    pendingImportedGraphAnalysisCertificate =
+      prerequisites.analysisCertificate ||
+      null;
 
     if (prerequisites.graph) {
       assertImportedGraphDocumentIdentity(
@@ -26638,6 +30956,42 @@ async function applyLoadedProjectWithFeedback(
     const graphResult =
       await graphUiReady;
 
+    if (prerequisites.compatibilityMode) {
+      const host =
+        window.RMLDynamicGraphHost;
+      const actualGraph =
+        host?.getRootState?.() ||
+        host?.getState?.();
+      const verification =
+        host
+          ?.verifyPreservedCatalogOperatorsForImport?.(
+            actualGraph,
+            prerequisites.offlinePortablePlan
+          );
+      if (
+        await Promise.resolve(
+          portableRegistryTransaction
+            ?.verify?.()
+        ) !== true ||
+        verification?.ready !== true
+      ) {
+        throw new Error(
+          `The installed portable API contracts failed their exact post-install verification${Array.isArray(verification?.issues) && verification.issues.length > 0 ? `: ${verification.issues.slice(0, 8).join(" | ")}` : ""}. The JSON was not loaded.`
+        );
+      }
+      if (
+        runtimeGraphPortablePreservationSignature(
+          actualGraph
+        ) !==
+          prerequisites
+            .portablePreservationSignature
+      ) {
+        throw new Error(
+          "The Runtime Graph changed a node position, wire endpoint, routing point, branch or composite boundary while installing portable API contracts. The JSON was not loaded."
+        );
+      }
+    }
+
     if (prerequisites.graph) {
       assertImportedGraphDocumentIdentity(
         prerequisites.graph
@@ -26660,20 +31014,30 @@ async function applyLoadedProjectWithFeedback(
         title:
           prerequisites.compatibilityMode
             ? "Preserving unresolved graph paths…"
-            : "Validating generated output…",
+            : intentionallyDegradedGraph
+              ? "Preserving the repairable graph remainder…"
+              : "Validating generated output…",
         message:
           prerequisites.compatibilityMode
             ? `${Number(prerequisites.unresolvedNodeCount || 0).toLocaleString("de-DE")} unresolved node${Number(prerequisites.unresolvedNodeCount || 0) === 1 ? " remains" : "s remain"} visible and editable. Their affected execution paths are disabled until a compatible replacement is selected.`
-            : "The import remains locked until the complete Runtime Graph contribution and every generated source check have finished.",
+            : intentionallyDegradedGraph
+              ? `${omittedUnavailableNodeCount.toLocaleString("de-DE")} unavailable API node${omittedUnavailableNodeCount === 1 ? " is" : "s are"} absent. Any now-incomplete execution path stays editable so a current node can be added and reconnected manually.`
+              : "The import remains locked until the complete Runtime Graph contribution and every generated source check have finished.",
         detail:
           prerequisites.compatibilityMode
             ? "The project opens without waiting for code generation that cannot succeed while an Unavailable API node is present."
-            : "No background generator work is left behind after a successful import.",
+            : intentionallyDegradedGraph
+              ? "Structural, identity and routing checks remain mandatory. Full code generation is intentionally skipped only because the confirmed omission may leave a disconnected path; normal export validation will report it until repaired."
+              : "No background generator work is left behind after a successful import.",
         progress: 88
       }
     );
 
-    if (!prerequisites.compatibilityMode && state.metadata.includeGuide === true) {
+    if (
+      !prerequisites.compatibilityMode &&
+      !intentionallyDegradedGraph &&
+      state.metadata.includeGuide === true
+    ) {
       await ensureLazyScriptBundle("guidance");
       await window.RMLGuidance.ensureFor(state);
     }
@@ -26681,7 +31045,8 @@ async function applyLoadedProjectWithFeedback(
     if (
       prerequisites.graph &&
       prerequisites.runtimeActive &&
-      !prerequisites.compatibilityMode
+      !prerequisites.compatibilityMode &&
+      !intentionallyDegradedGraph
     ) {
       await waitForImportedCodegen(
         prerequisites.graph,
@@ -26690,7 +31055,8 @@ async function applyLoadedProjectWithFeedback(
         importedProjectEpoch
       );
     } else if (
-      !prerequisites.compatibilityMode
+      !prerequisites.compatibilityMode &&
+      !intentionallyDegradedGraph
     ) {
       const diagnostics =
         getDiagnostics();
@@ -26704,32 +31070,129 @@ async function applyLoadedProjectWithFeedback(
 
     updateGeneratedOutput();
 
+    if (
+      portableRegistryTransaction &&
+      await Promise.resolve(
+        portableRegistryTransaction
+          .complete?.()
+      ) !== true
+    ) {
+      throw new Error(
+        "The portable API registry lease could not be completed. The JSON was not loaded."
+      );
+    }
+    portableRegistryTransaction = null;
+
     await commitSuccessfulProjectStorage(
       previousProject?.projectId,
       `loaded:${displayName}`
     );
 
+    const omittedApiNodes =
+      Array.isArray(
+        prerequisites
+          .removedUnavailableApiNodes
+      )
+        ? prerequisites
+            .removedUnavailableApiNodes
+        : [];
+    const omittedConnectionsByLocation =
+      new Map();
+    for (const item of omittedApiNodes) {
+      for (const value of
+        Array.isArray(
+          item?.disconnectedConnectionIds
+        )
+          ? item.disconnectedConnectionIds
+          : []) {
+        const path = String(
+          typeof value === "string"
+            ? item?.path || "runtime-root"
+            : value?.path ||
+                item?.path ||
+                "runtime-root"
+        );
+        const connectionId = String(
+          typeof value === "string"
+            ? value
+            : value?.connectionId || ""
+        );
+        if (!connectionId) continue;
+        omittedConnectionsByLocation.set(
+          `${path}\u0000${connectionId}`,
+          { path, connectionId }
+        );
+      }
+    }
+    const omittedConnections = [
+      ...omittedConnectionsByLocation.values()
+    ];
+    const omittedConnectionLabels =
+      omittedConnections.map(value =>
+        `${value.path}/${value.connectionId}`
+      );
+    const omittedApiDetail =
+      omittedApiNodes.length > 0
+        ? `${omittedApiNodes.length.toLocaleString("de-DE")} API node${omittedApiNodes.length === 1 ? " was" : "s were"} not present in the verified Live/cache catalog and had no same-kind, port-compatible replacement, so only ${omittedApiNodes.map(item => `'${item.nodeName}' [${item.operatorId}] at ${item.path}`).slice(0, 5).join(", ")}${omittedApiNodes.length > 5 ? ` and ${(omittedApiNodes.length - 5).toLocaleString("de-DE")} more` : ""} ${omittedApiNodes.length === 1 ? "was" : "were"} omitted. ${omittedConnections.length.toLocaleString("de-DE")} dependent connection${omittedConnections.length === 1 ? "" : "s"}${omittedConnections.length > 0 ? ` (${omittedConnectionLabels.slice(0, 8).join(", ")}${omittedConnections.length > 8 ? ", …" : ""})` : ""} ${omittedConnections.length === 1 ? "was" : "were"} removed with ${omittedConnections.length === 1 ? "it" : "them"}; unrelated nodes, IDs and routes were preserved. Add a current API node later and reconnect it.`
+        : "";
+    const graphPresentationDetail =
+      graphResult?.ready === false
+        ? `${graphResult.presentationError || "The Runtime Graph presentation is still recovering."} The complete validated project data and generated output are retained; the Runtime Graph remains unavailable for interaction until its presentation reports ready.`
+        : "";
+
     updateBuilderWork(
       session,
       {
-        title: "Project ready",
+        title:
+          omittedApiNodes.length > 0
+            ? "Project ready · API node warning"
+            : graphResult?.ready === false
+              ? "Project ready · Runtime Graph recovery pending"
+            : "Project ready",
         message:
           `Loaded ${displayName} successfully.`,
         detail:
-          prerequisites.compatibilityMode
-            ? `${Number(prerequisites.unresolvedNodeCount || 0).toLocaleString("de-DE")} unavailable node${Number(prerequisites.unresolvedNodeCount || 0) === 1 ? " was" : "s were"} preserved with all stored ports and connections. Search for a verified compatible replacement in each node's inspector. Export remains blocked only for affected execution paths.`
+          omittedApiDetail ||
+          graphPresentationDetail ||
+          (prerequisites.compatibilityMode
+            ? `${Number(prerequisites.unresolvedNodeCount || 0).toLocaleString("de-DE")} unavailable node${Number(prerequisites.unresolvedNodeCount || 0) === 1 ? " was" : "s were"} preserved with every still-valid stored port and connection.${Number(prerequisites.compositeReconciliation?.disconnectedWires || 0) > 0 ? ` ${Number(prerequisites.compositeReconciliation.disconnectedWires).toLocaleString("de-DE")} outer wire${Number(prerequisites.compositeReconciliation.disconnectedWires) === 1 ? " was" : "s were"} removed because its exposed Composite endpoint is connected internally and therefore no longer exists in the real outer contract.` : ""} Search for a verified compatible replacement in each node's inspector. Export remains blocked only for affected execution paths.`
             : prerequisites.catalog
             ?.cacheSatisfied === true
             ? "No known Live health path could be confirmed, so the cached fallback resolved the required contracts and confirmed replacements. The complete Runtime Graph model and generated sources are ready without opening its page."
             : prerequisites.graph
               ? "Catalog contracts, the complete Runtime Graph model, generated sources, dialogs and controls are all ready without requiring a page switch."
-              : "Project data, dialogs and controls are all ready.",
+              : "Project data, dialogs and controls are all ready."),
         progress: 100
       }
     );
     await paintBuilderUi();
+    if (omittedApiNodes.length > 0) {
+      await showBuilderNotice({
+        tone: "warning",
+        kicker: "Project imported with missing API nodes",
+        title:
+          omittedApiNodes.length === 1
+            ? "Reconnect the omitted API node"
+            : "Reconnect the omitted API nodes",
+        message:
+          `Loaded ${displayName} successfully, but ${omittedApiNodes.length.toLocaleString("de-DE")} API node${omittedApiNodes.length === 1 ? " was" : "s were"} unavailable and could not be reconstructed safely.`,
+        details: omittedApiDetail,
+        confirmLabel: "OK"
+      });
+    }
     return graphResult;
   } catch (error) {
+    try {
+      await Promise.resolve(
+        portableRegistryTransaction
+          ?.rollback?.()
+      );
+    } catch (registryRollbackError) {
+      console.error(
+        "The portable API registry transaction could not be rolled back.",
+        registryRollbackError
+      );
+    }
     if (projectApplied) {
       updateBuilderWork(
         session,
@@ -26842,6 +31305,11 @@ async function openProjectDialog() {
   if (sequence !== projectDialogOpenSequence) {
     return;
   }
+  await waitForBuilderMessageQueueIdle();
+
+  if (sequence !== projectDialogOpenSequence) {
+    return;
+  }
 
   if (
     typeof elements.projectDialog.showModal ===
@@ -26887,6 +31355,22 @@ function closeProjectDialog() {
 }
 
 let activeBuilderMessageResolver = null;
+let builderMessageQueueTail =
+  Promise.resolve();
+
+async function waitForBuilderMessageQueueIdle() {
+  while (true) {
+    const observedTail =
+      builderMessageQueueTail;
+    await observedTail;
+    if (
+      observedTail ===
+        builderMessageQueueTail
+    ) {
+      return;
+    }
+  }
+}
 
 function normalizedBuilderMessageTone(tone) {
   return ["warning", "danger", "info", "success"].includes(tone)
@@ -26912,7 +31396,7 @@ function resolveBuilderMessage(
   resolve?.(Boolean(accepted));
 }
 
-function showBuilderMessage({
+function presentBuilderMessage({
   tone = "info",
   kicker = "Builder message",
   title = "Continue?",
@@ -26930,10 +31414,6 @@ function showBuilderMessage({
       "Builder message dialog is not available."
     );
     return Promise.resolve(false);
-  }
-
-  if (activeBuilderMessageResolver) {
-    resolveBuilderMessage(false);
   }
 
   const normalizedTone =
@@ -26987,6 +31467,26 @@ function showBuilderMessage({
   });
 
   return result;
+}
+
+function showBuilderMessage(options = {}) {
+  const present = () =>
+    presentBuilderMessage(options);
+  const queued =
+    builderMessageQueueTail.then(
+      present,
+      present
+    );
+  builderMessageQueueTail = queued.then(
+    () => undefined,
+    error => {
+      console.error(
+        "A queued Builder message could not be displayed.",
+        error
+      );
+    }
+  );
+  return queued;
 }
 
 function confirmBuilderAction(options) {
@@ -27171,6 +31671,10 @@ async function loadProjectJsonFile(
       );
     }
 
+    releaseIdleBuilderMemory({
+      discardGeneratedBuild: true
+    });
+
     await paintBuilderUi();
 
     const projectFile =
@@ -27178,7 +31682,7 @@ async function loadProjectJsonFile(
         file,
         file.name
       );
-    const projectSource =
+    let projectSource =
       projectFile.value;
 
     if (
@@ -27233,10 +31737,13 @@ async function loadProjectJsonFile(
         );
       }
 
-      const imported =
-        await host.importSavedApiComposites(
+      const importPromise =
+        host.importSavedApiComposites(
           projectSource
         );
+      projectFile.value = null;
+      projectSource = null;
+      const imported = await importPromise;
       if (
         loadSession !==
           activeProjectLoadSession
@@ -27244,7 +31751,6 @@ async function loadProjectJsonFile(
         return;
       }
 
-      openProjectDialog();
       const importSummary =
         imported?.summary || null;
       const replacedInstances = Number(
@@ -27253,17 +31759,129 @@ async function loadProjectJsonFile(
       const replacementErrors = Number(
         importSummary?.instanceUpdateErrors || 0
       );
+      const declinedReplacements = Number(
+        importSummary?.instanceUpdatesDeclined || 0
+      );
       const linkedByName = Number(
         importSummary?.instancesLinkedByName || 0
       );
+      const disconnectedWires = Number(
+        importSummary?.disconnectedWires || 0
+      );
+      const omittedApiNodeDetails =
+        Array.isArray(
+          importSummary
+            ?.omittedApiNodeDetails
+        )
+          ? importSummary
+              .omittedApiNodeDetails
+          : [];
+      const omittedApiNodes = Math.max(
+        omittedApiNodeDetails.length,
+        Number(
+          importSummary?.omittedApiNodes ||
+          0
+        )
+      );
+      const omittedApiConnections =
+        Math.max(
+          0,
+          Number(
+            importSummary
+              ?.omittedApiConnections ||
+            0
+          )
+        );
+      const offlinePreservationDetails =
+        Array.isArray(
+          importSummary
+            ?.offlinePreservationDetails
+        )
+          ? importSummary
+              .offlinePreservationDetails
+          : [];
+      const offlinePreservedApiNodes =
+        Math.max(
+          offlinePreservationDetails.reduce(
+            (total, value) =>
+              total + Math.max(
+                0,
+                Number(
+                  value?.nodeCount
+                ) || 0
+              ),
+            0
+          ),
+          Number(
+            importSummary
+              ?.offlinePreservedApiNodes ||
+            0
+          )
+        );
+      const omissionDetails =
+        omittedApiNodeDetails.map(item => {
+          const connections =
+            (Array.isArray(
+              item
+                ?.disconnectedConnectionIds
+            )
+              ? item
+                  .disconnectedConnectionIds
+              : [])
+              .map(value =>
+                String(
+                  typeof value === "string"
+                    ? value
+                    : value
+                        ?.connectionId ||
+                      ""
+                )
+              )
+              .filter(Boolean);
+          return `${String(item?.compositeName || "Saved API Composite")}: '${String(item?.nodeName || item?.nodeId || "Unavailable API node")}' [${String(item?.operatorId || "unknown operator")}] at ${String(item?.path || "runtime-root")}/${String(item?.nodeId || "<unknown>")}${connections.length > 0 ? `; removed connections: ${connections.join(", ")}` : "; no connected wires were removed"}`;
+        });
       setProjectFileStatus(
         importSummary
-          ? `Composite import completed: ${Number(importSummary.added || 0).toLocaleString("de-DE")} new, ${Number(importSummary.updated || 0).toLocaleString("de-DE")} updated, ${Number(importSummary.unchanged || 0).toLocaleString("de-DE")} unchanged and ${Number(importSummary.discarded || 0).toLocaleString("de-DE")} discarded.${replacedInstances > 0 ? ` ${replacedInstances.toLocaleString("de-DE")} placed instance${replacedInstances === 1 ? " was" : "s were"} replaced.${linkedByName > 0 ? ` ${linkedByName.toLocaleString("de-DE")} matched by exact normalized name and received the imported fingerprint.` : ""}` : " The open project was not changed."}${replacementErrors > 0 ? ` ${replacementErrors.toLocaleString("de-DE")} graph replacement${replacementErrors === 1 ? " failed" : "s failed"} atomically.` : ""}`
+          ? `Composite import completed: ${Number(importSummary.added || 0).toLocaleString("de-DE")} new, ${Number(importSummary.updated || 0).toLocaleString("de-DE")} updated, ${Number(importSummary.unchanged || 0).toLocaleString("de-DE")} unchanged and ${Number(importSummary.discarded || 0).toLocaleString("de-DE")} discarded.${omittedApiNodes > 0 ? ` ${omittedApiNodes.toLocaleString("de-DE")} unavailable API node${omittedApiNodes === 1 ? " was" : "s were"} omitted with ${omittedApiConnections.toLocaleString("de-DE")} dependent connection${omittedApiConnections === 1 ? "" : "s"}; the remaining graph was loaded.` : ""}${offlinePreservedApiNodes > 0 ? ` ${offlinePreservedApiNodes.toLocaleString("de-DE")} API node${offlinePreservedApiNodes === 1 ? " was" : "s were"} preserved from complete stored portable contracts because neither cache nor Live could be verified.` : ""}${replacedInstances > 0 ? ` ${replacedInstances.toLocaleString("de-DE")} placed instance${replacedInstances === 1 ? " was" : "s were"} replaced.${linkedByName > 0 ? ` ${linkedByName.toLocaleString("de-DE")} matched by exact normalized name and received the imported fingerprint.` : ""}` : declinedReplacements > 0 ? ` The Library import remains stored; ${declinedReplacements.toLocaleString("de-DE")} optional replacement${declinedReplacements === 1 ? " was" : "s were"} declined and the open project was not changed.` : " The open project was not changed."}${disconnectedWires > 0 ? ` ${disconnectedWires.toLocaleString("de-DE")} obsolete outer wire${disconnectedWires === 1 ? " was" : "s were"} removed after confirmation and must be reconnected where still needed.` : ""}${replacementErrors > 0 ? ` ${replacementErrors.toLocaleString("de-DE")} graph replacement${replacementErrors === 1 ? " failed" : "s failed"} atomically; the Library import remains stored.` : ""}`
           : `Imported ${Number(imported?.length || 0).toLocaleString("de-DE")} Saved API Composite${imported?.length === 1 ? "" : "s"}. The open project was not changed.`,
-        replacementErrors > 0
+        replacementErrors > 0 ||
+        omittedApiNodes > 0 ||
+        offlinePreservedApiNodes > 0
           ? "warning"
           : "success"
       );
+      if (omittedApiNodes > 0) {
+        await showBuilderNotice({
+          tone: "warning",
+          kicker:
+            "Saved Composite imported with missing API nodes",
+          title:
+            omittedApiNodes === 1
+              ? "Reconnect the omitted API node"
+              : "Reconnect the omitted API nodes",
+          message:
+            `The remaining Saved Composite graph was imported successfully. ${omittedApiNodes.toLocaleString("de-DE")} unavailable API node${omittedApiNodes === 1 ? " was" : "s were"} neither reconstructed automatically nor replaceable with a compatible current node and ${omittedApiNodes === 1 ? "was" : "were"} therefore omitted.`,
+          details:
+            `${omittedApiConnections.toLocaleString("de-DE")} dependent connection${omittedApiConnections === 1 ? " was" : "s were"} removed with ${omittedApiConnections === 1 ? "it" : "them"}; unrelated nodes and routes were preserved. ${omissionDetails.slice(0, 12).join(" | ")}${omissionDetails.length > 12 ? ` | and ${(omissionDetails.length - 12).toLocaleString("de-DE")} more` : ""}`,
+          confirmLabel: "OK"
+        });
+      } else if (
+        offlinePreservedApiNodes > 0
+      ) {
+        await showBuilderNotice({
+          tone: "warning",
+          kicker:
+            "Saved Composite imported in offline preservation mode",
+          title:
+            "Catalog verification is still required",
+          message:
+            `The Saved Composite was imported instead of being rejected. ${offlinePreservedApiNodes.toLocaleString("de-DE")} API node${offlinePreservedApiNodes === 1 ? " was" : "s were"} retained from complete, conflict-free stored contracts because neither the verified cache nor one bounded Live scanner attempt provided a usable current catalog.`,
+          details:
+            `${offlinePreservationDetails.map(value => `${String(value?.compositeName || "Saved API Composite")}: ${Math.max(0, Number(value?.nodeCount) || 0).toLocaleString("de-DE")} preserved API node${Number(value?.nodeCount) === 1 ? "" : "s"}`).join(" | ")} No node was guessed or deleted merely because the catalog was unavailable. The Builder will reconcile these contracts when a verified cache or Live catalog becomes available.`,
+          confirmLabel: "OK"
+        });
+      }
+      await openProjectDialog();
       return;
     }
 
@@ -27347,7 +31965,9 @@ async function loadProjectJsonFile(
           title:
             "Constructing the validated project…",
           message:
-            "Every API contract and replacement has been confirmed. The Configuration Outline and Runtime Graph can now be normalized.",
+            prerequisites.compatibilityMode
+              ? "Every unavailable node has a complete stored contract. The Configuration Outline and Runtime Graph can now be constructed without changing their wires or ports."
+              : "Every API contract and replacement has been confirmed. The Configuration Outline and Runtime Graph can now be normalized.",
           detail:
             "This is the first construction pass for the imported project.",
           progress: 54
@@ -27381,6 +32001,16 @@ async function loadProjectJsonFile(
           prevalidatedPrerequisites:
             prerequisites
         }
+      );
+      if (
+        loadSession !==
+          activeProjectLoadSession
+      ) {
+        return;
+      }
+      setProjectFileStatus(
+        `Loaded ${file.name} successfully.`,
+        "success"
       );
     } catch (error) {
       finishBuilderWork(
@@ -29603,28 +34233,6 @@ function updateExportCopyButtonState(
   }
 }
 
-async function validateGeneratedCSharp14Files(files) {
-  await ensureLazyScriptBundle(
-    "compiler"
-  );
-  const compiler = window.RMLCompile;
-  if (typeof compiler?.validate !== "function") {
-    throw new Error(
-      "The browser C# preflight module is unavailable."
-    );
-  }
-  const result = await compiler.validate(files);
-  if (result?.phase === "ready") return;
-  const failures =
-    formatExportPreflightDiagnostics(
-      result
-    );
-  throw new Error(
-    failures.slice(0, 8).join(" | ") ||
-    "C# 14 export validation failed."
-  );
-}
-
 function setExportValidationFailure(error) {
   const message = error instanceof Error ? error.message : String(error);
   setExportReadiness(
@@ -31423,8 +36031,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "../../templates/help_template.html?v=1.10-nonwrapping-shortcut-key-groups",
-    "../templates/help_template.js?v=1.10-nonwrapping-shortcut-key-groups",
+    "../../templates/help_template.html?v=1.20.31-universal-presentation-dev23",
+    "../templates/help_template.js?v=1.20.31-universal-presentation-dev23",
     "help-template",
     "RMLHelpTemplateMarkup"
   )
@@ -33082,6 +37690,12 @@ function exposeBuilderBridge() {
       return builderStateSnapshot();
     },
 
+    getConfigurationNodeCount() {
+      return Array.isArray(state.nodes)
+        ? state.nodes.length
+        : 0;
+    },
+
     getProjectId() {
       return String(state.projectId || "");
     },
@@ -33302,6 +37916,16 @@ function exposeBuilderBridge() {
           }
         )
       );
+    },
+
+    async flushPersistence() {
+      await flushProjectDraftWrites();
+      if (projectDraftLastWriteError) {
+        throw new Error(
+          `The project draft could not be saved: ${projectDraftLastWriteError.message}`
+        );
+      }
+      return true;
     },
 
     requestRender() {
@@ -36617,6 +41241,12 @@ function installUniversalScrollLayerSelector() {
           scheduleVisualRefresh();
           return true;
         },
+        isActive() {
+          return Boolean(
+            selection ||
+              session
+          );
+        },
         hasVisibleEmbeddedHost,
         hasVisibleEmbedded() {
           return (
@@ -36694,6 +41324,7 @@ async function initialize() {
   installPalettePointerDragBridge();
 
   cacheElements();
+  flushGeneratedOutputRefreshAfterDomReady();
   exposeBuilderDialogBridge();
 
   const startupWork =
@@ -37337,7 +41968,7 @@ async function initialize() {
             title: `${EXAMPLE_PROJECT_FILE_NAME} could not be loaded`,
             message,
             details:
-              "Keep Load Example.json under assets/data/. For a local Windows start, use Start Builder.cmd instead of opening index.html directly.",
+              "Keep Load Example.json under assets/data/. You can also select a project JSON or GZIP manually.",
             confirmLabel: "OK"
           });
         }
@@ -37614,7 +42245,10 @@ async function initialize() {
   elements.builderMessageDialog.addEventListener(
     "close",
     () => {
-      if (activeBuilderMessageResolver) {
+      if (
+        !elements.builderMessageDialog.open &&
+        activeBuilderMessageResolver
+      ) {
         resolveBuilderMessage(
           false,
           false
@@ -37802,7 +42436,7 @@ async function initialize() {
       title: `${EXAMPLE_PROJECT_FILE_NAME} was not loaded`,
       message: error.message,
       details:
-        "The builder started with a blank project and did not use any embedded fallback. Keep Load Example.json under assets/data/ and launch Start Builder.cmd for automatic local loading.",
+        "The builder started with a blank project. Keep Load Example.json under assets/data/ or select a project JSON or GZIP manually.",
       confirmLabel: "OK"
     });
   }
@@ -37821,7 +42455,15 @@ async function initialize() {
   );
 }
 
-if (document.readyState === "loading") {
+if (
+  typeof window.RMLArchitectureGate
+    ?.registerBuilderStart === "function"
+) {
+  window.RMLArchitectureGate
+    .registerBuilderStart(initialize);
+} else if (
+  document.readyState === "loading"
+) {
   document.addEventListener(
     "DOMContentLoaded",
     initialize,

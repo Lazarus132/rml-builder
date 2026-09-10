@@ -311,6 +311,16 @@
     publish(resultState("idle", "", [], 0));
   }
 
+  function releaseCaches() {
+    validationCache.clear();
+    if (!activeValidation) {
+      publish(
+        resultState("idle", "", [], 0)
+      );
+    }
+    return true;
+  }
+
   const api = Object.freeze({
     version: VERSION,
     languageVersion: LANGUAGE_VERSION,
@@ -323,7 +333,8 @@
     getState() {
       return state;
     },
-    invalidate
+    invalidate,
+    releaseCaches
   });
 
   Object.defineProperty(window, "RMLCompile", {

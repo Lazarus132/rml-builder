@@ -32,12 +32,26 @@
     if (entry?.value) return Promise.resolve(entry.value);
     if (entry?.error) return Promise.reject(entry.error);
     if (entry?.promise) return entry.promise;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 20000);
     const pending = {};
     cache.set(name, pending);
     pending.promise = (async () => {
+      let controller = null;
+      let timer = 0;
       try {
+        if (root.location?.protocol === "file:") {
+          const ensureStaticPayloads = root
+            .RMLCodeTemplates
+            ?.ensureStaticPayloads;
+          if (typeof ensureStaticPayloads !== "function") {
+            throw new Error(
+              "The static Builder payload loader is unavailable."
+            );
+          }
+          const payloads = await ensureStaticPayloads();
+          return install(name, payloads.guidance?.[name]);
+        }
+        controller = new AbortController();
+        timer = setTimeout(() => controller.abort(), 20000);
         const response = await fetch(new URL(`${name}.json?v=793`, base), { signal: controller.signal });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         return install(name, await response.json());
@@ -45,7 +59,7 @@
         pending.error = new Error(`${name}.json: ${error?.message || error}`);
         throw pending.error;
       } finally {
-        clearTimeout(timer);
+        if (timer) clearTimeout(timer);
         pending.promise = null;
       }
     })();

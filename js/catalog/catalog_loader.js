@@ -1,7 +1,9 @@
 (() => {
   "use strict";
 
-  const LOADER_VERSION = 75;
+  const CATALOG_LOADER_MODULE_ID =
+    "1.20.31-universal-presentation-dev23";
+  const LOADER_VERSION = 84;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
   const CATALOG_PATH = "/resonite_api_catalog.json";
@@ -24,6 +26,40 @@
   const SUPPORTED_RELOAD_SAFETY_READER_VERSION = 1;
   const REQUIRED_SCANNER_FINGERPRINT_ALGORITHM =
     "sha256-canonical-semantic-catalog-v1";
+  const REQUIRED_SCANNER_VERSION =
+    "1.11.1";
+  const REQUIRED_METHOD_IDENTITY_ALGORITHM =
+    "assembly-neutral-declaring-type-and-signature-v2";
+  const REQUIRED_RELOAD_SAFETY_CONTRACT_VERSION = 1;
+  const REQUIRED_RELOAD_SAFETY_POLICY =
+    "operation-structure-and-use-site-v2-compatible-v1";
+  const CACHE_RECORD_SCHEMA_VERSION = 3;
+  const LEGACY_CACHE_RECORD_SCHEMA_VERSION = 2;
+  const LEGACY_CACHE_CONTENT_HASH_ALGORITHM =
+    "sha256-json-payload-v1";
+  const CACHE_CHUNK_FORMAT =
+    "rml-catalog-structural-chunks-v1";
+  const CACHE_CONTENT_HASH_ALGORITHM =
+    "sha256-catalog-chunk-tree-v1";
+  const CACHE_CHUNK_RECORD_SCHEMA_VERSION = 1;
+  const CACHE_CHUNK_TARGET_BYTES =
+    512 * 1024;
+  const CACHE_CHUNK_MAX_BYTES =
+    4 * 1024 * 1024;
+  const CACHE_CHUNK_MAX_KEY_BYTES =
+    64 * 1024;
+  const CACHE_CHUNK_MAX_COUNT = 16384;
+  const CACHE_CHUNK_MAX_DEPTH = 128;
+  const CACHE_CHUNK_MAX_CONTAINER_ENTRIES =
+    5_000_000;
+  const CACHE_MANIFEST_MAX_BYTES =
+    4 * 1024 * 1024;
+  const CACHE_STAGING_RECORD_KEY =
+    "catalog-chunk-staging";
+  const CACHE_ACTIVE_RECORD_KEY =
+    "catalog-chunk-active";
+  const REQUIRED_API_FACTORY_VERSION = 38;
+  const REQUIRED_API_VERIFICATION_SCHEMA_VERSION = 3;
 
   const scriptUrl =
     document.currentScript?.src ||
@@ -33,11 +69,11 @@
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "../compiler/visual_csharp.js?v=82-source-comment-pruning-v776",
+    "../compiler/visual_csharp.js?v=83-empty-custom-csharp-ignored",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=794-shared-loader-runtime",
+    "api_nodes.js?v=1.20.31-universal-presentation-dev23",
     scriptUrl
   ).href;
 
@@ -200,6 +236,391 @@
       ?.fingerprint || "";
   }
 
+  function strictCachedScannerContract(raw) {
+    const contract =
+      scannerFingerprintContract(raw);
+    const assemblyFingerprint = String(
+      raw?.assemblyFingerprint || ""
+    ).trim().toLowerCase();
+    const engineVersion = String(
+      raw?.engineVersion || ""
+    ).trim();
+    const types = catalogTypes(raw);
+
+    return Boolean(
+      contract &&
+      contract.schemaVersion ===
+        REQUIRED_CATALOG_SCHEMA_VERSION &&
+      String(raw?.catalogKind || "") ===
+        "live-resonite-api" &&
+      contract.scannerVersion ===
+        REQUIRED_SCANNER_VERSION &&
+      contract.version ===
+        REQUIRED_SCANNER_FINGERPRINT_VERSION &&
+      contract.algorithm ===
+        REQUIRED_SCANNER_FINGERPRINT_ALGORITHM &&
+      contract.methodIdentityVersion ===
+        REQUIRED_METHOD_IDENTITY_VERSION &&
+      contract.methodIdentityAlgorithm ===
+        REQUIRED_METHOD_IDENTITY_ALGORITHM &&
+      contract.reloadSafetyContractVersion ===
+        REQUIRED_RELOAD_SAFETY_CONTRACT_VERSION &&
+      contract.reloadSafetyPolicy ===
+        REQUIRED_RELOAD_SAFETY_POLICY &&
+      contract.reloadSafetyMinimumReaderVersion ===
+        SUPPORTED_RELOAD_SAFETY_READER_VERSION &&
+      contract.reloadSafetyMaximumReaderVersion ===
+        SUPPORTED_RELOAD_SAFETY_READER_VERSION &&
+      contract.reloadSafetyCompatible === true &&
+      engineVersion &&
+      engineVersion !== "unknown" &&
+      /^[a-f0-9]{64}$/.test(
+        assemblyFingerprint
+      ) &&
+      /^[a-f0-9]{64}$/.test(
+        contract.fingerprint
+      ) &&
+      types.length > 0 &&
+      types.some(type =>
+        String(type?.fullName || "").trim()
+      )
+    );
+  }
+
+  async function legacyCatalogCacheContentHash(raw) {
+    const subtle =
+      globalThis.crypto?.subtle;
+    if (
+      !subtle ||
+      typeof subtle.digest !== "function"
+    ) {
+      throw new Error(
+        "SHA-256 is unavailable for catalog cache verification."
+      );
+    }
+
+    let payload = JSON.stringify(raw);
+    if (typeof payload !== "string") {
+      throw new Error(
+        "Catalog cache payload is not JSON serializable."
+      );
+    }
+    let encodedPayload =
+      new TextEncoder().encode(payload);
+    payload = "";
+    const digest = await subtle.digest(
+      "SHA-256",
+      encodedPayload
+    );
+    encodedPayload = null;
+    return [...new Uint8Array(digest)]
+      .map(value =>
+        value.toString(16).padStart(2, "0")
+      )
+      .join("");
+  }
+
+  const CACHE_JSON_TOO_LARGE =
+    Symbol("catalog-cache-json-too-large");
+
+  function catalogUtf8ByteLength(value) {
+    let bytes = 0;
+    for (let index = 0; index < value.length; index += 1) {
+      const code = value.charCodeAt(index);
+      if (code <= 0x7f) {
+        bytes += 1;
+      } else if (code <= 0x7ff) {
+        bytes += 2;
+      } else if (
+        code >= 0xd800 &&
+        code <= 0xdbff &&
+        index + 1 < value.length &&
+        value.charCodeAt(index + 1) >= 0xdc00 &&
+        value.charCodeAt(index + 1) <= 0xdfff
+      ) {
+        bytes += 4;
+        index += 1;
+      } else {
+        bytes += 3;
+      }
+    }
+    return bytes;
+  }
+
+  function boundedCatalogJson(
+    value,
+    maximumBytes = CACHE_CHUNK_MAX_BYTES
+  ) {
+    const parts = [];
+    let byteLength = 0;
+    const ancestors = new WeakSet();
+
+    const append = token => {
+      const tokenBytes =
+        catalogUtf8ByteLength(token);
+      if (
+        byteLength + tokenBytes >
+          maximumBytes
+      ) {
+        throw CACHE_JSON_TOO_LARGE;
+      }
+      byteLength += tokenBytes;
+      parts.push(token);
+    };
+
+    const visit = (current, depth) => {
+      if (current === null) {
+        append("null");
+        return;
+      }
+
+      const type = typeof current;
+      if (type === "string") {
+        if (
+          current.length > maximumBytes
+        ) {
+          throw CACHE_JSON_TOO_LARGE;
+        }
+        append(JSON.stringify(current));
+        return;
+      }
+      if (type === "boolean") {
+        append(current ? "true" : "false");
+        return;
+      }
+      if (type === "number") {
+        if (!Number.isFinite(current)) {
+          throw new TypeError(
+            "Catalog cache values must be finite JSON numbers."
+          );
+        }
+        append(
+          Object.is(current, -0)
+            ? "0"
+            : String(current)
+        );
+        return;
+      }
+      if (type !== "object") {
+        throw new TypeError(
+          "Catalog cache values must be JSON serializable."
+        );
+      }
+      if (depth > CACHE_CHUNK_MAX_DEPTH) {
+        throw new Error(
+          `Catalog cache values may not be nested more than ${CACHE_CHUNK_MAX_DEPTH} levels.`
+        );
+      }
+      if (ancestors.has(current)) {
+        throw new TypeError(
+          "Catalog cache values may not contain cycles."
+        );
+      }
+
+      ancestors.add(current);
+      try {
+        if (Array.isArray(current)) {
+          const keys = Object.keys(current);
+          if (
+            keys.length !== current.length ||
+            keys.some((key, index) =>
+              key !== String(index)
+            )
+          ) {
+            throw new TypeError(
+              "Catalog cache arrays must be dense JSON arrays without named properties."
+            );
+          }
+          append("[");
+          for (
+            let index = 0;
+            index < current.length;
+            index += 1
+          ) {
+            if (index > 0) append(",");
+            visit(current[index], depth + 1);
+          }
+          append("]");
+          return;
+        }
+
+        const prototype =
+          Object.getPrototypeOf(current);
+        if (
+          prototype !== null &&
+          Object.prototype.toString.call(
+            current
+          ) !== "[object Object]"
+        ) {
+          throw new TypeError(
+            "Catalog cache objects must be plain JSON objects."
+          );
+        }
+        append("{");
+        const keys = Object.keys(current);
+        for (
+          let index = 0;
+          index < keys.length;
+          index += 1
+        ) {
+          if (index > 0) append(",");
+          const key = keys[index];
+          if (key.length > maximumBytes) {
+            throw CACHE_JSON_TOO_LARGE;
+          }
+          append(JSON.stringify(key));
+          append(":");
+          visit(current[key], depth + 1);
+        }
+        append("}");
+      } finally {
+        ancestors.delete(current);
+      }
+    };
+
+    try {
+      visit(value, 0);
+      return Object.freeze({
+        json: parts.join(""),
+        byteLength,
+        tooLarge: false
+      });
+    } catch (error) {
+      if (error === CACHE_JSON_TOO_LARGE) {
+        return Object.freeze({
+          json: "",
+          byteLength: maximumBytes + 1,
+          tooLarge: true
+        });
+      }
+      throw error;
+    }
+  }
+
+  function catalogDigestHex(digest) {
+    return [...new Uint8Array(digest)]
+      .map(value =>
+        value.toString(16).padStart(2, "0")
+      )
+      .join("");
+  }
+
+  async function catalogCacheBoundedHash(
+    value,
+    maximumBytes = CACHE_CHUNK_MAX_BYTES
+  ) {
+    const serialized = boundedCatalogJson(
+      value,
+      maximumBytes
+    );
+    if (serialized.tooLarge) {
+      throw new Error(
+        `A catalog cache entry exceeds the ${Math.floor(maximumBytes / (1024 * 1024))} MiB integrity limit.`
+      );
+    }
+    const subtle = globalThis.crypto?.subtle;
+    if (
+      !subtle ||
+      typeof subtle.digest !== "function"
+    ) {
+      throw new Error(
+        "SHA-256 is unavailable for catalog cache verification."
+      );
+    }
+    const encoded = new TextEncoder().encode(
+      serialized.json
+    );
+    const digest = await subtle.digest(
+      "SHA-256",
+      encoded
+    );
+    return Object.freeze({
+      hash: catalogDigestHex(digest),
+      byteLength: serialized.byteLength
+    });
+  }
+
+  function createCatalogCacheGeneration() {
+    const bytes = new Uint8Array(16);
+    let random = "";
+    if (
+      typeof globalThis.crypto
+        ?.getRandomValues === "function"
+    ) {
+      globalThis.crypto.getRandomValues(
+        bytes
+      );
+      random = [...bytes]
+        .map(value =>
+          value.toString(16).padStart(2, "0")
+        )
+        .join("");
+    } else {
+      random = Math.random()
+        .toString(36).slice(2);
+    }
+    return `${Date.now().toString(36)}-${random}`;
+  }
+
+  function catalogCacheChunkId(
+    generation,
+    index
+  ) {
+    return `catalog-chunk:${generation}:${String(index).padStart(8, "0")}`;
+  }
+
+  async function yieldCatalogCacheWork() {
+    await new Promise(resolve => {
+      if (
+        typeof requestAnimationFrame ===
+          "function"
+      ) {
+        requestAnimationFrame(() =>
+          resolve()
+        );
+      } else {
+        setTimeout(resolve, 0);
+      }
+    });
+  }
+
+  function deepFreezeCatalogSnapshot(
+    value
+  ) {
+    if (
+      !value ||
+      typeof value !== "object"
+    ) {
+      return value;
+    }
+
+    const pending = [value];
+    while (pending.length > 0) {
+      const current = pending.pop();
+      if (
+        !current ||
+        typeof current !== "object" ||
+        Object.isFrozen(current)
+      ) {
+        continue;
+      }
+
+      Object.freeze(current);
+      for (const child of
+        Object.values(current)) {
+        if (
+          child &&
+          typeof child === "object" &&
+          !Object.isFrozen(child)
+        ) {
+          pending.push(child);
+        }
+      }
+    }
+
+    return value;
+  }
+
   function legacyScannerFingerprint(raw) {
     const fingerprint = String(
       raw?.catalogFingerprint ||
@@ -215,11 +636,6 @@
 
   function legacyCacheFingerprint(raw) {
     return legacyScannerFingerprint(raw);
-  }
-
-  function cachedCatalogFingerprint(raw) {
-    return scannerCatalogFingerprint(raw) ||
-      legacyCacheFingerprint(raw);
   }
 
   function requireScannerFingerprintContract(
@@ -310,7 +726,6 @@
     const fingerprintContract =
       scannerFingerprintContract(value);
     const legacyFingerprint =
-      source === "scanner-cache" ||
       source === "scanner-legacy"
         ? legacyCacheFingerprint(value)
         : "";
@@ -436,13 +851,22 @@
           ? parameters
           : []).map(
             catalogParameterShape
+          ).sort((left, right) =>
+            left.position - right.position
           );
+      const normalizedReturnType =
+        catalogContractType(
+          returnType || "System.Void"
+        );
       const identity = JSON.stringify({
         kind,
         ownerType:
           catalogContractType(ownerType),
         memberName:
           String(memberName || ""),
+        parameterShape,
+        returnType:
+          normalizedReturnType,
         isStatic: isStatic === true,
         genericArity: Math.max(
           0,
@@ -452,9 +876,7 @@
       const shape = JSON.stringify({
         parameterShape,
         returnType:
-          catalogContractType(
-            returnType || "System.Void"
-          )
+          normalizedReturnType
       });
       members.set(identity, {
         identity,
@@ -653,7 +1075,9 @@
     }
   );
 
-  function installCatalog(catalog) {
+  function createCatalogPublication(
+    catalog
+  ) {
     const previous =
       window.RMLResoniteApiCatalog ||
       window.RMLFrooxComponentCatalog ||
@@ -698,60 +1122,145 @@
           )
       : null;
 
-    Object.defineProperty(
-      window,
+    const properties = [
       "RMLCatalogDiffReport",
-      {
-        value: compatibility,
-        writable: false,
-        enumerable: true,
-        configurable: true
-      }
-    );
-    for (const property of [
       "RMLResoniteApiCatalog",
       "RMLFrooxComponentCatalog"
-    ]) {
-      Object.defineProperty(
-        window,
-        property,
-        {
-          value: catalog,
-          writable: false,
-          enumerable: true,
-          configurable: true
-        }
+    ];
+    const previousDescriptors =
+      new Map(
+        properties.map(property => [
+          property,
+          Object.getOwnPropertyDescriptor(
+            window,
+            property
+          )
+        ])
       );
-    }
-
-    updateStatus(catalog);
-
-    document.dispatchEvent(
-      new CustomEvent(
-        "rml-catalog:loaded",
-        {
-          detail: catalog
+    let committed = false;
+    let rolledBack = false;
+    let notified = false;
+    const restorePreviousDescriptors = () => {
+      for (const property of properties) {
+        const descriptor =
+          previousDescriptors.get(
+            property
+          );
+        if (descriptor) {
+          Object.defineProperty(
+            window,
+            property,
+            descriptor
+          );
+        } else {
+          delete window[property];
         }
-      )
-    );
-
-    if (compatibility) {
+      }
+    };
+    const verify = () =>
+      committed &&
+      !rolledBack &&
+      window.RMLResoniteApiCatalog ===
+        catalog &&
+      window.RMLFrooxComponentCatalog ===
+        catalog &&
+      window.RMLCatalogDiffReport ===
+        compatibility;
+    const commit = () => {
+      if (rolledBack || notified) {
+        return false;
+      }
+      if (committed) return verify();
+      try {
+        Object.defineProperty(
+          window,
+          "RMLCatalogDiffReport",
+          {
+            value: compatibility,
+            writable: false,
+            enumerable: true,
+            configurable: true
+          }
+        );
+        for (const property of [
+          "RMLResoniteApiCatalog",
+          "RMLFrooxComponentCatalog"
+        ]) {
+          Object.defineProperty(
+            window,
+            property,
+            {
+              value: catalog,
+              writable: false,
+              enumerable: true,
+              configurable: true
+            }
+          );
+        }
+        committed = true;
+        return verify();
+      } catch (error) {
+        restorePreviousDescriptors();
+        rolledBack = true;
+        throw error;
+      }
+    };
+    const rollback = () => {
+      if (
+        !committed ||
+        rolledBack ||
+        notified
+      ) {
+        return false;
+      }
+      restorePreviousDescriptors();
+      rolledBack = true;
+      return true;
+    };
+    const notify = () => {
+      if (
+        notified ||
+        !verify()
+      ) {
+        return false;
+      }
+      notified = true;
+      updateStatus(catalog);
       document.dispatchEvent(
         new CustomEvent(
-          "rml-catalog:compatibility",
+          "rml-catalog:loaded",
           {
-            detail: compatibility
+            detail: catalog
           }
         )
       );
-    }
+      if (compatibility) {
+        document.dispatchEvent(
+          new CustomEvent(
+            "rml-catalog:compatibility",
+            {
+              detail: compatibility
+            }
+          )
+        );
+      }
+      return true;
+    };
 
-    return catalog;
+    return Object.freeze({
+      catalog,
+      compatibility,
+      commit,
+      verify,
+      rollback,
+      notify
+    });
   }
 
   let scannerCheckPromise = null;
   let scannerCheckGeneration = -1;
   let cachedCatalogRecord = null;
+  let cachedCatalogReadPromise = null;
   let lastScannerFingerprintSync =
     Object.freeze({
       liveReached: false,
@@ -769,19 +1278,8 @@
     );
   }
 
-  // The RuntimeBridge owns the existing Cached/Live badge. A cache install,
-  // factory rebuild or catalog error must never override transport state.
   function updateStatus() { window.RMLRuntimeBridge?.renderStatus?.(); }
   function updateUnavailableStatus() { updateStatus(); }
-
-  function safeLocalStorageValue(key) {
-    try {
-      return window.localStorage
-        ?.getItem(key) || "";
-    } catch {
-      return "";
-    }
-  }
 
   function setSafeLocalStorageValue(
     key,
@@ -794,14 +1292,6 @@
       );
     } catch {
     }
-  }
-
-  function rememberedScannerCatalogUrl() {
-    return loopbackScannerCatalogUrl(
-      safeLocalStorageValue(
-        KNOWN_SCANNER_URL_STORAGE_KEY
-      )
-    );
   }
 
   function rememberScannerCatalogUrl(url) {
@@ -973,68 +1463,1231 @@
     );
   }
 
-  async function readCachedLiveCatalog() {
+  function readCatalogCacheValue(
+    database,
+    key
+  ) {
+    return new Promise(
+      (resolve, reject) => {
+        const transaction =
+          database.transaction(
+            CACHE_STORE_NAME,
+            "readonly"
+          );
+        const request = transaction
+          .objectStore(CACHE_STORE_NAME)
+          .get(key);
+        request.onsuccess = () =>
+          resolve(request.result || null);
+        request.onerror = () =>
+          reject(
+            request.error ||
+            new Error(
+              "Cached catalog data could not be read."
+            )
+          );
+      }
+    );
+  }
+
+  function readCatalogCacheRecord(
+    database
+  ) {
+    return readCatalogCacheValue(
+      database,
+      CACHE_RECORD_KEY
+    );
+  }
+
+  function storeCatalogCacheRecord(
+    database,
+    record
+  ) {
+    return new Promise(
+      (resolve, reject) => {
+        const transaction =
+          database.transaction(
+            CACHE_STORE_NAME,
+            "readwrite"
+          );
+        transaction.objectStore(
+          CACHE_STORE_NAME
+        ).put(record);
+        transaction.oncomplete =
+          () => resolve(true);
+        transaction.onerror =
+          () => reject(
+            transaction.error ||
+            new Error(
+              "Live catalog data could not be cached."
+            )
+          );
+        transaction.onabort =
+          () => reject(
+            transaction.error ||
+            new Error(
+              "Live catalog cache transaction was aborted."
+            )
+          );
+      }
+    );
+  }
+
+  function commitCatalogCacheManifest(
+    database,
+    manifest
+  ) {
+    return new Promise(
+      (resolve, reject) => {
+        const transaction =
+          database.transaction(
+            CACHE_STORE_NAME,
+            "readwrite"
+          );
+        const store = transaction.objectStore(
+          CACHE_STORE_NAME
+        );
+        store.put(manifest);
+        store.put({
+          id: CACHE_ACTIVE_RECORD_KEY,
+          schemaVersion:
+            CACHE_CHUNK_RECORD_SCHEMA_VERSION,
+          generation: manifest.generation,
+          contentHash: manifest.contentHash
+        });
+        transaction.oncomplete =
+          () => resolve(true);
+        transaction.onerror =
+          () => reject(
+            transaction.error ||
+            new Error(
+              "Catalog cache manifest could not be committed."
+            )
+          );
+        transaction.onabort =
+          () => reject(
+            transaction.error ||
+            new Error(
+              "Catalog cache manifest commit was aborted."
+            )
+          );
+      }
+    );
+  }
+
+  function deleteCatalogCacheKeys(
+    database,
+    keys
+  ) {
+    if (!Array.isArray(keys) || keys.length === 0) {
+      return Promise.resolve(true);
+    }
+    return new Promise(
+      (resolve, reject) => {
+        const transaction =
+          database.transaction(
+            CACHE_STORE_NAME,
+            "readwrite"
+          );
+        const store = transaction.objectStore(
+          CACHE_STORE_NAME
+        );
+        for (const key of keys) {
+          store.delete(key);
+        }
+        transaction.oncomplete =
+          () => resolve(true);
+        transaction.onerror =
+          () => reject(
+            transaction.error ||
+            new Error(
+              "Obsolete catalog cache chunks could not be removed."
+            )
+          );
+        transaction.onabort =
+          () => reject(
+            transaction.error ||
+            new Error(
+              "Catalog cache cleanup was aborted."
+            )
+          );
+      }
+    );
+  }
+
+  function catalogCacheManifestIntegrity(
+    record
+  ) {
+    return {
+      schemaVersion: Number(
+        record?.schemaVersion
+      ),
+      format: String(record?.format || ""),
+      generation: String(
+        record?.generation || ""
+      ),
+      fingerprint: String(
+        record?.fingerprint || ""
+      ).trim().toLowerCase(),
+      chunkCount: Number(
+        record?.chunkCount
+      ),
+      chunkTargetBytes: Number(
+        record?.chunkTargetBytes
+      ),
+      chunkMaximumBytes: Number(
+        record?.chunkMaximumBytes
+      ),
+      root: record?.root,
+      chunks: record?.chunks
+    };
+  }
+
+  function validCatalogCacheManifest(
+    record
+  ) {
+    const generation = String(
+      record?.generation || ""
+    );
+    const chunks = record?.chunks;
+    const chunkCount = record?.chunkCount;
+    return Boolean(
+      String(record?.id || "") ===
+        CACHE_RECORD_KEY &&
+      record?.schemaVersion ===
+        CACHE_RECORD_SCHEMA_VERSION &&
+      String(record?.format || "") ===
+        CACHE_CHUNK_FORMAT &&
+      String(
+        record?.contentHashAlgorithm || ""
+      ) === CACHE_CONTENT_HASH_ALGORITHM &&
+      /^[a-f0-9]{64}$/.test(
+        String(record?.contentHash || "")
+          .trim().toLowerCase()
+      ) &&
+      /^[a-z0-9-]{12,96}$/i.test(
+        generation
+      ) &&
+      /^[a-f0-9]{64}$/.test(
+        String(record?.fingerprint || "")
+          .trim().toLowerCase()
+      ) &&
+      Number.isInteger(chunkCount) &&
+      chunkCount >= 0 &&
+      chunkCount <= CACHE_CHUNK_MAX_COUNT &&
+      record?.chunkTargetBytes ===
+        CACHE_CHUNK_TARGET_BYTES &&
+      record?.chunkMaximumBytes ===
+        CACHE_CHUNK_MAX_BYTES &&
+      Array.isArray(chunks) &&
+      chunks.length === chunkCount &&
+      chunks.every((chunk, index) =>
+        Number.isInteger(chunk?.index) &&
+        chunk.index === index &&
+        /^(array|object)$/.test(
+          String(chunk?.kind || "")
+        ) &&
+        Number.isInteger(chunk?.count) &&
+        chunk.count > 0 &&
+        Number.isInteger(chunk?.byteLength) &&
+        chunk.byteLength > 0 &&
+        chunk.byteLength <=
+          CACHE_CHUNK_MAX_BYTES &&
+        /^[a-f0-9]{64}$/.test(
+          String(chunk?.hash || "")
+        )
+      ) &&
+      record?.root &&
+      typeof record.root === "object"
+    );
+  }
+
+  function readActiveCatalogChunk(
+    database,
+    manifest,
+    index
+  ) {
+    return new Promise(
+      (resolve, reject) => {
+        const transaction =
+          database.transaction(
+            CACHE_STORE_NAME,
+            "readonly"
+          );
+        const store = transaction.objectStore(
+          CACHE_STORE_NAME
+        );
+        const manifestRequest = store.get(
+          CACHE_ACTIVE_RECORD_KEY
+        );
+        const chunkRequest = store.get(
+          catalogCacheChunkId(
+            manifest.generation,
+            index
+          )
+        );
+        let manifestDone = false;
+        let chunkDone = false;
+        const finish = () => {
+          if (!manifestDone || !chunkDone) {
+            return;
+          }
+          const active =
+            manifestRequest.result;
+          if (
+            Number(active?.schemaVersion) !==
+              CACHE_CHUNK_RECORD_SCHEMA_VERSION ||
+            String(active?.generation || "") !==
+              manifest.generation ||
+            String(active?.contentHash || "") !==
+              manifest.contentHash
+          ) {
+            const error = new Error(
+              "The active catalog cache generation changed while it was being read."
+            );
+            error.code =
+              "RML_CATALOG_CACHE_GENERATION_CHANGED";
+            reject(error);
+            return;
+          }
+          resolve(chunkRequest.result || null);
+        };
+        manifestRequest.onsuccess = () => {
+          manifestDone = true;
+          finish();
+        };
+        chunkRequest.onsuccess = () => {
+          chunkDone = true;
+          finish();
+        };
+        const fail = request =>
+          reject(
+            request.error ||
+            new Error(
+              "A catalog cache chunk could not be read."
+            )
+          );
+        manifestRequest.onerror = () =>
+          fail(manifestRequest);
+        chunkRequest.onerror = () =>
+          fail(chunkRequest);
+      }
+    );
+  }
+
+  async function encodeCatalogCacheNode(
+    value,
+    context,
+    depth = 0
+  ) {
+    if (
+      depth > CACHE_CHUNK_MAX_DEPTH ||
+      !value ||
+      typeof value !== "object"
+    ) {
+      throw new Error(
+        "An oversized catalog cache entry cannot be structurally chunked."
+      );
+    }
+    const isArray = Array.isArray(value);
+    const descriptor = isArray
+      ? {
+          kind: "array",
+          length: value.length,
+          segments: []
+        }
+      : {
+          kind: "object",
+          segments: []
+        };
+    const directKeys = Object.keys(value);
+    if (
+      (
+        isArray
+          ? value.length
+          : directKeys.length
+      ) > CACHE_CHUNK_MAX_CONTAINER_ENTRIES
+    ) {
+      throw new Error(
+        `A catalog cache container exceeds ${CACHE_CHUNK_MAX_CONTAINER_ENTRIES} entries.`
+      );
+    }
+    if (
+      isArray &&
+      (
+        directKeys.length !== value.length ||
+        directKeys.some((key, index) =>
+          key !== String(index)
+        )
+      )
+    ) {
+      throw new TypeError(
+        "Catalog cache arrays must be dense JSON arrays without named properties."
+      );
+    }
+    const entryCount = isArray
+      ? value.length
+      : directKeys.length;
+    let pending = [];
+    let pendingBytes = 2;
+    let pendingStart = 0;
+
+    const writePending = async () => {
+      if (pending.length === 0) return;
+      const payload = isArray
+        ? pending.map(entry => entry[1])
+        : pending.map(entry => [
+            entry[0],
+            entry[1]
+          ]);
+      const integrity =
+        await catalogCacheBoundedHash(
+          payload
+        );
+      const index = context.chunks.length;
+      if (index >= CACHE_CHUNK_MAX_COUNT) {
+        throw new Error(
+          `Catalog cache requires more than ${CACHE_CHUNK_MAX_COUNT} chunks.`
+        );
+      }
+      const expected = {
+        index,
+        kind: isArray ? "array" : "object",
+        count: pending.length,
+        byteLength: integrity.byteLength,
+        hash: integrity.hash
+      };
+      await storeCatalogCacheRecord(
+        context.database,
+        {
+          id: CACHE_STAGING_RECORD_KEY,
+          schemaVersion:
+            CACHE_CHUNK_RECORD_SCHEMA_VERSION,
+          generation: context.generation,
+          chunkCount: index + 1,
+          createdAtUtc: context.createdAtUtc,
+          updatedAtUtc:
+            new Date().toISOString()
+        }
+      );
+      context.plannedChunkCount =
+        index + 1;
+      await storeCatalogCacheRecord(
+        context.database,
+        {
+          id: catalogCacheChunkId(
+            context.generation,
+            index
+          ),
+          schemaVersion:
+            CACHE_CHUNK_RECORD_SCHEMA_VERSION,
+          generation: context.generation,
+          index,
+          kind: expected.kind,
+          count: expected.count,
+          byteLength: expected.byteLength,
+          hash: expected.hash,
+          payload
+        }
+      );
+      context.chunks.push(expected);
+      descriptor.segments.push(
+        isArray
+          ? {
+              kind: "chunk",
+              index,
+              start: pendingStart,
+              count: pending.length
+            }
+          : {
+              kind: "chunk",
+              index,
+              keys: pending.map(entry =>
+                entry[0]
+              )
+            }
+      );
+      pending = [];
+      pendingBytes = 2;
+      if (context.chunks.length % 4 === 0) {
+        await yieldCatalogCacheWork();
+      }
+    };
+
+    for (
+      let entryIndex = 0;
+      entryIndex < entryCount;
+      entryIndex += 1
+    ) {
+      const entryKey = isArray
+        ? entryIndex
+        : directKeys[entryIndex];
+      const entryValue = value[entryKey];
+      if (
+        !isArray &&
+        boundedCatalogJson(
+          String(entryKey),
+          CACHE_CHUNK_MAX_KEY_BYTES
+        ).tooLarge
+      ) {
+        throw new Error(
+          "A catalog cache object key exceeds the 64 KiB metadata limit."
+        );
+      }
+      const candidateValue = isArray
+        ? entryValue
+        : [entryKey, entryValue];
+      let candidate = boundedCatalogJson(
+        candidateValue,
+        CACHE_CHUNK_TARGET_BYTES - 2
+      );
+      const structuralCandidate = Boolean(
+        entryValue &&
+        typeof entryValue === "object"
+      );
+      if (
+        candidate.tooLarge &&
+        !structuralCandidate
+      ) {
+        candidate = boundedCatalogJson(
+          candidateValue,
+          CACHE_CHUNK_MAX_BYTES - 2
+        );
+      }
+      if (
+        candidate.tooLarge
+      ) {
+        await writePending();
+        if (
+          !structuralCandidate
+        ) {
+          throw new Error(
+            `A single catalog cache value exceeds ${Math.floor(CACHE_CHUNK_MAX_BYTES / (1024 * 1024))} MiB.`
+          );
+        }
+        descriptor.segments.push({
+          kind: "child",
+          key: entryKey,
+          node: await encodeCatalogCacheNode(
+            entryValue,
+            context,
+            depth + 1
+          )
+        });
+        pendingStart = entryIndex + 1;
+        continue;
+      }
+      const addedBytes =
+        candidate.byteLength +
+        (pending.length > 0 ? 1 : 0);
+      if (
+        pending.length > 0 &&
+        pendingBytes + addedBytes >
+          CACHE_CHUNK_TARGET_BYTES
+      ) {
+        await writePending();
+        pendingStart = entryIndex;
+      }
+      pending.push([
+        entryKey,
+        entryValue
+      ]);
+      pendingBytes +=
+        candidate.byteLength +
+        (pending.length > 1 ? 1 : 0);
+    }
+    await writePending();
+    return descriptor;
+  }
+
+  async function reconstructCatalogCacheNode(
+    descriptor,
+    context,
+    depth = 0
+  ) {
+    if (
+      depth > CACHE_CHUNK_MAX_DEPTH ||
+      !descriptor ||
+      typeof descriptor !== "object" ||
+      !Array.isArray(descriptor.segments) ||
+      !/^(array|object)$/.test(
+        String(descriptor.kind || "")
+      )
+    ) {
+      throw new Error(
+        "Catalog cache structure is invalid."
+      );
+    }
+    const isArray =
+      descriptor.kind === "array";
+    if (
+      isArray &&
+      (!Number.isInteger(descriptor.length) ||
+        descriptor.length < 0 ||
+        descriptor.length >
+          CACHE_CHUNK_MAX_CONTAINER_ENTRIES)
+    ) {
+      throw new Error(
+        "Catalog cache array length is invalid."
+      );
+    }
+    const result = isArray
+      ? new Array(descriptor.length)
+      : {};
+    let expectedPosition = 0;
+    const objectKeys = new Set();
+
+    for (const segment of descriptor.segments) {
+      if (segment?.kind === "child") {
+        const key = segment.key;
+        if (
+          isArray
+            ? !Number.isInteger(key) ||
+              key !== expectedPosition
+            : typeof key !== "string" ||
+              objectKeys.has(key)
+        ) {
+          throw new Error(
+            "Catalog cache child ordering is invalid."
+          );
+        }
+        const child =
+          await reconstructCatalogCacheNode(
+            segment.node,
+            context,
+            depth + 1
+          );
+        if (isArray) {
+          result[key] = child;
+        } else {
+          Object.defineProperty(
+            result,
+            key,
+            {
+              value: child,
+              writable: true,
+              enumerable: true,
+              configurable: true
+            }
+          );
+        }
+        if (isArray) {
+          expectedPosition += 1;
+        } else {
+          objectKeys.add(key);
+        }
+        continue;
+      }
+      if (segment?.kind !== "chunk") {
+        throw new Error(
+          "Catalog cache segment type is invalid."
+        );
+      }
+      const index = Number(segment.index);
+      if (
+        !Number.isInteger(index) ||
+        index < 0 ||
+        index >= context.manifest.chunkCount ||
+        context.usedChunks.has(index)
+      ) {
+        throw new Error(
+          "Catalog cache contains a missing or duplicate chunk reference."
+        );
+      }
+      const expected =
+        context.manifest.chunks[index];
+      if (
+        expected.kind !==
+          (isArray ? "array" : "object")
+      ) {
+        throw new Error(
+          "Catalog cache chunk kind is invalid."
+        );
+      }
+      const record = await readActiveCatalogChunk(
+        context.database,
+        context.manifest,
+        index
+      );
+      if (
+        !record ||
+        String(record.id || "") !==
+          catalogCacheChunkId(
+            context.manifest.generation,
+            index
+          ) ||
+        Number(record.schemaVersion) !==
+          CACHE_CHUNK_RECORD_SCHEMA_VERSION ||
+        String(record.generation || "") !==
+          context.manifest.generation ||
+        Number(record.index) !== index ||
+        String(record.kind || "") !==
+          expected.kind ||
+        Number(record.count) !==
+          expected.count ||
+        Number(record.byteLength) !==
+          expected.byteLength ||
+        String(record.hash || "") !==
+          expected.hash ||
+        !Array.isArray(record.payload)
+      ) {
+        throw new Error(
+          "Catalog cache chunk metadata is invalid."
+        );
+      }
+      const actual =
+        await catalogCacheBoundedHash(
+          record.payload
+        );
+      if (
+        actual.hash !== expected.hash ||
+        actual.byteLength !==
+          expected.byteLength ||
+        record.payload.length !==
+          expected.count
+      ) {
+        throw new Error(
+          "Catalog cache chunk integrity verification failed."
+        );
+      }
+      context.usedChunks.add(index);
+
+      if (isArray) {
+        if (
+        !Number.isInteger(segment.start) ||
+          segment.start !==
+            expectedPosition ||
+          !Number.isInteger(segment.count) ||
+          segment.count !==
+            record.payload.length
+        ) {
+          throw new Error(
+            "Catalog cache array chunk ordering is invalid."
+          );
+        }
+        for (const item of record.payload) {
+          result[expectedPosition] = item;
+          expectedPosition += 1;
+        }
+      } else {
+        const keys = segment.keys;
+        if (
+          !Array.isArray(keys) ||
+          keys.length !== record.payload.length
+        ) {
+          throw new Error(
+            "Catalog cache object chunk keys are invalid."
+          );
+        }
+        for (
+          let position = 0;
+          position < keys.length;
+          position += 1
+        ) {
+          const pair = record.payload[position];
+          const key = keys[position];
+          if (
+            typeof key !== "string" ||
+            objectKeys.has(key) ||
+            !Array.isArray(pair) ||
+            pair.length !== 2 ||
+            pair[0] !== key
+          ) {
+            throw new Error(
+              "Catalog cache object chunk contains duplicate or mismatched keys."
+            );
+          }
+          Object.defineProperty(
+            result,
+            key,
+            {
+              value: pair[1],
+              writable: true,
+              enumerable: true,
+              configurable: true
+            }
+          );
+          objectKeys.add(key);
+        }
+      }
+      if (context.usedChunks.size % 4 === 0) {
+        await yieldCatalogCacheWork();
+      }
+    }
+    if (
+      isArray &&
+      expectedPosition !== descriptor.length
+    ) {
+      throw new Error(
+        "Catalog cache array is incomplete."
+      );
+    }
+    return result;
+  }
+
+  async function verifiedCurrentCacheRecord(
+    database,
+    record
+  ) {
+    if (!validCatalogCacheManifest(record)) {
+      return null;
+    }
+    const expectedContentHash = String(
+      record.contentHash
+    ).trim().toLowerCase();
+    const manifestIntegrity =
+      await catalogCacheBoundedHash(
+        catalogCacheManifestIntegrity(
+          record
+        ),
+        CACHE_MANIFEST_MAX_BYTES
+      );
+    if (
+      manifestIntegrity.hash !==
+        expectedContentHash
+    ) {
+      return null;
+    }
+    const active =
+      await readCatalogCacheValue(
+        database,
+        CACHE_ACTIVE_RECORD_KEY
+      );
+    if (
+      Number(active?.schemaVersion) !==
+        CACHE_CHUNK_RECORD_SCHEMA_VERSION ||
+      String(active?.generation || "") !==
+        record.generation ||
+      String(active?.contentHash || "") !==
+        expectedContentHash
+    ) {
+      return null;
+    }
+    const context = {
+      database,
+      manifest: record,
+      usedChunks: new Set()
+    };
+    const raw =
+      await reconstructCatalogCacheNode(
+        record.root,
+        context
+      );
+    if (
+      context.usedChunks.size !==
+        record.chunkCount ||
+      !raw ||
+      typeof raw !== "object" ||
+      Array.isArray(raw) ||
+      !strictCachedScannerContract(raw)
+    ) {
+      return null;
+    }
+    const fingerprint =
+      scannerCatalogFingerprint(raw);
+    if (
+      !fingerprint ||
+      fingerprint !==
+        String(record.fingerprint)
+          .trim().toLowerCase()
+    ) {
+      return null;
+    }
+    return Object.freeze({
+      ...record,
+      fingerprint,
+      contentHash: expectedContentHash,
+      catalog:
+        deepFreezeCatalogSnapshot(raw)
+    });
+  }
+
+  async function verifiedLegacyV2CacheRecord(
+    record
+  ) {
+    const raw = record?.catalog;
+    const fingerprint =
+      scannerCatalogFingerprint(raw);
+    const expectedContentHash = String(
+      record?.contentHash || ""
+    ).trim().toLowerCase();
+    if (
+      String(record?.id || "") !==
+        CACHE_RECORD_KEY ||
+      Number(record?.schemaVersion) !==
+        LEGACY_CACHE_RECORD_SCHEMA_VERSION ||
+      String(
+        record?.contentHashAlgorithm || ""
+      ) !==
+        LEGACY_CACHE_CONTENT_HASH_ALGORITHM ||
+      !/^[a-f0-9]{64}$/.test(
+        expectedContentHash
+      ) ||
+      !raw ||
+      typeof raw !== "object" ||
+      Array.isArray(raw) ||
+      !strictCachedScannerContract(raw) ||
+      !fingerprint ||
+      String(record?.fingerprint || "")
+        .trim().toLowerCase() !== fingerprint
+    ) {
+      return null;
+    }
+    const actualContentHash =
+      await legacyCatalogCacheContentHash(raw);
+    return actualContentHash ===
+      expectedContentHash
+      ? Object.freeze({
+          ...record,
+          catalog:
+            deepFreezeCatalogSnapshot(raw)
+        })
+      : null;
+  }
+
+  function legacyCacheRecordCanMigrate(
+    record
+  ) {
+    const schemaVersion =
+      record?.schemaVersion;
+    const raw = record?.catalog;
+    const fingerprint =
+      scannerCatalogFingerprint(raw);
+    return Boolean(
+      (schemaVersion == null ||
+        schemaVersion === "" ||
+        Number(schemaVersion) === 1) &&
+      String(record?.id || "") ===
+        CACHE_RECORD_KEY &&
+      !String(
+        record?.contentHashAlgorithm || ""
+      ).trim() &&
+      !String(
+        record?.contentHash || ""
+      ).trim() &&
+      raw &&
+      typeof raw === "object" &&
+      !Array.isArray(raw) &&
+      strictCachedScannerContract(raw) &&
+      fingerprint &&
+      String(record?.fingerprint || "")
+        .trim().toLowerCase() === fingerprint
+    );
+  }
+
+  async function removeCatalogCacheGeneration(
+    database,
+    generation,
+    chunkCount
+  ) {
+    if (
+      !generation ||
+      !Number.isInteger(chunkCount) ||
+      chunkCount < 1 ||
+      chunkCount > CACHE_CHUNK_MAX_COUNT
+    ) {
+      return;
+    }
+    for (
+      let start = 0;
+      start < chunkCount;
+      start += 256
+    ) {
+      const end = Math.min(
+        chunkCount,
+        start + 256
+      );
+      const keys = [];
+      for (let index = start; index < end; index += 1) {
+        keys.push(
+          catalogCacheChunkId(
+            generation,
+            index
+          )
+        );
+      }
+      await deleteCatalogCacheKeys(
+        database,
+        keys
+      );
+      await yieldCatalogCacheWork();
+    }
+  }
+
+  async function clearOwnedCatalogStaging(
+    database,
+    generation
+  ) {
+    const staging =
+      await readCatalogCacheValue(
+        database,
+        CACHE_STAGING_RECORD_KEY
+      );
+    if (
+      String(staging?.generation || "") ===
+        generation
+    ) {
+      await deleteCatalogCacheKeys(
+        database,
+        [CACHE_STAGING_RECORD_KEY]
+      );
+    }
+  }
+
+  async function writeChunkedCatalogRecord(
+    database,
+    raw,
+    sourceUrl,
+    previousRecord = null
+  ) {
+    const generation =
+      createCatalogCacheGeneration();
+    const createdAtUtc =
+      new Date().toISOString();
+    const context = {
+      database,
+      generation,
+      createdAtUtc,
+      chunks: [],
+      plannedChunkCount: 0
+    };
+    let committed = false;
+    try {
+      const staleStaging =
+        await readCatalogCacheValue(
+          database,
+          CACHE_STAGING_RECORD_KEY
+        );
+      const staleAge =
+        Date.now() - Date.parse(
+          String(
+            staleStaging?.updatedAtUtc ||
+            staleStaging?.createdAtUtc || ""
+          )
+        );
+      if (staleStaging?.generation) {
+        const staleGeneration = String(
+          staleStaging.generation
+        );
+        const activeGeneration = String(
+          previousRecord?.generation || ""
+        );
+        if (
+          staleGeneration ===
+            activeGeneration
+        ) {
+          await clearOwnedCatalogStaging(
+            database,
+            staleGeneration
+          );
+        } else if (
+          Number.isFinite(staleAge) &&
+          staleAge > 10 * 60 * 1000
+        ) {
+          await removeCatalogCacheGeneration(
+            database,
+            staleGeneration,
+            Number(staleStaging.chunkCount)
+          );
+          await clearOwnedCatalogStaging(
+            database,
+            staleGeneration
+          );
+        } else {
+          throw new Error(
+            "Another catalog cache generation is still being written."
+          );
+        }
+      }
+      await storeCatalogCacheRecord(
+        database,
+        {
+          id: CACHE_STAGING_RECORD_KEY,
+          schemaVersion:
+            CACHE_CHUNK_RECORD_SCHEMA_VERSION,
+          generation,
+          chunkCount: 0,
+          createdAtUtc,
+          updatedAtUtc: createdAtUtc
+        }
+      );
+      const root =
+        await encodeCatalogCacheNode(
+          raw,
+          context
+        );
+      const manifest = {
+        id: CACHE_RECORD_KEY,
+        schemaVersion:
+          CACHE_RECORD_SCHEMA_VERSION,
+        format: CACHE_CHUNK_FORMAT,
+        savedAtUtc: createdAtUtc,
+        sourceUrl,
+        fingerprint:
+          scannerCatalogFingerprint(raw),
+        contentHashAlgorithm:
+          CACHE_CONTENT_HASH_ALGORITHM,
+        contentHash: "",
+        generation,
+        chunkCount:
+          context.chunks.length,
+        chunkTargetBytes:
+          CACHE_CHUNK_TARGET_BYTES,
+        chunkMaximumBytes:
+          CACHE_CHUNK_MAX_BYTES,
+        root,
+        chunks: context.chunks
+      };
+      const integrity =
+        await catalogCacheBoundedHash(
+          catalogCacheManifestIntegrity(
+            manifest
+          ),
+          CACHE_MANIFEST_MAX_BYTES
+        );
+      manifest.contentHash =
+        integrity.hash;
+
+      await commitCatalogCacheManifest(
+        database,
+        manifest
+      );
+      committed = true;
+      try {
+        await clearOwnedCatalogStaging(
+          database,
+          generation
+        );
+      } catch (cleanupError) {
+        console.debug(
+          "Committed catalog staging metadata could not be removed.",
+          cleanupError
+        );
+      }
+
+      if (
+        Number(previousRecord?.schemaVersion) ===
+          CACHE_RECORD_SCHEMA_VERSION &&
+        previousRecord.generation &&
+        previousRecord.generation !== generation
+      ) {
+        try {
+          await removeCatalogCacheGeneration(
+            database,
+            String(previousRecord.generation),
+            Number(previousRecord.chunkCount)
+          );
+        } catch (cleanupError) {
+          console.debug(
+            "The previous catalog cache generation could not be removed.",
+            cleanupError
+          );
+        }
+      }
+      return manifest;
+    } catch (error) {
+      if (!committed) {
+        try {
+          await removeCatalogCacheGeneration(
+            database,
+            generation,
+            context.plannedChunkCount
+          );
+          await clearOwnedCatalogStaging(
+            database,
+            generation
+          );
+        } catch (cleanupError) {
+          console.debug(
+            "Incomplete catalog cache generation cleanup failed.",
+            cleanupError
+          );
+        }
+      }
+      throw error;
+    }
+  }
+
+  async function migrateLegacyCacheRecord(
+    database,
+    record
+  ) {
+    const verifiedV2 =
+      await verifiedLegacyV2CacheRecord(
+        record
+      );
+    const legacyV1 =
+      legacyCacheRecordCanMigrate(record)
+        ? record
+        : null;
+    const accepted = verifiedV2 || legacyV1;
+    if (!accepted) return null;
+    const raw =
+      deepFreezeCatalogSnapshot(
+        accepted.catalog
+      );
+    try {
+      const manifest =
+        await writeChunkedCatalogRecord(
+          database,
+          raw,
+          accepted.sourceUrl || "",
+          accepted
+        );
+      return Object.freeze({
+        ...manifest,
+        migratedAtUtc:
+          new Date().toISOString(),
+        catalog: raw
+      });
+    } catch (error) {
+      console.debug(
+        "The verified legacy catalog cache could not be migrated to chunks.",
+        error
+      );
+      return verifiedV2;
+    }
+  }
+
+  async function readCachedLiveCatalogRecord() {
     let database;
 
     try {
       database =
         await openCatalogCache();
-
-      return await new Promise(
-        (resolve, reject) => {
-          const transaction =
-            database.transaction(
-              CACHE_STORE_NAME,
-              "readonly"
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const stored =
+          await readCatalogCacheRecord(
+            database
+          );
+        try {
+          const current =
+            await verifiedCurrentCacheRecord(
+              database,
+              stored
             );
-          const request =
-            transaction
-              .objectStore(
-                CACHE_STORE_NAME
-              )
-              .get(CACHE_RECORD_KEY);
-
-          request.onsuccess = () => {
-            const record =
-              request.result;
-            const raw = record?.catalog;
-
-            const valid = Boolean(
-              raw &&
-              typeof raw === "object" &&
-              !Array.isArray(raw) &&
-              cachedCatalogFingerprint(raw) &&
-              String(
-                record?.fingerprint || ""
-              ).trim().toLowerCase() ===
-                cachedCatalogFingerprint(raw)
+          const resolved = current ||
+            await migrateLegacyCacheRecord(
+              database,
+              stored
             );
-            const resolved = valid
-              ? {
-                  ...record,
-                  fingerprint:
-                    cachedCatalogFingerprint(
-                      raw
-                    )
-                }
-              : null;
-
-            if (resolved) {
-              cachedCatalogRecord =
-                resolved;
-            }
-
-            resolve(resolved);
-          };
-          request.onerror = () =>
-            reject(
-              request.error ||
-              new Error(
-                "Cached catalog could not be read."
-              )
-            );
+          if (resolved) {
+            cachedCatalogRecord =
+              resolved;
+          }
+          return resolved;
+        } catch (error) {
+          if (
+            error?.code ===
+              "RML_CATALOG_CACHE_GENERATION_CHANGED" &&
+            attempt === 0
+          ) {
+            continue;
+          }
+          throw error;
         }
-      );
+      }
+      return null;
     } catch (error) {
       console.debug(
         "No cached live Resonite API catalog is available.",
@@ -1046,64 +2699,66 @@
     }
   }
 
+  function readCachedLiveCatalog() {
+    if (!cachedCatalogReadPromise) {
+      cachedCatalogReadPromise =
+        readCachedLiveCatalogRecord()
+          .then(record => {
+            if (!record) {
+              cachedCatalogReadPromise =
+                null;
+            }
+            return record;
+          })
+          .catch(error => {
+            cachedCatalogReadPromise =
+              null;
+            throw error;
+          });
+    }
+    return cachedCatalogReadPromise;
+  }
+
   async function writeCachedLiveCatalog(
     raw,
     sourceUrl
   ) {
     let database;
     const fingerprint =
-      scannerCatalogFingerprint(raw) ||
-      legacyScannerFingerprint(raw);
+      scannerCatalogFingerprint(raw);
 
-    if (!fingerprint) {
+    if (
+      !fingerprint ||
+      !strictCachedScannerContract(raw)
+    ) {
       throw new Error(
-        "Live scanner catalog has no cacheable scanner fingerprint."
+        "Live scanner catalog does not satisfy the current cache contract."
       );
     }
-    const record = {
-      id: CACHE_RECORD_KEY,
-      savedAtUtc:
-        new Date().toISOString(),
-      sourceUrl,
-      fingerprint,
-      catalog: raw
-    };
+    const catalogSnapshot =
+      deepFreezeCatalogSnapshot(raw);
 
     try {
       database =
         await openCatalogCache();
-
-      await new Promise(
-        (resolve, reject) => {
-          const transaction =
-            database.transaction(
-              CACHE_STORE_NAME,
-              "readwrite"
-            );
-
-          transaction.objectStore(
-            CACHE_STORE_NAME
-          ).put(record);
-
-          transaction.oncomplete =
-            () => resolve(true);
-          transaction.onerror =
-            () => reject(
-              transaction.error ||
-              new Error(
-                "Live catalog could not be cached."
-              )
-            );
-          transaction.onabort =
-            () => reject(
-              transaction.error ||
-              new Error(
-                "Live catalog cache transaction was aborted."
-              )
-            );
-        }
-      );
-      cachedCatalogRecord = record;
+      const previousRecord =
+        await readCatalogCacheRecord(
+          database
+        );
+      const manifest =
+        await writeChunkedCatalogRecord(
+          database,
+          catalogSnapshot,
+          sourceUrl,
+          previousRecord
+        );
+      const stored = Object.freeze({
+        ...manifest,
+        catalog: catalogSnapshot
+      });
+      cachedCatalogRecord = stored;
+      cachedCatalogReadPromise =
+        Promise.resolve(stored);
       return true;
     } catch (error) {
       console.warn(
@@ -1127,12 +2782,10 @@
       cachedCatalogRecord = cached;
 
 
-      return installCatalog(
-        normalizeCatalog(
-          cached.catalog,
-          "scanner-cache",
-          cached.sourceUrl || ""
-        )
+      return normalizeCatalog(
+        cached.catalog,
+        "scanner-cache",
+        cached.sourceUrl || ""
       );
     }
 
@@ -1221,6 +2874,35 @@
     ).trim();
   }
 
+  function publishFactoryReportMetadata(
+    previousReport,
+    nextReport
+  ) {
+    const projectionIndex =
+      window.RMLApiCatalogProjectionIndex;
+    const replacePublishedReport =
+      window.RMLApiNodeFactoryController
+        ?.replacePublishedFactoryReport;
+    if (projectionIndex) {
+      if (
+        typeof replacePublishedReport !==
+          "function" ||
+        replacePublishedReport(
+          previousReport,
+          nextReport
+        ) !== true
+      ) {
+        throw new Error(
+          "The verified API factory report could not be republished with its prepared graph-codegen projection index."
+        );
+      }
+    } else {
+      window.RMLApiNodeFactoryReport =
+        nextReport;
+    }
+    return nextReport;
+  }
+
   function promoteFactoryReportForCatalog(
     catalog,
     {
@@ -1272,8 +2954,10 @@
           catalog?.catalogSource || ""
         )
     });
-    window.RMLApiNodeFactoryReport =
-      nextReport;
+    publishFactoryReportMetadata(
+      report,
+      nextReport
+    );
     window.dispatchEvent(
       new CustomEvent(
         "rml-api-node-factory-ready",
@@ -1283,26 +2967,117 @@
     return true;
   }
 
-  async function ensureApiNodesLoaded() {
+  async function ensureApiNodesModuleLoaded() {
     await loadScript(
       apiNodesUrl,
       "api-nodes",
       "api_nodes.js"
     );
 
-    const factoryReady =
-      window.RMLApiNodeFactoryReady;
-
+    const controller =
+      window.RMLApiNodeFactoryController;
     if (
-      factoryReady &&
-      typeof factoryReady.then ===
-        "function"
+      controller?.moduleId !==
+        CATALOG_LOADER_MODULE_ID ||
+      Number(controller?.factoryVersion) !==
+        REQUIRED_API_FACTORY_VERSION
     ) {
-      await factoryReady;
+      throw new Error(
+        `Runtime module version mismatch: the API node factory is not the ${CATALOG_LOADER_MODULE_ID} factory required by this catalog loader. Reload the Builder without cached files. The JSON was not loaded.`
+      );
+    }
+
+    const report =
+      window.RMLApiNodeFactoryReport;
+    const activeFactoryVersion =
+      Number(
+        window.__RMLApiNodeFactoryVersion
+      ) || 0;
+    if (
+      (
+        activeFactoryVersion !== 0 &&
+        activeFactoryVersion !==
+          REQUIRED_API_FACTORY_VERSION
+      ) ||
+      (
+        report &&
+        (
+          Number(report.factoryVersion) !==
+            REQUIRED_API_FACTORY_VERSION ||
+          report.moduleId !==
+            CATALOG_LOADER_MODULE_ID
+        )
+      )
+    ) {
+      throw new Error(
+        `Runtime module version mismatch: catalog loader v${LOADER_VERSION} requires API factory v${REQUIRED_API_FACTORY_VERSION}, but the active factory is v${activeFactoryVersion || 0}. Reload the Builder without cached files. The JSON was not loaded.`
+      );
     }
   }
 
-  async function activateCatalogAndFactory(
+  let catalogActivationPromise =
+    Promise.resolve();
+
+  function queueCatalogActivationOperation(
+    operation
+  ) {
+    const run = () =>
+      Promise.resolve().then(
+        operation
+      );
+    const queued =
+      catalogActivationPromise.then(
+        run,
+        run
+      );
+    catalogActivationPromise =
+      queued.catch(() => null);
+    return queued;
+  }
+
+  function catalogSnapshotsMatch(
+    left,
+    right
+  ) {
+    return Boolean(
+      left &&
+      right &&
+      catalogIdentity(left) &&
+      catalogIdentity(left) ===
+        catalogIdentity(right) &&
+      String(left.engineVersion || "") ===
+        String(right.engineVersion || "")
+    );
+  }
+
+  function assertCatalogFactoryCommit(
+    catalog,
+    report
+  ) {
+    const activeCatalog =
+      statusCatalog();
+    if (
+      !catalogSnapshotsMatch(
+        activeCatalog,
+        catalog
+      ) ||
+      !factoryMatchesCatalog(
+        catalog,
+        report
+      ) ||
+      !factoryMatchesCatalog(
+        activeCatalog,
+        report
+      )
+    ) {
+      throw new Error(
+        "The active API catalog and its verified node factory did not commit the same fingerprint and engine version."
+      );
+    }
+    return report;
+  }
+
+  async function activateCatalogAndFactoryNow(
     catalog
   ) {
     const existingReport =
@@ -1311,18 +3086,24 @@
       factoryMatchesCatalog(
         catalog,
         existingReport
+      ) &&
+      catalogSnapshotsMatch(
+        statusCatalog(),
+        catalog
       )
     ) {
-      installCatalog(catalog);
       promoteFactoryReportForCatalog(
         catalog
       );
-      return existingReport;
+      return assertCatalogFactoryCommit(
+        catalog,
+        window.RMLApiNodeFactoryReport ||
+          existingReport
+      );
     }
 
-    installCatalog(catalog);
-    await modNodesReady;
-    await ensureApiNodesLoaded();
+    await baseModNodesReady;
+    await ensureApiNodesModuleLoaded();
 
     let report =
       window.RMLApiNodeFactoryReport;
@@ -1331,12 +3112,20 @@
       factoryMatchesCatalog(
         catalog,
         report
+      ) &&
+      catalogSnapshotsMatch(
+        statusCatalog(),
+        catalog
       )
     ) {
       promoteFactoryReportForCatalog(
         catalog
       );
-      return report;
+      return assertCatalogFactoryCommit(
+        catalog,
+        window.RMLApiNodeFactoryReport ||
+          report
+      );
     }
 
     const controller =
@@ -1352,22 +3141,29 @@
       );
     }
 
-    await controller.rebuild(catalog);
+    await controller.rebuild(
+      catalog,
+      {
+        createCatalogPublication
+      }
+    );
     report =
       window.RMLApiNodeFactoryReport;
+    return assertCatalogFactoryCommit(
+      catalog,
+      report
+    );
+  }
 
-    if (
-      !factoryMatchesCatalog(
-        catalog,
-        report
-      )
-    ) {
-      throw new Error(
-        "The API node factory did not publish the selected catalog fingerprint."
-      );
-    }
-
-    return report;
+  function activateCatalogAndFactory(
+    catalog
+  ) {
+    return queueCatalogActivationOperation(
+      () =>
+        activateCatalogAndFactoryNow(
+          catalog
+        )
+    );
   }
 
   function currentScannerConnection() {
@@ -1379,14 +3175,15 @@
     if (!report || report.liveCatalogVerified !== true) return;
     const next = Object.freeze({ ...report, liveCatalogVerified: false,
       catalogSource: statusCatalog()?.catalogSource || "scanner-cache" });
-    window.RMLApiNodeFactoryReport = next;
+    publishFactoryReportMetadata(
+      report,
+      next
+    );
     window.dispatchEvent(new CustomEvent("rml-api-node-factory-ready", { detail: next }));
   }
 
   async function synchronizeScannerStatus(options = {}) {
     const session = currentScannerConnection();
-    // Imports and renders may use the authorized cache but never initiate a
-    // scanner request. Only the Cached/Live button supplies manualSession.
     if (session.mode !== "live") return false;
     if (scannerCheckGeneration === session.generation) {
       if (scannerCheckPromise) return scannerCheckPromise;
@@ -1579,6 +3376,24 @@
     options
   ) {
     const requirements = new Map();
+    const stableFamilyValue = value =>
+      value &&
+      typeof value === "object"
+        ? Array.isArray(value)
+          ? value.map(stableFamilyValue)
+          : Object.fromEntries(
+              Object.keys(value)
+                .sort((left, right) =>
+                  left.localeCompare(right)
+                )
+                .map(key => [
+                  key,
+                  stableFamilyValue(
+                    value[key]
+                  )
+                ])
+            )
+        : value ?? null;
     const add = (
       operatorId,
       inputPorts = [],
@@ -1587,7 +3402,9 @@
       missingCatalogObject = false,
       catalogScope = "api",
       nodeParameters = {},
-      nodeLabels = []
+      nodeLabels = [],
+      requirementKey = "",
+      nodeReferences = []
     ) => {
       const id = String(
         operatorId || ""
@@ -1609,8 +3426,21 @@
         return;
       }
 
-      if (!requirements.has(id)) {
-        requirements.set(id, {
+      const familyKey = String(
+        requirementKey || ""
+      ).trim() || JSON.stringify({
+        operatorId: id,
+        apiContract:
+          stableFamilyValue(apiContract),
+        nodeParameters:
+          stableFamilyValue(
+            nodeParameters
+          )
+      });
+
+      if (!requirements.has(familyKey)) {
+        requirements.set(familyKey, {
+          requirementKey: familyKey,
           operatorId: id,
           apiContract:
             apiContract &&
@@ -1637,13 +3467,33 @@
                 )
               : {},
           nodeLabels: new Set(),
+          nodeReferences: new Map(),
           inputPorts: new Set(),
           outputPorts: new Set()
         });
       }
 
       const requirement =
-        requirements.get(id);
+        requirements.get(familyKey);
+
+      for (const reference of
+        Array.isArray(nodeReferences)
+          ? nodeReferences
+          : []) {
+        const nodeId = String(
+          reference?.nodeId || ""
+        ).trim();
+        const path = String(
+          reference?.path ||
+          "runtime-root"
+        ).trim();
+        if (nodeId) {
+          requirement.nodeReferences.set(
+            `${path}\u0000${nodeId}`,
+            { nodeId, path }
+          );
+        }
+      }
 
       for (const value of
         Array.isArray(nodeLabels)
@@ -1709,12 +3559,16 @@
         value?.missingCatalogObject,
         value?.catalogScope,
         value?.nodeParameters,
-        value?.nodeLabels
+        value?.nodeLabels,
+        value?.requirementKey,
+        value?.nodeReferences
       );
     }
 
     return [...requirements.values()]
       .map(requirement => ({
+        requirementKey:
+          requirement.requirementKey,
         operatorId:
           requirement.operatorId,
         apiContract:
@@ -1734,6 +3588,17 @@
             .sort((left, right) =>
               left.localeCompare(right)
             ),
+        nodeReferences:
+          [...requirement
+            .nodeReferences.values()]
+            .sort((left, right) =>
+              left.path.localeCompare(
+                right.path
+              ) ||
+              left.nodeId.localeCompare(
+                right.nodeId
+              )
+            ),
         inputPorts:
           [...requirement.inputPorts]
             .sort((left, right) =>
@@ -1748,8 +3613,253 @@
       .sort((left, right) =>
         left.operatorId.localeCompare(
           right.operatorId
+        ) ||
+        left.requirementKey.localeCompare(
+          right.requirementKey
         )
       );
+  }
+
+  let factoryRegistryIntegrityCache = null;
+
+  function factoryRegistryIntegrity(
+    catalog,
+    report,
+    requiredNodes = []
+  ) {
+    const controller =
+      window.RMLApiNodeFactoryController;
+    if (
+      typeof controller
+        ?.verifyRegistryPublication ===
+        "function"
+    ) {
+      try {
+        const verifiedPublication = controller
+          .verifyRegistryPublication(
+            catalog,
+            report,
+            requiredNodes
+          );
+        if (
+          verifiedPublication &&
+          typeof verifiedPublication ===
+            "object"
+        ) {
+          return verifiedPublication;
+        }
+      } catch (error) {
+        console.error(
+          "The API factory registry publication could not be verified.",
+          error
+        );
+      }
+    }
+
+    const registry =
+      window.RMLModNodeRegistry;
+    const definitions =
+      registry?.getNodeDefinitions?.();
+    const catalogFingerprint = String(
+      catalog?.catalogFingerprint || ""
+    );
+    const engineVersion = String(
+      catalog?.engineVersion || ""
+    );
+    const definitionRevision = Number(
+      window.__RMLNodeDefinitionRevision
+    ) || 0;
+    const cacheMatches = Boolean(
+      factoryRegistryIntegrityCache &&
+      factoryRegistryIntegrityCache.registry ===
+        registry &&
+      factoryRegistryIntegrityCache.definitions ===
+        definitions &&
+      factoryRegistryIntegrityCache.report ===
+        report &&
+      factoryRegistryIntegrityCache.catalog ===
+        catalog &&
+      factoryRegistryIntegrityCache.catalogIdentity ===
+        `${catalogFingerprint}|${engineVersion}` &&
+      factoryRegistryIntegrityCache.definitionRevision ===
+        definitionRevision
+    );
+    let publicationValid = false;
+    let generatedDefinitions = 0;
+
+    if (cacheMatches) {
+      publicationValid =
+        factoryRegistryIntegrityCache
+          .publicationValid;
+      generatedDefinitions =
+        factoryRegistryIntegrityCache
+          .generatedDefinitions;
+    } else {
+      publicationValid = Boolean(
+        definitions &&
+        typeof definitions === "object" &&
+        !Array.isArray(definitions) &&
+        catalogFingerprint &&
+        report &&
+        report.verificationPassed === true &&
+        Number(report.totalGeneratedNodes) > 0
+      );
+      if (publicationValid) {
+        for (const id in definitions) {
+          if (!Object.prototype.hasOwnProperty.call(
+            definitions,
+            id
+          )) {
+            continue;
+          }
+          const definition = definitions[id];
+          if (
+            definition?.catalogGenerated !==
+              true ||
+            definition?.legacyCatalogAlias ===
+              true
+          ) {
+            continue;
+          }
+          generatedDefinitions += 1;
+          const contract =
+            definition.apiVerification;
+          if (
+            definition.unavailableApiContract ===
+              true ||
+            !contract ||
+            typeof contract !== "object" ||
+            Number(contract.schemaVersion) !==
+              REQUIRED_API_VERIFICATION_SCHEMA_VERSION ||
+            String(contract.nodeId || "") !==
+              id ||
+            String(
+              contract.catalogFingerprint || ""
+            ) !== catalogFingerprint ||
+            String(
+              contract.engineVersion || ""
+            ) !== engineVersion ||
+            !String(
+              contract.contractFingerprint || ""
+            ).trim()
+          ) {
+            publicationValid = false;
+          }
+        }
+        if (
+          generatedDefinitions !==
+            Number(
+              report.totalGeneratedNodes
+            )
+        ) {
+          publicationValid = false;
+        }
+      }
+      factoryRegistryIntegrityCache = {
+        registry,
+        definitions,
+        report,
+        catalog,
+        catalogIdentity:
+          `${catalogFingerprint}|${engineVersion}`,
+        definitionRevision,
+        publicationValid,
+        generatedDefinitions
+      };
+    }
+
+    const missingRequired = [];
+    for (const requirement of
+      Array.isArray(requiredNodes)
+        ? requiredNodes
+        : []) {
+      const operatorId = String(
+        typeof requirement === "string"
+          ? requirement
+          : requirement?.operatorId || ""
+      ).trim();
+      if (!operatorId) continue;
+      const definition =
+        definitions?.[operatorId];
+      const contract =
+        definition?.apiVerification;
+      const inputIds = new Set(
+        (Array.isArray(definition?.inputs)
+          ? definition.inputs
+          : []).map(port =>
+          String(port?.id || "")
+        )
+      );
+      const outputIds = new Set(
+        (Array.isArray(definition?.outputs)
+          ? definition.outputs
+          : []).map(port =>
+          String(port?.id || "")
+        )
+      );
+      const requiredInputs =
+        typeof requirement === "string"
+          ? []
+          : Array.isArray(
+                requirement?.inputPorts
+              )
+            ? requirement.inputPorts
+            : [];
+      const requiredOutputs =
+        typeof requirement === "string"
+          ? []
+          : Array.isArray(
+                requirement?.outputPorts
+              )
+            ? requirement.outputPorts
+            : [];
+      if (
+        definition?.catalogGenerated !==
+          true ||
+        definition.unavailableApiContract ===
+          true ||
+        !contract ||
+        typeof contract !== "object" ||
+        Number(contract.schemaVersion) !==
+          REQUIRED_API_VERIFICATION_SCHEMA_VERSION ||
+        String(contract.nodeId || "") !==
+          operatorId ||
+        String(
+          contract.catalogFingerprint || ""
+        ) !== catalogFingerprint ||
+        String(contract.engineVersion || "") !==
+          engineVersion ||
+        !String(
+          contract.contractFingerprint || ""
+        ).trim() ||
+        !requiredInputs.every(id =>
+          inputIds.has(String(id || ""))
+        ) ||
+        !requiredOutputs.every(id =>
+          outputIds.has(String(id || ""))
+        )
+      ) {
+        missingRequired.push(operatorId);
+      }
+    }
+
+    return Object.freeze({
+      valid:
+        publicationValid &&
+        missingRequired.length === 0,
+      publicationValid,
+      generatedDefinitions,
+      expectedGeneratedDefinitions:
+        Math.max(
+          0,
+          Number(
+            report?.totalGeneratedNodes
+          ) || 0
+        ),
+      missingRequired: Object.freeze([
+        ...new Set(missingRequired)
+      ])
+    });
   }
 
   function factoryMatchesCatalog(
@@ -1760,6 +3870,26 @@
       catalog &&
       report &&
       report.verificationPassed === true &&
+      report.moduleId ===
+        CATALOG_LOADER_MODULE_ID &&
+      Number(report.factoryVersion) ===
+        REQUIRED_API_FACTORY_VERSION &&
+      window.RMLApiNodeFactoryController
+        ?.moduleId ===
+        CATALOG_LOADER_MODULE_ID &&
+      Number(
+        window.RMLApiNodeFactoryController
+          ?.factoryVersion
+      ) === REQUIRED_API_FACTORY_VERSION &&
+      Number(
+        window.__RMLApiNodeFactoryVersion
+      ) === REQUIRED_API_FACTORY_VERSION &&
+      Number(
+        report.verificationSchemaVersion
+      ) ===
+        REQUIRED_API_VERIFICATION_SCHEMA_VERSION &&
+      Number(report.generatedTypes) > 0 &&
+      Number(report.totalGeneratedNodes) > 0 &&
       String(
         report.catalogFingerprint || ""
       ) ===
@@ -1767,7 +3897,11 @@
           catalog.catalogFingerprint || ""
         ) &&
       String(report.engineVersion || "") ===
-        String(catalog.engineVersion || "")
+        String(catalog.engineVersion || "") &&
+      factoryRegistryIntegrity(
+        catalog,
+        report
+      ).publicationValid === true
     );
   }
 
@@ -1779,6 +3913,58 @@
     const definitions =
       window.RMLModNodeRegistry
         ?.getNodeDefinitions?.() || {};
+    const semanticKey = value => {
+      if (
+        !value ||
+        typeof value !== "object" ||
+        Array.isArray(value) ||
+        !String(value.ownerType || "").trim() ||
+        !String(value.kind || "").trim()
+      ) {
+        return "";
+      }
+      const normalizeType = type =>
+        String(type || "System.Object")
+          .replace(/^global::/, "")
+          .replace(/\s+/g, "")
+          .replace(/&$/, "");
+      return JSON.stringify({
+        kind: String(value.kind),
+        ownerType:
+          normalizeType(value.ownerType),
+        memberName:
+          String(value.memberName || ""),
+        parameters:
+          (Array.isArray(value.parameters)
+            ? value.parameters
+            : []).map((parameter, index) => ({
+              position: Math.max(
+                0,
+                Number(parameter?.position) ||
+                index
+              ),
+              type: normalizeType(
+                parameter?.elementType ||
+                parameter?.type
+              ),
+              isByRef:
+                parameter?.isByRef === true ||
+                parameter?.isOut === true,
+              isOut:
+                parameter?.isOut === true
+            })),
+        returnType: normalizeType(
+          value.returnType ||
+          "System.Void"
+        ),
+        isStatic:
+          value.isStatic === true,
+        genericArity: Math.max(
+          0,
+          Number(value.genericArity) || 0
+        )
+      });
+    };
 
     return requiredNodes
       .map(requirement => {
@@ -1788,6 +3974,10 @@
         definitions[id];
       const contract =
         definition?.apiVerification;
+      const requiredSemanticKey =
+        semanticKey(
+          requirement.apiContract
+        );
 
       const contractValid = Boolean(
         definition?.catalogGenerated ===
@@ -1805,11 +3995,21 @@
         String(contract.engineVersion || "") ===
           String(
             report?.engineVersion || ""
-          )
+          ) &&
+        (
+          !requiredSemanticKey ||
+          semanticKey(contract) ===
+            requiredSemanticKey
+        )
       );
 
       if (!contractValid) {
         return {
+          requirementKey:
+            String(
+              requirement
+                .requirementKey || ""
+            ),
           operatorId: id,
           missingInputs: [],
           missingOutputs: [],
@@ -1847,7 +4047,12 @@
 
       return missingInputs.length > 0 ||
         missingOutputs.length > 0
-        ? {
+          ? {
+            requirementKey:
+              String(
+                requirement
+                  .requirementKey || ""
+              ),
             operatorId: id,
             missingInputs,
             missingOutputs,
@@ -1866,6 +4071,11 @@
   ) {
     return requiredNodes.map(
       requirement => ({
+        requirementKey:
+          String(
+            requirement
+              .requirementKey || ""
+          ),
         operatorId:
           requirement.operatorId,
         missingInputs: [
@@ -1879,28 +4089,47 @@
     );
   }
 
-  async function reconcileLegacyRequiredApiNodes(
+  function reconcileLegacyRequiredApiNodes(
     requiredNodes,
     catalog
   ) {
-    const controller =
-      window.RMLApiNodeFactoryController;
+    return queueCatalogActivationOperation(
+      () => {
+        const controller =
+          window.RMLApiNodeFactoryController;
+        const activeCatalog =
+          statusCatalog();
+        const resolvedCatalog =
+          catalogSnapshotsMatch(
+            activeCatalog,
+            catalog
+          )
+            ? catalog
+            : activeCatalog;
+        const report =
+          window.RMLApiNodeFactoryReport;
 
-    if (
-      !catalog ||
-      !controller ||
-      typeof controller
-        .resolveRequiredOperators !==
-        "function"
-    ) {
-      return null;
-    }
+        if (
+          !resolvedCatalog ||
+          !factoryMatchesCatalog(
+            resolvedCatalog,
+            report
+          ) ||
+          !controller ||
+          typeof controller
+            .resolveRequiredOperators !==
+            "function"
+        ) {
+          return null;
+        }
 
-    return controller
-      .resolveRequiredOperators(
-        requiredNodes,
-        catalog
-      );
+        return controller
+          .resolveRequiredOperators(
+            requiredNodes,
+            resolvedCatalog
+          );
+      }
+    );
   }
 
   function requiredApiNodeFailureLabel(
@@ -1941,6 +4170,20 @@
   }
 
   async function activateCachedCatalogFallback() {
+    const activeCatalog = statusCatalog();
+    const activeReport =
+      window.RMLApiNodeFactoryReport;
+
+    if (
+      activeCatalog &&
+      factoryMatchesCatalog(
+        activeCatalog,
+        activeReport
+      )
+    ) {
+      return activeCatalog;
+    }
+
     const cached =
       cachedCatalogRecord ||
       await readCachedLiveCatalog();
@@ -2078,6 +4321,200 @@
     });
   }
 
+  function ensureCatalogForExport(
+    options = {}
+  ) {
+    const requiredNodes =
+      normalizedRequiredApiNodes(options)
+        .filter(requirement =>
+          requirement.catalogScope ===
+            "api"
+        );
+
+    return queueCatalogActivationOperation(
+      async () => {
+        let catalog = statusCatalog();
+        let rebuilt = false;
+
+        if (!catalog) {
+          const cached =
+            cachedCatalogRecord ||
+            await readCachedLiveCatalog();
+          if (cached) {
+            const normalized =
+              normalizeCatalog(
+                cached.catalog,
+                "scanner-cache",
+                cached.sourceUrl || ""
+              );
+            await activateCatalogAndFactoryNow(
+              normalized
+            );
+            rebuilt = true;
+            catalog = statusCatalog();
+          }
+        }
+
+        if (!catalog) {
+          return Object.freeze({
+            required:
+              requiredNodes.length > 0,
+            verified: false,
+            available: false,
+            rebuilt,
+            unresolved:
+              requiredNodes.length,
+            unresolvedRequirements:
+              Object.freeze([
+                ...requiredNodes
+              ]),
+            failureLabels:
+              Object.freeze([
+                "No verified cached API catalog is available."
+              ]),
+            catalogFingerprint: "",
+            engineVersion: ""
+          });
+        }
+
+        const expectedFingerprint = String(
+          catalog.catalogFingerprint || ""
+        );
+        const expectedEngineVersion = String(
+          catalog.engineVersion || ""
+        );
+        let report =
+          window.RMLApiNodeFactoryReport;
+        let integrity =
+          factoryRegistryIntegrity(
+            catalog,
+            report,
+            requiredNodes
+          );
+        let missing =
+          factoryMatchesCatalog(
+            catalog,
+            report
+          )
+            ? missingRequiredApiNodes(
+                requiredNodes,
+                catalog,
+                report
+              )
+            : unresolvedRequiredApiNodes(
+                requiredNodes,
+                "the verified catalog factory publication is incomplete"
+              );
+
+        if (
+          integrity.valid !== true ||
+          missing.length > 0
+        ) {
+          await baseModNodesReady;
+          await ensureApiNodesModuleLoaded();
+          if (
+            statusCatalog() !== catalog ||
+            !catalogSnapshotsMatch(
+              statusCatalog(),
+              catalog
+            )
+          ) {
+            throw new Error(
+              "The active API catalog changed before export registry repair could start. Export was not prepared."
+            );
+          }
+          const controller =
+            window.RMLApiNodeFactoryController;
+          if (
+            !controller ||
+            typeof controller.rebuild !==
+              "function"
+          ) {
+            throw new Error(
+              "The API node factory cannot repair the registry required by this export."
+            );
+          }
+          await controller.rebuild(
+            catalog,
+            {
+              createCatalogPublication
+            }
+          );
+          rebuilt = true;
+        }
+
+        const activeCatalog = statusCatalog();
+        report =
+          window.RMLApiNodeFactoryReport;
+        if (
+          activeCatalog !== catalog ||
+          !catalogSnapshotsMatch(
+            activeCatalog,
+            catalog
+          ) ||
+          String(
+            activeCatalog
+              ?.catalogFingerprint || ""
+          ) !== expectedFingerprint ||
+          String(
+            activeCatalog
+              ?.engineVersion || ""
+          ) !== expectedEngineVersion
+        ) {
+          throw new Error(
+            "The active API catalog changed while the export registry was being verified. Export was not prepared."
+          );
+        }
+
+        integrity = factoryRegistryIntegrity(
+          activeCatalog,
+          report,
+          requiredNodes
+        );
+        const factoryReady =
+          factoryMatchesCatalog(
+            activeCatalog,
+            report
+          );
+        missing = factoryReady
+          ? missingRequiredApiNodes(
+              requiredNodes,
+              activeCatalog,
+              report
+            )
+          : unresolvedRequiredApiNodes(
+              requiredNodes,
+              "the verified catalog factory publication is incomplete"
+            );
+        const verified = Boolean(
+          factoryReady &&
+          integrity.valid === true &&
+          missing.length === 0
+        );
+
+        return Object.freeze({
+          required:
+            requiredNodes.length > 0,
+          verified,
+          available: verified,
+          rebuilt,
+          unresolved: missing.length,
+          unresolvedRequirements:
+            Object.freeze(missing),
+          failureLabels: Object.freeze(
+            missing.map(
+              requiredApiNodeFailureLabel
+            )
+          ),
+          catalogFingerprint:
+            expectedFingerprint,
+          engineVersion:
+            expectedEngineVersion
+        });
+      }
+    );
+  }
+
   async function ensureCatalogForImport(
     options = {}
   ) {
@@ -2168,7 +4605,7 @@
         title:
           "Checking required catalog contracts…",
         message:
-          `Checking ${requiredNodes.length} unique catalog operator contract${requiredNodes.length === 1 ? "" : "s"}; repeated node instances share this result.`,
+          `Checking ${requiredNodes.length} catalog contract famil${requiredNodes.length === 1 ? "y" : "ies"}; only instances with the same portable contract and parameters share a result.`,
         detail:
           "The API factory is ready. This phase checks only project-referenced operator IDs and ports.",
         progress: 51.5
@@ -2212,6 +4649,8 @@
           catalog
         )
       );
+      catalog = statusCatalog() ||
+        catalog;
       report =
         window.RMLApiNodeFactoryReport;
       missing =
@@ -2237,37 +4676,36 @@
         report
       )
     ) {
-      const controller =
-        window.RMLApiNodeFactoryController;
-
-      if (
-        controller &&
-        typeof controller.rebuild ===
-          "function"
-      ) {
-        await controller.rebuild(catalog);
-        collectMigrations(
-          await reconcileLegacyRequiredApiNodes(
-            scannerResolvableNodes,
-            catalog
-          )
-        );
-        report =
-          window.RMLApiNodeFactoryReport;
-        missing =
-          factoryMatchesCatalog(
-            catalog,
-            report
-          )
-            ? missingRequiredApiNodes(
-                requiredNodes,
-                catalog,
-                report
-              )
-            : unresolvedRequiredApiNodes(
-                requiredNodes
-              );
-      }
+      catalog = statusCatalog() ||
+        catalog;
+      await activateCatalogAndFactory(
+        catalog
+      );
+      catalog = statusCatalog() ||
+        catalog;
+      collectMigrations(
+        await reconcileLegacyRequiredApiNodes(
+          scannerResolvableNodes,
+          catalog
+        )
+      );
+      catalog = statusCatalog() ||
+        catalog;
+      report =
+        window.RMLApiNodeFactoryReport;
+      missing =
+        factoryMatchesCatalog(
+          catalog,
+          report
+        )
+          ? missingRequiredApiNodes(
+              requiredNodes,
+              catalog,
+              report
+            )
+          : unresolvedRequiredApiNodes(
+              requiredNodes
+            );
     }
 
     if (missing.length === 0) {
@@ -2322,10 +4760,11 @@
       });
     }
 
-    const missingByOperator =
+    const missingByRequirement =
       new Map(
         missing.map(failure => [
           String(
+            failure?.requirementKey ||
             failure?.operatorId || ""
           ),
           failure
@@ -2334,13 +4773,20 @@
     const unresolvedRequirements =
       requiredNodes
         .filter(requirement =>
-          missingByOperator.has(
+          missingByRequirement.has(
             String(
+              requirement
+                ?.requirementKey ||
               requirement?.operatorId || ""
             )
           )
         )
         .map(requirement => ({
+          requirementKey:
+            String(
+              requirement
+                .requirementKey || ""
+            ),
           operatorId:
             String(
               requirement.operatorId || ""
@@ -2385,6 +4831,28 @@
                 ? requirement.nodeLabels
                 : [])
             ]),
+          nodeReferences:
+            Object.freeze(
+              (Array.isArray(
+                requirement
+                  .nodeReferences
+              )
+                ? requirement
+                    .nodeReferences
+                : [])
+                .map(reference =>
+                  Object.freeze({
+                    nodeId: String(
+                      reference?.nodeId ||
+                      ""
+                    ),
+                    path: String(
+                      reference?.path ||
+                      "runtime-root"
+                    )
+                  })
+                )
+            ),
           inputPorts:
             Object.freeze([
               ...requirement.inputPorts
@@ -2395,8 +4863,10 @@
             ]),
           failure:
             Object.freeze({
-              ...missingByOperator.get(
+              ...missingByRequirement.get(
                 String(
+                  requirement
+                    .requirementKey ||
                   requirement.operatorId || ""
                 )
               )
@@ -2477,8 +4947,6 @@
 
   function synchronizeConnectedSession(connection = currentScannerConnection()) {
     if (connection.mode === "live") {
-      // Only the badge can open a session. Catalog initialization may reuse that
-      // session, but never opens or retries a transport connection itself.
       void synchronizeScannerStatus({ manualSession: connection });
     } else {
       demoteLiveFactoryReport();
@@ -2511,6 +4979,7 @@
           "visual-csharp-nodes",
           "visual_csharp.js"
         );
+        await ensureApiNodesModuleLoaded();
 
         return true;
       });
@@ -2519,13 +4988,16 @@
     Promise.all([
       catalogReady,
       baseModNodesReady
-    ])
+      ])
       .then(async ([catalog]) => {
+        await ensureApiNodesModuleLoaded();
         if (catalog) {
-          await ensureApiNodesLoaded();
+          await activateCatalogAndFactory(
+            catalog
+          );
         } else {
           console.info(
-            "RML API catalog nodes are disabled until a live or cached catalog is available."
+            "RML API catalog nodes are unavailable until a live or cached catalog is available. Stored API contracts remain editable in offline-preservation mode."
           );
         }
 
@@ -2604,12 +5076,20 @@
     {
       value: Object.freeze({
         version: 12,
+        moduleId:
+          CATALOG_LOADER_MODULE_ID,
+        loaderVersion:
+          LOADER_VERSION,
+        requiredApiFactoryVersion:
+          REQUIRED_API_FACTORY_VERSION,
         ensureForImport:
           ensureCatalogForImport,
         ensureLive:
           ensureCatalogForImport,
         ensureForReplacement:
-          ensureCatalogForReplacement
+          ensureCatalogForReplacement,
+        ensureForExport:
+          ensureCatalogForExport
       }),
       writable: false,
       enumerable: true,

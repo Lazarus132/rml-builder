@@ -1,8 +1,11 @@
 (() => {
   "use strict";
 
-  const FACTORY_VERSION = 31;
+  const API_FACTORY_MODULE_ID =
+    "1.20.31-universal-presentation-dev23";
+  const FACTORY_VERSION = 38;
   const API_VERIFICATION_SCHEMA_VERSION = 3;
+  const CATALOG_PROJECTION_INDEX_VERSION = 1;
   const ADVANCED_GROUP = "Advanced / Raw C#";
   const UNAVAILABLE_GROUP = "Unavailable API";
   const API_GROUPS = Object.freeze({
@@ -16,10 +19,22 @@
 
   let prerequisiteWaitInstalled = false;
   let factoryBuildPromise = null;
+  let factoryOperationPromise =
+    Promise.resolve();
+  let factoryOperationEpoch = 0;
+  let activeFactoryOperationLease = null;
+  let compatibleLegacyAliasRevision = 0;
+  const portableAdmissionRecords =
+    new WeakMap();
   let legacyOperatorResolver = null;
   let activeReloadSafetyContractCompatible = false;
   let factoryReadySettled = false;
+  let factoryRegistryIntegrityCache = null;
   let resolveFactoryReady;
+  const catalogProjectionIndexByReport =
+    new WeakMap();
+  const catalogProjectionCustomStateByIndex =
+    new WeakMap();
 
   const factoryReady =
     new Promise(resolve => {
@@ -46,6 +61,108 @@
     return report || null;
   }
 
+  function queueFactoryOperation(
+    operation,
+    kind = "factory-operation"
+  ) {
+    const run = async () => {
+      const lease = Object.freeze({
+        epoch:
+          factoryOperationEpoch + 1,
+        kind: String(kind ||
+          "factory-operation"),
+        token: Object.freeze({})
+      });
+      factoryOperationEpoch =
+        lease.epoch;
+      activeFactoryOperationLease =
+        lease;
+      try {
+        return await operation(lease);
+      } finally {
+        if (
+          activeFactoryOperationLease ===
+            lease
+        ) {
+          activeFactoryOperationLease =
+            null;
+        }
+      }
+    };
+    const queued =
+      factoryOperationPromise.then(
+        run,
+        run
+      );
+    factoryOperationPromise =
+      queued.catch(() => null);
+    return queued;
+  }
+
+  function assertFactoryOperationLease(
+    lease,
+    action
+  ) {
+    if (
+      !lease ||
+      activeFactoryOperationLease !== lease
+    ) {
+      throw new Error(
+        `The API node factory lease expired before ${String(action || "the registry operation")}.`
+      );
+    }
+  }
+
+  function acquireFactoryOperationLease(
+    kind,
+    createValue
+  ) {
+    let resolveAcquired;
+    let rejectAcquired;
+    let acquiredSettled = false;
+    const acquired = new Promise(
+      (resolve, reject) => {
+        resolveAcquired = resolve;
+        rejectAcquired = reject;
+      }
+    );
+
+    const queued = queueFactoryOperation(
+      async lease => {
+        let releaseLease;
+        let released = false;
+        const releasedPromise =
+          new Promise(resolve => {
+            releaseLease = () => {
+              if (released) return false;
+              released = true;
+              resolve();
+              return true;
+            };
+          });
+        try {
+          const value = createValue(
+            lease,
+            releaseLease
+          );
+          acquiredSettled = true;
+          resolveAcquired(value);
+          await releasedPromise;
+        } catch (error) {
+          if (!acquiredSettled) {
+            acquiredSettled = true;
+            rejectAcquired(error);
+          }
+          releaseLease?.();
+          throw error;
+        }
+      },
+      kind
+    );
+    queued.catch(() => null);
+    return acquired;
+  }
+
   function apiCatalogIdentity(catalog) {
     return [
       String(
@@ -58,6 +175,474 @@
         ""
       )
     ].join("|");
+  }
+
+  function catalogProjectionTypeName(value) {
+    return String(value || "")
+      .trim()
+      .replace(/^global::/, "")
+      .replace(/\s+/g, " ");
+  }
+
+  function catalogProjectionGenericShape(value) {
+    const text =
+      catalogProjectionTypeName(value);
+    const open = text.indexOf("<");
+    if (open < 0) return "";
+    let depth = 0;
+    let close = -1;
+    let argumentsCount = 1;
+    for (
+      let index = open;
+      index < text.length;
+      index += 1
+    ) {
+      const character = text[index];
+      if (character === "<") {
+        depth += 1;
+      } else if (character === ">") {
+        depth -= 1;
+        if (depth === 0) {
+          close = index;
+          break;
+        }
+      } else if (
+        character === "," &&
+        depth === 1
+      ) {
+        argumentsCount += 1;
+      }
+    }
+    if (close < 0) return "";
+    return [
+      text.slice(0, open)
+        .replace(/\s+/g, ""),
+      text.slice(close + 1)
+        .replace(/\s+/g, ""),
+      argumentsCount
+    ].join("|");
+  }
+
+  function rememberCatalogProjectionRow(
+    map,
+    name,
+    row,
+    index
+  ) {
+    if (!name) return;
+    const current = map.get(name);
+    if (current) {
+      if (!current.occurrences) {
+        current.occurrences = [
+          Object.freeze({
+            row: current.row,
+            index: current.index
+          })
+        ];
+      }
+      current.row = row;
+      current.index = index;
+      current.occurrences.push(
+        Object.freeze({ row, index })
+      );
+      return;
+    }
+    map.set(name, {
+      row,
+      index,
+      occurrences: null
+    });
+  }
+
+  function catalogProjectionLookup(map) {
+    return Object.freeze({
+      has(key) {
+        return map.has(key);
+      },
+      get(key) {
+        return map.get(key);
+      }
+    });
+  }
+
+  function customCSharpCatalogShortType(value) {
+    let type = String(value || "")
+      .replace(/global::/g, "")
+      .trim();
+    while (type.endsWith("?")) {
+      type = type.slice(0, -1).trim();
+    }
+    return type
+      .replace(/<.*>$/, "")
+      .split(".")
+      .at(-1);
+  }
+
+  function createCatalogProjectionCustomState(
+    source = null
+  ) {
+    return {
+      byIdentifier:
+        new Map(
+          source
+            ? [...source.byIdentifier]
+                .map(([identifier, candidates]) => [
+                  identifier,
+                  [...candidates]
+                ])
+            : []
+        ),
+      indexer:
+        source ? [...source.indexer] : [],
+      catalogTypeNames:
+        new Set(
+          source
+            ? source.catalogTypeNames
+            : []
+        ),
+      nextOrder:
+        source
+          ? Math.max(
+              0,
+              Number(source.nextOrder) || 0
+            )
+          : 0
+    };
+  }
+
+  function appendCatalogProjectionCustomDefinition(
+    state,
+    operatorId,
+    definition
+  ) {
+    const contract =
+      definition?.apiVerification;
+    if (
+      definition?.catalogGenerated !== true ||
+      definition?.customCSharpCatalogNode !== true ||
+      contract?.catalogSource !== "scanner" ||
+      !String(
+        contract?.catalogFingerprint || ""
+      ).trim()
+    ) {
+      return false;
+    }
+
+    for (const type of [
+      definition.catalogType,
+      definition.apiReturnType,
+      ...(Array.isArray(
+        definition.apiParameters
+      )
+        ? definition.apiParameters
+            .flatMap(parameter => [
+              parameter?.type,
+              parameter?.elementType
+            ])
+        : [])
+    ]) {
+      const value = String(type || "").trim();
+      if (value) {
+        state.catalogTypeNames.add(value);
+      }
+    }
+
+    const kind = String(
+      definition.apiMemberKind || ""
+    );
+    if (![
+      "method",
+      "constructor",
+      "property-get",
+      "property-set",
+      "field-get",
+      "field-set",
+      "type"
+    ].includes(kind)) {
+      return true;
+    }
+
+    const memberName = String(
+      definition.catalogMember || ""
+    ).replace(/^@/, "");
+    const identifiers = new Set();
+    if (
+      kind === "type" ||
+      kind === "constructor"
+    ) {
+      const ownerName =
+        customCSharpCatalogShortType(
+          definition.catalogType
+        );
+      if (ownerName) {
+        identifiers.add(ownerName);
+      }
+    }
+    if (memberName) {
+      identifiers.add(memberName);
+    }
+
+    const requirement = Object.freeze({
+      operatorId,
+      apiContract:
+        definition.apiVerification,
+      availability: "verified",
+      inputPorts:
+        Object.freeze(
+          (Array.isArray(definition.inputs)
+            ? definition.inputs
+            : [])
+            .map(port =>
+              String(port?.id || "")
+            )
+            .filter(Boolean)
+        ),
+      outputPorts:
+        Object.freeze(
+          (Array.isArray(definition.outputs)
+            ? definition.outputs
+            : [])
+            .map(port =>
+              String(port?.id || "")
+            )
+            .filter(Boolean)
+        )
+    });
+    const candidate = Object.freeze({
+      order: state.nextOrder,
+      operatorId,
+      requirement
+    });
+    state.nextOrder += 1;
+
+    for (const identifier of identifiers) {
+      const candidates =
+        state.byIdentifier.get(identifier) || [];
+      candidates.push(candidate);
+      state.byIdentifier.set(
+        identifier,
+        candidates
+      );
+    }
+    if (memberName === "Item") {
+      state.indexer.push(candidate);
+    }
+    return true;
+  }
+
+  function catalogProjectionCustomLookup(state) {
+    const byIdentifier = new Map(
+      [...state.byIdentifier]
+        .map(([identifier, candidates]) => [
+          identifier,
+          Object.freeze([...candidates])
+        ])
+    );
+    const indexer = Object.freeze([
+      ...state.indexer
+    ]);
+
+    return Object.freeze({
+      has(identifier) {
+        return byIdentifier.has(identifier);
+      },
+      get(identifier) {
+        return byIdentifier.get(identifier);
+      },
+      indexer,
+      select(identifiers, hasIndexer = false) {
+        const selected = new Map();
+        for (const identifier of identifiers || []) {
+          for (const candidate of
+            byIdentifier.get(identifier) || []) {
+            selected.set(
+              candidate.operatorId,
+              candidate
+            );
+          }
+        }
+        if (hasIndexer) {
+          for (const candidate of indexer) {
+            selected.set(
+              candidate.operatorId,
+              candidate
+            );
+          }
+        }
+        return Object.freeze(
+          [...selected.values()]
+            .sort((left, right) =>
+              left.order - right.order
+            )
+            .map(candidate =>
+              candidate.requirement
+            )
+        );
+      }
+    });
+  }
+
+  function completeCatalogProjectionIndex(
+    baseIndex,
+    state,
+    definitionRevision
+  ) {
+    const index = Object.freeze({
+      ...baseIndex,
+      definitionRevision:
+        Math.max(
+          0,
+          Number(definitionRevision) || 0
+        ),
+      customCSharpByIdentifier:
+        catalogProjectionCustomLookup(state),
+      catalogTypeNames:
+        Object.freeze([
+          ...state.catalogTypeNames
+        ])
+    });
+    catalogProjectionCustomStateByIndex.set(
+      index,
+      state
+    );
+    return index;
+  }
+
+  function refreshPublishedCatalogProjectionIndex(
+    definitionEntries = []
+  ) {
+    const current =
+      window.RMLApiCatalogProjectionIndex;
+    const state =
+      catalogProjectionCustomStateByIndex.get(
+        current
+      );
+    const catalog =
+      window.RMLResoniteApiCatalog ||
+      window.RMLFrooxComponentCatalog ||
+      null;
+    const report =
+      window.RMLApiNodeFactoryReport || null;
+    if (
+      !current ||
+      !state ||
+      current.catalog !== catalog ||
+      current.report !== report ||
+      String(current.catalogFingerprint || "") !==
+        String(
+          report?.catalogFingerprint || ""
+        ) ||
+      Number(current.revision) !==
+        Number(
+          report?.catalogProjectionRevision
+        )
+    ) {
+      return false;
+    }
+
+    const nextState =
+      createCatalogProjectionCustomState(state);
+    for (const [operatorId, definition] of
+      definitionEntries) {
+      appendCatalogProjectionCustomDefinition(
+        nextState,
+        operatorId,
+        definition
+      );
+    }
+    const next = completeCatalogProjectionIndex(
+      current,
+      nextState,
+      Number(
+        window.__RMLNodeDefinitionRevision
+      ) || 0
+    );
+    publishCatalogProjectionIndex(next);
+    catalogProjectionIndexByReport.set(
+      report,
+      next
+    );
+    return true;
+  }
+
+  function replacePublishedFactoryReport(
+    expectedReport,
+    nextReport
+  ) {
+    if (
+      !expectedReport ||
+      !nextReport ||
+      typeof expectedReport !== "object" ||
+      typeof nextReport !== "object" ||
+      window.RMLApiNodeFactoryReport !==
+        expectedReport
+    ) {
+      return false;
+    }
+    if (expectedReport === nextReport) {
+      return true;
+    }
+
+    const current =
+      window.RMLApiCatalogProjectionIndex;
+    const state =
+      catalogProjectionCustomStateByIndex.get(
+        current
+      );
+    const catalog =
+      window.RMLResoniteApiCatalog ||
+      window.RMLFrooxComponentCatalog ||
+      null;
+    if (
+      !current ||
+      !state ||
+      current.catalog !== catalog ||
+      current.report !== expectedReport ||
+      nextReport.verificationPassed !== true ||
+      String(
+        nextReport.catalogFingerprint || ""
+      ) !==
+        String(
+          current.catalogFingerprint || ""
+        ) ||
+      String(nextReport.engineVersion || "") !==
+        String(current.engineVersion || "") ||
+      Number(
+        nextReport.catalogProjectionRevision
+      ) !== Number(current.revision)
+    ) {
+      return false;
+    }
+
+    const nextIndex = Object.freeze({
+      ...current,
+      report: nextReport
+    });
+    catalogProjectionCustomStateByIndex.set(
+      nextIndex,
+      state
+    );
+    window.RMLApiNodeFactoryReport =
+      nextReport;
+    publishCatalogProjectionIndex(nextIndex);
+    catalogProjectionIndexByReport.set(
+      nextReport,
+      nextIndex
+    );
+    return true;
+  }
+
+  function publishCatalogProjectionIndex(index) {
+    Object.defineProperty(
+      window,
+      "RMLApiCatalogProjectionIndex",
+      {
+        value: index,
+        writable: false,
+        enumerable: false,
+        configurable: true
+      }
+    );
   }
 
   function portablePortRole(kind, direction, port, parameters = []) {
@@ -321,6 +906,837 @@
     });
   }
 
+  function exactPortableContractKey(
+    contract
+  ) {
+    const semantic =
+      exactApiSemanticContractKey(
+        contract
+      );
+    if (!semantic) return "";
+    const normalizePorts = (
+      direction,
+      key
+    ) => (
+      Array.isArray(contract?.[key])
+        ? contract[key]
+        : []
+    ).map(port => ({
+      id: String(port?.id || "").trim(),
+      type: String(
+        port?.type || ""
+      ).trim(),
+      typeVar: String(
+        port?.typeVar || ""
+      ).trim(),
+      generic:
+        port?.generic === true,
+      optional:
+        port?.optional === true,
+      role: portablePortRole(
+        contract?.kind,
+        direction,
+        port,
+        contract?.parameters
+      )
+    }));
+
+    return JSON.stringify({
+      semantic,
+      signature: String(
+        contract?.signature || ""
+      ).trim(),
+      runtimeBound:
+        contract?.runtimeBound === true,
+      inputPorts: normalizePorts(
+        "input",
+        "inputPorts"
+      ),
+      outputPorts: normalizePorts(
+        "output",
+        "outputPorts"
+      )
+    });
+  }
+
+  function normalizedPortableCsType(
+    value
+  ) {
+    return String(value || "")
+      .trim()
+      .replace(/^global::/, "")
+      .replace(/\s+/g, " ")
+      .replace(/\?$/, "");
+  }
+
+  function portableGenericTypeParts(
+    value
+  ) {
+    const text =
+      normalizedPortableCsType(value);
+    const start = text.indexOf("<");
+    if (start <= 0) return null;
+    let depth = 0;
+    let end = -1;
+    for (
+      let index = start;
+      index < text.length;
+      index += 1
+    ) {
+      if (text[index] === "<") {
+        depth += 1;
+      } else if (text[index] === ">") {
+        depth -= 1;
+        if (depth === 0) {
+          end = index;
+          break;
+        }
+      }
+    }
+    if (end < 0) return null;
+    const argumentsList = [];
+    let argumentStart = start + 1;
+    depth = 0;
+    for (
+      let index = argumentStart;
+      index < end;
+      index += 1
+    ) {
+      if (text[index] === "<") {
+        depth += 1;
+      } else if (text[index] === ">") {
+        depth -= 1;
+      } else if (
+        text[index] === "," &&
+        depth === 0
+      ) {
+        argumentsList.push(
+          normalizedPortableCsType(
+            text.slice(
+              argumentStart,
+              index
+            )
+          )
+        );
+        argumentStart = index + 1;
+      }
+    }
+    argumentsList.push(
+      normalizedPortableCsType(
+        text.slice(argumentStart, end)
+      )
+    );
+    return {
+      head: normalizedPortableCsType(
+        text.slice(0, start)
+      ),
+      arguments: argumentsList,
+      suffix: text.slice(end + 1)
+    };
+  }
+
+  function portableEnumerableElementCsType(
+    value
+  ) {
+    const text =
+      normalizedPortableCsType(value);
+    if (
+      !text ||
+      text === "string" ||
+      text === "System.String"
+    ) {
+      return "";
+    }
+    const array = text.match(
+      /^(.*)\[(?:,*)\]$/
+    );
+    if (array) {
+      return normalizedPortableCsType(
+        array[1]
+      );
+    }
+    if (
+      text ===
+        "System.Collections.IEnumerable"
+    ) {
+      return "System.Object";
+    }
+    const parsed =
+      portableGenericTypeParts(text);
+    if (!parsed) return "";
+    const head = parsed.head
+      .replace(/\s+/g, "");
+    const suffix = parsed.suffix
+      .replace(/\s+/g, "");
+    const oneElementCollections =
+      new Set([
+        "System.Collections.Generic.IEnumerable",
+        "System.Collections.Generic.ICollection",
+        "System.Collections.Generic.IList",
+        "System.Collections.Generic.IReadOnlyCollection",
+        "System.Collections.Generic.IReadOnlyList",
+        "System.Collections.Generic.ISet",
+        "System.Collections.Generic.List",
+        "System.Collections.Generic.HashSet",
+        "System.Collections.Generic.Queue",
+        "System.Collections.Generic.Stack",
+        "System.Collections.Generic.LinkedList",
+        "System.Collections.ObjectModel.Collection",
+        "System.Collections.ObjectModel.ReadOnlyCollection",
+        "System.Collections.ObjectModel.ObservableCollection",
+        "System.Collections.Concurrent.ConcurrentBag",
+        "System.Collections.Concurrent.ConcurrentQueue",
+        "System.Collections.Concurrent.ConcurrentStack",
+        "System.Collections.Immutable.ImmutableArray",
+        "System.Collections.Immutable.ImmutableList",
+        "System.Collections.Immutable.ImmutableHashSet"
+      ]);
+    if (
+      !suffix &&
+      parsed.arguments.length === 1 &&
+      oneElementCollections.has(head)
+    ) {
+      return parsed.arguments[0];
+    }
+    if (
+      head === "System.Linq.IGrouping" &&
+      parsed.arguments.length === 2
+    ) {
+      return parsed.arguments[1];
+    }
+    const dictionaryHeads = new Set([
+      "System.Collections.Generic.Dictionary",
+      "System.Collections.Generic.IDictionary",
+      "System.Collections.Generic.IReadOnlyDictionary",
+      "System.Collections.Concurrent.ConcurrentDictionary",
+      "System.Collections.Immutable.ImmutableDictionary"
+    ]);
+    if (
+      dictionaryHeads.has(head) &&
+      parsed.arguments.length === 2
+    ) {
+      if (suffix.endsWith(".ValueCollection")) {
+        return parsed.arguments[1];
+      }
+      if (suffix.endsWith(".KeyCollection")) {
+        return parsed.arguments[0];
+      }
+      if (!suffix) {
+        return (
+          "System.Collections.Generic.KeyValuePair<" +
+          `${parsed.arguments[0]}, ${parsed.arguments[1]}>`
+        );
+      }
+    }
+    return "";
+  }
+
+  function portableContractPortCsType(
+    contract,
+    direction,
+    port
+  ) {
+    const role = portablePortRole(
+      contract?.kind,
+      direction,
+      port,
+      contract?.parameters
+    );
+    if (role === "input:target") {
+      return normalizedPortableCsType(
+        contract?.ownerType
+      );
+    }
+    if (
+      direction === "output" &&
+      (
+        role === "output:value" ||
+        role === "output:result"
+      )
+    ) {
+      if (contract?.kind === "type") {
+        return "System.Type";
+      }
+      if (contract?.kind === "constructor") {
+        return normalizedPortableCsType(
+          contract?.ownerType
+        );
+      }
+      return normalizedPortableCsType(
+        contract?.returnType
+      );
+    }
+    const match =
+      /^parameter:(\d+):/.exec(role);
+    if (match) {
+      const position = Number(match[1]);
+      const parameter = (
+        Array.isArray(contract?.parameters)
+          ? contract.parameters
+          : []
+      ).find((value, index) =>
+        Math.max(
+          0,
+          Number(value?.position) || index
+        ) === position
+      );
+      return normalizedPortableCsType(
+        parameter?.elementType ||
+        parameter?.type
+      );
+    }
+    return "";
+  }
+
+  function placeholderMatchesGeneratedContract(
+    placeholder,
+    generatedDefinition
+  ) {
+    if (
+      placeholder
+        ?.unavailableApiContract !== true ||
+      generatedDefinition
+        ?.catalogGenerated !== true
+    ) {
+      return false;
+    }
+    const preservedKey =
+      exactPortableContractKey(
+        placeholder
+          .preservedApiContract
+      );
+    const generatedKey =
+      exactPortableContractKey(
+        generatedDefinition
+          .apiVerification
+      );
+    return Boolean(
+      preservedKey &&
+      generatedKey &&
+      preservedKey === generatedKey
+    );
+  }
+
+  function factoryRegistryIntegrity(
+    catalog,
+    report,
+    requiredNodes = []
+  ) {
+    const registry =
+      window.RMLModNodeRegistry;
+    const definitions =
+      registry?.getNodeDefinitions?.();
+    const catalogFingerprint = String(
+      catalog?.catalogFingerprint || ""
+    );
+    const engineVersion = String(
+      catalog?.engineVersion || ""
+    );
+    const definitionRevision = Number(
+      window.__RMLNodeDefinitionRevision
+    ) || 0;
+    const metadataValid = Boolean(
+      registry &&
+      definitions &&
+      typeof definitions === "object" &&
+      !Array.isArray(definitions) &&
+      catalogFingerprint &&
+      report &&
+      report.verificationPassed === true &&
+      report.moduleId ===
+        API_FACTORY_MODULE_ID &&
+      Number(report.factoryVersion) ===
+        FACTORY_VERSION &&
+      Number(
+        report.verificationSchemaVersion
+      ) ===
+        API_VERIFICATION_SCHEMA_VERSION &&
+      String(
+        report.catalogFingerprint || ""
+      ) === catalogFingerprint &&
+      String(report.engineVersion || "") ===
+        engineVersion &&
+      Number(report.totalGeneratedNodes) > 0
+    );
+    const cacheMatches = Boolean(
+      factoryRegistryIntegrityCache &&
+      factoryRegistryIntegrityCache.registry ===
+        registry &&
+      factoryRegistryIntegrityCache.definitions ===
+        definitions &&
+      factoryRegistryIntegrityCache.report ===
+        report &&
+      factoryRegistryIntegrityCache.catalog ===
+        catalog &&
+      factoryRegistryIntegrityCache.catalogIdentity ===
+        apiCatalogIdentity(catalog) &&
+      factoryRegistryIntegrityCache.definitionRevision ===
+        definitionRevision
+    );
+
+    let publicationValid = false;
+    let generatedDefinitions = 0;
+    if (cacheMatches) {
+      publicationValid =
+        factoryRegistryIntegrityCache
+          .publicationValid;
+      generatedDefinitions =
+        factoryRegistryIntegrityCache
+          .generatedDefinitions;
+    } else {
+      publicationValid = metadataValid;
+      if (metadataValid) {
+        for (const id in definitions) {
+          if (!Object.prototype.hasOwnProperty.call(
+            definitions,
+            id
+          )) {
+            continue;
+          }
+          const definition = definitions[id];
+          if (
+            definition?.catalogGenerated !==
+              true ||
+            definition?.legacyCatalogAlias ===
+              true
+          ) {
+            continue;
+          }
+          generatedDefinitions += 1;
+          const contract =
+            definition.apiVerification;
+          if (
+            definition.unavailableApiContract ===
+              true ||
+            !contract ||
+            typeof contract !== "object" ||
+            Number(contract.schemaVersion) !==
+              API_VERIFICATION_SCHEMA_VERSION ||
+            String(contract.nodeId || "") !==
+              id ||
+            String(
+              contract.catalogFingerprint || ""
+            ) !== catalogFingerprint ||
+            String(
+              contract.engineVersion || ""
+            ) !== engineVersion ||
+            !String(
+              contract.contractFingerprint || ""
+            ).trim()
+          ) {
+            publicationValid = false;
+          }
+        }
+        if (
+          generatedDefinitions !==
+            Number(
+              report.totalGeneratedNodes
+            )
+        ) {
+          publicationValid = false;
+        }
+      }
+      factoryRegistryIntegrityCache = {
+        registry,
+        definitions,
+        report,
+        catalog,
+        catalogIdentity:
+          apiCatalogIdentity(catalog),
+        definitionRevision,
+        publicationValid,
+        generatedDefinitions
+      };
+    }
+
+    const missingRequired = [];
+    for (const requirement of
+      Array.isArray(requiredNodes)
+        ? requiredNodes
+        : []) {
+      const operatorId = String(
+        typeof requirement === "string"
+          ? requirement
+          : requirement?.operatorId || ""
+      ).trim();
+      if (!operatorId) continue;
+      const definition =
+        definitions?.[operatorId];
+      const contract =
+        definition?.apiVerification;
+      const inputIds = new Set(
+        (Array.isArray(definition?.inputs)
+          ? definition.inputs
+          : []).map(port =>
+          String(port?.id || "")
+        )
+      );
+      const outputIds = new Set(
+        (Array.isArray(definition?.outputs)
+          ? definition.outputs
+          : []).map(port =>
+          String(port?.id || "")
+        )
+      );
+      const requiredInputs =
+        typeof requirement === "string"
+          ? []
+          : Array.isArray(
+                requirement?.inputPorts
+              )
+            ? requirement.inputPorts
+            : [];
+      const requiredOutputs =
+        typeof requirement === "string"
+          ? []
+          : Array.isArray(
+                requirement?.outputPorts
+              )
+            ? requirement.outputPorts
+            : [];
+      if (
+        definition?.catalogGenerated !==
+          true ||
+        definition.unavailableApiContract ===
+          true ||
+        !contract ||
+        typeof contract !== "object" ||
+        Number(contract.schemaVersion) !==
+          API_VERIFICATION_SCHEMA_VERSION ||
+        String(contract.nodeId || "") !==
+          operatorId ||
+        String(
+          contract.catalogFingerprint || ""
+        ) !== catalogFingerprint ||
+        String(contract.engineVersion || "") !==
+          engineVersion ||
+        !String(
+          contract.contractFingerprint || ""
+        ).trim() ||
+        !requiredInputs.every(id =>
+          inputIds.has(String(id || ""))
+        ) ||
+        !requiredOutputs.every(id =>
+          outputIds.has(String(id || ""))
+        )
+      ) {
+        missingRequired.push(operatorId);
+      }
+    }
+
+    return Object.freeze({
+      valid:
+        publicationValid &&
+        missingRequired.length === 0,
+      publicationValid,
+      generatedDefinitions,
+      expectedGeneratedDefinitions:
+        Math.max(
+          0,
+          Number(
+            report?.totalGeneratedNodes
+          ) || 0
+        ),
+      missingRequired: Object.freeze([
+        ...new Set(missingRequired)
+      ])
+    });
+  }
+
+  function objectIdentityEntries(
+    value
+  ) {
+    return new Map(
+      Object.entries(value || {})
+    );
+  }
+
+  function identityEntriesMatch(
+    value,
+    snapshot
+  ) {
+    const entries =
+      Object.entries(value || {});
+    if (
+      !(snapshot instanceof Map) ||
+      entries.length !== snapshot.size
+    ) {
+      return false;
+    }
+    return entries.every(
+      ([key, entry]) =>
+        snapshot.has(key) &&
+        snapshot.get(key) === entry
+    );
+  }
+
+  function captureFactoryEnvironment(
+    registry
+  ) {
+    const definitions =
+      registry?.getNodeDefinitions?.();
+    const typeDefinitions =
+      registry?.getTypeDefinitions?.();
+    const valueTypes =
+      registry?.getValueTypes?.();
+    if (
+      !definitions ||
+      !typeDefinitions ||
+      !Array.isArray(valueTypes)
+    ) {
+      throw new Error(
+        "The graph registry cannot provide a complete atomic factory snapshot."
+      );
+    }
+    return {
+      registry,
+      definitions,
+      typeDefinitions,
+      valueTypes,
+      definitionEntries:
+        objectIdentityEntries(
+          definitions
+        ),
+      typeEntries:
+        objectIdentityEntries(
+          typeDefinitions
+        ),
+      valueTypeEntries:
+        [...valueTypes],
+      definitionRevision:
+        Number(
+          window
+            .__RMLNodeDefinitionRevision
+        ) || 0,
+      apiCatalog:
+        window
+          .RMLResoniteApiCatalog ||
+        null,
+      componentCatalog:
+        window
+          .RMLFrooxComponentCatalog ||
+        null,
+      factoryReport:
+        window
+          .RMLApiNodeFactoryReport ||
+        null,
+      factoryVersion:
+        Number(
+          window
+            .__RMLApiNodeFactoryVersion
+        ) || 0,
+      catalogProjectionIndex:
+        window
+          .RMLApiCatalogProjectionIndex ||
+        null,
+      catalogProjectionIndexDescriptor:
+        Object.getOwnPropertyDescriptor(
+          window,
+          "RMLApiCatalogProjectionIndex"
+        )
+    };
+  }
+
+  function assertFactoryEnvironmentUnchanged(
+    snapshot,
+    lease,
+    action,
+    {
+      allowSyntheticTypeAdditions = false
+    } = {}
+  ) {
+    const label = String(
+      action || "publishing API nodes"
+    );
+    assertFactoryOperationLease(
+      lease,
+      label
+    );
+    const registry =
+      window.RMLModNodeRegistry;
+    if (
+      registry !== snapshot.registry ||
+      registry
+        ?.getNodeDefinitions?.() !==
+          snapshot.definitions ||
+      registry
+        ?.getTypeDefinitions?.() !==
+          snapshot.typeDefinitions ||
+      registry
+        ?.getValueTypes?.() !==
+          snapshot.valueTypes
+    ) {
+      throw new Error(
+        `The graph registry instance changed before ${label}.`
+      );
+    }
+    const typeEntriesUnchanged =
+      identityEntriesMatch(
+        snapshot.typeDefinitions,
+        snapshot.typeEntries
+      ) ||
+      (
+        allowSyntheticTypeAdditions &&
+        Object.entries(
+          snapshot.typeDefinitions
+        ).every(([id, information]) =>
+          snapshot.typeEntries.has(id)
+            ? snapshot.typeEntries.get(id) ===
+                information
+            : information
+                ?.syntheticCollectionType ===
+                  true &&
+              information
+                ?.catalogGenerated !== true &&
+              information
+                ?.unavailableApiType !== true
+        ) &&
+        [...snapshot.typeEntries]
+          .every(([id, information]) =>
+            snapshot.typeDefinitions[id] ===
+              information
+          )
+      );
+    if (
+      !identityEntriesMatch(
+        snapshot.definitions,
+        snapshot.definitionEntries
+      ) ||
+      !typeEntriesUnchanged ||
+      snapshot.valueTypes.length !==
+        snapshot
+          .valueTypeEntries.length ||
+      snapshot.valueTypes.some(
+        (value, index) =>
+          value !==
+          snapshot
+            .valueTypeEntries[index]
+      ) ||
+      (Number(
+        window
+          .__RMLNodeDefinitionRevision
+      ) || 0) !==
+        snapshot.definitionRevision
+    ) {
+      throw new Error(
+        `The graph registry changed before ${label}.`
+      );
+    }
+    if (
+      (window
+        .RMLResoniteApiCatalog ||
+        null) !== snapshot.apiCatalog ||
+      (window
+        .RMLFrooxComponentCatalog ||
+        null) !==
+          snapshot.componentCatalog ||
+      (window
+        .RMLApiNodeFactoryReport ||
+        null) !==
+          snapshot.factoryReport ||
+      (Number(
+        window
+          .__RMLApiNodeFactoryVersion
+      ) || 0) !==
+        snapshot.factoryVersion ||
+      (window
+        .RMLApiCatalogProjectionIndex ||
+        null) !==
+          snapshot.catalogProjectionIndex
+    ) {
+      throw new Error(
+        `The active catalog or API factory changed before ${label}.`
+      );
+    }
+  }
+
+  function createUnavailableOperatorAdmissionToken(
+    planKey
+  ) {
+    const key = String(planKey || "");
+    if (!key) {
+      throw new Error(
+        "The portable API admission plan has no identity."
+      );
+    }
+    if (activeFactoryOperationLease) {
+      throw new Error(
+        "The API node factory is changing. Retry the portable project admission after it settles."
+      );
+    }
+    const environment =
+      captureFactoryEnvironment(
+        window.RMLModNodeRegistry
+      );
+    if (
+      environment.apiCatalog ||
+      environment.componentCatalog ||
+      environment.factoryReport
+        ?.verificationPassed === true
+    ) {
+      throw new Error(
+        "A catalog or verified API node factory became available before portable offline admission."
+      );
+    }
+    const token = Object.freeze({
+      epoch: factoryOperationEpoch,
+      planKey: key,
+      nonce: Object.freeze({})
+    });
+    portableAdmissionRecords.set(
+      token,
+      {
+        epoch: factoryOperationEpoch,
+        planKey: key,
+        environment
+      }
+    );
+    return token;
+  }
+
+  function consumeUnavailableOperatorAdmission(
+    token,
+    planKey,
+    lease
+  ) {
+    const record =
+      token &&
+      typeof token === "object"
+        ? portableAdmissionRecords.get(
+            token
+          )
+        : null;
+    portableAdmissionRecords.delete(
+      token
+    );
+    if (
+      !record ||
+      record.planKey !==
+        String(planKey || "") ||
+      record.epoch + 1 !==
+        lease.epoch
+    ) {
+      throw new Error(
+        "The portable API admission token is stale. Retry the project import."
+      );
+    }
+    assertFactoryEnvironmentUnchanged(
+      record.environment,
+      lease,
+      "admitting portable offline API contracts"
+    );
+    if (
+      window.RMLResoniteApiCatalog ||
+      window.RMLFrooxComponentCatalog ||
+      window.RMLApiNodeFactoryReport
+        ?.verificationPassed === true
+    ) {
+      throw new Error(
+        "A catalog or verified API node factory became available during portable offline admission. Retry the project import."
+      );
+    }
+  }
+
   function registerUnavailableApiOperator(operatorId, apiContract, required = {}) {
     const id = String(operatorId || "").trim();
     const registry = window.RMLModNodeRegistry;
@@ -348,7 +1764,18 @@
       ? required.outputPorts.map(String)
       : [];
     const existing = registry.getNodeDefinition?.(id);
-    if (existing?.unavailableApiContract === true) return id;
+    if (
+      existing?.unavailableApiContract ===
+        true
+    ) {
+      return exactPortableContractKey(
+        existing.preservedApiContract
+      ) === exactPortableContractKey(
+        contract
+      )
+        ? id
+        : "";
+    }
     if (existing && !hasApiContract) return id;
     if (existing?.catalogGenerated === true && existing.apiVerification) {
       const available = existing.apiVerification;
@@ -368,11 +1795,21 @@
       const existingOutputIds = new Set((existing.outputs || []).map(port => String(port?.id || "")));
       if (
         sameExactContract &&
+        exactPortableContractKey(
+          contract
+        ) ===
+          exactPortableContractKey(
+            available
+          ) &&
         referencedInputs.every(portId => existingInputIds.has(portId)) &&
         referencedOutputs.every(portId => existingOutputIds.has(portId))
       ) {
         return id;
       }
+    }
+
+    if (activeFactoryOperationLease) {
+      return "";
     }
 
     let registrationId = id;
@@ -426,6 +1863,7 @@
               referenceType: true,
               valueType: true,
               globalGenericCandidate: false,
+              unavailableApiType: true,
               assignableTo: ["object"],
               constraints: ["value", "reference"]
             });
@@ -481,14 +1919,795 @@
         return "";
       }
     });
+    if (registered !== false) {
+      window.__RMLNodeDefinitionRevision =
+        (Number(
+          window
+            .__RMLNodeDefinitionRevision
+        ) || 0) + 1;
+      refreshPublishedCatalogProjectionIndex();
+    }
     return registered === false
       ? ""
       : registrationId;
   }
 
-  async function rebuildFactoryForCatalog(
-    catalog
+  function stageUnavailableOperatorTransaction(
+    requestedEntries,
+    lease,
+    releaseLease,
+    admission
   ) {
+    assertFactoryOperationLease(
+      lease,
+      "staging portable API contracts"
+    );
+    consumeUnavailableOperatorAdmission(
+      admission?.token,
+      admission?.planKey,
+      lease
+    );
+    const registry =
+      window.RMLModNodeRegistry;
+    if (
+      !registry ||
+      typeof registry.getNodeDefinitions !==
+        "function" ||
+      typeof registry.getTypeDefinitions !==
+        "function" ||
+      typeof registry.registerType !==
+        "function" ||
+      typeof registry.port !== "function"
+    ) {
+      throw new Error(
+        "The graph registry cannot stage portable API contracts."
+      );
+    }
+
+    const stagedEnvironment =
+      captureFactoryEnvironment(
+        registry
+      );
+    const canonicalSyntheticCollectorVerifier =
+      window.RMLTypedNodeGraphGenerator
+        ?.isCanonicalSyntheticCollectorType;
+    if (
+      typeof canonicalSyntheticCollectorVerifier !==
+        "function"
+    ) {
+      throw new Error(
+        "The Runtime Graph cannot verify canonical synthetic collection contracts."
+      );
+    }
+
+    const definitions =
+      registry.getNodeDefinitions();
+    const typeDefinitions =
+      registry.getTypeDefinitions();
+    const entries = Array.isArray(
+      requestedEntries
+    )
+      ? requestedEntries
+      : [];
+    if (entries.length === 0) {
+      throw new Error(
+        "No portable API contracts were supplied for installation."
+      );
+    }
+
+    const stagedDefinitions = new Map();
+    const stagedTypes = new Map();
+    const previousDefinitions = new Map();
+    const ownedTypeBaselines = new Map();
+    const publishedTypes = new Map();
+
+    const normalizedContract = (
+      operatorId,
+      value,
+      required
+    ) => {
+      if (
+        !value ||
+        typeof value !== "object" ||
+        Array.isArray(value)
+      ) {
+        throw new Error(
+          `Portable API contract '${operatorId}' is missing.`
+        );
+      }
+      const contract =
+        structuredClone(value);
+      if (
+        !String(contract.ownerType || "").trim() ||
+        !String(contract.kind || "").trim()
+      ) {
+        throw new Error(
+          `Portable API contract '${operatorId}' has no complete owner/kind identity.`
+        );
+      }
+      contract.schemaVersion = 3;
+      contract.stableContractId =
+        stableContractId(contract);
+      for (const [direction, key] of [
+        ["input", "inputPorts"],
+        ["output", "outputPorts"]
+      ]) {
+        const rows = Array.isArray(
+          contract[key]
+        )
+          ? contract[key]
+          : [];
+        const ids = new Set();
+        contract[key] = rows.map(port => {
+          const id = String(
+            port?.id || ""
+          ).trim();
+          const type = String(
+            port?.type || ""
+          ).trim();
+          if (!id || !type) {
+            throw new Error(
+              `Portable API contract '${operatorId}' contains an incomplete ${direction} port.`
+            );
+          }
+          if (ids.has(id)) {
+            throw new Error(
+              `Portable API contract '${operatorId}' contains duplicate ${direction} port '${id}'.`
+            );
+          }
+          ids.add(id);
+          return {
+            ...port,
+            id,
+            type,
+            role: portablePortRole(
+              contract.kind,
+              direction,
+              port,
+              contract.parameters
+            )
+          };
+        });
+        const requiredIds =
+          Array.isArray(
+            required?.[
+              direction === "input"
+                ? "inputPorts"
+                : "outputPorts"
+            ]
+          )
+            ? required[
+                direction === "input"
+                  ? "inputPorts"
+                  : "outputPorts"
+              ]
+            : [];
+        for (const requiredIdValue of
+          requiredIds) {
+          const requiredId = String(
+            requiredIdValue || ""
+          ).trim();
+          if (!requiredId || !ids.has(requiredId)) {
+            throw new Error(
+              `Portable API contract '${operatorId}' does not declare required ${direction} port '${requiredId || "<missing>"}'.`
+            );
+          }
+        }
+      }
+      return contract;
+    };
+
+    const graphTypeForCsType = csType => {
+      const normalized =
+        normalizedPortableCsType(
+          csType
+        );
+      if (!normalized) return "";
+      for (const [id, information] of [
+        ...Object.entries(
+          typeDefinitions
+        ),
+        ...stagedTypes
+      ]) {
+        if (
+          normalizedPortableCsType(
+            information?.csType
+          ).replace(/\s+/g, "") ===
+            normalized.replace(/\s+/g, "")
+        ) {
+          return id;
+        }
+      }
+      const head = normalized
+        .slice(
+          0,
+          normalized.indexOf("<") >= 0
+            ? normalized.indexOf("<")
+            : normalized.length
+        );
+      const label =
+        head.split(".").pop() ||
+        "type";
+      const slug = label
+        .replace(
+          /([a-z0-9])([A-Z])/g,
+          "$1-$2"
+        )
+        .replace(/[^A-Za-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .toLowerCase()
+        .slice(0, 42) || "type";
+      return `api.${slug}.${stableHash(normalized)}`;
+    };
+
+    const stageType = (
+      type,
+      csType = ""
+    ) => {
+      const normalizedCsType =
+        normalizedPortableCsType(csType);
+      const alreadyStaged =
+        stagedTypes.get(type);
+      if (alreadyStaged) {
+        const existingCsType =
+          normalizedPortableCsType(
+            alreadyStaged.csType
+          );
+        if (
+          normalizedCsType &&
+          existingCsType &&
+          existingCsType !== "object" &&
+          normalizedCsType
+            .replace(/\s+/g, "") !==
+            existingCsType
+              .replace(/\s+/g, "")
+        ) {
+          throw new Error(
+            `Portable graph type '${type}' represents conflicting C# contracts.`
+          );
+        }
+        return;
+      }
+      if (
+        Object.prototype
+          .hasOwnProperty.call(
+            typeDefinitions,
+            type
+        )
+      ) {
+        return;
+      }
+      const elementCsType =
+        portableEnumerableElementCsType(
+          normalizedCsType
+        );
+      let elementGraphType = "";
+      if (elementCsType) {
+        elementGraphType =
+          graphTypeForCsType(
+            elementCsType
+          );
+        if (
+          elementGraphType &&
+          !Object.prototype
+            .hasOwnProperty.call(
+              typeDefinitions,
+              elementGraphType
+            ) &&
+          !stagedTypes.has(
+            elementGraphType
+          )
+        ) {
+          stageType(
+            elementGraphType,
+            elementCsType
+          );
+        }
+      }
+      stagedTypes.set(type, {
+        label: `Unavailable · ${type}`,
+        short: "API?",
+        color: "#ff6f91",
+        csType:
+          normalizedCsType || "object",
+        defaultCs: "null!",
+        referenceType: true,
+        valueType: true,
+        globalGenericCandidate: false,
+        unavailableApiType: true,
+        assignableTo: ["object"],
+        constraints: [
+          "value",
+          "reference",
+          ...(elementGraphType
+            ? [
+                "enumerable",
+                "serializable"
+              ]
+            : [])
+        ],
+        ...(elementGraphType
+          ? {
+              collectionType: true,
+              enumerableElementType:
+                elementGraphType,
+              enumerableElementCsType:
+                elementCsType
+            }
+          : {})
+      });
+    };
+
+    for (const requested of entries) {
+      const operatorId = String(
+        requested?.operatorId || ""
+      ).trim();
+      if (!operatorId) {
+        throw new Error(
+          "A portable API contract has no operator id."
+        );
+      }
+      if (stagedDefinitions.has(operatorId)) {
+        throw new Error(
+          `Portable API operator '${operatorId}' occurs more than once in the installation plan.`
+        );
+      }
+      const existing = definitions[operatorId];
+      if (
+        existing &&
+        existing.unavailableApiContract !==
+          true
+      ) {
+        throw new Error(
+          `Portable API operator '${operatorId}' collides with a real or integrated registry definition.`
+        );
+      }
+      const contract = normalizedContract(
+        operatorId,
+        requested?.apiContract,
+        requested
+      );
+      const makePorts = (
+        direction,
+        key
+      ) => contract[key].map(port => {
+        stageType(
+          port.type,
+          portableContractPortCsType(
+            contract,
+            direction,
+            port
+          )
+        );
+        return registry.port(
+          port.id,
+          String(port.label || port.id),
+          port.type,
+          {
+            optional:
+              port.optional === true,
+            unavailableApiPort: true,
+            semanticRole:
+              port.role
+          }
+        );
+      });
+      const inputs = makePorts(
+        "input",
+        "inputPorts"
+      );
+      const outputs = makePorts(
+        "output",
+        "outputPorts"
+      );
+      const displayName = [
+        contract.ownerType,
+        contract.memberName
+      ].filter(Boolean).join(".") ||
+        operatorId;
+      const isApi =
+        operatorId.startsWith("api.");
+      stagedDefinitions.set(
+        operatorId,
+        {
+          title:
+            `${isApi ? "Unavailable API" : "Unavailable Operator"} · ${displayName}`,
+          group: UNAVAILABLE_GROUP,
+          symbol: "API?",
+          description:
+            `The original ${isApi ? "API contract" : "node contract"} is preserved, but the current Builder has no safely equivalent operator. The project remains editable; only export of this unresolved runtime path is blocked.`,
+          hiddenFromPalette: true,
+          expertOnly: true,
+          unavailableApiContract: true,
+          preservedApiContract:
+            contract,
+          inputs,
+          outputs,
+          parameters: [],
+          codegenCollect(api) {
+            api.diagnostic?.(
+              `Unavailable API contract '${displayName}' (${operatorId}) must be resolved before export.`
+            );
+          },
+          codegenExpression(api) {
+            api.diagnostic?.(
+              `Unavailable API contract '${displayName}' (${operatorId}) must be resolved before export.`
+            );
+            return api.csDefault?.(
+              api.type || "object"
+            ) || "default!";
+          },
+          codegenAction(api) {
+            api.diagnostic?.(
+              `Unavailable API contract '${displayName}' (${operatorId}) must be resolved before export.`
+            );
+            return "";
+          }
+        }
+      );
+      previousDefinitions.set(
+        operatorId,
+        {
+          present:
+            Object.prototype
+              .hasOwnProperty.call(
+                definitions,
+                operatorId
+              ),
+          value: existing
+        }
+      );
+    }
+
+    for (const type of stagedTypes.keys()) {
+      ownedTypeBaselines.set(type, {
+        present:
+          stagedEnvironment.typeEntries
+            .has(type),
+        value:
+          stagedEnvironment.typeEntries
+            .get(type)
+      });
+    }
+
+    let committed = false;
+    let rolledBack = false;
+    let completed = false;
+    let committedEnvironment = null;
+
+    const isExactSyntheticCollector = (
+      type,
+      information
+    ) =>
+      canonicalSyntheticCollectorVerifier(
+        type,
+        information
+      ) === true;
+
+    const isSameSyntheticCollectorLineage = (
+      type,
+      previous,
+      current
+    ) =>
+      Boolean(
+        previous &&
+        previous.syntheticCollectionType ===
+          true &&
+        previous.collectorCollection === true &&
+        String(
+          previous.enumerableElementType ||
+          ""
+        ).trim() ===
+          String(
+            current
+              ?.enumerableElementType ||
+            ""
+          ).trim() &&
+        type ===
+          `collectList:${String(
+            previous.enumerableElementType ||
+            ""
+          ).trim()}`
+      );
+
+    const adoptSyntheticCollectorTypeDeltas =
+      () => {
+        if (!committedEnvironment) {
+          return;
+        }
+        const expectedEntries =
+          committedEnvironment.typeEntries;
+        for (const [type, current] of
+          Object.entries(typeDefinitions)) {
+          const present =
+            expectedEntries.has(type);
+          const previous =
+            expectedEntries.get(type);
+          if (present && previous === current) {
+            continue;
+          }
+          if (publishedTypes.has(type)) {
+            continue;
+          }
+          if (
+            !isExactSyntheticCollector(
+              type,
+              current
+            ) ||
+            (
+              present &&
+              !isSameSyntheticCollectorLineage(
+                type,
+                previous,
+                current
+              )
+            )
+          ) {
+            continue;
+          }
+          if (!ownedTypeBaselines.has(type)) {
+            ownedTypeBaselines.set(type, {
+              present:
+                stagedEnvironment.typeEntries
+                  .has(type),
+              value:
+                stagedEnvironment.typeEntries
+                  .get(type)
+            });
+          }
+          publishedTypes.set(type, current);
+          expectedEntries.set(type, current);
+        }
+      };
+
+    const rollback = () => {
+      if (rolledBack || completed) {
+        return false;
+      }
+      assertFactoryOperationLease(
+        lease,
+        "rolling back portable API contracts"
+      );
+      adoptSyntheticCollectorTypeDeltas();
+      let changed = false;
+      for (const [operatorId, previous] of
+        previousDefinitions) {
+        const staged =
+          stagedDefinitions.get(operatorId);
+        if (
+          definitions[operatorId] !== staged
+        ) {
+          continue;
+        }
+        if (previous.present) {
+          definitions[operatorId] =
+            previous.value;
+        } else {
+          delete definitions[operatorId];
+        }
+        changed = true;
+      }
+      for (const [type, previous] of
+        ownedTypeBaselines) {
+        if (
+          !publishedTypes.has(type) ||
+          typeDefinitions[type] !==
+            publishedTypes.get(type)
+        ) {
+          continue;
+        }
+        if (previous.present) {
+          typeDefinitions[type] =
+            previous.value;
+        } else {
+          delete typeDefinitions[type];
+        }
+        changed = true;
+      }
+      if (changed) {
+        window.__RMLNodeDefinitionRevision =
+          (Number(
+            window.__RMLNodeDefinitionRevision
+          ) || 0) + 1;
+        refreshPublishedCatalogProjectionIndex();
+      }
+      rolledBack = true;
+      releaseLease();
+      return committed;
+    };
+    const verify = () => {
+      if (
+        !committed ||
+        rolledBack ||
+        completed ||
+        !committedEnvironment
+      ) {
+        return false;
+      }
+      adoptSyntheticCollectorTypeDeltas();
+      assertFactoryEnvironmentUnchanged(
+        committedEnvironment,
+        lease,
+        "verifying portable API contracts"
+      );
+      return [...stagedDefinitions]
+        .every(([operatorId, definition]) =>
+          definitions[operatorId] ===
+            definition &&
+          definition.unavailableApiContract ===
+            true &&
+          exactPortableContractKey(
+            definition
+              .preservedApiContract
+          ) ===
+            exactPortableContractKey(
+              stagedDefinitions
+                .get(operatorId)
+                .preservedApiContract
+            )
+        );
+    };
+    const commit = () => {
+      if (rolledBack) {
+        throw new Error(
+          "The portable API contract installation was already rolled back."
+        );
+      }
+      if (committed) {
+        return verify();
+      }
+      try {
+        assertFactoryEnvironmentUnchanged(
+          stagedEnvironment,
+          lease,
+          "committing portable API contracts"
+        );
+        for (const [operatorId, previous] of
+          previousDefinitions) {
+          const current =
+            definitions[operatorId];
+          if (
+            current !== previous.value ||
+            Boolean(current) !==
+              previous.present
+          ) {
+            throw new Error(
+              `Registry definition '${operatorId}' changed while the project import was pending.`
+            );
+          }
+          if (
+            current &&
+            current.unavailableApiContract !==
+              true
+          ) {
+            throw new Error(
+              `Registry definition '${operatorId}' is no longer available for a portable placeholder.`
+            );
+          }
+        }
+        for (const [type, information] of
+          stagedTypes) {
+          if (!typeDefinitions[type]) {
+            registry.registerType(
+              type,
+              information
+            );
+            publishedTypes.set(
+              type,
+              typeDefinitions[type]
+            );
+          }
+        }
+        registry.registerGroup?.(
+          UNAVAILABLE_GROUP,
+          { after: ADVANCED_GROUP }
+        );
+        for (const [operatorId, definition] of
+          stagedDefinitions) {
+          definitions[operatorId] =
+            definition;
+        }
+        window.__RMLNodeDefinitionRevision =
+          (Number(
+            window.__RMLNodeDefinitionRevision
+          ) || 0) + 1;
+        refreshPublishedCatalogProjectionIndex();
+        committed = true;
+        committedEnvironment =
+          captureFactoryEnvironment(
+            registry
+          );
+        if (!verify()) {
+          throw new Error(
+            "The portable API definitions were not published as one exact registry plan."
+          );
+        }
+        return true;
+      } catch (error) {
+        rollback();
+        throw error;
+      }
+    };
+
+    const complete = () => {
+      if (
+        completed ||
+        rolledBack ||
+        !verify()
+      ) {
+        return false;
+      }
+      completed = true;
+      releaseLease();
+      return true;
+    };
+
+    return Object.freeze({
+      epoch: lease.epoch,
+      operatorIds: Object.freeze(
+        [...stagedDefinitions.keys()]
+      ),
+      commit,
+      verify,
+      complete,
+      rollback
+    });
+  }
+
+  function createUnavailableOperatorTransaction(
+    requestedEntries,
+    admission = {}
+  ) {
+    return acquireFactoryOperationLease(
+      "portable-offline-install",
+      (lease, releaseLease) =>
+        stageUnavailableOperatorTransaction(
+          requestedEntries,
+          lease,
+          releaseLease,
+          admission
+        )
+    );
+  }
+
+  function acquireCatalogResolutionStabilityLease() {
+    return acquireFactoryOperationLease(
+      "saved-composite-resolution-commit",
+      (lease, releaseLease) => {
+        let released = false;
+        return Object.freeze({
+          release() {
+            if (released) return false;
+            let leaseError = null;
+            try {
+              assertFactoryOperationLease(
+                lease,
+                "releasing the Saved Composite catalog stability lease"
+              );
+            } catch (error) {
+              leaseError = error;
+            }
+            released = true;
+            const result = releaseLease();
+            if (leaseError) {
+              throw leaseError;
+            }
+            return result;
+          }
+        });
+      }
+    );
+  }
+
+  async function rebuildFactoryForCatalog(
+    catalog,
+    lease,
+    options = {}
+  ) {
+    assertFactoryOperationLease(
+      lease,
+      "starting a catalog factory rebuild"
+    );
     const registry =
       window.RMLModNodeRegistry;
 
@@ -501,6 +2720,32 @@
     ) {
       throw new Error(
         "The live API node factory cannot be rebuilt because its catalog or registry is unavailable."
+      );
+    }
+
+    const initialEnvironment =
+      captureFactoryEnvironment(
+        registry
+      );
+    const stagedCatalogProjectionRevision =
+      initialEnvironment.definitionRevision +
+      1;
+    const createCatalogPublication =
+      typeof options
+        ?.createCatalogPublication ===
+          "function"
+        ? options
+            .createCatalogPublication
+        : null;
+    if (
+      initialEnvironment.apiCatalog &&
+      apiCatalogIdentity(
+        initialEnvironment.apiCatalog
+      ) !== apiCatalogIdentity(catalog) &&
+      !createCatalogPublication
+    ) {
+      throw new Error(
+        "The requested API catalog is no longer the active catalog."
       );
     }
 
@@ -535,6 +2780,8 @@
     const previousReport = window.RMLApiNodeFactoryReport || null;
     const previousFactoryVersion = Number(window.__RMLApiNodeFactoryVersion) || 0;
     const previousLegacyOperatorResolver = legacyOperatorResolver;
+    let catalogPublication = null;
+    let registryMutationStarted = false;
     const stagingRegistry = {
       ...registry,
       registerGroup(name, options) {
@@ -591,8 +2838,13 @@
       const report = await buildFactory(
         stagingRegistry,
         catalog,
-        false
+        false,
+        stagedCatalogProjectionRevision
       );
+      let stagedCatalogProjectionIndex =
+        catalogProjectionIndexByReport.get(
+          report
+        );
       const stagedLegacyOperatorResolver = legacyOperatorResolver;
       legacyOperatorResolver = previousLegacyOperatorResolver;
 
@@ -600,7 +2852,16 @@
         !report ||
         report.verificationPassed !== true ||
         apiCatalogIdentity(report) !==
-          apiCatalogIdentity(catalog)
+          apiCatalogIdentity(catalog) ||
+        !stagedCatalogProjectionIndex ||
+        stagedCatalogProjectionIndex.catalog !==
+          catalog ||
+        stagedCatalogProjectionIndex.report !==
+          report ||
+        Number(
+          stagedCatalogProjectionIndex.revision
+        ) !==
+          stagedCatalogProjectionRevision
       ) {
         const details = Array.isArray(report?.verificationErrors)
           ? report.verificationErrors.slice(0, 12).join(" | ")
@@ -610,33 +2871,370 @@
         );
       }
 
-      for (const id of Object.keys(definitions)) {
-        if (definitions[id]?.catalogGenerated === true) delete definitions[id];
-      }
-      for (const [id, definition] of Object.entries(stagedDefinitions)) {
-        if (definition?.catalogGenerated === true) {
-          if (definitions[id]?.unavailableApiContract === true) delete definitions[id];
-          definitions[id] = definition;
+      assertFactoryEnvironmentUnchanged(
+        initialEnvironment,
+        lease,
+        "committing the rebuilt catalog factory"
+      );
+
+      const generatedDefinitions =
+        Object.entries(
+          stagedDefinitions
+        ).filter(([, definition]) =>
+          definition
+            ?.catalogGenerated === true
+        );
+      const stagedCatalogProjectionCustomState =
+        createCatalogProjectionCustomState();
+      for (const [id, definition] of
+        generatedDefinitions) {
+        appendCatalogProjectionCustomDefinition(
+          stagedCatalogProjectionCustomState,
+          id,
+          definition
+        );
+        const current =
+          definitions[id];
+        if (
+          current
+            ?.unavailableApiContract ===
+              true &&
+          !placeholderMatchesGeneratedContract(
+            current,
+            definition
+          )
+        ) {
+          throw new Error(
+            `Live API node '${id}' does not exactly match the preserved portable contract. The unavailable placeholder was retained.`
+          );
         }
       }
-      for (const id of Object.keys(typeDefinitions)) delete typeDefinitions[id];
-      Object.assign(typeDefinitions, stagedTypes);
-      valueTypes.splice(0, valueTypes.length, ...stagedValueTypes);
-      for (const [name, options] of stagedGroups) registry.registerGroup(name, options);
+      stagedCatalogProjectionIndex =
+        completeCatalogProjectionIndex(
+          stagedCatalogProjectionIndex,
+          stagedCatalogProjectionCustomState,
+          stagedCatalogProjectionRevision
+        );
+      catalogProjectionIndexByReport.set(
+        report,
+        stagedCatalogProjectionIndex
+      );
+      if (
+        Number(
+          stagedCatalogProjectionIndex
+            .definitionRevision
+        ) !== stagedCatalogProjectionRevision ||
+        typeof stagedCatalogProjectionIndex
+          .customCSharpByIdentifier?.get !==
+            "function" ||
+        !Array.isArray(
+          stagedCatalogProjectionIndex
+            .catalogTypeNames
+        )
+      ) {
+        throw new Error(
+          "The live API node factory did not prepare a complete definition-scoped Custom C# catalog index."
+        );
+      }
+
+      const generatedTypes =
+        Object.entries(
+          stagedTypes
+        ).filter(([, information]) =>
+          information
+            ?.catalogGenerated === true
+        );
+      const updatedIntegratedTypes =
+        Object.entries(stagedTypes)
+          .filter(([id, information]) =>
+            information
+              ?.catalogGenerated !== true &&
+            Object.prototype
+              .hasOwnProperty.call(
+                typeDefinitions,
+                id
+              ) &&
+            JSON.stringify(information) !==
+              JSON.stringify(
+                typeDefinitions[id]
+              )
+          );
+      for (const [id] of generatedTypes) {
+        const current =
+          typeDefinitions[id];
+        if (
+          current &&
+          current.catalogGenerated !==
+            true &&
+          current.unavailableApiType !==
+            true
+        ) {
+          throw new Error(
+            `Live API type '${id}' collides with a non-catalog graph type. The existing type was retained.`
+          );
+        }
+      }
+
+      for (const [name, options] of
+        stagedGroups) {
+        registry.registerGroup(
+          name,
+          options
+        );
+      }
+
+      if (createCatalogPublication) {
+        catalogPublication =
+          createCatalogPublication(
+            catalog
+          );
+        if (
+          !catalogPublication ||
+          typeof catalogPublication.commit !==
+            "function" ||
+          typeof catalogPublication.verify !==
+            "function" ||
+          typeof catalogPublication.rollback !==
+            "function"
+        ) {
+          throw new Error(
+            "The catalog publication transaction is incomplete."
+          );
+        }
+        if (
+          catalogPublication.commit() !==
+            true ||
+          catalogPublication.verify() !==
+            true
+        ) {
+          throw new Error(
+            "The catalog could not be published inside the factory lease."
+          );
+        }
+      }
+
+      registryMutationStarted = true;
+      for (const id of Object.keys(definitions)) {
+        if (
+          definitions[id]
+            ?.catalogGenerated === true
+        ) {
+          delete definitions[id];
+        }
+      }
+      for (const [id, definition] of
+        generatedDefinitions) {
+        definitions[id] = definition;
+      }
+
+      const previousGeneratedTypeIds =
+        new Set(
+          Object.entries(typeDefinitions)
+            .filter(([, information]) =>
+              information
+                ?.catalogGenerated ===
+                  true
+            )
+            .map(([id]) => id)
+        );
+      for (const id of
+        previousGeneratedTypeIds) {
+        delete typeDefinitions[id];
+      }
+      for (const [id, information] of
+        updatedIntegratedTypes) {
+        typeDefinitions[id] =
+          information;
+      }
+      for (const [id, information] of
+        generatedTypes) {
+        typeDefinitions[id] =
+          information;
+      }
+      const nextGeneratedValueTypes =
+        new Set(
+          stagedValueTypes.filter(id =>
+            stagedTypes[id]
+              ?.catalogGenerated === true
+          )
+        );
+      const retainedValueTypes =
+        valueTypes.filter(id =>
+          !previousGeneratedTypeIds.has(id)
+        );
+      valueTypes.splice(
+        0,
+        valueTypes.length,
+        ...new Set([
+          ...retainedValueTypes,
+          ...nextGeneratedValueTypes
+        ])
+      );
       legacyOperatorResolver = stagedLegacyOperatorResolver;
       window.__RMLApiNodeFactoryVersion = FACTORY_VERSION;
       window.RMLApiNodeFactoryReport = report;
       window.__RMLNodeDefinitionRevision =
         (Number(window.__RMLNodeDefinitionRevision) || 0) + 1;
-      window.dispatchEvent(
-        new CustomEvent("rml-api-node-factory-ready", { detail: report })
+
+      assertFactoryOperationLease(
+        lease,
+        "verifying the rebuilt catalog factory"
       );
+      if (
+        (window
+          .RMLResoniteApiCatalog ||
+          null) !==
+            (catalogPublication
+              ? catalog
+              : initialEnvironment
+                  .apiCatalog) ||
+        (window
+          .RMLFrooxComponentCatalog ||
+          null) !==
+            (catalogPublication
+              ? catalog
+              : initialEnvironment
+                  .componentCatalog) ||
+        (
+          catalogPublication &&
+          catalogPublication.verify() !==
+            true
+        ) ||
+        generatedDefinitions.some(
+          ([id, definition]) =>
+            definitions[id] !==
+              definition
+        ) ||
+        generatedTypes.some(
+          ([id, information]) =>
+            typeDefinitions[id] !==
+              information
+        ) ||
+        updatedIntegratedTypes.some(
+          ([id, information]) =>
+            typeDefinitions[id] !==
+              information
+        ) ||
+        (Number(
+          window
+            .__RMLNodeDefinitionRevision
+        ) || 0) !==
+          Number(
+            report.catalogProjectionRevision
+          ) ||
+        window.RMLApiNodeFactoryReport !==
+          report
+      ) {
+        throw new Error(
+          "The rebuilt API catalog factory failed its atomic publication verification."
+        );
+      }
+
+      publishCatalogProjectionIndex(
+        stagedCatalogProjectionIndex
+      );
+      if (
+        window.RMLApiCatalogProjectionIndex !==
+          stagedCatalogProjectionIndex ||
+        stagedCatalogProjectionIndex.report !==
+          report ||
+        Number(
+          stagedCatalogProjectionIndex.revision
+        ) !==
+          Number(
+            report.catalogProjectionRevision
+          ) ||
+        Number(
+          stagedCatalogProjectionIndex
+            .definitionRevision
+        ) !==
+          (Number(
+            window.__RMLNodeDefinitionRevision
+          ) || 0) ||
+        typeof stagedCatalogProjectionIndex
+          .customCSharpByIdentifier?.select !==
+            "function" ||
+        !Object.isFrozen(
+          stagedCatalogProjectionIndex
+            .catalogTypeNames
+        )
+      ) {
+        throw new Error(
+          "The rebuilt API catalog factory failed to publish its prepared graph-codegen index."
+        );
+      }
+
+      window.dispatchEvent(
+        new CustomEvent(
+          "rml-api-node-factory-ready",
+          { detail: report }
+        )
+      );
+      try {
+        catalogPublication?.notify?.();
+      } catch (catalogEventError) {
+        console.error(
+          "The verified catalog event could not be delivered.",
+          catalogEventError
+        );
+      }
 
       completeFactoryReady(report);
       return report;
     } catch (error) {
+      if (registryMutationStarted) {
+        for (const id of
+          Object.keys(definitions)) {
+          delete definitions[id];
+        }
+        for (const [id, definition] of
+          initialEnvironment
+            .definitionEntries) {
+          definitions[id] = definition;
+        }
+        for (const id of
+          Object.keys(typeDefinitions)) {
+          delete typeDefinitions[id];
+        }
+        for (const [id, information] of
+          initialEnvironment.typeEntries) {
+          typeDefinitions[id] =
+            information;
+        }
+        valueTypes.splice(
+          0,
+          valueTypes.length,
+          ...initialEnvironment
+            .valueTypeEntries
+        );
+        window.__RMLNodeDefinitionRevision =
+          initialEnvironment
+            .definitionRevision;
+      }
+      try {
+        catalogPublication?.rollback?.();
+      } catch (rollbackError) {
+        console.error(
+          "The failed catalog publication could not be rolled back.",
+          rollbackError
+        );
+      }
       window.__RMLApiNodeFactoryVersion = previousFactoryVersion;
       window.RMLApiNodeFactoryReport = previousReport;
+      if (
+        initialEnvironment
+          .catalogProjectionIndexDescriptor
+      ) {
+        Object.defineProperty(
+          window,
+          "RMLApiCatalogProjectionIndex",
+          initialEnvironment
+            .catalogProjectionIndexDescriptor
+        );
+      } else {
+        delete window
+          .RMLApiCatalogProjectionIndex;
+      }
       legacyOperatorResolver = previousLegacyOperatorResolver;
 
       throw error;
@@ -648,58 +3246,101 @@
     "RMLApiNodeFactoryController",
     {
       value: Object.freeze({
-        version: 4,
-        rebuild(catalog) {
-          const previous =
-            factoryBuildPromise;
-          const run = () =>
-            rebuildFactoryForCatalog(
-              catalog
+        version: 9,
+        moduleId:
+          API_FACTORY_MODULE_ID,
+        factoryVersion:
+          FACTORY_VERSION,
+        compatibleLegacyAliasRevision() {
+          return compatibleLegacyAliasRevision;
+        },
+        replacePublishedFactoryReport(
+          expectedReport,
+          nextReport
+        ) {
+          return replacePublishedFactoryReport(
+            expectedReport,
+            nextReport
+          );
+        },
+        verifyRegistryPublication(
+          catalog,
+          report =
+            window.RMLApiNodeFactoryReport,
+          requiredNodes = []
+        ) {
+          return factoryRegistryIntegrity(
+            catalog,
+            report,
+            requiredNodes
+          );
+        },
+        rebuild(catalog, options = {}) {
+          factoryBuildPromise =
+            queueFactoryOperation(
+              lease =>
+                rebuildFactoryForCatalog(
+                  catalog,
+                  lease,
+                  options
+                ),
+              "catalog-rebuild"
             );
-
-          factoryBuildPromise = previous
-            ? Promise.resolve(previous)
-                .then(run, run)
-            : run();
 
           return factoryBuildPromise;
         },
-        async resolveRequiredOperators(
+        resolveRequiredOperators(
           requiredNodes,
           catalog
         ) {
-          if (factoryBuildPromise) {
-            await factoryBuildPromise;
-          }
+          return queueFactoryOperation(
+            async () => {
+              const report =
+                window.RMLApiNodeFactoryReport;
+              const resolver =
+                legacyOperatorResolver;
 
-          const report =
-            window.RMLApiNodeFactoryReport;
+              if (
+                !resolver ||
+                !report ||
+                report.verificationPassed !==
+                  true ||
+                apiCatalogIdentity(report) !==
+                  apiCatalogIdentity(catalog)
+              ) {
+                return Object.freeze({
+                  attempted: false,
+                  resolved: 0,
+                  unresolved:
+                    Array.isArray(
+                      requiredNodes
+                    )
+                      ? requiredNodes.length
+                      : 0
+                });
+              }
 
-          if (
-            !legacyOperatorResolver ||
-            !report ||
-            report.verificationPassed !==
-              true ||
-            apiCatalogIdentity(report) !==
-              apiCatalogIdentity(catalog)
-          ) {
-            return Object.freeze({
-              attempted: false,
-              resolved: 0,
-              unresolved:
-                Array.isArray(requiredNodes)
-                  ? requiredNodes.length
-                  : 0
-            });
-          }
-
-          return legacyOperatorResolver(
-            requiredNodes,
-            catalog
+              return resolver(
+                requiredNodes,
+                catalog,
+                window.RMLModNodeRegistry
+              );
+            },
+            "legacy-operator-resolution"
           );
         },
         ensureUnavailableOperator(operatorId, apiContract, required) {
+          if (activeFactoryOperationLease) {
+            return "";
+          }
           return registerUnavailableApiOperator(operatorId, apiContract, required);
+        },
+        acquireCatalogResolutionStabilityLease,
+        createUnavailableOperatorAdmissionToken(planKey) {
+          return createUnavailableOperatorAdmissionToken(planKey);
+        },
+        createUnavailableOperatorTransaction(entries, admission) {
+          return createUnavailableOperatorTransaction(entries, admission);
         }
       }),
       writable: false,
@@ -752,21 +3393,33 @@
       return factoryBuildPromise;
     }
 
+    const existingReport =
+      window.RMLApiNodeFactoryReport;
+    const existingCatalog =
+      window.RMLResoniteApiCatalog ||
+      window.RMLFrooxComponentCatalog;
     if (
-      (window.__RMLApiNodeFactoryVersion || 0) >=
-        FACTORY_VERSION &&
-      window.RMLApiNodeFactoryReport
+      Number(
+        window.__RMLApiNodeFactoryVersion
+      ) === FACTORY_VERSION &&
+      Number(
+        existingReport?.factoryVersion
+      ) === FACTORY_VERSION &&
+      existingReport?.moduleId ===
+        API_FACTORY_MODULE_ID &&
+      factoryRegistryIntegrity(
+        existingCatalog,
+        existingReport
+      ).publicationValid
     ) {
       completeFactoryReady(
-        window.RMLApiNodeFactoryReport
+        existingReport
       );
       return factoryReady;
     }
 
     const registry = window.RMLModNodeRegistry;
-    const catalog =
-      window.RMLResoniteApiCatalog ||
-      window.RMLFrooxComponentCatalog;
+    const catalog = existingCatalog;
 
     if (
       !registry ||
@@ -807,14 +3460,14 @@
       }
       return factoryReady;
     }
-
-    window.__RMLApiNodeFactoryVersion =
-      FACTORY_VERSION;
-
     factoryBuildPromise =
-      buildFactory(
-        registry,
-        catalog
+      queueFactoryOperation(
+        lease =>
+          rebuildFactoryForCatalog(
+            catalog,
+            lease
+          ),
+        "initial-catalog-build"
       )
         .then(completeFactoryReady)
         .catch(error => {
@@ -829,7 +3482,16 @@
     return factoryBuildPromise;
   }
 
-  async function buildFactory(registry, catalog, publish = true) {
+  async function buildFactory(
+    registry,
+    catalog,
+    publish = true,
+    projectionRevision =
+      (Number(
+        window
+          .__RMLNodeDefinitionRevision
+      ) || 0) + 1
+  ) {
     activeReloadSafetyContractCompatible =
       catalog?.reloadSafetyCompatible === true;
 
@@ -863,11 +3525,18 @@
     const definitions = getNodeDefinitions();
     const typeByName = new Map();
     const genericTypeRowsByShape = new Map();
+    const projectionTypeByName = new Map();
+    const projectionGenericTypeByShape =
+      new Map();
+    const projectionEnumByName = new Map();
+    const projectionAssemblyByName =
+      new Map();
     const graphTypeByCs = new Map();
     const graphTypeByNormalizedCs = new Map();
     const generatedNodeIds = new Set();
     const legacyAliasIds = new Set();
     const legacyAliasEntries = [];
+    const legacyAliasPrefixes = new Set();
     const rejectedGeneratedNodeIds = new Set();
     const verificationErrors = [];
     const catalogSchemaVersion =
@@ -892,19 +3561,44 @@
         enums: catalog.enums || []
       }))
     );
-    const assemblyByName = new Map(
-      (Array.isArray(catalog.assemblies)
+    const catalogProjectionRevision =
+      Math.max(
+        1,
+        Number(projectionRevision) || 0
+      );
+    const assemblyByName = new Map();
+    const assemblyRows =
+      Array.isArray(catalog.assemblies)
         ? catalog.assemblies
-        : [])
-        .filter(Boolean)
-        .map(assembly => [
-          String(assembly.name || "").trim(),
-          assembly
-        ])
-        .filter(([name]) => Boolean(name))
-    );
+        : [];
+    for (
+      let index = 0;
+      index < assemblyRows.length;
+      index += 1
+    ) {
+      const assembly = assemblyRows[index];
+      if (!assembly) continue;
+      const projectionName = String(
+        assembly.name || ""
+      );
+      rememberCatalogProjectionRow(
+        projectionAssemblyByName,
+        projectionName,
+        assembly,
+        index
+      );
+      const name = projectionName.trim();
+      if (name) {
+        assemblyByName.set(name, assembly);
+      }
+    }
 
-    for (const row of typeRows) {
+    for (
+      let index = 0;
+      index < typeRows.length;
+      index += 1
+    ) {
+      const row = typeRows[index];
       const name = normalizeCsType(row.fullName);
       if (name) {
         typeByName.set(name, row);
@@ -912,6 +3606,32 @@
         const shape = genericTypeShape(name);
         if (shape && !genericTypeRowsByShape.has(shape)) {
           genericTypeRowsByShape.set(shape, row);
+        }
+      }
+      const projectionName =
+        catalogProjectionTypeName(
+          row.fullName
+        );
+      if (projectionName) {
+        rememberCatalogProjectionRow(
+          projectionTypeByName,
+          projectionName,
+          row,
+          index
+        );
+        const projectionShape =
+          catalogProjectionGenericShape(
+            projectionName
+          );
+        if (
+          projectionShape &&
+          !projectionGenericTypeByShape
+            .has(projectionShape)
+        ) {
+          projectionGenericTypeByShape.set(
+            projectionShape,
+            Object.freeze({ row, index })
+          );
         }
       }
     }
@@ -1413,9 +4133,26 @@
       registerApiType(row.fullName, row);
     }
 
-    for (const row of enumRows) {
+    for (
+      let enumIndex = 0;
+      enumIndex < enumRows.length;
+      enumIndex += 1
+    ) {
+      const row = enumRows[enumIndex];
       if ((cooperativeWork += 1) % 120 === 0) {
         await yieldToBrowser();
+      }
+      const projectionName =
+        catalogProjectionTypeName(
+          row?.fullName
+        );
+      if (projectionName) {
+        rememberCatalogProjectionRow(
+          projectionEnumByName,
+          projectionName,
+          row,
+          enumIndex
+        );
       }
       if (!row || row.isObsolete || !row.fullName) {
         continue;
@@ -1841,7 +4578,82 @@
     }
 
     legacyOperatorResolver =
-      async requiredNodes => {
+      async (
+        requiredNodes,
+        _catalog,
+        resolutionRegistry = registry
+      ) => {
+        const resolutionDefinitions =
+          typeof resolutionRegistry
+            ?.getNodeDefinitions ===
+              "function"
+            ? resolutionRegistry
+                .getNodeDefinitions()
+            : definitions;
+        const resolutionRegisterNode =
+          typeof resolutionRegistry
+            ?.registerNode === "function"
+            ? resolutionRegistry
+                .registerNode
+                .bind(resolutionRegistry)
+            : registerNode;
+        const definitionRevisionBeforeResolution =
+          Number(
+            window.__RMLNodeDefinitionRevision
+          ) || 0;
+        const stagedResolutionAliases =
+          Object.create(null);
+        const stagedResolutionDefinitions =
+          new Proxy(stagedResolutionAliases, {
+            get(target, property) {
+              return Object.prototype
+                .hasOwnProperty.call(
+                  target,
+                  property
+                )
+                ? target[property]
+                : resolutionDefinitions[
+                    property
+                  ];
+            }
+          });
+        const stageResolutionAlias =
+          (id, definition) => {
+            if (
+              resolutionDefinitions[id] ||
+              stagedResolutionAliases[id]
+            ) {
+              return false;
+            }
+            stagedResolutionAliases[id] =
+              definition;
+            return true;
+          };
+        const resolvedProjectionDefinitions = [];
+        const registerResolutionLegacyAlias =
+          (id, entry) => {
+            const existed = Boolean(
+              stagedResolutionDefinitions[id]
+            );
+            const registered =
+              registerLegacyAlias(
+                id,
+                entry,
+                stagedResolutionDefinitions,
+                stageResolutionAlias
+              );
+            if (
+              registered &&
+              !existed &&
+              stagedResolutionDefinitions[id]
+            ) {
+              resolvedProjectionDefinitions.push([
+                id,
+                stagedResolutionDefinitions[id]
+              ]);
+            }
+            return registered;
+          };
         const requirements =
           (Array.isArray(requiredNodes)
             ? requiredNodes
@@ -1873,8 +4685,35 @@
             )
             .filter(Boolean)
         );
+        const requirementFamiliesById =
+          new Map();
+        for (const requirement of
+          requirements) {
+          const id = String(
+            typeof requirement === "string"
+              ? requirement
+              : requirement?.operatorId || ""
+          ).trim();
+          if (!id) continue;
+          const values =
+            requirementFamiliesById.get(id) ||
+            [];
+          values.push(requirement);
+          requirementFamiliesById.set(
+            id,
+            values
+          );
+        }
+        const conflictingFamilyIds =
+          new Set(
+            [...requirementFamiliesById]
+              .filter(([, values]) =>
+                values.length > 1
+              )
+              .map(([id]) => id)
+          );
         const requested =
-          requiredIds.size;
+          requirements.length;
         let resolved = 0;
         let attempts = 0;
         const migrations = {};
@@ -1923,27 +4762,6 @@
           }
           return result;
         };
-        const semanticIndex = new Map();
-
-        for (const [id, definition] of
-          Object.entries(definitions)) {
-          if (
-            definition?.catalogGenerated !== true ||
-            definition?.legacyCatalogAlias === true
-          ) {
-            continue;
-          }
-
-          const key = semanticContractKey(
-            definition.apiVerification
-          );
-          if (!key) continue;
-          if (!semanticIndex.has(key)) {
-            semanticIndex.set(key, []);
-          }
-          semanticIndex.get(key).push(id);
-        }
-
         const normalizedLegacyName = value =>
           String(value || "")
             .trim()
@@ -1968,9 +4786,152 @@
               requirement
             ])
           );
+        const normalizedSemanticType = value =>
+          String(value || "")
+            .replace(/^global::/, "")
+            .replace(/\s+/g, "")
+            .replace(/&$/, "");
+        const semanticContractDiscriminator =
+          value => {
+            if (
+              !value ||
+              typeof value !== "object" ||
+              Array.isArray(value)
+            ) {
+              return "";
+            }
+            const kind = String(
+              value.kind ||
+              value.apiMemberKind ||
+              ""
+            ).trim();
+            const ownerType =
+              normalizedSemanticType(
+                value.ownerType ||
+                value.catalogType ||
+                ""
+              );
+            if (!kind || !ownerType) {
+              return "";
+            }
+            return JSON.stringify({
+              kind,
+              ownerType,
+              memberName: String(
+                value.memberName ??
+                value.catalogMember ??
+                ""
+              ),
+              isStatic:
+                value.isStatic === true ||
+                value.apiIsStatic === true,
+              genericArity: Math.max(
+                0,
+                Number(
+                  value.genericArity ??
+                  value.apiGenericArity
+                ) || 0
+              )
+            });
+          };
+        const semanticKeyById =
+          new Map();
+        const requestedSemanticKeys =
+          new Set();
+        const requestedSemanticDiscriminators =
+          new Set();
+
+        for (const requirement of
+          requirements) {
+          const id = String(
+            typeof requirement === "string"
+              ? requirement
+              : requirement?.operatorId || ""
+          ).trim();
+          if (
+            !id ||
+            conflictingFamilyIds.has(id) ||
+            typeof requirement === "string"
+          ) {
+            continue;
+          }
+          const contract =
+            requirement?.apiContract;
+          const key =
+            semanticContractKey(contract);
+          const discriminator =
+            semanticContractDiscriminator(
+              contract
+            );
+          if (!key || !discriminator) {
+            continue;
+          }
+          semanticKeyById.set(id, key);
+          requestedSemanticKeys.add(key);
+          requestedSemanticDiscriminators
+            .add(discriminator);
+        }
+
+        const semanticCandidatesByKey =
+          new Map(
+            [...requestedSemanticKeys]
+              .map(key => [key, []])
+          );
+        if (
+          requestedSemanticKeys.size > 0
+        ) {
+          let scannedDefinitions = 0;
+          for (const id in
+            resolutionDefinitions) {
+            if (
+              !Object.prototype
+                .hasOwnProperty.call(
+                  resolutionDefinitions,
+                  id
+                )
+            ) {
+              continue;
+            }
+            scannedDefinitions += 1;
+            if (
+              scannedDefinitions % 4096 ===
+                0
+            ) {
+              await yieldToBrowser();
+            }
+            const definition =
+              resolutionDefinitions[id];
+            if (
+              definition?.catalogGenerated !==
+                true ||
+              definition?.legacyCatalogAlias ===
+                true ||
+              !requestedSemanticDiscriminators
+                .has(
+                  semanticContractDiscriminator(
+                    definition
+                  )
+                )
+            ) {
+              continue;
+            }
+
+            const key = semanticContractKey(
+              definition.apiVerification
+            );
+            const matches =
+              semanticCandidatesByKey.get(
+                key
+              );
+            if (matches) {
+              matches.push(id);
+            }
+          }
+        }
+
         const entryNames = entry => {
           const definition =
-            definitions[
+            resolutionDefinitions[
               entry.canonicalId
             ];
           const owner = shortTypeName(
@@ -1991,45 +4952,111 @@
           );
         };
         const legacyPrefixes = [
-          ...new Set(
-            legacyAliasEntries.map(
-              entry => entry.prefix
-            )
-          )
+          ...legacyAliasPrefixes
         ].sort((left, right) =>
           right.length - left.length
         );
-        const legacyEntryHintIndex =
-          new Map();
-        for (const entry of
-          legacyAliasEntries) {
-          for (const name of
-            entryNames(entry)) {
-            const key =
-              `${entry.prefix}|${name}`;
-            if (
-              !legacyEntryHintIndex.has(
-                key
-              )
-            ) {
-              legacyEntryHintIndex.set(
-                key,
-                []
-              );
-            }
-            legacyEntryHintIndex
-              .get(key)
-              .push(entry);
-          }
-        }
         const hintedLegacyEntriesById =
           new Map();
+        const requestedLegacyHintsByPrefix =
+          new Map();
+
+        for (const oldId of requiredIds) {
+          const matches = new Set();
+          hintedLegacyEntriesById.set(
+            oldId,
+            matches
+          );
+          if (
+            conflictingFamilyIds.has(oldId)
+          ) {
+            continue;
+          }
+          const requirement =
+            requirementById.get(oldId);
+          const labels =
+            typeof requirement === "string"
+              ? []
+              : Array.isArray(
+                    requirement?.nodeLabels
+                  )
+                ? requirement.nodeLabels
+                : [];
+          const hints = new Set(
+            labels
+              .map(normalizedLegacyName)
+              .filter(Boolean)
+          );
+          const prefix =
+            legacyPrefixes.find(value =>
+              oldId.startsWith(value)
+            ) || "";
+          if (!prefix || hints.size === 0) {
+            continue;
+          }
+          if (
+            !requestedLegacyHintsByPrefix
+              .has(prefix)
+          ) {
+            requestedLegacyHintsByPrefix.set(
+              prefix,
+              new Map()
+            );
+          }
+          const names =
+            requestedLegacyHintsByPrefix
+              .get(prefix);
+          for (const hint of hints) {
+            if (!names.has(hint)) {
+              names.set(hint, new Set());
+            }
+            names.get(hint).add(oldId);
+          }
+        }
+
+        if (
+          requestedLegacyHintsByPrefix.size >
+            0
+        ) {
+          let scannedLegacyEntries = 0;
+          for (const entry of
+            legacyAliasEntries) {
+            scannedLegacyEntries += 1;
+            if (
+              scannedLegacyEntries % 4096 ===
+                0
+            ) {
+              await yieldToBrowser();
+            }
+            const requestedNames =
+              requestedLegacyHintsByPrefix
+                .get(entry.prefix);
+            if (!requestedNames) {
+              continue;
+            }
+            for (const name of
+              entryNames(entry)) {
+              const requestedIds =
+                requestedNames.get(name);
+              if (!requestedIds) {
+                continue;
+              }
+              for (const oldId of
+                requestedIds) {
+                hintedLegacyEntriesById
+                  .get(oldId)
+                  ?.add(entry);
+              }
+            }
+          }
+        }
+
         const exactReferencedPortsExist =
           (oldId, entry) => {
             const requirement =
               requirementById.get(oldId);
             const definition =
-              definitions[
+              resolutionDefinitions[
                 entry.canonicalId
               ];
             if (!definition) {
@@ -2073,51 +5100,6 @@
             );
           };
 
-        for (const oldId of requiredIds) {
-          const requirement =
-            requirementById.get(oldId);
-          const labels =
-            typeof requirement === "string"
-              ? []
-              : Array.isArray(
-                    requirement?.nodeLabels
-                  )
-                ? requirement.nodeLabels
-                : [];
-          const hints = new Set(
-            labels
-              .map(normalizedLegacyName)
-              .filter(Boolean)
-          );
-          const prefix =
-            legacyPrefixes.find(value =>
-              oldId.startsWith(
-                value
-              )
-            ) || "";
-
-          if (!prefix || hints.size === 0) {
-            hintedLegacyEntriesById.set(
-              oldId,
-              []
-            );
-            continue;
-          }
-
-          hintedLegacyEntriesById.set(
-            oldId,
-            [
-              ...new Set(
-                [...hints].flatMap(hint =>
-                  legacyEntryHintIndex.get(
-                    `${prefix}|${hint}`
-                  ) || []
-                )
-              )
-            ]
-          );
-        }
-
         for (const requirement of
           requirements) {
           const oldId = String(
@@ -2129,18 +5111,24 @@
           if (!requiredIds.has(oldId)) {
             continue;
           }
+          if (
+            conflictingFamilyIds.has(oldId)
+          ) {
+            unresolvedDetails[oldId] =
+              "the stored operator ID is used by multiple portable contract or parameter families; each instance family requires an explicit node-scoped resolution";
+            continue;
+          }
 
-          const key = semanticContractKey(
-            typeof requirement === "string"
-              ? null
-              : requirement?.apiContract
-          );
+          const key =
+            semanticKeyById.get(oldId) ||
+            "";
           const requiredContract =
             typeof requirement === "string"
               ? null
               : requirement?.apiContract;
           const exactCandidates = key
-            ? semanticIndex.get(key) || []
+            ? semanticCandidatesByKey
+                .get(key) || []
             : [];
           const candidates =
             exactCandidates;
@@ -2157,7 +5145,9 @@
           const compatible = candidates.map(
             candidateId => {
               const candidate =
-                definitions[candidateId];
+                resolutionDefinitions[
+                  candidateId
+                ];
               const portMigration = requiredPortMigration(
                 requiredContract,
                 candidate?.apiVerification,
@@ -2171,8 +5161,12 @@
           if (
             compatible.length === 1 &&
             (
-              Boolean(definitions[oldId]) ||
-              registerLegacyAlias(
+              Boolean(
+                resolutionDefinitions[
+                  oldId
+                ]
+              ) ||
+              registerResolutionLegacyAlias(
                 oldId,
                 {
                   canonicalId: compatible[0].candidateId
@@ -2214,9 +5208,10 @@
           const candidateEntries = [
             ...new Set(
               [...requiredIds].flatMap(id =>
-                hintedLegacyEntriesById.get(
-                  id
-                ) || []
+                [
+                  ...(hintedLegacyEntriesById
+                    .get(id) || [])
+                ]
               )
             )
           ];
@@ -2229,10 +5224,11 @@
 
             const relevantIds =
               [...requiredIds].filter(id =>
+                !conflictingFamilyIds.has(id) &&
                 (
                   hintedLegacyEntriesById
-                    .get(id) || []
-                ).includes(entry)
+                    .get(id)
+                )?.has(entry) === true
               );
             if (relevantIds.length === 0) {
               continue;
@@ -2265,7 +5261,7 @@
                   legacyId,
                   entry
                 ) &&
-                registerLegacyAlias(
+                registerResolutionLegacyAlias(
                   legacyId,
                   entry
                 )
@@ -2275,7 +5271,9 @@
                 );
                 resolved += 1;
                 migrations[legacyId] =
-                  definitions[legacyId]
+                  stagedResolutionDefinitions[
+                    legacyId
+                  ]
                     ?.canonicalOperatorId ||
                   legacyId;
                 if (
@@ -2308,18 +5306,66 @@
             unresolvedDetails[oldId] =
               (
                 hintedLegacyEntriesById
-                  .get(oldId) || []
-              ).length > 0
+                  .get(oldId)
+              )?.size > 0
                 ? "the exact legacy name was found, but its historical hash identity or referenced port contract did not match"
                 : "no portable API contract or exact stored API node name is available; manual catalog replacement is required";
           }
         }
 
         if (resolved > 0) {
-          window.__RMLNodeDefinitionRevision =
-            (Number(
-              window.__RMLNodeDefinitionRevision
-            ) || 0) + 1;
+          const committedAliases = [];
+          try {
+            for (const [id, definition] of
+              resolvedProjectionDefinitions) {
+              if (
+                resolutionDefinitions[id] ||
+                resolutionRegisterNode(
+                  id,
+                  definition
+                ) === false
+              ) {
+                throw new Error(
+                  `The compatible API alias '${id}' changed before publication.`
+                );
+              }
+              committedAliases.push([
+                id,
+                definition
+              ]);
+            }
+            window.__RMLNodeDefinitionRevision =
+              (Number(
+                window.__RMLNodeDefinitionRevision
+              ) || 0) + 1;
+            if (
+              !refreshPublishedCatalogProjectionIndex(
+                resolvedProjectionDefinitions
+              )
+            ) {
+              throw new Error(
+                "The compatible API alias could not be published with its definition-scoped catalog index."
+              );
+            }
+          } catch (error) {
+            for (const [id, definition] of
+              committedAliases) {
+              if (
+                resolutionDefinitions[id] ===
+                  definition
+              ) {
+                delete resolutionDefinitions[id];
+              }
+            }
+            for (const [id] of
+              resolvedProjectionDefinitions) {
+              legacyAliasIds.delete(id);
+            }
+            window.__RMLNodeDefinitionRevision =
+              definitionRevisionBeforeResolution;
+            throw error;
+          }
+          compatibleLegacyAliasRevision += 1;
           window.dispatchEvent(
             new CustomEvent(
               "rml-api-node-factory-ready",
@@ -2351,7 +5397,27 @@
         });
       };
 
+    const generatedTypeCount =
+      Object.values(
+        getTypeDefinitions()
+      ).filter(information =>
+        information?.catalogGenerated ===
+          true
+      ).length;
+    if (generatedTypeCount === 0) {
+      verificationErrors.push(
+        "The catalog factory generated no API graph types."
+      );
+    }
+    if (generatedNodeIds.size === 0) {
+      verificationErrors.push(
+        "The catalog factory generated no API node definitions."
+      );
+    }
+
     const report = Object.freeze({
+      moduleId:
+        API_FACTORY_MODULE_ID,
       factoryVersion: FACTORY_VERSION,
       verificationSchemaVersion:
         API_VERIFICATION_SCHEMA_VERSION,
@@ -2359,6 +5425,7 @@
       engineVersion,
       catalogSource,
       catalogFingerprint,
+      catalogProjectionRevision,
       liveCatalogVerified:
         catalogSource === "scanner" &&
         engineVersion !== "unknown" &&
@@ -2368,6 +5435,8 @@
         verificationErrors.length === 0,
       verificationErrors:
         Object.freeze([...verificationErrors]),
+      generatedTypes:
+        generatedTypeCount,
       rejectedGeneratedNodes:
         rejectedGeneratedNodeIds.size,
       registeredTypes: graphTypeByCs.size,
@@ -2381,14 +5450,74 @@
       eventNodes: eventNodeCount,
       legacyAliases:
         legacyAliasIds.size,
+      legacyAliasCandidates:
+        legacyAliasEntries.length,
       skippedMembers: skippedCount,
       totalGeneratedNodes: generatedNodeIds.size
     });
+    const catalogProjectionIndex =
+      Object.freeze({
+        version:
+          CATALOG_PROJECTION_INDEX_VERSION,
+        catalog,
+        report,
+        catalogFingerprint,
+        engineVersion,
+        revision:
+          catalogProjectionRevision,
+        typeByName:
+          catalogProjectionLookup(
+            projectionTypeByName
+          ),
+        enumByName:
+          catalogProjectionLookup(
+            projectionEnumByName
+          ),
+        genericTypeByShape:
+          catalogProjectionLookup(
+            projectionGenericTypeByShape
+          ),
+        assemblyByName:
+          catalogProjectionLookup(
+            projectionAssemblyByName
+          )
+      });
+    catalogProjectionIndexByReport.set(
+      report,
+      catalogProjectionIndex
+    );
 
     if (publish) {
+      const publishedDefinitionRevision =
+        (Number(
+          window.__RMLNodeDefinitionRevision
+        ) || 0) + 1;
+      const publishedCustomState =
+        createCatalogProjectionCustomState();
+      for (const operatorId of
+        generatedNodeIds) {
+        appendCatalogProjectionCustomDefinition(
+          publishedCustomState,
+          operatorId,
+          definitions[operatorId]
+        );
+      }
+      const publishedCatalogProjectionIndex =
+        completeCatalogProjectionIndex(
+          catalogProjectionIndex,
+          publishedCustomState,
+          publishedDefinitionRevision
+        );
+      catalogProjectionIndexByReport.set(
+        report,
+        publishedCatalogProjectionIndex
+      );
       window.RMLApiNodeFactoryReport = report;
       window.__RMLNodeDefinitionRevision =
-        (Number(window.__RMLNodeDefinitionRevision) || 0) + 1;
+        publishedDefinitionRevision;
+      publishCatalogProjectionIndex(
+        publishedCatalogProjectionIndex
+      );
       window.dispatchEvent(
         new CustomEvent("rml-api-node-factory-ready", { detail: report })
       );
@@ -2486,18 +5615,18 @@
         canonicalId
       });
       legacyAliasEntries.push(entry);
-
-      return registerLegacyAlias(
-        `${prefix}${stableHash(`${legacyBase}|${currentIndex}`)}`,
-        entry
-      );
+      legacyAliasPrefixes.add(prefix);
+      return true;
     }
 
     function registerLegacyAlias(
       id,
-      entry
+      entry,
+      targetDefinitions = definitions,
+      targetRegisterNode = registerNode
     ) {
-      const existing = definitions[id];
+      const existing =
+        targetDefinitions[id];
       if (existing) {
         return (
           id === entry.canonicalId ||
@@ -2507,7 +5636,9 @@
       }
 
       const canonical =
-        definitions[entry.canonicalId];
+        targetDefinitions[
+          entry.canonicalId
+        ];
       if (!canonical) {
         return false;
       }
@@ -2535,7 +5666,7 @@
         );
 
       const registered =
-        registerNode(
+        targetRegisterNode(
           id,
           aliasDefinition
         );
@@ -4673,8 +7804,6 @@
       : "Select the concrete generic type argument.";
   }
 
-  window.addEventListener("rml-api-catalog-ready", boot, { once: true });
-  window.addEventListener("rml-catalog-ready", boot, { once: true });
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", boot, { once: true });
   }

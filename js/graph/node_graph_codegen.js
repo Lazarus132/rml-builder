@@ -11,6 +11,7 @@ const GRAPH_MAX_ZOOM = 1.65;
 const LEGACY_GRAPH_COORDINATE_LIMIT = 100000;
 const GRAPH_COORDINATE_LIMIT = 250000000;
 const CUSTOM_CSHARP_COORDINATE_SPACE_VERSION = 2;
+const API_COMPOSITE_MAX_NESTING_DEPTH = 32;
 const GRAPH_NODE_MIN_WIDTH = 120;
 const GRAPH_NODE_MIN_HEIGHT = 96;
 const GRAPH_NODE_MAX_WIDTH =
@@ -78,9 +79,11 @@ function customCSharpFilesForNodes(
         typeof source[ownerId] === "object" &&
         !Array.isArray(source[ownerId])
       ) {
-        result[ownerId] = nodeGraphClone(
-          source[ownerId]
-        );
+        result[ownerId] =
+          cloneCustomCSharpFileGraph(
+            ownerId,
+            source[ownerId]
+          );
       }
     }
     return result;
@@ -110,7 +113,11 @@ function mergeCustomCSharpFileRegistry(
         typeof customGraph === "object" &&
         !Array.isArray(customGraph)
       ) {
-        result[ownerId] = nodeGraphClone(customGraph);
+        result[ownerId] =
+          cloneCustomCSharpFileGraph(
+            ownerId,
+            customGraph
+          );
       }
     }
     return result;
@@ -158,6 +165,33 @@ function apiCompositeInternalDefinitionAllowed(
     );
   }
 
+function apiCompositeOwnedContainerAllowed(
+    node,
+    ownedGraphs
+  ) {
+    if (
+      node?.kind !== "operator" ||
+      node.operatorId !==
+        "container.apiComposite"
+    ) {
+      return false;
+    }
+    const registry =
+      ownedGraphs &&
+      typeof ownedGraphs === "object" &&
+      !Array.isArray(ownedGraphs)
+        ? ownedGraphs
+        : {};
+    const owned = registry[node.id];
+    return Boolean(
+      owned &&
+      typeof owned === "object" &&
+      !Array.isArray(owned) &&
+      Array.isArray(owned.nodes) &&
+      Array.isArray(owned.connections)
+    );
+  }
+
 let bridge = null;
 
 let graph = null;
@@ -171,6 +205,24 @@ let apiCompositeRootOperation = false;
 let customCSharpRootOperation = false;
 
 let currentAnalysis = null;
+
+const GRAPH_ANALYSIS_CACHE_LIMIT = 4;
+
+const GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION = 1;
+
+const graphAnalysisCache = new Map();
+
+const graphAnalysisIdentityTokens = new WeakMap();
+
+const trustedGraphAnalysisCertificates = new WeakSet();
+
+let lastGraphAnalysisRecord = null;
+
+let pendingGraphAnalysisCertificate = null;
+
+let graphAnalysisCoreRunCount = 0;
+
+let graphAnalysisAsyncRequestSequence = 0;
 
 let lastPersistedGraphReference = null;
 
@@ -214,7 +266,12 @@ let graphNodeLookupLength = -1;
 
 let graphConnectionLookupLength = -1;
 
-function resetGraphRenderCaches() {
+function resetGraphRenderCaches({
+    capturePresentation = true
+  } = {}) {
+    if (capturePresentation) {
+      window.RMLCaptureGraphPresentationBeforeCacheReset?.();
+    }
     if (graphStructuralPaintFrame) {
       cancelAnimationFrame(
         graphStructuralPaintFrame
@@ -244,6 +301,7 @@ function resetGraphRenderCaches() {
     graphConnectionLookupSource = null;
     graphNodeLookupLength = -1;
     graphConnectionLookupLength = -1;
+    window.RMLResetGraphBoundaryTopologyCaches?.();
   }
 
 function nodeGraphClone(value) {
@@ -254,6 +312,32 @@ function nodeGraphClone(value) {
     return JSON.parse(
       JSON.stringify(value)
     );
+  }
+
+const customCSharpReopenCloneCapability = {};
+
+function cloneCustomCSharpFileGraph(
+    ownerId,
+    customGraph
+  ) {
+    const cloned = nodeGraphClone(customGraph);
+    try {
+      if (
+        typeof transportCustomCSharpReopenIdentity ===
+          "function"
+      ) {
+        transportCustomCSharpReopenIdentity(
+          ownerId,
+          customGraph,
+          cloned,
+          customCSharpReopenCloneCapability
+        );
+      }
+    } catch {
+      // Clone transport is an optional, ephemeral optimization. A missing or
+      // stale certificate must never prevent the durable graph clone.
+    }
+    return cloned;
   }
 
 function nodeGraphClamp(
@@ -314,7 +398,55 @@ function collectListTypeId(
       : null;
   }
 
-function ensureCollectListType(
+function exactGraphTypeInformationMatch(
+    left,
+    right
+  ) {
+    if (Object.is(left, right)) {
+      return true;
+    }
+    if (
+      Array.isArray(left) ||
+      Array.isArray(right)
+    ) {
+      return Boolean(
+        Array.isArray(left) &&
+        Array.isArray(right) &&
+        left.length === right.length &&
+        left.every((value, index) =>
+          exactGraphTypeInformationMatch(
+            value,
+            right[index]
+          )
+        )
+      );
+    }
+    if (
+      !left ||
+      !right ||
+      typeof left !== "object" ||
+      typeof right !== "object"
+    ) {
+      return false;
+    }
+    const leftKeys =
+      Object.keys(left).sort();
+    const rightKeys =
+      Object.keys(right).sort();
+    return (
+      leftKeys.length === rightKeys.length &&
+      leftKeys.every(
+        (key, index) =>
+          key === rightKeys[index] &&
+          exactGraphTypeInformationMatch(
+            left[key],
+            right[key]
+          )
+      )
+    );
+  }
+
+function canonicalCollectListTypeInformation(
     elementType
   ) {
     const normalized = String(
@@ -343,8 +475,7 @@ function ensureCollectListType(
       graphTypeAssemblyReferences(
         normalized
       );
-
-    registerGraphType(id, {
+    const information = {
       label:
         `List<${typeLabel(normalized)}>`,
       short:
@@ -383,7 +514,134 @@ function ensureCollectListType(
             reference.include
         ),
       assemblyReferences
-    });
+    };
+    const normalizedAssemblyReferences =
+      information.assemblyReferences
+        .filter(reference =>
+          reference &&
+          typeof reference === "object" &&
+          String(
+            reference.include || ""
+          ).trim()
+        )
+        .map(reference => ({
+          include: String(
+            reference.include || ""
+          ).trim(),
+          hintPath: String(
+            reference.hintPath || ""
+          ).trim(),
+          private: reference.private === true
+        }));
+    const assemblies = [...new Set([
+      ...information.assemblies,
+      information.assembly
+    ]
+      .map(value =>
+        String(value || "").trim()
+      )
+      .filter(Boolean))];
+
+    return {
+      label: information.label || id,
+      short:
+        information.short ||
+        id.slice(0, 4).toUpperCase(),
+      color:
+        information.color || "#9da8b4",
+      ...information,
+      assemblies,
+      assemblyReferences:
+        normalizedAssemblyReferences
+    };
+  }
+
+function isCanonicalSyntheticCollectorType(
+    type,
+    information
+  ) {
+    if (
+      typeof type !== "string" ||
+      type !== type.trim()
+    ) {
+      return false;
+    }
+    const id = type;
+    if (!isCollectListType(id)) {
+      return false;
+    }
+    const elementType =
+      id.slice(
+        COLLECT_LIST_TYPE_PREFIX.length
+      );
+    const expected =
+      canonicalCollectListTypeInformation(
+        elementType
+      );
+    return Boolean(
+      expected &&
+      String(
+        information
+          ?.enumerableElementType ||
+        ""
+      ).trim() === elementType &&
+      exactGraphTypeInformationMatch(
+        information,
+        expected
+      )
+    );
+  }
+
+function ensureCollectListType(
+    elementType
+  ) {
+    const normalized = String(
+      elementType || ""
+    ).trim();
+    const id =
+      collectListTypeId(
+        normalized
+      );
+    const expected =
+      canonicalCollectListTypeInformation(
+        normalized
+      );
+    if (!id || !expected) {
+      return null;
+    }
+    const existing =
+      TYPE_INFO[id];
+
+    if (existing) {
+      const replaceableSyntheticCollector =
+        existing.syntheticCollectionType ===
+          true &&
+        existing.collectorCollection ===
+          true &&
+        String(
+          existing
+            .enumerableElementType ||
+          ""
+        ).trim() === normalized;
+
+      if (
+        replaceableSyntheticCollector &&
+        exactGraphTypeInformationMatch(
+          existing,
+          expected
+        )
+      ) {
+        return id;
+      }
+
+      if (!replaceableSyntheticCollector) {
+        throw new Error(
+          `Graph type '${id}' already exists with a conflicting collection contract.`
+        );
+      }
+    }
+
+    registerGraphType(id, expected);
 
     return id;
   }
@@ -1431,11 +1689,323 @@ function applyGraphView(view) {
     graph.nextSequence = view.nextSequence;
   }
 
+function apiCompositeEditorChain(
+    editor = apiCompositeEditor,
+    {
+      outermostFirst = false
+    } = {}
+  ) {
+    const result = [];
+    const visited = new Set();
+    let current = editor || null;
+    const limit = Math.max(
+      1,
+      Number(
+        API_COMPOSITE_MAX_NESTING_DEPTH
+      ) || 32
+    ) + 1;
+    while (
+      current &&
+      !visited.has(current) &&
+      result.length < limit
+    ) {
+      visited.add(current);
+      result.push(current);
+      current =
+        current.parentEditor ||
+        current.parent ||
+        null;
+    }
+    return outermostFirst
+      ? result.reverse()
+      : result;
+  }
+
+function apiCompositeEditorOwnerPath(
+    editor = apiCompositeEditor
+  ) {
+    if (!editor) return [];
+    const rawStored = Array.isArray(
+      editor.ownerPath
+    )
+      ? editor.ownerPath
+      : [];
+    const stored = rawStored.map(value =>
+      String(value || "").trim()
+    );
+    if (
+      stored.some(value => !value) ||
+      stored.length >
+        API_COMPOSITE_MAX_NESTING_DEPTH
+    ) {
+      return [];
+    }
+    if (stored.length > 0) {
+      return stored;
+    }
+    return apiCompositeEditorChain(
+      editor,
+      { outermostFirst: true }
+    )
+      .map(frame =>
+        String(
+          frame.containerNodeId || ""
+        ).trim()
+      )
+      .filter(Boolean);
+  }
+
+function apiCompositeDocumentForOwnerPath(
+    ownerPath
+  ) {
+    if (!graph) return null;
+    const path = Array.isArray(ownerPath)
+      ? ownerPath
+      : [];
+    if (
+      path.length >
+        API_COMPOSITE_MAX_NESTING_DEPTH
+    ) {
+      return null;
+    }
+    let documentValue = graph;
+    const visitedDocuments = new WeakSet();
+    visitedDocuments.add(documentValue);
+    for (const rawOwnerId of path) {
+      const ownerId = String(
+        rawOwnerId || ""
+      ).trim();
+      const next =
+        ownerId &&
+        documentValue
+          ?.apiCompositeGraphs?.[ownerId];
+      if (
+        !next ||
+        typeof next !== "object" ||
+        Array.isArray(next) ||
+        visitedDocuments.has(next)
+      ) {
+        return null;
+      }
+      visitedDocuments.add(next);
+      documentValue = next;
+    }
+    return documentValue;
+  }
+
+function apiCompositeParentDocumentForOwnerPath(
+    ownerPath
+  ) {
+    const path = Array.isArray(ownerPath)
+      ? ownerPath
+      : [];
+    if (path.length === 0) return null;
+    return apiCompositeDocumentForOwnerPath(
+      path.slice(0, -1)
+    );
+  }
+
+function apiCompositeEditorDocument(
+    editor = apiCompositeEditor
+  ) {
+    const ownerPath =
+      apiCompositeEditorOwnerPath(editor);
+    if (!editor || ownerPath.length === 0) {
+      return null;
+    }
+    return apiCompositeDocumentForOwnerPath(
+      ownerPath
+    );
+  }
+
+function apiCompositeEditorCommitDocument(
+    editor,
+    composite
+  ) {
+    if (!editor || !composite || !graph) {
+      return null;
+    }
+    const ownerPath =
+      apiCompositeEditorOwnerPath(editor);
+    const ownerId = String(
+      ownerPath.at(-1) || ""
+    );
+    const parentDocument =
+      apiCompositeParentDocumentForOwnerPath(
+        ownerPath
+      );
+    if (
+      !ownerId ||
+      !parentDocument ||
+      !parentDocument.apiCompositeGraphs ||
+      typeof parentDocument
+        .apiCompositeGraphs !== "object" ||
+      Array.isArray(
+        parentDocument.apiCompositeGraphs
+      )
+    ) {
+      return null;
+    }
+    parentDocument.apiCompositeGraphs[
+      ownerId
+    ] = composite;
+    return composite;
+  }
+
+function apiCompositeVisibleDocument() {
+    return apiCompositeEditor
+      ? apiCompositeEditorDocument()
+      : graph;
+  }
+
+function activeGraphCustomCSharpFileRegistry({
+    create = false
+  } = {}) {
+    const customOwnerDocument =
+      typeof customCSharpEditor !==
+          "undefined" &&
+        customCSharpEditor
+        ? customCSharpEditor
+            .openOwnerDocument || null
+        : null;
+    const documentValue =
+      customOwnerDocument ||
+      apiCompositeVisibleDocument();
+    const existing =
+      documentValue?.customCSharpFiles;
+    if (
+      existing &&
+      typeof existing === "object" &&
+      !Array.isArray(existing)
+    ) {
+      return existing;
+    }
+    if (!create || !documentValue) {
+      return {};
+    }
+    documentValue.customCSharpFiles = {};
+    return documentValue.customCSharpFiles;
+  }
+
+function apiCompositeVisibleOwnedGraph(
+    ownerId
+  ) {
+    const documentValue =
+      apiCompositeVisibleDocument();
+    return documentValue
+      ?.apiCompositeGraphs?.[
+        String(ownerId || "")
+      ] || null;
+  }
+
+function outermostApiCompositeEditor() {
+    return apiCompositeEditorChain(
+      apiCompositeEditor,
+      { outermostFirst: true }
+    )[0] || null;
+  }
+
 function captureCustomCSharpEditorView(
     options = {}
   ) {
     if (!customCSharpEditor || !graph) return null;
-    const existing = graph.customCSharpFiles?.[customCSharpEditor.fileNodeId] || {};
+    const fileNodeId = String(
+      customCSharpEditor.fileNodeId || ""
+    );
+    const compositeDocument = apiCompositeEditor
+      ? apiCompositeEditorDocument(
+          apiCompositeEditor
+        )
+      : null;
+    const compositeOwner =
+      compositeDocument?.nodes?.find(node =>
+        node?.operatorId === "csharp.file" &&
+        String(node.id || "") === fileNodeId
+      ) || null;
+    const ownerDocument = compositeOwner
+      ? compositeDocument
+      : null;
+    const ownerRegistry =
+      ownerDocument
+        ? (
+            ownerDocument.customCSharpFiles &&
+            typeof ownerDocument
+              .customCSharpFiles === "object" &&
+            !Array.isArray(
+              ownerDocument.customCSharpFiles
+            )
+              ? ownerDocument
+                  .customCSharpFiles
+              : null
+          )
+        : activeGraphCustomCSharpFileRegistry();
+    const openPreparation =
+      customCSharpEditor.openPreparation ||
+      null;
+    const preparedBase =
+      openPreparation?.preparedGraph &&
+      typeof restoreCustomCSharpOpenPreparation ===
+        "function" &&
+      restoreCustomCSharpOpenPreparation(
+        openPreparation
+      )
+        ? openPreparation.preparedGraph
+        : null;
+    const existing =
+      preparedBase ||
+      ownerRegistry?.[fileNodeId] ||
+      {};
+    const commitCaptured = captured => {
+      if (ownerDocument) {
+        ownerDocument.customCSharpFiles =
+          ownerDocument.customCSharpFiles &&
+          typeof ownerDocument
+            .customCSharpFiles === "object" &&
+          !Array.isArray(
+            ownerDocument.customCSharpFiles
+          )
+            ? ownerDocument.customCSharpFiles
+            : {};
+        ownerDocument.customCSharpFiles[
+          fileNodeId
+        ] = captured;
+      } else {
+        const rootRegistry =
+          activeGraphCustomCSharpFileRegistry({
+            create: true
+          });
+        rootRegistry[fileNodeId] =
+          captured;
+      }
+      customCSharpEditor.openPreparation =
+        null;
+      customCSharpEditor.openStoredGraph =
+        captured;
+      customCSharpEditor.openOwnerSource =
+        String(
+          customCSharpEditor.openOwner
+            ?.parameters?.source || ""
+        );
+      customCSharpEditor.openNodes =
+        graph.nodes;
+      customCSharpEditor.openConnections =
+        graph.connections;
+      customCSharpEditor.openContentRevision =
+        typeof graphViewContentRevision ===
+          "function"
+          ? graphViewContentRevision(
+              graph.nodes
+            )
+          : null;
+      if (
+        typeof customCSharpOpenPreparationViewState ===
+          "function"
+      ) {
+        customCSharpEditor.openViewState =
+          customCSharpOpenPreparationViewState();
+      }
+      return captured;
+    };
     if (
       options.synchronizeSource === false
     ) {
@@ -1443,34 +2013,78 @@ function captureCustomCSharpEditorView(
         ...existing,
         ...graphViewFrom(graph)
       };
-      graph.customCSharpFiles[
-        customCSharpEditor.fileNodeId
-      ] = captured;
-      return captured;
+      return commitCaptured(captured);
     }
     const captured = {
       ...existing,
       ...graphViewFrom(graph)
     };
-    graph.customCSharpFiles[customCSharpEditor.fileNodeId] = captured;
-    const rendered = window.RMLVisualCSharp?.renderCustomCSharpGraph?.(captured);
+    const rendered =
+      existing.sourceEditedInInspector === true
+        ? null
+        : window.RMLVisualCSharp?.renderCustomCSharpGraph?.(captured);
     if (rendered && typeof rendered.source === "string") {
       captured.sourceEditedInInspector = false;
       captured.sourceHash =
         window.RMLVisualCSharp?.sourceHash?.(
           rendered.source
         ) || hashText(rendered.source);
-      const owner = customCSharpEditor.mainView.nodes.find(
-        node => node.id === customCSharpEditor.fileNodeId
-      );
-      if (owner) {
-        owner.parameters = owner.parameters && typeof owner.parameters === "object"
-          ? owner.parameters
-          : {};
+      const visibleOwner =
+        customCSharpEditor.mainView.nodes.find(
+          node =>
+            String(node?.id || "") === fileNodeId
+        );
+
+      const exactOwnerDocument =
+        customCSharpEditor.openOwnerDocument ||
+        ownerDocument;
+
+      const owners = new Set([
+        customCSharpEditor.openOwner,
+        visibleOwner,
+        compositeOwner
+      ]);
+
+      if (
+        typeof customCSharpEditorNodeLocations ===
+          "function"
+      ) {
+        for (const location of
+          customCSharpEditorNodeLocations(fileNodeId)) {
+          if (
+            location.node ===
+              customCSharpEditor.openOwner ||
+            location.document === exactOwnerDocument
+          ) {
+            owners.add(location.node);
+          }
+        }
+      }
+
+      for (const owner of owners) {
+        if (!owner) continue;
+
+        owner.parameters =
+          owner.parameters &&
+          typeof owner.parameters === "object"
+            ? owner.parameters
+            : {};
+
         owner.parameters.source = rendered.source;
       }
+
+      if (
+        typeof synchronizeCustomCSharpInspectorValue ===
+          "function"
+      ) {
+        synchronizeCustomCSharpInspectorValue(
+          fileNodeId,
+          "source",
+          rendered.source
+        );
+      }
     }
-    return captured;
+    return commitCaptured(captured);
   }
 
 function apiCompositeBoundaryRecords(
@@ -1538,32 +2152,181 @@ function apiCompositeBoundaryRecords(
     return result;
   }
 
+function sanitizeApiCompositeElementIdentity(
+    value,
+    {
+      templateIdFallback = "",
+      nodes = [],
+      connections = [],
+      boundaries = []
+    } = {}
+  ) {
+    const source =
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value)
+        ? value
+        : {};
+    const sourceNodes =
+      source.nodes &&
+      typeof source.nodes === "object" &&
+      !Array.isArray(source.nodes)
+        ? source.nodes
+        : {};
+    const sourceConnections =
+      source.connections &&
+      typeof source.connections === "object" &&
+      !Array.isArray(source.connections)
+        ? source.connections
+        : {};
+    const sourcePoints =
+      source.points &&
+      typeof source.points === "object" &&
+      !Array.isArray(source.points)
+        ? source.points
+        : {};
+    const sourceBoundaries =
+      source.boundaries &&
+      typeof source.boundaries === "object" &&
+      !Array.isArray(source.boundaries)
+        ? source.boundaries
+        : {};
+    const stableValue = value =>
+      typeof value === "string"
+        ? value.trim().slice(0, 360)
+        : "";
+    const uniqueValue = (
+      requested,
+      fallback,
+      used
+    ) => {
+      let candidate =
+        stableValue(requested) ||
+        stableValue(fallback) ||
+        "element";
+      const base = candidate;
+      let suffix = 2;
+      while (used.has(candidate)) {
+        const suffixText = `#${suffix}`;
+        candidate =
+          `${base.slice(0, Math.max(0, 360 - suffixText.length))}${suffixText}`;
+        suffix += 1;
+      }
+      used.add(candidate);
+      return candidate;
+    };
+    const result = {
+      version: 1,
+      templateId:
+        stableValue(source.templateId)
+          .slice(0, 180) ||
+        stableValue(templateIdFallback)
+          .slice(0, 180),
+      nodes: {},
+      connections: {},
+      points: {},
+      boundaries: {}
+    };
+
+    const usedNodes = new Set();
+    for (const node of
+      Array.isArray(nodes) ? nodes : []) {
+      const nodeId = String(node?.id || "");
+      if (!nodeId) continue;
+      result.nodes[nodeId] = uniqueValue(
+        sourceNodes[nodeId],
+        `node:${nodeId}`,
+        usedNodes
+      );
+    }
+
+    const usedConnections = new Set();
+    const usedPoints = new Set();
+    for (const connection of
+      Array.isArray(connections)
+        ? connections
+        : []) {
+      const connectionId = String(
+        connection?.id || ""
+      );
+      if (!connectionId) continue;
+      const connectionStableId =
+        uniqueValue(
+          sourceConnections[connectionId],
+          `connection:${connectionId}`,
+          usedConnections
+        );
+      result.connections[connectionId] =
+        connectionStableId;
+      const pointSource =
+        sourcePoints[connectionId] &&
+        typeof sourcePoints[connectionId] ===
+          "object" &&
+        !Array.isArray(
+          sourcePoints[connectionId]
+        )
+          ? sourcePoints[connectionId]
+          : {};
+      const pointMap = {};
+      for (const point of
+        Array.isArray(connection?.points)
+          ? connection.points
+          : []) {
+        const pointId = String(
+          point?.id || ""
+        );
+        if (!pointId) continue;
+        pointMap[pointId] = uniqueValue(
+          pointSource[pointId],
+          `point:${connectionStableId}:${pointId}`,
+          usedPoints
+        );
+      }
+      result.points[connectionId] =
+        pointMap;
+    }
+
+    const usedBoundaries = new Set();
+    for (const boundary of
+      apiCompositeBoundaryRecords(
+        boundaries
+      )) {
+      const boundaryKey =
+        `${boundary.direction}\u0000${boundary.id}`;
+      result.boundaries[boundaryKey] =
+        uniqueValue(
+          sourceBoundaries[boundaryKey],
+          `boundary:${boundary.direction}:${boundary.id}`,
+          usedBoundaries
+        );
+    }
+    return result;
+  }
+
 function apiCompositeBoundaryEndpointKey(
     boundary
   ) {
     return `${String(boundary?.direction || "")}\u0000${String(boundary?.internalNodeId || "")}\u0000${String(boundary?.internalPortId || "")}`;
   }
 
-function apiCompositeBoundaryHasExternalWire(
-    boundary
-  ) {
-    if (!apiCompositeEditor) return false;
-    const ownerId =
-      apiCompositeEditor.containerNodeId;
-    return apiCompositeEditor.mainView
-      .connections.some(connection =>
-        boundary.direction === "input"
-          ? connection.toNode === ownerId &&
-              connection.toPort === boundary.id
-          : connection.fromNode === ownerId &&
-              connection.fromPort === boundary.id
-      );
-  }
-
 function apiCompositePortHasInternalWire(
     boundary
   ) {
-    return graph.connections.some(connection =>
+    return apiCompositePortHasInternalWireInDocument(
+      graph,
+      boundary
+    );
+  }
+
+function apiCompositePortHasInternalWireInDocument(
+    documentValue,
+    boundary
+  ) {
+    return (
+      Array.isArray(documentValue?.connections)
+        ? documentValue.connections
+        : []
+    ).some(connection =>
       boundary.direction === "input"
         ? connection.toNode ===
             boundary.internalNodeId &&
@@ -1572,7 +2335,7 @@ function apiCompositePortHasInternalWire(
         : connection.fromNode ===
             boundary.internalNodeId &&
           connection.fromPort ===
-            boundary.internalPortId
+          boundary.internalPortId
     );
   }
 
@@ -1596,6 +2359,1585 @@ function nextApiCompositeBoundaryId(
     return `${prefix}-${index}`;
   }
 
+function forwardedApiCompositeBoundary(
+    owner,
+    boundary,
+    boundaries
+  ) {
+    return {
+      id: nextApiCompositeBoundaryId(
+        boundary.direction,
+        boundaries
+      ),
+      direction: boundary.direction,
+      label: `${String(
+        owner?.label ||
+        owner?.parameters?.title ||
+        "API Composite"
+      )} · ${String(
+        boundary.label || boundary.id
+      )}`.slice(0, 160),
+      type: String(
+        boundary.type || ""
+      ).slice(0, 320),
+      typeVar: String(
+        boundary.typeVar || ""
+      ).slice(0, 120),
+      constraint: String(
+        boundary.constraint || "value"
+      ).slice(0, 120),
+      autoExposed: true,
+      internalNodeId: String(
+        owner?.id || ""
+      ),
+      internalPortId: boundary.id
+    };
+  }
+
+function apiCompositeBoundaryPortSpecification(
+    documentValue,
+    boundary
+  ) {
+    const node = (
+      Array.isArray(documentValue?.nodes)
+        ? documentValue.nodes
+        : []
+    ).find(candidate =>
+      String(candidate?.id || "") ===
+        String(boundary?.internalNodeId || "")
+    );
+    if (!node) return null;
+
+    if (
+      node.operatorId ===
+        "container.apiComposite"
+    ) {
+      const nestedBoundary =
+        apiCompositeBoundaryRecords(
+          node.parameters?.boundaryPorts
+        ).find(candidate =>
+          candidate.direction ===
+            boundary.direction &&
+          candidate.id ===
+            boundary.internalPortId
+        );
+      return nestedBoundary
+        ? {
+            id: nestedBoundary.id,
+            label: nestedBoundary.label,
+            type: nestedBoundary.type,
+            typeVar:
+              nestedBoundary.typeVar,
+            constraint:
+              nestedBoundary.constraint
+          }
+        : null;
+    }
+
+    const definition = nodeDefinition(node);
+    const definitionSpecifications =
+      boundary.direction === "output"
+        ? definition?.outputs || []
+        : definition?.inputs || [];
+    const currentSpecification =
+      definitionSpecifications.find(
+        specification =>
+          specification.id ===
+            boundary.internalPortId
+      );
+    if (currentSpecification) {
+      return currentSpecification;
+    }
+    if (
+      definition &&
+      definition.unavailableApiContract !==
+        true
+    ) {
+      return null;
+    }
+
+    const storedContract =
+      node.apiContract &&
+      typeof node.apiContract === "object" &&
+      !Array.isArray(node.apiContract)
+        ? node.apiContract
+        : definition?.preservedApiContract;
+    const storedPortValues =
+      boundary.direction === "output"
+        ? storedContract?.outputPorts
+        : storedContract?.inputPorts;
+    const storedSpecifications =
+      Array.isArray(storedPortValues)
+        ? storedPortValues
+        : [];
+    return storedSpecifications.find(
+      specification =>
+        String(specification?.id || "") ===
+          String(
+            boundary.internalPortId || ""
+          )
+    ) || null;
+  }
+
+function apiCompositeExpandedConnectionRemovalIds(
+    connections,
+    connectionIds,
+    branchRouting = null
+  ) {
+    const list = Array.isArray(connections)
+      ? connections
+      : [];
+    const removed = new Set(
+      Array.isArray(connectionIds) ||
+      connectionIds instanceof Set
+        ? connectionIds
+        : [connectionIds]
+    );
+    removed.delete("");
+    removed.delete(null);
+    removed.delete(undefined);
+
+    const childrenByConnectionId = new Map();
+    const availableConnectionIds = new Set(
+      list.map(connection =>
+        String(connection?.id || "")
+      )
+    );
+    for (const connection of list) {
+      const parentId =
+        connection?.branchFrom?.connectionId;
+      if (!parentId) continue;
+      const children =
+        childrenByConnectionId.get(parentId) ||
+        [];
+      children.push(connection.id);
+      childrenByConnectionId.set(
+        parentId,
+        children
+      );
+    }
+    if (
+      branchRouting &&
+      typeof branchRouting === "object" &&
+      !Array.isArray(branchRouting)
+    ) {
+      for (const [childId, branch] of
+        Object.entries(branchRouting)) {
+        const parentId = String(
+          branch?.connectionId || ""
+        );
+        if (
+          !parentId ||
+          !childId ||
+          !availableConnectionIds.has(
+            childId
+          )
+        ) {
+          continue;
+        }
+        const children =
+          childrenByConnectionId.get(
+            parentId
+          ) || [];
+        if (!children.includes(childId)) {
+          children.push(childId);
+        }
+        childrenByConnectionId.set(
+          parentId,
+          children
+        );
+      }
+    }
+
+    const queue = [...removed];
+    for (
+      let index = 0;
+      index < queue.length;
+      index += 1
+    ) {
+      for (const childId of
+        childrenByConnectionId.get(
+          queue[index]
+        ) || []) {
+        if (removed.has(childId)) continue;
+        removed.add(childId);
+        queue.push(childId);
+      }
+    }
+    return removed;
+  }
+
+function apiCompositeRemoveConnectionsFromDocument(
+    documentValue,
+    connectionIds
+  ) {
+    const connections =
+      Array.isArray(documentValue?.connections)
+        ? documentValue.connections
+        : [];
+    const removed =
+      apiCompositeExpandedConnectionRemovalIds(
+        connections,
+        connectionIds,
+        documentValue?.branchRouting
+      );
+    if (removed.size === 0) return removed;
+
+    const retained = connections.filter(
+      connection =>
+        !removed.has(connection.id)
+    );
+    connections.splice(
+      0,
+      connections.length,
+      ...retained
+    );
+    normalizeConnectionRouting(connections);
+
+    if (
+      removed.has(
+        documentValue.selectedConnectionId
+      )
+    ) {
+      documentValue.selectedConnectionId =
+        null;
+    }
+    if (
+      removed.has(
+        documentValue.selectedWirePoint
+          ?.connectionId
+      )
+    ) {
+      documentValue.selectedWirePoint = null;
+    }
+
+    const availableById = new Map(
+      connections.map(connection => [
+        connection.id,
+        connection
+      ])
+    );
+    if (
+      documentValue.branchRouting &&
+      typeof documentValue.branchRouting ===
+        "object" &&
+      !Array.isArray(
+        documentValue.branchRouting
+      )
+    ) {
+      for (const [connectionId, branch] of
+        Object.entries(
+          documentValue.branchRouting
+        )) {
+        const parent = availableById.get(
+          branch?.connectionId
+        );
+        if (
+          !availableById.has(connectionId) ||
+          !parent ||
+          !(parent.points || []).some(point =>
+            point.id === branch?.pointId
+          )
+        ) {
+          delete documentValue.branchRouting[
+            connectionId
+          ];
+        }
+      }
+    }
+    return removed;
+  }
+
+function apiCompositeRemoveInvalidOwnerConnections(
+    parentDocument,
+    ownerId,
+    boundaries
+  ) {
+    const inputs = new Set();
+    const outputs = new Set();
+    for (const boundary of
+      apiCompositeBoundaryRecords(boundaries)) {
+      (
+        boundary.direction === "output"
+          ? outputs
+          : inputs
+      ).add(boundary.id);
+    }
+    const invalidIds = (
+      Array.isArray(parentDocument?.connections)
+        ? parentDocument.connections
+        : []
+    ).filter(connection =>
+      (
+        connection.fromNode === ownerId &&
+        !outputs.has(connection.fromPort)
+      ) ||
+      (
+        connection.toNode === ownerId &&
+        !inputs.has(connection.toPort)
+      )
+    ).map(connection => connection.id);
+    return apiCompositeRemoveConnectionsFromDocument(
+      parentDocument,
+      invalidIds
+    );
+  }
+
+function apiCompositeBoundaryListsEqual(
+    first,
+    second
+  ) {
+    return JSON.stringify(
+      apiCompositeBoundaryRecords(first)
+    ) === JSON.stringify(
+      apiCompositeBoundaryRecords(second)
+    );
+  }
+
+function reconcileApiCompositeBoundaryTree(
+    rootDocument,
+    options = {}
+  ) {
+    const invalidateCaches =
+      options.invalidateCaches !== false;
+    const statistics = {
+      addedBoundaries: 0,
+      removedBoundaries: 0,
+      disconnectedWires: 0,
+      disconnectedConnectionIds: [],
+      synchronizedOwners: 0
+    };
+    const disconnectedConnectionIds =
+      new Set();
+    if (
+      !rootDocument ||
+      typeof rootDocument !== "object" ||
+      Array.isArray(rootDocument)
+    ) {
+      return statistics;
+    }
+
+    const requestedChangedOwnerPath =
+      Array.isArray(
+        options.changedOwnerPath
+      )
+        ? options.changedOwnerPath.map(value =>
+            String(value || "").trim()
+          )
+        : null;
+    const targetedPath =
+      requestedChangedOwnerPath &&
+      requestedChangedOwnerPath.every(Boolean) &&
+      requestedChangedOwnerPath.length <=
+        API_COMPOSITE_MAX_NESTING_DEPTH &&
+      apiCompositeHierarchyContextAtOwnerPath(
+        rootDocument,
+        requestedChangedOwnerPath
+      )
+        ? requestedChangedOwnerPath
+        : null;
+
+    const stack = new WeakSet();
+    const visit = (
+      documentValue,
+      depth,
+      isRoot,
+      pathIndex = 0
+    ) => {
+      if (
+        depth >
+          API_COMPOSITE_MAX_NESTING_DEPTH
+      ) {
+        throw new Error(
+          `API Composite nesting exceeds the safe depth limit of ${API_COMPOSITE_MAX_NESTING_DEPTH}.`
+        );
+      }
+      if (stack.has(documentValue)) {
+        throw new Error(
+          "API Composite nesting contains a cycle."
+        );
+      }
+      stack.add(documentValue);
+      try {
+        const nodes =
+          Array.isArray(documentValue.nodes)
+            ? documentValue.nodes
+            : [];
+        const registry =
+          documentValue.apiCompositeGraphs &&
+          typeof documentValue
+            .apiCompositeGraphs === "object" &&
+          !Array.isArray(
+            documentValue.apiCompositeGraphs
+          )
+            ? documentValue.apiCompositeGraphs
+            : {};
+        const candidateBoundaries = isRoot
+          ? []
+          : apiCompositeBoundaryRecords(
+              documentValue.boundaryPorts
+            );
+        const candidateBoundaryEndpoints =
+          new Set(
+            candidateBoundaries.map(
+              apiCompositeBoundaryEndpointKey
+            )
+          );
+
+        const ownerNodes = targetedPath
+          ? pathIndex < targetedPath.length
+            ? nodes.filter(node =>
+                node?.operatorId ===
+                  "container.apiComposite" &&
+                String(node.id || "") ===
+                  targetedPath[pathIndex]
+              )
+            : []
+          : nodes;
+
+        for (const owner of ownerNodes) {
+          if (
+            owner?.operatorId !==
+              "container.apiComposite"
+          ) {
+            continue;
+          }
+          const child = registry[owner.id];
+          if (
+            !child ||
+            typeof child !== "object" ||
+            Array.isArray(child)
+          ) {
+            owner.parameters =
+              owner.parameters &&
+              typeof owner.parameters ===
+                "object" &&
+              !Array.isArray(owner.parameters)
+                ? owner.parameters
+                : {};
+            if (
+              !Array.isArray(
+                owner.parameters.boundaryPorts
+              ) ||
+              apiCompositeBoundaryRecords(
+                owner.parameters.boundaryPorts
+              ).length > 0 ||
+              Number(
+                owner.parameters.memberCount || 0
+              ) !== 0
+            ) {
+              statistics.synchronizedOwners +=
+                1;
+            }
+            owner.parameters.boundaryPorts = [];
+            owner.parameters.memberCount = 0;
+            const removed =
+              apiCompositeRemoveInvalidOwnerConnections(
+                documentValue,
+                owner.id,
+                []
+              );
+            statistics.disconnectedWires +=
+              removed.size;
+            for (const connectionId of removed) {
+              disconnectedConnectionIds.add(
+                connectionId
+              );
+            }
+            continue;
+          }
+          const visitChild = Boolean(
+            !targetedPath ||
+            (
+              pathIndex < targetedPath.length &&
+              String(owner.id || "") ===
+                targetedPath[pathIndex]
+            )
+          );
+          if (visitChild) {
+            visit(
+              child,
+              depth + 1,
+              false,
+              pathIndex + 1
+            );
+          }
+
+          const childBoundaries =
+            apiCompositeBoundaryRecords(
+              child.boundaryPorts
+            );
+          if (visitChild) {
+            child.boundaryPorts =
+              childBoundaries;
+          }
+          owner.parameters =
+            owner.parameters &&
+            typeof owner.parameters ===
+              "object" &&
+            !Array.isArray(owner.parameters)
+              ? owner.parameters
+              : {};
+          if (
+            !apiCompositeBoundaryListsEqual(
+              owner.parameters.boundaryPorts,
+              childBoundaries
+            )
+          ) {
+            statistics.synchronizedOwners += 1;
+          }
+          owner.parameters.boundaryPorts =
+            nodeGraphClone(childBoundaries);
+          owner.parameters.memberCount =
+            Array.isArray(child.nodes)
+              ? child.nodes.length
+              : 0;
+
+          if (!isRoot) {
+            for (const childBoundary of
+              childBoundaries) {
+              const endpoint = {
+                direction:
+                  childBoundary.direction,
+                internalNodeId: owner.id,
+                internalPortId:
+                  childBoundary.id
+              };
+              const endpointKey =
+                apiCompositeBoundaryEndpointKey(
+                  endpoint
+                );
+              if (
+                candidateBoundaryEndpoints.has(
+                  endpointKey
+                ) ||
+                apiCompositePortHasInternalWireInDocument(
+                  documentValue,
+                  endpoint
+                )
+              ) {
+                continue;
+              }
+              const forwarded =
+                forwardedApiCompositeBoundary(
+                  owner,
+                  childBoundary,
+                  candidateBoundaries
+                );
+              candidateBoundaries.push(
+                forwarded
+              );
+              candidateBoundaryEndpoints.add(
+                endpointKey
+              );
+              statistics.addedBoundaries += 1;
+            }
+          }
+
+          const removed =
+            apiCompositeRemoveInvalidOwnerConnections(
+              documentValue,
+              owner.id,
+              childBoundaries
+            );
+          statistics.disconnectedWires +=
+            removed.size;
+          for (const connectionId of removed) {
+            disconnectedConnectionIds.add(
+              connectionId
+            );
+          }
+        }
+
+        if (!isRoot) {
+          const sourceBoundaries =
+            candidateBoundaries;
+          const boundaries = [];
+          for (const boundary of
+            sourceBoundaries) {
+            const specification =
+              apiCompositeBoundaryPortSpecification(
+                documentValue,
+                boundary
+              );
+            if (
+              !specification ||
+              apiCompositePortHasInternalWireInDocument(
+                documentValue,
+                boundary
+              )
+            ) {
+              statistics.removedBoundaries +=
+                1;
+              continue;
+            }
+            boundaries.push({
+              ...boundary,
+              label: String(
+                boundary.label ||
+                specification.label ||
+                boundary.internalPortId
+              ).slice(0, 160),
+              type: String(
+                specification.type ||
+                boundary.type ||
+                ""
+              ).slice(0, 320),
+              typeVar:
+                specification.type
+                  ? ""
+                  : String(
+                      specification.typeVar ||
+                      boundary.typeVar ||
+                      ""
+                    ).slice(0, 120),
+              constraint: String(
+                specification.constraint ||
+                boundary.constraint ||
+                "value"
+              ).slice(0, 120)
+            });
+          }
+          documentValue.boundaryPorts =
+            boundaries;
+          documentValue.elementIdentity =
+            sanitizeApiCompositeElementIdentity(
+              documentValue.elementIdentity,
+              {
+                templateIdFallback:
+                  documentValue.elementIdentity
+                    ?.templateId || "",
+                nodes,
+                connections:
+                  documentValue.connections,
+                boundaries
+              }
+            );
+        }
+
+        normalizeConnectionRouting(
+          Array.isArray(documentValue.connections)
+            ? documentValue.connections
+            : []
+        );
+      } finally {
+        stack.delete(documentValue);
+      }
+    };
+
+    visit(rootDocument, 0, true, 0);
+    statistics.disconnectedConnectionIds =
+      [...disconnectedConnectionIds];
+    if (
+      invalidateCaches &&
+      (
+        statistics.addedBoundaries > 0 ||
+        statistics.removedBoundaries > 0 ||
+        statistics.disconnectedWires > 0 ||
+        statistics.synchronizedOwners > 0
+      )
+    ) {
+      graphNodeDefinitionCache = new WeakMap();
+      graphNodeGeometryCache.clear();
+      graphSocketElementCache.clear();
+      graphSvgWirePathCache.clear();
+      graphSvgWirePointCache.clear();
+      currentAnalysis = null;
+      window.RMLResetGraphBoundaryTopologyCaches?.();
+    }
+    return statistics;
+  }
+
+function apiCompositeHierarchyContexts(
+    rootDocument
+  ) {
+    const contexts = new WeakMap();
+    const stack = new WeakSet();
+    const rootContext = {
+      document: rootDocument,
+      owner: null,
+      parentDocument: null,
+      parentContext: null,
+      depth: 0
+    };
+    const visit = context => {
+      if (
+        !context.document ||
+        typeof context.document !== "object" ||
+        Array.isArray(context.document) ||
+        stack.has(context.document) ||
+        context.depth >
+          API_COMPOSITE_MAX_NESTING_DEPTH
+      ) {
+        return;
+      }
+      stack.add(context.document);
+      contexts.set(
+        context.document,
+        context
+      );
+      const registry =
+        context.document.apiCompositeGraphs &&
+        typeof context.document
+          .apiCompositeGraphs === "object" &&
+        !Array.isArray(
+          context.document.apiCompositeGraphs
+        )
+          ? context.document.apiCompositeGraphs
+          : {};
+      for (const owner of
+        Array.isArray(context.document.nodes)
+          ? context.document.nodes
+          : []) {
+        if (
+          owner?.operatorId !==
+            "container.apiComposite"
+        ) {
+          continue;
+        }
+        const child = registry[owner.id];
+        if (!child || stack.has(child)) {
+          continue;
+        }
+        visit({
+          document: child,
+          owner,
+          parentDocument: context.document,
+          parentContext: context,
+          depth: context.depth + 1
+        });
+      }
+      stack.delete(context.document);
+    };
+    visit(rootContext);
+    return contexts;
+  }
+
+function apiCompositeHierarchyContextAtOwnerPath(
+    rootDocument,
+    ownerPath
+  ) {
+    if (
+      !rootDocument ||
+      typeof rootDocument !== "object" ||
+      Array.isArray(rootDocument)
+    ) {
+      return null;
+    }
+    const path = Array.isArray(ownerPath)
+      ? ownerPath.map(value =>
+          String(value || "").trim()
+        )
+      : [];
+    if (
+      path.some(value => !value) ||
+      path.length >
+        API_COMPOSITE_MAX_NESTING_DEPTH
+    ) {
+      return null;
+    }
+    let context = {
+      document: rootDocument,
+      owner: null,
+      parentDocument: null,
+      parentContext: null,
+      depth: 0
+    };
+    const visited = new WeakSet();
+    visited.add(rootDocument);
+    for (const ownerId of path) {
+      const owner = (
+        Array.isArray(
+          context.document.nodes
+        )
+          ? context.document.nodes
+          : []
+      ).find(node =>
+        String(node?.id || "") ===
+          ownerId &&
+        node?.operatorId ===
+          "container.apiComposite"
+      );
+      const child =
+        context.document
+          .apiCompositeGraphs?.[
+            ownerId
+          ];
+      if (
+        !owner ||
+        !child ||
+        typeof child !== "object" ||
+        Array.isArray(child) ||
+        visited.has(child)
+      ) {
+        return null;
+      }
+      visited.add(child);
+      context = {
+        document: child,
+        owner,
+        parentDocument:
+          context.document,
+        parentContext: context,
+        depth: context.depth + 1
+      };
+    }
+    return context;
+  }
+
+function apiCompositeContextOwnerPath(
+    context
+  ) {
+    const result = [];
+    let current = context;
+    while (current?.owner) {
+      const ownerId = String(
+        current.owner.id || ""
+      );
+      if (!ownerId) return [];
+      result.push(ownerId);
+      current = current.parentContext;
+    }
+    return result.reverse();
+  }
+
+function apiCompositeDocumentAtOwnerPath(
+    rootDocument,
+    ownerPath
+  ) {
+    let current = rootDocument;
+    for (const ownerId of
+      Array.isArray(ownerPath)
+        ? ownerPath
+        : []) {
+      current =
+        current?.apiCompositeGraphs?.[
+          ownerId
+        ] || null;
+      if (!current) return null;
+    }
+    return current;
+  }
+
+function apiCompositeBoundaryIdentityKey(
+    boundary
+  ) {
+    return `${String(
+      boundary?.direction || ""
+    )}\u0000${String(boundary?.id || "")}`;
+  }
+
+function apiCompositeUnusedBoundaryChainPlan(
+    rootDocument,
+    sourceComposite,
+    internalNodeId,
+    options = {}
+  ) {
+    const result = {
+      sourceBoundaries: [],
+      removals: [],
+      blockedAtInternalWire: 0,
+      blockedAtOuterWire: 0,
+      sourceOwnerPath: []
+    };
+    const requestedOwnerPath =
+      Array.isArray(
+        options.sourceOwnerPath
+      )
+        ? options.sourceOwnerPath
+        : null;
+    const sourceContext =
+      requestedOwnerPath
+        ? apiCompositeHierarchyContextAtOwnerPath(
+            rootDocument,
+            requestedOwnerPath
+          )
+        : apiCompositeHierarchyContexts(
+            rootDocument
+          ).get(sourceComposite);
+    if (!sourceContext?.owner) {
+      return result;
+    }
+    if (
+      sourceContext.document !==
+        sourceComposite
+    ) {
+      return result;
+    }
+    result.sourceOwnerPath =
+      apiCompositeContextOwnerPath(
+        sourceContext
+      );
+    const nodeId = String(
+      internalNodeId || ""
+    );
+    const removalKeysByDocument =
+      new Map();
+    const appendRemoval = (
+      documentValue,
+      boundary
+    ) => {
+      let keys =
+        removalKeysByDocument.get(
+          documentValue
+        );
+      if (!keys) {
+        keys = new Set();
+        removalKeysByDocument.set(
+          documentValue,
+          keys
+        );
+      }
+      keys.add(
+        apiCompositeBoundaryIdentityKey(
+          boundary
+        )
+      );
+    };
+
+    for (const sourceBoundary of
+      apiCompositeBoundaryRecords(
+        sourceComposite.boundaryPorts
+      )) {
+      if (
+        sourceBoundary.internalNodeId !==
+          nodeId
+      ) {
+        continue;
+      }
+      if (
+        apiCompositePortHasInternalWireInDocument(
+          sourceComposite,
+          sourceBoundary
+        )
+      ) {
+        result.blockedAtInternalWire += 1;
+        continue;
+      }
+
+      const chain = [{
+        document: sourceComposite,
+        boundary: sourceBoundary
+      }];
+      let inwardDocument =
+        sourceComposite;
+      let inwardBoundary =
+        sourceBoundary;
+      const inwardDocuments =
+        new WeakSet();
+      inwardDocuments.add(
+        inwardDocument
+      );
+      let inwardBlocked = false;
+      for (
+        let depth = 0;
+        depth <
+          API_COMPOSITE_MAX_NESTING_DEPTH;
+        depth += 1
+      ) {
+        const inwardOwner = (
+          Array.isArray(
+            inwardDocument.nodes
+          )
+            ? inwardDocument.nodes
+            : []
+        ).find(node =>
+          String(node?.id || "") ===
+            String(
+              inwardBoundary
+                .internalNodeId || ""
+            ) &&
+          node?.operatorId ===
+            "container.apiComposite"
+        );
+        if (!inwardOwner) break;
+        const childDocument =
+          inwardDocument
+            .apiCompositeGraphs?.[
+              inwardOwner.id
+            ];
+        if (
+          !childDocument ||
+          typeof childDocument !== "object" ||
+          Array.isArray(childDocument) ||
+          inwardDocuments.has(
+            childDocument
+          )
+        ) {
+          inwardBlocked = true;
+          break;
+        }
+        const childBoundary =
+          apiCompositeBoundaryRecords(
+            childDocument.boundaryPorts
+          ).find(candidate =>
+            candidate.direction ===
+              inwardBoundary.direction &&
+            candidate.id ===
+              inwardBoundary.internalPortId
+          );
+        if (!childBoundary) break;
+        if (
+          apiCompositePortHasInternalWireInDocument(
+            childDocument,
+            childBoundary
+          )
+        ) {
+          result.blockedAtInternalWire += 1;
+          inwardBlocked = true;
+          break;
+        }
+        chain.push({
+          document: childDocument,
+          boundary: childBoundary
+        });
+        inwardDocuments.add(
+          childDocument
+        );
+        inwardDocument = childDocument;
+        inwardBoundary = childBoundary;
+      }
+      if (inwardBlocked) continue;
+
+      let context = sourceContext;
+      let boundary = sourceBoundary;
+      let blocked = false;
+      while (context?.owner) {
+        const parentDocument =
+          context.parentDocument;
+        if (!parentDocument) break;
+        const ownerEndpoint = {
+          direction: boundary.direction,
+          internalNodeId:
+            context.owner.id,
+          internalPortId: boundary.id
+        };
+        if (
+          apiCompositePortHasInternalWireInDocument(
+            parentDocument,
+            ownerEndpoint
+          )
+        ) {
+          result.blockedAtOuterWire += 1;
+          blocked = true;
+          break;
+        }
+
+        const parentContext =
+          context.parentContext;
+        if (!parentContext?.owner) break;
+        const endpointKey =
+          apiCompositeBoundaryEndpointKey(
+            ownerEndpoint
+          );
+        const parentBoundary =
+          apiCompositeBoundaryRecords(
+            parentDocument.boundaryPorts
+          ).find(candidate =>
+            apiCompositeBoundaryEndpointKey(
+              candidate
+            ) === endpointKey
+          );
+        if (!parentBoundary) break;
+        chain.push({
+          document: parentDocument,
+          boundary: parentBoundary
+        });
+        boundary = parentBoundary;
+        context = parentContext;
+      }
+      if (blocked) continue;
+
+      result.sourceBoundaries.push(
+        sourceBoundary
+      );
+      for (const item of chain) {
+        appendRemoval(
+          item.document,
+          item.boundary
+        );
+      }
+    }
+
+    result.removals = [
+      ...removalKeysByDocument.entries()
+    ].map(([documentValue, keys]) => ({
+      document: documentValue,
+      keys
+    }));
+    return result;
+  }
+
+function applyApiCompositeBoundaryRemovalPlan(
+    plan
+  ) {
+    let removedBoundaries = 0;
+    for (const item of
+      Array.isArray(plan?.removals)
+        ? plan.removals
+        : []) {
+      const before =
+        apiCompositeBoundaryRecords(
+          item.document?.boundaryPorts
+        );
+      const after = before.filter(boundary =>
+        !item.keys.has(
+          apiCompositeBoundaryIdentityKey(
+            boundary
+          )
+        )
+      );
+      removedBoundaries +=
+        before.length - after.length;
+      item.document.boundaryPorts = after;
+    }
+    return removedBoundaries;
+  }
+
+function apiCompositeImmutableTopologySnapshot(
+    rootDocument
+  ) {
+    const result = [];
+    const visited = new WeakSet();
+    const visit = (documentValue, path) => {
+      if (
+        !documentValue ||
+        typeof documentValue !== "object" ||
+        Array.isArray(documentValue) ||
+        visited.has(documentValue)
+      ) {
+        return;
+      }
+      visited.add(documentValue);
+      result.push({
+        path,
+        connections: nodeGraphClone(
+          Array.isArray(
+            documentValue.connections
+          )
+            ? documentValue.connections
+            : []
+        ),
+        branchRouting: nodeGraphClone(
+          documentValue.branchRouting &&
+          typeof documentValue.branchRouting ===
+            "object" &&
+          !Array.isArray(
+            documentValue.branchRouting
+          )
+            ? documentValue.branchRouting
+            : {}
+        ),
+        geometry: (
+          Array.isArray(documentValue.nodes)
+            ? documentValue.nodes
+            : []
+        ).map(node => ({
+          id: String(node?.id || ""),
+          x: node?.x,
+          y: node?.y,
+          width: node?.width,
+          height: node?.height
+        }))
+      });
+      const registry =
+        documentValue.apiCompositeGraphs &&
+        typeof documentValue
+          .apiCompositeGraphs === "object" &&
+        !Array.isArray(
+          documentValue.apiCompositeGraphs
+        )
+          ? documentValue.apiCompositeGraphs
+          : {};
+      for (const ownerId of
+        Object.keys(registry).sort()) {
+        visit(
+          registry[ownerId],
+          `${path}/${ownerId}`
+        );
+      }
+    };
+    visit(rootDocument, "root");
+    return JSON.stringify(result);
+  }
+
+function apiCompositeBoundaryContractSnapshot(
+    rootDocument
+  ) {
+    const result = [];
+    const visited = new WeakSet();
+    const visit = (documentValue, path) => {
+      if (
+        !documentValue ||
+        typeof documentValue !== "object" ||
+        Array.isArray(documentValue) ||
+        visited.has(documentValue)
+      ) {
+        return;
+      }
+      visited.add(documentValue);
+      result.push({
+        path,
+        boundaries:
+          apiCompositeBoundaryRecords(
+            documentValue.boundaryPorts
+          )
+      });
+      const registry =
+        documentValue.apiCompositeGraphs &&
+        typeof documentValue
+          .apiCompositeGraphs === "object" &&
+        !Array.isArray(
+          documentValue.apiCompositeGraphs
+        )
+          ? documentValue.apiCompositeGraphs
+          : {};
+      for (const ownerId of
+        Object.keys(registry).sort()) {
+        visit(
+          registry[ownerId],
+          `${path}/${ownerId}`
+        );
+      }
+    };
+    visit(rootDocument, "root");
+    return JSON.stringify(result);
+  }
+
+function restoreApiCompositeBoundaryMutationState(
+    targetRoot,
+    sourceRoot
+  ) {
+    const replaceArray = (
+      target,
+      key,
+      source
+    ) => {
+      const replacement = nodeGraphClone(
+        Array.isArray(source?.[key])
+          ? source[key]
+          : []
+      );
+      if (Array.isArray(target?.[key])) {
+        target[key].splice(
+          0,
+          target[key].length,
+          ...replacement
+        );
+      } else if (target) {
+        target[key] = replacement;
+      }
+    };
+    const visit = (target, source) => {
+      if (!target || !source) return;
+      replaceArray(
+        target,
+        "connections",
+        source
+      );
+      replaceArray(
+        target,
+        "boundaryPorts",
+        source
+      );
+      target.branchRouting = nodeGraphClone(
+        source.branchRouting || {}
+      );
+      target.elementIdentity = nodeGraphClone(
+        source.elementIdentity || {}
+      );
+      target.selectedConnectionId =
+        source.selectedConnectionId || null;
+      target.selectedWirePoint = nodeGraphClone(
+        source.selectedWirePoint || null
+      );
+
+      const sourceNodes = new Map(
+        (
+          Array.isArray(source.nodes)
+            ? source.nodes
+            : []
+        ).map(node => [
+          String(node?.id || ""),
+          node
+        ])
+      );
+      for (const targetNode of
+        Array.isArray(target.nodes)
+          ? target.nodes
+          : []) {
+        if (
+          targetNode?.operatorId !==
+            "container.apiComposite"
+        ) {
+          continue;
+        }
+        const sourceNode = sourceNodes.get(
+          String(targetNode.id || "")
+        );
+        if (sourceNode) {
+          targetNode.parameters =
+            nodeGraphClone(
+              sourceNode.parameters || {}
+            );
+        }
+      }
+
+      const targetRegistry =
+        target.apiCompositeGraphs || {};
+      const sourceRegistry =
+        source.apiCompositeGraphs || {};
+      for (const ownerId of
+        Object.keys(sourceRegistry)) {
+        if (targetRegistry[ownerId]) {
+          visit(
+            targetRegistry[ownerId],
+            sourceRegistry[ownerId]
+          );
+        }
+      }
+    };
+    visit(targetRoot, sourceRoot);
+    graphNodeDefinitionCache = new WeakMap();
+    graphNodeGeometryCache.clear();
+    graphSocketElementCache.clear();
+    graphSvgWirePathCache.clear();
+    graphSvgWirePointCache.clear();
+    currentAnalysis = null;
+    window.RMLResetGraphBoundaryTopologyCaches?.();
+  }
+
+function hideUnusedApiCompositeBoundaryChains(
+    rootDocument,
+    sourceComposite,
+    internalNodeId,
+    options = {}
+  ) {
+    const result = {
+      removedSourceBoundaries: 0,
+      removedBoundaries: 0,
+      blockedAtInternalWire: 0,
+      blockedAtOuterWire: 0,
+      aborted: false,
+      reason: "",
+      reconciliation: null
+    };
+    const plan =
+      apiCompositeUnusedBoundaryChainPlan(
+        rootDocument,
+        sourceComposite,
+        internalNodeId,
+        options
+      );
+    result.blockedAtInternalWire =
+      plan.blockedAtInternalWire;
+    result.blockedAtOuterWire =
+      plan.blockedAtOuterWire;
+    result.removedSourceBoundaries =
+      plan.sourceBoundaries.length;
+    if (
+      result.removedSourceBoundaries === 0
+    ) {
+      return result;
+    }
+
+    const topologyBefore =
+      apiCompositeImmutableTopologySnapshot(
+        rootDocument
+      );
+    const previewRoot =
+      nodeGraphClone(rootDocument);
+    const previewSource =
+      apiCompositeDocumentAtOwnerPath(
+        previewRoot,
+        plan.sourceOwnerPath
+      );
+    const previewPlan =
+      apiCompositeUnusedBoundaryChainPlan(
+        previewRoot,
+        previewSource,
+        internalNodeId,
+        {
+          sourceOwnerPath:
+            plan.sourceOwnerPath
+        }
+      );
+    applyApiCompositeBoundaryRemovalPlan(
+      previewPlan
+    );
+    const previewExpectedBoundaries =
+      apiCompositeBoundaryContractSnapshot(
+        previewRoot
+      );
+    const previewReconciliation =
+      reconcileApiCompositeBoundaryTree(
+        previewRoot,
+        { invalidateCaches: false }
+      );
+    if (
+      previewReconciliation
+        .disconnectedWires > 0 ||
+      apiCompositeBoundaryContractSnapshot(
+        previewRoot
+      ) !== previewExpectedBoundaries ||
+      apiCompositeImmutableTopologySnapshot(
+        previewRoot
+      ) !== topologyBefore
+    ) {
+      result.aborted = true;
+      result.reason =
+        "Hiding these ports would change an existing wire, branch, route or node geometry.";
+      result.removedSourceBoundaries = 0;
+      return result;
+    }
+
+    const rollbackSnapshot =
+      nodeGraphClone(rootDocument);
+    result.removedBoundaries =
+      applyApiCompositeBoundaryRemovalPlan(
+        plan
+      );
+    const expectedBoundaries =
+      apiCompositeBoundaryContractSnapshot(
+        rootDocument
+      );
+    result.reconciliation =
+      reconcileApiCompositeBoundaryTree(
+        rootDocument
+      );
+    if (
+      result.reconciliation
+        .disconnectedWires > 0 ||
+      apiCompositeBoundaryContractSnapshot(
+        rootDocument
+      ) !== expectedBoundaries ||
+      apiCompositeImmutableTopologySnapshot(
+        rootDocument
+      ) !== topologyBefore
+    ) {
+      restoreApiCompositeBoundaryMutationState(
+        rootDocument,
+        rollbackSnapshot
+      );
+      result.aborted = true;
+      result.reason =
+        "The port update was rolled back because reconciliation changed an existing wire, branch, route or node geometry.";
+      result.removedSourceBoundaries = 0;
+      result.removedBoundaries = 0;
+      result.reconciliation = null;
+    }
+    return result;
+  }
+
+function propagateApiCompositeBoundariesOutward(
+    rootDocument,
+    sourceComposite,
+    sourceBoundaries
+  ) {
+    const result = {
+      addedBoundaries: 0,
+      stoppedAtInternalWire: 0
+    };
+    const contexts =
+      apiCompositeHierarchyContexts(
+        rootDocument
+      );
+    const sourceContext =
+      contexts.get(sourceComposite);
+    if (!sourceContext) return result;
+
+    for (const sourceBoundary of
+      apiCompositeBoundaryRecords(
+        sourceBoundaries
+      )) {
+      let context = sourceContext;
+      let boundary = sourceBoundary;
+      while (context?.owner) {
+        const owner = context.owner;
+        owner.parameters =
+          owner.parameters &&
+          typeof owner.parameters ===
+            "object" &&
+          !Array.isArray(owner.parameters)
+            ? owner.parameters
+            : {};
+        owner.parameters.boundaryPorts =
+          nodeGraphClone(
+            apiCompositeBoundaryRecords(
+              context.document
+                .boundaryPorts
+            )
+          );
+        owner.parameters.memberCount =
+          Array.isArray(
+            context.document.nodes
+          )
+            ? context.document.nodes.length
+            : 0;
+
+        const parentContext =
+          context.parentContext;
+        if (!parentContext?.owner) break;
+        const parentDocument =
+          context.parentDocument;
+        const endpoint = {
+          direction: boundary.direction,
+          internalNodeId: owner.id,
+          internalPortId: boundary.id
+        };
+        if (
+          apiCompositePortHasInternalWireInDocument(
+            parentDocument,
+            endpoint
+          )
+        ) {
+          result.stoppedAtInternalWire += 1;
+          break;
+        }
+
+        const parentBoundaries =
+          apiCompositeBoundaryRecords(
+            parentDocument.boundaryPorts
+          );
+        const endpointKey =
+          apiCompositeBoundaryEndpointKey(
+            endpoint
+          );
+        let parentBoundary =
+          parentBoundaries.find(candidate =>
+            apiCompositeBoundaryEndpointKey(
+              candidate
+            ) === endpointKey
+          );
+        if (!parentBoundary) {
+          parentBoundary =
+            forwardedApiCompositeBoundary(
+              owner,
+              boundary,
+              parentBoundaries
+            );
+          parentBoundaries.push(
+            parentBoundary
+          );
+          parentDocument.boundaryPorts =
+            parentBoundaries;
+          result.addedBoundaries += 1;
+        }
+        boundary = parentBoundary;
+        context = parentContext;
+      }
+    }
+
+    if (result.addedBoundaries > 0) {
+      graphNodeDefinitionCache = new WeakMap();
+      graphNodeGeometryCache.clear();
+      graphSocketElementCache.clear();
+      currentAnalysis = null;
+      window.RMLResetGraphBoundaryTopologyCaches?.();
+    }
+    return result;
+  }
+
 function synchronizeApiCompositeBoundaries(
     sourceBoundaries,
     nodeIdsToExpose = []
@@ -1606,11 +3948,7 @@ function synchronizeApiCompositeBoundaries(
         sourceBoundaries
       ).filter(boundary => {
         if (
-          boundary.autoExposed === true &&
           apiCompositePortHasInternalWire(
-            boundary
-          ) &&
-          !apiCompositeBoundaryHasExternalWire(
             boundary
           )
         ) {
@@ -1625,6 +3963,11 @@ function synchronizeApiCompositeBoundaries(
       )
     );
     let added = 0;
+    const activeOwnedGraphs =
+      apiCompositeEditor
+        ? apiCompositeEditorDocument()
+            ?.apiCompositeGraphs || {}
+        : {};
     for (const nodeId of
       new Set(nodeIdsToExpose)) {
       const node = findGraphNode(nodeId);
@@ -1633,8 +3976,14 @@ function synchronizeApiCompositeBoundaries(
         : null;
       if (
         !node ||
-        !apiCompositeInternalDefinitionAllowed(
-          definition
+        !(
+          apiCompositeInternalDefinitionAllowed(
+            definition
+          ) ||
+          apiCompositeOwnedContainerAllowed(
+            node,
+            activeOwnedGraphs
+          )
         )
       ) {
         continue;
@@ -1695,8 +4044,9 @@ function captureApiCompositeEditorView(
     const ownerId =
       apiCompositeEditor.containerNodeId;
     const existing =
-      graph.apiCompositeGraphs?.[ownerId] ||
-      {};
+      apiCompositeEditorDocument(
+        apiCompositeEditor
+      ) || {};
     if (customCSharpEditor) {
       const compositeView =
         customCSharpEditor.mainView;
@@ -1705,13 +4055,30 @@ function captureApiCompositeEditorView(
         customCSharpFiles:
           customCSharpFilesForNodes(
             compositeView.nodes,
-            graph.customCSharpFiles
+            existing.customCSharpFiles
           ),
         ...graphViewFrom(compositeView)
       };
-      graph.apiCompositeGraphs[ownerId] =
-        captured;
-      return captured;
+      captured.elementIdentity =
+        sanitizeApiCompositeElementIdentity(
+          existing.elementIdentity,
+          {
+            templateIdFallback:
+              existing.elementIdentity
+                ?.templateId || "",
+            nodes: captured.nodes,
+            connections:
+              captured.connections,
+            boundaries:
+              apiCompositeBoundaryRecords(
+                captured.boundaryPorts
+              )
+          }
+        );
+      return apiCompositeEditorCommitDocument(
+        apiCompositeEditor,
+        captured
+      );
     }
     if (
       options.synchronizeBoundaries ===
@@ -1721,9 +4088,10 @@ function captureApiCompositeEditorView(
         ...existing,
         ...graphViewFrom(graph)
       };
-      graph.apiCompositeGraphs[ownerId] =
-        captured;
-      return captured;
+      return apiCompositeEditorCommitDocument(
+        apiCompositeEditor,
+        captured
+      );
     }
     const internalNodeIds = new Set(
       graph.nodes.map(node => node.id)
@@ -1794,17 +4162,9 @@ function captureApiCompositeEditorView(
           )
         };
       }).filter(Boolean);
-    const automaticallyExposedNodeIds =
-      graph.nodes
-        .filter(node =>
-          !apiCompositeEditor.initialNodeIds
-            ?.has(node.id)
-        )
-        .map(node => node.id);
     const boundaryUpdate =
       synchronizeApiCompositeBoundaries(
-        resolvedBoundaries,
-        automaticallyExposedNodeIds
+        resolvedBoundaries
       );
     const boundaries =
       boundaryUpdate.boundaries;
@@ -1820,32 +4180,11 @@ function captureApiCompositeEditorView(
             ?.removed
         ) || 0) + boundaryUpdate.removed
     };
-    const validProxyIds = new Set(
-      boundaries.map(boundary =>
-        boundary.id
-      )
+    apiCompositeRemoveInvalidOwnerConnections(
+      apiCompositeEditor.mainView,
+      ownerId,
+      boundaries
     );
-    apiCompositeEditor.mainView.connections =
-      apiCompositeEditor.mainView.connections
-        .filter(connection => {
-          if (
-            connection.fromNode === ownerId &&
-            !validProxyIds.has(
-              connection.fromPort
-            )
-          ) {
-            return false;
-          }
-          if (
-            connection.toNode === ownerId &&
-            !validProxyIds.has(
-              connection.toPort
-            )
-          ) {
-            return false;
-          }
-          return true;
-        });
     const owner =
       apiCompositeEditor.mainView.nodes
         .find(node => node.id === ownerId);
@@ -1900,13 +4239,27 @@ function captureApiCompositeEditorView(
       customCSharpFiles:
         customCSharpFilesForNodes(
           graph.nodes,
-          graph.customCSharpFiles
+          existing.customCSharpFiles
         ),
       ...graphViewFrom(graph)
     };
-    graph.apiCompositeGraphs[ownerId] =
-      captured;
-    return captured;
+    captured.elementIdentity =
+      sanitizeApiCompositeElementIdentity(
+        existing.elementIdentity,
+        {
+          templateIdFallback:
+            existing.elementIdentity
+              ?.templateId || "",
+          nodes: captured.nodes,
+          connections:
+            captured.connections,
+          boundaries
+        }
+      );
+    return apiCompositeEditorCommitDocument(
+      apiCompositeEditor,
+      captured
+    );
   }
 
 function apiCompositePortDescriptor(
@@ -1973,182 +4326,352 @@ function expandApiCompositeGraphDocument(
       );
     }
 
-    const composites =
-      source.apiCompositeGraphs &&
-      typeof source.apiCompositeGraphs ===
-        "object" &&
-      !Array.isArray(
-        source.apiCompositeGraphs
-      )
-        ? source.apiCompositeGraphs
-        : {};
-    const containerIds = new Set(
-      source.nodes
-        .filter(node =>
-          node?.operatorId ===
-            "container.apiComposite"
-        )
-        .map(node => node.id)
-    );
-
-    if (containerIds.size === 0) {
-      return {
-        ...source,
-        ...graphViewFrom(source)
-      };
-    }
-
-    const nodes = source.nodes
-      .filter(node =>
-        !containerIds.has(node.id)
-      )
-      .map(node => nodeGraphClone(node));
-    const usedNodeIds = new Set(
-      nodes.map(node => node.id)
-    );
-    const boundaryByContainer =
-      new Map();
-    const branchRouting = {};
-    const internalConnections = [];
-    const customCSharpFiles = {};
-
-    for (const containerId of
-      containerIds) {
-      const composite =
-        composites[containerId];
+    const expansionStack = new WeakSet();
+    const ownedNodeIds = new Set();
+    const ownedConnectionIds = new Set();
+    const expandView = (
+      candidate,
+      depth,
+      path
+    ) => {
       if (
-        !composite ||
-        !Array.isArray(composite.nodes) ||
-        !Array.isArray(
-          composite.connections
-        )
+        !candidate ||
+        typeof candidate !== "object" ||
+        Array.isArray(candidate) ||
+        !Array.isArray(candidate.nodes) ||
+        !Array.isArray(candidate.connections)
       ) {
         throw new Error(
-          `API Composite '${containerId}' has no complete internal graph.`
+          `${path} has no complete internal graph.`
         );
       }
-      const boundaries =
-        apiCompositeBoundaryRecords(
-          composite.boundaryPorts
+      if (
+        depth >
+          API_COMPOSITE_MAX_NESTING_DEPTH
+      ) {
+        throw new Error(
+          `API Composite nesting exceeds the safe depth limit of ${API_COMPOSITE_MAX_NESTING_DEPTH}.`
         );
-      boundaryByContainer.set(
-        containerId,
-        new Map(
-          boundaries.map(boundary => [
-            `${boundary.direction}\u0000${boundary.id}`,
-            boundary
-          ])
-        )
-      );
-
-      for (const node of composite.nodes) {
-        if (
-          node?.operatorId ===
-            "container.apiComposite" ||
-          usedNodeIds.has(node?.id)
-        ) {
-          throw new Error(
-            `API Composite '${containerId}' contains a nested container or duplicate node identity '${String(node?.id || "<unnamed>")}'.`
+      }
+      if (expansionStack.has(candidate)) {
+        throw new Error(
+          `API Composite nesting contains a cycle at ${path}.`
+        );
+      }
+      expansionStack.add(candidate);
+      try {
+        for (const node of candidate.nodes) {
+          const nodeId = String(
+            node?.id || ""
+          );
+          if (
+            !nodeId ||
+            ownedNodeIds.has(nodeId)
+          ) {
+            throw new Error(
+              `API Composite hierarchy contains duplicate node identity '${nodeId || "<unnamed>"}'.`
+            );
+          }
+          ownedNodeIds.add(nodeId);
+        }
+        for (const connection of
+          candidate.connections) {
+          const connectionId = String(
+            connection?.id || ""
+          );
+          if (
+            !connectionId ||
+            ownedConnectionIds.has(
+              connectionId
+            )
+          ) {
+            throw new Error(
+              `API Composite hierarchy contains duplicate connection identity '${connectionId || "<unnamed>"}'.`
+            );
+          }
+          ownedConnectionIds.add(
+            connectionId
           );
         }
-        usedNodeIds.add(node.id);
-        nodes.push(nodeGraphClone(node));
+        const composites =
+          candidate.apiCompositeGraphs &&
+          typeof candidate.apiCompositeGraphs ===
+            "object" &&
+          !Array.isArray(
+            candidate.apiCompositeGraphs
+          )
+            ? candidate.apiCompositeGraphs
+            : {};
+        const containerNodes =
+          candidate.nodes.filter(node =>
+            node?.operatorId ===
+              "container.apiComposite"
+          );
+        const containerIds = new Set(
+          containerNodes.map(node =>
+            String(node.id || "")
+          )
+        );
+        for (const ownerId of
+          Object.keys(composites)) {
+          if (!containerIds.has(ownerId)) {
+            throw new Error(
+              `${path} contains an orphaned API Composite graph '${ownerId || "<unnamed>"}'.`
+            );
+          }
+        }
+        const nodes = candidate.nodes
+          .filter(node =>
+            !containerIds.has(
+              String(node?.id || "")
+            )
+          )
+          .map(node => nodeGraphClone(node));
+        const connections =
+          candidate.connections.map(
+            connection =>
+              nodeGraphClone(connection)
+          );
+        const directConnectionCount =
+          connections.length;
+        const branchRouting = nodeGraphClone(
+          candidate.branchRouting || {}
+        );
+        const customCSharpFiles =
+          mergeCustomCSharpFileRegistry(
+            {},
+            candidate.customCSharpFiles
+          );
+        const boundaryByContainer =
+          new Map();
+
+        for (const container of
+          containerNodes) {
+          const containerId = String(
+            container.id || ""
+          );
+          const composite =
+            composites[containerId];
+          if (!containerId || !composite) {
+            throw new Error(
+              `API Composite '${containerId || "<unnamed>"}' has no complete owned graph.`
+            );
+          }
+          const expandedChild = expandView(
+            composite,
+            depth + 1,
+            `${path}/${String(
+              container.label ||
+              container.parameters?.title ||
+              containerId
+            )}`
+          );
+          const boundaries =
+            apiCompositeBoundaryRecords(
+              expandedChild.boundaryPorts
+            );
+          boundaryByContainer.set(
+            containerId,
+            new Map(
+              boundaries.map(boundary => [
+                `${boundary.direction}\u0000${boundary.id}`,
+                boundary
+              ])
+            )
+          );
+          nodes.push(
+            ...expandedChild.nodes
+          );
+          connections.push(
+            ...expandedChild.connections
+          );
+          Object.assign(
+            branchRouting,
+            expandedChild.branchRouting
+          );
+          mergeCustomCSharpFileRegistry(
+            customCSharpFiles,
+            expandedChild.customCSharpFiles
+          );
+        }
+
+        for (
+          let connectionIndex = 0;
+          connectionIndex <
+            directConnectionCount;
+          connectionIndex += 1
+        ) {
+          const connection =
+            connections[connectionIndex];
+          if (
+            containerIds.has(
+              String(connection.fromNode || "")
+            )
+          ) {
+            const boundary =
+              boundaryByContainer
+                .get(
+                  String(connection.fromNode)
+                )
+                ?.get(
+                  `output\u0000${connection.fromPort}`
+                );
+            if (!boundary) {
+              throw new Error(
+                `API Composite '${connection.fromNode}' is missing output proxy '${connection.fromPort}'.`
+              );
+            }
+            connection.fromNode =
+              boundary.internalNodeId;
+            connection.fromPort =
+              boundary.internalPortId;
+          }
+          if (
+            containerIds.has(
+              String(connection.toNode || "")
+            )
+          ) {
+            const boundary =
+              boundaryByContainer
+                .get(
+                  String(connection.toNode)
+                )
+                ?.get(
+                  `input\u0000${connection.toPort}`
+                );
+            if (!boundary) {
+              throw new Error(
+                `API Composite '${connection.toNode}' is missing input proxy '${connection.toPort}'.`
+              );
+            }
+            connection.toNode =
+              boundary.internalNodeId;
+            connection.toPort =
+              boundary.internalPortId;
+          }
+        }
+
+        const boundaryPorts =
+          apiCompositeBoundaryRecords(
+            candidate.boundaryPorts
+          ).map(boundary => {
+            if (
+              !containerIds.has(
+                String(
+                  boundary.internalNodeId ||
+                  ""
+                )
+              )
+            ) {
+              return boundary;
+            }
+            const nestedBoundary =
+              boundaryByContainer
+                .get(
+                  String(
+                    boundary.internalNodeId
+                  )
+                )
+                ?.get(
+                  `${boundary.direction}\u0000${boundary.internalPortId}`
+                );
+            if (!nestedBoundary) {
+              throw new Error(
+                `Nested API Composite '${boundary.internalNodeId}' is missing ${boundary.direction} proxy '${boundary.internalPortId}'.`
+              );
+            }
+            return {
+              ...boundary,
+              internalNodeId:
+                nestedBoundary.internalNodeId,
+              internalPortId:
+                nestedBoundary.internalPortId,
+              type:
+                nestedBoundary.type ||
+                boundary.type || "",
+              typeVar:
+                nestedBoundary.typeVar ||
+                boundary.typeVar || "",
+              constraint:
+                nestedBoundary.constraint ||
+                boundary.constraint ||
+                "value"
+            };
+          });
+
+        return {
+          nodes,
+          connections,
+          boundaryPorts,
+          branchRouting,
+          customCSharpFiles
+        };
+      } finally {
+        expansionStack.delete(candidate);
       }
-      internalConnections.push(
-        ...composite.connections.map(
-          connection => nodeGraphClone(connection)
-        )
-      );
-      Object.assign(
-        branchRouting,
-        nodeGraphClone(
-          composite.branchRouting || {}
-        )
-      );
-      mergeCustomCSharpFileRegistry(
-        customCSharpFiles,
-        composite.customCSharpFiles
-      );
-    }
-    mergeCustomCSharpFileRegistry(
-      customCSharpFiles,
-      source.customCSharpFiles
-    );
+    };
 
-    const connections = source.connections
-      .map(connection => {
-        const copy = nodeGraphClone(connection);
-        if (containerIds.has(copy.fromNode)) {
-          const boundary =
-            boundaryByContainer
-              .get(copy.fromNode)
-              ?.get(
-                `output\u0000${copy.fromPort}`
-              );
-          if (!boundary) {
-            throw new Error(
-              `API Composite '${copy.fromNode}' is missing output proxy '${copy.fromPort}'.`
-            );
-          }
-          copy.fromNode =
-            boundary.internalNodeId;
-          copy.fromPort =
-            boundary.internalPortId;
-        }
-        if (containerIds.has(copy.toNode)) {
-          const boundary =
-            boundaryByContainer
-              .get(copy.toNode)
-              ?.get(
-                `input\u0000${copy.toPort}`
-              );
-          if (!boundary) {
-            throw new Error(
-              `API Composite '${copy.toNode}' is missing input proxy '${copy.toPort}'.`
-            );
-          }
-          copy.toNode =
-            boundary.internalNodeId;
-          copy.toPort =
-            boundary.internalPortId;
-        }
-        return copy;
-      });
-    connections.push(
-      ...internalConnections
+    const expanded = expandView(
+      source,
+      0,
+      "Runtime Graph"
     );
-
-    const usedConnectionIds = new Set();
-    for (const connection of connections) {
-      if (
-        usedConnectionIds.has(connection.id)
-      ) {
+    const usedNodeIds = new Set();
+    for (const node of expanded.nodes) {
+      const nodeId = String(node?.id || "");
+      if (!nodeId || usedNodeIds.has(nodeId)) {
         throw new Error(
-          `Expanded API Composite graph contains duplicate connection identity '${connection.id}'.`
+          `Expanded API Composite graph contains duplicate node identity '${nodeId || "<unnamed>"}'.`
         );
       }
-      usedConnectionIds.add(connection.id);
+      usedNodeIds.add(nodeId);
+    }
+    const usedConnectionIds = new Set();
+    for (const connection of
+      expanded.connections) {
+      const connectionId = String(
+        connection?.id || ""
+      );
+      if (
+        !connectionId ||
+        usedConnectionIds.has(
+          connectionId
+        )
+      ) {
+        throw new Error(
+          `Expanded API Composite graph contains duplicate connection identity '${connectionId || "<unnamed>"}'.`
+        );
+      }
+      usedConnectionIds.add(
+        connectionId
+      );
       if (
         Object.hasOwn(
-          branchRouting,
-          connection.id
+          expanded.branchRouting,
+          connectionId
         )
       ) {
         connection.branchFrom = nodeGraphClone(
-          branchRouting[connection.id]
+          expanded.branchRouting[
+            connectionId
+          ]
         );
       }
     }
     normalizeConnectionRouting(
-      connections
+      expanded.connections
     );
 
     return {
       ...source,
       apiCompositeGraphs: {},
-      customCSharpFiles,
-      nodes,
-      connections,
+      customCSharpFiles:
+        expanded.customCSharpFiles,
+      nodes: expanded.nodes,
+      connections:
+        expanded.connections,
+      boundaryPorts:
+        expanded.boundaryPorts,
       selectedNodeId: null,
       selectedNodeIds: [],
       selectedConnectionId: null,
@@ -2164,46 +4687,112 @@ function withRuntimeRootGraph(callback) {
     ) {
       return callback();
     }
-    const frames = [];
-    if (customCSharpEditor) {
-      captureCustomCSharpEditorView();
-      frames.push({
-        editor: customCSharpEditor,
-        nestedView: graphViewFrom(graph)
-      });
-      applyGraphView(
-        customCSharpEditor.mainView
+    const savedCustomEditor =
+      customCSharpEditor || null;
+    const savedPresentationAnalysis =
+      currentAnalysis;
+    const savedApiFrames =
+      apiCompositeEditorChain(
+        apiCompositeEditor,
+        { outermostFirst: true }
       );
-      resetGraphRenderCaches();
+    const savedCustomViewUnchanged = Boolean(
+      savedCustomEditor &&
+      typeof customCSharpEditorCompleteStateUnchangedSinceOpen ===
+        "function" &&
+      customCSharpEditorCompleteStateUnchangedSinceOpen(
+        savedCustomEditor
+      )
+    );
+    if (savedCustomEditor) {
+      if (!savedCustomViewUnchanged) {
+        captureCustomCSharpEditorView();
+      }
+      applyGraphView(
+        savedCustomEditor.mainView
+      );
+      currentAnalysis = null;
+      customCSharpEditor = null;
     }
-    if (apiCompositeEditor) {
-      captureApiCompositeEditorView();
-      frames.push({
-        editor: apiCompositeEditor,
-        nestedView: graphViewFrom(graph)
-      });
+    if (savedApiFrames.length > 0) {
+      const savedApiViewUnchanged =
+        savedCustomViewUnchanged ||
+        Boolean(
+          typeof apiCompositeEditorCompleteStateUnchangedSinceOpen ===
+            "function" &&
+          apiCompositeEditorCompleteStateUnchangedSinceOpen(
+            apiCompositeEditor,
+            graph
+          )
+        );
+      if (!savedApiViewUnchanged) {
+        captureApiCompositeEditorView();
+      }
+      const rootFrame =
+        savedApiFrames[0];
       applyGraphView(
-        apiCompositeEditor.mainView
+        rootFrame.mainView
       );
-      resetGraphRenderCaches();
+      currentAnalysis = null;
+      apiCompositeEditor = null;
     }
     customCSharpRootOperation = true;
     try {
       return callback();
     } finally {
-      for (
-        let index = frames.length - 1;
-        index >= 0;
-        index -= 1
-      ) {
-        const frame = frames[index];
-        frame.editor.mainView =
+      let restoredParent = null;
+      for (const frame of savedApiFrames) {
+        const composite =
+          apiCompositeEditorDocument(frame);
+        if (!composite) break;
+        frame.parentEditor =
+          restoredParent;
+        frame.mainView =
           graphViewFrom(graph);
+        apiCompositeEditor = frame;
         applyGraphView(
-          frame.nestedView
+          graphViewFrom(composite)
         );
-        resetGraphRenderCaches();
+        currentAnalysis = null;
+        restoredParent = frame;
       }
+      apiCompositeEditor = restoredParent;
+      if (savedCustomEditor) {
+        const activeCustomRegistry =
+          activeGraphCustomCSharpFileRegistry();
+        const fileGraph =
+          savedCustomViewUnchanged &&
+          savedCustomEditor.openPreparation
+            ?.preparedGraph
+            ? savedCustomEditor.openPreparation
+                .preparedGraph
+            : activeCustomRegistry[
+                savedCustomEditor.fileNodeId
+              ];
+        const ownerExists =
+          graph.nodes.some(node =>
+            node?.id ===
+              savedCustomEditor.fileNodeId
+          );
+        if (
+          ownerExists &&
+          fileGraph &&
+          typeof fileGraph === "object"
+        ) {
+          savedCustomEditor.mainView =
+            graphViewFrom(graph);
+          customCSharpEditor =
+            savedCustomEditor;
+          applyGraphView(
+            graphViewFrom(fileGraph)
+          );
+          currentAnalysis = null;
+        } else {
+          customCSharpEditor = null;
+        }
+      }
+      currentAnalysis =
+        savedPresentationAnalysis;
       customCSharpRootOperation = false;
     }
   }
@@ -2230,6 +4819,8 @@ function withExpandedApiCompositeGraph(
 
     const originalView =
       graphViewFrom(graph);
+    const originalAnalysis =
+      currentAnalysis;
     const expanded =
       expandApiCompositeGraphDocument(
         graph
@@ -2238,14 +4829,12 @@ function withExpandedApiCompositeGraph(
     applyGraphView(
       graphViewFrom(expanded)
     );
-    resetGraphRenderCaches();
     currentAnalysis = null;
     try {
       return callback();
     } finally {
       applyGraphView(originalView);
-      resetGraphRenderCaches();
-      currentAnalysis = null;
+      currentAnalysis = originalAnalysis;
       apiCompositeRootOperation = false;
     }
   }
@@ -2411,8 +5000,89 @@ function branchReferenceCreatesCycle(
     return false;
   }
 
+function graphRoutingObjectHasJsonKeys(
+    source,
+    expectedKeys
+  ) {
+    if (
+      !source ||
+      typeof source !== "object" ||
+      Array.isArray(source)
+    ) {
+      return false;
+    }
+
+    const persistedKeys =
+      Object.keys(source).filter(key => {
+        const valueType =
+          typeof source[key];
+        return (
+          valueType !== "undefined" &&
+          valueType !== "function" &&
+          valueType !== "symbol"
+        );
+      });
+    return (
+      persistedKeys.length ===
+        expectedKeys.length &&
+      expectedKeys.every(key =>
+        Object.hasOwn(source, key)
+      )
+    );
+  }
+
+function graphRoutingPointsEqual(
+    sourcePoints,
+    normalizedPoints
+  ) {
+    return (
+      Array.isArray(sourcePoints) &&
+      sourcePoints.length ===
+        normalizedPoints.length &&
+      normalizedPoints.every(
+        (normalizedPoint, index) => {
+          const sourcePoint =
+            sourcePoints[index];
+          return (
+            graphRoutingObjectHasJsonKeys(
+              sourcePoint,
+              ["id", "x", "y"]
+            ) &&
+            sourcePoint.id ===
+              normalizedPoint.id &&
+            sourcePoint.x ===
+              normalizedPoint.x &&
+            sourcePoint.y ===
+              normalizedPoint.y
+          );
+        }
+      )
+    );
+  }
+
+function graphRoutingBranchEqual(
+    sourceBranch,
+    normalizedBranch
+  ) {
+    if (normalizedBranch === null) {
+      return sourceBranch === null;
+    }
+
+    return (
+      graphRoutingObjectHasJsonKeys(
+        sourceBranch,
+        ["connectionId", "pointId"]
+      ) &&
+      sourceBranch.connectionId ===
+        normalizedBranch.connectionId &&
+      sourceBranch.pointId ===
+        normalizedBranch.pointId
+    );
+  }
+
 function normalizeConnectionRouting(
-    connections
+    connections,
+    mutation = null
   ) {
     const list = Array.isArray(connections)
       ? connections
@@ -2425,18 +5095,44 @@ function normalizeConnectionRouting(
     );
 
     for (const connection of list) {
-      connection.points =
+      const sourcePoints =
+        connection.points;
+      const normalizedPoints =
         sanitizeWirePoints(
-          connection.points,
+          sourcePoints,
           connection.id
         );
+      if (
+        mutation &&
+        !graphRoutingPointsEqual(
+          sourcePoints,
+          normalizedPoints
+        )
+      ) {
+        mutation.routingChanged = true;
+      }
+      connection.points = normalizedPoints;
 
+      const sourceBranch =
+        connection.branchFrom;
       const branch =
         sanitizeBranchReference(
           connection
         );
 
       if (!branch) {
+        if (
+          mutation &&
+          !(
+            Object.hasOwn(
+              connection,
+              "branchFrom"
+            ) &&
+            sourceBranch === null
+          )
+        ) {
+          mutation.routingChanged = true;
+        }
         connection.branchFrom = null;
         continue;
       }
@@ -2457,13 +5153,24 @@ function normalizeConnectionRouting(
         parent.fromPort ===
           connection.fromPort;
 
-      connection.branchFrom =
+      const normalizedBranch =
         parent &&
         parent.id !== connection.id &&
         point &&
         sameSemanticSource
           ? branch
           : null;
+      if (
+        mutation &&
+        !graphRoutingBranchEqual(
+          sourceBranch,
+          normalizedBranch
+        )
+      ) {
+        mutation.routingChanged = true;
+      }
+      connection.branchFrom =
+        normalizedBranch;
     }
 
     for (const connection of list) {
@@ -2474,6 +5181,9 @@ function normalizeConnectionRouting(
           connectionsById
         )
       ) {
+        if (mutation) {
+          mutation.routingChanged = true;
+        }
         connection.branchFrom = null;
       }
     }
@@ -2481,8 +5191,27 @@ function normalizeConnectionRouting(
     return list;
   }
 
-function sanitizeGraphState(raw) {
+function sanitizeGraphState(
+    raw,
+    options = {}
+  ) {
     const result = defaultGraphState();
+
+    const apiCompositeDepth = Math.max(
+      0,
+      Math.trunc(
+        finiteNumber(
+          options.apiCompositeDepth,
+          0
+        )
+      )
+    );
+    if (
+      apiCompositeDepth >
+        API_COMPOSITE_MAX_NESTING_DEPTH
+    ) {
+      return result;
+    }
 
     if (
       !raw ||
@@ -3109,43 +5838,6 @@ function sanitizeGraphState(raw) {
         )
         .map(node => [node.id, node])
     );
-    const rawCompositeSourcesForCustomCSharp =
-      raw.apiCompositeGraphs &&
-      typeof raw.apiCompositeGraphs ===
-        "object" &&
-      !Array.isArray(
-        raw.apiCompositeGraphs
-      )
-        ? raw.apiCompositeGraphs
-        : {};
-    for (const compositeSource of
-      Object.values(
-        rawCompositeSourcesForCustomCSharp
-      )) {
-      for (const node of
-        Array.isArray(compositeSource?.nodes)
-          ? compositeSource.nodes
-          : []) {
-        if (
-          node?.kind === "operator" &&
-          node.operatorId === "csharp.file"
-        ) {
-          customFileOwners.set(
-            node.id,
-            node
-          );
-        }
-      }
-      mergeCustomCSharpFileRegistry(
-        rawCustomCSharpFiles,
-        compositeSource
-          ?.customCSharpFiles
-      );
-    }
-    mergeCustomCSharpFileRegistry(
-      rawCustomCSharpFiles,
-      raw.customCSharpFiles
-    );
     const customFileOwnerIds = new Set(
       customFileOwners.keys()
     );
@@ -3193,17 +5885,42 @@ function sanitizeGraphState(raw) {
         connections: source.connections,
         viewport: source.viewport,
         selectedNodeId: source.selectedNodeId,
+        selectedNodeIds: source.selectedNodeIds,
         selectedConnectionId: source.selectedConnectionId,
         selectedWirePoint: source.selectedWirePoint,
         nextSequence: source.nextSequence
+      }, {
+        apiCompositeDepth
       });
       sanitizedView.nodes = sanitizedView.nodes.filter(node => {
         if (node.operatorId === "csharp.directSource") return false;
         const definition = OPERATOR_DEFINITIONS[node.operatorId];
+        const storedContract =
+          node.apiContract &&
+          typeof node.apiContract === "object" &&
+          !Array.isArray(node.apiContract)
+            ? node.apiContract
+            : definition?.preservedApiContract;
+        const preservedCatalogNode =
+          Boolean(
+            String(
+              storedContract?.ownerType || ""
+            ).trim() &&
+            String(
+              storedContract?.kind || ""
+            ).trim()
+          ) &&
+          (
+            !definition ||
+            definition
+              .unavailableApiContract ===
+                true
+          );
         return Boolean(
           definition?.customCSharpSyntaxNode === true ||
           definition?.customCSharpSubgraphOnly === true ||
-          definition?.customCSharpCatalogNode === true
+          definition?.customCSharpCatalogNode === true ||
+          preservedCatalogNode
         );
       });
       const allowedInternalIds = new Set(sanitizedView.nodes.map(node => node.id));
@@ -3211,6 +5928,11 @@ function sanitizeGraphState(raw) {
         allowedInternalIds.has(connection.fromNode) &&
         allowedInternalIds.has(connection.toNode)
       );
+      sanitizedView.selectedNodeIds =
+        sanitizedView.selectedNodeIds.filter(
+          nodeId =>
+            allowedInternalIds.has(nodeId)
+        );
       if (!allowedInternalIds.has(sanitizedView.selectedNodeId)) {
         sanitizedView.selectedNodeId = null;
       }
@@ -3427,7 +6149,20 @@ function sanitizeGraphState(raw) {
           selectedWirePoint:
             source.selectedWirePoint,
           nextSequence:
-            source.nextSequence
+            source.nextSequence,
+          customCSharpFiles:
+            mergeCustomCSharpFileRegistry(
+              mergeCustomCSharpFileRegistry(
+                {},
+                rawCustomCSharpFiles
+              ),
+              source.customCSharpFiles
+            ),
+          apiCompositeGraphs:
+            source.apiCompositeGraphs
+        }, {
+          apiCompositeDepth:
+            apiCompositeDepth + 1
         });
       sanitizedView.nodes =
         sanitizedView.nodes.filter(node => {
@@ -3435,7 +6170,12 @@ function sanitizeGraphState(raw) {
             node.operatorId ===
               "container.apiComposite"
           ) {
-            return false;
+            return Boolean(
+              sanitizedView
+                .apiCompositeGraphs?.[
+                  node.id
+                ]
+            );
           }
           const definition =
             OPERATOR_DEFINITIONS[
@@ -3540,6 +6280,14 @@ function sanitizeGraphState(raw) {
         version: 1,
         title:
           owner.parameters.title,
+        portLayout:
+          source.portLayout === "mirrored" ||
+          source.portLayout === "standard"
+            ? source.portLayout
+            : owner.parameters
+                .portLayout === "mirrored"
+              ? "mirrored"
+              : "standard",
         contentFingerprint:
           String(
             source.contentFingerprint ||
@@ -3560,6 +6308,11 @@ function sanitizeGraphState(raw) {
                 "standard"
               ? "standard"
               : "",
+        fingerprintNestedSignature:
+          String(
+            source.fingerprintNestedSignature ||
+            ""
+          ).slice(0, 96),
         createdCatalogFingerprint:
           String(
             source.createdCatalogFingerprint ||
@@ -3570,12 +6323,32 @@ function sanitizeGraphState(raw) {
             source.createdEngineVersion ||
             ""
           ).slice(0, 160),
+        elementIdentity:
+          sanitizeApiCompositeElementIdentity(
+            source.elementIdentity,
+            {
+              templateIdFallback:
+                owner.parameters
+                  ?.savedApiCompositeId ||
+                "",
+              nodes:
+                sanitizedView.nodes,
+              connections:
+                sanitizedView.connections,
+              boundaries
+            }
+          ),
         boundaryPorts: boundaries,
         branchRouting,
         customCSharpFiles:
-          customCSharpFilesForNodes(
-            sanitizedView.nodes,
-            result.customCSharpFiles
+          nodeGraphClone(
+            sanitizedView
+              .customCSharpFiles || {}
+          ),
+        apiCompositeGraphs:
+          nodeGraphClone(
+            sanitizedView
+              .apiCompositeGraphs || {}
           ),
         ...graphViewFrom(sanitizedView)
       };
@@ -3621,6 +6394,11 @@ function sanitizeGraphState(raw) {
       }
     }
 
+    if (apiCompositeDepth === 0) {
+      reconcileApiCompositeBoundaryTree(
+        result
+      );
+    }
     return result;
   }
 
@@ -4437,9 +7215,817 @@ function variableCandidateOrder(variable) {
     return ordered;
   }
 
-function analyzeConnections(connections) {
+function graphAnalysisPortContract(spec) {
+    return [
+      String(spec?.id || ""),
+      String(spec?.label || ""),
+      String(spec?.type || ""),
+      String(spec?.typeVar || ""),
+      String(spec?.constraint || ""),
+      String(spec?.reaction || "")
+    ];
+  }
+
+function graphAnalysisDefinitionContract(
+    definition
+  ) {
+    return [
+      String(definition?.title || ""),
+      String(
+        definition?.configurableTypeVar || ""
+      ),
+      Array.isArray(
+        definition?.configurableTypes
+      )
+        ? definition.configurableTypes.map(type =>
+            String(type || "")
+          )
+        : [],
+      String(definition?.autoFallbackType || ""),
+      String(definition?.defaultType || ""),
+      (definition?.inputs || []).map(
+        graphAnalysisPortContract
+      ),
+      (definition?.outputs || []).map(
+        graphAnalysisPortContract
+      ),
+      (Array.isArray(definition?.genericRelations)
+        ? definition.genericRelations
+        : []
+      ).map(relation => [
+        String(relation?.kind || ""),
+        String(
+          relation?.collectionTypeVar || ""
+        ),
+        String(
+          relation?.elementTypeVar || ""
+        ),
+        relation?.exact === true
+      ])
+    ];
+  }
+
+function graphAnalysisTypeContract(type) {
+    const information =
+      TYPE_INFO[type] || {};
+    return [
+      type,
+      String(information.label || ""),
+      Array.isArray(information.constraints)
+        ? information.constraints.map(value =>
+            String(value || "")
+          )
+        : [],
+      information.referenceType === true,
+      information.enumType === true,
+      information.acceptsAnyValue === true,
+      Array.isArray(information.assignableTo)
+        ? information.assignableTo.map(value =>
+            String(value || "")
+          )
+        : [],
+      Array.isArray(information.acceptsTypes)
+        ? information.acceptsTypes.map(value =>
+            String(value || "")
+          )
+        : [],
+      String(information.csType || ""),
+      information.collectorCollection === true,
+      String(
+        information.enumerableElementType || ""
+      )
+    ];
+  }
+
+function createGraphAnalysisFingerprint() {
+    let first = 0x811c9dc5;
+    let second = 0x9e3779b9;
+    let third = 0x85ebca6b;
+    let fourth = 0xc2b2ae35;
+
+    const mix = rawValue => {
+      const value = Number(rawValue) >>> 0;
+      first = Math.imul(
+        first ^ value,
+        0x01000193
+      );
+      second = Math.imul(
+        second ^ ((value + 0x9e3779b9) >>> 0),
+        0x85ebca6b
+      );
+      third = Math.imul(
+        (third + value) >>> 0,
+        0xc2b2ae35
+      );
+      third ^= third >>> 13;
+      fourth ^= (
+        value +
+        0x9e3779b9 +
+        (fourth << 6) +
+        (fourth >>> 2)
+      ) >>> 0;
+      fourth = Math.imul(
+        fourth,
+        0x27d4eb2f
+      );
+    };
+
+    const addText = value => {
+      const text = String(value);
+      mix(6);
+      mix(text.length);
+      let left = 0x811c9dc5;
+      let right = 0x9e3779b9;
+      for (
+        let index = 0;
+        index < text.length;
+        index += 1
+      ) {
+        const code = text.charCodeAt(index);
+        left = Math.imul(
+          left ^ code,
+          0x01000193
+        );
+        right = Math.imul(
+          right ^ ((code + index) >>> 0),
+          0x85ebca6b
+        );
+      }
+      mix(left);
+      mix(right);
+    };
+
+    const add = value => {
+      if (Array.isArray(value)) {
+        mix(1);
+        mix(value.length);
+        for (const item of value) {
+          add(item);
+        }
+        mix(0xffffffff);
+        return;
+      }
+      if (value === null) {
+        mix(2);
+        return;
+      }
+      switch (typeof value) {
+        case "boolean":
+          mix(value ? 3 : 4);
+          return;
+        case "number":
+          mix(5);
+          add(String(value));
+          return;
+        case "string":
+          addText(value);
+          return;
+        case "undefined":
+          mix(7);
+          return;
+        default:
+          mix(8);
+          add(String(value));
+      }
+    };
+
+    const avalanche = value => {
+      let result = value >>> 0;
+      result ^= result >>> 16;
+      result = Math.imul(result, 0x85ebca6b);
+      result ^= result >>> 13;
+      result = Math.imul(result, 0xc2b2ae35);
+      result ^= result >>> 16;
+      return result >>> 0;
+    };
+
+    return {
+      add,
+      addText,
+      digest() {
+        return [first, second, third, fourth]
+          .map(value =>
+            avalanche(value)
+              .toString(16)
+              .padStart(8, "0")
+          )
+          .join("");
+      }
+    };
+  }
+
+function observableGraphAnalysisMutationEpoch() {
+    try {
+      return typeof graphAnalysisMutationSequence ===
+        "number"
+        ? graphAnalysisMutationSequence
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+function graphAnalysisSemanticToken(
+    connections,
+    sourceGraph = graph,
+    { refresh = false } = {}
+  ) {
+    if (
+      !sourceGraph ||
+      !Array.isArray(sourceGraph.nodes) ||
+      !Array.isArray(connections)
+    ) {
+      return "";
+    }
+
+    const mutationEpoch =
+      observableGraphAnalysisMutationEpoch();
+    const definitionEpoch = Number(
+      window.__RMLNodeDefinitionRevision
+    ) || 0;
+    const factoryEpoch = Number(
+      window.__RMLApiNodeFactoryVersion
+    ) || 0;
+    const catalogFingerprint = String(
+      window.RMLApiNodeFactoryReport
+        ?.catalogFingerprint || ""
+    );
+    const catalogId = hashText(
+      catalogFingerprint
+    );
+    const valueTypeCount =
+      VALUE_TYPES.length;
+    const typeInformationCount =
+      Object.keys(TYPE_INFO).length;
+    const identityCached =
+      graphAnalysisIdentityTokens.get(
+        connections
+      );
+    if (
+      !refresh &&
+      mutationEpoch !== null &&
+      identityCached?.sourceGraph === sourceGraph &&
+      identityCached.nodes === sourceGraph.nodes &&
+      identityCached.mutationEpoch === mutationEpoch &&
+      identityCached.definitionEpoch === definitionEpoch &&
+      identityCached.factoryEpoch === factoryEpoch &&
+      identityCached.catalogId === catalogId &&
+      identityCached.valueTypeCount ===
+        valueTypeCount &&
+      identityCached.typeInformationCount ===
+        typeInformationCount &&
+      identityCached.nodeCount ===
+        sourceGraph.nodes.length &&
+      identityCached.connectionCount ===
+        connections.length
+    ) {
+      return identityCached.token;
+    }
+    graphConcreteTypes();
+
+    const fingerprint =
+      createGraphAnalysisFingerprint();
+    const staticDefinitionIndexes =
+      new WeakMap();
+    const staticDefinitionFingerprints = [];
+    fingerprint.addText(JSON.stringify([
+        GRAPH_SCHEMA_VERSION,
+        Boolean(customCSharpEditor),
+        definitionEpoch,
+        factoryEpoch,
+        catalogFingerprint,
+        VALUE_TYPES.map(type => String(type || "")),
+        Object.keys(TYPE_INFO)
+          .sort()
+          .map(graphAnalysisTypeContract)
+      ]));
+
+    let nodeChunk = [];
+    const nodeIndexById = new Map();
+    for (
+      let nodeIndex = 0;
+      nodeIndex < sourceGraph.nodes.length;
+      nodeIndex += 1
+    ) {
+      const node = sourceGraph.nodes[nodeIndex];
+      nodeIndexById.set(node?.id, nodeIndex);
+      const definition = nodeDefinition(node);
+      const registeredDefinition =
+        node?.kind === "operator"
+          ? OPERATOR_DEFINITIONS[
+              node.operatorId
+            ]
+          : null;
+      const staticDefinition = Boolean(
+        registeredDefinition &&
+        node.operatorId !==
+          "constant.typedDefault" &&
+        node.operatorId !==
+          "configuration.menuInstance" &&
+        typeof registeredDefinition
+          .resolveDefinition !== "function" &&
+        !registeredDefinition.variadicInputs &&
+        !registeredDefinition.variadicOutputs
+      );
+      let staticDefinitionIndex =
+        staticDefinition
+          ? staticDefinitionIndexes.get(
+              registeredDefinition
+            )
+          : null;
+      let definitionIdentity = null;
+      if (
+        staticDefinition &&
+        staticDefinitionIndex !== undefined &&
+        staticDefinitionIndex !== null
+      ) {
+        definitionIdentity = [
+          "static",
+          staticDefinitionIndex
+        ];
+      } else {
+        const contractFingerprint =
+          createGraphAnalysisFingerprint();
+        contractFingerprint.addText(
+          JSON.stringify(
+            graphAnalysisDefinitionContract(
+              definition
+            )
+          )
+        );
+        const definitionFingerprint =
+          contractFingerprint.digest();
+        if (staticDefinition) {
+          staticDefinitionIndex =
+            staticDefinitionFingerprints.length;
+          staticDefinitionIndexes.set(
+            registeredDefinition,
+            staticDefinitionIndex
+          );
+          staticDefinitionFingerprints.push([
+            String(node.operatorId || ""),
+            definitionFingerprint
+          ]);
+          definitionIdentity = [
+            "static",
+            staticDefinitionIndex
+          ];
+        } else {
+          definitionIdentity = [
+            "dynamic",
+            definitionFingerprint
+          ];
+        }
+      }
+      if (!definitionIdentity) {
+        definitionIdentity = [
+          "missing",
+          ""
+        ];
+      }
+      nodeChunk.push([
+        String(node?.id || ""),
+        String(node?.kind || ""),
+        String(node?.operatorId || ""),
+        definitionIdentity,
+        String(
+          node?.parameters?.valueType || ""
+        ),
+        String(node?.parameters?.value ?? ""),
+        String(
+          node?.parameters?.components ?? ""
+        ),
+        String(
+          node?.parameters?.autoVectorType || ""
+        )
+      ]);
+      if (nodeChunk.length >= 128) {
+        fingerprint.addText(
+          JSON.stringify(nodeChunk)
+        );
+        nodeChunk = [];
+      }
+    }
+    if (nodeChunk.length > 0) {
+      fingerprint.addText(
+        JSON.stringify(nodeChunk)
+      );
+    }
+    fingerprint.addText(
+      JSON.stringify(
+        staticDefinitionFingerprints
+      )
+    );
+
+    let connectionChunk = [];
+    for (const connection of connections) {
+      const fromIndex = nodeIndexById.get(
+        connection?.fromNode
+      );
+      const toIndex = nodeIndexById.get(
+        connection?.toNode
+      );
+      connectionChunk.push([
+        String(connection?.id || ""),
+        fromIndex === undefined
+          ? ["missing", String(connection?.fromNode || "")]
+          : fromIndex,
+        String(connection?.fromPort || ""),
+        toIndex === undefined
+          ? ["missing", String(connection?.toNode || "")]
+          : toIndex,
+        String(connection?.toPort || "")
+      ]);
+      if (connectionChunk.length >= 128) {
+        fingerprint.addText(
+          JSON.stringify(connectionChunk)
+        );
+        connectionChunk = [];
+      }
+    }
+    if (connectionChunk.length > 0) {
+      fingerprint.addText(
+        JSON.stringify(connectionChunk)
+      );
+    }
+
+    const token = [
+      "ga3",
+      sourceGraph.nodes.length,
+      connections.length,
+      VALUE_TYPES.length,
+      typeInformationCount,
+      definitionEpoch,
+      factoryEpoch,
+      catalogId,
+      fingerprint.digest()
+    ].join(":");
+    if (mutationEpoch !== null) {
+      graphAnalysisIdentityTokens.set(
+        connections,
+        {
+          sourceGraph,
+          nodes: sourceGraph.nodes,
+          mutationEpoch,
+          definitionEpoch,
+          factoryEpoch,
+          catalogId,
+          valueTypeCount,
+          typeInformationCount,
+          nodeCount:
+            sourceGraph.nodes.length,
+          connectionCount:
+            connections.length,
+          token
+        }
+      );
+    }
+    return token;
+  }
+
+function cloneGraphAnalysis(analysis) {
+    return {
+      valid: analysis?.valid === true,
+      reason: String(analysis?.reason || ""),
+      bindings: new Map(
+        [...(analysis?.bindings || new Map())]
+          .map(([nodeId, bindings]) => [
+            nodeId,
+            { ...(bindings || {}) }
+          ])
+      )
+    };
+  }
+
+function cachedGraphAnalysis(token) {
+    if (!token || !graphAnalysisCache.has(token)) {
+      return null;
+    }
+    const cached = graphAnalysisCache.get(token);
+    graphAnalysisCache.delete(token);
+    graphAnalysisCache.set(token, cached);
+    return cloneGraphAnalysis(cached);
+  }
+
+function cacheGraphAnalysis(token, analysis) {
+    if (!token || !analysis) {
+      return;
+    }
+    graphAnalysisCache.delete(token);
+    graphAnalysisCache.set(
+      token,
+      cloneGraphAnalysis(analysis)
+    );
+    while (
+      graphAnalysisCache.size >
+        GRAPH_ANALYSIS_CACHE_LIMIT
+    ) {
+      graphAnalysisCache.delete(
+        graphAnalysisCache.keys().next().value
+      );
+    }
+  }
+
+function graphAnalysisCatalogId() {
+    return hashText(
+      String(
+        window.RMLApiNodeFactoryReport
+          ?.catalogFingerprint || ""
+      )
+    );
+  }
+
+function createGraphAnalysisCertificate(
+    connections,
+    analysis
+  ) {
+    if (
+      analysis?.valid !== true ||
+      !(analysis.bindings instanceof Map) ||
+      graph?.connections !== connections
+    ) {
+      return null;
+    }
+    const token =
+      lastGraphAnalysisRecord?.sourceGraph === graph &&
+      lastGraphAnalysisRecord?.nodes === graph.nodes &&
+      lastGraphAnalysisRecord?.connections === connections
+        ? lastGraphAnalysisRecord.token
+        : graphAnalysisSemanticToken(
+            connections,
+            graph,
+            { refresh: true }
+          );
+    const bindings = [...analysis.bindings]
+      .filter(([, values]) =>
+        values &&
+        Object.keys(values).length > 0
+      )
+      .map(([nodeId, values]) =>
+        Object.freeze([
+          String(nodeId || ""),
+          Object.freeze({ ...values })
+        ])
+      );
+    const certificate = Object.freeze({
+      schemaVersion:
+        GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION,
+      moduleId:
+        "1.20.31-universal-presentation-dev23",
+      semanticToken: token,
+      nodeCount: graph.nodes.length,
+      connectionCount: connections.length,
+      definitionEpoch:
+        Number(
+          window.__RMLNodeDefinitionRevision
+        ) || 0,
+      factoryEpoch:
+        Number(
+          window.__RMLApiNodeFactoryVersion
+        ) || 0,
+      catalogId: graphAnalysisCatalogId(),
+      valid: true,
+      bindings: Object.freeze(bindings),
+      autoVectorUpdates: Object.freeze([])
+    });
+    trustedGraphAnalysisCertificates.add(
+      certificate
+    );
+    return certificate;
+  }
+
+function graphAnalysisCertificateEnvelopeValid(
+    certificate
+  ) {
+    return Boolean(
+      certificate &&
+      typeof certificate === "object" &&
+      !Array.isArray(certificate) &&
+      Number(certificate.schemaVersion) ===
+        GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION &&
+      certificate.moduleId ===
+        "1.20.31-universal-presentation-dev23" &&
+      certificate.valid === true &&
+      typeof certificate.semanticToken ===
+        "string" &&
+      certificate.semanticToken.startsWith(
+        "ga3:"
+      ) &&
+      Array.isArray(certificate.bindings) &&
+      Array.isArray(
+        certificate.autoVectorUpdates
+      )
+    );
+  }
+
+function acceptGraphAnalysisCertificate(
+    certificate,
+    { transferred = false } = {}
+  ) {
+    if (
+      !graphAnalysisCertificateEnvelopeValid(
+        certificate
+      ) ||
+      (
+        !transferred &&
+        !trustedGraphAnalysisCertificates.has(
+          certificate
+        )
+      )
+    ) {
+      return false;
+    }
+    pendingGraphAnalysisCertificate =
+      certificate;
+    return true;
+  }
+
+function graphAnalysisFromCertificate(
+    certificate,
+    connections,
+    semanticToken
+  ) {
+    if (
+      !graphAnalysisCertificateEnvelopeValid(
+        certificate
+      ) ||
+      !graph ||
+      graph.connections !== connections ||
+      certificate.semanticToken !==
+        semanticToken ||
+      Number(certificate.nodeCount) !==
+        graph.nodes.length ||
+      Number(certificate.connectionCount) !==
+        connections.length ||
+      Number(certificate.definitionEpoch) !==
+        (
+          Number(
+            window.__RMLNodeDefinitionRevision
+          ) || 0
+        ) ||
+      Number(certificate.factoryEpoch) !==
+        (
+          Number(
+            window.__RMLApiNodeFactoryVersion
+          ) || 0
+        ) ||
+      certificate.catalogId !==
+        graphAnalysisCatalogId()
+    ) {
+      return null;
+    }
+
+    const concreteTypes = new Set(
+      graphConcreteTypes()
+    );
+    const bindings = new Map(
+      graph.nodes.map(node => [node.id, {}])
+    );
+    const seenNodeIds = new Set();
+    for (const row of certificate.bindings) {
+      if (
+        !Array.isArray(row) ||
+        row.length !== 2 ||
+        typeof row[0] !== "string" ||
+        !row[1] ||
+        typeof row[1] !== "object" ||
+        Array.isArray(row[1]) ||
+        seenNodeIds.has(row[0]) ||
+        !bindings.has(row[0])
+      ) {
+        return null;
+      }
+      const node = findGraphNode(row[0]);
+      const definition = nodeDefinition(node);
+      const values = {};
+      for (const [typeVar, type] of
+        Object.entries(row[1])) {
+        const specs = [
+          ...(definition?.inputs || []),
+          ...(definition?.outputs || [])
+        ].filter(spec =>
+          spec?.typeVar === typeVar
+        );
+        if (
+          specs.length === 0 ||
+          typeof type !== "string" ||
+          !concreteTypes.has(type) ||
+          (
+            definition?.configurableTypeVar ===
+              typeVar &&
+            Array.isArray(
+              definition.configurableTypes
+            ) &&
+            !definition.configurableTypes.includes(
+              type
+            )
+          ) ||
+          !specs.every(spec =>
+            typeMatchesConstraint(
+              type,
+              spec.constraint || "value"
+            )
+          ) ||
+          !nodeAllowsConcreteType(
+            node,
+            definition,
+            type
+          )
+        ) {
+          return null;
+        }
+        values[typeVar] = type;
+      }
+      seenNodeIds.add(row[0]);
+      bindings.set(row[0], values);
+    }
+
+    for (const node of graph.nodes) {
+      const definition = nodeDefinition(node);
+      const typeVariables = new Set(
+        [
+          ...(definition?.inputs || []),
+          ...(definition?.outputs || [])
+        ]
+          .map(spec =>
+            String(spec?.typeVar || "")
+          )
+          .filter(Boolean)
+      );
+      const nodeBindings =
+        bindings.get(node.id) || {};
+      if (
+        [...typeVariables].some(typeVar =>
+          typeof nodeBindings[typeVar] !==
+            "string"
+        )
+      ) {
+        return null;
+      }
+    }
+
+    return {
+      valid: true,
+      reason: "",
+      bindings
+    };
+  }
+
+function analyzeConnectionsCore(
+    connections,
+    options = {}
+  ) {
+    graphAnalysisCoreRunCount += 1;
     const concreteTypes = graphConcreteTypes();
+    const compatibilityBySourceType = new Map();
+    const typesCompatible = (
+      fromType,
+      toType
+    ) => {
+      let byTargetType =
+        compatibilityBySourceType.get(
+          fromType
+        );
+      if (!byTargetType) {
+        byTargetType = new Map();
+        compatibilityBySourceType.set(
+          fromType,
+          byTargetType
+        );
+      }
+      if (byTargetType.has(toType)) {
+        return byTargetType.get(toType);
+      }
+      const compatible =
+        connectionTypesCompatible(
+          fromType,
+          toType
+        );
+      byTargetType.set(
+        toType,
+        compatible
+      );
+      return compatible;
+    };
     const variables = new Map();
+    const domainTemplates = new Map();
+    const allowedTypeListIds = new WeakMap();
+    let nextAllowedTypeListId = 1;
+    const allowedTypeListId = values => {
+      if (
+        values &&
+        typeof values === "object"
+      ) {
+        let id = allowedTypeListIds.get(values);
+        if (!id) {
+          id = nextAllowedTypeListId;
+          nextAllowedTypeListId += 1;
+          allowedTypeListIds.set(values, id);
+        }
+        return id;
+      }
+      return String(values || "");
+    };
 
     for (const node of graph.nodes) {
       const definition = nodeDefinition(node);
@@ -4473,25 +8059,54 @@ function analyzeConnections(connections) {
           allowed.includes(configured)
             ? configured
             : null;
-        const domain = new Set(
-          (explicitType ? [explicitType] : allowed).filter(
-            type =>
-              type &&
-              type !== "generic" &&
-              type !== "auto" &&
-              specs.every(spec =>
-                typeMatchesConstraint(
-                  type,
-                  spec.constraint || "value"
-                )
-              ) &&
-              nodeAllowsConcreteType(
-                node,
-                definition,
-                type
+        const domainKey = [
+          allowedTypeListId(allowed),
+          explicitType || "",
+          specs
+            .map(spec =>
+              String(
+                spec.constraint || "value"
               )
-          )
-        );
+            )
+            .join("\u0001"),
+          node.operatorId === "constant.number"
+            ? `constant.number:${String(
+                node.parameters?.value ?? ""
+              )}`
+            : node.operatorId === "constant.vector"
+              ? `constant.vector:${String(
+                  node.parameters?.components ?? ""
+                )}`
+              : ""
+        ].join("\u0000");
+        let domainValues =
+          domainTemplates.get(domainKey);
+        if (!domainValues) {
+          domainValues = (
+            explicitType ? [explicitType] : allowed
+          ).filter(
+              type =>
+                type &&
+                type !== "generic" &&
+                type !== "auto" &&
+                specs.every(spec =>
+                  typeMatchesConstraint(
+                    type,
+                    spec.constraint || "value"
+                  )
+                ) &&
+                nodeAllowsConcreteType(
+                  node,
+                  definition,
+                  type
+                )
+            );
+          domainTemplates.set(
+            domainKey,
+            domainValues
+          );
+        }
+        const domain = new Set(domainValues);
 
         if (domain.size === 0) {
           return {
@@ -4749,7 +8364,7 @@ function analyzeConnections(connections) {
         if (
           !fromValues.some(fromType =>
             toValues.some(toType =>
-              connectionTypesCompatible(fromType, toType)
+              typesCompatible(fromType, toType)
             )
           )
         ) {
@@ -4765,7 +8380,7 @@ function analyzeConnections(connections) {
           for (const type of fromValues) {
             if (
               !toValues.some(toType =>
-                connectionTypesCompatible(type, toType)
+                typesCompatible(type, toType)
               )
             ) {
               edge.from.variable.domain.delete(type);
@@ -4779,7 +8394,7 @@ function analyzeConnections(connections) {
           for (const type of toValues) {
             if (
               !latestFromValues.some(fromType =>
-                connectionTypesCompatible(fromType, type)
+                typesCompatible(fromType, type)
               )
             ) {
               edge.to.variable.domain.delete(type);
@@ -4927,7 +8542,7 @@ function analyzeConnections(connections) {
         if (
           fromType &&
           toType &&
-          !connectionTypesCompatible(fromType, toType)
+          !typesCompatible(fromType, toType)
         ) {
           return false;
         }
@@ -5036,13 +8651,85 @@ function analyzeConnections(connections) {
         (relationsByVariable.get(key) || []).length > 0
     );
 
-    const solve = () => {
+    const constraintComponents = (() => {
+      if (
+        options?.decompose === false ||
+        connectedVariableKeys.length < 2
+      ) {
+        return connectedVariableKeys.length > 0
+          ? [connectedVariableKeys]
+          : [];
+      }
+
+      const parents = new Map(
+        connectedVariableKeys.map(key => [key, key])
+      );
+      const ranks = new Map(
+        connectedVariableKeys.map(key => [key, 0])
+      );
+      const findRoot = key => {
+        let root = key;
+        while (parents.get(root) !== root) {
+          root = parents.get(root);
+        }
+        let current = key;
+        while (parents.get(current) !== current) {
+          const next = parents.get(current);
+          parents.set(current, root);
+          current = next;
+        }
+        return root;
+      };
+      const union = (left, right) => {
+        if (!parents.has(left) || !parents.has(right)) {
+          return;
+        }
+        let leftRoot = findRoot(left);
+        let rightRoot = findRoot(right);
+        if (leftRoot === rightRoot) {
+          return;
+        }
+        const leftRank = ranks.get(leftRoot) || 0;
+        const rightRank = ranks.get(rightRoot) || 0;
+        if (leftRank < rightRank) {
+          [leftRoot, rightRoot] = [rightRoot, leftRoot];
+        }
+        parents.set(rightRoot, leftRoot);
+        if (leftRank === rightRank) {
+          ranks.set(leftRoot, leftRank + 1);
+        }
+      };
+
+      for (const edge of edges) {
+        if (!edge.from.fixed && !edge.to.fixed) {
+          union(edge.from.key, edge.to.key);
+        }
+      }
+      for (const relation of genericRelations) {
+        union(
+          relation.collection.key,
+          relation.element.key
+        );
+      }
+
+      const componentsByRoot = new Map();
+      for (const key of connectedVariableKeys) {
+        const root = findRoot(key);
+        const component =
+          componentsByRoot.get(root) || [];
+        component.push(key);
+        componentsByRoot.set(root, component);
+      }
+      return [...componentsByRoot.values()];
+    })();
+
+    const solve = componentKeys => {
       solveSteps += 1;
       if (solveSteps > 200000) {
         return false;
       }
 
-      const remaining = connectedVariableKeys.filter(
+      const remaining = componentKeys.filter(
         key => !assignments.has(key)
       );
       if (remaining.length === 0) {
@@ -5187,7 +8874,7 @@ function analyzeConnections(connections) {
         assignments.set(selectedKey, candidate);
         if (
           everyUnassignedNeighborHasCandidate(selectedKey) &&
-          solve()
+          solve(componentKeys)
         ) {
           return true;
         }
@@ -5197,13 +8884,15 @@ function analyzeConnections(connections) {
       return false;
     };
 
-    if (!solve()) {
-      return {
-        valid: false,
-        reason:
-          "No safe concrete type assignment satisfies all connected generic ports. Add an explicit conversion or select a concrete node type.",
-        bindings: new Map()
-      };
+    for (const componentKeys of constraintComponents) {
+      if (!solve(componentKeys)) {
+        return {
+          valid: false,
+          reason:
+            "No safe concrete type assignment satisfies all connected generic ports. Add an explicit conversion or select a concrete node type.",
+          bindings: new Map()
+        };
+      }
     }
 
     for (const [key, variable] of variables) {
@@ -5229,7 +8918,7 @@ function analyzeConnections(connections) {
         ? edge.to.type
         : assignments.get(edge.to.key);
 
-      if (!connectionTypesCompatible(fromType, toType)) {
+      if (!typesCompatible(fromType, toType)) {
         return {
           valid: false,
           reason:
@@ -5270,6 +8959,71 @@ function analyzeConnections(connections) {
         reason: "",
         bindings
     };
+  }
+
+function analyzeConnections(
+    connections,
+    options = {}
+  ) {
+    if (
+      options?.cache === false ||
+      options?.decompose === false
+    ) {
+      return analyzeConnectionsCore(
+        connections,
+        options
+      );
+    }
+
+    const token =
+      graphAnalysisSemanticToken(
+        connections
+      );
+    const certified =
+      graphAnalysisFromCertificate(
+        pendingGraphAnalysisCertificate,
+        connections,
+        token
+      );
+    if (certified) {
+      pendingGraphAnalysisCertificate = null;
+      cacheGraphAnalysis(token, certified);
+      lastGraphAnalysisRecord = {
+        sourceGraph: graph,
+        nodes: graph?.nodes,
+        connections,
+        token,
+        analysis: certified
+      };
+      return cloneGraphAnalysis(certified);
+    }
+    const cached =
+      cachedGraphAnalysis(token);
+    if (cached) {
+      lastGraphAnalysisRecord = {
+        sourceGraph: graph,
+        nodes: graph?.nodes,
+        connections,
+        token,
+        analysis: cached
+      };
+      return cached;
+    }
+
+    const analysis =
+      analyzeConnectionsCore(
+        connections,
+        options
+      );
+    cacheGraphAnalysis(token, analysis);
+    lastGraphAnalysisRecord = {
+      sourceGraph: graph,
+      nodes: graph?.nodes,
+      connections,
+      token,
+      analysis
+    };
+    return analysis;
   }
 
 function resolvePortType(
@@ -5661,6 +9415,179 @@ function synchronizeAutoVectorTypes(
     return result.analysis;
   }
 
+function graphAnalysisAbortError(
+    message = "Graph analysis was aborted."
+  ) {
+    if (typeof DOMException === "function") {
+      return new DOMException(
+        message,
+        "AbortError"
+      );
+    }
+    const error = new Error(message);
+    error.name = "AbortError";
+    return error;
+  }
+
+function reportGraphAnalysisProgress(
+    callback,
+    progress
+  ) {
+    if (typeof callback !== "function") {
+      return;
+    }
+    try {
+      callback(progress);
+    } catch (error) {
+      console.error(
+        "Runtime Graph analysis progress callback failed.",
+        error
+      );
+    }
+  }
+
+function yieldGraphAnalysisTask(signal) {
+    return new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(graphAnalysisAbortError());
+        return;
+      }
+      let settled = false;
+      const finish = callback => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        signal?.removeEventListener?.(
+          "abort",
+          abort
+        );
+        callback();
+      };
+      const abort = () => {
+        clearTimeout(handle);
+        finish(() =>
+          reject(graphAnalysisAbortError())
+        );
+      };
+      const handle = setTimeout(
+        () => finish(resolve),
+        0
+      );
+      signal?.addEventListener?.(
+        "abort",
+        abort,
+        { once: true }
+      );
+    });
+  }
+
+async function analyzeGraphConnectionsAsync(
+    connections,
+    {
+      signal = null,
+      onProgress = null
+    } = {}
+  ) {
+    const requestedGraph = graph;
+    const requestedNodes = graph?.nodes;
+    const requestedConnections = connections;
+    const requestSequence =
+      ++graphAnalysisAsyncRequestSequence;
+    const requestedMutationEpoch =
+      observableGraphAnalysisMutationEpoch();
+
+    if (
+      !requestedGraph ||
+      requestedGraph.connections !==
+        requestedConnections ||
+      !Array.isArray(requestedNodes) ||
+      !Array.isArray(requestedConnections)
+    ) {
+      throw graphAnalysisAbortError(
+        "The requested graph is no longer active."
+      );
+    }
+
+    const semanticToken =
+      graphAnalysisSemanticToken(
+        requestedConnections,
+        requestedGraph,
+        { refresh: true }
+      );
+    reportGraphAnalysisProgress(
+      onProgress,
+      {
+        phase: "queued",
+        completed: 0,
+        total: 1
+      }
+    );
+    await yieldGraphAnalysisTask(signal);
+
+    const assertCurrent = (
+      { verifySemanticToken = true } = {}
+    ) => {
+      if (
+        signal?.aborted ||
+        requestSequence !==
+          graphAnalysisAsyncRequestSequence ||
+        graph !== requestedGraph ||
+        graph?.nodes !== requestedNodes ||
+        graph?.connections !==
+          requestedConnections ||
+        (
+          requestedMutationEpoch !== null &&
+          observableGraphAnalysisMutationEpoch() !==
+            requestedMutationEpoch
+        ) ||
+        (
+          verifySemanticToken &&
+          requestedMutationEpoch === null &&
+          graphAnalysisSemanticToken(
+            requestedConnections,
+            requestedGraph,
+            { refresh: true }
+          ) !== semanticToken
+        )
+      ) {
+        throw graphAnalysisAbortError(
+          "The graph topology changed during analysis."
+        );
+      }
+    };
+
+    assertCurrent();
+    reportGraphAnalysisProgress(
+      onProgress,
+      {
+        phase: "analyzing",
+        completed: 0,
+        total: 1
+      }
+    );
+    assertCurrent();
+    const result = analyzeWithAutoVectors(
+      requestedConnections,
+      null
+    );
+    assertCurrent({
+      verifySemanticToken: false
+    });
+
+    applyAutoVectorUpdates(result.updates);
+    currentAnalysis = result.analysis;
+    reportGraphAnalysisProgress(
+      onProgress,
+      {
+        phase: "complete",
+        completed: 1,
+        total: 1
+      }
+    );
+    return currentAnalysis;
+  }
+
 function pathExists(
     adjacency,
     start,
@@ -6004,35 +9931,6 @@ function connectionProposal(
       };
     }
 
-    if (apiCompositeEditor) {
-      const ownerId =
-        apiCompositeEditor.containerNodeId;
-      const boundary =
-        apiCompositeBoundaryRecords(
-          graph.apiCompositeGraphs?.[
-            ownerId
-          ]?.boundaryPorts
-        ).find(candidate =>
-          candidate.direction === "input" &&
-          candidate.internalNodeId ===
-            endpoints.to.nodeId &&
-          candidate.internalPortId ===
-            endpoints.to.portId
-        );
-      if (
-        boundary &&
-        apiCompositeBoundaryHasExternalWire(
-          boundary
-        )
-      ) {
-        return {
-          valid: false,
-          reason:
-            globalThis.RMLCodeTemplates.text("runtime", "source_013", [])
-        };
-      }
-    }
-
     const candidate = {
       id: makeId("wire"),
       fromNode:
@@ -6233,20 +10131,128 @@ function hasMissingOperatorDefinitions() {
     );
   }
 
-function pruneConnections() {
+function graphAutoVectorTypeSnapshot() {
+    return new Map(
+      (Array.isArray(graph?.nodes)
+        ? graph.nodes
+        : [])
+        .filter(isAutoVectorOperator)
+        .map(node => [
+          node,
+          {
+            present: Object.hasOwn(
+              node.parameters,
+              "autoVectorType"
+            ),
+            value:
+              node.parameters.autoVectorType
+          }
+        ])
+    );
+  }
+
+function graphPruneMutationResult({
+    connectionCountBefore = 0,
+    routingChanged = false,
+    autoVectorTypesBefore = new Map()
+  } = {}) {
+    const connectionsChanged =
+      graph.connections.length !==
+        connectionCountBefore;
+    const autoVectorTypeChanged =
+      [...autoVectorTypesBefore].some(
+        ([node, before]) =>
+          before.present !==
+            Object.hasOwn(
+              node.parameters,
+              "autoVectorType"
+            ) ||
+          before.value !==
+            node.parameters.autoVectorType
+      );
+    return Object.freeze({
+      documentChanged:
+        connectionsChanged ||
+        routingChanged ||
+        autoVectorTypeChanged,
+      connectionsChanged,
+      routingChanged,
+      autoVectorTypeChanged
+    });
+  }
+
+function pruneConnections(
+    {
+      preserveStoredConnections = false
+    } = {}
+  ) {
+    const connectionCountBefore =
+      graph.connections.length;
+    const mutation = {
+      routingChanged: false
+    };
+    const mutationResultWithoutAutoVectors = () =>
+      graphPruneMutationResult({
+        connectionCountBefore,
+        routingChanged:
+          mutation.routingChanged
+      });
     if (customCSharpEditor) {
-      graph.connections = graph.connections.filter(connection => {
+      const retainedConnections =
+        graph.connections.filter(connection => {
         const fromNode = findGraphNode(connection.fromNode);
         const toNode = findGraphNode(connection.toNode);
         return Boolean(fromNode && toNode && nodeDefinition(fromNode) && nodeDefinition(toNode));
       });
-      normalizeConnectionRouting(graph.connections);
+      if (
+        retainedConnections.length !==
+        graph.connections.length
+      ) {
+        graph.connections = retainedConnections;
+      }
+      normalizeConnectionRouting(
+        graph.connections,
+        mutation
+      );
       currentAnalysis = null;
-      return;
+      return mutationResultWithoutAutoVectors();
     }
     if (hasMissingOperatorDefinitions()) {
-      return;
+      if (preserveStoredConnections) {
+        const missingOperatorIds = [
+          ...new Set(
+            graph.nodes
+              .filter(node =>
+                node.kind === "operator" &&
+                !Object.hasOwn(
+                  OPERATOR_DEFINITIONS,
+                  String(node.operatorId || "")
+                )
+              )
+              .map(node =>
+                String(
+                  node.operatorId ||
+                  "<missing-id>"
+                )
+              )
+          )
+        ];
+        throw new Error(
+          `The imported Runtime Graph cannot be validated because operator definitions are unavailable: ${missingOperatorIds.slice(0, 8).join(", ") || "unknown"}. No stored wire was removed. The JSON was not loaded.`
+        );
+      }
+      return mutationResultWithoutAutoVectors();
     }
+
+    const autoVectorTypesBefore =
+      graphAutoVectorTypeSnapshot();
+    const mutationResult = () =>
+      graphPruneMutationResult({
+        connectionCountBefore,
+        routingChanged:
+          mutation.routingChanged,
+        autoVectorTypesBefore
+      });
 
     if (graph.connections.length === 0) {
       currentAnalysis =
@@ -6255,7 +10261,7 @@ function pruneConnections() {
           currentAnalysis
         );
 
-      return;
+      return mutationResult();
     }
 
     const wholeGraph =
@@ -6287,7 +10293,8 @@ function pruneConnections() {
             );
 
         normalizeConnectionRouting(
-            graph.connections
+            graph.connections,
+            mutation
         );
 
         if (
@@ -6303,7 +10310,13 @@ function pruneConnections() {
 
         normalizeSelectedWirePoint();
 
-        return;
+        return mutationResult();
+    }
+
+    if (preserveStoredConnections) {
+      throw new Error(
+        `The imported Runtime Graph connection contract is invalid: ${String(wholeGraph.analysis.reason || "type inference could not validate every stored wire")}. No stored wire was removed. The JSON was not loaded.`
+      );
     }
 
     if (
@@ -6313,7 +10326,8 @@ function pruneConnections() {
       currentAnalysis =
         wholeGraph.analysis;
       normalizeConnectionRouting(
-        graph.connections
+        graph.connections,
+        mutation
       );
 
       if (
@@ -6328,7 +10342,7 @@ function pruneConnections() {
       }
 
       normalizeSelectedWirePoint();
-      return;
+      return mutationResult();
     }
 
     const accepted = [];
@@ -6370,7 +10384,8 @@ function pruneConnections() {
 
     graph.connections = accepted;
     normalizeConnectionRouting(
-      graph.connections
+      graph.connections,
+      mutation
     );
     currentAnalysis =
       synchronizeAutoVectorTypes(
@@ -6390,6 +10405,7 @@ function pruneConnections() {
     }
 
     normalizeSelectedWirePoint();
+    return mutationResult();
   }
 
 function previewNumber(value) {
@@ -6936,6 +10952,15 @@ function synchronizeGraphForCodegen(
       return;
     }
 
+    const acceptedAnalysisCertificate =
+      acceptGraphAnalysisCertificate(
+        request.analysisCertificate,
+        {
+          transferred:
+            request.trustedAnalysisTransfer === true
+        }
+      );
+
     if (
       incoming === graph ||
       incoming ===
@@ -6951,7 +10976,13 @@ function synchronizeGraphForCodegen(
     graphCodegenRevision += 1;
     typedGraphCodegenCacheKey = "";
     typedGraphCodegenCache = null;
-    pruneConnections();
+    if (acceptedAnalysisCertificate) {
+      normalizeConnectionRouting(
+        graph.connections
+      );
+    } else {
+      pruneConnections();
+    }
   }
 
 function sanitizeGeneratedCSharp(source) {
@@ -8936,6 +12967,7 @@ function buildTypedNodeGraphCSharpContribution(
     if (
       !graph?.configSnapshot
     ) {
+      pendingGraphAnalysisCertificate = null;
       return {
         active: false,
         diagnostics: [],
@@ -9004,6 +13036,7 @@ function buildTypedNodeGraphCSharpContribution(
       typedGraphCodegenCacheKey ===
         cacheKey
     ) {
+      pendingGraphAnalysisCertificate = null;
       return typedGraphCodegenCache;
     }
 
@@ -9016,6 +13049,7 @@ function buildTypedNodeGraphCSharpContribution(
       analyzeConnections(
         graph.connections
       );
+    pendingGraphAnalysisCertificate = null;
     const nodeById =
       new Map(
         graph.nodes.map(
@@ -12168,13 +16202,7 @@ extensionMembersCode ? `\n\n${extensionMembersCode}` : ""]);
           .toLowerCase()
           .endsWith(".cs")
       ) {
-        if (file.skipHeuristicDiagnostics === true) {
-          if (!String(file.content || "").trim()) {
-            diagnostics.push(
-              `Visual C# source file '${file.name}' is empty.`
-            );
-          }
-        } else {
+        if (file.skipHeuristicDiagnostics !== true) {
           diagnostics.push(
             ...generatedSourceDiagnostics(
               file.content,
@@ -12399,7 +16427,8 @@ function validateTypedNodeGraphDocument(
     ) {
       return Object.freeze({
         valid: true,
-        diagnostics: Object.freeze([])
+        diagnostics: Object.freeze([]),
+        analysisCertificate: null
       });
     }
 
@@ -12418,6 +16447,7 @@ function validateTypedNodeGraphDocument(
         requestedGraph
       );
     const diagnostics = [];
+    let analysisCertificate = null;
     const legacyCSharpMigration =
       finiteNumber(requestedGraph.version, 0) < 23 &&
       Object.keys(candidate.customCSharpFiles || {}).length >
@@ -12475,6 +16505,12 @@ function validateTypedNodeGraphDocument(
             analysis.reason ||
               "The graph contains an invalid typed connection."
           );
+        } else {
+          analysisCertificate =
+            createGraphAnalysisCertificate(
+              expanded.connections,
+              analysis
+            );
         }
       } catch (error) {
         diagnostics.push(
@@ -12502,7 +16538,11 @@ function validateTypedNodeGraphDocument(
       valid:
         uniqueDiagnostics.length === 0,
       diagnostics:
-        uniqueDiagnostics
+        uniqueDiagnostics,
+      analysisCertificate:
+        uniqueDiagnostics.length === 0
+          ? analysisCertificate
+          : null
     });
   }
 
@@ -12543,37 +16583,103 @@ function fallbackConcreteTypeForPort(
   }
 
 function ensureGraphConnectionLookups() {
+    const connections = graph.connections;
     if (
-      graphConnectionLookupSource !== graph.connections ||
-      graphConnectionLookupLength !== graph.connections.length
+      graphConnectionLookupSource === connections &&
+      graphConnectionLookupLength === connections.length
     ) {
-      graphConnectionLookupSource = graph.connections;
-      graphConnectionLookupLength = graph.connections.length;
-      graphConnectionLookupCache = new Map(
-        graph.connections.map(connection => [
-          connection.id,
-          connection
-        ])
-      );
-      graphIncidentConnectionLookupCache = new Map();
-      for (const connection of graph.connections) {
-        for (const nodeId of [
-          connection.fromNode,
-          connection.toNode
-        ]) {
-          let ids =
-            graphIncidentConnectionLookupCache.get(
-              nodeId
-            );
-          if (!ids) {
-            ids = new Set();
-            graphIncidentConnectionLookupCache.set(
-              nodeId,
-              ids
-            );
-          }
-          ids.add(connection.id);
+      return;
+    }
+    const canAdoptAppendedTail = Boolean(
+      graphConnectionLookupSource === connections &&
+      graphConnectionLookupLength >= 0 &&
+      graphConnectionLookupLength < connections.length &&
+      graphConnectionLookupCache.size ===
+        graphConnectionLookupLength
+    );
+    if (canAdoptAppendedTail) {
+      const tailStart =
+        graphConnectionLookupLength;
+      const tailIds = new Set();
+      let validTail = true;
+      for (
+        let index = tailStart;
+        index < connections.length;
+        index += 1
+      ) {
+        const connection = connections[index];
+        if (
+          !connection?.id ||
+          tailIds.has(connection.id) ||
+          graphConnectionLookupCache.has(
+            connection.id
+          )
+        ) {
+          validTail = false;
+          break;
         }
+        tailIds.add(connection.id);
+      }
+      if (validTail) {
+        for (
+          let index = tailStart;
+          index < connections.length;
+          index += 1
+        ) {
+          const connection = connections[index];
+          graphConnectionLookupCache.set(
+            connection.id,
+            connection
+          );
+          for (const nodeId of [
+            connection.fromNode,
+            connection.toNode
+          ]) {
+            let ids =
+              graphIncidentConnectionLookupCache.get(
+                nodeId
+              );
+            if (!ids) {
+              ids = new Set();
+              graphIncidentConnectionLookupCache.set(
+                nodeId,
+                ids
+              );
+            }
+            ids.add(connection.id);
+          }
+        }
+        graphConnectionLookupLength =
+          connections.length;
+        return;
+      }
+    }
+    graphConnectionLookupSource = connections;
+    graphConnectionLookupLength = connections.length;
+    graphConnectionLookupCache = new Map(
+      connections.map(connection => [
+        connection.id,
+        connection
+      ])
+    );
+    graphIncidentConnectionLookupCache = new Map();
+    for (const connection of connections) {
+      for (const nodeId of [
+        connection.fromNode,
+        connection.toNode
+      ]) {
+        let ids =
+          graphIncidentConnectionLookupCache.get(
+            nodeId
+          );
+        if (!ids) {
+          ids = new Set();
+          graphIncidentConnectionLookupCache.set(
+            nodeId,
+            ids
+          );
+        }
+        ids.add(connection.id);
       }
     }
   }
@@ -12587,13 +16693,47 @@ function graphConnectionById(
 
 Object.defineProperty(
     window,
+    "RMLAnalyzeGraphConnectionsAsync",
+    {
+      value:
+        analyzeGraphConnectionsAsync,
+      writable: false,
+      enumerable: true,
+      configurable: true
+    }
+  );
+
+Object.defineProperty(
+    window,
     "RMLTypedNodeGraphGenerator",
     {
       value: Object.freeze({
+        moduleId:
+          "1.20.31-universal-presentation-dev23",
         build:
           buildTypedNodeGraphCSharpContribution,
         validateDocument:
           validateTypedNodeGraphDocument,
+        acceptAnalysisCertificate(
+          certificate
+        ) {
+          return acceptGraphAnalysisCertificate(
+            certificate
+          );
+        },
+        acceptTransferredAnalysisCertificate(
+          certificate
+        ) {
+          return acceptGraphAnalysisCertificate(
+            certificate,
+            { transferred: true }
+          );
+        },
+        reconcileCompositeBoundaries:
+          reconcileApiCompositeBoundaryTree,
+        propagateCompositeBoundaries:
+          propagateApiCompositeBoundariesOutward,
+        isCanonicalSyntheticCollectorType,
         verifyGeneratedSource(
           source,
           fileName = "Generated.cs",

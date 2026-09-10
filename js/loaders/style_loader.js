@@ -1,7 +1,23 @@
 (() => {
   "use strict";
 
-  const CLASS_STYLE_VERSION = 2;
+  const STYLE_LOADER_MODULE_ID =
+    "1.20.31-universal-presentation-dev23";
+
+  if (
+    Object.hasOwn(
+      window,
+      "RMLBuilderBuildId"
+    ) &&
+    window.RMLBuilderBuildId !==
+      STYLE_LOADER_MODULE_ID
+  ) {
+    throw new Error(
+      `Builder module version mismatch: index.html published '${String(window.RMLBuilderBuildId || "missing")}', but style_loader.js is '${STYLE_LOADER_MODULE_ID}'. Reload the Builder without cached files.`
+    );
+  }
+
+  const CLASS_STYLE_VERSION = 3;
 
   function installClassStyleRuntime() {
     if (
@@ -148,6 +164,9 @@
       ...integerAttributes,
       ...percentageAttributes
     ]);
+    const attributeNameSet = new Set(
+      attributeNames
+    );
     const observedAttributeNames =
       Object.freeze([
         ...attributeNames,
@@ -304,12 +323,22 @@
         state.observer = new Observer(
           records => {
             const changedElements =
-              new Set();
+              new Map();
             for (const record of records) {
               if (record.type === "attributes") {
-                changedElements.add(
+                let names = changedElements.get(
                   record.target
                 );
+                if (!names) {
+                  names = new Set();
+                  changedElements.set(
+                    record.target,
+                    names
+                  );
+                }
+                if (record.attributeName) {
+                  names.add(record.attributeName);
+                }
                 continue;
               }
               for (const removed of
@@ -324,12 +353,20 @@
                 );
               }
             }
-            for (const element of
+            for (const [element, names] of
               changedElements) {
-              synchronizeElement(
-                element,
-                state
-              );
+              if (names.has("class")) {
+                synchronizeElement(
+                  element,
+                  state
+                );
+              } else {
+                synchronizeAttributes(
+                  element,
+                  names,
+                  state
+                );
+              }
             }
           }
         );
@@ -372,7 +409,8 @@
         className,
         rule: state.sheet.cssRules[index],
         state,
-        signature: ""
+        signature: "",
+        values: new Map()
       };
     }
 
@@ -400,6 +438,7 @@
       );
       record.rule.style.cssText = "";
       record.signature = "";
+      record.values.clear();
       elementRecords.delete(element);
       record.state.availableRules.push(record);
     }
@@ -494,14 +533,87 @@
         return true;
       }
       record.rule.style.cssText = "";
+      record.values.clear();
       for (const [property, value] of
         declarations) {
         record.rule.style.setProperty(
           property,
           value
         );
+        record.values.set(property, value);
       }
       record.signature = signature;
+      return true;
+    }
+
+    function synchronizeAttributes(
+      element,
+      names,
+      suppliedState = null
+    ) {
+      if (!isElement(element)) {
+        return false;
+      }
+      const changed = [];
+      for (const name of names || []) {
+        if (attributeNameSet.has(name)) {
+          changed.push(name);
+        }
+      }
+      if (changed.length === 0) {
+        return Boolean(elementRecords.get(element));
+      }
+
+      const state = suppliedState ||
+        stateForDocument(
+          element.ownerDocument
+        );
+      const record =
+        elementRecords.get(element);
+      if (
+        !record ||
+        record.state !== state ||
+        !element.classList.contains(
+          record.className
+        )
+      ) {
+        return synchronizeElement(
+          element,
+          state
+        );
+      }
+
+      for (const name of changed) {
+        const property = propertyName(name);
+        const value =
+          formattedAttributeValue(
+            element,
+            name
+          );
+        if (value === null) {
+          record.rule.style.removeProperty(
+            property
+          );
+          record.values.delete(property);
+        } else if (
+          record.values.get(property) !== value
+        ) {
+          record.rule.style.setProperty(
+            property,
+            value
+          );
+          record.values.set(property, value);
+        }
+      }
+
+      if (record.values.size === 0) {
+        releaseElement(element);
+        return false;
+      }
+
+      // A later full synchronization must rebuild its canonical signature;
+      // partial updates deliberately avoid scanning every supported attribute.
+      record.signature = "";
       return true;
     }
 
@@ -565,6 +677,7 @@
       version: CLASS_STYLE_VERSION,
       attributes: attributeNames,
       sync: synchronizeElement,
+      syncAttributes: synchronizeAttributes,
       syncTree: synchronizeTree,
       observe(doc = document) {
         const state =
@@ -604,7 +717,7 @@
     setup: "../../styles/features/styles.setup.css?v=5-source-comment-pruning-v776",
     project: "../../styles/features/styles.project.css?v=4-max-graph-performance-v755",
     export: "../../styles/features/styles.export.css?v=2-max-graph-performance-v755",
-    "runtime-graph": "../../styles/features/styles.runtime-graph.css?v=1.9-svg-status-pill"
+    "runtime-graph": "../../styles/features/styles.runtime-graph.css?v=1.20.31-universal-presentation-dev23"
   });
   const bundleOrder = Object.freeze([
     "preview",
@@ -850,6 +963,7 @@
   Object.defineProperty(window, "RMLStyleLoader", {
     value: Object.freeze({
       version: 9,
+      moduleId: STYLE_LOADER_MODULE_ID,
       ensure,
       ensureMany,
       prefetch,

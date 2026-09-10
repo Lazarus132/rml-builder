@@ -1,12 +1,19 @@
 (() => {
   "use strict";
 
+  const NODE_GRAPH_RELEASE_ID =
+    "1.20.31-universal-presentation-dev23";
+
   if (
+    window.RMLTypedNodeGraphGenerator?.moduleId ===
+      NODE_GRAPH_RELEASE_ID &&
     typeof window.RMLTypedNodeGraphGenerator?.build === "function" &&
     (
       typeof document === "undefined" ||
       (
-        window.RMLDynamicGraphHost?.version >= 70 &&
+        window.RMLDynamicGraphHost?.moduleId ===
+          NODE_GRAPH_RELEASE_ID &&
+        window.RMLDynamicGraphHost?.version >= 73 &&
         typeof window.RMLDynamicGraphHost?.isReady === "function"
       )
     )
@@ -18,7 +25,7 @@
     "../core/code_templates.js?v=794-shared-loader-runtime",
     "../core/guidance.js?v=793",
     "node_graph_registry.js?v=1-physical-modules-v748",
-    "node_graph_codegen.js?v=794-shared-loader-runtime"
+    "node_graph_codegen.js?v=1.20.31-universal-presentation-dev23"
   ];
 
   if (
@@ -75,7 +82,7 @@
     const link = document.createElement("link");
     link.rel = "stylesheet";
     link.href = new URL(
-      "../../styles/features/styles.runtime-graph.css?v=1.9-svg-status-pill",
+      "../../styles/features/styles.runtime-graph.css?v=1.20.31-universal-presentation-dev23",
       scriptUrl
     ).href;
     link.dataset.rmlStyleBundle = "runtime-graph";
@@ -96,18 +103,19 @@
       window.RMLClassStyles
         ? []
         : [
-            "../loaders/style_loader.js?v=1.9-svg-status-pill"
+            "../loaders/style_loader.js?v=1.20.31-universal-presentation-dev23"
           ]
     ),
     "node_graph_registry.js?v=1-physical-modules-v748",
-    "node_graph_codegen.js?v=794-shared-loader-runtime",
+    "node_graph_codegen.js?v=1.20.31-universal-presentation-dev23",
     "runtime_bridge.js?v=797-manual-port-discovery",
-    "node_graph_composites.js?v=799-ready-graph-entry",
-    "node_graph_custom_csharp.js?v=1.9-svg-status-pill",
+    "../workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev23",
+    "node_graph_composites.js?v=1.20.31-universal-presentation-dev23",
+    "node_graph_custom_csharp.js?v=1.20.31-universal-presentation-dev23",
     "node_graph_guided.js?v=1-physical-modules-v748",
-    "node_graph_view.js?v=1.9-svg-status-pill",
-    "graph_gpu_renderer.js?v=801-atomic-graph-camera",
-    "node_graph_bootstrap.js?v=1.8-project-load-svg-guard"
+    "node_graph_view.js?v=1.20.31-universal-presentation-dev23",
+    "graph_gpu_renderer.js?v=806-universal-graph-presentation",
+    "node_graph_bootstrap.js?v=1.20.31-universal-presentation-dev23"
   ];
 
   const ready = files.reduce(

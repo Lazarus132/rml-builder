@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = 15;
+  const VERSION = 23;
   const WIRE_CULL_CELL_SIZE = 960;
   const NODE_CELL_SIZE = 360;
   const WIRE_LINEAR_PICK_LIMIT = 512;
@@ -16,8 +16,8 @@
   const WIRE_LAYERS_PER_SEGMENT = 1;
   const FLOATS_PER_NODE_INSTANCE = 6;
   const WEBGPU_WORKGROUP_SIZE = 128;
-  const WEBGPU_CULL_OVERSCAN_PIXELS = 384;
-  const WEBGPU_CULL_SCALE_REUSE_RATIO = 1.125;
+  const GPU_CULL_OVERSCAN_PIXELS = 384;
+  const GPU_CULL_SCALE_REUSE_RATIO = 1.125;
   const WEBGPU_ASYNC_INDEX_THRESHOLD = 20000;
   const WEBGPU_INDEX_BATCH_SIZE = 1024;
   const RENDERER_BACKEND_STORAGE_KEY =
@@ -112,6 +112,21 @@
     return steps;
   }
 
+  function curveStepsForPresentation(
+    scale,
+    detailTier = "full"
+  ) {
+    const steps = curveStepsForScale(
+      scale,
+      0
+    );
+    return detailTier === "coarse"
+      ? Math.min(steps, 8)
+      : detailTier === "summary"
+        ? Math.min(steps, 16)
+        : steps;
+  }
+
   function curveControlPolygonLength(curve) {
     if (!curve) return 0;
     return (
@@ -147,19 +162,67 @@
   }
 
   function webGpuAdapterOptions() {
-    const platform = String(
-      navigator.userAgentData?.platform ||
-      navigator.platform ||
-      ""
-    );
-    return /windows|win32|win64/i.test(platform)
-      ? undefined
-      : { powerPreference: "high-performance" };
+    return undefined;
   }
 
   let rendererBackendPreference =
     storedRendererBackend();
   let activeRendererBackend = "none";
+  const RENDERER_BACKEND_RETRY_BASE_MILLISECONDS = 750;
+  const RENDERER_BACKEND_RETRY_MAX_MILLISECONDS = 8000;
+  const rendererBackendSubmissionFailures = new Map();
+
+  function markRendererBackendSubmissionFailure(
+    backendKind
+  ) {
+    const now = performance.now();
+    const previous =
+      rendererBackendSubmissionFailures.get(
+        backendKind
+      );
+    const attempts = previous &&
+      now - previous.failedAt < 60000
+        ? previous.attempts + 1
+        : 1;
+    const retryDelay = Math.min(
+      RENDERER_BACKEND_RETRY_MAX_MILLISECONDS,
+      RENDERER_BACKEND_RETRY_BASE_MILLISECONDS *
+        2 ** Math.min(3, attempts - 1)
+    );
+    rendererBackendSubmissionFailures.set(
+      backendKind,
+      {
+        attempts,
+        failedAt: now,
+        retryAt: now + retryDelay
+      }
+    );
+  }
+
+  function rendererBackendTemporarilyUnavailable(
+    backendKind
+  ) {
+    const failure =
+      rendererBackendSubmissionFailures.get(
+        backendKind
+      );
+    if (!failure) return false;
+    if (performance.now() >= failure.retryAt) {
+      rendererBackendSubmissionFailures.delete(
+        backendKind
+      );
+      return false;
+    }
+    return true;
+  }
+
+  function clearRendererBackendSubmissionFailure(
+    backendKind
+  ) {
+    rendererBackendSubmissionFailures.delete(
+      backendKind
+    );
+  }
 
   const webGpuRuntime = {
     adapter: null,
@@ -712,10 +775,24 @@
     constructor(options = {}) {
       this.viewport = null;
       this.onAvailabilityChange = null;
+      this.onRecoveryComplete = null;
       this.onCameraCommitted = null;
+      this.backendKind = String(
+        options.backendKind || "webgl2-glsl"
+      );
+      this.lifecycleState =
+        options.confirmedFallback === true
+          ? "confirmed-fallback"
+          : "initializing";
+      this.lifecycleGeneration = 0;
+      this.canRecoverContext =
+        this.backendKind === "webgl2-glsl";
+      this.lastSubmissionError = "";
       this.canvas = document.createElement("canvas");
       this.canvas.className = "rml-graph-gpu-canvas";
       this.canvas.setAttribute("aria-hidden", "true");
+      this.canvas.dataset.rmlRendererLifecycle =
+        this.lifecycleState;
       this.canvas.tabIndex = -1;
       this.scene = {
         segments: [],
@@ -726,9 +803,14 @@
         y: 0,
         scale: 1
       };
+      this.sourceCamera = { ...this.camera };
       this.cssWidth = 1;
       this.cssHeight = 1;
+      this.nativePixelRatio = 1;
       this.pixelRatio = 1;
+      this.rasterScale = 1;
+      this.presentationDetailTier = "full";
+      this.presentationQualityKey = "";
       this.available = false;
       this.contextLost = false;
       this.disposed = false;
@@ -748,11 +830,15 @@
       this.wireCullSpatialIndex = new Map();
       this.wireCullOverflowRecords = [];
       this.wireRecordIndexByKey = new Map();
+      this.wireConnectionSegmentCounts = new Map();
+      this.wireHiddenConnectionIds = new Set();
       this.wireInstanceData = new Float32Array(0);
       this.wireInstanceCapacity = 0;
       this.visibleWireInstanceData = new Float32Array(0);
       this.visibleWireInstanceCapacity = 0;
       this.visibleWireRecords = [];
+      this.visibleWireCullBounds = null;
+      this.visibleWireCullScale = 0;
       this.maximumWireCurveLength = 0;
       this.wireDataRevision = 0;
       this.visibleWireDataRevision = -1;
@@ -809,6 +895,13 @@
         lastWirePickCandidates: 0,
         hiddenConnections: 0,
         reusedWireGeometries: 0,
+        endpointPatchCalls: 0,
+        endpointPatchConnections: 0,
+        endpointPatchSourceRecords: 0,
+        visibleWireUploadPasses: 0,
+        visibleWireUploadBytes: 0,
+        visibleWireSelectionPasses: 0,
+        visibleWireSelectionReusedFrames: 0,
         previewInstances: 0,
         lastNodePickMilliseconds: 0
       };
@@ -818,16 +911,41 @@
         event.preventDefault();
         if (this.disposed) return;
         this.contextLost = true;
+        this.setLifecycleState("recovering");
         this.setAvailability(false);
       };
       this.handleContextRestored = () => {
         if (this.disposed) return;
         this.contextLost = false;
-        this.initialize();
+        this._rmlContextRestoring = true;
+        if (!this.initialize()) {
+          this._rmlContextRestoring = false;
+          this.onRecoveryComplete?.(false);
+          return;
+        }
         this.setScene(this.scene, true);
         this.setPreview(
           this.previewSegment
         );
+        void Promise.resolve(
+          this.whenSceneReady?.()
+        ).then(ready => {
+          this._rmlContextRestoring = false;
+          if (
+            this.disposed ||
+            this.contextLost ||
+            this.available !== true
+          ) {
+            return;
+          }
+          this.onRecoveryComplete?.(
+            ready !== false
+          );
+        }).catch(error => {
+          this._rmlContextRestoring = false;
+          this.reportSubmissionFailure(error);
+          this.onRecoveryComplete?.(false);
+        });
       };
       if (!options.deferGraphics) {
         this.canvas.addEventListener(
@@ -843,8 +961,81 @@
       this.attach(options);
     }
 
+    setLifecycleState(value) {
+      const next = String(value || "initializing");
+      if (this.lifecycleState !== next) {
+        this.lifecycleGeneration += 1;
+      }
+      this.lifecycleState = next;
+      this.canvas.dataset.rmlRendererLifecycle = next;
+      if (this.stats) {
+        this.stats.lifecycleState = next;
+        this.stats.backendKind = this.backendKind;
+      }
+    }
+
+    confirmFallback() {
+      this.setLifecycleState("confirmed-fallback");
+      this.available = false;
+      this.canvas.classList.remove("available");
+      this.stats.renderer = "svg-fallback";
+      activeRendererBackend = "svg-fallback";
+      this.onAvailabilityChange?.(false);
+      return false;
+    }
+
+    fallbackCanvasAvailable() {
+      return false;
+    }
+
+    setCameraCompositeContentReady() {
+      return false;
+    }
+
+    reportSubmissionFailure(error) {
+      if (this.disposed) return false;
+      this.lastSubmissionError = String(
+        error?.message || error || "GPU submission failed"
+      );
+      markRendererBackendSubmissionFailure(
+        this.backendKind
+      );
+      this.canRecoverContext = false;
+      this.contextLost = true;
+      this.setLifecycleState("recovering");
+      this.setAvailability(false);
+      return false;
+    }
+
+    handleGpuOperationException(
+      error,
+      operation = "GPU operation"
+    ) {
+      if (
+        error?.name === "AbortError" ||
+        this.disposed ||
+        this.lifecycleState === "recovering"
+      ) {
+        return false;
+      }
+      const failure = error instanceof Error
+        ? error
+        : new Error(
+            `${operation} failed: ${String(error)}`
+          );
+      if (!failure.message) {
+        failure.message = `${operation} failed.`;
+      }
+      return this.reportSubmissionFailure(
+        failure
+      );
+    }
+
     setAvailability(value) {
       const next = value === true;
+      if (next) {
+        this.setLifecycleState("active");
+      }
       if (this.available === next) {
         return;
       }
@@ -852,7 +1043,7 @@
       this.canvas.classList.toggle("available", next);
       this.stats.renderer = next ? "webgl2" : "svg-fallback";
       activeRendererBackend = next
-        ? "webgl2-glsl"
+        ? this.backendKind
         : "svg-fallback";
       this.onAvailabilityChange?.(next);
     }
@@ -870,9 +1061,7 @@
           depth: false,
           stencil: false,
           premultipliedAlpha: true,
-          preserveDrawingBuffer: false,
-          powerPreference: "high-performance",
-          desynchronized: true
+          preserveDrawingBuffer: false
         });
       } catch {
         gl = null;
@@ -880,8 +1069,7 @@
 
       if (!gl) {
         this.gl = null;
-        this.setAvailability(false);
-        return false;
+        return this.confirmFallback();
       }
 
       try {
@@ -902,8 +1090,7 @@
         console.error("RML graph WebGL initialization failed.", error);
         this.deleteGpuResources();
         this.gl = null;
-        this.setAvailability(false);
-        return false;
+        return this.confirmFallback();
       }
     }
 
@@ -923,6 +1110,10 @@
         typeof options.onCameraCommitted === "function"
           ? options.onCameraCommitted
           : null;
+      this.onRecoveryComplete =
+        typeof options.onRecoveryComplete === "function"
+          ? options.onRecoveryComplete
+          : null;
 
       if (
         typeof ResizeObserver === "function" &&
@@ -936,12 +1127,14 @@
       this.onAvailabilityChange?.(
         this.available
       );
-      this.resize();
+      if (options.skipResize !== true) {
+        this.resize();
+      }
       this.scheduleDraw();
       return true;
     }
 
-    detach() {
+    suspend() {
       if (this.disposed) {
         return false;
       }
@@ -953,7 +1146,15 @@
       this.resizeObserver = null;
       this.viewport = null;
       this.onAvailabilityChange = null;
+      this.onRecoveryComplete = null;
       this.onCameraCommitted = null;
+      return true;
+    }
+
+    detach() {
+      if (!this.suspend()) {
+        return false;
+      }
       this.clearScene();
       this.canvas.remove();
 
@@ -979,12 +1180,16 @@
       this.wireCullOverflowRecords = [];
       this.nodeSpatialIndex.clear();
       this.wireRecordIndexByKey.clear();
+      this.wireConnectionSegmentCounts.clear();
+      this.wireHiddenConnectionIds.clear();
       this.nodeRecordIndexById.clear();
       this.wireInstanceData = new Float32Array(0);
       this.wireInstanceCapacity = 0;
       this.visibleWireInstanceData = new Float32Array(0);
       this.visibleWireInstanceCapacity = 0;
       this.visibleWireRecords = [];
+      this.visibleWireCullBounds = null;
+      this.visibleWireCullScale = 0;
       this.maximumWireCurveLength = 0;
       this.wireDataRevision += 1;
       this.visibleWireDataRevision = -1;
@@ -1564,7 +1769,14 @@
       const rectangle = this.viewport.getBoundingClientRect();
       const width = Math.max(1, Math.round(rectangle.width));
       const height = Math.max(1, Math.round(rectangle.height));
-      const ratio = Math.max(1, finite(window.devicePixelRatio, 1));
+      const nativeRatio = Math.max(
+        1,
+        finite(window.devicePixelRatio, 1)
+      );
+      const ratio = Math.max(
+        0.5,
+        nativeRatio * this.rasterScale
+      );
       const pixelWidth = Math.max(1, Math.round(width * ratio));
       const pixelHeight = Math.max(1, Math.round(height * ratio));
       const changed =
@@ -1576,6 +1788,7 @@
 
       this.cssWidth = width;
       this.cssHeight = height;
+      this.nativePixelRatio = nativeRatio;
       this.pixelRatio = ratio;
       if (changed) {
         this.canvas.width = pixelWidth;
@@ -1590,10 +1803,52 @@
       }
     }
 
+    setPresentationQuality(plan = {}) {
+      const detailTier = [
+        "full",
+        "summary",
+        "coarse"
+      ].includes(plan.detailTier)
+        ? plan.detailTier
+        : "full";
+      const requestedScale = finite(
+        plan.rasterScale,
+        detailTier === "full" ? 1 : 0.75
+      );
+      const rasterScale = requestedScale >= 0.875
+        ? 1
+        : requestedScale >= 0.625
+          ? 0.75
+          : 0.5;
+      const qualityKey = String(
+        plan.qualityKey ||
+        `${detailTier}:${rasterScale}`
+      );
+      if (
+        this.presentationDetailTier === detailTier &&
+        this.rasterScale === rasterScale
+      ) {
+        this.presentationQualityKey = qualityKey;
+        return false;
+      }
+      const resolutionChanged =
+        this.rasterScale !== rasterScale;
+      this.presentationDetailTier = detailTier;
+      this.rasterScale = rasterScale;
+      this.presentationQualityKey = qualityKey;
+      if (resolutionChanged) {
+        this.resize();
+      } else {
+        this.scheduleDraw();
+      }
+      return true;
+    }
+
     setCamera(camera = {}) {
       const x = finite(camera.x, 0);
       const y = finite(camera.y, 0);
       const scale = Math.max(0.0001, finite(camera.scale, 1));
+      this.sourceCamera = { x, y, scale };
       if (
         this.camera.x === x &&
         this.camera.y === y &&
@@ -1652,6 +1907,241 @@
       }
       this.scheduleDraw();
       return true;
+    }
+
+    appendNodes(nodes = []) {
+      if (
+        !this.available ||
+        !Array.isArray(nodes) ||
+        nodes.length === 0
+      ) {
+        return false;
+      }
+      const firstIndex = this.nodeRecords.length;
+      const sourceAlreadyAppended =
+        this.scene.nodes.length ===
+          firstIndex + nodes.length &&
+        nodes.every(
+          (node, offset) =>
+            this.scene.nodes[
+              firstIndex + offset
+            ] === node
+        );
+      if (
+        this.scene.nodes.length !== firstIndex &&
+        !sourceAlreadyAppended
+      ) {
+        return false;
+      }
+      const suppliedIds = new Set();
+      const records = [];
+      for (
+        let offset = 0;
+        offset < nodes.length;
+        offset += 1
+      ) {
+        const node = nodes[offset];
+        const nodeId = String(
+          node?.nodeId || ""
+        );
+        if (
+          !nodeId ||
+          suppliedIds.has(nodeId) ||
+          this.nodeRecordIndexById.has(nodeId)
+        ) {
+          return false;
+        }
+        suppliedIds.add(nodeId);
+        records.push(
+          this.prepareNodeRecord(
+            node,
+            firstIndex + offset
+          )
+        );
+      }
+
+      const requiredInstances =
+        firstIndex + records.length;
+      if (
+        requiredInstances >
+          this.nodeInstanceCapacity
+      ) {
+        const nextCapacity = grownCapacity(
+          this.nodeInstanceCapacity,
+          requiredInstances
+        );
+        const nextData = new Float32Array(
+          nextCapacity *
+            FLOATS_PER_NODE_INSTANCE
+        );
+        nextData.set(
+          this.nodeInstanceData.subarray(
+            0,
+            firstIndex *
+              FLOATS_PER_NODE_INSTANCE
+          )
+        );
+        this.nodeInstanceCapacity =
+          nextCapacity;
+        this.nodeInstanceData = nextData;
+      }
+
+      if (!sourceAlreadyAppended) {
+        this.scene.nodes.push(...nodes);
+      }
+      for (
+        let offset = 0;
+        offset < records.length;
+        offset += 1
+      ) {
+        const index = firstIndex + offset;
+        const record = records[offset];
+        this.nodeRecords.push(record);
+        this.nodeRecordIndexById.set(
+          record.nodeId,
+          index
+        );
+        if (!this.nodeSpatialIndexDirty) {
+          record.spatialKeys = addToSpatialIndex(
+            this.nodeSpatialIndex,
+            record,
+            NODE_CELL_SIZE,
+            record
+          );
+        }
+        const dataOffset =
+          index * FLOATS_PER_NODE_INSTANCE;
+        this.nodeInstanceData[dataOffset] =
+          record.left;
+        this.nodeInstanceData[dataOffset + 1] =
+          record.top;
+        this.nodeInstanceData[dataOffset + 2] =
+          Math.max(
+            1,
+            record.right - record.left
+          );
+        this.nodeInstanceData[dataOffset + 3] =
+          Math.max(
+            1,
+            record.bottom - record.top
+          );
+        this.nodeInstanceData[dataOffset + 4] =
+          record.configuration === true
+            ? 1
+            : 0;
+        this.nodeInstanceData[dataOffset + 5] =
+          record.selected === true ? 1 : 0;
+      }
+      this.lastNodeUpdateIndices =
+        records.map(
+          (_record, offset) =>
+            firstIndex + offset
+        );
+      this.stats.nodes =
+        this.nodeRecords.length;
+      this.nodeDataRevision += 1;
+      this.visibleNodeSelectionDirty = true;
+      this.scheduleDraw();
+      return true;
+    }
+
+    removeNodes(nodeIds = []) {
+      const ids = new Set(
+        Array.isArray(nodeIds) ||
+        nodeIds instanceof Set
+          ? nodeIds
+          : [nodeIds]
+      );
+      ids.delete("");
+      ids.delete(null);
+      ids.delete(undefined);
+      if (ids.size === 0) {
+        return 0;
+      }
+      const normalizedIds = new Set(
+        [...ids].map(nodeId =>
+          String(nodeId)
+        )
+      );
+      const nextSceneNodes = [];
+      const nextRecords = [];
+      const changedIndices = [];
+      let removed = 0;
+      for (
+        let index = 0;
+        index < this.nodeRecords.length;
+        index += 1
+      ) {
+        const record =
+          this.nodeRecords[index];
+        if (
+          normalizedIds.has(
+            String(record.nodeId || "")
+          )
+        ) {
+          removed += 1;
+          if (!this.nodeSpatialIndexDirty) {
+            removeFromSpatialIndex(
+              this.nodeSpatialIndex,
+              record.spatialKeys,
+              record
+            );
+          }
+          continue;
+        }
+        const nextIndex =
+          nextRecords.length;
+        nextSceneNodes.push(
+          this.scene.nodes[index]
+        );
+        nextRecords.push(record);
+        if (nextIndex !== index) {
+          this.nodeInstanceData.copyWithin(
+            nextIndex *
+              FLOATS_PER_NODE_INSTANCE,
+            index *
+              FLOATS_PER_NODE_INSTANCE,
+            (index + 1) *
+              FLOATS_PER_NODE_INSTANCE
+          );
+          record.order = nextIndex;
+          changedIndices.push(nextIndex);
+        }
+      }
+      if (removed === 0) {
+        return 0;
+      }
+      this.scene.nodes = nextSceneNodes;
+      this.nodeRecords = nextRecords;
+      this.nodeRecordIndexById.clear();
+      for (
+        let index = 0;
+        index < nextRecords.length;
+        index += 1
+      ) {
+        this.nodeRecordIndexById.set(
+          nextRecords[index].nodeId,
+          index
+        );
+      }
+      for (const nodeId of normalizedIds) {
+        this.nodeExcludedIds.delete(nodeId);
+      }
+      this.visibleNodeRecords =
+        this.visibleNodeRecords.filter(
+          record =>
+            !normalizedIds.has(
+              String(record.nodeId || "")
+            )
+        );
+      this.lastNodeUpdateIndices =
+        changedIndices;
+      this.stats.nodes =
+        this.nodeRecords.length;
+      this.nodeDataRevision += 1;
+      this.visibleNodeSelectionDirty = true;
+      this.scheduleDraw();
+      return removed;
     }
 
     setNodeExclusions(nodeIds = []) {
@@ -1814,9 +2304,10 @@
       }
       this.wireRecords = [];
       this.wireRecordIndexByKey.clear();
+      this.wireConnectionSegmentCounts.clear();
+      this.wireHiddenConnectionIds.clear();
       let reusedWireGeometries = 0;
       let maximumCurveLength = 0;
-      const hiddenConnectionIds = new Set();
       for (
         let index = 0;
         index < this.scene.segments.length;
@@ -1837,7 +2328,7 @@
           reusedWireGeometries += 1;
         }
         if (record.hidden === true) {
-          hiddenConnectionIds.add(
+          this.wireHiddenConnectionIds.add(
             record.connectionId
           );
         }
@@ -1852,6 +2343,12 @@
           this.wireRecordKey(record),
           index
         );
+        this.wireConnectionSegmentCounts.set(
+          String(record.connectionId || ""),
+          (this.wireConnectionSegmentCounts.get(
+            String(record.connectionId || "")
+          ) || 0) + 1
+        );
       }
 
       this.wireCullSpatialIndexDirty = true;
@@ -1860,7 +2357,7 @@
       this.visibleWireSelectionDirty = true;
       this.stats.segments = this.wireRecords.length;
       this.stats.hiddenConnections =
-        hiddenConnectionIds.size;
+        this.wireHiddenConnectionIds.size;
       this.stats.reusedWireGeometries =
         reusedWireGeometries;
     }
@@ -1920,16 +2417,285 @@
       return `${record.connectionId}\u0000${record.segmentIndex}`;
     }
 
-    countHiddenConnections() {
-      const connectionIds = new Set();
-      for (const record of this.wireRecords) {
-        if (record.hidden === true) {
-          connectionIds.add(
-            record.connectionId
+    wireConnectionCount() {
+      return this.wireConnectionSegmentCounts.size;
+    }
+
+    hasWireConnection(connectionId) {
+      return this.wireConnectionSegmentCounts.has(
+        String(connectionId || "")
+      );
+    }
+
+    mutateWireConnections(
+      segments = [],
+      {
+        allowExisting = true,
+        allowNew = true
+      } = {}
+    ) {
+      if (
+        !this.available ||
+        !Array.isArray(segments) ||
+        segments.length === 0 ||
+        this.scene.segments.length !==
+          this.wireRecords.length
+      ) {
+        return false;
+      }
+      const groups = new Map();
+      const suppliedKeys = new Set();
+      for (const segment of segments) {
+        const connectionId = String(
+          segment?.connectionId || ""
+        );
+        const segmentIndex = Number(
+          segment?.segmentIndex
+        );
+        if (
+          !connectionId ||
+          !Number.isSafeInteger(segmentIndex) ||
+          segmentIndex < 0
+        ) {
+          return false;
+        }
+        const key = this.wireRecordKey({
+          connectionId,
+          segmentIndex
+        });
+        if (suppliedKeys.has(key)) {
+          return false;
+        }
+        suppliedKeys.add(key);
+        let group = groups.get(connectionId);
+        if (!group) {
+          group = [];
+          groups.set(connectionId, group);
+        }
+        group.push({
+          segment,
+          connectionId,
+          segmentIndex,
+          key
+        });
+      }
+
+      const plans = [];
+      let appendedCount = 0;
+      for (const [connectionId, group] of groups) {
+        group.sort(
+          (left, right) =>
+            left.segmentIndex -
+            right.segmentIndex
+        );
+        if (
+          group.some(
+            (entry, index) =>
+              entry.segmentIndex !== index
+          )
+        ) {
+          return false;
+        }
+        const existingCount =
+          this.wireConnectionSegmentCounts.get(
+            connectionId
+          );
+        const exists =
+          Number.isSafeInteger(existingCount);
+        if (
+          (exists && !allowExisting) ||
+          (!exists && !allowNew) ||
+          (exists && existingCount !== group.length)
+        ) {
+          return false;
+        }
+        const records = [];
+        for (const entry of group) {
+          const index = exists
+            ? this.wireRecordIndexByKey.get(
+                entry.key
+              )
+            : this.wireRecords.length +
+              appendedCount;
+          if (
+            exists &&
+            !Number.isSafeInteger(index)
+          ) {
+            return false;
+          }
+          const previous = exists
+            ? this.wireRecords[index]
+            : null;
+          const record = this.prepareWireRecord(
+            entry.segment,
+            previous
+          );
+          record.order = index;
+          records.push({
+            ...entry,
+            index,
+            previous,
+            record
+          });
+          if (!exists) {
+            appendedCount += 1;
+          }
+        }
+        plans.push({
+          connectionId,
+          exists,
+          records
+        });
+      }
+
+      const requiredInstances =
+        this.wireRecords.length +
+        appendedCount;
+      if (
+        requiredInstances >
+          this.wireInstanceCapacity
+      ) {
+        const nextCapacity = grownCapacity(
+          this.wireInstanceCapacity,
+          requiredInstances
+        );
+        const nextData = new Float32Array(
+          nextCapacity *
+            WIRE_LAYERS_PER_SEGMENT *
+            FLOATS_PER_WIRE_INSTANCE
+        );
+        nextData.set(
+          this.wireInstanceData.subarray(
+            0,
+            this.wireRecords.length *
+              WIRE_LAYERS_PER_SEGMENT *
+              FLOATS_PER_WIRE_INSTANCE
+          )
+        );
+        this.wireInstanceCapacity =
+          nextCapacity;
+        this.wireInstanceData = nextData;
+      }
+
+      const changedIndices = [];
+      let reusedWireGeometries = 0;
+      for (const plan of plans) {
+        let hidden = false;
+        for (const update of plan.records) {
+          if (
+            plan.exists &&
+            !this.wireCullSpatialIndexDirty
+          ) {
+            this.removeWireCullRecord(
+              update.previous
+            );
+          }
+          if (plan.exists) {
+            this.wireRecords[update.index] =
+              update.record;
+            this.scene.segments[update.index] =
+              update.segment;
+          } else {
+            this.wireRecords.push(
+              update.record
+            );
+            this.scene.segments.push(
+              update.segment
+            );
+            this.wireRecordIndexByKey.set(
+              update.key,
+              update.index
+            );
+          }
+          if (!this.wireCullSpatialIndexDirty) {
+            this.addWireCullRecord(
+              update.record
+            );
+          }
+          const floatOffset =
+            update.index *
+            WIRE_LAYERS_PER_SEGMENT *
+            FLOATS_PER_WIRE_INSTANCE;
+          this.writeWireLayerData(
+            update.record,
+            this.wireScratchData,
+            0
+          );
+          this.wireInstanceData.set(
+            this.wireScratchData,
+            floatOffset
+          );
+          hidden = hidden ||
+            update.record.hidden === true;
+          reusedWireGeometries +=
+            update.record.geometryReused === true
+              ? 1
+              : 0;
+          this.maximumWireCurveLength =
+            Math.max(
+              this.maximumWireCurveLength,
+              curveControlPolygonLength(
+                update.record.curve
+              )
+            );
+          changedIndices.push(update.index);
+        }
+        if (!plan.exists) {
+          this.wireConnectionSegmentCounts.set(
+            plan.connectionId,
+            plan.records.length
+          );
+        }
+        if (hidden) {
+          this.wireHiddenConnectionIds.add(
+            plan.connectionId
+          );
+        } else {
+          this.wireHiddenConnectionIds.delete(
+            plan.connectionId
           );
         }
       }
-      return connectionIds.size;
+      changedIndices.sort(
+        (left, right) => left - right
+      );
+      this.lastWireUpdateIndices =
+        changedIndices;
+      this.stats.segments =
+        this.wireRecords.length;
+      this.stats.hiddenConnections =
+        this.wireHiddenConnectionIds.size;
+      this.stats.reusedWireGeometries =
+        (this.stats.reusedWireGeometries || 0) +
+        reusedWireGeometries;
+      this.wireDataRevision += 1;
+      this.visibleWireSelectionDirty = true;
+      this.scheduleDraw();
+      return true;
+    }
+
+    appendSegments(segments = []) {
+      return this.mutateWireConnections(
+        segments,
+        {
+          allowExisting: false,
+          allowNew: true
+        }
+      );
+    }
+
+    updateOrAppendSegments(segments = []) {
+      return this.mutateWireConnections(
+        segments,
+        {
+          allowExisting: true,
+          allowNew: true
+        }
+      );
+    }
+
+    countHiddenConnections() {
+      return this.wireHiddenConnectionIds.size;
     }
 
     prepareWireRecord(segment, previous = null) {
@@ -2147,13 +2913,41 @@
       return spatialRecordsInBounds(
         this.wireCullSpatialIndex,
         this.wireRecords,
-        this.viewportGraphBounds(
+        arguments[0] || this.viewportGraphBounds(
           WIRE_CULL_MARGIN_PIXELS
         ),
         WIRE_CULL_CELL_SIZE,
         record => record.hidden !== true,
         this.wireCullOverflowRecords
       );
+    }
+
+    visibleWireGeometryWorkload() {
+      const records =
+        this.visibleWireRecordsForCamera(
+          this.viewportGraphBounds(0)
+        );
+      const instances =
+        records.length *
+        WIRE_LAYERS_PER_SEGMENT;
+      const vertexCount = detailTier =>
+        instances *
+        (
+          curveStepsForPresentation(
+            this.camera.scale,
+            detailTier
+          ) + 1
+        ) * 2;
+      return {
+        visibleWireSegmentCount:
+          records.length,
+        fullWireVertexCount:
+          vertexCount("full"),
+        summaryWireVertexCount:
+          vertexCount("summary"),
+        coarseWireVertexCount:
+          vertexCount("coarse")
+      };
     }
 
     visibleNodeRecordsForCamera() {
@@ -2183,16 +2977,58 @@
       ) {
         return;
       }
+      const dataChanged =
+        this.visibleWireDataRevision !==
+        this.wireDataRevision;
+      const viewportBounds =
+        this.viewportGraphBounds(
+          WIRE_CULL_MARGIN_PIXELS
+        );
+      const scaleReuseRatio =
+        Math.max(
+          this.camera.scale,
+          this.visibleWireCullScale ||
+            this.camera.scale
+        ) /
+        Math.max(
+          0.0001,
+          Math.min(
+            this.camera.scale,
+            this.visibleWireCullScale ||
+              this.camera.scale
+          )
+        );
+      if (
+        !dataChanged &&
+        scaleReuseRatio <
+          GPU_CULL_SCALE_REUSE_RATIO &&
+        containsBounds(
+          this.visibleWireCullBounds,
+          viewportBounds
+        )
+      ) {
+        this.visibleWireSelectionDirty = false;
+        this.stats
+          .visibleWireSelectionReusedFrames += 1;
+        return;
+      }
+      const cullBounds =
+        this.viewportGraphBounds(
+          GPU_CULL_OVERSCAN_PIXELS
+        );
       const records =
-        this.visibleWireRecordsForCamera();
+        this.visibleWireRecordsForCamera(
+          cullBounds
+        );
+      this.visibleWireCullBounds = cullBounds;
+      this.visibleWireCullScale =
+        this.camera.scale;
+      this.stats.visibleWireSelectionPasses += 1;
       const selectionChanged =
         !sameRecordOrder(
           this.visibleWireRecords,
           records
         );
-      const dataChanged =
-        this.visibleWireDataRevision !==
-        this.wireDataRevision;
       this.visibleWireSelectionDirty = false;
       if (!selectionChanged && !dataChanged) {
         return;
@@ -2425,7 +3261,10 @@
       this.visibleWireSelectionDirty = true;
     }
 
-    updateSegments(segments = []) {
+    updateRetainedSegments(
+      segments = [],
+      { deferDraw = false } = {}
+    ) {
       if (
         !this.available ||
         !Array.isArray(segments) ||
@@ -2435,9 +3274,14 @@
       }
 
       const prepared = [];
+      const suppliedKeys = new Set();
       for (const segment of segments) {
         const key =
           this.wireRecordKey(segment);
+        if (suppliedKeys.has(key)) {
+          return false;
+        }
+        suppliedKeys.add(key);
         const index =
           this.wireRecordIndexByKey.get(
             key
@@ -2499,8 +3343,216 @@
       }
       this.wireDataRevision += 1;
       this.visibleWireSelectionDirty = true;
-      this.scheduleDraw();
+      const changedIndices = prepared
+        .map(update => update.index)
+        .sort((left, right) => left - right);
+      this.lastWireUpdateIndices =
+        changedIndices;
+      this.lastWireUpdateRange = {
+        tailShifted: false,
+        start: changedIndices[0],
+        end:
+          changedIndices[
+            changedIndices.length - 1
+          ] + 1,
+        indices: changedIndices
+      };
+      if (!deferDraw) {
+        this.scheduleDraw();
+      }
       return true;
+    }
+
+    updateWireEndpoints(
+      patches = [],
+      options = {}
+    ) {
+      this.lastWireEndpointPatchChanged = false;
+      if (
+        !this.available ||
+        !Array.isArray(patches) ||
+        patches.length === 0
+      ) {
+        return false;
+      }
+
+      const plans = [];
+      const connectionIds = new Set();
+      for (const patch of patches) {
+        const connectionId = String(
+          patch?.connectionId || ""
+        );
+        const deltaX = Number(patch?.deltaX);
+        const deltaY = Number(patch?.deltaY);
+        const translateFrom =
+          patch?.translateFrom === true;
+        const translateTo =
+          patch?.translateTo === true;
+        const segmentCount =
+          this.wireConnectionSegmentCounts.get(
+            connectionId
+          );
+        if (
+          !connectionId ||
+          connectionIds.has(connectionId) ||
+          !Number.isFinite(deltaX) ||
+          !Number.isFinite(deltaY) ||
+          (!translateFrom && !translateTo) ||
+          !Number.isSafeInteger(segmentCount) ||
+          segmentCount < 1
+        ) {
+          return false;
+        }
+        const firstIndex =
+          this.wireRecordIndexByKey.get(
+            this.wireRecordKey({
+              connectionId,
+              segmentIndex: 0
+            })
+          );
+        const lastIndex =
+          this.wireRecordIndexByKey.get(
+            this.wireRecordKey({
+              connectionId,
+              segmentIndex: segmentCount - 1
+            })
+          );
+        const first =
+          this.scene.segments[firstIndex];
+        const last =
+          this.scene.segments[lastIndex];
+        if (
+          !Number.isSafeInteger(firstIndex) ||
+          !Number.isSafeInteger(lastIndex) ||
+          !first?.from ||
+          !first?.to ||
+          !last?.from ||
+          !last?.to ||
+          (
+            translateFrom &&
+            first.from.branch !== true &&
+            (
+              !Number.isFinite(Number(first.from.x)) ||
+              !Number.isFinite(Number(first.from.y))
+            )
+          ) ||
+          (
+            translateTo &&
+            (
+              !Number.isFinite(Number(last.to.x)) ||
+              !Number.isFinite(Number(last.to.y))
+            )
+          )
+        ) {
+          return false;
+        }
+        connectionIds.add(connectionId);
+        plans.push({
+          connectionId,
+          deltaX,
+          deltaY,
+          translateFrom,
+          translateTo,
+          firstIndex,
+          lastIndex
+        });
+      }
+
+      const segmentUpdates = new Map();
+      const mutableSegment = index => {
+        let segment = segmentUpdates.get(index);
+        if (segment) return segment;
+        const source = this.scene.segments[index];
+        segment = {
+          ...source,
+          from: { ...source.from },
+          to: { ...source.to }
+        };
+        segmentUpdates.set(index, segment);
+        return segment;
+      };
+      const patchedConnections = new Set();
+      for (const plan of plans) {
+        let changed = false;
+        if (
+          plan.translateFrom &&
+          this.scene.segments[
+            plan.firstIndex
+          ].from.branch !== true &&
+          (plan.deltaX !== 0 || plan.deltaY !== 0)
+        ) {
+          const segment = mutableSegment(
+            plan.firstIndex
+          );
+          segment.from.x =
+            Number(segment.from.x) + plan.deltaX;
+          segment.from.y =
+            Number(segment.from.y) + plan.deltaY;
+          changed = true;
+        }
+        if (
+          plan.translateTo &&
+          (plan.deltaX !== 0 || plan.deltaY !== 0)
+        ) {
+          const segment = mutableSegment(
+            plan.lastIndex
+          );
+          segment.to.x =
+            Number(segment.to.x) + plan.deltaX;
+          segment.to.y =
+            Number(segment.to.y) + plan.deltaY;
+          changed = true;
+        }
+        if (changed) {
+          patchedConnections.add(
+            plan.connectionId
+          );
+        }
+      }
+
+      if (segmentUpdates.size === 0) {
+        return true;
+      }
+      for (const segment of
+        segmentUpdates.values()) {
+        if (segment.from.endpoint === "point") {
+          segment.from.side =
+            segment.to.x >= segment.from.x
+              ? "right"
+              : "left";
+        }
+        if (segment.to.endpoint === "point") {
+          segment.to.side =
+            segment.from.x <= segment.to.x
+              ? "left"
+              : "right";
+        }
+      }
+
+      const updated = this.updateRetainedSegments(
+        [...segmentUpdates.values()],
+        options
+      );
+      if (!updated) {
+        return false;
+      }
+      this.lastWireEndpointPatchChanged = true;
+      this.stats.endpointPatchCalls += 1;
+      this.stats.endpointPatchConnections +=
+        patchedConnections.size;
+      this.stats.endpointPatchSourceRecords +=
+        segmentUpdates.size;
+      return true;
+    }
+
+    updateSegments(
+      segments = [],
+      options = {}
+    ) {
+      return this.updateRetainedSegments(
+        segments,
+        options
+      );
     }
 
     hideConnections(connectionIds = []) {
@@ -2582,6 +3634,11 @@
 
       this.wireDataRevision += 1;
       this.visibleWireSelectionDirty = true;
+      for (const connectionId of ids) {
+        this.wireHiddenConnectionIds.add(
+          String(connectionId || "")
+        );
+      }
       this.stats.hiddenConnections =
         this.countHiddenConnections();
       this.scheduleDraw();
@@ -2679,8 +3736,20 @@
       this.buildWireCullSpatialIndex();
       this.buildNodeSpatialIndex();
       this.drawNow();
-      await this.whenSubmittedWorkDone();
-      return !this.disposed && Boolean(this.viewport);
+      const submitted =
+        await this.whenSubmittedWorkDone();
+      const ready = Boolean(
+        submitted !== false &&
+        !this.disposed &&
+        this.available &&
+        this.viewport
+      );
+      if (ready) {
+        clearRendererBackendSubmissionFailure(
+          this.backendKind
+        );
+      }
+      return ready;
     }
 
     whenSubmittedWorkDone() {
@@ -2689,7 +3758,6 @@
       if (!gl || !this.available || !viewport || !gl.fenceSync) return Promise.resolve(false);
       const fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
       if (!fence) return Promise.resolve(false);
-      gl.flush();
       return new Promise((resolve, reject) => {
         const inspect = () => {
           if (this.disposed || this.contextLost || this.gl !== gl || this.viewport !== viewport) {
@@ -2697,7 +3765,11 @@
             resolve(false);
             return;
           }
-          const state = gl.clientWaitSync(fence, 0, 0);
+          const state = gl.clientWaitSync(
+            fence,
+            gl.SYNC_FLUSH_COMMANDS_BIT,
+            0
+          );
           if (state === gl.ALREADY_SIGNALED || state === gl.CONDITION_SATISFIED) {
             gl.deleteSync(fence);
             resolve(true);
@@ -2725,11 +3797,9 @@
       }
       const started = performance.now();
       this.prepareVisibleInstances();
-      const curveSteps = curveStepsForScale(
+      const curveSteps = curveStepsForPresentation(
         this.camera.scale,
-        maximumCurveControlPolygonLength(
-          this.visibleWireRecords
-        )
+        this.presentationDetailTier
       );
       const wireVertexCount =
         (curveSteps + 1) * 2;
@@ -2859,8 +3929,13 @@
       return true;
     }
 
-    clientToGraph(clientX, clientY) {
-      const rectangle = this.viewport?.getBoundingClientRect();
+    clientToGraph(
+      clientX,
+      clientY,
+      viewportRectangle = null
+    ) {
+      const rectangle = viewportRectangle ||
+        this.viewport?.getBoundingClientRect();
       if (!rectangle) {
         return { x: 0, y: 0 };
       }
@@ -2910,12 +3985,22 @@
       };
     }
 
-    pickWire(clientX, clientY, radiusPixels = 12, excludedConnectionId = null) {
+    pickWire(
+      clientX,
+      clientY,
+      radiusPixels = 12,
+      excludedConnectionId = null,
+      viewportRectangle = null
+    ) {
       if (!this.wireRecords.length) {
         return null;
       }
       const started = performance.now();
-      const target = this.clientToGraph(clientX, clientY);
+      const target = this.clientToGraph(
+        clientX,
+        clientY,
+        viewportRectangle
+      );
       const radius = Math.max(1, radiusPixels / this.camera.scale);
       const bounds = {
         left: target.x - radius,
@@ -3004,13 +4089,21 @@
       };
     }
 
-    pickNode(clientX, clientY) {
+    pickNode(
+      clientX,
+      clientY,
+      viewportRectangle = null
+    ) {
       if (!this.nodeRecords.length) {
         return null;
       }
       const started = performance.now();
       this.buildNodeSpatialIndex();
-      const target = this.clientToGraph(clientX, clientY);
+      const target = this.clientToGraph(
+        clientX,
+        clientY,
+        viewportRectangle
+      );
       const cellX = Math.floor(target.x / NODE_CELL_SIZE);
       const cellY = Math.floor(target.y / NODE_CELL_SIZE);
       const candidates = this.nodeSpatialIndex.get(spatialKey(cellX, cellY)) || [];
@@ -3066,7 +4159,18 @@
         ...this.stats,
         available: this.available,
         contextLost: this.contextLost,
+        backendKind: this.backendKind,
+        lifecycleState: this.lifecycleState,
+        lifecycleGeneration:
+          this.lifecycleGeneration,
+        nativePixelRatio:
+          this.nativePixelRatio,
         pixelRatio: this.pixelRatio,
+        rasterScale: this.rasterScale,
+        presentationDetailTier:
+          this.presentationDetailTier,
+        presentationQualityKey:
+          this.presentationQualityKey,
         width: this.cssWidth,
         height: this.cssHeight
       };
@@ -3076,6 +4180,10 @@
       if (this.disposed) {
         return;
       }
+      this.disposed = true;
+      this.setLifecycleState("disposed");
+      this.onAvailabilityChange = null;
+      this.onRecoveryComplete = null;
       if (this.frame) {
         cancelAnimationFrame(this.frame);
         this.frame = 0;
@@ -3095,10 +4203,8 @@
         this.handleContextRestored
       );
       this.viewport = null;
-      this.onAvailabilityChange = null;
       this.onCameraCommitted = null;
       this.gl = null;
-      this.disposed = true;
     }
   }
 
@@ -3106,7 +4212,8 @@
     constructor(options = {}, runtime) {
       super({
         ...options,
-        deferGraphics: true
+        deferGraphics: true,
+        backendKind: "webgpu-wgsl"
       });
       this.gpuAdapter = runtime.adapter;
       this.gpuDevice = runtime.device;
@@ -3144,6 +4251,7 @@
       this.nodeIndirectData =
         new Uint32Array([4, 0, 0, 0]);
       this.activeCurveSteps = GPU_CURVE_STEPS;
+      this.canRecoverContext = false;
       this.gpuCullBounds = null;
       this.gpuCullScale = 0;
       this.gpuCullDirty = true;
@@ -3164,7 +4272,7 @@
       this.stats.gpuWireCandidateMode = "empty";
       this.stats.gpuNodeCandidateMode = "empty";
       this.stats.gpuCullOverscanPixels =
-        WEBGPU_CULL_OVERSCAN_PIXELS;
+        GPU_CULL_OVERSCAN_PIXELS;
       this.stats.gpuLastCullMilliseconds = 0;
       this.stats.gpuSpatialIndexBuilding = false;
       this.gpuResourcesReady = false;
@@ -3173,6 +4281,9 @@
 
     setAvailability(value) {
       const next = value === true;
+      if (next) {
+        this.setLifecycleState("active");
+      }
       if (this.available === next) {
         return;
       }
@@ -3197,15 +4308,13 @@
         !navigator.gpu ||
         this.disposed
       ) {
-        this.setAvailability(false);
-        return false;
+        return this.confirmFallback();
       }
       try {
         this.gpuContext =
           this.canvas.getContext("webgpu");
         if (!this.gpuContext) {
-          this.setAvailability(false);
-          return false;
+          return this.confirmFallback();
         }
         this.gpuContext.configure({
           device: this.gpuDevice,
@@ -3228,6 +4337,12 @@
             info
           );
           this.contextLost = true;
+          if (webGpuRuntime.device === this.gpuDevice) {
+            webGpuRuntime.device = null;
+            webGpuRuntime.error =
+              info?.message || "WebGPU device lost";
+          }
+          this.setLifecycleState("recovering");
           this.setAvailability(false);
         });
         this.setAvailability(true);
@@ -3240,8 +4355,7 @@
           error
         );
         this.deleteGpuResources();
-        this.setAvailability(false);
-        return false;
+        return this.confirmFallback();
       }
     }
 
@@ -3705,6 +4819,22 @@
               result = overPremultiplied(
                 result,
                 vec3<f32>(0.0),
+                0.10 * coverage(
+                  edgeDistance,
+                  7.0 * scaleEstimate
+                )
+              );
+              result = overPremultiplied(
+                result,
+                vec3<f32>(0.0),
+                0.20 * coverage(
+                  edgeDistance,
+                  5.0 * scaleEstimate
+                )
+              );
+              result = overPremultiplied(
+                result,
+                vec3<f32>(0.0),
                 0.72 * coverage(
                   edgeDistance,
                   4.0 * scaleEstimate
@@ -3865,6 +4995,21 @@
                 abs(distance)
               );
               color = mix(color, border, borderMask);
+              let dividerDistance = abs(input.local.y - 45.0);
+              let divider = select(
+                1.0 - smoothstep(
+                  borderWidth,
+                  borderWidth + antialiasGraph,
+                  dividerDistance
+                ),
+                0.0,
+                header
+              );
+              color = mix(
+                color,
+                vec3<f32>(0.1647, 0.2039, 0.2510),
+                divider
+              );
               return vec4<f32>(color, alpha * 0.99);
             }
           `
@@ -4635,32 +5780,394 @@
       this.invalidateGpuCulling();
     }
 
-    updateSegments(segments = []) {
-      const indices = segments.map(segment =>
-        this.wireRecordIndexByKey.get(
-          this.wireRecordKey(segment)
-        )
-      );
-      const updated = super.updateSegments(
-        segments
-      );
-      if (!updated) {
-        return false;
+    uploadWireMutation(previousMaster) {
+      if (!this.gpuResourcesReady) {
+        return;
       }
-      for (const index of indices) {
-        const dataOffset =
-          index * FLOATS_PER_WIRE_INSTANCE;
-        this.gpuDevice.queue.writeBuffer(
+      this.ensureWebGpuBuffers();
+      const activeFloatCount =
+        this.wireRecords.length *
+        FLOATS_PER_WIRE_INSTANCE;
+      if (
+        this.gpuBuffers.wireMaster !==
+          previousMaster
+      ) {
+        if (activeFloatCount > 0) {
+          this.gpuDevice.queue.writeBuffer(
+            this.gpuBuffers.wireMaster,
+            0,
+            this.wireInstanceData.subarray(
+              0,
+              activeFloatCount
+            )
+          );
+          this.stats.visibleWireUploadPasses += 1;
+          this.stats.visibleWireUploadBytes +=
+            activeFloatCount *
+            Float32Array.BYTES_PER_ELEMENT;
+        }
+      } else {
+        this.writeWireDataRanges(
           this.gpuBuffers.wireMaster,
-          dataOffset * 4,
-          this.wireInstanceData.subarray(
-            dataOffset,
-            dataOffset + FLOATS_PER_WIRE_INSTANCE
-          )
+          this.lastWireUpdateIndices || []
+        );
+      }
+      this.invalidateGpuCulling();
+    }
+
+    writeWireDataRanges(
+      buffer,
+      indices,
+      data = this.wireInstanceData
+    ) {
+      if (!buffer) return false;
+      const ordered = [
+        ...new Set(indices || [])
+      ].filter(Number.isSafeInteger).sort(
+        (left, right) => left - right
+      );
+      if (ordered.length === 0) return true;
+      let rangeStart = ordered[0];
+      let rangeEnd = rangeStart + 1;
+      const uploadRange = () => {
+        const dataStart =
+          rangeStart * FLOATS_PER_WIRE_INSTANCE;
+        const dataEnd =
+          rangeEnd * FLOATS_PER_WIRE_INSTANCE;
+        this.gpuDevice.queue.writeBuffer(
+          buffer,
+          dataStart *
+            Float32Array.BYTES_PER_ELEMENT,
+          data.subarray(dataStart, dataEnd)
+        );
+        this.stats.visibleWireUploadPasses += 1;
+        this.stats.visibleWireUploadBytes +=
+          (dataEnd - dataStart) *
+          Float32Array.BYTES_PER_ELEMENT;
+      };
+      for (
+        let offset = 1;
+        offset < ordered.length;
+        offset += 1
+      ) {
+        const next = ordered[offset];
+        if (next <= rangeEnd) {
+          rangeEnd = Math.max(
+            rangeEnd,
+            next + 1
+          );
+          continue;
+        }
+        uploadRange();
+        rangeStart = next;
+        rangeEnd = next + 1;
+      }
+      uploadRange();
+      return true;
+    }
+
+    uploadRetainedWireUpdateRange(
+      previousMaster,
+      { buffersReady = false } = {}
+    ) {
+      if (!buffersReady) {
+        this.ensureWebGpuBuffers();
+      }
+      const activeFloatCount =
+        this.wireRecords.length *
+        FLOATS_PER_WIRE_INSTANCE;
+      if (
+        this.gpuBuffers.wireMaster !==
+          previousMaster
+      ) {
+        if (activeFloatCount > 0) {
+          this.gpuDevice.queue.writeBuffer(
+            this.gpuBuffers.wireMaster,
+            0,
+            this.wireInstanceData.subarray(
+              0,
+              activeFloatCount
+            )
+          );
+          this.stats.visibleWireUploadPasses += 1;
+          this.stats.visibleWireUploadBytes +=
+            activeFloatCount *
+            Float32Array.BYTES_PER_ELEMENT;
+        }
+      } else {
+        this.writeWireDataRanges(
+          this.gpuBuffers.wireMaster,
+          this.lastWireUpdateRange?.indices || []
         );
       }
       this.invalidateGpuCulling();
       return true;
+    }
+
+    captureRetainedWireMutationState(
+      segments
+    ) {
+      const saved = [];
+      const indices = [];
+      for (const segment of segments || []) {
+        const index =
+          this.wireRecordIndexByKey.get(
+            this.wireRecordKey(segment)
+          );
+        if (!Number.isSafeInteger(index)) {
+          return null;
+        }
+        indices.push(index);
+        saved.push({
+          index,
+          segment: this.scene.segments[index],
+          record: this.wireRecords[index],
+          data: this.wireInstanceData.slice(
+            index * FLOATS_PER_WIRE_INSTANCE,
+            (index + 1) *
+              FLOATS_PER_WIRE_INSTANCE
+          )
+        });
+      }
+      return {
+        saved,
+        indices,
+        wireDataRevision: this.wireDataRevision,
+        visibleWireSelectionDirty:
+          this.visibleWireSelectionDirty,
+        lastWireUpdateIndices:
+          this.lastWireUpdateIndices,
+        lastWireUpdateRange:
+          this.lastWireUpdateRange,
+        maximumWireCurveLength:
+          this.maximumWireCurveLength,
+        wireCullSpatialIndexDirty:
+          this.wireCullSpatialIndexDirty,
+        stats: { ...this.stats },
+        frame: this.frame
+      };
+    }
+
+    restoreRetainedWireMutationState(snapshot) {
+      if (!snapshot) return false;
+      try {
+        if (
+          this.frame &&
+          this.frame !== snapshot.frame
+        ) {
+          cancelAnimationFrame(this.frame);
+        }
+        for (const saved of snapshot.saved) {
+          const current =
+            this.wireRecords[saved.index];
+          if (
+            snapshot.wireCullSpatialIndexDirty !==
+              true &&
+            current &&
+            current !== saved.record
+          ) {
+            this.removeWireCullRecord(current);
+            this.addWireCullRecord(saved.record);
+          }
+          this.wireRecords[saved.index] =
+            saved.record;
+          this.scene.segments[saved.index] =
+            saved.segment;
+          this.wireInstanceData.set(
+            saved.data,
+            saved.index *
+              FLOATS_PER_WIRE_INSTANCE
+          );
+        }
+        this.wireDataRevision =
+          snapshot.wireDataRevision;
+        this.visibleWireSelectionDirty =
+          snapshot.visibleWireSelectionDirty;
+        this.lastWireUpdateIndices =
+          snapshot.lastWireUpdateIndices;
+        this.lastWireUpdateRange =
+          snapshot.lastWireUpdateRange;
+        this.maximumWireCurveLength =
+          snapshot.maximumWireCurveLength;
+        this.wireCullSpatialIndexDirty =
+          snapshot.wireCullSpatialIndexDirty;
+        for (const key of Object.keys(this.stats)) {
+          if (!(key in snapshot.stats)) {
+            delete this.stats[key];
+          }
+        }
+        Object.assign(this.stats, snapshot.stats);
+        this.frame = snapshot.frame;
+        return true;
+      } catch {
+        this.wireCullSpatialIndexDirty = true;
+        this.wireCullSpatialIndex.clear();
+        this.wireCullOverflowRecords.length = 0;
+        return false;
+      }
+    }
+
+    uploadNodeMutation(previousMaster) {
+      if (!this.gpuResourcesReady) {
+        return;
+      }
+      this.ensureWebGpuBuffers();
+      const activeFloatCount =
+        this.nodeRecords.length *
+        FLOATS_PER_NODE_INSTANCE;
+      if (
+        this.gpuBuffers.nodeMaster !==
+          previousMaster
+      ) {
+        if (activeFloatCount > 0) {
+          this.gpuDevice.queue.writeBuffer(
+            this.gpuBuffers.nodeMaster,
+            0,
+            this.nodeInstanceData.subarray(
+              0,
+              activeFloatCount
+            )
+          );
+        }
+      } else {
+        for (const index of [
+          ...new Set(
+            this.lastNodeUpdateIndices || []
+          )
+        ]) {
+          const offset =
+            index * FLOATS_PER_NODE_INSTANCE;
+          this.gpuDevice.queue.writeBuffer(
+            this.gpuBuffers.nodeMaster,
+            offset * 4,
+            this.nodeInstanceData.subarray(
+              offset,
+              offset + FLOATS_PER_NODE_INSTANCE
+            )
+          );
+        }
+      }
+      this.invalidateGpuCulling();
+    }
+
+    appendSegments(segments = []) {
+      const previousMaster =
+        this.gpuBuffers.wireMaster;
+      const changed =
+        super.appendSegments(segments);
+      if (!changed) {
+        return false;
+      }
+      this.uploadWireMutation(previousMaster);
+      return true;
+    }
+
+    updateOrAppendSegments(segments = []) {
+      const previousMaster =
+        this.gpuBuffers.wireMaster;
+      const changed =
+        super.updateOrAppendSegments(
+          segments
+        );
+      if (!changed) {
+        return false;
+      }
+      this.uploadWireMutation(previousMaster);
+      return true;
+    }
+
+    appendNodes(nodes = []) {
+      const previousMaster =
+        this.gpuBuffers.nodeMaster;
+      const changed =
+        super.appendNodes(nodes);
+      if (!changed) {
+        return false;
+      }
+      this.uploadNodeMutation(previousMaster);
+      return true;
+    }
+
+    removeNodes(nodeIds = []) {
+      const previousMaster =
+        this.gpuBuffers.nodeMaster;
+      const removed =
+        super.removeNodes(nodeIds);
+      if (!removed) {
+        return 0;
+      }
+      this.uploadNodeMutation(previousMaster);
+      return removed;
+    }
+
+    updateRetainedSegments(
+      segments = [],
+      options = {}
+    ) {
+      try {
+        this.ensureWebGpuBuffers();
+      } catch (error) {
+        this.handleGpuOperationException(
+          error,
+          "WebGPU retained wire preflight"
+        );
+        return false;
+      }
+      const previousMaster =
+        this.gpuBuffers.wireMaster;
+      const snapshot =
+        this.captureRetainedWireMutationState(
+          segments
+        );
+      if (!snapshot) return false;
+      try {
+        const updated =
+          super.updateRetainedSegments(
+            segments,
+            options
+          );
+        if (!updated) return false;
+        return this.uploadRetainedWireUpdateRange(
+          previousMaster,
+          { buffersReady: true }
+        );
+      } catch (error) {
+        const failedIndices =
+          this.lastWireUpdateRange?.indices ||
+          snapshot.indices;
+        const restored =
+          this.restoreRetainedWireMutationState(
+            snapshot
+          );
+        if (restored) {
+          try {
+            this.writeWireDataRanges(
+              this.gpuBuffers.wireMaster,
+              failedIndices
+            );
+          } catch {
+            // The renderer is quarantined below. A later backend recovery
+            // rebuilds from the restored authoritative CPU scene.
+          }
+        }
+        this.handleGpuOperationException(
+          error,
+          restored
+            ? "WebGPU retained wire update (rolled back)"
+            : "WebGPU retained wire update rollback"
+        );
+        return false;
+      }
+    }
+
+    updateSegments(
+      segments = [],
+      options = {}
+    ) {
+      return super.updateSegments(
+        segments,
+        options
+      );
     }
 
     updateNodes(nodes = []) {
@@ -4808,7 +6315,7 @@
         this.gpuCullDirty ||
         !this.gpuCullReady ||
         scaleReuseRatio >=
-          WEBGPU_CULL_SCALE_REUSE_RATIO ||
+          GPU_CULL_SCALE_REUSE_RATIO ||
         !containsBounds(
           this.gpuCullBounds,
           viewportBounds
@@ -4818,14 +6325,14 @@
       if (needsCull) {
         cullBounds =
           this.viewportGraphBounds(
-            WEBGPU_CULL_OVERSCAN_PIXELS
+            GPU_CULL_OVERSCAN_PIXELS
           );
         maximumCount =
           this.prepareGpuCulling(cullBounds);
       }
-      const curveSteps = curveStepsForScale(
+      const curveSteps = curveStepsForPresentation(
         this.camera.scale,
-        this.gpuCandidateMaximumCurveLength
+        this.presentationDetailTier
       );
       if (curveSteps !== this.activeCurveSteps) {
         this.activeCurveSteps = curveSteps;
@@ -5016,9 +6523,18 @@
         if (wireRevision !== this.wireDataRevision || nodeRevision !== this.nodeDataRevision) continue;
         this.invalidateGpuCulling();
         this.drawNow();
-        await this.whenSubmittedWorkDone();
+        const submitted =
+          await this.whenSubmittedWorkDone();
+        if (submitted === false) {
+          return false;
+        }
         if (wireRevision === this.wireDataRevision && nodeRevision === this.nodeDataRevision &&
-            !this.wireCullSpatialIndexDirty && !this.nodeSpatialIndexDirty) return true;
+            !this.wireCullSpatialIndexDirty && !this.nodeSpatialIndexDirty) {
+          clearRendererBackendSubmissionFailure(
+            this.backendKind
+          );
+          return true;
+        }
       }
       return false;
     }
@@ -5077,6 +6593,74 @@
     }
   }
 
+  function guardRendererGpuOperations(
+    RendererClass,
+    operationNames
+  ) {
+    for (const operation of operationNames) {
+      const original =
+        RendererClass.prototype[operation];
+      if (
+        typeof original !== "function" ||
+        original._rmlRecoveryGuard === true
+      ) {
+        continue;
+      }
+      const guarded = function (...args) {
+        try {
+          const result = original.apply(
+            this,
+            args
+          );
+          if (
+            result &&
+            typeof result.then === "function"
+          ) {
+            return Promise.resolve(result).catch(
+              error =>
+                this.handleGpuOperationException(
+                  error,
+                  operation
+                )
+            );
+          }
+          return result;
+        } catch (error) {
+          return this.handleGpuOperationException(
+            error,
+            operation
+          );
+        }
+      };
+      guarded._rmlRecoveryGuard = true;
+      RendererClass.prototype[operation] =
+        guarded;
+    }
+  }
+
+  guardRendererGpuOperations(
+    GraphHybridRenderer,
+    [
+      "resize", "setScene", "setNodes", "updateNodes", "removeNodes",
+      "setPreview", "uploadVisibleWireInstances", "uploadVisibleNodeInstances",
+      "rebuildWireBuffers", "updateSegments", "updateWireEndpoints", "hideConnections",
+      "rebuildNodeBuffers", "draw", "whenSceneReady", "whenSubmittedWorkDone",
+      "clearScene"
+    ]
+  );
+  guardRendererGpuOperations(
+    GraphWebGpuRenderer,
+    [
+      "initializeWebGpu", "createWebGpuPipelines", "ensureBuffer",
+      "scheduleGpuSpatialIndexBuild", "uploadGpuCandidateIndices",
+      "prepareGpuCulling", "ensureWebGpuBuffers", "createWebGpuBindGroups",
+      "rebuildWireBuffers", "rebuildNodeBuffers", "updateRetainedSegments",
+      "updateSegments", "updateNodes",
+      "removeNodes", "hideConnections", "setPreview", "draw", "whenSceneReady",
+      "whenSubmittedWorkDone", "clearScene"
+    ]
+  );
+
   function rendererBackendStatus() {
     return Object.freeze({
       preference: rendererBackendPreference,
@@ -5128,6 +6712,7 @@
           if (
             rendererBackendPreference !== "glsl" &&
             rendererBackendPreference !== "svg" &&
+            !rendererBackendTemporarilyUnavailable("webgpu-wgsl") &&
             webGpuRuntime.device
           ) {
             const renderer =
@@ -5144,12 +6729,18 @@
           }
           const renderer =
             new GraphHybridRenderer(
-              rendererBackendPreference === "svg"
+              rendererBackendPreference === "svg" ||
+                rendererBackendTemporarilyUnavailable("webgl2-glsl")
                 ? {
                     ...options,
-                    deferGraphics: true
+                    deferGraphics: true,
+                    confirmedFallback: true,
+                    backendKind: "svg-fallback"
                   }
-                : options
+                : {
+                    ...options,
+                    backendKind: "webgl2-glsl"
+                  }
             );
           activeRendererBackend =
             renderer.available

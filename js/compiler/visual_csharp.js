@@ -1646,10 +1646,6 @@
       for (const node of fileNodes) {
         const fileName = String(parameter(node, "fileName", "VisualProgram.cs")).trim();
         const projectId = String(parameter(node, "projectId", "main")).trim() || "main";
-        if (!/^(?![./\\])(?:(?!\.\.)[^<>:"|?*\u0000-\u001f])+\.cs$/i.test(fileName)) {
-          api.diagnostic(`C# File '${fileName}' must be a safe relative .cs path.`);
-          continue;
-        }
         const customGraph = api.graph?.customCSharpFiles?.[node.id];
         let connection;
         let renderNode = renderMainNode;
@@ -1672,7 +1668,10 @@
           ? renderNode(connection.fromNode)
           : String(parameter(node, "source", ""));
         if (!body.trim()) {
-          api.diagnostic(`Custom C# File '${fileName}' has neither generated node-graph code nor C# source text.`);
+          continue;
+        }
+        if (!/^(?![./\\])(?:(?!\.\.)[^<>:"|?*\u0000-\u001f])+\.cs$/i.test(fileName)) {
+          api.diagnostic(`C# File '${fileName}' must be a safe relative .cs path.`);
           continue;
         }
         const nullable = parameter(node, "nullable", "inherit");
@@ -3999,7 +3998,13 @@
         connections: []
       };
     }
-    host.commit?.();
+    host.commit?.({
+      documentChanged:
+        activation?.documentMutationAccepted !== true,
+      mutationClass: "topology",
+      refreshGeneratedOutput: true,
+      refreshCompositeActions: true
+    });
     return {
       ...fragment,
       nodes: [runtimeFileNode],

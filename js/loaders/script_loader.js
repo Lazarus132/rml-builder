@@ -1,7 +1,27 @@
 (() => {
   "use strict";
 
-  if (window.RMLScriptLoader?.version >= 38) {
+  const SCRIPT_LOADER_MODULE_ID =
+    "1.20.31-universal-presentation-dev23";
+
+  if (
+    Object.hasOwn(
+      window,
+      "RMLBuilderBuildId"
+    ) &&
+    window.RMLBuilderBuildId !==
+      SCRIPT_LOADER_MODULE_ID
+  ) {
+    throw new Error(
+      `Builder module version mismatch: index.html published '${String(window.RMLBuilderBuildId || "missing")}', but script_loader.js is '${SCRIPT_LOADER_MODULE_ID}'. Reload the Builder without cached files.`
+    );
+  }
+
+  if (
+    window.RMLScriptLoader?.version >= 40 &&
+    window.RMLScriptLoader?.moduleId ===
+      SCRIPT_LOADER_MODULE_ID
+  ) {
     return;
   }
 
@@ -163,10 +183,22 @@
       dependencies: Object.freeze([]),
       files: Object.freeze([
         Object.freeze({
-          url: "../catalog/catalog_loader.js?v=796-manual-scanner-session",
+          url: "../catalog/catalog_loader.js?v=1.20.31-universal-presentation-dev23",
           ready: () =>
-            typeof window.RMLBaseModNodesReady?.then === "function" ||
-            typeof window.RMLModNodesReady?.then === "function"
+            window.RMLCatalogImportGate?.moduleId ===
+              SCRIPT_LOADER_MODULE_ID &&
+            Number(
+              window.RMLCatalogImportGate
+                ?.loaderVersion
+            ) === 84 &&
+            Number(
+              window.RMLCatalogImportGate
+                ?.requiredApiFactoryVersion
+            ) === 38 &&
+            (
+              typeof window.RMLBaseModNodesReady?.then === "function" ||
+              typeof window.RMLModNodesReady?.then === "function"
+            )
         }),
         Object.freeze({
           url: "../graph/node_graph_registry.js?v=1-physical-modules-v748",
@@ -203,8 +235,10 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/node_graph_codegen.js?v=794-shared-loader-runtime",
+          url: "../graph/node_graph_codegen.js?v=1.20.31-universal-presentation-dev23",
           ready: () =>
+            window.RMLTypedNodeGraphGenerator?.moduleId ===
+              SCRIPT_LOADER_MODULE_ID &&
             typeof window.RMLTypedNodeGraphGenerator?.build ===
               "function"
         })
@@ -218,27 +252,50 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/node_graph_composites.js?v=799-ready-graph-entry"
+          url: "../workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev23",
+          ready: () =>
+            window.RMLSavedApiCompositeCompareWorkerBootstrap
+              ?.moduleId === SCRIPT_LOADER_MODULE_ID &&
+            typeof window
+              .RMLSavedApiCompositeCompareWorkerBootstrap
+              ?.source === "string"
         }),
         Object.freeze({
-          url: "../graph/node_graph_custom_csharp.js?v=1.9-svg-status-pill"
+          url: "../graph/node_graph_composites.js?v=1.20.31-universal-presentation-dev23",
+          ready: () =>
+            window.RMLNodeGraphCompositesModuleId ===
+              SCRIPT_LOADER_MODULE_ID
+        }),
+        Object.freeze({
+          url: "../graph/node_graph_custom_csharp.js?v=1.20.31-universal-presentation-dev23",
+          ready: () =>
+            window.RMLNodeGraphCustomCSharpModuleId ===
+              SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
           url: "../graph/node_graph_guided.js?v=1-physical-modules-v748"
         }),
         Object.freeze({
-          url: "../graph/node_graph_view.js?v=1.9-svg-status-pill"
+          url: "../graph/node_graph_view.js?v=1.20.31-universal-presentation-dev23",
+          ready: () =>
+            window.RMLNodeGraphViewModuleId ===
+              SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_bootstrap.js?v=1.8-project-load-svg-guard",
+          url: "../graph/node_graph_bootstrap.js?v=1.20.31-universal-presentation-dev23",
           ready: () =>
-            window.RMLDynamicGraphHost?.version >= 70 &&
+            window.RMLDynamicGraphHost?.moduleId ===
+              SCRIPT_LOADER_MODULE_ID &&
+            window.RMLDynamicGraphHost?.version >= 73 &&
             typeof window.RMLDynamicGraphHost?.isReady === "function"
         })
       ]),
       settle: async () => {
         await waitFor(
-          () => window.RMLDynamicGraphHost?.isReady?.() === true,
+          () =>
+            window.RMLDynamicGraphHost?.moduleId ===
+              SCRIPT_LOADER_MODULE_ID &&
+            window.RMLDynamicGraphHost?.isReady?.() === true,
           "The Runtime Graph host did not connect to the restored project."
         );
       }
@@ -249,7 +306,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/graph_gpu_renderer.js?v=801-atomic-graph-camera",
+          url: "../graph/graph_gpu_renderer.js?v=806-universal-graph-presentation",
           ready: () =>
             typeof window.RMLGraphHybridRenderer?.create === "function"
         })
@@ -527,11 +584,19 @@
       status("graph-codegen").status === "failed" ||
       status("runtime-core").status === "failed" ||
       status("runtime-view").status === "failed";
-    const sourceNodes =
-      bridge?.getStateSnapshot?.()?.nodes || [];
+    const sourceNodeCount = Array.isArray(
+      graph?.configSnapshot?.nodes
+    )
+      ? graph.configSnapshot.nodes.length
+      : Math.max(
+          0,
+          Number(
+            bridge?.getConfigurationNodeCount?.()
+          ) || 0
+        );
     const available = Boolean(
       bridge &&
-      (sourceNodes.length > 0 || graph?.active === true)
+      (sourceNodeCount > 0 || graph?.active === true)
     );
 
     const unavailableReason =
@@ -744,6 +809,19 @@
           }
           runtimeViewOpenAfterLoadPromise = null;
           updateRuntimeButton();
+          if (
+            button.dataset.rmlGraphActionBound === "true" &&
+            status("runtime-view").status === "loaded"
+          ) {
+            // The real Runtime Graph handler was installed while the lazy
+            // loader owned the button. Release that temporary lock before
+            // replaying the user's click; the real handler validates the
+            // current graph state again.
+            button.disabled = false;
+            button.setAttribute("aria-disabled", "false");
+            button.removeAttribute("aria-busy");
+            delete button.dataset.unavailableReason;
+          }
           button.click();
         })
         .catch(error => {
@@ -789,7 +867,8 @@
 
   Object.defineProperty(window, "RMLScriptLoader", {
     value: Object.freeze({
-      version: 38,
+      version: 40,
+      moduleId: SCRIPT_LOADER_MODULE_ID,
       ensure,
       ensureMany(names) {
         return Promise.all(

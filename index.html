@@ -7,7 +7,7 @@
       content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
     <meta
       name="rml-builder-build"
-      content="help-shortcut-key-groups-20260907-v1.10">
+      content="1.20.31-universal-presentation-dev23">
     <meta
       name="description"
       content="Build complete typed ResoniteModLoader projects visually with automatic dependencies; optional Raw C# tools remain an expert fallback.">
@@ -17,22 +17,158 @@
         window,
         "RMLBuilderBuildId",
         {
-          value:
-            "help-shortcut-key-groups-20260907-v1.10",
-          writable: false,
-          enumerable: true,
-          configurable: true
-        }
-      );
+           value:
+             "1.20.31-universal-presentation-dev23",
+           writable: false,
+           enumerable: true,
+           configurable: false
+         }
+       );
       document.documentElement.dataset
         .rmlBuilderBuild =
           window.RMLBuilderBuildId;
     </script>
-    <link rel="stylesheet" href="styles/base/styles.css?v=283-custom-csharp-atomic-scroll-tabs-v784">
+    <script id="rml-frame-audit-loader">
+      (() => {
+        const query = new URLSearchParams(window.location.search);
+        if (query.get("rmlFrameAudit") !== "1") return;
+        const rawPort = query.get("rmlFrameAuditPort") || "";
+        if (!/^\d{1,5}$/.test(rawPort)) return;
+        const port = Number(rawPort);
+        if (!Number.isInteger(port) || port < 1024 || port > 65535) return;
+        document.write(
+          `<script src="http://127.0.0.1:${port}/rml-frame-audit-bootstrap.js"><\/script>`
+        );
+      })();
+    </script>
+    <script src="js/bootstrap/architecture_gate.js?v=1.20.31-universal-presentation-dev23"></script>
+    <link rel="stylesheet" href="styles/base/styles.css?v=284-architecture-gate">
     <link rel="shortcut icon" href="assets/icons/favicon.svg">
     <link rel="icon" href="assets/icons/favicon.svg">
   </head>
   <body>
+    <section
+      id="rml-architecture-gate"
+      class="rml-architecture-gate"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="rml-architecture-gate-title"
+      aria-describedby="rml-architecture-gate-support rml-architecture-gate-detail"
+      hidden>
+      <div class="rml-architecture-gate-grid" aria-hidden="true"></div>
+      <div class="rml-architecture-gate-shell">
+        <div class="rml-architecture-gate-visual" aria-hidden="true">
+          <svg
+            class="rml-architecture-gate-car"
+            viewBox="0 0 920 380"
+            focusable="false">
+            <defs>
+              <linearGradient id="rml-gate-body" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#f8a85d"></stop>
+                <stop offset="0.52" stop-color="#d86a43"></stop>
+                <stop offset="1" stop-color="#87364b"></stop>
+              </linearGradient>
+              <linearGradient id="rml-gate-window" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#9cf6ff" stop-opacity=".92"></stop>
+                <stop offset="1" stop-color="#244665" stop-opacity=".96"></stop>
+              </linearGradient>
+              <linearGradient id="rml-gate-beam" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0" stop-color="#fff7ad" stop-opacity=".76"></stop>
+                <stop offset="1" stop-color="#fff7ad" stop-opacity="0"></stop>
+              </linearGradient>
+              <filter id="rml-gate-glow" x="-80%" y="-80%" width="260%" height="260%">
+                <feGaussianBlur stdDeviation="7"></feGaussianBlur>
+              </filter>
+            </defs>
+
+            <g class="rml-architecture-gate-wires" fill="none" stroke="#44d7ff" stroke-width="2" stroke-linecap="round">
+              <path d="M58 96h118l42 44"></path>
+              <path d="M70 304h112l56-34"></path>
+              <path d="M690 68h104l56 48"></path>
+              <path d="M736 304h90"></path>
+              <g fill="#081621">
+                <circle cx="58" cy="96" r="7"></circle>
+                <circle cx="218" cy="140" r="7"></circle>
+                <circle cx="70" cy="304" r="7"></circle>
+                <circle cx="238" cy="270" r="7"></circle>
+                <circle cx="690" cy="68" r="7"></circle>
+                <circle cx="850" cy="116" r="7"></circle>
+                <circle cx="736" cy="304" r="7"></circle>
+                <circle cx="826" cy="304" r="7"></circle>
+              </g>
+            </g>
+
+            <ellipse cx="475" cy="306" rx="286" ry="27" fill="#02080e" opacity=".72"></ellipse>
+
+            <g class="rml-architecture-gate-steam" fill="none" stroke="#c8f8ff" stroke-linecap="round">
+              <path class="rml-architecture-gate-steam-one" d="M692 153c-18-17 14-27-2-45-10-12-2-23 10-30" stroke-width="10" opacity=".7"></path>
+              <path class="rml-architecture-gate-steam-two" d="M722 151c-11-15 15-25 2-39-8-9-2-19 8-27" stroke-width="7" opacity=".48"></path>
+              <path class="rml-architecture-gate-steam-three" d="M665 155c-12-11 5-21-4-34" stroke-width="6" opacity=".38"></path>
+            </g>
+
+            <g class="rml-architecture-gate-antenna">
+              <path d="M512 135 548 55" fill="none" stroke="#d8fbff" stroke-width="5" stroke-linecap="round"></path>
+              <circle cx="550" cy="50" r="9" fill="#ff6c88" stroke="#ffe1e8" stroke-width="3"></circle>
+              <path d="M538 79q18 7 28-5" fill="none" stroke="#ff6c88" stroke-width="3" stroke-linecap="round" opacity=".75"></path>
+            </g>
+
+            <g class="rml-architecture-gate-car-body">
+              <path d="M203 252 224 177l91-20 66-78h205l91 79 89 21 38 73-24 40H218z" fill="url(#rml-gate-body)" stroke="#ffc079" stroke-width="6" stroke-linejoin="round"></path>
+              <path d="M379 89h83v79H318z" fill="url(#rml-gate-window)" stroke="#11273a" stroke-width="7"></path>
+              <path d="M476 89h102l79 78H476z" fill="url(#rml-gate-window)" stroke="#11273a" stroke-width="7"></path>
+              <path d="M475 91v151M304 174h364M254 219h502" fill="none" stroke="#87364b" stroke-width="6" opacity=".7"></path>
+              <path d="M257 185 224 194l-17 48h52z" fill="#ffda7a" stroke="#633248" stroke-width="5"></path>
+              <path d="M747 189h44l24 46h-68z" fill="#fff2a0" stroke="#633248" stroke-width="5"></path>
+              <rect x="450" y="184" width="55" height="12" rx="6" fill="#ffd4a3" opacity=".85"></rect>
+              <path d="M190 254h638v35H190z" fill="#313845" stroke="#8290a0" stroke-width="5" stroke-linejoin="round"></path>
+              <rect x="658" y="260" width="82" height="24" rx="5" fill="#fff3b3" stroke="#111b27" stroke-width="4"></rect>
+              <text x="699" y="278" text-anchor="middle" fill="#111b27" font-size="17" font-family="ui-monospace, monospace" font-weight="900">32-BIT</text>
+            </g>
+
+            <g class="rml-architecture-gate-wheel" transform="translate(314 280)">
+              <circle r="58" fill="#090b10" stroke="#667080" stroke-width="7"></circle>
+              <circle r="29" fill="#293342" stroke="#b9c5d3" stroke-width="6"></circle>
+              <path d="M0-24V24M-24 0h48M-17-17l34 34M17-17l-34 34" stroke="#8290a0" stroke-width="5"></path>
+              <circle r="7" fill="#ff775e"></circle>
+            </g>
+            <g class="rml-architecture-gate-wheel" transform="translate(690 280)">
+              <circle r="58" fill="#090b10" stroke="#667080" stroke-width="7"></circle>
+              <circle r="29" fill="#293342" stroke="#b9c5d3" stroke-width="6"></circle>
+              <path d="M0-24V24M-24 0h48M-17-17l34 34M17-17l-34 34" stroke="#8290a0" stroke-width="5"></path>
+              <circle r="7" fill="#ff775e"></circle>
+            </g>
+
+            <g class="rml-architecture-gate-headlight">
+              <path d="M794 194 914 153v111L794 226z" fill="url(#rml-gate-beam)"></path>
+              <rect x="774" y="192" width="38" height="39" rx="9" fill="#fff8b8" filter="url(#rml-gate-glow)" opacity=".62"></rect>
+              <rect x="776" y="195" width="34" height="33" rx="8" fill="#fffbd2" stroke="#fff" stroke-width="3"></rect>
+            </g>
+
+            <g class="rml-architecture-gate-face">
+              <circle cx="750" cy="246" r="5" fill="#211c27"></circle>
+              <circle cx="786" cy="246" r="5" fill="#211c27"></circle>
+              <path d="M756 262q13 12 26 0" fill="none" stroke="#211c27" stroke-width="4" stroke-linecap="round"></path>
+            </g>
+          </svg>
+        </div>
+
+        <div class="rml-architecture-gate-copy">
+          <p class="rml-architecture-gate-badge">32-BIT DETECTED</p>
+          <h1 id="rml-architecture-gate-title">This is nothing for Oldtimers</h1>
+          <p id="rml-architecture-gate-support" class="rml-architecture-gate-support">This builder needs a 64-bit engine.</p>
+          <p id="rml-architecture-gate-detail" class="rml-architecture-gate-detail">
+            Windows positively reported a native 32-bit browser environment. You can look around anyway, but large graphs and compiler work need a 64-bit engine.
+          </p>
+          <button
+            id="rml-architecture-gate-proceed"
+            class="rml-architecture-gate-proceed"
+            type="button">
+            Proceed anyway
+          </button>
+        </div>
+      </div>
+    </section>
+
     <header class="topbar">
       <div class="brand-logo" aria-hidden="true">
         <img src="assets/icons/favicon.svg" alt="">
@@ -722,13 +858,22 @@
       </section>
     </div>
 
-    <script src="js/loaders/style_loader.js?v=1.10-shortcut-key-groups"></script>
-    <script src="js/loaders/script_loader.js?v=1.9-help-shortcuts-svg-status"></script>
-    <script src="js/ui/scroll_manager.js?v=35-custom-csharp-atomic-scroll-tabs-v784"></script>
-    <script src="js/ui/scroll_hierarchy.js?v=10-custom-csharp-atomic-scroll-tabs-v784"></script>
-    <script src="js/core/crypto.js?v=5-guidance-comments-global-v723"></script>
-    <script src="js/core/code_templates.js?v=794-shared-loader-runtime"></script>
-    <script src="js/bootstrap/app.js?v=1.10-help-shortcut-key-groups"></script>
-    <script src="js/core/dynamic_settings.js?v=794-shared-loader-runtime"></script>
+    <script>
+      window.RMLArchitectureGate.bootstrap([
+        "js/loaders/style_loader.js?v=1.20.31-universal-presentation-dev23",
+        "js/loaders/script_loader.js?v=1.20.31-universal-presentation-dev23",
+        "js/ui/scroll_manager.js?v=35-custom-csharp-atomic-scroll-tabs-v784",
+        "js/ui/scroll_hierarchy.js?v=10-custom-csharp-atomic-scroll-tabs-v784",
+        "js/core/crypto.js?v=5-guidance-comments-global-v723",
+        "js/core/code_templates.js?v=794-shared-loader-runtime",
+        "js/bootstrap/app.js?v=1.20.31-universal-presentation-dev23",
+        "js/core/dynamic_settings.js?v=794-shared-loader-runtime"
+      ]).catch(error => {
+        console.error(
+          "The Builder could not start after its architecture check.",
+          error
+        );
+      });
+    </script>
 </body>
 </html>

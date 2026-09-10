@@ -2005,7 +2005,7 @@
       "mode-switch-outline-preview": [
         {
           targets: ".rml-pack-button",
-          text: "The same view button returns to the Configuration Outline."
+          text: "The top-right view button switches directly to the Configuration Outline. Switching it again restores the last opened Graph level; use the Breadcrumb for navigation inside the Runtime Graph."
         },
         {
           targets: "#preview-open",
@@ -22609,8 +22609,8 @@
     const menu = await teacherEnsureResponsiveTopActionsOpen(
       button,
       wantsGraph
-        ? "Open the responsive Hamburger before choosing Open Runtime Graph"
-        : "Open the responsive Hamburger before returning to Configuration Outline",
+        ? "Open the responsive Hamburger before restoring the last opened Graph level"
+        : "Open the responsive Hamburger before switching directly to Configuration Outline",
       runId
     );
     if (menu.required && !menu.open) return false;
@@ -22635,8 +22635,8 @@
     const switched = await teacherClickElement(
       button,
       wantsGraph
-        ? "Use the real Pack into Node button"
-        : "Use the same real button to return to Configuration Outline",
+        ? "Use the real view button to restore the last opened Graph level"
+        : "Use the same real view button to switch directly to Configuration Outline",
       runId
     );
 

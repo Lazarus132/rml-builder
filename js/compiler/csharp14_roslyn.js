@@ -12,6 +12,7 @@
       ).href,
       name: "rml-csharp14-validator",
       worker: null,
+      idleTimer: 0,
       failure: null
     },
     liveValidator: {
@@ -22,6 +23,7 @@
       ).href,
       name: "rml-csharp14-live-validator",
       worker: null,
+      idleTimer: 0,
       failure: null
     },
     compiler: {
@@ -32,11 +34,13 @@
       ).href,
       name: "rml-csharp14-compiler",
       worker: null,
+      idleTimer: 0,
       failure: null
     }
   };
   const START_TIMEOUT_MS = 5 * 60 * 1000;
   const OPERATION_TIMEOUT_MS = 10 * 60 * 1000;
+  const IDLE_WORKER_RELEASE_MS = 15000;
 
   let requestSequence = 0;
   const pending = new Map();
@@ -65,11 +69,80 @@
     );
     const failedWorker = channel.worker;
     channel.worker = null;
+    if (channel.idleTimer) {
+      globalThis.clearTimeout(
+        channel.idleTimer
+      );
+      channel.idleTimer = 0;
+    }
     try {
       failedWorker?.terminate();
     } catch {}
     rejectPending(channel, channel.failure);
     return channel.failure;
+  }
+
+  function channelHasPendingRequests(
+    channel
+  ) {
+    for (const request of pending.values()) {
+      if (request.channel === channel) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function releaseIdleChannel(channel) {
+    if (
+      !channel.worker ||
+      channelHasPendingRequests(channel)
+    ) {
+      return false;
+    }
+    if (channel.idleTimer) {
+      globalThis.clearTimeout(
+        channel.idleTimer
+      );
+      channel.idleTimer = 0;
+    }
+    const worker = channel.worker;
+    channel.worker = null;
+    try {
+      worker.terminate();
+    } catch {}
+    return true;
+  }
+
+  function scheduleIdleChannelRelease(
+    channel
+  ) {
+    if (channel.idleTimer) {
+      globalThis.clearTimeout(
+        channel.idleTimer
+      );
+    }
+    channel.idleTimer = globalThis.setTimeout(
+      () => {
+        channel.idleTimer = 0;
+        releaseIdleChannel(channel);
+      },
+      IDLE_WORKER_RELEASE_MS
+    );
+  }
+
+  function releaseIdleWorkers() {
+    let released = 0;
+    let busy = 0;
+    for (const channel of
+      Object.values(channels)) {
+      if (channelHasPendingRequests(channel)) {
+        busy += 1;
+      } else if (releaseIdleChannel(channel)) {
+        released += 1;
+      }
+    }
+    return Object.freeze({ released, busy });
   }
 
   function handleMessage(channel, event) {
@@ -88,6 +161,7 @@
 
     pending.delete(message.id);
     globalThis.clearTimeout(request.timer);
+    scheduleIdleChannelRelease(channel);
     if (message.type === "result") {
       request.resolve(message.result);
       return;
@@ -106,6 +180,12 @@
 
   function createWorker(channel) {
     if (channel.failure) throw channel.failure;
+    if (channel.idleTimer) {
+      globalThis.clearTimeout(
+        channel.idleTimer
+      );
+      channel.idleTimer = 0;
+    }
     if (channel.worker) return channel.worker;
     if (typeof globalThis.Worker !== "function") {
       throw markWorkerFailed(
@@ -278,7 +358,7 @@
     "RMLCSharp14Roslyn",
     {
       value: Object.freeze({
-        version: 10,
+        version: 11,
         name: "Roslyn C# 14 isolated browser compiler (.NET 9 host, .NET 10 target)",
         languageVersion: LANGUAGE_VERSION,
         assembly: ASSEMBLY,
@@ -291,6 +371,7 @@
         compile,
         configureReferences,
         resetCompilerReferences,
+        releaseIdleWorkers,
         capabilities: Object.freeze({
           syntaxValidation: true,
           binaryCompilation: true,

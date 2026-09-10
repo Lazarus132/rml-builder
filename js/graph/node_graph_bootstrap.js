@@ -1,6 +1,45 @@
 "use strict";
 
-// v792 coherent graph modules: bootstrapped with the matching Composite, C# and view files.
+// Coherent graph modules: Composite contracts, cached/live factory transitions and lazy Runtime Graph handoff stay synchronized.
+
+const GRAPH_BOOTSTRAP_MODULE_ID =
+  "1.20.31-universal-presentation-dev23";
+
+function assertGraphBootstrapModuleCoherence() {
+  const mismatches = [];
+  for (const [name, actual] of [
+    [
+      "node_graph_codegen.js",
+      window.RMLTypedNodeGraphGenerator
+        ?.moduleId
+    ],
+    [
+      "node_graph_composites.js",
+      window.RMLNodeGraphCompositesModuleId
+    ],
+    [
+      "node_graph_custom_csharp.js",
+      window.RMLNodeGraphCustomCSharpModuleId
+    ],
+    [
+      "node_graph_view.js",
+      window.RMLNodeGraphViewModuleId
+    ]
+  ]) {
+    if (actual !== GRAPH_BOOTSTRAP_MODULE_ID) {
+      mismatches.push(
+        `${name} (${String(actual || "missing")})`
+      );
+    }
+  }
+  if (mismatches.length > 0) {
+    throw new Error(
+      `Runtime Graph module version mismatch: ${mismatches.join(", ")}. Reload the Builder without cached files. Project import was stopped before graph reconciliation.`
+    );
+  }
+}
+
+assertGraphBootstrapModuleCoherence();
 
 // Runtime Graph public view contracts and startup.
 
@@ -107,13 +146,120 @@ if (
         once: true
       }
     );
-  } else {
+} else {
     initializeImmediately();
+  }
+
+  function commitAcceptedGraphDocumentMutation({
+    refreshGeneratedOutput = true,
+    refreshCompositeActions = true,
+    mutationClass = "topology",
+    analysisChanged = null
+  } = {}) {
+    // Every public host writer converges here.  The accepted document
+    // revision is minted before the shared persistence scheduler snapshots
+    // the complete active graph, including nested Composite and Custom C#
+    // registries.
+    return scheduleAcceptedGraphPersistenceAfterPaint({
+      refreshGeneratedOutput:
+        refreshGeneratedOutput === true,
+      refreshCompositeActions:
+        refreshCompositeActions === true,
+      mutationClass,
+      analysisChanged,
+      contentChanged: true,
+      documentChanged: true
+    });
+  }
+
+  function commitGraphDocumentMutationIfChanged(
+    documentChanged,
+    options = {}
+  ) {
+    if (documentChanged === true) {
+      return commitAcceptedGraphDocumentMutation(options);
+    }
+    if (options.persistViewWhenUnchanged === true) {
+      persistGraphView(
+        options.persistViewImmediately === true,
+        false
+      );
+    }
+    return null;
+  }
+
+  function graphAnalysisChangedBindingNodeIds(
+    previousAnalysis,
+    nextAnalysis
+  ) {
+    const previousBindings =
+      previousAnalysis?.bindings;
+    const nextBindings = nextAnalysis?.bindings;
+    const changed = new Set();
+    if (
+      !(previousBindings instanceof Map) ||
+      !(nextBindings instanceof Map) ||
+      previousBindings === nextBindings
+    ) {
+      return changed;
+    }
+    const recordsEqual = (previous, next) => {
+      if (previous === next) {
+        return true;
+      }
+      const previousKeys =
+        Object.keys(previous || {});
+      const nextKeys = Object.keys(next || {});
+      return (
+        previousKeys.length ===
+          nextKeys.length &&
+        previousKeys.every(key =>
+          previous[key] === next[key]
+        )
+      );
+    };
+    for (const [nodeId, previous] of
+      previousBindings) {
+      const next =
+        nextBindings.get(nodeId) || {};
+      if (
+        !recordsEqual(previous || {}, next)
+      ) {
+        changed.add(nodeId);
+      }
+    }
+    for (const [nodeId, next] of
+      nextBindings) {
+      if (
+        !previousBindings.has(nodeId) &&
+        !recordsEqual({}, next || {})
+      ) {
+        changed.add(nodeId);
+      }
+    }
+    return changed;
+  }
+
+  function addCachedIncidentConnectionIds(
+    target,
+    nodeIds
+  ) {
+    for (const nodeId of nodeIds) {
+      for (const connectionId of
+        graphIncidentConnectionLookupCache.get(
+          nodeId
+        ) || []) {
+        target.add(connectionId);
+      }
+    }
+    return target;
   }
 
 Object.defineProperty(window, "RMLDynamicGraphHost", {
     value: Object.freeze({
-      version: 70,
+      version: 73,
+      moduleId:
+        GRAPH_BOOTSTRAP_MODULE_ID,
       getState() { return graph; },
       whenViewReady: whenGraphViewReady,
       hasPendingEditorEdits() {
@@ -156,10 +302,17 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
         const composite = Boolean(
           apiCompositeEditor
         );
+        const ownerPath = composite
+          ? apiCompositeEditorOwnerPath(
+              apiCompositeEditor
+            )
+          : [];
         const ownerId = composite
           ? String(
-              apiCompositeEditor
-                .containerNodeId || ""
+              ownerPath.at(-1) ||
+                apiCompositeEditor
+                  .containerNodeId ||
+                ""
             )
           : "";
         const title = composite
@@ -171,7 +324,7 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
         return Object.freeze({
           available: true,
           key: composite
-            ? `project:${builderProjectEpoch}:api-composite:${ownerId}`
+            ? `project:${builderProjectEpoch}:api-composite:${ownerPath.map(value => encodeURIComponent(value)).join("/")}`
             : `project:${builderProjectEpoch}:runtime-root`,
           kind: composite
             ? "api-composite"
@@ -180,6 +333,9 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
             ? `API Composite ‘${title}’`
             : title,
           ownerId,
+          ownerPath: Object.freeze([
+            ...ownerPath
+          ]),
           state: graph
         });
       },
@@ -222,7 +378,11 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
         });
       },
       synchronizeProjectState(
-        projectEpoch
+        projectEpoch,
+        {
+          importedDocument = false,
+          graphNormalizationChanged = false
+        } = {}
       ) {
         const requestedProjectEpoch =
           Number(projectEpoch) || 0;
@@ -242,7 +402,12 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
         handleBuilderRendered({
           detail: {
             projectEpoch:
-              requestedProjectEpoch
+              requestedProjectEpoch,
+            importedDocument:
+              importedDocument === true,
+            graphNormalizationChanged:
+              graphNormalizationChanged ===
+                true
           }
         });
         return (
@@ -255,6 +420,69 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
       ) {
         return migrateLegacyOperatorsForImport(
           graphDocument
+        );
+      },
+      planPreservedCatalogOperatorsForImport(
+        graphDocument,
+        unresolvedRequirements
+      ) {
+        return planPreservedCatalogOperatorsForImport(
+          graphDocument,
+          unresolvedRequirements
+        );
+      },
+      createPreservedCatalogInstallTransaction(
+        plan,
+        admissionToken
+      ) {
+        const controller =
+          window.RMLApiNodeFactoryController;
+        if (
+          typeof controller
+            ?.createUnavailableOperatorTransaction !==
+            "function"
+        ) {
+          throw new Error(
+            "The portable API contract installer is unavailable."
+          );
+        }
+        return controller
+          .createUnavailableOperatorTransaction(
+            plan?.entries || [],
+            {
+              token: admissionToken,
+              planKey: String(
+                plan?.planKey || ""
+              )
+            }
+          );
+      },
+      createPreservedCatalogAdmissionToken(
+        plan
+      ) {
+        const controller =
+          window.RMLApiNodeFactoryController;
+        if (
+          typeof controller
+            ?.createUnavailableOperatorAdmissionToken !==
+              "function"
+        ) {
+          throw new Error(
+            "The portable API contract admission gate is unavailable."
+          );
+        }
+        return controller
+          .createUnavailableOperatorAdmissionToken(
+            String(plan?.planKey || "")
+          );
+      },
+      verifyPreservedCatalogOperatorsForImport(
+        graphDocument,
+        plan
+      ) {
+        return verifyPreservedCatalogOperatorsForImport(
+          graphDocument,
+          plan
         );
       },
       compatibleImportReplacementCandidates(
@@ -298,12 +526,14 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
       applyCatalogMigrationsPreservingGeometry(
         graphDocument,
         migrations,
-        portMigrations
+        portMigrations,
+        nodeMigrations = []
       ) {
         return applyCatalogMigrationsPreservingGeometry(
           graphDocument,
           migrations,
-          portMigrations
+          portMigrations,
+          nodeMigrations
         );
       },
       getRootState() {
@@ -335,6 +565,10 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
         return { ok: closeCustomCSharpFileGraph() };
       },
       getApiCompositeEditorState() {
+        const ownerPath =
+          apiCompositeEditorOwnerPath(
+            apiCompositeEditor
+          );
         return Object.freeze({
           active: Boolean(
             apiCompositeEditor
@@ -344,7 +578,11 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
               ?.containerNodeId || "",
           title:
             apiCompositeEditor?.title ||
-            ""
+            "",
+          depth: ownerPath.length,
+          ownerPath: Object.freeze([
+            ...ownerPath
+          ])
         });
       },
       createApiComposite(nodeIds = []) {
@@ -1094,6 +1332,7 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
         );
       },
       ensureActiveMode(options = {}) {
+        let documentChanged = false;
         if (graph?.active !== true) {
           if (options.activateIfNeeded !== true) {
             return {
@@ -1109,7 +1348,16 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
             ensureConfigurationNode();
           }
           pruneConnections();
+          documentChanged = true;
         }
+        commitGraphDocumentMutationIfChanged(
+          documentChanged,
+          {
+            refreshGeneratedOutput: true,
+            refreshCompositeActions: true,
+            mutationClass: "topology"
+          }
+        );
         commitPresentationPage(
           "runtime-graph",
           "runtime-graph-api-open"
@@ -1122,7 +1370,9 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
           ),
           graphActive: graph.active === true,
           graphViewActive:
-            runtimeGraphViewActive === true
+            runtimeGraphViewActive === true,
+          documentMutationAccepted:
+            documentChanged === true
         };
       },
       showConfigurationOutline() {
@@ -1150,6 +1400,14 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
             runtimeGraphViewActive === true,
           viewReady: graphViewPreparationCurrent() && !graphViewPreparation?.pending &&
             dom.root?.dataset.rmlGraphPhase === "ready",
+          viewFailed:
+            dom.root?.dataset
+              .rmlGraphPhase === "failed",
+          viewError:
+            String(
+              graphViewPreparation?.error ||
+              ""
+            ),
           renderBlocked,
           renderingBlocked: renderBlocked,
           renderingBlockReason: renderBlocked ? "svg-capacity" : "",
@@ -1179,8 +1437,10 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
         );
         const width = definition.width || 280;
         const height = 190;
-        const pointerOffsetX = 130;
-        const pointerOffsetY = 35;
+        const pointerOffsetX =
+          GRAPH_PALETTE_POINTER_OFFSET_X;
+        const pointerOffsetY =
+          GRAPH_PALETTE_POINTER_OFFSET_Y;
         return {
           ok: true,
           operatorId,
@@ -1339,13 +1599,28 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
           ) || null;
 
         if (existing) {
-          renderGraphNodesAndWires();
           return {
             ok: true,
             created: false,
             connectionId: existing.id
           };
         }
+
+        const previousConnections =
+          graph.connections;
+        const replacedInputConnection =
+          previousConnections.find(
+            connection =>
+              connection.toNode ===
+                input.nodeId &&
+              connection.toPort ===
+                input.portId
+          ) || null;
+        const previousSelection =
+          graphMutationSelectionSnapshot();
+        const previousAnalysis =
+          currentAnalysis;
+        ensureGraphConnectionLookups();
 
         const proposal = connectionProposal(
           a,
@@ -1362,24 +1637,82 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
           };
         }
 
+        const autoVectorNodeIds = new Set(
+          proposal.autoVectorUpdates instanceof Map
+            ? [...proposal.autoVectorUpdates]
+                .filter(([nodeId, type]) =>
+                  findGraphNode(nodeId)
+                    ?.parameters
+                    ?.autoVectorType !== type
+                )
+                .map(([nodeId]) => nodeId)
+            : []
+        );
         applyAutoVectorUpdates(
           proposal.autoVectorUpdates
         );
-        graph.connections =
-          proposal.nextConnections;
-        normalizeConnectionRouting(
-          graph.connections
-        );
+        const appendedWithoutReplacement =
+          proposal.nextConnections.length ===
+          previousConnections.length + 1;
+        if (appendedWithoutReplacement) {
+          proposal.candidate.points = [];
+          proposal.candidate.branchFrom = null;
+          previousConnections.push(
+            proposal.candidate
+          );
+        } else {
+          graph.connections =
+            proposal.nextConnections;
+          normalizeConnectionRouting(
+            graph.connections
+          );
+        }
         graph.selectedConnectionId =
           proposal.candidate.id;
         graph.selectedNodeId = null;
         graph.selectedNodeIds = [];
         clearSelectedWirePoint();
         currentAnalysis = proposal.analysis;
-        pruneConnections();
-        persistGraph(true);
-        renderGraphNodesAndWires();
+        const contentNodeIds =
+          graphAnalysisChangedBindingNodeIds(
+            previousAnalysis,
+            currentAnalysis
+          );
+        contentNodeIds.add(output.nodeId);
+        contentNodeIds.add(input.nodeId);
+        for (const nodeId of
+          autoVectorNodeIds) {
+          contentNodeIds.add(nodeId);
+        }
+        const affectedConnectionIds =
+          new Set(
+            previousSelection.connectionIds
+          );
+        addCachedIncidentConnectionIds(
+          affectedConnectionIds,
+          contentNodeIds
+        );
+        affectedConnectionIds.add(
+          proposal.candidate.id
+        );
+        if (replacedInputConnection) {
+          affectedConnectionIds.add(
+            replacedInputConnection.id
+          );
+        }
+        renderGraphMutationDelta({
+          nodeIds:
+            previousSelection.nodeIds,
+          nodeContentIds: contentNodeIds,
+          connectionIds:
+            affectedConnectionIds
+        });
         renderGraphInspector();
+        commitAcceptedGraphDocumentMutation({
+          refreshGeneratedOutput: true,
+          refreshCompositeActions: true,
+          mutationClass: "topology"
+        });
 
         return {
           ok: true,
@@ -1436,7 +1769,6 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
                 ?.connectionId === parent.id
           ) || null;
         if (existing) {
-          renderGraphWires();
           return {
             ok: true,
             created: false,
@@ -1445,6 +1777,21 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
               existing.branchFrom?.pointId || ""
           };
         }
+
+        const previousConnections =
+          graph.connections;
+        const replacedInputConnection =
+          previousConnections.find(
+            connection =>
+              connection.toNode ===
+                target.nodeId &&
+              connection.toPort ===
+                target.portId
+          ) || null;
+        const previousSelection =
+          graphMutationSelectionSnapshot();
+        const previousAnalysis =
+          currentAnalysis;
 
         const proposal = connectionProposal(
           sourceSocketRefForConnection(parent),
@@ -1604,23 +1951,84 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
           Array.isArray(branch.points)
             ? branch.points
             : [];
+        const autoVectorNodeIds = new Set(
+          proposal.autoVectorUpdates instanceof Map
+            ? [...proposal.autoVectorUpdates]
+                .filter(([nodeId, type]) =>
+                  findGraphNode(nodeId)
+                    ?.parameters
+                    ?.autoVectorType !== type
+                )
+                .map(([nodeId]) => nodeId)
+            : []
+        );
         applyAutoVectorUpdates(
           proposal.autoVectorUpdates
         );
-        graph.connections =
-          proposal.nextConnections;
-        normalizeConnectionRouting(
-          graph.connections
-        );
+        const appendedWithoutReplacement =
+          proposal.nextConnections.length ===
+          previousConnections.length + 1;
+        if (appendedWithoutReplacement) {
+          previousConnections.push(branch);
+        } else {
+          graph.connections =
+            proposal.nextConnections;
+          normalizeConnectionRouting(
+            graph.connections
+          );
+        }
         graph.selectedConnectionId =
           branch.id;
         graph.selectedNodeId = null;
         graph.selectedNodeIds = [];
         clearSelectedWirePoint();
         currentAnalysis = proposal.analysis;
-        persistGraph(true);
-        renderGraphNodesAndWires();
+        const contentNodeIds =
+          graphAnalysisChangedBindingNodeIds(
+            previousAnalysis,
+            currentAnalysis
+          );
+        contentNodeIds.add(parent.fromNode);
+        contentNodeIds.add(target.nodeId);
+        for (const nodeId of
+          autoVectorNodeIds) {
+          contentNodeIds.add(nodeId);
+        }
+        const affectedConnectionIds =
+          new Set(
+            previousSelection.connectionIds
+          );
+        addCachedIncidentConnectionIds(
+          affectedConnectionIds,
+          contentNodeIds
+        );
+        for (const connectionId of
+          relatedGraphConnectionIds(
+            parent.id
+          )) {
+          affectedConnectionIds.add(
+            connectionId
+          );
+        }
+        affectedConnectionIds.add(branch.id);
+        if (replacedInputConnection) {
+          affectedConnectionIds.add(
+            replacedInputConnection.id
+          );
+        }
+        renderGraphMutationDelta({
+          nodeIds:
+            previousSelection.nodeIds,
+          nodeContentIds: contentNodeIds,
+          connectionIds:
+            affectedConnectionIds
+        });
         renderGraphInspector();
+        commitAcceptedGraphDocumentMutation({
+          refreshGeneratedOutput: true,
+          refreshCompositeActions: true,
+          mutationClass: "topology"
+        });
         return {
           ok: true,
           created: true,
@@ -1677,9 +2085,17 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
           connectionId: connection.id,
           pointId: point.id
         };
-        persistGraph(true);
-        renderGraphWires();
+        renderGraphWireConnectionsImmediately(
+          relatedGraphConnectionIds(
+            connection.id
+          )
+        );
         renderGraphInspector();
+        commitAcceptedGraphDocumentMutation({
+          refreshGeneratedOutput: false,
+          refreshCompositeActions: false,
+          mutationClass: "geometry"
+        });
         return {
           ok: true,
           pointId: point.id
@@ -1707,18 +2123,32 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
           finiteNumber(clientX, 0),
           finiteNumber(clientY, 0)
         );
-        point.x = nodeGraphClamp(
+        const nextPointX = nodeGraphClamp(
           Math.round(position.x / GRAPH_WIRE_POINT_SNAP) *
             GRAPH_WIRE_POINT_SNAP,
           -GRAPH_COORDINATE_LIMIT,
           GRAPH_COORDINATE_LIMIT
         );
-        point.y = nodeGraphClamp(
+        const nextPointY = nodeGraphClamp(
           Math.round(position.y / GRAPH_WIRE_POINT_SNAP) *
             GRAPH_WIRE_POINT_SNAP,
           -GRAPH_COORDINATE_LIMIT,
           GRAPH_COORDINATE_LIMIT
         );
+        const geometryChanged =
+          point.x !== nextPointX ||
+          point.y !== nextPointY;
+        const selectionChanged =
+          graph.selectedNodeId !== null ||
+          (graph.selectedNodeIds || []).length > 0 ||
+          graph.selectedConnectionId !== connection.id ||
+          graph.selectedWirePoint?.connectionId !==
+            connection.id ||
+          graph.selectedWirePoint?.pointId !== point.id;
+        if (geometryChanged) {
+          point.x = nextPointX;
+          point.y = nextPointY;
+        }
         graph.selectedNodeId = null;
         graph.selectedNodeIds = [];
         graph.selectedConnectionId = connection.id;
@@ -1726,9 +2156,24 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
           connectionId: connection.id,
           pointId: point.id
         };
-        persistGraph(true);
-        renderGraphWires();
-        renderGraphInspector();
+        if (geometryChanged || selectionChanged) {
+          renderGraphWireConnectionsImmediately(
+            relatedGraphConnectionIds(
+              connection.id
+            )
+          );
+          renderGraphInspector();
+        }
+        commitGraphDocumentMutationIfChanged(
+          geometryChanged,
+          {
+            refreshGeneratedOutput: false,
+            refreshCompositeActions: false,
+            mutationClass: "geometry",
+            persistViewWhenUnchanged:
+              selectionChanged
+          }
+        );
         return {
           ok: true,
           connectionId: connection.id,
@@ -1740,7 +2185,8 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
           requestedClientPosition: {
             x: finiteNumber(clientX, 0),
             y: finiteNumber(clientY, 0)
-          }
+          },
+          changed: geometryChanged
         };
       },
       ensureAutomaticHelper(
@@ -1774,9 +2220,11 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
           start.portId,
           start.direction
         );
-        const beforeIds = new Set(
-          graph.nodes.map(candidate => candidate.id)
-        );
+        const previousSelection =
+          graphMutationSelectionSnapshot();
+        const previousAnalysis =
+          currentAnalysis;
+        ensureGraphConnectionLookups();
         const interaction = {
           kind: "connection",
           start,
@@ -1809,18 +2257,48 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
           };
         }
 
-        pruneConnections();
-        persistGraph(true);
-        renderGraphNodesAndWires();
+        const contentNodeIds =
+          graphAnalysisChangedBindingNodeIds(
+            previousAnalysis,
+            currentAnalysis
+          );
+        contentNodeIds.add(start.nodeId);
+        if (result.node?.id) {
+          contentNodeIds.add(result.node.id);
+        }
+        for (const nodeId of
+          result.autoVectorNodeIds || []) {
+          contentNodeIds.add(nodeId);
+        }
+        const affectedConnectionIds =
+          new Set(
+            previousSelection.connectionIds
+          );
+        addCachedIncidentConnectionIds(
+          affectedConnectionIds,
+          contentNodeIds
+        );
+        if (result.connection?.id) {
+          affectedConnectionIds.add(
+            result.connection.id
+          );
+        }
+        renderGraphMutationDelta({
+          nodeIds:
+            previousSelection.nodeIds,
+          nodeContentIds: contentNodeIds,
+          connectionIds:
+            affectedConnectionIds
+        });
         renderGraphInspector();
-        const created =
-          graph.nodes.find(
-            candidate => !beforeIds.has(candidate.id)
-          ) || null;
-
+        commitAcceptedGraphDocumentMutation({
+          refreshGeneratedOutput: true,
+          refreshCompositeActions: true,
+          mutationClass: "topology"
+        });
         return {
           ok: true,
-          nodeId: created?.id || "",
+          nodeId: result.node?.id || "",
           message: result.message || ""
         };
       },
@@ -1845,16 +2323,37 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
           (node.kind === "configuration" ? 390 : 280);
         const height =
           element?.offsetHeight || 180;
-        node.x = point.x - width / 2;
-        node.y = point.y - height / 2;
-        persistGraph(true);
-        renderGraphNodesAndWires();
-        renderGraphInspector();
+        const nextNodeX = point.x - width / 2;
+        const nextNodeY = point.y - height / 2;
+        const positionChanged =
+          node.x !== nextNodeX ||
+          node.y !== nextNodeY;
+        if (positionChanged) {
+          node.x = nextNodeX;
+          node.y = nextNodeY;
+          renderGraphMutationDelta({
+            nodeIds: [node.id],
+            connectionIds:
+              incidentGraphConnectionIds(
+                node.id
+              )
+          });
+          renderGraphInspector();
+        }
+        commitGraphDocumentMutationIfChanged(
+          positionChanged,
+          {
+            refreshGeneratedOutput: false,
+            refreshCompositeActions: false,
+            mutationClass: "geometry"
+          }
+        );
         return {
           ok: true,
           nodeId: node.id,
           x: node.x,
-          y: node.y
+          y: node.y,
+          changed: positionChanged
         };
       },
       setNodePosition(nodeId, x, y) {
@@ -1865,16 +2364,37 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
             reason: "The graph node is unavailable."
           };
         }
-        node.x = finiteNumber(x, node.x);
-        node.y = finiteNumber(y, node.y);
-        persistGraph(true);
-        renderGraphNodesAndWires();
-        renderGraphInspector();
+        const nextNodeX = finiteNumber(x, node.x);
+        const nextNodeY = finiteNumber(y, node.y);
+        const positionChanged =
+          node.x !== nextNodeX ||
+          node.y !== nextNodeY;
+        if (positionChanged) {
+          node.x = nextNodeX;
+          node.y = nextNodeY;
+          renderGraphMutationDelta({
+            nodeIds: [node.id],
+            connectionIds:
+              incidentGraphConnectionIds(
+                node.id
+              )
+          });
+          renderGraphInspector();
+        }
+        commitGraphDocumentMutationIfChanged(
+          positionChanged,
+          {
+            refreshGeneratedOutput: false,
+            refreshCompositeActions: false,
+            mutationClass: "geometry"
+          }
+        );
         return {
           ok: true,
           nodeId: node.id,
           x: node.x,
-          y: node.y
+          y: node.y,
+          changed: positionChanged
         };
       },
       setNodePortLayout(nodeId, layout) {
@@ -1891,18 +2411,40 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
             reason: "This node has no switchable sockets."
           };
         }
-        node.parameters =
-          node.parameters || {};
-        node.parameters.portLayout =
+        const nextPortLayout =
           layout === "mirrored"
             ? "mirrored"
             : "standard";
-        persistGraph(true);
-        renderGraphNodesAndWires();
-        renderGraphInspector();
+        const layoutChanged =
+          node.parameters?.portLayout !==
+          nextPortLayout;
+        if (layoutChanged) {
+          node.parameters =
+            node.parameters || {};
+          node.parameters.portLayout =
+            nextPortLayout;
+          renderGraphMutationDelta({
+            nodeContentIds: [node.id],
+            connectionIds:
+              incidentGraphConnectionIds(
+                node.id
+              )
+          });
+          renderGraphInspector();
+        }
+        commitGraphDocumentMutationIfChanged(
+          layoutChanged,
+          {
+            refreshGeneratedOutput: true,
+            refreshCompositeActions: true,
+            mutationClass: "parameter"
+          }
+        );
         return {
           ok: true,
-          layout: node.parameters.portLayout
+          layout: node.parameters?.portLayout ||
+            nextPortLayout,
+          changed: layoutChanged
         };
       },
       fitNodesToClientRect(
@@ -2028,8 +2570,8 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
         graph.viewport.x = fittedViewport.x;
         graph.viewport.y = fittedViewport.y;
         applyViewportTransform();
-        persistGraph(true);
         renderGraphWires();
+        persistGraphView(true);
 
         return {
           ok: true,
@@ -2067,7 +2609,7 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
         applyViewportTransform();
         renderGraphWires();
         if (options.persist !== false) {
-          persistGraph(true);
+          persistGraphView(true);
         }
         return {
           ok: true,
@@ -2118,7 +2660,7 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
           })
         });
       },
-      commit() {
+      commit(options = {}) {
         try { window.normalizeGraph?.(); } catch {}
         try { window.normalizeState?.(); } catch {}
         try { window.render?.(); } catch {}
@@ -2126,7 +2668,25 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
         try { window.scheduleRender?.(); } catch {}
         try { window.save?.(); } catch {}
         try { window.saveState?.(); } catch {}
-        try { if (typeof persistGraph === "function") persistGraph(); } catch {}
+        try {
+          commitGraphDocumentMutationIfChanged(
+            options.documentChanged === true,
+            {
+              refreshGeneratedOutput:
+                options.refreshGeneratedOutput !== false,
+              refreshCompositeActions:
+                options.refreshCompositeActions !== false,
+              mutationClass:
+                options.mutationClass || "topology",
+              analysisChanged:
+                options.analysisChanged == null
+                  ? null
+                  : options.analysisChanged === true,
+              persistViewWhenUnchanged:
+                options.persistViewWhenUnchanged === true
+            }
+          );
+        } catch {}
         try { window.emitChange?.(); } catch {}
         window.dispatchEvent(new CustomEvent("rml-dynamic-graph-commit"));
       }
