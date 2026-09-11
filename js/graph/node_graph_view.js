@@ -37936,18 +37936,49 @@ function finishWireSegmentDrag(
     activeInteraction = null;
     stopAutoPan();
     normalizeSelectedWirePoint();
-    persistGraphView(
-      false,
-      commit === true &&
+
+    if (!commit || restoreOriginal) {
+      graphConnectionGeometryCache.clear();
+
+      graphConnectionLookupSource = null;
+      graphConnectionLookupLength = -1;
+
+      graphConnectedPortKeysSource = null;
+      graphConnectedPortKeysLength = -1;
+
+      graphBranchPointUsageSource = null;
+      graphBranchPointUsageLength = -1;
+
+      cancelGraphWireHandleWork(true);
+
+      persistGraphView(
+        true,
+        false,
+        {
+          connectionIds:
+            interaction.connectionIds
+        }
+      );
+
+      renderGraphWireConnectionsImmediately();
+
+      synchronizeGraphWireHandles();
+      graphHybridRenderer?.drawNow?.();
+    } else {
+      persistGraphView(
+        false,
         interaction.dragging === true,
-      {
-        connectionIds:
-          interaction.connectionIds
-      }
-    );
-    renderGraphWireConnectionsImmediately(
-      interaction.connectionIds
-    );
+        {
+          connectionIds:
+            interaction.connectionIds
+        }
+      );
+
+      renderGraphWireConnectionsImmediately(
+        interaction.connectionIds
+      );
+    }
+
     renderGraphInspector();
   }
 
@@ -38187,17 +38218,49 @@ function finishWirePointDrag(
 
     activeInteraction = null;
     stopAutoPan();
-    persistGraphView(
-      false,
-      commit === true,
-      {
-        connectionIds:
-          interaction.connectionIds
-      }
-    );
-    renderGraphWireConnectionsImmediately(
-      interaction.connectionIds
-    );
+
+    if (!commit || restoreOriginal) {
+      graphConnectionGeometryCache.clear();
+
+      graphConnectionLookupSource = null;
+      graphConnectionLookupLength = -1;
+
+      graphConnectedPortKeysSource = null;
+      graphConnectedPortKeysLength = -1;
+
+      graphBranchPointUsageSource = null;
+      graphBranchPointUsageLength = -1;
+
+      cancelGraphWireHandleWork(true);
+
+      persistGraphView(
+        true,
+        false,
+        {
+          connectionIds:
+            interaction.connectionIds
+        }
+      );
+
+      renderGraphWireConnectionsImmediately();
+
+      synchronizeGraphWireHandles();
+      graphHybridRenderer?.drawNow?.();
+    } else {
+      persistGraphView(
+        false,
+        true,
+        {
+          connectionIds:
+            interaction.connectionIds
+        }
+      );
+
+      renderGraphWireConnectionsImmediately(
+        interaction.connectionIds
+      );
+    }
+
     renderGraphInspector();
   }
 
