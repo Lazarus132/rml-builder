@@ -1,8 +1,6 @@
 "use strict";
 // Runtime Graph interface, rendering and interactions.
 
-
-
 const RML_GRAPH_VISUAL_TEST =
     new URLSearchParams(window.location.search).has("rmlTourTest") ||
     window.location.hash.includes("rmlTourTest");
@@ -16617,6 +16615,16 @@ function commitPaletteDroppedGraphNode(
         String(graph.nodes.length);
     }
     updateSourceBadge();
+    
+    if (
+      apiCompositeEditor &&
+      !customCSharpEditor
+    ) {
+      exposeApiCompositeNodePorts(
+        node.id
+      );
+    }
+
     renderGraphInspector();
     schedulePaletteDroppedGraphCommit(node);
     return node;
@@ -31751,53 +31759,6 @@ function deleteGraphNode(nodeId) {
       return false;
     }
 
-    if (
-      apiCompositeEditor &&
-      !customCSharpEditor
-    ) {
-      const activeComposite =
-        activeApiCompositeGraphDocument();
-      const activeOwnedGraphs =
-        activeComposite
-          ?.apiCompositeGraphs || {};
-      const removedOwnedComposite =
-        node.operatorId ===
-          "container.apiComposite"
-          ? activeOwnedGraphs[nodeId]
-          : null;
-      const removesVerifiedCatalogNode =
-        apiCompositeVerifiedCatalogNode(
-          node
-        ) ||
-        Boolean(
-          removedOwnedComposite &&
-          apiCompositeHasVerifiedCatalogNode(
-            removedOwnedComposite.nodes,
-            removedOwnedComposite
-              .apiCompositeGraphs
-          )
-        );
-      const remainingOwnedGraphs = {
-        ...activeOwnedGraphs
-      };
-      delete remainingOwnedGraphs[nodeId];
-      if (
-        removesVerifiedCatalogNode &&
-        !apiCompositeHasVerifiedCatalogNode(
-          graph.nodes.filter(candidate =>
-            candidate.id !== nodeId
-          ),
-          remainingOwnedGraphs
-        )
-      ) {
-        showGraphMessage(
-          "This is the last verified catalog API node in the Composite and cannot be deleted.",
-          "error"
-        );
-        return false;
-      }
-    }
-
     const deletedEditorNodeIds = new Set([
       nodeId
     ]);
@@ -32169,27 +32130,14 @@ function renderGraphInspector(options = {}) {
           node?.operatorId ===
             "container.apiComposite"
         );
-      const selectedRegularNodes =
-        selectedNodes.filter(node =>
-          node?.operatorId !==
-            "container.apiComposite"
-        );
-      const regularNodesSupported =
-        selectedRegularNodes.every(node =>
-          node.kind === "operator" &&
-          apiCompositeInternalDefinitionAllowed(
-            nodeDefinition(node)
-          ) &&
-          nodeDefinition(node)
-            ?.unavailableApiContract !== true &&
-          (
-            nodeDefinition(node)
-              ?.catalogGenerated !== true ||
-            portableApiContractForNode(node)
-          )
-        );
+      const selectionCanBecomeComposite =
+        selectionComplete &&
+        selectedNodes.length >= 2;
       const extendsExistingComposite =
-        selectedCompositeNodes.length > 0;
+        selectedCompositeNodes.length === 1 &&
+        selectedNodes.length > 1 &&
+        selectedCompositeNodes.length !==
+          selectedNodes.length;
       const activeCompositeDocument =
         apiCompositeEditor
           ? activeApiCompositeGraphDocument()
@@ -32214,63 +32162,57 @@ function renderGraphInspector(options = {}) {
               selectedNodeIds
             )
           : null;
-      const allCompositeNodes =
-        selectionComplete &&
-        selectedCompositeNodes.length === 0 &&
-        regularNodesSupported;
-      const includesCatalogNode =
-        apiCompositeHasVerifiedCatalogNode(
-          selectedRegularNodes
-        );
       const canExtendComposite =
         extensionPlan?.valid === true &&
         !customCSharpEditor;
+
       if (!extendsExistingComposite) {
         copy.textContent =
-          allCompositeNodes &&
-          includesCatalogNode
-            ? "The selection contains verified catalog API nodes plus only supported logic/value/flow nodes. Contracts, positions, ports and wire routes will be preserved."
-            : "An API Composite requires at least one verified catalog API node; every other selected node must be a supported logic, value, conversion, math, flow or output node.";
+          selectionCanBecomeComposite
+            ? "The selected nodes can be combined into one Composite. Internal connections, positions, ports, wire routes, explicit exposed ports, parameters, nested Composites and owned subgraphs are preserved."
+            : "Select at least two nodes to create a Composite.";
       } else if (extensionPlan?.valid) {
         copy.textContent =
-          "The additional nodes will be integrated into the selected API Composite. Its identity, position, ports, wire routes and Saved Composite link will be preserved.";
+          "The additional nodes will be integrated into the selected Composite. Its identity, position, ports, explicit exposed ports, wire routes and Saved Composite link will be preserved.";
       } else {
         copy.textContent =
           extensionPlan?.reason ||
-          "Select exactly one existing API Composite together with at least one supported node to add.";
+          "Select exactly one existing Composite together with at least one additional node to extend it.";
       }
+
       const actions =
         document.createElement("div");
       actions.className =
         "rml-graph-inspector-actions";
       const create = inspectorButton(
         extendsExistingComposite
-          ? "Extend API Composite"
-          : "Create API Composite",
+          ? "Extend Composite"
+          : "Create Composite",
         createApiCompositeFromSelection,
         "primary"
       );
       const canCreateComposite =
-        (
-          extendsExistingComposite
-            ? canExtendComposite
-            : allCompositeNodes &&
-              includesCatalogNode
-        ) &&
-        apiCompositeCatalogAvailable();
-      let unavailableReason =
-        "A verified catalog, at least one generated API node and otherwise only supported logic/value/flow nodes are required.";
-      if (extendsExistingComposite) {
+        extendsExistingComposite
+          ? canExtendComposite
+          : selectionCanBecomeComposite;
+      let unavailableReason = "";
+      if (!selectionComplete) {
+        unavailableReason =
+          "One or more selected nodes could not be resolved.";
+      } else if (
+        !extendsExistingComposite &&
+        selectedNodes.length < 2
+      ) {
+        unavailableReason =
+          "Select at least two nodes to create a Composite.";
+      } else if (extendsExistingComposite) {
         if (customCSharpEditor) {
           unavailableReason =
-            "Existing API Composites cannot be extended inside a Custom C# graph.";
+            "An existing Composite cannot currently be extended from inside a Custom C# graph.";
         } else if (!extensionPlan?.valid) {
           unavailableReason =
             extensionPlan?.reason ||
-            "Select exactly one existing API Composite together with at least one supported node to add.";
-        } else if (!apiCompositeCatalogAvailable()) {
-          unavailableReason =
-            "A verified live or cached API catalog is required.";
+            "The selected Composite cannot be extended with this selection.";
         }
       }
       setGraphButtonAvailability(
@@ -32278,15 +32220,11 @@ function renderGraphInspector(options = {}) {
         canCreateComposite,
         unavailableReason
       );
-      if (extendsExistingComposite) {
-        create.title = !canCreateComposite
-          ? `Extend API Composite — ${unavailableReason}`
-          : "Extend API Composite — integrate the additional selected nodes into this Composite while preserving its identity, outer connections and Saved Composite link.";
-      } else {
-        create.title = !canCreateComposite
-          ? "Create API Composite — unavailable until the selection contains a verified catalog API node and otherwise only supported logic/value/flow nodes."
-          : "Create API Composite — combine the selected API and logic nodes into one reversible composite node.";
-      }
+      create.title = !canCreateComposite
+        ? `${extendsExistingComposite ? "Extend" : "Create"} Composite — ${unavailableReason}`
+        : extendsExistingComposite
+          ? "Extend Composite — integrate the additional selected nodes while preserving identity, topology, exposed ports and layout."
+          : "Create Composite — combine the selected nodes into one reversible nested graph while preserving topology, exposed ports and layout.";
       actions.appendChild(create);
       card.append(
         heading,
@@ -35759,31 +35697,28 @@ function nodeInspectorCard(node) {
           canOpenComposite,
           "A verified live or cached API catalog is required."
         );
-        open.title = !canOpenComposite
-          ? "Edit Internal API & Logic Graph — a verified live or cached API catalog is required."
-          : "Edit Internal API & Logic Graph — edit preserved internal API and logic nodes; new unconnected ports stay hidden and internal until you explicitly expose them on the outer Composite.";
+        open.title =
+          "Edit Internal API & Logic Graph — newly added nodes expose their currently unconnected ports automatically so they can be wired immediately; unused ports can be hidden again at any time.";
         actions.appendChild(open);
-        if (!apiCompositeEditor) {
-          actions.appendChild(
-            inspectorButton(
-              "Unpack API Composite",
-              () => {
-                try {
-                  unpackApiCompositeNode(
-                    node.id
-                  );
-                } catch (error) {
-                  showGraphMessage(
-                    error instanceof Error
-                      ? error.message
-                      : String(error),
-                    "error"
-                  );
-                }
+        actions.appendChild(
+          inspectorButton(
+            "Unpack Composite",
+            () => {
+              try {
+                unpackApiCompositeNode(
+                  node.id
+                );
+              } catch (error) {
+                showGraphMessage(
+                  error instanceof Error
+                    ? error.message
+                    : String(error),
+                  "error"
+                );
               }
-            )
-          );
-        }
+            }
+          )
+        );
         actions.dataset
           .savedApiCompositeNodeActionsFor =
           node.id;
@@ -36969,7 +36904,12 @@ function inspectorButtonIconMarkup(text) {
         `<circle cx="5" cy="7" r="2"></circle><circle cx="12" cy="17" r="2"></circle><path d="M7 8.5l4 6M7 7h6"></path><path d="M15 5l2-2 4 4-8.5 8.5-3 .5.5-3z"></path>`
       );
     }
-    if (label.includes("create api composite")) {
+    if (
+      label.includes("create api composite") ||
+      label.includes("create composite") ||
+      label.includes("extend api composite") ||
+      label.includes("extend composite")
+    ) {
       return svg(
         `<rect x="3" y="5" width="6" height="5" rx="1"></rect><rect x="3" y="14" width="6" height="5" rx="1"></rect><path d="M9 7.5h4M9 16.5h4M13 7.5v9"></path><rect x="13" y="9" width="8" height="6" rx="1.5"></rect>`
       );

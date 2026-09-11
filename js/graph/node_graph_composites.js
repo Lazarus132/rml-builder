@@ -1,8 +1,6 @@
 "use strict";
 // Saved API Composite and boundary behavior.
 
-
-
 const SAVED_API_COMPOSITE_NESTING_LIMIT =
     typeof API_COMPOSITE_MAX_NESTING_DEPTH ===
       "number"
@@ -6613,10 +6611,7 @@ function commitApiCompositeRootDocumentMutation(
 function exposeApiCompositeNodePorts(
     nodeId
   ) {
-    if (
-      !apiCompositeEditor ||
-      !apiCompositeCatalogAvailable()
-    ) {
+    if (!apiCompositeEditor) {
       return false;
     }
     const composite =
@@ -6708,15 +6703,10 @@ function apiCompositeNodeSupportsVerifiedPortEditing(
       : null;
     return Boolean(
       node &&
+      definition &&
       (
-        (
-          apiCompositeCatalogAvailable() &&
-          definition?.catalogGenerated ===
-            true &&
-          definition
-            ?.unavailableApiContract !==
-            true
-        ) ||
+        Array.isArray(definition.inputs) ||
+        Array.isArray(definition.outputs) ||
         apiCompositeStoredNodeSupported(
           node,
           composite.apiCompositeGraphs ||
@@ -6837,10 +6827,7 @@ function hideUnusedApiCompositeNodePorts(
 function apiCompositeNodeHasExposablePorts(
     nodeId
   ) {
-    if (
-      !apiCompositeEditor ||
-      !apiCompositeCatalogAvailable()
-    ) {
+    if (!apiCompositeEditor) {
       return false;
     }
     const composite =
@@ -6855,9 +6842,7 @@ function apiCompositeNodeHasExposablePorts(
       !composite ||
       !node ||
       !(
-        apiCompositeInternalDefinitionAllowed(
-          definition
-        ) ||
+        definition ||
         apiCompositeOwnedContainerAllowed(
           node,
           composite.apiCompositeGraphs
@@ -7410,37 +7395,18 @@ function apiCompositeExtensionPlan(
       );
     }
 
-    const invalidPeer = peerNodes.find(
-      node => {
-        const definition =
-          nodeDefinition(node);
-        if (
-          node?.operatorId ===
-            "container.apiComposite"
-        ) {
-          return !apiCompositeOwnedContainerAllowed(
-            node,
-            source.apiCompositeGraphs
-          );
-        }
-        return !(
-          node.kind === "operator" &&
-          apiCompositeInternalDefinitionAllowed(
-            definition
-          ) &&
-          definition?.unavailableApiContract !==
-            true &&
-          (
-            definition?.catalogGenerated !==
-              true ||
-            portableApiContractForNode(node)
-          )
-        );
-      }
+    const invalidNestedPeer = peerNodes.find(
+      node =>
+        node?.operatorId ===
+          "container.apiComposite" &&
+        !apiCompositeOwnedContainerAllowed(
+          node,
+          source.apiCompositeGraphs
+        )
     );
-    if (invalidPeer) {
+    if (invalidNestedPeer) {
       return reject(
-        "An existing API Composite can absorb only complete API Composites, verified catalog API nodes and supported logic/value/flow nodes."
+        "The selected nested Composite has no complete owned graph."
       );
     }
 
@@ -7448,32 +7414,6 @@ function apiCompositeExtensionPlan(
       ...composite.nodes,
       ...peerNodes
     ];
-    if (
-      !apiCompositeHasVerifiedCatalogNode(
-        combinedNodes,
-        {
-          ...(composite.apiCompositeGraphs ||
-            {}),
-          ...Object.fromEntries(
-            peerNodes
-              .filter(node =>
-                node.operatorId ===
-                  "container.apiComposite"
-              )
-              .map(node => [
-                node.id,
-                source.apiCompositeGraphs[
-                  node.id
-                ]
-              ])
-          )
-        }
-      )
-    ) {
-      return reject(
-        "The extended API Composite must contain at least one verified catalog API node."
-      );
-    }
 
     return {
       valid: true,
@@ -8230,13 +8170,6 @@ function createApiCompositeFromSelection() {
       );
       return false;
     }
-    if (!apiCompositeCatalogAvailable()) {
-      showGraphMessage(
-        "A verified live or cached API catalog is required before an API Composite can be created.",
-        "error"
-      );
-      return false;
-    }
     if (apiCompositeEditor) {
       captureApiCompositeEditorView();
     }
@@ -8333,7 +8266,7 @@ function createApiCompositeFromSelection() {
       );
     if (selectedNodes.length < 2) {
       showGraphMessage(
-        "Select at least two compatible nodes with Ctrl/Command-click; at least one must be a verified catalog API node.",
+        "Select at least two nodes with Ctrl/Command-click.",
         "error"
       );
       return false;
@@ -8461,50 +8394,6 @@ function createApiCompositeFromSelection() {
       return true;
     }
 
-    const invalid = selectedNodes.find(node => {
-      if (
-        node?.operatorId ===
-          "container.apiComposite"
-      ) {
-        return !apiCompositeOwnedContainerAllowed(
-          node,
-          workingGraph.apiCompositeGraphs
-        );
-      }
-      const definition = nodeDefinition(node);
-      return !(
-        node.kind === "operator" &&
-        apiCompositeInternalDefinitionAllowed(
-          definition
-        ) &&
-        definition?.unavailableApiContract !==
-          true &&
-        (
-          definition?.catalogGenerated !==
-            true ||
-          portableApiContractForNode(node)
-        )
-      );
-    });
-    if (invalid) {
-      showGraphMessage(
-        "API Composites accept complete nested API Composites, verified catalog API nodes and supported logic/value/flow nodes only.",
-        "error"
-      );
-      return false;
-    }
-    if (
-      !apiCompositeHasVerifiedCatalogNode(
-        selectedNodes,
-        workingGraph.apiCompositeGraphs
-      )
-    ) {
-      showGraphMessage(
-        "An API Composite must contain at least one verified catalog API node.",
-        "error"
-      );
-      return false;
-    }
     const selectionAnalysis =
       currentAnalysis ||
       analyzeConnections(
@@ -8819,7 +8708,7 @@ function createApiCompositeFromSelection() {
       mutationClass: "topology"
     });
     showGraphMessage(
-      `${selectedNodes.length.toLocaleString("de-DE")} API and logic nodes combined. Existing connections crossing the new Composite boundary were preserved; no other unconnected ports were exposed.`,
+      `${selectedNodes.length.toLocaleString("de-DE")} nodes combined. Existing connections crossing the new Composite boundary were preserved; explicitly exposed ports remain available and no other unconnected ports were exposed automatically.`,
       "success"
     );
     return true;
@@ -8830,18 +8719,23 @@ function unpackApiCompositeNode(
   ) {
     if (
       !graph ||
-      customCSharpEditor ||
-      apiCompositeEditor
+      customCSharpEditor
     ) {
       return false;
     }
+    const ownerDocument =
+      activeApiCompositeGraphDocument();
     const composite =
-      graph.apiCompositeGraphs?.[
+      ownerDocument?.apiCompositeGraphs?.[
         containerNodeId
       ];
     const owner =
       findGraphNode(containerNodeId);
-    if (!composite || !owner) {
+    if (!ownerDocument || !composite || !owner) {
+      showGraphMessage(
+        "The selected Composite is not owned by the currently visible graph level. Nothing was changed.",
+        "error"
+      );
       return false;
     }
     const minimumInternalX = Math.min(
@@ -8964,15 +8858,15 @@ function unpackApiCompositeNode(
       })
     ];
     const unpackedComposites = {
-      ...(graph.apiCompositeGraphs || {})
+      ...(ownerDocument.apiCompositeGraphs || {})
     };
-    graph.customCSharpFiles =
+    ownerDocument.customCSharpFiles =
       mergeCustomCSharpFileRegistry(
         mergeCustomCSharpFileRegistry(
           {},
           composite.customCSharpFiles
         ),
-        graph.customCSharpFiles
+        ownerDocument.customCSharpFiles
       );
     delete unpackedComposites[
       containerNodeId
@@ -9033,7 +8927,7 @@ function unpackApiCompositeNode(
       liveConnections[index] =
         connections[index];
     }
-    graph.apiCompositeGraphs =
+    ownerDocument.apiCompositeGraphs =
       unpackedComposites;
     graph.selectedNodeIds =
       composite.nodes.map(node =>
@@ -9055,7 +8949,7 @@ function unpackApiCompositeNode(
       mutationClass: "topology"
     });
     showGraphMessage(
-      `API Composite unpacked. ${composite.nodes.length.toLocaleString("de-DE")} node positions and all stored wire routes were restored.`,
+      `Composite unpacked. ${composite.nodes.length.toLocaleString("de-DE")} node positions and all stored wire routes were restored.`,
       "success"
     );
     return true;
