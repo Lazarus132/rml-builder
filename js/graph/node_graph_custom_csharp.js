@@ -1,6 +1,7 @@
 "use strict";
+// Custom C# graph and editor integration.
 
-// Custom C# graph integration and editor behavior.
+
 
 const customCSharpSourceSyncTimers = new Map();
 const customCSharpLiveDiagnosticTimers = new Map();
@@ -1278,9 +1279,9 @@ function closeCustomCSharpFileGraph({
             !contentUnchanged ||
             Boolean(openPreparation),
           refreshCompositeActions: true,
-          // The Custom document was committed and published while its stable
-          // owner path was still active.  This parent pass only persists the
-          // complete tree and must not create a second parent revision.
+
+
+
           mutationClass: "view",
           acceptedMutation:
             currentAcceptedGraphDocumentMutation(
@@ -2259,7 +2260,7 @@ function buildCustomCSharpFragmentInWorker(nodeId, source, parseResult, options)
     }
     const worker = new Worker(
       new URL(
-        "js/workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev23",
+        "js/workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev27",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -4440,13 +4441,13 @@ function startCustomCSharpSourceGraphSynchronization(
     if (!customCSharpOwnerBindingCurrent(binding)) {
       return Promise.resolve(false);
     }
-    // Source-driven and button-driven graph builds are one operation.  Going
-    // directly to the worker here used to bypass the shared task/controller
-    // registry: the inspector button reported aria-busy="false" and clicking
-    // it could start a second synchronization for the same owner.  Route every
-    // source build through the same lifecycle so its visible state, promotion
-    // to "open after sync", cancellation and newest-edit-wins guarantee all
-    // describe the same task.
+
+
+
+
+
+
+
     return openCustomCSharpFileGraphSynced(
       binding.owner.id,
       {
@@ -5421,7 +5422,7 @@ function prepareCustomCSharpEditorHost(
       hostWindow.document.createElement("link");
     stylesheet.rel = "stylesheet";
     stylesheet.href = new URL(
-      "styles/features/styles.runtime-graph.css?v=1.20.31-universal-presentation-dev23",
+      "styles/features/styles.runtime-graph.css?v=1.20.31-universal-presentation-dev27",
       window.location.href
     ).href;
     hostWindow.document.head.appendChild(
@@ -6897,7 +6898,7 @@ Object.defineProperty(
   "RMLNodeGraphCustomCSharpModuleId",
   {
     value:
-      "1.20.31-universal-presentation-dev23",
+      "1.20.31-universal-presentation-dev27",
     writable: false,
     enumerable: true,
     configurable: true

@@ -1,6 +1,7 @@
 "use strict";
+// Guided Runtime Graph planning and routing.
 
-// Guided Runtime Graph planning, routing and verification.
+
 
 function guidedStep11Finite(value, fallback = 0) {
     const number = Number(value);

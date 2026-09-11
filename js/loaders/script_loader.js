@@ -1,8 +1,9 @@
 (() => {
   "use strict";
+  // RML Builder loaders: script_loader.
 
   const SCRIPT_LOADER_MODULE_ID =
-    "1.20.31-universal-presentation-dev23";
+    "1.20.31-universal-presentation-dev27";
 
   if (
     Object.hasOwn(
@@ -183,7 +184,7 @@
       dependencies: Object.freeze([]),
       files: Object.freeze([
         Object.freeze({
-          url: "../catalog/catalog_loader.js?v=1.20.31-universal-presentation-dev23",
+          url: "../catalog/catalog_loader.js?v=1.20.31-universal-presentation-dev27",
           ready: () =>
             window.RMLCatalogImportGate?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -235,7 +236,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/node_graph_codegen.js?v=1.20.31-universal-presentation-dev23",
+          url: "../graph/node_graph_codegen.js?v=1.20.31-universal-presentation-dev27",
           ready: () =>
             window.RMLTypedNodeGraphGenerator?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -252,7 +253,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev23",
+          url: "../workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev27",
           ready: () =>
             window.RMLSavedApiCompositeCompareWorkerBootstrap
               ?.moduleId === SCRIPT_LOADER_MODULE_ID &&
@@ -261,13 +262,13 @@
               ?.source === "string"
         }),
         Object.freeze({
-          url: "../graph/node_graph_composites.js?v=1.20.31-universal-presentation-dev23",
+          url: "../graph/node_graph_composites.js?v=1.20.31-universal-presentation-dev27",
           ready: () =>
             window.RMLNodeGraphCompositesModuleId ===
               SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_custom_csharp.js?v=1.20.31-universal-presentation-dev23",
+          url: "../graph/node_graph_custom_csharp.js?v=1.20.31-universal-presentation-dev27",
           ready: () =>
             window.RMLNodeGraphCustomCSharpModuleId ===
               SCRIPT_LOADER_MODULE_ID
@@ -276,13 +277,13 @@
           url: "../graph/node_graph_guided.js?v=1-physical-modules-v748"
         }),
         Object.freeze({
-          url: "../graph/node_graph_view.js?v=1.20.31-universal-presentation-dev23",
+          url: "../graph/node_graph_view.js?v=1.20.31-universal-presentation-dev27",
           ready: () =>
             window.RMLNodeGraphViewModuleId ===
               SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_bootstrap.js?v=1.20.31-universal-presentation-dev23",
+          url: "../graph/node_graph_bootstrap.js?v=1.20.31-universal-presentation-dev27",
           ready: () =>
             window.RMLDynamicGraphHost?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -813,10 +814,10 @@
             button.dataset.rmlGraphActionBound === "true" &&
             status("runtime-view").status === "loaded"
           ) {
-            // The real Runtime Graph handler was installed while the lazy
-            // loader owned the button. Release that temporary lock before
-            // replaying the user's click; the real handler validates the
-            // current graph state again.
+
+
+
+
             button.disabled = false;
             button.setAttribute("aria-disabled", "false");
             button.removeAttribute("aria-busy");
@@ -870,14 +871,6 @@
       version: 40,
       moduleId: SCRIPT_LOADER_MODULE_ID,
       ensure,
-      ensureMany(names) {
-        return Promise.all(
-          [...new Set(names)].map(ensure)
-        );
-      },
-      warm(name) {
-        return ensure(name);
-      },
       isLoaded(name) {
         return bundleState(name).status === "loaded";
       },

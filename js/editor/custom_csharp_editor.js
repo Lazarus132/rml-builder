@@ -1,5 +1,6 @@
 (() => {
   "use strict";
+  // RML Builder editor: custom_csharp_editor.
 
   if (
     window.RMLCustomCSharpDetachedEditor?.version >= 37 &&

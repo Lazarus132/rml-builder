@@ -1,5 +1,6 @@
 (() => {
   "use strict";
+  // RML Builder core: code_templates.
   const root = globalThis;
   if (root.RMLCodeTemplates?.version === 794) return;
   const scriptBase = new URL("./",

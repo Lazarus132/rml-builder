@@ -1,5 +1,6 @@
 (() => {
   "use strict";
+  // RML Builder core: dynamic_settings.
 
   const VERSION = 10;
   const IMPULSE_BUTTON_VALUE_TYPE =

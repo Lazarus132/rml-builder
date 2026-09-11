@@ -1,5 +1,6 @@
 (() => {
   "use strict";
+  // RML Builder ui: scroll_manager.
 
   if (window.RMLScrollManager) return;
 

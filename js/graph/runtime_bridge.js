@@ -1,5 +1,6 @@
 (() => {
   "use strict";
+  // Runtime Graph live-runtime bridge.
 
   const BRIDGE_VERSION = 6;
   const BRIDGE_PROTOCOL_VERSION = 1;
@@ -47,8 +48,8 @@
     if (!preferred) return [];
     const candidates = new Set([preferred]);
     const url = new URL(preferred);
-    // One bounded discovery pass per click, not an automatic retry loop.
-    // A custom endpoint outside the scanner range remains explicitly pinned.
+
+
     const first = 42719;
     const last = 42729;
     const port = Number(url.port);
@@ -66,7 +67,7 @@
       health, lastError, generation: epoch, retrying: false });
   }
 
-  // One existing badge, one transport state. Catalog provenance is not a mode.
+
   function renderStatus() {
     const element = document.getElementById("api-catalog-state");
     if (!element) return;
@@ -176,7 +177,7 @@
     settlePresence = null;
     settle?.(false);
     connectPromise = null;
-    // Stop every channel before any listener can observe the transition.
+
     const affected = [...channels.values()];
     for (const state of affected) stopChannel(state);
     publishConnection();
@@ -251,7 +252,7 @@
     };
     source.onerror = () => {
       if (!channelIsCurrent(state, source, token, generation)) return;
-      // close() cancels EventSource's native retry, including readyState CONNECTING.
+
       disconnect("Scanner stream interrupted. Click Cached to reconnect.");
     };
     state.streamTimer = window.setTimeout(() => {
@@ -315,7 +316,7 @@
     const candidates = scannerBaseCandidates();
     const sessionSignal = controller.signal;
     for (const state of channels.values()) { state.phase = "checking"; state.lastError = ""; }
-    // Defer the task so reentrant listeners and rapid clicks share one promise.
+
     const pending = Promise.resolve().then(async () => {
       if (!isCurrent(token)) return false;
       try {
@@ -593,7 +594,7 @@
         listener(Object.freeze({ kind: "state", state: publicState(state), record: null }));
       }
     });
-    // Subscribing is local-only in Cached mode. Only connect() grants a session.
+
     if (mode === "live") queueMicrotask(() => openChannel(state));
     let unsubscribed = false;
     return () => {
@@ -615,7 +616,7 @@
 
   function getValue(channel, monitorId) {
     const state = channels.get(normalizeChannel(channel));
-    // Keep cached records internally, but never present stale values as live.
+
     if (mode !== "live" || !state?.connected || !state.active) return null;
     return state.values.get(String(monitorId || "")) || null;
   }
@@ -656,8 +657,8 @@
   }
 
   document.addEventListener("rml-catalog:loaded", renderStatus);
-  // Returning online, rendering a monitor, loading a catalog or restoring a tab
-  // never authorizes another connection. Only the Cached/Live button does that.
+
+
   window.addEventListener("offline", () => { if (mode !== "cached") disconnect("The browser is offline. Click Cached to reconnect."); });
   window.addEventListener("pagehide", () => { if (mode !== "cached") disconnect(); });
 

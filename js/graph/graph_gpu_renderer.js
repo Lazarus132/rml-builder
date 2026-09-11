@@ -1,5 +1,6 @@
 (() => {
   "use strict";
+  // Runtime Graph GPU renderer and retained presentation.
 
   const VERSION = 23;
   const WIRE_CULL_CELL_SIZE = 960;
@@ -16,9 +17,9 @@
   const WIRE_LAYERS_PER_SEGMENT = 1;
   const FLOATS_PER_NODE_INSTANCE = 6;
   const WEBGPU_WORKGROUP_SIZE = 128;
-  // Both accelerated backends retain one universally sized visibility
-  // certificate around the viewport. Camera packets may reuse it while the
-  // exact required viewport remains inside the certified bounds.
+
+
+
   const GPU_CULL_OVERSCAN_PIXELS = 384;
   const GPU_CULL_SCALE_REUSE_RATIO = 1.125;
   const WEBGPU_ASYNC_INDEX_THRESHOLD = 20000;
@@ -165,9 +166,9 @@
   }
 
   function webGpuAdapterOptions() {
-    // Let every implementation select its stable default adapter.  Renderer
-    // output and quality must not depend on an OS/browser sniff or a requested
-    // power class.
+
+
+
     return undefined;
   }
 
@@ -176,9 +177,9 @@
   let activeRendererBackend = "none";
   const RENDERER_BACKEND_RETRY_BASE_MILLISECONDS = 750;
   const RENDERER_BACKEND_RETRY_MAX_MILLISECONDS = 8000;
-  // A failed backend is skipped only long enough to prevent an immediate
-  // recovery loop. It is never blacklisted for the page session: transient
-  // driver/device loss must not strand every later graph in SVG until reload.
+
+
+
   const rendererBackendSubmissionFailures = new Map();
 
   function markRendererBackendSubmissionFailure(
@@ -3385,9 +3386,9 @@
         return false;
       }
 
-      // Validate the complete transaction before cloning or publishing any
-      // retained scene record. A rejected patch therefore cannot leave a
-      // partially moved connection behind.
+
+
+
       const plans = [];
       const connectionIds = new Set();
       for (const patch of patches) {
@@ -6117,8 +6118,8 @@
       options = {}
     ) {
       try {
-        // Retained endpoint movement cannot change capacity. Allocate and
-        // validate the destination before the shared CPU state is published.
+
+
         this.ensureWebGpuBuffers();
       } catch (error) {
         this.handleGpuOperationException(
@@ -6160,8 +6161,8 @@
               failedIndices
             );
           } catch {
-            // The renderer is quarantined below. A later backend recovery
-            // rebuilds from the restored authoritative CPU scene.
+
+
           }
         }
         this.handleGpuOperationException(
@@ -6607,9 +6608,9 @@
     }
   }
 
-  // The current view shell treats a graphics exception as a recoverable
-  // backend handoff. Keep that non-throwing boundary around the pristine
-  // renderer methods without changing any successful-path pixels.
+
+
+
   function guardRendererGpuOperations(
     RendererClass,
     operationNames

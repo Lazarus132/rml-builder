@@ -1,24 +1,25 @@
 "use strict";
+// RML Builder workers: saved_api_composite_compare_worker.
 
 function savedApiCompositeCompareWorkerMain(
   workerScope
 ) {
 const self = workerScope;
 
-// Keep this worker self-contained.  It is intentionally a classic worker so
-// the same file can be loaded by the packaged/file:// application without an
-// import graph or a server-only module resolver.
+
+
+
 const SAVED_API_COMPOSITE_COMPARE_WORKER_MODULE_ID =
-  "1.20.31-universal-presentation-dev23";
+  "1.20.31-universal-presentation-dev27";
 const SAVED_API_COMPOSITE_CANONICAL_SCHEMA_VERSION = 4;
 const MESSAGE_TYPE = "rml-saved-api-composite-compare";
 const RESULT_TYPE = `${MESSAGE_TYPE}-result`;
 
 const GRAPH_CACHE_KEYS = new Set([
-  // Transaction bookkeeping is not Composite content. Real mutations still
-  // differ through their complete node, wire, boundary, registry or source
-  // JSON; ignoring this counter prevents cache-only revisions from creating
-  // a false Update state.
+
+
+
+
   "revision",
   "contentFingerprint",
   "fingerprintNameKey",
@@ -33,11 +34,11 @@ const GRAPH_PRESENTATION_KEYS = new Set([
   "selectedWirePoint"
 ]);
 const CUSTOM_CSHARP_GRAPH_DERIVED_KEYS = new Set([
-  // These values describe how an already-materialized Custom C# graph was
-  // produced or migrated.  The authoritative source lives on its csharp.file
-  // owner and the complete nodes/connections below describe the result.
-  // Rebuilding the same graph from a live instead of cached catalog must not
-  // manufacture a Saved Composite update.
+
+
+
+
+
   "catalogFingerprint",
   "catalogEngineVersion",
   "catalogSource",
@@ -48,8 +49,8 @@ const COMPOSITE_LINK_PARAMETER_KEYS = new Set([
   "savedApiCompositeId",
   "savedApiCompositeUpdatedAt",
   "apiCompositeFingerprint",
-  // These two values are mirrors of the owned Composite JSON.  The owned
-  // boundaryPorts and nodes remain part of the comparison in full.
+
+
   "boundaryPorts",
   "memberCount"
 ]);
@@ -67,8 +68,6 @@ function positiveWorkerLimit(name, fallback) {
     ? value
     : fallback;
 }
-const MAX_STREAM_CHUNK_TOKENS = 1024;
-const MAX_STREAM_CHUNK_CHARACTERS = 16 * 1024;
 const MAX_STREAM_TOKEN_STRING_LENGTH = 16 * 1024;
 const STREAM_PAGE_ENCODING_VERSION = 1;
 const STREAM_PAGE_BYTE_LENGTH = 64 * 1024;
@@ -90,9 +89,9 @@ const STREAM_PAGE_TOKEN = Object.freeze({
   stringPart: 14,
   endString: 15
 });
-// A valid project may occupy the complete 512 MiB project-file allowance.
-// This is a validity ceiling, not a retention budget.  Soft budgets below may
-// evict/retry, but can never reject one otherwise valid Composite.
+
+
+
 const MAX_STREAMED_JSON_CHARACTERS = Math.max(
   512 * 1024 * 1024,
   positiveWorkerLimit(
@@ -165,8 +164,8 @@ function assertJsonScalar(value, path) {
     case "undefined":
     case "function":
     case "symbol":
-      // Object callers omit these before canonicalization. Array callers
-      // preserve the positional shape by passing null, as JSON.stringify does.
+
+
       return null;
     default:
       throw jsonError(
@@ -368,8 +367,8 @@ function canonicalNode(node, index, state, path, scopes) {
         ) {
           continue;
         }
-        // Missing and the normal non-mirrored layout are the same node
-        // contract.  Only mirrored changes socket orientation.
+
+
         if (
           parameterKey === "portLayout" &&
           parameters[parameterKey] !== "mirrored"
@@ -404,9 +403,9 @@ function canonicalNode(node, index, state, path, scopes) {
       ]);
       continue;
     }
-    // The sanitizer writes explicit null while older/live graph records may
-    // omit natural dimensions.  Neither changes rendered or generated graph
-    // content.
+
+
+
     if (
       (key === "width" || key === "height") &&
       node[key] === null
@@ -524,8 +523,8 @@ function canonicalConnection(connection, index, state, path, scopes) {
           )
     ]);
   }
-  // Retain the source identity only for resolving point references above; it
-  // never enters the canonical JSON itself.
+
+
   void sourceConnectionId;
   return canonicalPropertyEntries(entries, path);
 }
@@ -773,10 +772,10 @@ function canonicalGraph(
     const scopes = [scope, ...ancestorScopes];
     const entries = [];
     for (const key of Object.keys(graph)) {
-      // These fields are stored in the real project JSON, but they describe
-      // only how a graph is being viewed.  Exclude them at every canonical
-      // graph boundary (root, nested Composite and Custom C#) without
-      // suppressing same-named data inside nodes, parameters or metadata.
+
+
+
+
       if (
         GRAPH_CACHE_KEYS.has(key) ||
         GRAPH_PRESENTATION_KEYS.has(key) ||
@@ -787,10 +786,10 @@ function canonicalGraph(
       ) {
         continue;
       }
-      // Old/live Custom C# registries may materialize a redundant source copy
-      // beside the authoritative csharp.file owner.  Missing/null and an exact
-      // copy are one representation.  A divergent registry source remains in
-      // the canonical JSON and therefore can never be hidden by this rule.
+
+
+
+
       if (
         graphKind === "custom-csharp" &&
         key === "source" &&
@@ -1040,176 +1039,6 @@ function attachStreamedJsonValue(builder, value) {
     configurable: true
   });
   frame.pendingKey = null;
-}
-
-function appendStreamedJsonTokens(builder, tokens) {
-  if (!Array.isArray(tokens) || tokens.length === 0) {
-    throw new TypeError("A streamed Composite chunk must contain tokens.");
-  }
-  if (tokens.length > MAX_STREAM_CHUNK_TOKENS) {
-    throw new RangeError(
-      `A streamed Composite chunk may contain at most ${MAX_STREAM_CHUNK_TOKENS} tokens.`
-    );
-  }
-  const chunkCharacterCount = tokens.reduce(
-    (total, token) =>
-      total +
-      (Array.isArray(token) &&
-      typeof token[1] === "string"
-        ? token[1].length
-        : 0),
-    0
-  );
-  if (
-    chunkCharacterCount >
-      MAX_STREAM_CHUNK_CHARACTERS
-  ) {
-    throw new RangeError(
-      `A streamed Composite chunk may contain at most ${MAX_STREAM_CHUNK_CHARACTERS} string characters.`
-    );
-  }
-  for (const token of tokens) {
-    if (!Array.isArray(token) || typeof token[0] !== "string") {
-      throw new TypeError("A streamed Composite token is invalid.");
-    }
-    builder.tokenCount += 1;
-    const type = token[0];
-    if (type === "object" || type === "array") {
-      if (builder.stringParts || builder.keyParts) {
-        throw new TypeError("A streamed container cannot begin inside a string or object key.");
-      }
-      const value = type === "array" ? [] : Object.create(null);
-      attachStreamedJsonValue(builder, value);
-      builder.stack.push({
-        kind: type,
-        value,
-        pendingKey: null
-      });
-      continue;
-    }
-    if (type === "end") {
-      if (builder.stringParts || builder.keyParts || builder.stack.length === 0) {
-        throw new TypeError("A streamed container terminator is unmatched.");
-      }
-      const frame = builder.stack.at(-1);
-      if (frame.kind === "object" && frame.pendingKey !== null) {
-        throw new TypeError("A streamed object property has no value.");
-      }
-      builder.stack.pop();
-      continue;
-    }
-    if (type === "key") {
-      const key = token[1];
-      if (
-        builder.stringParts ||
-        builder.keyParts ||
-        builder.stack.length === 0 ||
-        builder.stack.at(-1).kind !== "object" ||
-        builder.stack.at(-1).pendingKey !== null ||
-        typeof key !== "string"
-      ) {
-        throw new TypeError("A streamed object property key is out of sequence.");
-      }
-      if (key.length > MAX_STREAM_TOKEN_STRING_LENGTH) {
-        throw new RangeError("A streamed object property key is too large.");
-      }
-      builder.characterCount += key.length;
-      builder.stack.at(-1).pendingKey = key;
-      continue;
-    }
-    if (type === "key-string") {
-      if (
-        builder.stringParts ||
-        builder.keyParts ||
-        builder.stack.length === 0 ||
-        builder.stack.at(-1).kind !== "object" ||
-        builder.stack.at(-1).pendingKey !== null
-      ) {
-        throw new TypeError("A streamed object-key string is out of sequence.");
-      }
-      builder.keyParts = [];
-      builder.keyLength = 0;
-      continue;
-    }
-    if (type === "key-part") {
-      const part = token[1];
-      if (
-        !builder.keyParts ||
-        typeof part !== "string"
-      ) {
-        throw new TypeError("A streamed object-key part is out of sequence.");
-      }
-      if (part.length > MAX_STREAM_TOKEN_STRING_LENGTH) {
-        throw new RangeError("A streamed object-key part exceeds its bounded size.");
-      }
-      builder.keyParts.push(part);
-      builder.keyLength += part.length;
-      builder.characterCount += part.length;
-      continue;
-    }
-    if (type === "end-key") {
-      if (!builder.keyParts) {
-        throw new TypeError("A streamed object-key terminator is unmatched.");
-      }
-      const key = builder.keyParts.join("");
-      builder.keyParts = null;
-      builder.keyLength = 0;
-      builder.stack.at(-1).pendingKey = key;
-      continue;
-    }
-    if (type === "scalar") {
-      if (builder.stringParts || builder.keyParts) {
-        throw new TypeError("A streamed scalar cannot occur inside a string or object key.");
-      }
-      const value = token[1];
-      if (typeof value === "string") {
-        if (value.length > MAX_STREAM_TOKEN_STRING_LENGTH) {
-          throw new RangeError("A streamed scalar string must be sent in bounded parts.");
-        }
-        builder.characterCount += value.length;
-      }
-      attachStreamedJsonValue(
-        builder,
-        assertJsonScalar(value, "$stream")
-      );
-      continue;
-    }
-    if (type === "string") {
-      if (builder.stringParts || builder.keyParts) {
-        throw new TypeError("A streamed string cannot be nested.");
-      }
-      builder.stringParts = [];
-      builder.stringLength = 0;
-      continue;
-    }
-    if (type === "string-part") {
-      const part = token[1];
-      if (!builder.stringParts || typeof part !== "string") {
-        throw new TypeError("A streamed string part is out of sequence.");
-      }
-      if (part.length > MAX_STREAM_TOKEN_STRING_LENGTH) {
-        throw new RangeError("A streamed string part exceeds its bounded size.");
-      }
-      builder.stringParts.push(part);
-      builder.stringLength += part.length;
-      builder.characterCount += part.length;
-      continue;
-    }
-    if (type === "end-string") {
-      if (!builder.stringParts) {
-        throw new TypeError("A streamed string terminator is unmatched.");
-      }
-      const value = builder.stringParts.join("");
-      builder.stringParts = null;
-      builder.stringLength = 0;
-      attachStreamedJsonValue(builder, value);
-      continue;
-    }
-    throw new TypeError(`Unsupported streamed Composite token '${type}'.`);
-  }
-  if (builder.characterCount > MAX_STREAMED_JSON_CHARACTERS) {
-    throw new RangeError("The streamed Composite snapshot exceeds its JSON safety limit.");
-  }
 }
 
 function appendDecodedStreamedJsonToken(
@@ -1584,7 +1413,7 @@ function installRetainedBaseline(key, baseline) {
 function retainedBaseline(key) {
   const baseline = baselineByIdentity.get(key);
   if (!baseline) return null;
-  // Map insertion order provides a bounded, allocation-free LRU policy.
+
   baselineByIdentity.delete(key);
   baselineByIdentity.set(key, baseline);
   return baseline;
@@ -1735,8 +1564,8 @@ function executeCompositeOperation(
       ok: true,
       stale: false,
       transport,
-      // This exact string comparison decides equality.  Fingerprints are
-      // diagnostic/cache indices only and can never hide a hash collision.
+
+
       equivalent: baseline.serialized === candidate.serialized,
       baselineRevision: baseline.revision,
       baselineFingerprint: baseline.fingerprint,
@@ -1807,9 +1636,9 @@ function processRequest(request) {
         `Unsupported streamed Composite target operation '${String(request.targetOperation)}'.`
       );
     }
-    // One in-progress candidate per placed instance/record controller.  A new
-    // begin is itself a control message that releases any abandoned previous
-    // stream for that identity, including another ID at the same revision.
+
+
+
     for (const [activeKey, snapshot] of streamedSnapshots) {
       if (snapshot.identityKey === key) {
         discardStreamedSnapshot(activeKey);
@@ -1847,44 +1676,6 @@ function processRequest(request) {
       transport: "streamed",
       snapshotId,
       begun: true,
-      durationMs: performance.now() - startedAt
-    });
-  }
-
-  if (request.operation === "append-snapshot-chunk") {
-    const streamKey = requireSnapshotId();
-    const snapshot = streamedSnapshots.get(streamKey);
-    if (
-      !snapshot ||
-      snapshot.revision !== request.revision ||
-      snapshot.baselineKey !== baselineKey
-    ) {
-      return staleResult(request, "snapshot-not-active");
-    }
-    if (
-      snapshot.transport &&
-      snapshot.transport !== "streamed"
-    ) {
-      discardStreamedSnapshot(streamKey);
-      throw new TypeError(
-        "A streamed Composite snapshot cannot mix transport encodings."
-      );
-    }
-    try {
-      snapshot.transport = "streamed";
-      appendStreamedJsonTokens(snapshot.builder, request.tokens);
-      armStreamedSnapshotTimeout(streamKey, snapshot);
-    } catch (error) {
-      discardStreamedSnapshot(streamKey);
-      throw error;
-    }
-    return resultEnvelope(request, {
-      ok: true,
-      stale: false,
-      transport: "streamed",
-      snapshotId,
-      acceptedTokens: request.tokens.length,
-      totalTokens: snapshot.builder.tokenCount,
       durationMs: performance.now() - startedAt
     });
   }
@@ -2026,9 +1817,9 @@ function processRequest(request) {
         reason: "staged-baseline-not-installed"
       });
     }
-    // Promotion happens only after the caller's durable transaction commits.
-    // Move the already-canonical exact string instead of retransmitting or
-    // canonicalizing a multi-megabyte graph on the UI thread.
+
+
+
     dropRetainedBaseline(sourceBaselineKey);
     const baseline = {
       ...staged,
@@ -2060,29 +1851,6 @@ function processRequest(request) {
       baselineKey,
       startedAt
     );
-  }
-
-  if (request.operation === "compare-pair") {
-    const left = canonicalComposite(
-      request.leftComposite,
-      request.normalizationPolicy
-    );
-    const right = canonicalComposite(
-      request.rightComposite,
-      request.normalizationPolicy
-    );
-    return resultEnvelope(request, {
-      ok: true,
-      stale: false,
-      equivalent: left.serialized === right.serialized,
-      leftFingerprint: left.fingerprint,
-      rightFingerprint: right.fingerprint,
-      leftSerializedLength: left.serializedLength,
-      rightSerializedLength: right.serializedLength,
-      leftStats: left.stats,
-      rightStats: right.stats,
-      durationMs: performance.now() - startedAt
-    });
   }
 
   throw new TypeError(
@@ -2131,8 +1899,8 @@ function handleWorkerMessage(event) {
 
 self.addEventListener("message", handleWorkerMessage);
 
-// The frozen test seam executes the exact production request path.  It also
-// makes the protocol inspectable without adding an import/module dependency.
+
+
 Object.defineProperty(self, "RMLSavedApiCompositeCompareWorker", {
   value: Object.freeze({
     moduleId: SAVED_API_COMPOSITE_COMPARE_WORKER_MODULE_ID,
@@ -2140,9 +1908,6 @@ Object.defineProperty(self, "RMLSavedApiCompositeCompareWorker", {
     messageType: MESSAGE_TYPE,
     resultType: RESULT_TYPE,
     streamProtocol: Object.freeze({
-      maxChunkTokens: MAX_STREAM_CHUNK_TOKENS,
-      maxChunkCharacters:
-        MAX_STREAM_CHUNK_CHARACTERS,
       maxTokenStringLength: MAX_STREAM_TOKEN_STRING_LENGTH,
       pageEncodingVersion:
         STREAM_PAGE_ENCODING_VERSION,
@@ -2162,7 +1927,6 @@ Object.defineProperty(self, "RMLSavedApiCompositeCompareWorker", {
       idleTimeoutMs: STREAMED_SNAPSHOT_IDLE_TIMEOUT_MS,
       operations: Object.freeze([
         "begin-snapshot",
-        "append-snapshot-chunk",
         "append-snapshot-page",
         "finish-snapshot",
         "cancel-snapshot"
@@ -2210,17 +1974,17 @@ if (savedApiCompositeCompareWorkerThread) {
   typeof savedApiCompositeCompareWorkerScope ===
     "object"
 ) {
-  // Browsers do not agree on direct classic Worker loading from file://.
-  // Loading this same file as an ordinary script during startup supplies a
-  // byte-for-byte worker bootstrap for a Blob URL.  Canonicalization still
-  // runs only inside that worker; the page merely holds the source string.
+
+
+
+
   Object.defineProperty(
     savedApiCompositeCompareWorkerScope,
     "RMLSavedApiCompositeCompareWorkerBootstrap",
     {
       value: Object.freeze({
         moduleId:
-          "1.20.31-universal-presentation-dev23",
+          "1.20.31-universal-presentation-dev27",
         canonicalSchemaVersion:
           4,
         source:

@@ -1,5 +1,6 @@
 (() => {
   "use strict";
+  // RML Builder tour: setup_assistant.
 
   const SCRIPT_BASE = document.currentScript?.src || window.location.href;
   const TEMPLATE_URL = new URL("../../templates/setup_template.html?v=132-no-small-viewport-warning-v347f1", SCRIPT_BASE).href;

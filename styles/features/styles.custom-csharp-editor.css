@@ -1,4 +1,5 @@
-/* Custom C# editor presentation loaded only when an editor is opened. */
+/* Custom C# editor layout and interaction styles. */
+
 :root { color-scheme: dark; --editor-font-size: 16px; --editor-line-height: 24px; --rml-workbench-background: var(--rml-attr-rml-workbench-background, #181818); --rml-code-background: var(--rml-attr-rml-code-background, #000000); --rml-gutter-background: var(--rml-attr-rml-gutter-background, #000000); --rml-panel-background: var(--rml-attr-rml-panel-background, #181818); --rml-overlay-background: var(--rml-attr-rml-overlay-background, #252526); --rml-status-background: var(--rml-attr-rml-status-background, #68217a); --rml-selection-background: var(--rml-attr-rml-selection-background, #264f78); --rml-code-text: var(--rml-attr-rml-code-text, #ffffff); --rml-ui-text: var(--rml-attr-rml-ui-text, #cccccc); --rml-gutter-text: var(--rml-attr-rml-gutter-text, #858585); --rml-status-text: var(--rml-attr-rml-status-text, #ffffff); --rml-accent: var(--rml-attr-rml-accent, #b789ff); --rml-caret: var(--rml-attr-rml-caret, #ffffff); --line: #45414f; --line-strong: #665d75; --panel-deep: #121019; --text: #e8e3ef; --muted: #9790a2; --accent-dark: #a476ff; --accent-soft: rgba(164, 118, 255, .16); }
 * { box-sizing: border-box; }
 html, body { width: 100%; min-height: 100%; margin: 0; }

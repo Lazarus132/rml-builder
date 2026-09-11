@@ -1,4 +1,5 @@
 "use strict";
+// RML Builder workers: validator_worker.
 
 self.window = self;
 

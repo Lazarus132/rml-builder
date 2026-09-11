@@ -1,6 +1,7 @@
 "use strict";
+// Saved API Composite and boundary behavior.
 
-// Saved API Composite and composite-boundary behavior.
+
 
 const SAVED_API_COMPOSITE_NESTING_LIMIT =
     typeof API_COMPOSITE_MAX_NESTING_DEPTH ===
@@ -678,7 +679,7 @@ const savedApiCompositeSearchTextCache =
     `${SAVED_API_COMPOSITE_COMPARE_MESSAGE_TYPE}-result`;
 
   const SAVED_API_COMPOSITE_COMPARE_MODULE_ID =
-    "1.20.31-universal-presentation-dev23";
+    "1.20.31-universal-presentation-dev27";
 
   const SAVED_API_COMPOSITE_COMPARE_CANONICAL_SCHEMA_VERSION =
     4;
@@ -770,12 +771,12 @@ const savedApiCompositeSearchTextCache =
   let savedApiCompositeCompareStreamQueueGeneration =
     0;
 
-  // An accepted graph edit may be visible in the live model before its
-  // detached JSON transaction is committed.  Keep every settled comparison
-  // neutral during that interval and invalidate any stream which was reading
-  // live objects.  These counters make accept-time publication O(1): no
-  // Composite is cloned, traversed or queued until the committed document is
-  // available.
+
+
+
+
+
+
   let savedApiCompositeCompareAcceptedMutationGeneration =
     0;
 
@@ -942,7 +943,7 @@ const savedApiCompositeSearchTextCache =
       );
     }
     const workerUrl = new URL(
-      "js/workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev23&canonical-schema=4",
+      "js/workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev27&canonical-schema=4",
       document.baseURI
     );
     const workerOptions = {
@@ -1152,18 +1153,18 @@ const savedApiCompositeSearchTextCache =
         typeof window.requestIdleCallback ===
           "function"
       ) {
-        // Admit at most one sender slice per rendered frame. Re-registering
-        // requestIdleCallback directly from an idle callback lets browsers
-        // run several individually small slices in the same idle period;
-        // their aggregate then steals a whole high-refresh frame even though
-        // every recorded slice is under budget. The rAF callback performs no
-        // traversal. It only opens the next post-paint idle opportunity.
+
+
+
+
+
+
         const waitForFrameBudget = () =>
           window.requestAnimationFrame(() => {
             window.requestIdleCallback(deadline => {
-              // A timeout callback can arrive with no actual idle budget. Do
-              // not turn that into permission to steal time from the next
-              // frame; pending comparison state is deliberately neutral.
+
+
+
               if (
                 !deadline.didTimeout &&
                 deadline.timeRemaining() >= Math.max(
@@ -1189,8 +1190,8 @@ const savedApiCompositeSearchTextCache =
           "function"
       ) {
         window.requestAnimationFrame(() => {
-          // Queue the sender after the frame callback has returned so the
-          // fallback never performs graph traversal inside the paint lane.
+
+
           window.setTimeout(
             () => resolve(null),
             0
@@ -1719,8 +1720,8 @@ const savedApiCompositeSearchTextCache =
       index < value.length;
       index += 1
     ) {
-      // Non-ASCII values stay as UTF-16 code units. TextEncoder would replace
-      // lone surrogates and could therefore change JSON equality.
+
+
       view.setUint16(
         offset,
         value.charCodeAt(index),
@@ -2061,11 +2062,11 @@ const savedApiCompositeSearchTextCache =
             dispatchPage(currentPage);
             currentPage = null;
           }
-          // Reading both clocks for every scalar costs a measurable part of
-          // the traversal itself. Check at a bounded 8-token cadence (and
-          // after each page/string part); the cadence is time-based rather
-          // than a throughput cap and cannot turn a large graph into a
-          // one-token-per-frame transfer.
+
+
+
+
+
           if (
             (
               (sliceTokens & 7) === 0 ||
@@ -2193,11 +2194,11 @@ const savedApiCompositeSearchTextCache =
   async function streamSavedApiCompositeComparison(
     options
   ) {
-    // The worker deliberately accepts only one streamed graph at a time so a
-    // 512 MiB-valid project cannot multiply its transient memory by the
-    // number of placed instances.  Queue that same constraint on the page as
-    // well: otherwise every pending instance would poll begin-snapshot once
-    // per frame and the backpressure traffic itself could stutter the UI.
+
+
+
+
+
     const queueGeneration =
       savedApiCompositeCompareStreamQueueGeneration;
     const queuedProjectEpoch =
@@ -2366,8 +2367,8 @@ const savedApiCompositeSearchTextCache =
         result.reason ===
           "baseline-not-installed"
       ) {
-        // A soft LRU eviction is retryable and must never turn a valid
-        // comparison into an assumed equality/difference.
+
+
         installed = await install();
         if (
           !installed?.ok ||
@@ -2408,8 +2409,8 @@ const savedApiCompositeSearchTextCache =
           `${operationIdentity}:cleanup`
         );
       } catch {
-        // Project resets already clear all worker baselines.  Cleanup failure
-        // must not replace a more useful comparison/import error.
+
+
       }
     }
   }
@@ -2913,11 +2914,11 @@ const savedApiCompositeSearchTextCache =
     ownerPath = null,
     mutationClass = "content"
   } = {}) {
-    // Accept publication deliberately does not inspect the graph.  The live
-    // objects may already be changing, while the committed detached JSON is
-    // not available yet.  One monotonic generation makes every old result
-    // neutral and causes each in-flight sender to cancel at its next bounded
-    // slice without cloning or walking a Composite on the interaction lane.
+
+
+
+
+
     if (
       String(mutationClass || "")
         .trim()
@@ -2950,11 +2951,11 @@ const savedApiCompositeSearchTextCache =
     ) {
       return false;
     }
-    // Persistence did not publish this accepted graph revision. Release only
-    // its matching compare barrier; a newer edit owns a different generation
-    // and cannot be released by this failure. Cached candidates are discarded
-    // so the next query compares the still-live document instead of reusing a
-    // result captured before the rejected transaction.
+
+
+
+
+
     savedApiCompositeCompareCommittedMutationGeneration =
       savedApiCompositeCompareAcceptedMutationGeneration;
     savedApiCompositeCompareCandidateStates.clear();
@@ -2968,9 +2969,9 @@ const savedApiCompositeSearchTextCache =
     ownerPath = null,
     mutationClass = "content"
   } = {}) {
-    // Viewport, selection and navigation commits are persisted presentation
-    // state, not Saved Composite content.  Keep this public tracker defensive
-    // so no caller can enqueue the worker for a view-only transaction.
+
+
+
     if (
       String(mutationClass || "")
         .trim()
@@ -2981,10 +2982,10 @@ const savedApiCompositeSearchTextCache =
     const releasedAcceptedMutation =
       savedApiCompositeCompareCommittedMutationGeneration !==
         savedApiCompositeCompareAcceptedMutationGeneration;
-    // A graph persistence transaction serializes the newest accepted document
-    // and older transactions are rejected by node_graph_view.  Therefore this
-    // commit releases the complete accepted generation, including coalesced
-    // edits, before the affected Composite revisions are published below.
+
+
+
+
     savedApiCompositeCompareCommittedMutationGeneration =
       savedApiCompositeCompareAcceptedMutationGeneration;
     const affected = new Map();
@@ -3169,11 +3170,11 @@ function markCommittedGraphMutation({
     ownerPath = null,
     mutationClass = "topology"
   } = {}) {
-    // The Saved Composite worker compares committed JSON only. Publishing at
-    // edit-accept time can compare the old document at a new revision, while
-    // publishing by object identity alone loses the revision when persistence
-    // replaces a clone. Every real persistence sink goes through this helper
-    // with its stable owner path; presentation-cache writes never do.
+
+
+
+
+
     const normalizedMutationClass =
       [
         "view",
@@ -3570,8 +3571,8 @@ function sanitizeSavedApiCompositeImportRecord(
       );
     }
 
-    // Validate aggregate ownership, identity and size before recovery so
-    // omissions cannot be used to bypass the Saved Composite safety limits.
+
+
     savedApiCompositeGraphStats(sourceGraph);
     const recoveredSource =
       nodeGraphClone(raw);
@@ -3874,11 +3875,11 @@ function apiCompositeEditorContentUnchangedSinceOpen(
     ) {
       return false;
     }
-    // Boundary deltas describe work the owning parent must apply when this
-    // editor is closed; they are not uncommitted child JSON.  The capture that
-    // produced those deltas has already installed the complete child document
-    // and acknowledged this revision. Treating the notification as dirty
-    // would capture and stream the same multi-megabyte Composite a second time.
+
+
+
+
+
     return Number.isFinite(localRevision) &&
       Number.isFinite(localBaseline)
         ? localRevision === localBaseline
@@ -4609,13 +4610,13 @@ function savedApiCompositeBoundaryNormalizationIsValid(
         childResults.set(ownerId, childResult);
       }
 
-      // Reconciliation is allowed to complete a real child boundary through
-      // this document when the saved chain stopped too early. Reproduce that
-      // deterministic addition here before comparing the sanitized contract;
-      // otherwise a legitimate self-healed proxy looks like arbitrary data
-      // invented by the sanitizer. Starting with every source boundary is
-      // important because nextApiCompositeBoundaryId also sees boundaries
-      // which will subsequently be removed as stale.
+
+
+
+
+
+
+
       const expectedBoundaryCandidates = [
         ...sourceBoundaryState.records
       ];
@@ -5757,9 +5758,9 @@ function loadSavedApiCompositeLibrary() {
               );
             }
           }
-          // The Map is the sole durable owner. A fulfilled Promise retaining
-          // a second array would keep stale, replaced record bodies alive for
-          // the lifetime of the page.
+
+
+
           return true;
         })
         .catch(error => {
@@ -5830,8 +5831,8 @@ async function persistSavedApiCompositeRecords(
             record
           )
         );
-    // Identity/name ambiguity is independent of the content fingerprint.  It
-    // must fail before starting any worker stream or storage mutation.
+
+
     assertSavedApiCompositePersistenceBatch(
       normalized
     );
@@ -5872,7 +5873,7 @@ async function persistSavedApiCompositeRecords(
             "readwrite",
             store => {
               for (const record of normalized) {
-                // IndexedDB performs its own structured clone as part of put().
+
                 store.put(record);
               }
             },
@@ -5946,9 +5947,9 @@ async function applySavedApiCompositeReconciliation(
         ).filter(Boolean)
       )
     ];
-    // Reject structural batch ambiguity before doing background fingerprint
-    // work.  The fingerprint remains a cache hint and is deliberately absent
-    // from this decision.
+
+
+
     assertSavedApiCompositePersistenceBatch(
       normalizedUpdates,
       normalizedDeletionIds
@@ -7216,10 +7217,10 @@ function closeApiCompositeGraph({
         closingEditor
       );
     if (!completeStateUnchanged) {
-      // Attribute the committed document before restoring the parent view.
-      // The active graph arrays belong to this child at this point; after the
-      // switch they belong to its parent. Stable owner-path attribution keeps
-      // the comparison valid even if persistence replaces the JS object.
+
+
+
+
       markCommittedGraphMutation({
         nodes: captured.nodes,
         document: captured,
@@ -7272,10 +7273,10 @@ function closeApiCompositeGraph({
             boundaryChanged ||
             !contentUnchanged,
           refreshCompositeActions: true,
-          // The child document was captured and published above. This pass
-          // persists the already-committed root tree only; classifying it as
-          // parent geometry would dirty the wrong level and poison its cached
-          // presentation revision.
+
+
+
+
           mutationClass: "view",
           acceptedMutation:
             currentAcceptedGraphDocumentMutation(
@@ -8152,9 +8153,9 @@ function buildApiCompositeExtensionCandidate(
         ?.apiCompositeFingerprint ||
       ""
     );
-    // Extending the placed graph is a real structural mutation.  Clear the
-    // legacy cache hint; the full worker comparison detects the change, and
-    // a confirmed library update installs the new worker fingerprint.
+
+
+
     const newFingerprint = "";
     composite.contentFingerprint =
       newFingerprint;
@@ -8205,9 +8206,9 @@ function buildApiCompositeExtensionCandidate(
       composite,
       oldFingerprint,
       newFingerprint,
-      // apiCompositeExtensionPlan already proves that at least one peer node
-      // is absorbed. A hash comparison must never veto that real structural
-      // change, including under a deliberate fingerprint collision.
+
+
+
       changed: true,
       addedNodeCount:
         plan.peerNodes.length,
@@ -8258,22 +8259,62 @@ function createApiCompositeFromSelection() {
         : graph;
     const commitWorkingCandidate =
       candidate => {
+
+
+
+
+        const liveNodes = graph.nodes;
+        const liveConnections =
+          graph.connections;
+        resetGraphRenderCaches();
+        if (candidate.nodes !== liveNodes) {
+          liveNodes.length =
+            candidate.nodes.length;
+          for (
+            let index = 0;
+            index < candidate.nodes.length;
+            index += 1
+          ) {
+            liveNodes[index] =
+              candidate.nodes[index];
+          }
+        }
+        if (
+          candidate.connections !==
+            liveConnections
+        ) {
+          liveConnections.length =
+            candidate.connections.length;
+          for (
+            let index = 0;
+            index <
+              candidate.connections.length;
+            index += 1
+          ) {
+            liveConnections[index] =
+              candidate.connections[index];
+          }
+        }
+        const candidateView = {
+          ...graphViewFrom(candidate),
+          nodes: liveNodes,
+          connections: liveConnections
+        };
         if (apiCompositeEditor) {
           activeDocument.apiCompositeGraphs =
             candidate.apiCompositeGraphs;
           activeDocument.customCSharpFiles =
             candidate.customCSharpFiles;
-          applyGraphView(
-            graphViewFrom(candidate)
-          );
+          activeDocument.nodes = liveNodes;
+          activeDocument.connections =
+            liveConnections;
+          applyGraphView(candidateView);
         } else {
           graph.apiCompositeGraphs =
             candidate.apiCompositeGraphs;
           graph.customCSharpFiles =
             candidate.customCSharpFiles;
-          applyGraphView(
-            graphViewFrom(candidate)
-          );
+          applyGraphView(candidateView);
         }
       };
 
@@ -8385,7 +8426,6 @@ function createApiCompositeFromSelection() {
       graphNodeDefinitionCache =
         new WeakMap();
       currentAnalysis = null;
-      resetGraphRenderCaches();
       pruneConnections();
       renderGraphNodesAndWires();
       renderGraphInspector();
@@ -8769,7 +8809,6 @@ function createApiCompositeFromSelection() {
     graphNodeDefinitionCache =
       new WeakMap();
     currentAnalysis = null;
-    resetGraphRenderCaches();
     pruneConnections();
     renderGraphNodesAndWires();
     renderGraphInspector();
@@ -8966,13 +9005,34 @@ function unpackApiCompositeNode(
         "The API Composite cannot be unpacked into a valid Runtime Graph. Nothing was changed."
       );
     }
-    // This is an in-place topology replacement of the active canvas, not a
-    // navigation to another graph document. Reset while the active
-    // presentation still owns the current arrays so its retained renderer is
-    // not suspended and left behind with the removed Composite shell.
+
+
+
+
+    const liveNodes = graph.nodes;
+    const liveConnections =
+      graph.connections;
     resetGraphRenderCaches();
-    graph.nodes = unpackedNodes;
-    graph.connections = connections;
+    liveNodes.length =
+      unpackedNodes.length;
+    for (
+      let index = 0;
+      index < unpackedNodes.length;
+      index += 1
+    ) {
+      liveNodes[index] =
+        unpackedNodes[index];
+    }
+    liveConnections.length =
+      connections.length;
+    for (
+      let index = 0;
+      index < connections.length;
+      index += 1
+    ) {
+      liveConnections[index] =
+        connections[index];
+    }
     graph.apiCompositeGraphs =
       unpackedComposites;
     graph.selectedNodeIds =
@@ -9446,10 +9506,10 @@ async function saveApiCompositeNode(
       );
       stagedRecordBaselineIdentity = "";
     } catch (error) {
-      // The IndexedDB transaction above is already the atomic authority.  A
-      // soft worker-cache eviction must never turn that successful durable
-      // save into a reported failure; the exact baseline is streamed lazily
-      // again while the UI remains neutral.
+
+
+
+
       savedApiCompositeCompareRecordChanged(
         stored.id,
         stored
@@ -10634,10 +10694,10 @@ async function importSavedApiCompositePayload(
               )
             : [];
         if (!existing) {
-          // Selecting a Saved-Composite document is the Library-import
-          // decision. A same-name placed instance only adds a separate,
-          // optional post-commit graph-replacement decision; declining that
-          // dialog must never turn the completed Library import into a no-op.
+
+
+
+
           pending.push(incoming);
           knownById.set(
             incoming.id,
@@ -10945,7 +11005,7 @@ async function acquireSavedApiCompositeCatalogStabilityLease(
       try {
         lease?.release?.();
       } catch {
-        // Preserve the original admission failure.
+
       }
       throw error;
     }
@@ -12141,10 +12201,10 @@ function matchingSavedApiCompositeInstances(
           return false;
         }
         if (!staleOnly) return true;
-        // A missing/pending/error result is deliberately neutral.  Exact
-        // canonical serialized equality in the worker is the only authority
-        // that may make an update action visible; fingerprints are cache and
-        // import hints only.
+
+
+
+
         return (
           savedApiCompositeInstanceComparisonStatus(
             record,
@@ -12395,18 +12455,18 @@ function mapSavedApiCompositeReplacementNodes(
         return false;
       }
       if (allowNestedContentChange) {
-        // A nested Composite's fingerprint describes the content being
-        // replaced, not the identity of its owner node. Exact builder
-        // element identity (or the exact node id fallback below) proves the
-        // owner correspondence while kind/operator and both owned documents
-        // prove the generic container contract. Requiring equal fingerprints
-        // here classified the old owner as a local addition and promoted it
-        // beside the updated nested owner, creating a duplicate Composite.
+
+
+
+
+
+
+
         return true;
       }
-      // Without a stable element identity or the exact node-id match handled
-      // above, a nested owner correspondence cannot be proven synchronously.
-      // A fingerprint collision must never manufacture that proof.
+
+
+
       return false;
     };
     const assign = (
@@ -16710,7 +16770,7 @@ Object.defineProperty(
   "RMLNodeGraphCompositesModuleId",
   {
     value:
-      "1.20.31-universal-presentation-dev23",
+      "1.20.31-universal-presentation-dev27",
     writable: false,
     enumerable: true,
     configurable: true

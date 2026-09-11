@@ -1,5 +1,6 @@
 (() => {
   "use strict";
+  // RML Builder core: guidance.
   const root = globalThis;
   if (root.RMLGuidance?.version === 793) return;
   const base = new URL("../../assets/data/guidance/",

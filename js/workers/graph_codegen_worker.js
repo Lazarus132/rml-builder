@@ -1,7 +1,8 @@
 "use strict";
+// RML Builder workers: graph_codegen_worker.
 
 const GRAPH_CODEGEN_WORKER_MODULE_ID =
-  "1.20.31-universal-presentation-dev23";
+  "1.20.31-universal-presentation-dev27";
 const GRAPH_CODEGEN_WORKER_FACTORY_VERSION =
   38;
 
@@ -664,9 +665,9 @@ async function ensureRuntime(
       self.RMLFrooxComponentCatalog =
         catalog;
     } else {
-      // No Live/cache catalog is a supported portable-import state. Do not
-      // impersonate one with an empty catalog: api_nodes would correctly try
-      // to verify it and report a bogus zero-node factory failure.
+
+
+
       delete self.RMLResoniteApiCatalog;
       delete self.RMLFrooxComponentCatalog;
     }
@@ -681,7 +682,7 @@ async function ensureRuntime(
       "../compiler/visual_csharp.js?v=83-empty-custom-csharp-ignored"
     );
     importScripts(
-      "../catalog/api_nodes.js?v=1.20.31-universal-presentation-dev23"
+      "../catalog/api_nodes.js?v=1.20.31-universal-presentation-dev27"
     );
 
     if (
@@ -725,7 +726,7 @@ async function ensureRuntime(
     }
 
     importScripts(
-      "../graph/node_graph_codegen.js?v=1.20.31-universal-presentation-dev23"
+      "../graph/node_graph_codegen.js?v=1.20.31-universal-presentation-dev27"
     );
 
     if (
@@ -1000,9 +1001,9 @@ function customCSharpCatalogDefinitions(support) {
     return definitions;
   }
 
-  // Visual C# uses the complete catalog type-name set to disambiguate short
-  // C# names.  Keep that semantic input without cloning the catalog itself:
-  // these small type-index records are never emitted as graph nodes.
+
+
+
   for (let index = 0; index < typeNames.length; index += 1) {
     const typeName = String(
       typeNames[index] || ""

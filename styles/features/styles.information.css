@@ -1,4 +1,4 @@
-/* RML Builder information styles. Loaded on first use. */
+/* Builder help and information dialog styles. */
 
 .information-dialog {
   width: min(1180px, calc(100vw - 32px));

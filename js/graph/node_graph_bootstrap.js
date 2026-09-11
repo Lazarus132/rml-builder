@@ -1,9 +1,10 @@
 "use strict";
+// Runtime Graph module bootstrap and coherence gate.
 
-// Coherent graph modules: Composite contracts, cached/live factory transitions and lazy Runtime Graph handoff stay synchronized.
+
 
 const GRAPH_BOOTSTRAP_MODULE_ID =
-  "1.20.31-universal-presentation-dev23";
+  "1.20.31-universal-presentation-dev27";
 
 function assertGraphBootstrapModuleCoherence() {
   const mismatches = [];
@@ -41,7 +42,7 @@ function assertGraphBootstrapModuleCoherence() {
 
 assertGraphBootstrapModuleCoherence();
 
-// Runtime Graph public view contracts and startup.
+
 
 installGraphRevealProvider();
 
@@ -156,10 +157,10 @@ if (
     mutationClass = "topology",
     analysisChanged = null
   } = {}) {
-    // Every public host writer converges here.  The accepted document
-    // revision is minted before the shared persistence scheduler snapshots
-    // the complete active graph, including nested Composite and Custom C#
-    // registries.
+
+
+
+
     return scheduleAcceptedGraphPersistenceAfterPaint({
       refreshGeneratedOutput:
         refreshGeneratedOutput === true,
@@ -266,7 +267,7 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
         return customCSharpEditorPersistenceDirty || graphParameterPersistenceDirty;
       },
       flushPendingEditorEdits() {
-        // A single commit consumes both sources; avoid duplicate full snapshots.
+
         return flushGraphParameterPersistence() || flushCustomCSharpEditorPersistence();
       },
       hasUncommittedGraphChanges() {
@@ -275,8 +276,8 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
       prepareForExport() {
         if (!graph || !graphHostInitialized || !bridge) return false;
         if (activeInteraction) cancelInteraction(true);
-        // One commit captures pending node parameters / Custom C# and composite
-        // views, cancels queued commits and refreshes code caches for this click.
+
+
         persistGraph(true);
         return true;
       },

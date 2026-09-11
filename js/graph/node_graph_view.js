@@ -1,6 +1,7 @@
 "use strict";
+// Runtime Graph interface, rendering and interactions.
 
-// Runtime Graph interface, rendering, interactions and shared host state.
+
 
 const RML_GRAPH_VISUAL_TEST =
     new URLSearchParams(window.location.search).has("rmlTourTest") ||
@@ -172,13 +173,13 @@ let graphInspectorRenderedSelectionKey = "";
 
 let graphInspectorRenderedNode = null;
 
-// This is the only Runtime Graph detail/quality classifier. It keeps the DOM
-// card budget and the GPU wire budget independent: a cheap wire vertex is not
-// treated as if it cost as much as one rich node card. Callers provide the
-// exact viewport node count and the wire vertices produced by the renderer's
-// own culling/tessellation rules. One wire vertex per viewport pixel is the
-// full-detail reference load; the existing node-density band ratios provide
-// both the summary range and hysteresis, without a zoom-only cutoff.
+
+
+
+
+
+
+
 function computeGraphPresentationPlan({
     visibleNodeCount = 0,
     visibleWireSegmentCount = 0,
@@ -286,9 +287,9 @@ function computeGraphPresentationPlan({
           : "coarse";
     }
 
-    // Backing-store resolution changes only with a stable presentation band.
-    // Close/full views always use native device resolution; dense views shed
-    // raster work without ever removing a node, title, route or picking shape.
+
+
+
     const rasterScale = detailTier === "full"
       ? 1
       : detailTier === "summary"
@@ -688,8 +689,8 @@ function enforceGraphSvgSafety() {
         if (dom.viewport) {
           dom.viewport.inert = true;
         }
-        // Breadcrumbs, save and export stay usable while the replacement
-        // presentation is prepared.
+
+
         if (dom.toolbar) {
           dom.toolbar.inert = false;
         }
@@ -749,8 +750,8 @@ function enforceGraphSvgSafety() {
     root.dataset.rmlGraphPhase =
       "svg-blocked";
     root.removeAttribute("aria-busy");
-    // CSS suppresses pointer/render work in the viewport. Keep the toolbar
-    // active so navigation, saving and export remain available.
+
+
     if (viewport) viewport.inert = false;
     if (toolbar) toolbar.inert = false;
     let status = root.querySelector(
@@ -977,9 +978,9 @@ function replaceGraphPreparationRenderer(
     }
     attachment.replacingRenderer = true;
     try {
-      // Quarantine the backend that failed this preparation attempt. The
-      // factory deterministically walks WGSL -> GLSL -> CPU fallback without
-      // changing the user's saved renderer preference.
+
+
+
       previous.reportSubmissionFailure?.(
         error
       );
@@ -1187,8 +1188,8 @@ function completeEmergencyGraphPresentation(
           ?._rmlInternalDynamicMonitor ===
             true
       ) continue;
-      // Use the same definition/cached measured geometry as the ordinary
-      // renderer. Recovery never substitutes guessed boxes for stored nodes.
+
+
       nodeRecords.push(
         graphGpuNodeRecord(node)
       );
@@ -1206,11 +1207,11 @@ function completeEmergencyGraphPresentation(
     graphGpuNodeRecordsDirty = false;
     graphGpuNodeDirtyIds.clear();
 
-    // Recovery obeys the same viewport-density policy as the ordinary path.
-    // The mandatory GPU/SVG shells and summary titles keep every visible node
-    // represented; rich editable cards are retained only where the shared
-    // presentation plan says their detail is useful. No graph-order cap is
-    // permitted here because it would create arbitrary holes in the viewport.
+
+
+
+
+
     const detailedNodes =
       desiredRenderedGraphNodes();
     populateGraphNodeHost(
@@ -1220,8 +1221,8 @@ function completeEmergencyGraphPresentation(
     const segments = [];
     const wirePathParts = [];
     for (const connection of graph.connections) {
-      // connectionGeometry expands every connection.points chain and
-      // branchFrom routing junction exactly as the normal presentation does.
+
+
       const geometry = connectionGeometry(
         connection,
         true
@@ -1387,9 +1388,9 @@ async function recoverGraphPreparation(
 
 async function prepareGraphView(preparation) {
     try {
-      // The shell must become visible before renderer startup, validation or
-      // indexing begins. Two frames plus a task also gives assistive status
-      // updates a deterministic paint boundary.
+
+
+
       const painted =
         await waitForGraphPaintOpportunity();
       if (
@@ -1414,9 +1415,9 @@ async function prepareGraphView(preparation) {
       await prepareGraphNodeViewportSpatialIndex(
         preparation
       );
-      // Opening an existing graph is presentation-only. Preserve its stored
-      // viewport exactly even when no node currently intersects the screen;
-      // explicit creation/center requests use graphInitialViewportRequest.
+
+
+
       applyViewportTransform();
       updateSourceBadge();
       preparation.rebuildNodes = false;
@@ -1526,10 +1527,10 @@ async function prepareGraphView(preparation) {
             !renderer
               .fallbackCanvasAvailable?.()
           ) {
-            // A graphics backend can fail independently of the model.
-            // Re-enter the wire pass once so it installs the compact-SVG
-            // compatibility scene; readiness then no longer depends on a GPU
-            // submission.
+
+
+
+
             wiresNeeded = true;
             previousLayout = "";
             continue;
@@ -1543,10 +1544,10 @@ async function prepareGraphView(preparation) {
             const error = new Error(
               "The active graphics backend stopped while preparing the graph view."
             );
-            // A renderer is allowed to report submission failure without an
-            // availability callback (for example a failed fence returning
-            // false). Enter the same bounded in-place recovery directly so
-            // the preparation promise can never remain inert and unresolved.
+
+
+
+
             return recoverGraphPreparation(
               preparation,
               error
@@ -1633,10 +1634,10 @@ let openGraphCatalogReconciliationPromise = null;
 
 let openGraphCatalogReconciliationCompletedKey = "";
 
-// Catalog verification is an observation about the current runtime session,
-// not a document edit.  Keeping it by graph identity prevents repeated scans
-// without rewriting portable project/composite provenance merely because a
-// compatible catalog became available.
+
+
+
+
 const graphCatalogRuntimeVerifications = new WeakMap();
 
 let graphHostInitialized = false;
@@ -1655,20 +1656,20 @@ let persistSchedule = 0;
 
 let graphContentMutationSequence = 0;
 
-// A document revision is issued only when an in-memory graph mutation has
-// actually been accepted. Persistence merely carries that revision forward;
-// it must never manufacture one from a render, navigation or refresh request.
+
+
+
 let graphAcceptedDocumentRevision = 0;
 
-// The Saved Composite comparison worker has its own accept/commit generation.
-// Keep the generation which belongs to the newest graph document revision so
-// an exceptional persistence exit can release precisely that transaction
-// without accidentally releasing a newer edit.
+
+
+
+
 let graphAcceptedCompareGeneration = null;
 
-// This advances only after the bridge accepted the corresponding detached
-// document. Together these two monotonic revisions are the cheap global proof
-// that a complete graph serialization is (or is not) required.
+
+
+
 let graphPersistedDocumentRevision = 0;
 
 let graphAnalysisMutationSequence = 0;
@@ -1757,12 +1758,12 @@ function markGraphContentMutation(
       graphAcceptedDocumentRevision += 1;
       graphContentMutationSequence =
         graphAcceptedDocumentRevision;
-      // An open Composite needs a document-local dirty token. A global
-      // sequence alone is insufficient because catalog metadata, another
-      // graph level, or other non-editor state may be persisted while the
-      // Composite is merely being viewed. A real edit in a nested Composite
-      // dirties that Composite and each owning ancestor because nested
-      // content participates in every ancestor fingerprint.
+
+
+
+
+
+
       const editorChain =
         typeof apiCompositeEditorChain ===
           "function"
@@ -1861,12 +1862,12 @@ function restoreCurrentGraphAnalysis() {
 function invalidateGraphViewAnalysis(nodes) {
     if (Array.isArray(nodes)) {
       graphViewAnalysisByNodes.delete(nodes);
-      // Catalog/boundary changes can invalidate inferred bindings without
-      // editing the accepted graph document. Keep this cache epoch entirely
-      // separate from the content/revision oracle: the caller that actually
-      // changes JSON publishes that change through the accepted-mutation
-      // transaction, while a cache-only refresh cannot cancel queued
-      // persistence or manufacture Composite dirty state.
+
+
+
+
+
+
       graphViewMutationRevisionByNodes.set(
         nodes,
         ++graphAnalysisMutationSequence
@@ -1943,8 +1944,8 @@ async function prepareGraphAnalysisForView(
         currentAnalysis = analysis;
       }
     } else {
-      // Older embedded hosts do not expose the cooperative analyser. This
-      // compatibility path runs only after the preparation shell has painted.
+
+
       pruneConnections();
     }
     if (
@@ -1999,8 +2000,8 @@ let graphDeferredPersistTargetRevision = 0;
 
 let graphDeferredPersistCompareGeneration = null;
 
-// A separate queue generation prevents a cancelled callback from an earlier
-// project from clearing or consuming a newer project's pending transaction.
+
+
 let graphDeferredPersistSchedule = 0;
 
 const GRAPH_PERSIST_MUTATION_RANK =
@@ -2146,9 +2147,9 @@ let lastGuidedPaletteDropState = null;
 
 let paletteDragSuppressClickUntil = 0;
 
-// Palette pointer drops use the same fixed grab point exposed by
-// getOperatorPlacementMetrics().  Click insertion deliberately keeps its
-// separate free-position behaviour.
+
+
+
 const GRAPH_PALETTE_POINTER_OFFSET_X = 130;
 
 const GRAPH_PALETTE_POINTER_OFFSET_Y = 35;
@@ -2165,10 +2166,10 @@ let packedSnapshotSyncScheduled = false;
 
 let packedSnapshotSyncEpoch = 0;
 
-// Builder renders are the authoritative notification that the Configuration
-// Outline may have changed. Keep the packed graph's acknowledgement as a
-// monotone revision instead of cloning and hashing the complete Builder state
-// every time a graph status label is refreshed.
+
+
+
+
 let builderSourceRevision = 0;
 
 let packedSnapshotSourceRevision = -1;
@@ -2277,9 +2278,9 @@ let graphHybridRenderer = null;
 
 let graphHybridRendererAttachment = null;
 
-// Entry count is only a final metadata guard. Actual retention is governed by
-// the existing DOM/content/renderer byte budgets, so many small nested levels
-// remain warm without allowing large GPU/DOM presentations to grow unbounded.
+
+
+
 const GRAPH_PRESENTATION_CACHE_MAX_ENTRIES = 32;
 
 const GRAPH_PRESENTATION_CACHE_MAX_DOM_ELEMENTS = 80000;
@@ -2773,9 +2774,9 @@ function captureGraphPresentationBeforeCacheReset(
     const renderedNodeCount =
       references.nodesHost
         .childElementCount;
-    // Navigation capture runs in the input transaction. Never force a full
-    // descendant walk here; the compact title layer is one element per
-    // visible node and rich cards are conservatively budgeted by count.
+
+
+
     const domElementCount =
       256 +
       references.summaryHost
@@ -3403,9 +3404,9 @@ function restoreCachedGraphPresentation() {
     ) {
       rejectReasons.push("environment");
     }
-    // Camera, selection, panel layout and host size are presentation inputs,
-    // not graph identity. They are updated after reattachment and may never
-    // invalidate topology, measured geometry or retained GPU buffers.
+
+
+
     if (
       entry.renderedNodeCount !==
         references.nodesHost.childElementCount
@@ -3426,9 +3427,9 @@ function restoreCachedGraphPresentation() {
         rejectReasons.join(",")
       );
     }
-    // A successful admission supersedes any rejection reported by an older
-    // cache candidate. Diagnostics must describe this transaction, otherwise
-    // a later audit can falsely attribute a stale reason to a real cache hit.
+
+
+
     graphPresentationLastRejectReason = "";
 
     if (!sameGraphArrays) {
@@ -3527,11 +3528,11 @@ function restoreCachedGraphPresentation() {
       nodes: graph.nodes,
       projectEpoch: builderProjectEpoch,
       controller: new AbortController(),
-      // This scene, geometry and DOM were already fully presented before
-      // suspension and all admission certificates matched. Keep the retained
-      // view interactive while the backend confirms its no-op reattachment;
-      // the promise still gates the presentation-complete event, and a real
-      // submission failure enters the ordinary visible recovery path.
+
+
+
+
+
       pending: false,
       rebuildNodes: false,
       geometryDirty: false,
@@ -3595,11 +3596,11 @@ function detachGraphHybridRenderer() {
       graphHybridRenderer.lifecycleState ===
         "recovering"
     ) {
-      // A lost context cannot be carried into a different presentation. Its
-      // initial unavailable callback occurs before the new attachment is
-      // settled, which would otherwise let normal SVG preparation start.
-      // Dispose it so the factory selects a fresh GPU backend (or a confirmed
-      // fallback) for the new visible preparation shell.
+
+
+
+
+
       graphHybridRenderer.dispose?.();
       graphHybridRenderer = null;
       graphHybridRendererAttachment = null;
@@ -3718,19 +3719,19 @@ let graphInteractionMotionFrame = 0;
 
 let graphPendingInteractionMotion = null;
 
-// Pointer motion, edge auto-pan and the retained renderer share one physical
-// frame transaction.  No participant may submit its own competing draw while
-// that transaction is open: geometry is updated first, then one final scene
-// submission presents the newest camera and endpoints together.
+
+
+
+
 let graphInteractionRendererDrawPending = false;
 
 let graphInteractionFrameRunning = false;
 
-// Camera motion can be applied more than once inside one physical interaction
-// frame (for example edge auto-pan followed by the latest pointer sample).
-// Defer only the auxiliary overlays until that transaction closes; the camera
-// itself is still published immediately and the overlays are flushed exactly
-// once before the next paint.
+
+
+
+
+
 let graphViewportAuxiliarySyncPending = false;
 
 let graphConnectionPreviewPath = null;
@@ -4030,7 +4031,7 @@ function commitPresentationPage(
       normalizePresentationPage(page);
     if (graph) {
 
-      
+
       graph.lastOpenPage = normalized;
     }
     bridge?.setActivePage?.(
@@ -4631,9 +4632,9 @@ function commitGraphNavigationLevel(
       return false;
     }
 
-    // Keep the already validated analysis of the level we are leaving. Deep
-    // breadcrumb navigation can otherwise re-analyse the same large ancestor
-    // every time its child is opened and closed.
+
+
+
     rememberCurrentGraphAnalysis();
 
     const navigationGuardLimit =
@@ -4677,10 +4678,10 @@ function commitGraphNavigationLevel(
             scheduleGraphPersistenceAfterPaint({
               refreshGeneratedOutput: true,
               refreshCompositeActions: true,
-              // Every child close publishes its committed document before
-              // applyGraphView restores the parent.  This follow-up only
-              // persists that already-committed tree; it must not attribute
-              // another content revision to the parent graph.
+
+
+
+
               mutationClass: "view",
               acceptedMutation:
                 currentAcceptedGraphDocumentMutation(
@@ -4688,8 +4689,8 @@ function commitGraphNavigationLevel(
                 )
             });
           } else {
-            // Breadcrumb navigation is view state. Avoid serializing the whole
-            // project merely because the user moved to an ancestor level.
+
+
             persistGraphView();
           }
         }
@@ -4965,10 +4966,10 @@ function navigateToGraphNavigationLevel(
     }
     const target = graphNavigationLevels()
       .find(level => level.id === targetId);
-    // A certified retained presentation is already complete and interactive.
-    // Swap it synchronously so ancestor navigation never manufactures a
-    // loading frame, while the existing cooperative preparation path remains
-    // responsible for every cold or invalidated target.
+
+
+
+
     if (
       target?.exists &&
       !target.current &&
@@ -5814,7 +5815,7 @@ function restoreGraphNavigation() {
     try {
       const key = graphNavigationStorageKey();
       if (key) saved = JSON.parse(localStorage.getItem(key) || "null");
-    } catch { /* A corrupt local navigation record does not damage the project. */ }
+    } catch {   }
     const maximumCompositeDepth =
       typeof API_COMPOSITE_MAX_NESTING_DEPTH ===
         "number"
@@ -6013,11 +6014,11 @@ function restoreGraphNavigation() {
         if (
           entry.kind === "api-composite"
         ) {
-          // A restored editor is an ordinary open editor. Its saved local
-          // viewport/selection is the baseline for the next close just as it
-          // is after openApiCompositeGraph(). Without this baseline every
-          // unchanged breadcrumb return is misclassified as a view edit and
-          // needlessly replaces the complete owned Composite document.
+
+
+
+
+
           apiCompositeEditor.openViewState =
             apiCompositeEditorViewState(
               graph,
@@ -6081,9 +6082,9 @@ function handleProjectReplacement(event) {
     openGraphCatalogReconciliationCompletedKey =
       "";
     cancelProjectScopedGraphWork();
-    // The previous project's accepted revisions cannot be carried into the
-    // replacement. The incoming bridge document establishes the next baseline
-    // when handleBuilderRendered installs it.
+
+
+
     acknowledgeInstalledGraphDocument();
     customCSharpProjectEpoch += 1;
     cancelCustomCSharpEditorPersistence();
@@ -7016,10 +7017,10 @@ function applyCatalogMigrationsPreservingGeometry(
       };
 
     try {
-      // Apply every explicit port transition to the isolated documents first.
-      // This makes the subsequent boundary-chain cleanup part of the same
-      // preview transaction instead of leaving invalid outer wires for a
-      // later sanitizer pass.
+
+
+
+
       for (const view of views) {
         const plans = plansByView.get(view) || [];
         const plansByNodeId = new Map(
@@ -7328,15 +7329,15 @@ function applyCatalogMigrationsPreservingGeometry(
         }
       }
 
-      // Operator ids and portable contracts changed in place. Never let a
-      // cached definition from the old operator participate in boundary
-      // validation or in the preview validator that follows this call.
+
+
+
       invalidateReplacementDefinitionCache();
 
-      // Resolve the real published contract from the deepest Composite to
-      // the root. A mapped boundary keeps its own id/autoExposed state and
-      // therefore keeps every surviving outer route. A removed boundary
-      // deletes only incident outer wires and all of their branch children.
+
+
+
+
       for (const view of
         [...views].sort(
           (first, second) =>
@@ -7947,9 +7948,9 @@ function portableApiContractForNode(
         ? node.apiContract
         : null;
 
-    // Catalog reconciliation owns contract replacement. Persistence must not
-    // reconstruct an already stored portable contract, because future schema
-    // fields are valid opaque JSON and must survive an older Builder exactly.
+
+
+
     if (storedNodeContract) {
       return nodeGraphClone(storedNodeContract);
     }
@@ -8297,12 +8298,12 @@ function graphSerializableState(
                 composite.customCSharpFiles
               )
             );
-          // Serialization and lightweight persistence are latency-sensitive
-          // snapshot operations. Fingerprints are comparison hints, not model
-          // truth: preserve exactly what the owned document already carries
-          // and let the compare worker / explicit Save transaction publish a
-          // newly confirmed fingerprint. Re-hashing a multi-megabyte nested
-          // Composite here would block navigation and pointer-settle work.
+
+
+
+
+
+
           const derivedMetadata = {
                   ...(Object.hasOwn(
                     composite,
@@ -8545,8 +8546,8 @@ function scheduleGeneratedOutputRefresh() {
       window.setTimeout(run, 0);
     };
 
-    // Code generation can be substantial in the serverless file:// build.
-    // Let the graph mutation and its busy/ready feedback paint first.
+
+
     if (document.visibilityState === "hidden") {
       window.setTimeout(run, 0);
     } else {
@@ -8826,9 +8827,9 @@ function graphConnectionGeometryDelta(
       ) {
         return destinationPoint;
       }
-      // Geometry persistence owns only coordinates. Retain every unknown
-      // property already carried by the detached JSON instead of replacing the
-      // point with a schema-minimal object.
+
+
+
       return {
         ...destinationPoint,
         x: sourcePoint.x,
@@ -9041,9 +9042,9 @@ function persistGraphGeometryDelta(
           rootPresentationSnapshot
         );
       }
-      // The delta path is an optimization. A bridge which cannot accept its
-      // in-place transaction falls back to the authoritative detached full
-      // persistence path without publishing or acknowledging this attempt.
+
+
+
       return false;
     }
     acknowledgeGraphDocumentRevision(
@@ -9151,9 +9152,9 @@ function persistGraphViewLightweight() {
       if (!destination || destination === graph) {
         return;
       }
-      // Persisted snapshots and owned editor documents must never alias the
-      // mutable runtime view.  In particular, the next pan/zoom must still be
-      // observable as a real change against lastPersistedGraphReference.
+
+
+
       destination.viewport = {
         x: viewport?.x,
         y: viewport?.y,
@@ -9765,11 +9766,11 @@ function persistGraph(
         mutationClass,
         pendingMutationClass
       );
-    // A full transaction may reach the commit queue before a newer idle
-    // Geometry/parameter/source transaction. Adopt that accepted revision
-    // before consuming any shared timer or dirty state. This makes the full
-    // serialization the coalesced owner of the newer work instead of letting
-    // an older transaction erase it and only then discover that it is stale.
+
+
+
+
+
     if (
       (
         viewContentPending ||
@@ -9889,9 +9890,9 @@ function persistGraph(
         });
         return false;
       }
-      // A newer accepted edit makes this asynchronous snapshot stale. Hand
-      // every still-pending effect to a fresh transaction which owns that
-      // revision; do not consume any state created after this snapshot.
+
+
+
       if (
         targetDocumentRevision > 0 &&
         targetDocumentRevision <
@@ -9920,10 +9921,10 @@ function persistGraph(
         return false;
       }
       graphNodeDefinitionCache = new WeakMap();
-      // The serializer publishes a detached document and does not replace the
-      // live node or connection arrays. Keep their already-proved lookup
-      // snapshots: array replacement is detected by source identity, while
-      // append/remove paths update or invalidate the snapshots themselves.
+
+
+
+
 
       if (refreshOutput) {
         graphCodegenRevision =
@@ -9970,18 +9971,18 @@ function persistGraph(
         );
         throw error;
       }
-      // Neither the detached reference nor the monotonic persisted revision is
-      // published until the bridge commit above has returned successfully.
+
+
       lastPersistedGraphReference = persistedGraph;
       acknowledgeGraphDocumentRevision(
         targetDocumentRevision,
         projectEpoch
       );
       if (mutationClass !== "view") {
-        // markGraphContentMutation invalidates local analysis/presentation
-        // state as soon as an edit is accepted. Composite capture is deferred
-        // until after two paints, so notify the comparison worker only here,
-        // after that capture and the bridge transaction both committed.
+
+
+
+
         const committedDocument =
           customCSharpEditor
             ? activeGraphCustomCSharpFileRegistry()
@@ -10390,11 +10391,11 @@ function flushGraphViewPersistence(
   }
 
 function flushActiveGraphDocumentPersistenceBeforeTransition() {
-    // A navigation transition must never replace a pending child-view timer
-    // with a parent-view timer.  Consume every already scheduled persistence
-    // transaction while the active arrays and stable owner path still name
-    // the child.  If no timer exists, the lightweight pass is still required:
-    // pointer input and the breadcrumb click can occur in the same task.
+
+
+
+
+
     if (flushGraphViewPersistence(true)) {
       return true;
     }
@@ -12660,12 +12661,12 @@ function updatePackButton() {
       Boolean(graph?.active)
     );
 
-    // The packed snapshot is kept synchronized with the Builder while a
-    // Runtime Graph exists. Reuse that authoritative local array here: the
-    // bridge snapshot clones the complete project, including every saved
-    // Composite, and this status-only refresh runs several times during a
-    // graph-level transition. Only consult the bridge before a packed
-    // snapshot exists (the pre-pack Outline state).
+
+
+
+
+
+
     const sourceNodeCount = Array.isArray(
       graph?.configSnapshot?.nodes
     )
@@ -12759,8 +12760,8 @@ function sourceIsOutdated() {
       );
     }
 
-    // Before a packed snapshot exists there is no acknowledged revision to
-    // compare. Preserve the exact legacy check for that bounded pre-pack case.
+
+
     return Boolean(
       graph?.configSnapshot &&
       graph.sourceSignature &&
@@ -13295,8 +13296,8 @@ function suspendGraphNavigationForOutline() {
     cancelInteraction(true);
     closeEmbeddedEditorForGraphReplacement();
 
-    // Store the visible path before the editor chain is collapsed. This local
-    // record is deliberately retained while the Configuration Outline is open.
+
+
     persistGraphNavigation({
       allowPresentationShell: true
     });
@@ -13309,9 +13310,9 @@ function suspendGraphNavigationForOutline() {
       persistGraphView(true);
     }
 
-    // The root view has no applyGraphView transition for the reset hook to
-    // observe. Preserve its already measured presentation explicitly before
-    // the Outline takes ownership of the shared canvas.
+
+
+
     captureGraphPresentationBeforeCacheReset({
       force: true
     });
@@ -13394,8 +13395,8 @@ function suspendGraphNavigationForOutline() {
       if (!result.closed) break;
     }
 
-    // A malformed parent cycle must never trap the top-level navigation. The
-    // root view was captured before unwinding, so the Outline remains usable.
+
+
     customCSharpEditor = null;
     apiCompositeEditor = null;
     applyGraphView(rootView);
@@ -13420,8 +13421,8 @@ function unpackToOutline() {
       scheduleGraphPersistenceAfterPaint({
         refreshGeneratedOutput: true,
         refreshCompositeActions: true,
-        // Each child was captured and published at its own stable path while
-        // still active.  This root pass only commits the complete tree.
+
+
         mutationClass: "view",
         acceptedMutation:
           currentAcceptedGraphDocumentMutation(
@@ -13429,9 +13430,9 @@ function unpackToOutline() {
           )
       });
     }
-    // Rebuilding the Outline can traverse and clone a very large Composite.
-    // The navigation shell above is already complete, so let that state paint
-    // before asking the bridge to rebuild the non-graph presentation.
+
+
+
     cancelGraphOutlineDeferredRender();
     const projectEpoch = builderProjectEpoch;
     const sequence =
@@ -14248,18 +14249,18 @@ function scheduleRestoredGraphReadinessAfterPaint() {
         ) {
           return false;
         }
-        // A restored graph must get its visible, non-interactive shell before
-        // snapshot reconciliation. The snapshot path can prune a large set of
-        // connections, so running it in the builder-rendered/startup handler
-        // would delay the first paint even when the catalog itself is ready.
+
+
+
+
         if (hasPackedRuntimeProgram()) {
           synchronizePackedSnapshot(false);
         }
         const ready =
           evaluateRestoredGraphCatalogReadiness();
-        // Catalog readiness controls replacement/export verification, never
-        // access to the locally stored graph. Portable contracts remain
-        // editable while reconciliation continues in the background.
+
+
+
         restoreSavedPresentationIfReady();
         void scheduleOpenGraphCatalogReconciliation()
           .finally(() => {
@@ -14981,8 +14982,8 @@ function scheduleVisibleSavedApiCompositePaletteRowsRefresh() {
       ) {
         return;
       }
-      // Older modules accept no batch argument. Keep that path correct
-      // while newer modules update only a bounded set of rows per task.
+
+
       if (refreshRows.length < 1) {
         refreshRows();
         return;
@@ -16433,9 +16434,9 @@ function copyPaletteDroppedOwnedGraph(
         : {};
     target.apiCompositeGraphs[node.id] =
       nodeGraphClone(owned);
-    // The owned Composite clone already contains each exact descendant
-    // registry. Never flatten legacy descendant C# files into the graph-root
-    // registry while copying a palette item.
+
+
+
   }
 
 function persistPaletteDroppedGraphNode(
@@ -17243,9 +17244,9 @@ function applyGraphConnectionProposal(
         connections.length + 1
     );
     if (appendOnly) {
-      // connectionProposal is defined as base.filter(same input)+candidate.
-      // A growth of exactly one therefore proves that the filter removed
-      // nothing; retaining the source array makes Tail adoption O(1)+O(k).
+
+
+
       connections.push(proposal.candidate);
     } else {
       graph.connections =
@@ -17281,9 +17282,9 @@ function finalizeGraphConnectionProposalRouting(
     branchReference = null
   ) {
     if (!appendOnly) {
-      // A replacement/removal changes the source-array identity and already
-      // takes the one structural full-render path. Normalize the complete new
-      // transaction before that fallback instead of assuming a retained Tail.
+
+
+
       normalizeConnectionRouting(
         graph.connections
       );
@@ -17293,11 +17294,11 @@ function finalizeGraphConnectionProposalRouting(
     if (!candidate) {
       return false;
     }
-    // connectionProposal creates a fresh record. Canonicalize that trusted
-    // Tail directly; walking every existing connection would turn a one-wire
-    // append into O(total wires) work. A branch reference is supplied only
-    // after connectInputToWire has resolved the parent, matching source and
-    // concrete parent junction.
+
+
+
+
+
     candidate.points = [];
     candidate.branchFrom = branchReference
       ? {
@@ -18666,22 +18667,22 @@ function renderGraphCanvas() {
       replacingRenderer: false,
       onCameraCommitted(camera, detail = null) {
         if (dom.viewport === viewport && dom.stage === stage && runtimeGraphViewActive) {
-          // This is the single camera-publication hook for every visual
-          // layer. Updating one compositor transform is O(1) and keeps rich
-          // DOM cards at the exact same screen-space displacement as GPU
-          // routes, compact shells and the title raster throughout drag/zoom.
-          // The viewport backdrop may cover the DOM while a retained frame is
-          // rebased, but a covered layer must never retain an older camera.
+
+
+
+
+
+
           commitGraphViewportTransform(camera, stage);
           if (
             detail?.fallbackRasterCommitted === true &&
             graphFallbackCanvasActive()
           ) {
-            // The retained Canvas bitmap covers the complete graph while the
-            // camera is moving. Keep the bounded editable DOM selection
-            // stable; selection/inspection explicitly materializes a newly
-            // requested node. Rebuilding a viewport-nearest node set here
-            // would invalidate the just-committed raster through exclusions.
+
+
+
+
+
             scheduleGraphWireHandleSync();
             scheduleGraphScrollLayerVisualRefresh();
           }
@@ -18718,11 +18719,11 @@ function renderGraphCanvas() {
           renderer?.lifecycleState ===
             "recovering"
         ) {
-          // A recoverable WebGL context loss keeps its scene and attachment
-          // intact until the browser delivers webglcontextrestored.  A lost
-          // WebGPU device cannot be restored, so replace it on the next paint
-          // with another GPU backend.  Neither transient is an SVG fallback
-          // and neither may run the destructive SVG large-graph safety gate.
+
+
+
+
+
           showGraphSvgFallbackWarning();
           beginRendererRecovery();
           if (
@@ -18750,9 +18751,9 @@ function renderGraphCanvas() {
                     ) {
                       return;
                     }
-                    // Browsers normally restore WebGL quickly. If no restore
-                    // event arrives, atomically reselect a renderer instead of
-                    // leaving the graph permanently inert.
+
+
+
                     renderer.canRecoverContext =
                       false;
                     lastAvailability = true;
@@ -18862,9 +18863,9 @@ function renderGraphCanvas() {
               ) {
                 settleRendererRecovery(true);
               } else {
-                // A confirmed SVG backend may safely render a small graph,
-                // but it must enter the ordinary preparation pipeline rather
-                // than leaving the recovery shell inert forever.
+
+
+
                 bridgeRendererRecoveryToFreshRender();
               }
               return;
@@ -19115,9 +19116,9 @@ function markGraphCameraMoving(
             ) {
               return;
             }
-            // Returning to a two-dimensional transform releases the temporary
-            // compositor raster so text and edges are painted at the final
-            // zoom. No layout read or graph rebuild is required.
+
+
+
             stage.classList.remove(
               "rml-camera-moving"
             );
@@ -19205,9 +19206,9 @@ function refreshGraphViewportPresentation() {
     ) {
       return false;
     }
-    // Layout-only changes affect the viewport and culling window, not the
-    // graph's topology or geometry. Resize/reselect the retained presentation
-    // without measuring nodes or rebuilding routes.
+
+
+
     graphHybridRenderer?.resize?.();
     applyViewportTransform();
     graphNodeVirtualizationAnchor = null;
@@ -23876,10 +23877,10 @@ function beginNodeResize(
     event.stopPropagation();
     selectGraphNode(nodeId);
 
-    // Limits and measured node/socket geometry are populated during the
-    // visible preparation phase. Reusing them here keeps pointerdown free of
-    // a forced full style/layout pass. A genuinely new DOM node still falls
-    // back to the exact measurement path once.
+
+
+
+
     const limits =
       reusableNodeResizeLimits(article) ||
       updateNodeResizeLimitData(
@@ -24146,9 +24147,9 @@ function finishNodeResize(
       node.height !== interaction.originalHeight
     ));
     if (node && interaction.article) {
-      // Snapping on pointer-up can change the final dimensions after the last
-      // move. Manual dimensions and cached relative socket anchors make that
-      // geometry exact without forcing layout in the input-to-paint window.
+
+
+
       applyNodeSizeStyles(
         node,
         interaction.article
@@ -25051,8 +25052,8 @@ function planDirtyGraphNodeSpatialRecords(
         !previous &&
         order >= stablePrefixLength
       ) {
-        // A dirty notification can race a structural append. The Tail plan
-        // below owns that record and must not insert it twice.
+
+
         continue;
       }
       if (
@@ -25345,9 +25346,9 @@ function adoptGraphNodeViewportSpatialTail(
       return true;
     }
 
-    // Only callers that recorded an append-only structural generation may
-    // retain a same-array prefix. Replacement, truncation, reorder and any
-    // unclassified same-array mutation fail closed to the full rebuild.
+
+
+
     let dirtyRecords;
     const appended = [];
     try {
@@ -25492,8 +25493,8 @@ async function prepareGraphNodeViewportSpatialIndex(
       rebuild = true;
     }
     if (!rebuild) {
-      // A mass geometry change is cheaper and more interruptible as a fresh
-      // local index than thousands of in-place cell removals.
+
+
       rebuild = true;
     }
 
@@ -25895,9 +25896,9 @@ function graphDetailedDomNodeLimit(
     ) {
       return Math.floor(plannedLimit);
     }
-    // Preparation and legacy callers without a presentation plan retain the
-    // conservative fallback. Camera motion always supplies the freshly
-    // computed plan above and therefore performs no second layout read.
+
+
+
     const width = Math.max(
       1,
       Number(graphHybridRenderer?.cssWidth) ||
@@ -26192,11 +26193,11 @@ function desiredRenderedGraphNodes() {
         .map(record => record.node);
     }
 
-    // In full detail every viewport record wins over offscreen interaction
-    // conveniences. The density policy admits this tier only when that whole
-    // visible set fits the rich-card budget. Selected/focused cards outside
-    // the viewport may use the remaining budget, but can never displace a
-    // visible node or title.
+
+
+
+
+
     const visibleIds = new Set(
       visibleRecords.map(
         record => record.node.id
@@ -26275,10 +26276,10 @@ function applyGraphNodeInteractionPosition(
     if (!article || !node) {
       return;
     }
-    // Pointer motion owns exactly one local geometry write. The canonical
-    // x/y attributes (and their shared CSS rule) are committed once when the
-    // gesture ends; the discrete compositor hint is a CSS class toggled once
-    // at gesture start/finish.
+
+
+
+
     article.style.transform =
       `translate3d(${node.x}px, ${node.y}px, 0)`;
   }
@@ -26631,7 +26632,7 @@ function populateGraphNodeHost(
     recordGraphNodeVirtualizationAnchor();
 
 
-    
+
 
     if (graphViewPreparing()) {
       graphViewPreparation.geometryDirty = true;
@@ -27147,9 +27148,9 @@ function socketGraphCenter(
           side: socketGeometry.side
         };
       }
-      // Resizing never requires a live DOM read. Definition-derived geometry
-      // is the same bounded fallback used by the GPU overview and remains
-      // stable throughout the gesture.
+
+
+
       return estimatedSocketGraphCenter(
         nodeId,
         portId,
@@ -27168,11 +27169,11 @@ function socketGraphCenter(
       };
     }
     if (geometryInteractionSnapshot) {
-      // Geometry gestures own a frozen, exact prepared scene. Every endpoint
-      // which is not the actively resized node is unchanged; its prepared
-      // cache (above) or the same definition-derived geometry used by the GPU
-      // scene is authoritative for the whole gesture. Never interleave live
-      // socket/article/body layout reads with pointer-frame writes.
+
+
+
+
+
       return estimatedSocketGraphCenter(
         nodeId,
         portId,
@@ -27907,9 +27908,9 @@ function wireTargetAtPoint(
   }
 
 const GRAPH_WIRE_HANDLE_CELL_SIZE = 512;
-// Each routing point is retained at a few progressively coarser levels. The
-// camera hot path can therefore choose a level with at most this many queried
-// cells without scanning every point in a sparse, widely distributed graph.
+
+
+
 const GRAPH_WIRE_HANDLE_MAX_QUERY_CELLS = 4096;
 const GRAPH_WIRE_HANDLE_SPATIAL_CELL_SIZES = Object.freeze([
   GRAPH_WIRE_HANDLE_CELL_SIZE,
@@ -28064,9 +28065,9 @@ function graphWireHandleSpatialRecords(bounds) {
     }
     const result = new Set();
     if (!plan) {
-      // A missing/invalid viewport has no camera hot path. Treat every indexed
-      // point as visible for correctness, using only the sparsest level so a
-      // record is still visited exactly once.
+
+
+
       const coarsest =
         graphWireHandleSpatialLevels[
           graphWireHandleSpatialLevels.length - 1
@@ -28160,9 +28161,9 @@ function indexGraphWireHandles(connectionIds = null, usage = branchPointUsageMap
   }
 
 function graphWireHandleRequiredBounds() {
-    // Keep the existing hit-target overscan contract. The accelerated canvas
-    // currently has no oversized surface, but an optional compatible backend
-    // may expose one in the future.
+
+
+
     const retainedOverscan = graphHybridActive()
       ? Math.max(
           28,
@@ -28728,8 +28729,8 @@ function createWirePointHandle(
   }
 
 function materializeSvgWireCompatibility() {
-    // The visual backend is selected solely by capability. Tests, tours and
-    // graph size must exercise the same production renderer and pixels.
+
+
     return Boolean(
       !graphHybridActive() &&
       graphPresentationPlan?.detailTier ===
@@ -28774,9 +28775,9 @@ function graphSegmentInsideViewport(
       (from.side === "left" ? -1 : 1);
     const control2X = to.x + control *
       (to.side === "right" ? 1 : -1);
-    // A cubic Bézier is wholly contained by the convex hull of its four
-    // control points. Testing that conservative hull cannot discard a curve
-    // which bends into the viewport while both endpoints remain outside.
+
+
+
     const left = Math.min(
       from.x,
       control1X,
@@ -28836,9 +28837,9 @@ function graphGpuNodeRecord(node) {
       y: node.y,
       width: geometry.width,
       height: geometry.height,
-      // The accelerated shell is the complete lightweight representation,
-      // not a blank placeholder for whichever rich cards exceeded the DOM
-      // detail budget. Preserve custom labels as well as definition titles.
+
+
+
       title,
       subtitle: node?.group
         ? String(node.group)
@@ -28961,8 +28962,8 @@ async function prepareGraphGpuNodeRecords(
       graphGpuNodeRecordSource !== nodes ||
       graphGpuNodeRecordLength !== nodes.length;
     if (!rebuild) {
-      // Dirty selection/geometry records are normally a small interactive set.
-      // A large set is rebuilt cooperatively below instead.
+
+
       if (
         graphGpuNodeDirtyIds.size <=
           GRAPH_GPU_NODE_PREPARATION_BATCH_SIZE
@@ -29054,10 +29055,10 @@ function gpuOverviewNodeRecords() {
   }
 
 function synchronizeGraphGpuNodeExclusions() {
-    // The mandatory shell layer is never punctured while richer DOM cards are
-    // added or removed.  Rich cards are opaque overlays, so drawing the same
-    // shell beneath them costs no visual fidelity and prevents asynchronous
-    // hand-offs from exposing blank or stationary rectangles.
+
+
+
+
     graphHybridRenderer?.setNodeExclusions?.(
       []
     );
@@ -29554,10 +29555,10 @@ function updateGraphWireConnections(
           translateFrom,
           translateTo
         });
-        // The renderer owns the canonical segment records for this gesture.
-        // The DOM-derived cache is invalidated instead of being synchronously
-        // remeasured; a later operation that actually needs that cache may
-        // rebuild it lazily from the authoritative graph/socket state.
+
+
+
+
         graphConnectionGeometryCache.delete(
           connectionId
         );
@@ -29787,10 +29788,10 @@ function adoptGraphWireHandleMutationSource(
         next.length;
       return true;
     }
-    // A replaced source array cannot prove an unchanged prefix without an
-    // O(total connections) comparison. Structural deltas therefore retain
-    // the live array and append at its tail; replacement/removal converges on
-    // the single full-render fallback owned by the caller.
+
+
+
+
     return false;
   }
 
@@ -30108,11 +30109,11 @@ function renderGraphMutationDelta({
       return fullRender();
     }
 
-    // A shared codegen lookup may already have adopted a proved same-array
-    // Tail before the View reaches this commit. Renderer presence is the
-    // authoritative retained-scene distinction: every requested connection
-    // absent from that scene is a candidate append, while the O(1) total
-    // count below still proves there are no unreported additions/removals.
+
+
+
+
+
     for (const connection of connections) {
       if (
         !graphHybridRenderer
@@ -30156,10 +30157,10 @@ function renderGraphMutationDelta({
     ) {
       return fullRender();
     }
-    // Preserve the append-only retained prefix until the accelerated scene
-    // has consumed it. desiredRenderedGraphNodes() may reconcile the complete
-    // presentation cache; running that first would erase the old/new boundary
-    // and turn every valid tail append into a full-scene fallback.
+
+
+
+
     const desiredNodes =
       desiredRenderedGraphNodes();
     synchronizeGraphNodeMutationElements(
@@ -30257,9 +30258,9 @@ async function prepareCompleteHybridGraphWires(
     const connections = graph.connections;
     const renderer = graphHybridRenderer;
     const wires = dom.wires;
-    // Claim only the requests that this complete build is about to satisfy.
-    // Requests raised after the first yield remain pending, so the outer
-    // preparation loop publishes the newer user action on its next pass.
+
+
+
     graphWireFullRenderPending = false;
     graphWirePartialConnectionIds.clear();
     const usage = new Map();
@@ -30413,10 +30414,10 @@ async function prepareCompleteHybridGraphWires(
       );
     }
 
-    // The flags were claimed before the first yield. If either one is set
-    // again now, a newer action superseded this batch. Keep the current scene
-    // visible and let the preparation loop build the authoritative successor;
-    // an obsolete batch must never become a painted intermediate frame.
+
+
+
+
     if (
       graphWireFullRenderPending ||
       graphWirePartialConnectionIds.size > 0
@@ -30432,9 +30433,9 @@ async function prepareCompleteHybridGraphWires(
         ? ensureGraphGpuNodeRecords().records
         : []
     });
-    // setScene has already committed this exact retained node snapshot. Publish
-    // the matching ownership markers before any later structural edit can run;
-    // otherwise the first edit redundantly rebuilds every retained node.
+
+
+
     graphGpuNodeSceneRenderer = renderer;
     graphGpuSimplifiedNodesInstalled =
       simplifiedNodesInstalled;
@@ -30469,9 +30470,9 @@ async function prepareCompleteHybridGraphWires(
     graphWireHandleIndexRevision += 1;
     invalidateGraphWireHandleFullSetCertificate();
     synchronizeGraphWireHandles();
-    // The scene and its complete visible routing-point set publish in the
-    // same draw. Never expose the freshly prepared wires for one frame before
-    // their handles have reached the exclusive GPU/SVG presentation path.
+
+
+
     renderer?.setCamera?.(graph.viewport);
     renderer?.drawNow?.();
     notifyGraphRenderComplete();
@@ -30523,7 +30524,7 @@ function renderCompleteHybridGraphWires({
     const gpuSegments = [];
 
 
-    
+
 
     for (const connection of graph.connections) {
       const firstRecordIndex =
@@ -30825,10 +30826,10 @@ function renderGraphWires() {
     }
 
     if (compactSvgVisual) {
-      // Canvas2D is normally available. If the browser cannot create any 2D
-      // context, retain a complete graph in two compact SVG paths rather than
-      // falling back to a first-N DOM cap. Element count stays constant while
-      // every valid visible node and connection remains represented.
+
+
+
+
       if (compactWirePathParts.length > 0) {
         const pathData =
           compactWirePathParts.join(" ");
@@ -31359,9 +31360,9 @@ function removeGraphNodeFromRenderCaches(
     }
     graphNodeViewportSpatialDirtyNodeIds
       .delete(nodeId);
-    // Removing a middle record shifts every later array order. Keep the old
-    // buckets quarantined until the next authoritative rebuild rather than
-    // certifying a replacement source with stale or duplicate order values.
+
+
+
     graphNodeViewportSpatialSource = null;
     graphNodeViewportSpatialLength = -1;
     graphNodeViewportSpatialSourceRevision = -1;
@@ -31376,9 +31377,9 @@ function removeGraphNodeFromRenderCaches(
       typeof graphHybridRenderer.removeNodes !==
         "function"
     ) {
-      // Cached older renderer modules cannot compact a node record. Exclude
-      // it immediately so it cannot flash back as a GPU overview node; the
-      // next ordinary preparation installs the compact scene.
+
+
+
       const excluded = new Set([nodeId]);
       for (const element of
         dom.nodesHost?.children || []) {
@@ -31648,10 +31649,10 @@ async function refreshGraphAfterStructuralMutation(
             "AbortError"
           );
         }
-        // This updates only already-mounted wire records. Failure means the
-        // record is currently virtualized; it will be materialized by the
-        // next normal viewport preparation, never by a delete-triggered full
-        // canvas render.
+
+
+
+
         updateGraphWireConnections(
           ids.slice(start, start + 256)
         );
@@ -31703,9 +31704,9 @@ function scheduleStructuralGraphCommit(
           ) {
             return;
           }
-          // The caller already committed state and removed the exact DOM/SVG
-          // records. This lightweight update is deliberately the only work
-          // before the browser paints that immediate feedback.
+
+
+
           refreshGraphPaletteConfigurationAvailability();
           graphStructuralCommitFrame =
             requestProjectAnimationFrame(() => {
@@ -31733,8 +31734,8 @@ function scheduleStructuralGraphCommit(
             });
         });
     }
-    // All structural actions share one coalesced durable snapshot. No full
-    // canvas preparation or visible "Rendering connections" phase is queued.
+
+
     scheduleAcceptedGraphPersistenceAfterPaint({
       refreshGeneratedOutput: true,
       refreshCompositeActions: true
@@ -31861,9 +31862,9 @@ function deleteGraphNode(nodeId) {
         apiCompositeCustomCSharpOwnerIds(
           removedComposite
         )) {
-        // Legacy flat entries, when present, belong only to the exact
-        // document that owns the deleted Composite. Never reach out to the
-        // runtime-root registry from a nested editor.
+
+
+
         delete ownerDocument.customCSharpFiles?.[
           ownerId
         ];
@@ -32116,6 +32117,7 @@ function renderGraphInspector(options = {}) {
         )
       );
       dom.inspectorContent.appendChild(root);
+      installGraphInspectorSearch(root);
       return;
     }
 
@@ -32133,6 +32135,7 @@ function renderGraphInspector(options = {}) {
         )
       );
       dom.inspectorContent.appendChild(root);
+      installGraphInspectorSearch(root);
       return;
     }
 
@@ -32292,6 +32295,7 @@ function renderGraphInspector(options = {}) {
       );
       root.appendChild(card);
       dom.inspectorContent.appendChild(root);
+      installGraphInspectorSearch(root);
       return;
     }
 
@@ -32319,16 +32323,23 @@ function renderGraphInspector(options = {}) {
       nodeInspectorCard(node)
     );
     dom.inspectorContent.appendChild(root);
-    installInspectorOverflowSearch(root);
+    installGraphInspectorSearch(root);
   }
 
-function installInspectorOverflowSearch(root) {
+function installGraphInspectorSearch(root) {
     if (!root || !dom.inspectorContent) return;
     requestProjectAnimationFrame(() => {
-      const host = dom.inspectorContent;
-      const overflow = host.scrollHeight > host.clientHeight + 4;
+      if (
+        !root.isConnected ||
+        root.parentElement !== dom.inspectorContent
+      ) {
+        return;
+      }
       const existing = root.querySelector(":scope > .rml-graph-inspector-search");
-      if (!overflow) {
+      const entries = root.querySelectorAll(
+        ".rml-graph-inspector-card > p, .rml-graph-inspector-card > label, .rml-graph-inspector-card > fieldset, .rml-graph-inspector-card > small, .rml-graph-inspector-type-row, .rml-graph-display-value, .rml-graph-variadic-controls, .rml-graph-code-editor-actions, .rml-graph-inspector-actions > button"
+      );
+      if (entries.length <= 1) {
         existing?.remove();
         return;
       }
@@ -32346,11 +32357,24 @@ function installInspectorOverflowSearch(root) {
 
       const apply = () => {
         const query = input.value.trim().toLowerCase();
-        const entries = root.querySelectorAll(
-          ".rml-graph-inspector-card > label, .rml-graph-inspector-type-row, .rml-graph-display-value, .rml-graph-variadic-row, .rml-graph-code-editor-actions, .rml-graph-inspector-actions > button"
-        );
         for (const entry of entries) {
-          entry.hidden = Boolean(query) && !String(entry.textContent || "").toLowerCase().includes(query);
+          const controlValues = [
+            ...entry.querySelectorAll(
+              "input:not([type='search']), textarea, select"
+            )
+          ].map(control =>
+            control instanceof HTMLSelectElement
+              ? control.selectedOptions[0]?.textContent || control.value
+              : control.value
+          );
+          const searchableText = [
+            entry.innerText || "",
+            ...controlValues
+          ].join(" ").toLowerCase();
+          entry.toggleAttribute(
+            "data-rml-inspector-filtered",
+            Boolean(query) && !searchableText.includes(query)
+          );
         }
       };
       input.addEventListener("input", apply);
@@ -34313,9 +34337,9 @@ function manualReplacementPortMapping(
             : sameUniqueFamily;
     };
 
-    // A same-name/role port whose data type changed is a real incompatible
-    // correspondence. A port that simply disappeared is intentionally not an
-    // incompatibility: its own wire can be removed after confirmation.
+
+
+
     for (const oldPort of oldValues) {
       for (const newPort of newValues) {
         if (
@@ -34354,9 +34378,9 @@ function manualReplacementPortMapping(
       }
     }
 
-    // Map only a conflict-free intersection. Strongest stable identity wins;
-    // any ambiguity is left unmapped so the importer can warn and remove only
-    // that endpoint instead of guessing.
+
+
+
     for (const mode of [
       "id-and-role",
       "id",
@@ -35090,11 +35114,11 @@ function compatibleImportReplacementCandidates(
     const operatorId = String(
       requirement?.operatorId || ""
     ).trim();
-    // Candidate discovery is a read-only preflight. Registering an
-    // Unavailable placeholder here changes the node-definition revision and
-    // makes the import invalidate its own catalog epoch. The stored contract
-    // already contains every fact needed for role/type intersection, so build
-    // an isolated definition without publishing it to the active registry.
+
+
+
+
+
     const unavailableOperatorId = "";
     const unavailableDefinition =
       genericMissingCatalogDefinition(
@@ -35333,9 +35357,9 @@ function nodeInspectorCard(node) {
               node.label ||
               definition.title;
           }
-          // The retained compact title is part of the presented scene, so a
-          // custom-label edit must invalidate and republish that record just
-          // like geometry/selection changes do.
+
+
+
           invalidateGraphGpuNodeRecord(
             node.id
           );
@@ -35839,9 +35863,9 @@ function appendColorXParameterControl(
       specification.editorAppearance === true;
     const parameters =
       node.parameters || {};
-    // Inspector construction is a read-only projection. Legacy color values
-    // are normalized into a detached presentation object and enter the graph
-    // document only after a genuinely different user edit.
+
+
+
     const normalizedParameters =
       editorAppearance
         ? null
@@ -37312,9 +37336,9 @@ function detachGraphBranchReference(
     if (!branch) {
       return false;
     }
-    // Materialize the retained family index before changing the reference,
-    // then update its two entries in place. Subsequent handle/render deltas
-    // stay O(the affected branch family) instead of rebuilding all wires.
+
+
+
     branchPointUsageMap();
     const key =
       `${branch.connectionId}\u0000${branch.pointId}`;
@@ -37684,9 +37708,9 @@ function beginWireSegmentDrag(
       clientY: event.clientY
     };
 
-    // Capture every layout/curve-dependent interaction input before selection
-    // replaces the Inspector DOM. GPU-backed hits resolve against the retained
-    // analytic curve; SVG-only mode keeps its exact path-length fallback.
+
+
+
     const anchor = nearestGraphPointOnSvgPath(
       path,
       event.clientX,
@@ -37849,9 +37873,9 @@ function updateWireSegmentDrag(
       }
     );
     if (gpuWireHandleVisualActive()) {
-      // The dragged point record owns the same mutable point object, so this
-      // updates only the bounded instance buffer; rebuilding its complete
-      // connection/cell index remains deferred until the drag finishes.
+
+
+
       synchronizeGraphWireHandles();
       graphHybridRenderer?.drawNow?.();
     }
@@ -38544,10 +38568,10 @@ function activateGraphInteraction(
       return true;
     }
 
-    // Pointer capture is the lifetime boundary for every graph gesture. If
-    // the browser cannot establish it, immediately run the same authoritative
-    // restore path as a cancelled gesture instead of publishing an interaction
-    // that can become stranded outside the window.
+
+
+
+
     interaction.captureFailed = true;
     try {
       cancelInteraction(true);
@@ -38753,9 +38777,9 @@ function beginViewportPan(event) {
       graphHybridActive() ||
       graphFallbackVisualActive()
     ) {
-      // All hit tests share one immutable rectangle for this input packet.
-      // Reading layout independently for handles, nodes and wires produces
-      // redundant forced-layout work on every empty-canvas pointerdown.
+
+
+
       const viewportRectangle =
         graphViewportRectangleSnapshot();
       const gpuWireHandle =
@@ -39488,6 +39512,7 @@ function clearConnectionPreview() {
     graphHybridRenderer?.setPreview?.(
       null
     );
+    graphHybridRenderer?.drawNow?.();
     graphConnectionDragTelemetry
       .previewBackend = "none";
   }
@@ -41137,10 +41162,10 @@ function updateAutoPanPointer(
       }
     }
 
-    // A hit-test can force style/layout after the dragged node or ghost moved.
-    // It is relevant only in an edge zone where auto-pan would actually run;
-    // the entire center of the viewport has zero velocity regardless of the
-    // hovered element. Preserve the socket guard at every active edge.
+
+
+
+
     if (
       (moveX !== 0 || moveY !== 0) &&
       document
@@ -41164,9 +41189,9 @@ function updateAutoPanPointer(
 function runAutoPan(
     { deferCallback = false } = {}
   ) {
-    // Kept as an explicit causal phase for diagnostics, but it is executed
-    // only by runGraphInteractionFrame.  autoPanFrame remains a compatibility
-    // observable and can no longer own an independent animation clock.
+
+
+
     autoPanFrame = 0;
 
     if (
@@ -41235,9 +41260,9 @@ function commitGraphInteractionRendererDraw() {
       return false;
     }
     graphInteractionRendererDrawPending = false;
-    // drawNow cancels a stale renderer-owned rAF before submitting.  This is
-    // the sole interaction-frame draw, so the updated camera, node and wire
-    // endpoints become visible atomically and never compete in two callbacks.
+
+
+
     return graphHybridRenderer?.drawNow?.() !== false;
   }
 
@@ -41854,11 +41879,11 @@ function cancelInteraction(
 
     stopAutoPan();
     clearConnectionTargetStates();
-    // A cancelled interaction is a byte-exact restore.  Derived fingerprint
-    // caches are deliberately left exactly as they were (including absent or
-    // stale legacy fields); refreshing them here turned a cancel into content.
+
+
+
     if (interaction.captureFailed) {
-      // Activation was rolled back before the gesture could mutate state.
+
     } else if (
       interaction.kind === "node" ||
       interaction.kind === "pan"
@@ -41879,7 +41904,7 @@ function cancelInteraction(
     } else if (
       interaction.kind === "palette"
     ) {
-      // Palette cancellation is a pure abort: no graph or view state changed.
+
     } else if (
       interaction.kind !== "node-resize" &&
       interaction.kind !== "wire-segment" &&
@@ -42164,7 +42189,7 @@ function handleBuilderRendered(event) {
       graph.lastOpenPage =
         savedPresentationPage();
 
-      
+
       runtimeGraphViewActive = false;
       if (runtimeGraphRestoreRequested()) {
         markRestoredGraphCatalogCheckPending();
@@ -42199,10 +42224,10 @@ function handleBuilderRendered(event) {
         event?.detail
           ?.graphNormalizationChanged === true
       ) {
-        // The importer/sanitizer reports this while it is already traversing
-        // the document. Never rediscover it here with a blocking whole-project
-        // stringify/hash. The installed input remains the acknowledged
-        // baseline; only the reported normalized graph receives a new revision.
+
+
+
+
         importedGraphNormalizationMutation =
           acceptGraphDocumentMutation({
             mutationClass: "topology"
@@ -42392,9 +42417,9 @@ function initializeNodeGraphHost() {
       typedGraphCodegenCacheKey = "";
       typedGraphCodegenCache = null;
     } else {
-      // Loading a saved graph is not a content mutation. Keep its persisted
-      // reference for lightweight view updates instead of serializing the
-      // complete project again during startup.
+
+
+
       lastPersistedGraphReference =
         initialExtensionState;
     }
@@ -43403,9 +43428,9 @@ function restorePreservedGraphCatalogOperators(
       window.RMLFrooxComponentCatalog ||
       null;
     if (catalog && !graphCatalogGateSettled) {
-      // Do not register placeholders while the real factory may still be
-      // claiming these IDs. Stored contracts are preserved by sanitization
-      // and are restored only after the catalog gate has settled.
+
+
+
       graphCatalogRestoreUnresolvedOperatorIds =
         new Set();
       return Object.freeze({
@@ -44469,7 +44494,7 @@ function handleApiNodeFactoryReady() {
     }
 
 
-    
+
 
     const revision = Number(
       window.__RMLNodeDefinitionRevision
@@ -44485,7 +44510,7 @@ function handleApiNodeFactoryReady() {
     }
 
 
-    
+
     restoreSavedPresentationIfReady();
     void scheduleOpenGraphCatalogReconciliation()
       .finally(() => {
@@ -44511,9 +44536,9 @@ function handleGraphCatalogLoaded() {
       "The API catalog changed. Rebuilding the required Runtime Graph node factory in this session…";
 
     if (runtimeGraphRestoreRequested()) {
-      // Keep the exact locally stored graph editable while the replacement
-      // catalog is rebuilt. Only catalog-dependent creation and export remain
-      // subject to the verified-catalog contract.
+
+
+
       activateGraphMode();
     }
 
@@ -44624,7 +44649,7 @@ function refreshAfterNodeModulesReady(
 
 async function initializeImmediately() {
 
-    
+
 
     cacheDom();
     ensurePackButton();
@@ -44716,7 +44741,7 @@ async function initializeImmediately() {
         }
         if (catalogReady) {
 
-          
+
 
           restoreSavedPresentationIfReady();
           void scheduleOpenGraphCatalogReconciliation()
@@ -44739,7 +44764,7 @@ Object.defineProperty(
   "RMLNodeGraphViewModuleId",
   {
     value:
-      "1.20.31-universal-presentation-dev23",
+      "1.20.31-universal-presentation-dev27",
     writable: false,
     enumerable: true,
     configurable: true

@@ -1,5 +1,6 @@
 (() => {
   "use strict";
+  // RML Builder ui: scroll_hierarchy.
 
   if (window.RMLScrollHierarchy?.version >= 9) {
     return;

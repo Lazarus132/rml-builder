@@ -1,8 +1,9 @@
 (() => {
   "use strict";
+  // RML Builder bootstrap: architecture_gate.
 
   const MODULE_ID =
-    "1.20.31-universal-presentation-dev23";
+    "1.20.31-universal-presentation-dev27";
   const GATE_VERSION = 1;
   const DETECTION_TIMEOUT_MS = 5000;
   const HIGH_ENTROPY_HINTS = Object.freeze([

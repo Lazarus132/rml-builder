@@ -1,4 +1,5 @@
 "use strict";
+// RML Builder workers: compiler_worker.
 
 self.window = self;
 

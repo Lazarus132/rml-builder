@@ -1,6 +1,7 @@
 "use strict";
+// Runtime Graph node and type registry.
 
-// Runtime Graph registry, fixed node definitions and extension contract.
+
 
 const API_EXPORT_VERIFICATION_SCHEMA_VERSION = 3;
 

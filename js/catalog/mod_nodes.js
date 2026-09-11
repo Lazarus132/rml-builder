@@ -1,5 +1,6 @@
 (() => {
   "use strict";
+  // RML Builder catalog: mod_nodes.
 
   const registry = window.RMLModNodeRegistry;
   const requiredRegistryCapabilities = [
