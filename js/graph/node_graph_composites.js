@@ -6879,7 +6879,8 @@ function apiCompositeNodeHasExposablePorts(
               endpoint
             )
           ) &&
-          !apiCompositePortHasInternalWire(
+          !apiCompositePortHasInternalWireInDocument(
+            composite,
             endpoint
           )
         ) {
@@ -8719,23 +8720,18 @@ function unpackApiCompositeNode(
   ) {
     if (
       !graph ||
-      customCSharpEditor
+      customCSharpEditor ||
+      apiCompositeEditor
     ) {
       return false;
     }
-    const ownerDocument =
-      activeApiCompositeGraphDocument();
     const composite =
-      ownerDocument?.apiCompositeGraphs?.[
+      graph.apiCompositeGraphs?.[
         containerNodeId
       ];
     const owner =
       findGraphNode(containerNodeId);
-    if (!ownerDocument || !composite || !owner) {
-      showGraphMessage(
-        "The selected Composite is not owned by the currently visible graph level. Nothing was changed.",
-        "error"
-      );
+    if (!composite || !owner) {
       return false;
     }
     const minimumInternalX = Math.min(
@@ -8858,15 +8854,15 @@ function unpackApiCompositeNode(
       })
     ];
     const unpackedComposites = {
-      ...(ownerDocument.apiCompositeGraphs || {})
+      ...(graph.apiCompositeGraphs || {})
     };
-    ownerDocument.customCSharpFiles =
+    graph.customCSharpFiles =
       mergeCustomCSharpFileRegistry(
         mergeCustomCSharpFileRegistry(
           {},
           composite.customCSharpFiles
         ),
-        ownerDocument.customCSharpFiles
+        graph.customCSharpFiles
       );
     delete unpackedComposites[
       containerNodeId
@@ -8927,7 +8923,7 @@ function unpackApiCompositeNode(
       liveConnections[index] =
         connections[index];
     }
-    ownerDocument.apiCompositeGraphs =
+    graph.apiCompositeGraphs =
       unpackedComposites;
     graph.selectedNodeIds =
       composite.nodes.map(node =>
@@ -8949,7 +8945,7 @@ function unpackApiCompositeNode(
       mutationClass: "topology"
     });
     showGraphMessage(
-      `Composite unpacked. ${composite.nodes.length.toLocaleString("de-DE")} node positions and all stored wire routes were restored.`,
+      `API Composite unpacked. ${composite.nodes.length.toLocaleString("de-DE")} node positions and all stored wire routes were restored.`,
       "success"
     );
     return true;

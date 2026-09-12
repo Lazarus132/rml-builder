@@ -17128,71 +17128,21 @@ function createAutomaticOperatorNode(
     const width =
       definition.width ||
       280;
-    const estimatedHeight = 190;
-    const visibleBounds =
-      automaticVisibleGraphBounds();
     let requestedX =
       dropPoint.x - width / 2;
     let requestedY =
       dropPoint.y - 82;
 
-    if (visibleBounds) {
-      const margin = 18;
-      requestedX = nodeGraphClamp(
-        requestedX,
-        visibleBounds.left + margin,
-        Math.max(
-          visibleBounds.left + margin,
-          visibleBounds.right -
-            width -
-            margin
-        )
-      );
-      requestedY = nodeGraphClamp(
-        requestedY,
-        visibleBounds.top + margin,
-        Math.max(
-          visibleBounds.top + margin,
-          visibleBounds.bottom -
-            estimatedHeight -
-            margin
-        )
-      );
-    }
-
     const node =
       createOperatorNodeRecord(
         operatorId,
         requestedX,
-        requestedY
+        requestedY,
+        { exactPosition: true }
       );
 
     if (!node) {
       return null;
-    }
-
-    if (visibleBounds) {
-      const margin = 18;
-      node.x = nodeGraphClamp(
-        node.x,
-        visibleBounds.left + margin,
-        Math.max(
-          visibleBounds.left + margin,
-          visibleBounds.right -
-            width -
-            margin
-        )
-      );
-      node.y = nodeGraphClamp(
-        node.y,
-        visibleBounds.top + margin,
-        Math.max(
-          visibleBounds.top + margin,
-          visibleBounds.bottom -
-            estimatedHeight -
-            margin
-        )
-      );
     }
 
     const nodeCenterX =
@@ -17524,11 +17474,14 @@ function createAutomaticMonitorForOutput(
         interaction
       );
     const sourcePoint =
+      interaction.startAnchor ||
       socketGraphCenter(
         interaction.start.nodeId,
         interaction.start.portId,
-        "output"
-      ) || dropPoint;
+        "output",
+        { allowCurrentlyHidden: true }
+      ) ||
+      dropPoint;
     const operatorId =
       valueType === "impulse"
         ? "debug.displayImpulse"
@@ -27095,11 +27048,15 @@ function estimatedSocketGraphCenter(
 function socketGraphCenter(
     nodeId,
     portId,
-    direction
+    direction,
+    {
+      allowCurrentlyHidden = false
+    } = {}
   ) {
     const node = findGraphNode(nodeId);
     if (
       node &&
+      !allowCurrentlyHidden &&
       !graphPortVisibleInCurrentEditor(
         nodeId,
         portId,
@@ -28161,7 +28118,7 @@ function indexGraphWireHandles(connectionIds = null, usage = branchPointUsageMap
         graphConnectionImportRecoveryBroken(
           connection
         )
-          ? "#ff3b3b"
+          ? IMPORT_RECOVERY_BROKEN_WIRE_COLOR
           : typeInfo(
               resolvePortType(
                 spec,
@@ -28660,7 +28617,13 @@ function synchronizeGraphWireHandles() {
       }
       const attributes = { cx: String(point.x), cy: String(point.y),
         r: branches > 0 ? "8" : selected ? "7" : "5.5",
-        class: `rml-graph-wire-point ${branches > 0 ? "junction" : "bend"}${selected ? " selected" : ""}${dragging ? " dragging" : ""}` };
+        class: `rml-graph-wire-point ${branches > 0 ? "junction" : "bend"}${
+          graphConnectionImportRecoveryBroken(
+            connection
+          )
+            ? " import-recovery-broken"
+            : ""
+        }${selected ? " selected" : ""}${dragging ? " dragging" : ""}` };
       for (const [name, value] of Object.entries(attributes)) {
         if (handle.getAttribute(name) !== value) handle.setAttribute(name, value);
       }
@@ -28711,6 +28674,12 @@ function createWirePointHandle(
         junction
           ? "junction"
           : "bend"
+      }${
+        graphConnectionImportRecoveryBroken(
+          connection
+        )
+          ? " import-recovery-broken"
+          : ""
       }${selected ? " selected" : ""}${dragging ? " dragging" : ""}`
     );
     handle.setAttribute(
@@ -29324,7 +29293,7 @@ function gpuSegmentsForConnection(
       graphConnectionImportRecoveryBroken(
         connection
       )
-        ? "#ff3b3b"
+        ? IMPORT_RECOVERY_BROKEN_WIRE_COLOR
         : typeInfo(
             concreteType
           ).color;
@@ -29383,6 +29352,9 @@ function incidentGraphConnectionIds(
       ) || []
     );
   }
+
+const IMPORT_RECOVERY_BROKEN_WIRE_COLOR =
+  "#ff3b3b";
 
 function graphNodeImportRecoveryBroken(
   nodeId
@@ -29737,7 +29709,7 @@ function updateGraphWireConnections(
           graphConnectionImportRecoveryBroken(
             connection
           )
-            ? "#ff3b3b"
+            ? IMPORT_RECOVERY_BROKEN_WIRE_COLOR
             : typeInfo(
                 concreteType
               ).color;
@@ -29752,6 +29724,12 @@ function updateGraphWireConnections(
           ) {
             element.dataset.rmlWireColor =
               color;
+            element.classList.toggle(
+              "import-recovery-broken",
+              graphConnectionImportRecoveryBroken(
+                connection
+              )
+            );
             element.classList.toggle(
               "impulse",
               impulse
@@ -30410,7 +30388,7 @@ async function prepareCompleteHybridGraphWires(
           graphConnectionImportRecoveryBroken(
             connection
           )
-            ? "#ff3b3b"
+            ? IMPORT_RECOVERY_BROKEN_WIRE_COLOR
             : typeInfo(
                 resolvePortType(
                   specification,
@@ -30769,7 +30747,7 @@ function renderGraphWires() {
         graphConnectionImportRecoveryBroken(
           connection
         )
-          ? "#ff3b3b"
+          ? IMPORT_RECOVERY_BROKEN_WIRE_COLOR
           : typeInfo(
               concreteType
             ).color;
@@ -30817,6 +30795,12 @@ function renderGraphWires() {
               impulse ? " impulse" : ""
             }${
               selected ? " selected" : ""
+            }${
+              graphConnectionImportRecoveryBroken(
+                connection
+              )
+                ? " import-recovery-broken"
+                : ""
             }${
               targetState
                 ? ` branch-target-${targetState}`
@@ -32087,6 +32071,222 @@ function installGraphInspectorFocusGuard() {
         });
       }
     );
+  }
+
+
+function apiCompositeVisibleUnconnectedSocketKeys(
+    nodeId
+  ) {
+    if (!apiCompositeEditor) {
+      return new Set();
+    }
+
+    const article =
+      dom.nodesHost?.querySelector(
+        `[data-graph-node-id="${CSS.escape(
+          String(nodeId || "")
+        )}"]`
+      );
+
+    if (!article) {
+      return new Set();
+    }
+
+    const connected =
+      connectedPortKeys();
+    const result =
+      new Set();
+
+    for (const socket of
+      article.querySelectorAll(
+        ".rml-graph-socket"
+      )) {
+      const direction =
+        socket.dataset.direction ===
+          "output"
+          ? "output"
+          : "input";
+      const portId =
+        String(
+          socket.dataset.portId || ""
+        );
+      const currentNodeId =
+        String(
+          socket.dataset.nodeId ||
+          nodeId ||
+          ""
+        );
+
+      if (!portId || !currentNodeId) {
+        continue;
+      }
+
+      const key =
+        `${direction}:${currentNodeId}:${portId}`;
+
+      if (!connected.has(key)) {
+        result.add(key);
+      }
+    }
+
+    return result;
+  }
+
+function apiCompositeNodeHasVisibleUnconnectedPorts(
+    nodeId
+  ) {
+    return (
+      apiCompositeVisibleUnconnectedSocketKeys(
+        nodeId
+      ).size > 0
+    );
+  }
+
+function apiCompositeNodeHasHiddenExposablePorts(
+    nodeId
+  ) {
+    if (
+      !apiCompositeEditor ||
+      !apiCompositeNodeHasExposablePorts(
+        nodeId
+      )
+    ) {
+      return false;
+    }
+
+    const node =
+      findGraphNode(nodeId);
+    const definition =
+      node
+        ? nodeDefinition(node)
+        : null;
+
+    if (!node || !definition) {
+      return false;
+    }
+
+    const visible =
+      new Set();
+    const article =
+      dom.nodesHost?.querySelector(
+        `[data-graph-node-id="${CSS.escape(
+          String(nodeId || "")
+        )}"]`
+      );
+
+    for (const socket of
+      article?.querySelectorAll(
+        ".rml-graph-socket"
+      ) || []) {
+      const direction =
+        socket.dataset.direction ===
+          "output"
+          ? "output"
+          : "input";
+      const portId =
+        String(
+          socket.dataset.portId || ""
+        );
+      if (portId) {
+        visible.add(
+          `${direction}:${String(
+            nodeId || ""
+          )}:${portId}`
+        );
+      }
+    }
+
+    const connected =
+      connectedPortKeys();
+    const exposed =
+      activeApiCompositeVisibleBoundaryKeys() ||
+      new Set();
+
+    for (const direction of [
+      "input",
+      "output"
+    ]) {
+      const ports =
+        direction === "input"
+          ? definition.inputs || []
+          : definition.outputs || [];
+
+      for (const specification of ports) {
+        const portId =
+          String(
+            specification?.id || ""
+          );
+
+        if (!portId) {
+          continue;
+        }
+
+        const socketKey =
+          `${direction}:${String(
+            nodeId || ""
+          )}:${portId}`;
+
+        const boundaryKey =
+          apiCompositeBoundaryEndpointKey({
+            direction,
+            internalNodeId:
+              String(nodeId || ""),
+            internalPortId:
+              portId
+          });
+
+        if (
+          !connected.has(socketKey) &&
+          !exposed.has(boundaryKey) &&
+          !visible.has(socketKey)
+        ) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+function hideUnusedApiCompositeNodePortsIncludingVisible(
+    nodeId
+  ) {
+    const hasExposedUnused =
+      apiCompositeNodeHasUnusedExposedPorts(
+        nodeId
+      );
+    const hasVisibleUnused =
+      apiCompositeNodeHasVisibleUnconnectedPorts(
+        nodeId
+      );
+
+    if (!hasExposedUnused && !hasVisibleUnused) {
+      return false;
+    }
+
+    if (hasExposedUnused) {
+      /*
+       * The canonical Composite helper removes real boundary contracts and
+       * already performs a full node/wire refresh. That refresh also clears
+       * any purely visual retained-unconnected sockets.
+       */
+      return hideUnusedApiCompositeNodePorts(
+        nodeId
+      );
+    }
+
+    /*
+     * A just-disconnected port may still be intentionally visible in the
+     * current Composite editor even though it was never exposed as an outer
+     * boundary. Hide is therefore a presentation operation only: no boundary
+     * contract or wire topology is changed.
+     */
+    renderGraphNodesAndWires();
+    renderGraphInspector({
+      force: true
+    });
+    persistGraphViewLightweight();
+    return true;
   }
 
 function renderGraphInspector(options = {}) {
@@ -35692,7 +35892,7 @@ function nodeInspectorCard(node) {
     } else {
       if (
         apiCompositeEditor &&
-        apiCompositeNodeHasExposablePorts(
+        apiCompositeNodeHasHiddenExposablePorts(
           node.id
         )
       ) {
@@ -35709,15 +35909,20 @@ function nodeInspectorCard(node) {
       }
       if (
         apiCompositeEditor &&
-        apiCompositeNodeHasUnusedExposedPorts(
-          node.id
+        (
+          apiCompositeNodeHasUnusedExposedPorts(
+            node.id
+          ) ||
+          apiCompositeNodeHasVisibleUnconnectedPorts(
+            node.id
+          )
         )
       ) {
         actions.appendChild(
           inspectorButton(
             "Hide all unused ports",
             () =>
-              hideUnusedApiCompositeNodePorts(
+              hideUnusedApiCompositeNodePortsIncludingVisible(
                 node.id
               ),
             "primary"
@@ -39514,6 +39719,14 @@ function beginConnectionDrag(event) {
       }
     }
 
+    const startAnchor =
+      socketGraphCenter(
+        effectiveStart.nodeId,
+        effectiveStart.portId,
+        effectiveStart.direction,
+        { allowCurrentlyHidden: true }
+      );
+
     const interaction = {
       kind: "connection",
       pointerId: event.pointerId,
@@ -39521,6 +39734,7 @@ function beginConnectionDrag(event) {
         guidedAutomaticNodeCreationSuppressed,
       start: effectiveStart,
       originalStart: startRef,
+      startAnchor,
       startType,
       mutationSelection,
       detachedConnection,
@@ -39603,10 +39817,12 @@ function renderConnectionPreview(
     }
 
     const start =
+      interaction.startAnchor ||
       socketGraphCenter(
         interaction.start.nodeId,
         interaction.start.portId,
-        interaction.start.direction
+        interaction.start.direction,
+        { allowCurrentlyHidden: true }
       );
 
     if (!start) {
@@ -39676,7 +39892,21 @@ function renderConnectionPreview(
         currentAnalysis?.bindings ||
           new Map()
       ) || "generic";
-    const color = typeInfo(type).color;
+    const previewImportRecoveryBroken =
+      graphNodeImportRecoveryBroken(
+        interaction.start.nodeId
+      ) ||
+      (
+        interaction.detachedConnection &&
+        graphConnectionImportRecoveryBroken(
+          interaction.detachedConnection
+        )
+      );
+
+    const color =
+      previewImportRecoveryBroken
+        ? IMPORT_RECOVERY_BROKEN_WIRE_COLOR
+        : typeInfo(type).color;
     const impulse =
       type === "impulse";
 
@@ -39725,6 +39955,10 @@ function renderConnectionPreview(
     graphConnectionPreviewPath.setAttribute(
       "d",
       wirePath(from, to)
+    );
+    graphConnectionPreviewPath.classList.toggle(
+      "import-recovery-broken",
+      previewImportRecoveryBroken
     );
     graphConnectionPreviewPath.dataset
       .rmlWireColor = color;

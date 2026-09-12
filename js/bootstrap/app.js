@@ -30564,6 +30564,90 @@ function assertRuntimeGraphViewsIdentity(
       );
     }
     if (exactCompositeGeometry) {
+      /*
+       * API Composite initialization is allowed to canonicalize storage order
+       * (boundary array order / branchRouting property insertion order), but it
+       * must not change any semantic geometry, endpoint or routing identity.
+       *
+       * The previous raw JSON.stringify comparison treated harmless ordering
+       * normalization as graph damage. That false-positive is especially
+       * visible after an API replacement, because replacement legitimately
+       * rewrites port identities before the graph host initializes.
+       */
+      const normalizedPoint = point => ({
+        id: String(point?.id || ""),
+        x: Number(point?.x),
+        y: Number(point?.y)
+      });
+
+      const normalizedBranchFrom = branch =>
+        branch &&
+        typeof branch === "object" &&
+        !Array.isArray(branch)
+          ? {
+              connectionId: String(
+                branch.connectionId || ""
+              ),
+              pointId: String(
+                branch.pointId || ""
+              )
+            }
+          : null;
+
+      const normalizedBoundaryPorts = value =>
+        (Array.isArray(value)
+          ? value
+          : []
+        )
+          .map(boundary => ({
+            id: String(boundary?.id || ""),
+            direction:
+              boundary?.direction === "input"
+                ? "input"
+                : "output",
+            internalNodeId: String(
+              boundary?.internalNodeId || ""
+            ),
+            internalPortId: String(
+              boundary?.internalPortId || ""
+            )
+          }))
+          .sort((left, right) =>
+            [
+              left.direction,
+              left.id,
+              left.internalNodeId,
+              left.internalPortId
+            ].join("\u0000").localeCompare(
+              [
+                right.direction,
+                right.id,
+                right.internalNodeId,
+                right.internalPortId
+              ].join("\u0000")
+            )
+          );
+
+      const normalizedBranchRouting = value =>
+        Object.entries(
+          value &&
+          typeof value === "object" &&
+          !Array.isArray(value)
+            ? value
+            : {}
+        )
+          .map(([connectionId, branch]) => ({
+            connectionId:
+              String(connectionId || ""),
+            branch:
+              normalizedBranchFrom(branch)
+          }))
+          .sort((left, right) =>
+            left.connectionId.localeCompare(
+              right.connectionId
+            )
+          );
+
       const geometrySignature = value =>
         JSON.stringify({
           nodes: [...value.nodes]
@@ -30607,10 +30691,16 @@ function assertRuntimeGraphViewsIdentity(
                 connection?.toPort || ""
               ),
               points:
-                connection?.points || [],
+                (Array.isArray(
+                  connection?.points
+                )
+                  ? connection.points
+                  : []
+                ).map(normalizedPoint),
               branchFrom:
-                connection?.branchFrom ||
-                null
+                normalizedBranchFrom(
+                  connection?.branchFrom
+                )
             }))
             .sort((left, right) =>
               left.id.localeCompare(
@@ -30618,9 +30708,13 @@ function assertRuntimeGraphViewsIdentity(
               )
             ),
           boundaryPorts:
-            value.boundaryPorts || [],
+            normalizedBoundaryPorts(
+              value.boundaryPorts
+            ),
           branchRouting:
-            value.branchRouting || {}
+            normalizedBranchRouting(
+              value.branchRouting
+            )
         });
       if (
         geometrySignature(
@@ -30752,7 +30846,7 @@ function assertImportedGraphIdentity(
   assertRuntimeGraphViewsIdentity(
     expectedGraph,
     actualGraph,
-    "The Runtime Graph changed an embedded Custom C# graph during initialization"
+    "The Runtime Graph changed an embedded Runtime Graph during initialization"
   );
 }
 
@@ -31271,7 +31365,8 @@ async function applyLoadedProjectWithFeedback(
   {
     displayName = "project",
     workSession = 0,
-    prevalidatedPrerequisites = null
+    prevalidatedPrerequisites = null,
+    forceConfigurationPage = false
   } = {}
 ) {
   const session =
@@ -31412,11 +31507,49 @@ async function applyLoadedProjectWithFeedback(
       );
     }
 
+    /*
+     * A project replacement must never inherit an editor path into an
+     * embedded Runtime Graph from the project being replaced. When import is
+     * initiated while an API Composite (possibly nested) is open, the graph
+     * host can otherwise finish/persist that old presentation path while the
+     * new root model is being installed. That makes a nested graph appear to
+     * have changed during initialization and can also poison rollback.
+     *
+     * Explicit file imports therefore install on the Configuration Outline.
+     * The complete Runtime Graph is still synchronized and identity-checked,
+     * but no stale Composite presentation is materialized during the atomic
+     * replacement transaction. The user can open Runtime Graph afterwards
+     * from its clean root.
+     */
+    if (forceConfigurationPage) {
+      project.workspace = {
+        ...(isPlainObject(project.workspace)
+          ? project.workspace
+          : {}),
+        activePage: "configuration-outline"
+      };
+      if (
+        isPlainObject(
+          project.extensions?.typedNodeGraph
+        )
+      ) {
+        project.extensions.typedNodeGraph = {
+          ...project.extensions.typedNodeGraph,
+          lastOpenPage:
+            "configuration-outline"
+        };
+      }
+    }
+
     projectApplied = true;
     const importedProjectEpoch =
       applyLoadedProject(
         project,
-        { render: false }
+        {
+          render: false,
+          useJsonPageAssociation:
+            !forceConfigurationPage
+        }
       );
     pendingImportedGraphAnalysisCertificate =
       prerequisites.analysisCertificate ||
@@ -32549,7 +32682,8 @@ async function loadProjectJsonFile(
           displayName: file.name,
           workSession,
           prevalidatedPrerequisites:
-            prerequisites
+            prerequisites,
+          forceConfigurationPage: true
         }
       );
       if (
