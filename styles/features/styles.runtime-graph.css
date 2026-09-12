@@ -3147,3 +3147,36 @@ body.rml-node-graph-mode.rml-graph-edit-mode #inspector-content {
 .rml-graph-root.rml-graph-tiny-toolbar .rml-graph-svg-warning {
   display: none;
 }
+
+.rml-graph-node.import-recovery-broken {
+  border-color: #ff3b3b !important;
+  box-shadow:
+    0 0 0 1px #ff3b3b,
+    0 0 18px rgba(255, 59, 59, 0.32) !important;
+}
+
+.rml-graph-node.import-recovery-broken
+.rml-graph-node-header {
+  background:
+    rgba(160, 24, 24, 0.72) !important;
+}
+
+.rml-graph-node.import-recovery-broken
+.rml-graph-node-symbol {
+  filter:
+    drop-shadow(
+      0 0 5px rgba(255, 59, 59, 0.85)
+    );
+}
+
+.rml-graph-node.import-recovery-broken::after {
+  content: "UNRESOLVED";
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  color: #ff8b8b;
+  pointer-events: none;
+}

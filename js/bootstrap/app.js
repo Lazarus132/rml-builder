@@ -9499,6 +9499,230 @@ escapeXml(
       )]);
 }
 
+
+
+function importRecoveryDiagnosticScope(
+  extensionState
+) {
+  const nodeIds = new Set();
+  const connectionIds = new Set();
+
+  for (const view of
+    projectRuntimeGraphViews(
+      extensionState
+    )) {
+    const nodes =
+      Array.isArray(view.graph?.nodes)
+        ? view.graph.nodes
+        : [];
+    const recoveryNodeIds =
+      new Set(
+        nodes
+          .filter(node =>
+            node?.importRecovery
+              ?.unresolved === true
+          )
+          .map(node =>
+            String(node?.id || "")
+          )
+          .filter(Boolean)
+      );
+
+    for (const nodeId of
+      recoveryNodeIds) {
+      nodeIds.add(nodeId);
+    }
+
+    for (const connection of
+      Array.isArray(
+        view.graph?.connections
+      )
+        ? view.graph.connections
+        : []) {
+      const fromNode =
+        String(
+          connection?.fromNode || ""
+        );
+      const toNode =
+        String(
+          connection?.toNode || ""
+        );
+
+      if (
+        recoveryNodeIds.has(fromNode) ||
+        recoveryNodeIds.has(toNode)
+      ) {
+        const connectionId =
+          String(
+            connection?.id || ""
+          );
+        if (connectionId) {
+          connectionIds.add(
+            connectionId
+          );
+        }
+      }
+    }
+  }
+
+  return {
+    nodeIds,
+    connectionIds
+  };
+}
+
+function isImportRecoveryExportOnlyDiagnostic(
+  diagnostic,
+  extensionState
+) {
+  const message =
+    String(diagnostic || "");
+
+  const scope =
+    importRecoveryDiagnosticScope(
+      extensionState
+    );
+
+  if (
+    scope.nodeIds.size === 0
+  ) {
+    return false;
+  }
+
+  if (
+    message.startsWith(
+      "Import recovery:"
+    ) ||
+    message.includes(
+      "preserves unavailable API"
+    ) ||
+    (
+      message.includes(
+        "Unavailable API contract"
+      ) &&
+      message.includes(
+        "must be resolved before export"
+      )
+    )
+  ) {
+    return true;
+  }
+
+  /*
+   * A preserved recovery node may intentionally retain old port IDs.
+   * Connections incident to that node are therefore expected to be
+   * structurally unresolved until the user repairs/removes the node.
+   * Those diagnostics remain export blockers, but must not restart
+   * the import replacement transaction.
+   */
+  for (const nodeId of
+    scope.nodeIds) {
+    if (
+      nodeId &&
+      message.includes(nodeId)
+    ) {
+      return true;
+    }
+  }
+
+  for (const connectionId of
+    scope.connectionIds) {
+    if (
+      connectionId &&
+      message.includes(
+        connectionId
+      )
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function importBlockingDiagnostics(
+  diagnostics,
+  extensionState
+) {
+  return (
+    Array.isArray(diagnostics)
+      ? diagnostics
+      : []
+  )
+    .filter(Boolean)
+    .filter(diagnostic =>
+      !isImportRecoveryExportOnlyDiagnostic(
+        diagnostic,
+        extensionState
+      )
+    );
+}
+
+function validationGraphWithoutImportRecovery(
+  extensionState
+) {
+  const graph =
+    structuredClone(
+      extensionState
+    );
+
+  const removals = [];
+
+  for (const view of
+    projectRuntimeGraphViews(graph)) {
+    for (const node of
+      Array.isArray(view.graph?.nodes)
+        ? view.graph.nodes
+        : []) {
+      if (
+        node?.importRecovery
+          ?.unresolved !== true
+      ) {
+        continue;
+      }
+
+      removals.push({
+        path: view.path,
+        nodeId:
+          String(node.id || ""),
+        removeNode: true
+      });
+    }
+  }
+
+  if (removals.length === 0) {
+    return graph;
+  }
+
+  const replacementTransaction =
+    window.RMLDynamicGraphHost
+      ?.applyCatalogMigrationsPreservingGeometry;
+
+  if (
+    typeof replacementTransaction !==
+      "function"
+  ) {
+    return graph;
+  }
+
+  const transaction =
+    replacementTransaction(
+      graph,
+      {},
+      {},
+      removals
+    );
+
+  try {
+    transaction.assertGeometry();
+    transaction.commit();
+    return graph;
+  } catch {
+    transaction.rollback?.();
+    return graph;
+  }
+}
+
 function getDiagnostics() {
   const guidanceStatus = generatedGuidanceStatus();
   if (guidanceStatus) return [guidanceStatus];
@@ -9737,6 +9961,46 @@ function getDiagnostics() {
       )) {
       errors.push(
         `Generated source: ${diagnostic}`
+      );
+    }
+  }
+
+  for (const view of
+    projectRuntimeGraphViews(
+      state.extensions?.typedNodeGraph
+    )) {
+    for (const node of
+      Array.isArray(view.graph?.nodes)
+        ? view.graph.nodes
+        : []) {
+      if (
+        node?.importRecovery
+          ?.unresolved !== true
+      ) {
+        continue;
+      }
+
+      const recovery =
+        node.importRecovery;
+
+      const originalOperatorId =
+        String(
+          recovery.originalOperatorId ||
+          node.operatorId ||
+          "<unknown>"
+        );
+
+      errors.push(
+        `Import recovery: '${
+          node.label ||
+          node.id ||
+          originalOperatorId
+        }' [${originalOperatorId}] in ${
+          view.path
+        } is unresolved. ${
+          recovery.reason ||
+          "Repair or remove this node before exporting."
+        }`
       );
     }
   }
@@ -25571,6 +25835,16 @@ function resetBuilderReplacementUi() {
     elements.builderWorkReplacementCancel.onblur =
       null;
   }
+  if (elements.builderWorkReplacementSkip) {
+    elements.builderWorkReplacementSkip.onclick =
+      null;
+
+    elements.builderWorkReplacementSkip.textContent =
+      "Skip for now";
+
+    elements.builderWorkReplacementSkip.hidden =
+      false;
+  }
   if (elements.builderWorkReplacementConfirm) {
     elements.builderWorkReplacementConfirm.onclick =
       null;
@@ -25599,6 +25873,47 @@ function resetBuilderReplacementUi() {
       "aria-modal"
     );
   }
+}
+
+
+function assertReplacementDialogActuallyVisible(
+  { operatorId = "", index = -1, total = 0, candidateCount = 0 } = {}
+) {
+  /*
+   * #builder-work-replacement is the real replacement UI container.
+   * There is intentionally no separate builder-work-replacement-dialog element.
+   */
+  const dialog = elements.builderWorkReplacement;
+  const confirm = elements.builderWorkReplacementConfirm;
+  const cancel = elements.builderWorkReplacementCancel;
+  const skip = elements.builderWorkReplacementSkip;
+  const style = dialog ? window.getComputedStyle(dialog) : null;
+  const rect = dialog?.getBoundingClientRect?.();
+  const visible = Boolean(
+    dialog &&
+    dialog.isConnected &&
+    dialog.hidden !== true &&
+    style &&
+    style.display !== "none" &&
+    style.visibility !== "hidden" &&
+    Number(style.opacity || "1") > 0 &&
+    rect &&
+    rect.width > 0 &&
+    rect.height > 0
+  );
+
+  if (!dialog || !confirm || !cancel || !skip) {
+    throw new Error(
+      `[HARD REPLACEMENT UI ERROR] Replacement ${Number(index) + 1} of ${Number(total)} for '${String(operatorId || "<unknown>")}' cannot be shown because required replacement-panel controls are missing. dialog=${Boolean(dialog)}, confirm=${Boolean(confirm)}, cancel=${Boolean(cancel)}, skip=${Boolean(skip)}, candidates=${Number(candidateCount) || 0}.`
+    );
+  }
+
+  if (!visible) {
+    throw new Error(
+      `[HARD REPLACEMENT UI ERROR] Replacement ${Number(index) + 1} of ${Number(total)} for '${String(operatorId || "<unknown>")}' was requested but the replacement panel is not visibly rendered. hidden=${String(dialog.hidden)}, display=${String(style?.display)}, visibility=${String(style?.visibility)}, opacity=${String(style?.opacity)}, rect=${Number(rect?.width || 0)}x${Number(rect?.height || 0)}, candidates=${Number(candidateCount) || 0}.`
+    );
+  }
+  return true;
 }
 
 async function requestBuilderReplacementChoice(
@@ -25640,12 +25955,6 @@ async function requestBuilderReplacementChoice(
         )
       : [];
 
-  if (values.length === 0) {
-    throw new Error(
-      `No verified compatible replacement is available for '${String(requirement?.operatorId || "<unknown>")}'. The JSON was not loaded.`
-    );
-  }
-
   window.clearTimeout(
     builderWorkWatchdog
   );
@@ -25661,6 +25970,8 @@ async function requestBuilderReplacementChoice(
     elements.builderWorkReplacementConfirm;
   const cancel =
     elements.builderWorkReplacementCancel;
+  const skip =
+    elements.builderWorkReplacementSkip;
   const summary =
     elements.builderWorkReplacementSummary;
   const queueHost =
@@ -25778,11 +26089,13 @@ async function requestBuilderReplacementChoice(
       state.textContent =
         status === "selected"
           ? "✓"
-          : status === "current"
-            ? "›"
-            : status === "unavailable"
-              ? "!"
-              : "·";
+          : status === "skipped"
+            ? "!"
+            : status === "current"
+              ? "›"
+              : status === "unavailable"
+                ? "!"
+                : "·";
       const name =
         document.createElement("span");
       name.className =
@@ -26135,6 +26448,15 @@ async function requestBuilderReplacementChoice(
           finish(resolve, selected);
         }
       };
+      const skipReplacement = () => {
+        finish(
+          resolve,
+          Object.freeze({
+            skipped: true,
+            operatorId
+          })
+        );
+      };
       const rejectImport = source => {
         const error = new Error(
           `Project import was cancelled by the ${source} before the required API replacement was confirmed. The JSON was not loaded.`
@@ -26227,6 +26549,9 @@ async function requestBuilderReplacementChoice(
         );
       };
       confirm.onclick = accept;
+      if (skip) {
+        skip.onclick = skipReplacement;
+      }
       cancel.onpointerdown = event => {
         cancelPointerArmed =
           event.isPrimary !== false &&
@@ -26279,6 +26604,20 @@ async function requestBuilderReplacementChoice(
   renderReplacementQueue();
   renderCandidates();
   await paintBuilderUi();
+
+  await new Promise(resolve =>
+    window.requestAnimationFrame(() =>
+      window.requestAnimationFrame(resolve)
+    )
+  );
+
+  assertReplacementDialogActuallyVisible({
+    operatorId,
+    index,
+    total,
+    candidateCount: values.length
+  });
+
   search.focus({
     preventScroll: true
   });
@@ -27182,9 +27521,18 @@ function projectRequiredCatalogNodes(
       const operatorId = String(
         node?.operatorId || ""
       ).trim();
+
+      if (
+        node?.importRecovery
+          ?.unresolved === true
+      ) {
+        continue;
+      }
+
       const apiContract =
         node?.apiContract &&
-        typeof node.apiContract === "object" &&
+        typeof node.apiContract ===
+          "object" &&
         !Array.isArray(node.apiContract)
           ? node.apiContract
           : null;
@@ -28846,7 +29194,60 @@ async function ensureProjectRuntimePrerequisites(
         });
       }
 
-      for (const entry of replacementQueue) {
+      if (
+        unresolvedRequirements.length > 0 &&
+        replacementQueue.length === 0
+      ) {
+        throw new Error(
+          `[HARD REPLACEMENT FLOW ERROR] ${unresolvedRequirements.length.toLocaleString("de-DE")} unresolved API contract${unresolvedRequirements.length === 1 ? " requires" : "s require"} replacement, but the replacement queue is empty. The replacement dialog path was bypassed.`
+        );
+      }
+
+       for (const entry of replacementQueue) {
+
+        /*
+         * No candidates:
+         * preserve the original node as unresolved and continue
+         * immediately to the next replacement requirement.
+         * Do NOT open an empty replacement dialog.
+         */
+        if (entry.candidates.length === 0) {
+          entry.status = "skipped";
+          entry.skipped = true;
+
+          /*
+           * Important:
+           * This was skipped automatically because there was
+           * nothing the user could select.
+           */
+          entry.autoSelected = true;
+
+          entry.selectedCandidate = null;
+          entry.selectedOperatorId = "";
+
+          for (const item of
+            entry.matchingNodes) {
+            item.node.importRecovery = {
+              schemaVersion: 1,
+              unresolved: true,
+              reason:
+                "No suitable replacement candidate was found.",
+              originalOperatorId:
+                entry.operatorId,
+              originalApiContract:
+                item.node.apiContract
+                  ? structuredClone(
+                      item.node.apiContract
+                    )
+                  : null,
+              compositePath:
+                item.path
+            };
+          }
+
+          continue;
+        }
+
         const exactCandidates =
           entry.candidates.filter(candidate =>
             candidate
@@ -28893,41 +29294,6 @@ async function ensureProjectRuntimePrerequisites(
           selected.operatorId;
       }
 
-      const unresolvedWithoutCandidates =
-        replacementQueue.filter(entry =>
-          entry.candidates.length === 0
-        );
-      for (const entry of
-        unresolvedWithoutCandidates) {
-        entry.status = "omitted";
-        entry.autoSelected = true;
-        entry.omitUnavailableNode = true;
-      }
-      if (
-        unresolvedWithoutCandidates.length > 0
-      ) {
-        const omittedLabels =
-          unresolvedWithoutCandidates
-            .flatMap(entry =>
-              entry.matchingNodes.map(item =>
-                `'${item.node.label || item.node.id || entry.operatorId}' [${entry.operatorId}] at ${item.path}`
-              )
-            );
-        updateBuilderWork(
-          workSession,
-          {
-            title:
-              "Unavailable API nodes will be omitted…",
-            message:
-              `${omittedLabels.length.toLocaleString("de-DE")} node${omittedLabels.length === 1 ? " has" : "s have"} no same-kind replacement with compatible corresponding port types in the verified catalog: ${omittedLabels.slice(0, 4).join(", ")}${omittedLabels.length > 4 ? ` and ${(omittedLabels.length - 4).toLocaleString("de-DE")} more` : ""}.`,
-            detail:
-              "The Builder will not guess a different API operation or data type. Only these nodes, their incident wires, branch descendants and exposed outer boundary chain will be omitted; the completed import warning lists the removed connection IDs.",
-            progress: 60
-          }
-        );
-        await paintBuilderUi();
-      }
-
       let selectedPlanDiagnostics = [];
       let selectedPlanAccepted = false;
 
@@ -28939,7 +29305,10 @@ async function ensureProjectRuntimePrerequisites(
         ) {
           const entry =
             replacementQueue[index];
-          if (entry.autoSelected === true) {
+          if (
+            entry.autoSelected === true ||
+            entry.skipped === true
+          ) {
             continue;
           }
           const {
@@ -28950,6 +29319,7 @@ async function ensureProjectRuntimePrerequisites(
           } = entry;
 
           entry.status = "current";
+          entry.replacementDialogRequested = true;
           const selected =
             await requestBuilderReplacementChoice(
               workSession,
@@ -28969,19 +29339,66 @@ async function ensureProjectRuntimePrerequisites(
                   selectedPlanDiagnostics
               }
             );
+
+          entry.replacementDialogCompleted = true;
+
           if (
             runtimeCatalogResolutionEpochToken() !==
-            replacementEpoch
+              replacementEpoch
           ) {
             throw new Error(
               "The available API catalog changed while the replacement dialog was open. The isolated import and its stale choices were discarded; retry it against the current catalog. The open project remains unchanged."
             );
           }
-          entry.status = "selected";
-          entry.selectedCandidate =
-            selected;
-          entry.selectedOperatorId =
-            selected.operatorId;
+
+          if (selected?.skipped === true) {
+            entry.status = "skipped";
+            entry.skipped = true;
+            entry.autoSelected = false;
+            entry.selectedCandidate = null;
+            entry.selectedOperatorId = "";
+
+            for (const item of
+              entry.matchingNodes) {
+              item.node.importRecovery = {
+                schemaVersion: 1,
+                unresolved: true,
+                reason:
+                  entry.candidates.length === 0
+                    ? "No suitable replacement candidate was found."
+                    : "Replacement was skipped by the user.",
+                originalOperatorId:
+                  entry.operatorId,
+                originalApiContract:
+                  item.node.apiContract
+                    ? structuredClone(
+                        item.node.apiContract
+                      )
+                    : null,
+                compositePath:
+                  item.path
+              };
+            }
+          } else {
+            entry.status = "selected";
+            entry.skipped = false;
+            entry.selectedCandidate =
+              selected;
+            entry.selectedOperatorId =
+              selected.operatorId;
+          }
+        }
+
+        const missingReplacementDialogs =
+          replacementQueue.filter(entry =>
+            entry.autoSelected !== true &&
+            entry.replacementDialogCompleted !== true
+          );
+
+        if (missingReplacementDialogs.length > 0) {
+          throw new Error(
+            `[HARD REPLACEMENT FLOW ERROR] ${missingReplacementDialogs.length.toLocaleString("de-DE")} non-automatic replacement entr${missingReplacementDialogs.length === 1 ? "y was" : "ies were"} not presented to the user: ${missingReplacementDialogs.slice(0, 8).map(entry => entry.operatorId).join(", ")}${missingReplacementDialogs.length > 8 ? ` and ${(missingReplacementDialogs.length - 8).toLocaleString("de-DE")} more` : ""}.`
+          );
         }
 
         if (
@@ -28994,59 +29411,58 @@ async function ensureProjectRuntimePrerequisites(
         }
 
         const nodeMigrations =
-          replacementQueue.flatMap(entry =>
-            entry.matchingNodes.map(item => {
-              if (
-                entry
-                  .omitUnavailableNode ===
-                true
-              ) {
-                return {
-                  path: item.path,
-                  nodeId: String(
-                    item.node.id || ""
-                  ),
-                  removeNode: true
-                };
-              }
-              const selected =
-                entry.selectedCandidate;
-              return {
-                path: item.path,
-                nodeId: String(
-                  item.node.id || ""
+          replacementQueue.flatMap(entry => {
+            if (entry.skipped === true) {
+              return [];
+            }
+
+            const selected =
+              entry.selectedCandidate;
+
+            if (!selected) {
+              return [];
+            }
+
+            return entry.matchingNodes.map(item => ({
+              path: item.path,
+              nodeId: String(
+                item.node.id || ""
+              ),
+              operatorId:
+                selected.operatorId,
+
+              ...(selected.apiContract
+                ? {
+                    apiContract:
+                      structuredClone(
+                        selected.apiContract
+                      )
+                  }
+                : {}),
+
+              inputMap:
+                structuredClone(
+                  selected.inputMap || {}
                 ),
-                operatorId:
-                  selected.operatorId,
-                ...(selected.apiContract
-                  ? {
-                      apiContract:
-                        structuredClone(
-                          selected.apiContract
-                        )
-                    }
-                  : {}),
-                inputMap:
-                  structuredClone(
-                    selected.inputMap || {}
-                  ),
-                outputMap:
-                  structuredClone(
-                    selected.outputMap || {}
-                  ),
-                removeInputPorts:
-                  structuredClone(
-                    selected
-                      .unmappedInputPorts || []
-                  ),
-                removeOutputPorts:
-                  structuredClone(
-                    selected
-                      .unmappedOutputPorts || []
-                  )
-              };
-            })
-          );
+
+              outputMap:
+                structuredClone(
+                  selected.outputMap || {}
+                ),
+
+              removeInputPorts:
+                structuredClone(
+                  selected
+                    .unmappedInputPorts || []
+                ),
+
+              removeOutputPorts:
+                structuredClone(
+                  selected
+                    .unmappedOutputPorts || []
+                )
+            }));
+          });
 
         const transaction =
           replacementTransaction(
@@ -29059,8 +29475,16 @@ async function ensureProjectRuntimePrerequisites(
         try {
           transaction.assertGeometry();
           geometryVerified = true;
+          const validationGraph =
+            validationGraphWithoutImportRecovery(
+              graph
+            );
+
           selectedPlanDiagnostics =
-            validateRuntimeGraphViewsFast(
+            importBlockingDiagnostics(
+              validateRuntimeGraphViewsFast(
+                validationGraph
+              ),
               graph
             );
           if (
@@ -29162,12 +29586,14 @@ async function ensureProjectRuntimePrerequisites(
         ) {
           let hasManualChoice =
             replacementQueue.some(entry =>
-              entry.autoSelected !== true
+              entry.autoSelected !== true &&
+              entry.skipped !== true
             );
           if (!hasManualChoice) {
             const automaticReplacements =
               replacementQueue.filter(
                 entry =>
+                  entry.skipped !== true &&
                   entry
                     .omitUnavailableNode !==
                     true &&
@@ -29188,9 +29614,30 @@ async function ensureProjectRuntimePrerequisites(
               automaticReplacements.length >
               0;
             if (!hasManualChoice) {
+              const blockingAfterRecoveryOmission =
+                validateRuntimeGraphViewsFast(
+                  validationGraphWithoutImportRecovery(
+                    graph
+                  )
+                );
+
+              if (
+                blockingAfterRecoveryOmission
+                  .length === 0
+              ) {
+                selectedPlanDiagnostics = [];
+                selectedPlanAccepted = true;
+                transaction.commit();
+                appliedNodeMigrations =
+                  structuredClone(
+                    nodeMigrations
+                  );
+                break;
+              }
+
               throw irreparableProjectJsonError(
-                "Omitting every unavailable API node still leaves an invalid remaining Runtime Graph.",
-                selectedPlanDiagnostics
+                "The Runtime Graph remains invalid even after excluding intentionally preserved recovery nodes from import validation.",
+                blockingAfterRecoveryOmission
               );
             }
           }
@@ -29210,23 +29657,49 @@ async function ensureProjectRuntimePrerequisites(
         }
       }
 
+      const skippedReplacementEntries =
+        replacementQueue.filter(entry =>
+          entry.skipped === true
+        );
+
       catalogResult = Object.freeze({
         ...catalogResult,
         verified: true,
-        unresolved: 0,
+        unresolved:
+          skippedReplacementEntries.length,
         unresolvedRequirements:
-          Object.freeze([]),
-        userConfirmedReplacements:
-          replacementQueue.filter(entry =>
-            entry
-              .omitUnavailableNode !== true
-          ).length,
-        omittedUnavailableNodes:
           Object.freeze(
-            structuredClone(
-              removedUnavailableApiNodes
+            skippedReplacementEntries.map(
+              entry =>
+                Object.freeze({
+                  ...entry.requirement
+                })
             )
           ),
+        userConfirmedReplacements:
+          replacementQueue.filter(entry =>
+            entry.status === "selected"
+          ).length,
+        skippedReplacements:
+          Object.freeze(
+            skippedReplacementEntries.map(
+              entry =>
+                Object.freeze({
+                  operatorId:
+                    entry.operatorId,
+                  instanceCount:
+                    entry.instanceCount,
+                  paths:
+                    Object.freeze(
+                      entry.matchingNodes.map(
+                        item => item.path
+                      )
+                    )
+                })
+            )
+          ),
+        omittedUnavailableNodes:
+          Object.freeze([]),
         migrations:
           Object.freeze(
             structuredClone(
@@ -29574,7 +30047,9 @@ async function ensureProjectRuntimePrerequisites(
       .filter(item =>
         definitions[item.node?.operatorId]
           ?.unavailableApiContract ===
-            true
+            true ||
+        item.node?.importRecovery
+          ?.unresolved === true
       )
       .map(item => ({
         nodeId:
@@ -29591,27 +30066,38 @@ async function ensureProjectRuntimePrerequisites(
         path: item.path
       }));
 
+  const unresolvedWithoutRecovery =
+    [
+      ...unavailable,
+      ...unresolvedApiNodes
+    ].filter(item => {
+      const located =
+        graphNodes.find(
+          candidate =>
+            String(candidate.node?.id || "") ===
+              item.nodeId &&
+            candidate.path ===
+              item.path
+        );
+
+      return located?.node
+        ?.importRecovery
+        ?.unresolved !== true;
+    });
+
   if (
     !compatibilityMode &&
-    (
-      unavailable.length > 0 ||
-      unresolvedApiNodes.length > 0
-    )
+    unresolvedWithoutRecovery.length > 0
   ) {
-    const visible = [
-      ...unavailable.map(item =>
-        `'${item.operatorId}' on '${item.nodeId}' (${item.path})`
-      ),
-      ...unresolvedApiNodes.map(item =>
-        `'${item.operatorId}' on '${item.nodeId}' (${item.path})`
-      )
-    ].slice(0, 12);
-    const total =
-      unavailable.length +
-      unresolvedApiNodes.length;
+    const visible =
+      unresolvedWithoutRecovery
+        .map(item =>
+          `'${item.operatorId}' on '${item.nodeId}' (${item.path})`
+        )
+        .slice(0, 12);
 
     throw new Error(
-      `The project still contains ${total.toLocaleString("de-DE")} unavailable operator${total === 1 ? "" : "s"} after the pre-import replacement phase: ${visible.join(", ")}${total > visible.length ? ` and ${(total - visible.length).toLocaleString("de-DE")} more` : ""}. The JSON was not loaded.`
+      `The project still contains unavailable operators that were not explicitly preserved for recovery: ${visible.join(", ")}. The JSON was not loaded.`
     );
   }
 
@@ -29735,14 +30221,20 @@ async function ensureProjectRuntimePrerequisites(
       graphValidation?.diagnostics
     )
       ? graphValidation.diagnostics
-          .filter(Boolean)
       : [];
 
+  const importFatalGraphDiagnostics =
+    importBlockingDiagnostics(
+      graphValidationDiagnostics,
+      project.extensions
+        ?.typedNodeGraph
+    );
+
   if (
-    graphValidationDiagnostics.length > 0
+    importFatalGraphDiagnostics.length > 0
   ) {
     throw new Error(
-      `Runtime Graph validation failed: ${graphValidationDiagnostics.slice(0, 8).join(" | ")}${graphValidationDiagnostics.length > 8 ? ` | and ${graphValidationDiagnostics.length - 8} more` : ""}. The JSON was not loaded.`
+      `Runtime Graph validation failed: ${importFatalGraphDiagnostics.slice(0, 8).join(" | ")}${importFatalGraphDiagnostics.length > 8 ? ` | and ${importFatalGraphDiagnostics.length - 8} more` : ""}. The JSON was not loaded.`
     );
   }
   return {
@@ -30384,12 +30876,10 @@ async function waitForImportedCodegen(
   }
 
   const graphDiagnostics =
-    Array.isArray(
-      contribution?.diagnostics
-    )
-      ? contribution.diagnostics
-          .filter(Boolean)
-      : [];
+    importBlockingDiagnostics(
+      contribution?.diagnostics,
+      state.extensions?.typedNodeGraph
+    );
 
   if (graphDiagnostics.length > 0) {
     throw new Error(
@@ -30398,7 +30888,10 @@ async function waitForImportedCodegen(
   }
 
   const diagnostics =
-    getDiagnostics();
+    importBlockingDiagnostics(
+      getDiagnostics(),
+      state.extensions?.typedNodeGraph
+    );
 
   if (diagnostics.length > 0) {
     throw new Error(
@@ -37164,6 +37657,9 @@ function cacheElements() {
     ),
     builderWorkReplacementCancel: document.getElementById(
       "builder-work-replacement-cancel"
+    ),
+    builderWorkReplacementSkip: document.getElementById(
+      "builder-work-replacement-skip"
     ),
     builderWorkReplacementConfirm: document.getElementById(
       "builder-work-replacement-confirm"

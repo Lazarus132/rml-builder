@@ -24213,6 +24213,12 @@ function createGraphNodeElementRmlOriginal(
   ) {
     const definition =
       nodeDefinition(node);
+    const importRecoveryBroken =
+      node?.importRecovery
+        ?.unresolved === true ||
+      definition
+        ?.unavailableApiContract ===
+          true;
     const exposedBoundaryKeys =
       activeApiCompositeVisibleBoundaryKeys();
     const visibleInputs =
@@ -24291,6 +24297,10 @@ function createGraphNodeElementRmlOriginal(
          hasBodyContent
            ? ""
            : " no-body"
+       }${
+         importRecoveryBroken
+           ? " import-recovery-broken"
+           : ""
        }${
          (
           graphGpuSelectedNodeIds.has(node.id)
@@ -28147,7 +28157,18 @@ function indexGraphWireHandles(connectionIds = null, usage = branchPointUsageMap
       graphWireHandleConnections.set(connection.id, records);
       if (!connection.points?.length) continue;
       const spec = findPortSpec(connection.fromNode, connection.fromPort, "output");
-      const color = typeInfo(resolvePortType(spec, currentAnalysis?.bindings || new Map()) || "generic").color;
+      const color =
+        graphConnectionImportRecoveryBroken(
+          connection
+        )
+          ? "#ff3b3b"
+          : typeInfo(
+              resolvePortType(
+                spec,
+                currentAnalysis?.bindings ||
+                  new Map()
+              ) || "generic"
+            ).color;
       for (const point of connection.points) {
         if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) continue;
         const spatialCells =
@@ -29300,7 +29321,13 @@ function gpuSegmentsForConnection(
           new Map()
       ) || "generic";
     const color =
-      typeInfo(concreteType).color;
+      graphConnectionImportRecoveryBroken(
+        connection
+      )
+        ? "#ff3b3b"
+        : typeInfo(
+            concreteType
+          ).color;
     const targetState = inputBranchStart
       ? quickWireBranchTargetState(
           connection,
@@ -29356,6 +29383,37 @@ function incidentGraphConnectionIds(
       ) || []
     );
   }
+
+function graphNodeImportRecoveryBroken(
+  nodeId
+) {
+  const node =
+    findGraphNode(nodeId);
+
+  if (!node) {
+    return false;
+  }
+
+  return Boolean(
+    node.importRecovery
+      ?.unresolved === true ||
+    nodeDefinition(node)
+      ?.unavailableApiContract === true
+  );
+}
+
+function graphConnectionImportRecoveryBroken(
+  connection
+) {
+  return Boolean(
+    graphNodeImportRecoveryBroken(
+      connection?.fromNode
+    ) ||
+    graphNodeImportRecoveryBroken(
+      connection?.toNode
+    )
+  );
+}
 
 function graphSvgWirePathKey(
     connectionId,
@@ -29564,9 +29622,6 @@ function updateGraphWireConnections(
           translateTo
         });
 
-
-
-
         graphConnectionGeometryCache.delete(
           connectionId
         );
@@ -29678,9 +29733,14 @@ function updateGraphWireConnections(
             destination
           )
         );
-        const color = typeInfo(
-          concreteType
-        ).color;
+        const color =
+          graphConnectionImportRecoveryBroken(
+            connection
+          )
+            ? "#ff3b3b"
+            : typeInfo(
+                concreteType
+              ).color;
         for (const element of
           dom.wires?.querySelectorAll(
             `[data-connection-id="${CSS.escape(connectionId)}"]`
@@ -30267,8 +30327,6 @@ async function prepareCompleteHybridGraphWires(
     const renderer = graphHybridRenderer;
     const wires = dom.wires;
 
-
-
     graphWireFullRenderPending = false;
     graphWirePartialConnectionIds.clear();
     const usage = new Map();
@@ -30348,13 +30406,18 @@ async function prepareCompleteHybridGraphWires(
           connection.fromPort,
           "output"
         );
-        const color = typeInfo(
-          resolvePortType(
-            specification,
-            currentAnalysis?.bindings ||
-              new Map()
-          ) || "generic"
-        ).color;
+         const color =
+          graphConnectionImportRecoveryBroken(
+            connection
+          )
+            ? "#ff3b3b"
+            : typeInfo(
+                resolvePortType(
+                  specification,
+                  currentAnalysis?.bindings ||
+                    new Map()
+                ) || "generic"
+              ).color;
         for (const point of connection.points) {
           if (
             !Number.isFinite(point.x) ||
@@ -30703,7 +30766,13 @@ function renderGraphWires() {
           currentAnalysis.bindings
         ) || "generic";
       const color =
-        typeInfo(concreteType).color;
+        graphConnectionImportRecoveryBroken(
+          connection
+        )
+          ? "#ff3b3b"
+          : typeInfo(
+              concreteType
+            ).color;
       const targetState =
         inputBranchStart
           ? quickWireBranchTargetState(

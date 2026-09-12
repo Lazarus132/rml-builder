@@ -2,7 +2,7 @@
   "use strict";
   // Runtime Graph live-runtime bridge.
 
-  const BRIDGE_VERSION = 6;
+  const BRIDGE_VERSION = 7;
   const BRIDGE_PROTOCOL_VERSION = 1;
   const PROBE_TIMEOUT_MS = 3000;
   const STREAM_OPEN_TIMEOUT_MS = 5000;
@@ -76,13 +76,28 @@
     const prefix = version ? `Resonite API ${version}` : "Resonite API";
     const checking = mode === "checking";
     const live = mode === "live";
-    element.textContent = `${prefix} · ${checking ? "checking…" : live ? "Live" : "Cached"}`;
-    element.dataset.source = checking ? "updating" : live ? "scanner" : "cache";
+    const cached = Boolean(catalog) && !checking && !live;
+    element.textContent = checking
+      ? `${prefix} · checking…`
+      : live
+        ? `${prefix} · Live`
+        : cached
+          ? `${prefix} · Cached`
+          : "Resonite API · unavailable";
+    element.dataset.source = checking
+      ? "updating"
+      : live
+        ? "scanner"
+        : cached
+          ? "cache"
+          : "unavailable";
     element.setAttribute("aria-pressed", String(live));
     element.setAttribute("aria-busy", String(checking));
     const action = checking ? "Click to cancel the connection attempt."
       : live ? "Click to disconnect and use Cached mode."
-      : "Click to find the scanner once and connect. Each candidate port is checked at most once; no automatic retries.";
+      : cached
+        ? "Click to find the scanner once and connect. Each candidate port is checked at most once; no automatic retries."
+        : "Click to find the scanner and load a verified Live catalog into IndexedDB.";
     const report = window.RMLApiNodeFactoryReport;
     let statistics = "";
     if (catalog && report && String(report.engineVersion || "") === version &&

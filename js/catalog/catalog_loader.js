@@ -9,11 +9,7 @@
   const DEFAULT_PORT_LAST = 42729;
   const CATALOG_PATH = "/resonite_api_catalog.json";
   const HEALTH_PATH = "/health";
-  const BUILDER_SCANNER_STATUS_PATH =
-    "/rml-scanner-status";
-  const BUILDER_SCANNER_CATALOG_PATH =
-    "/rml-scanner-catalog";
-  const CATALOG_FETCH_TIMEOUT_MS = 0;
+const CATALOG_FETCH_TIMEOUT_MS = 0;
   const CACHE_DATABASE_NAME =
     "rml-resonite-api-catalog";
   const CACHE_DATABASE_VERSION = 1;
@@ -27,8 +23,6 @@
   const SUPPORTED_RELOAD_SAFETY_READER_VERSION = 1;
   const REQUIRED_SCANNER_FINGERPRINT_ALGORITHM =
     "sha256-canonical-semantic-catalog-v1";
-  const REQUIRED_SCANNER_VERSION =
-    "1.11.1";
   const REQUIRED_METHOD_IDENTITY_ALGORITHM =
     "assembly-neutral-declaring-type-and-signature-v2";
   const REQUIRED_RELOAD_SAFETY_CONTRACT_VERSION = 1;
@@ -254,8 +248,6 @@
         REQUIRED_CATALOG_SCHEMA_VERSION &&
       String(raw?.catalogKind || "") ===
         "live-resonite-api" &&
-      contract.scannerVersion ===
-        REQUIRED_SCANNER_VERSION &&
       contract.version ===
         REQUIRED_SCANNER_FINGERPRINT_VERSION &&
       contract.algorithm ===
@@ -1268,6 +1260,14 @@
   let scannerCheckPromise = null;
   let scannerCheckGeneration = -1;
   let cachedCatalogRecord = null;
+
+  /*
+   * Authoritative catalog availability owned by the catalog loader.
+   * RuntimeBridge mode "cached" means only "not live"; it does not prove
+   * that IndexedDB contains a catalog.
+   */
+  let catalogAvailabilityKnown = false;
+  let catalogAvailable = false;
   let cachedCatalogReadPromise = null;
   let lastScannerFingerprintSync =
     Object.freeze({
@@ -1288,8 +1288,103 @@
 
 
 
-  function updateStatus() { window.RMLRuntimeBridge?.renderStatus?.(); }
-  function updateUnavailableStatus() { updateStatus(); }
+  function updateStatus() {
+    window.RMLRuntimeBridge?.renderStatus?.();
+
+    const element =
+      document.getElementById(
+        "api-catalog-state"
+      );
+
+    if (!element) {
+      return;
+    }
+
+    const catalog =
+      statusCatalog();
+    const report =
+      window.RMLApiNodeFactoryReport ||
+      null;
+
+    if (
+      catalogAvailabilityKnown &&
+      catalogAvailable !== true
+    ) {
+      element.dataset.source =
+        "unavailable";
+      element.textContent =
+        "Resonite API · unavailable";
+      element.removeAttribute("title");
+      element.setAttribute(
+        "aria-label",
+        "Resonite API · unavailable"
+      );
+      return;
+    }
+    const connection =
+      window.RMLRuntimeBridge
+        ?.getConnectionState?.() ||
+      null;
+
+    /*
+     * The transport state "cached" only means "not connected live".
+     * It must never be rendered as a cached API catalog unless an
+     * actual catalog is active.
+     */
+    if (!catalog) {
+      element.dataset.source =
+        "unavailable";
+      element.textContent =
+        "Resonite API · unavailable";
+      element.removeAttribute(
+        "title"
+      );
+      element.setAttribute(
+        "aria-label",
+        "Resonite API · unavailable"
+      );
+      return;
+    }
+
+    const version =
+      String(
+        catalog.engineVersion ||
+        "unknown"
+      );
+
+    const live =
+      connection?.mode === "live" &&
+      report
+        ?.liveCatalogVerified === true &&
+      String(
+        report?.catalogFingerprint || ""
+      ) ===
+        String(
+          catalog
+            ?.catalogFingerprint || ""
+        );
+
+    element.dataset.source =
+      live
+        ? "scanner"
+        : "cache";
+
+    element.textContent =
+      `Resonite API ${version} · ${
+        live
+          ? "Live"
+          : "cached"
+      }`;
+
+    element.setAttribute(
+      "aria-label",
+      element.textContent
+    );
+  }
+
+  function updateUnavailableStatus() {
+    updateStatus();
+  }
 
   function setSafeLocalStorageValue(
     key,
@@ -2789,6 +2884,7 @@
     }
   }
 
+
   async function loadCatalog() {
 
 
@@ -2798,7 +2894,8 @@
 
     if (cached) {
       cachedCatalogRecord = cached;
-
+      catalogAvailabilityKnown = true;
+      catalogAvailable = true;
 
       return normalizeCatalog(
         cached.catalog,
@@ -2807,9 +2904,290 @@
       );
     }
 
+    /*
+     * Startup intentionally stops here.
+     *
+     * No IndexedDB catalog means API Unavailable.
+     * A user click connects to the Live scanner; there is no Builder-local
+     * resonite_api_catalog.json fallback.
+     */
+    catalogAvailabilityKnown = true;
+    catalogAvailable = false;
     updateUnavailableStatus();
     return null;
   }
+
+  let manualCatalogActivationInstalled =
+    false;
+  let manualCatalogActivationPromise =
+    null;
+
+  function renderManualCatalogChecking() {
+    const element =
+      document.getElementById(
+        "api-catalog-state"
+      );
+
+    if (!element) {
+      return;
+    }
+
+    element.dataset.source =
+      "updating";
+    element.textContent =
+      "Resonite API · checking…";
+    element.setAttribute(
+      "aria-label",
+      element.textContent
+    );
+  }
+
+  async function activateCatalogFromUserClick() {
+    if (manualCatalogActivationPromise) {
+      return manualCatalogActivationPromise;
+    }
+
+    manualCatalogActivationPromise =
+      Promise.resolve()
+        .then(async () => {
+          /*
+           * Match the import path exactly: import prepares runtime-core before
+           * it reads RMLRuntimeBridge and calls bridge.connect().
+           */
+          const scriptLoader =
+            window.RMLScriptLoader;
+
+          if (
+            !scriptLoader ||
+            typeof scriptLoader.ensure !== "function"
+          ) {
+            throw new Error(
+              "[RML API Catalog] The deferred JavaScript module loader is unavailable."
+            );
+          }
+
+          console.info(
+            "[RML API Catalog] Preparing runtime-core exactly as project import does."
+          );
+
+          await scriptLoader.ensure(
+            "runtime-core"
+          );
+
+          const bridge =
+            window.RMLRuntimeBridge;
+
+          if (
+            !bridge ||
+            typeof bridge.connect !== "function"
+          ) {
+            throw new Error(
+              "[RML API Catalog] runtime-core finished loading but RMLRuntimeBridge.connect() is still unavailable."
+            );
+          }
+
+          const before =
+            bridge.getConnectionState?.() ||
+            currentScannerConnection();
+
+          /*
+           * The API badge is the actual Live/Cached/Unavailable toggle.
+           * A click must NEVER be discarded merely because a cached catalog
+           * exists: Cached -> click means "probe scanner ports and go Live".
+           */
+          if (before?.mode === "live") {
+            console.info(
+              "[RML API Catalog] Disconnecting Live scanner and returning to cached/offline mode."
+            );
+            bridge.disconnect?.();
+            catalogAvailabilityKnown = true;
+            catalogAvailable =
+              Boolean(statusCatalog());
+            updateStatus();
+            return false;
+          }
+
+          renderManualCatalogChecking();
+
+          console.info(
+            `[RML API Catalog] Manual scanner discovery started. Probing ports ${DEFAULT_PORT_FIRST}-${DEFAULT_PORT_LAST} via ${HEALTH_PATH}.`
+          );
+
+          let connected = false;
+
+          try {
+            connected =
+              await bridge.connect();
+          } catch (error) {
+            console.error(
+              "[RML API Catalog] Scanner discovery failed.",
+              error
+            );
+            connected = false;
+          }
+
+          if (connected) {
+            try {
+              const session =
+                bridge.getConnectionState?.() ||
+                currentScannerConnection();
+
+              /*
+               * synchronizeConnectedSession() may already have started this
+               * exact generation. synchronizeScannerStatus() shares that
+               * scannerCheckPromise, so the click waits for the SAME operation
+               * instead of requiring a second click.
+               */
+              const synchronized =
+                await synchronizeScannerStatus({
+                  manualSession: session,
+                  showChecking: true,
+                  throwOnFailure: false
+                });
+
+              if (
+                synchronized === true &&
+                statusCatalog()
+              ) {
+                catalogAvailabilityKnown = true;
+                catalogAvailable = true;
+                updateStatus();
+                console.info(
+                  "[RML API Catalog] Live scanner catalog synchronized and activated."
+                );
+                return true;
+              }
+            } catch (error) {
+              console.error(
+                "[RML API Catalog] Live scanner connected, but catalog synchronization failed.",
+                error
+              );
+            }
+          }
+
+          /*
+           * No usable Live scanner/catalog.
+           * Keep a real IndexedDB catalog active if one exists; otherwise
+           * remain unavailable. There is no static/local JSON fallback.
+           */
+          const existing =
+            statusCatalog();
+
+          catalogAvailabilityKnown = true;
+          catalogAvailable =
+            Boolean(existing);
+
+          if (existing) {
+            updateStatus();
+          } else {
+            updateUnavailableStatus();
+          }
+
+          console.info(
+            "[RML API Catalog] No usable Live scanner catalog was activated."
+          );
+          return false;
+        })
+        .finally(() => {
+          manualCatalogActivationPromise =
+            null;
+        });
+
+    return manualCatalogActivationPromise;
+  }
+
+  function installManualUnavailableCatalogActivation() {
+    if (manualCatalogActivationInstalled) {
+      return;
+    }
+
+    const element =
+      document.getElementById(
+        "api-catalog-state"
+      );
+
+    if (!element) {
+      return;
+    }
+
+    manualCatalogActivationInstalled = true;
+
+    const reassertUnavailable = () => {
+      /*
+       * Never overwrite the explicit checking state while a manual scanner
+       * discovery/catalog synchronization is still in progress.
+       */
+      if (manualCatalogActivationPromise) {
+        return;
+      }
+
+      if (
+        catalogAvailabilityKnown &&
+        catalogAvailable !== true
+      ) {
+        queueMicrotask(
+          updateUnavailableStatus
+        );
+      }
+    };
+
+    window.addEventListener(
+      "rml-scanner-connection",
+      reassertUnavailable
+    );
+
+    element.addEventListener(
+      "click",
+      event => {
+        /*
+         * Own the badge click in every state. This prevents a stale
+         * catalogAvailable flag or another generic toggle handler from
+         * swallowing the action before scanner discovery starts.
+         */
+        event.preventDefault();
+        event.stopImmediatePropagation();
+
+        console.info(
+          "[RML API Catalog] API status button clicked."
+        );
+
+        void activateCatalogFromUserClick()
+          .catch(error => {
+            console.error(
+              "[RML API Catalog] Manual catalog activation failed.",
+              error
+            );
+
+            catalogAvailabilityKnown = true;
+            catalogAvailable =
+              Boolean(statusCatalog());
+
+            if (catalogAvailable) {
+              updateStatus();
+            } else {
+              updateUnavailableStatus();
+            }
+          });
+      },
+      true
+    );
+  }
+
+
+  /*
+   * Install immediately. catalogReady may involve IndexedDB work and must not
+   * gate whether the user can click the API status button.
+   */
+  installManualUnavailableCatalogActivation();
+
+  if (!manualCatalogActivationInstalled) {
+    document.addEventListener(
+      "DOMContentLoaded",
+      installManualUnavailableCatalogActivation,
+      { once: true }
+    );
+  }
+
 
   function loadScript(
     url,
@@ -3206,12 +3584,19 @@
   async function synchronizeScannerStatus(options = {}) {
     const session = currentScannerConnection();
 
-
     if (session.mode !== "live") return false;
-    if (scannerCheckGeneration === session.generation) {
-      if (scannerCheckPromise) return scannerCheckPromise;
-      return lastScannerFingerprintSync.liveReached === true &&
-        window.RMLApiNodeFactoryReport?.liveCatalogVerified === true;
+    if (
+      scannerCheckGeneration === session.generation &&
+      scannerCheckPromise
+    ) {
+      return scannerCheckPromise;
+    }
+    if (
+      scannerCheckGeneration === session.generation &&
+      lastScannerFingerprintSync.liveReached === true &&
+      window.RMLApiNodeFactoryReport?.liveCatalogVerified === true
+    ) {
+      return true;
     }
     if (!options.manualSession || options.manualSession.generation !== session.generation) {
       return false;
@@ -3227,13 +3612,50 @@
     const pending = Promise.resolve().then(async () => {
       try {
         assertSession();
-        const fingerprintContract = scannerFingerprintContract(session.health);
-        const legacyFingerprint = legacyScannerFingerprint(session.health);
-        if (session.health?.catalogReady !== true || session.health?.catalogAvailable !== true ||
-            (!fingerprintContract && !legacyFingerprint)) {
-          throw new Error("Scanner connected, but its catalog is not ready or lacks a compatible fingerprint. The existing cache remains available.");
+
+        /*
+         * The RuntimeBridge health probe proves only that the scanner server is
+         * reachable. The catalog scan can still be running at that exact moment.
+         * Never permanently cache that pre-scan health snapshot for this scanner
+         * generation. Wait for the scanner's catalog-ready barrier, then read a
+         * fresh /health snapshot containing the final catalog fingerprint.
+         */
+        let scannerHealth = session.health;
+        if (
+          scannerHealth?.catalogReady !== true ||
+          scannerHealth?.catalogAvailable !== true
+        ) {
+          const ready = await fetchJson(
+            `${session.scannerBaseUrl}/catalog/ready`,
+            CATALOG_FETCH_TIMEOUT_MS,
+            signal
+          );
+          assertSession();
+          if (ready?.ready !== true) {
+            throw new Error(
+              "Scanner catalog-ready barrier returned without a ready catalog."
+            );
+          }
+          scannerHealth = await fetchJson(
+            `${session.scannerBaseUrl}/health`,
+            CATALOG_FETCH_TIMEOUT_MS,
+            signal
+          );
+          assertSession();
         }
-        const live = { health: session.health,
+
+        const fingerprintContract = scannerFingerprintContract(scannerHealth);
+        const legacyFingerprint = legacyScannerFingerprint(scannerHealth);
+        if (
+          scannerHealth?.catalogReady !== true ||
+          scannerHealth?.catalogAvailable !== true ||
+          (!fingerprintContract && !legacyFingerprint)
+        ) {
+          throw new Error(
+            "Scanner connected, but its completed catalog lacks a compatible fingerprint."
+          );
+        }
+        const live = { health: scannerHealth,
           fingerprint: fingerprintContract?.fingerprint || legacyFingerprint,
           legacy: !fingerprintContract,
           url: `${session.scannerBaseUrl}/resonite_api_catalog.json`, signal };
@@ -4974,15 +5396,59 @@
     });
   }
 
-  function synchronizeConnectedSession(connection = currentScannerConnection()) {
+  function synchronizeConnectedSession(
+    connection = currentScannerConnection()
+  ) {
     if (connection.mode === "live") {
+      /*
+       * A Live transport connection is not yet a Live catalog. Keep the UI in
+       * checking state until fingerprint verification, cache commit and factory
+       * activation have all completed. This removes the first-click
+       * checking -> unavailable -> second-click -> Live race.
+       */
+      renderManualCatalogChecking();
 
+      void synchronizeScannerStatus({
+        manualSession: connection,
+        showChecking: true,
+        throwOnFailure: false
+      }).then(synchronized => {
+        if (synchronized === true && statusCatalog()) {
+          catalogAvailabilityKnown = true;
+          catalogAvailable = true;
+          updateStatus();
+          return;
+        }
 
-      void synchronizeScannerStatus({ manualSession: connection });
-    } else {
-      demoteLiveFactoryReport();
+        if (!manualCatalogActivationPromise) {
+          const existing = statusCatalog();
+          catalogAvailabilityKnown = true;
+          catalogAvailable = Boolean(existing);
+          if (existing) {
+            updateStatus();
+          } else {
+            updateUnavailableStatus();
+          }
+        }
+      });
+      return;
     }
-    updateStatus();
+
+    demoteLiveFactoryReport();
+
+    if (manualCatalogActivationPromise) {
+      return;
+    }
+
+    const existing = statusCatalog();
+    catalogAvailabilityKnown = true;
+    catalogAvailable = Boolean(existing);
+
+    if (existing) {
+      updateStatus();
+    } else {
+      updateUnavailableStatus();
+    }
   }
 
   window.addEventListener("rml-scanner-connection", event => {
@@ -5081,9 +5547,32 @@
 
   catalogReady
     .then(() => {
+      installManualUnavailableCatalogActivation();
+
+      if (
+        catalogAvailabilityKnown &&
+        catalogAvailable !== true
+      ) {
+        updateUnavailableStatus();
+      }
+
       synchronizeConnectedSession();
+
+      queueMicrotask(() => {
+        if (
+          catalogAvailabilityKnown &&
+          catalogAvailable !== true
+        ) {
+          updateUnavailableStatus();
+        }
+      });
     })
-    .catch(() => {});
+    .catch(() => {
+      catalogAvailabilityKnown = true;
+      catalogAvailable = false;
+      installManualUnavailableCatalogActivation();
+      updateUnavailableStatus();
+    });
 
   Object.defineProperty(
     window,
@@ -5093,11 +5582,7 @@
         first: DEFAULT_PORT_FIRST,
         last: DEFAULT_PORT_LAST,
         healthPath: HEALTH_PATH,
-        catalogPath: CATALOG_PATH,
-        builderStatusPath:
-          BUILDER_SCANNER_STATUS_PATH,
-        builderCatalogPath:
-          BUILDER_SCANNER_CATALOG_PATH
+        catalogPath: CATALOG_PATH
       }),
       writable: false,
       enumerable: true,
