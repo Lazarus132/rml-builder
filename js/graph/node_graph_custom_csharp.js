@@ -2260,7 +2260,7 @@ function buildCustomCSharpFragmentInWorker(nodeId, source, parseResult, options)
     }
     const worker = new Worker(
       new URL(
-        "js/workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev55-retained-disconnected-ports",
+        "js/workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev57-outline-first-paint-spinner",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -5422,7 +5422,7 @@ function prepareCustomCSharpEditorHost(
       hostWindow.document.createElement("link");
     stylesheet.rel = "stylesheet";
     stylesheet.href = new URL(
-      "styles/features/styles.runtime-graph.css?v=1.20.31-universal-presentation-dev55-retained-disconnected-ports",
+      "styles/features/styles.runtime-graph.css?v=1.20.31-universal-presentation-dev57-outline-first-paint-spinner",
       window.location.href
     ).href;
     hostWindow.document.head.appendChild(
@@ -6900,7 +6900,7 @@ Object.defineProperty(
   "RMLNodeGraphCustomCSharpModuleId",
   {
     value:
-      "1.20.31-universal-presentation-dev55-retained-disconnected-ports",
+      "1.20.31-universal-presentation-dev57-outline-first-paint-spinner",
     writable: false,
     enumerable: true,
     configurable: true

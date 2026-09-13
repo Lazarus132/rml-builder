@@ -4,7 +4,7 @@
 
 
 const GRAPH_BOOTSTRAP_MODULE_ID =
-  "1.20.31-universal-presentation-dev55-retained-disconnected-ports";
+  "1.20.31-universal-presentation-dev57-outline-first-paint-spinner";
 
 function assertGraphBootstrapModuleCoherence() {
   const mismatches = [];

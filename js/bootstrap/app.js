@@ -43,7 +43,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "1.20.31-universal-presentation-dev55-retained-disconnected-ports";
+  "1.20.31-universal-presentation-dev57-outline-first-paint-spinner";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -4292,7 +4292,7 @@ function ensureGraphCodegenWorker() {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev55-retained-disconnected-ports",
+      "../workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev57-outline-first-paint-spinner",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -27947,7 +27947,7 @@ function promiseWithBuilderTimeout(
 
 function assertProjectRuntimeModuleCoherence() {
   const expectedModuleId =
-    "1.20.31-universal-presentation-dev55-retained-disconnected-ports";
+    "1.20.31-universal-presentation-dev57-outline-first-paint-spinner";
   const requiredFactoryVersion = 38;
   const mismatches = [];
   const requireModuleId = (
@@ -36681,8 +36681,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "../../templates/help_template.html?v=1.20.31-universal-presentation-dev55-retained-disconnected-ports",
-    "../templates/help_template.js?v=1.20.31-universal-presentation-dev55-retained-disconnected-ports",
+    "../../templates/help_template.html?v=1.20.31-universal-presentation-dev57-outline-first-paint-spinner",
+    "../templates/help_template.js?v=1.20.31-universal-presentation-dev57-outline-first-paint-spinner",
     "help-template",
     "RMLHelpTemplateMarkup"
   )
@@ -41984,15 +41984,6 @@ async function initialize() {
     beginStartupStatus(
       "Restoring local workspace…"
     );
-  let startupNodeRegistryReady =
-    readPageStateStore().activePage ===
-      "runtime-graph"
-      ? Promise.resolve(
-          window.RMLScriptLoader?.ensure?.(
-            "node-registry"
-          ) || true
-        ).catch(() => false)
-      : null;
   await paintBuilderUi();
 
   preventGlobalDoubleSelection();
@@ -42005,17 +41996,6 @@ async function initialize() {
       state.activePage ||
       startupGraph.lastOpenPage
     ) === "runtime-graph";
-  if (
-    startupRuntimeGraphRequested &&
-    !startupNodeRegistryReady
-  ) {
-    startupNodeRegistryReady =
-      Promise.resolve(
-        window.RMLScriptLoader?.ensure?.(
-          "node-registry"
-        ) || true
-      ).catch(() => false);
-  }
   startupWork.update({
       title: "Preparing controls and dialogs…",
       message:
@@ -43055,14 +43035,19 @@ async function initialize() {
   );
   startUniversalCustomSelectObserver();
 
-  if (
-    startupRuntimeGraphRequested &&
-    startupNodeRegistryReady
-  ) {
+  renderAll();
+  if (startupRuntimeGraphRequested) {
     startupWork.update({
       title: "Preparing cached Runtime Graph nodes…"
     });
-    await startupNodeRegistryReady;
+  }
+  await paintBuilderUi();
+  if (startupRuntimeGraphRequested) {
+    await Promise.resolve(
+      window.RMLScriptLoader?.ensure?.(
+        "node-registry"
+      ) || true
+    ).catch(() => false);
   }
 
   exposeBuilderBridge();
@@ -43093,7 +43078,6 @@ async function initialize() {
   if (startupWork.visible) {
     await paintBuilderUi();
   }
-  renderAll();
 
   const startupGraphResult =
     await startupGraphReady;
