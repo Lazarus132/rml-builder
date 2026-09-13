@@ -43,7 +43,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "1.20.31-universal-presentation-dev27";
+  "1.20.31-universal-presentation-dev39-clean-stale-api-repair";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -4292,7 +4292,7 @@ function ensureGraphCodegenWorker() {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev27",
+      "../workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev39-clean-stale-api-repair",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -25875,14 +25875,9 @@ function resetBuilderReplacementUi() {
   }
 }
 
-
 function assertReplacementDialogActuallyVisible(
   { operatorId = "", index = -1, total = 0, candidateCount = 0 } = {}
 ) {
-  /*
-   * #builder-work-replacement is the real replacement UI container.
-   * There is intentionally no separate builder-work-replacement-dialog element.
-   */
   const dialog = elements.builderWorkReplacement;
   const confirm = elements.builderWorkReplacementConfirm;
   const cancel = elements.builderWorkReplacementCancel;
@@ -27928,7 +27923,7 @@ function promiseWithBuilderTimeout(
 
 function assertProjectRuntimeModuleCoherence() {
   const expectedModuleId =
-    "1.20.31-universal-presentation-dev27";
+    "1.20.31-universal-presentation-dev39-clean-stale-api-repair";
   const requiredFactoryVersion = 38;
   const mismatches = [];
   const requireModuleId = (
@@ -29204,24 +29199,10 @@ async function ensureProjectRuntimePrerequisites(
       }
 
        for (const entry of replacementQueue) {
-
-        /*
-         * No candidates:
-         * preserve the original node as unresolved and continue
-         * immediately to the next replacement requirement.
-         * Do NOT open an empty replacement dialog.
-         */
         if (entry.candidates.length === 0) {
           entry.status = "skipped";
           entry.skipped = true;
-
-          /*
-           * Important:
-           * This was skipped automatically because there was
-           * nothing the user could select.
-           */
           entry.autoSelected = true;
-
           entry.selectedCandidate = null;
           entry.selectedOperatorId = "";
 
@@ -30564,16 +30545,6 @@ function assertRuntimeGraphViewsIdentity(
       );
     }
     if (exactCompositeGeometry) {
-      /*
-       * API Composite initialization is allowed to canonicalize storage order
-       * (boundary array order / branchRouting property insertion order), but it
-       * must not change any semantic geometry, endpoint or routing identity.
-       *
-       * The previous raw JSON.stringify comparison treated harmless ordering
-       * normalization as graph damage. That false-positive is especially
-       * visible after an API replacement, because replacement legitimately
-       * rewrites port identities before the graph host initializes.
-       */
       const normalizedPoint = point => ({
         id: String(point?.id || ""),
         x: Number(point?.x),
@@ -31507,20 +31478,6 @@ async function applyLoadedProjectWithFeedback(
       );
     }
 
-    /*
-     * A project replacement must never inherit an editor path into an
-     * embedded Runtime Graph from the project being replaced. When import is
-     * initiated while an API Composite (possibly nested) is open, the graph
-     * host can otherwise finish/persist that old presentation path while the
-     * new root model is being installed. That makes a nested graph appear to
-     * have changed during initialization and can also poison rollback.
-     *
-     * Explicit file imports therefore install on the Configuration Outline.
-     * The complete Runtime Graph is still synchronized and identity-checked,
-     * but no stale Composite presentation is materialized during the atomic
-     * replacement transaction. The user can open Runtime Graph afterwards
-     * from its clean root.
-     */
     if (forceConfigurationPage) {
       project.workspace = {
         ...(isPlainObject(project.workspace)
@@ -36715,8 +36672,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "../../templates/help_template.html?v=1.20.31-universal-presentation-dev27",
-    "../templates/help_template.js?v=1.20.31-universal-presentation-dev27",
+    "../../templates/help_template.html?v=1.20.31-universal-presentation-dev39-clean-stale-api-repair",
+    "../templates/help_template.js?v=1.20.31-universal-presentation-dev39-clean-stale-api-repair",
     "help-template",
     "RMLHelpTemplateMarkup"
   )

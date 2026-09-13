@@ -677,7 +677,7 @@ const savedApiCompositeSearchTextCache =
     `${SAVED_API_COMPOSITE_COMPARE_MESSAGE_TYPE}-result`;
 
   const SAVED_API_COMPOSITE_COMPARE_MODULE_ID =
-    "1.20.31-universal-presentation-dev27";
+    "1.20.31-universal-presentation-dev39-clean-stale-api-repair";
 
   const SAVED_API_COMPOSITE_COMPARE_CANONICAL_SCHEMA_VERSION =
     4;
@@ -941,7 +941,7 @@ const savedApiCompositeSearchTextCache =
       );
     }
     const workerUrl = new URL(
-      "js/workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev27&canonical-schema=4",
+      "js/workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev39-clean-stale-api-repair&canonical-schema=4",
       document.baseURI
     );
     const workerOptions = {
@@ -16660,7 +16660,7 @@ Object.defineProperty(
   "RMLNodeGraphCompositesModuleId",
   {
     value:
-      "1.20.31-universal-presentation-dev27",
+      "1.20.31-universal-presentation-dev39-clean-stale-api-repair",
     writable: false,
     enumerable: true,
     configurable: true

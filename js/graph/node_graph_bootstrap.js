@@ -4,7 +4,7 @@
 
 
 const GRAPH_BOOTSTRAP_MODULE_ID =
-  "1.20.31-universal-presentation-dev27";
+  "1.20.31-universal-presentation-dev39-clean-stale-api-repair";
 
 function assertGraphBootstrapModuleCoherence() {
   const mismatches = [];

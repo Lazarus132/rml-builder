@@ -13019,6 +13019,21 @@ function pruneConnectionsForConfigurationSnapshot(
       );
 
     if (removed.length > 0) {
+      currentAnalysis = null;
+      graphConnectionLookupSource = null;
+      graphConnectionLookupLength = -1;
+      graphIncidentConnectionLookupCache.clear();
+      graphConnectedPortKeysSource = null;
+      graphConnectedPortKeysLength = -1;
+      synchronizeGraphConnectedSocketClasses(
+        new Set(
+          removed.flatMap(connection => [
+            connection.fromNode,
+            connection.toNode
+          ])
+        )
+      );
+
       normalizeConnectionRouting(
         graph.connections
       );
@@ -14257,7 +14272,20 @@ function scheduleRestoredGraphReadinessAfterPaint() {
         const ready =
           evaluateRestoredGraphCatalogReadiness();
 
-
+        if (
+          ready &&
+          graphUsesCatalogOperators(graph)
+        ) {
+          const revision = Number(
+            window.__RMLNodeDefinitionRevision
+          ) || 0;
+          const refreshed =
+            refreshAfterNodeModulesReady();
+          if (refreshed) {
+            lastGraphCatalogRefreshRevision =
+              revision;
+          }
+        }
 
         restoreSavedPresentationIfReady();
         void scheduleOpenGraphCatalogReconciliation()
@@ -30119,6 +30147,46 @@ function renderGraphMutationDelta({
     for (const nodeId of nodeContentIdSet) {
       nodeIdSet.add(nodeId);
     }
+    if (connectionIdSet.size > 0) {
+      const currentConnectionsById = new Map();
+      for (const connection of graph.connections) {
+        if (
+          connection?.id &&
+          connectionIdSet.has(connection.id)
+        ) {
+          currentConnectionsById.set(
+            connection.id,
+            connection
+          );
+        }
+      }
+
+      const addPortStateEndpoint = connection => {
+        if (!connection) return;
+        for (const nodeId of [
+          connection.fromNode,
+          connection.toNode
+        ]) {
+          if (!nodeId) continue;
+          nodeIdSet.add(nodeId);
+          nodeContentIdSet.add(nodeId);
+        }
+      };
+
+      for (const connectionId of connectionIdSet) {
+        addPortStateEndpoint(
+          graphConnectionLookupCache.get(
+            connectionId
+          )
+        );
+        addPortStateEndpoint(
+          currentConnectionsById.get(
+            connectionId
+          )
+        );
+      }
+    }
+
     if (
       nodeIdSet.size === 0 &&
       connectionIdSet.size === 0
@@ -31306,6 +31374,95 @@ function hideGraphConnectionsImmediately(
     scheduleGraphNodeVirtualization();
   }
 
+function synchronizeGraphConnectedSocketClasses(
+    nodeIds = null
+  ) {
+    if (!dom.nodesHost || !graph) {
+      return 0;
+    }
+
+    const connectedKeys =
+      connectedPortKeys();
+    const normalizedNodeIds =
+      nodeIds === null ||
+      nodeIds === undefined
+        ? null
+        : new Set(
+            (
+              Array.isArray(nodeIds) ||
+              nodeIds instanceof Set
+                ? [...nodeIds]
+                : [nodeIds]
+            )
+              .map(value =>
+                String(value || "")
+              )
+              .filter(Boolean)
+          );
+    let changed = 0;
+
+    const synchronizeSocket = socket => {
+      const nodeId = String(
+        socket?.dataset?.nodeId || ""
+      );
+      if (
+        !nodeId ||
+        (normalizedNodeIds &&
+          !normalizedNodeIds.has(nodeId))
+      ) {
+        return;
+      }
+      const direction = String(
+        socket.dataset.direction || ""
+      );
+      const portId = String(
+        socket.dataset.portId || ""
+      );
+      if (!direction || !portId) {
+        return;
+      }
+      const connected = connectedKeys.has(
+        `${direction}:${nodeId}:${portId}`
+      );
+      if (
+        socket.classList.contains(
+          "connected"
+        ) !== connected
+      ) {
+        socket.classList.toggle(
+          "connected",
+          connected
+        );
+        changed += 1;
+      }
+    };
+
+    if (normalizedNodeIds) {
+      for (const nodeId of
+        normalizedNodeIds) {
+        const article =
+          dom.nodesHost.querySelector(
+            `[data-graph-node-id="${CSS.escape(nodeId)}"]`
+          );
+        for (const socket of
+          article?.querySelectorAll(
+            ".rml-graph-socket"
+          ) || []) {
+          synchronizeSocket(socket);
+        }
+      }
+    } else {
+      for (const socket of
+        dom.nodesHost.querySelectorAll(
+          ".rml-graph-socket"
+        )) {
+        synchronizeSocket(socket);
+      }
+    }
+
+    return changed;
+  }
+
 function removeGraphConnectionsFromState(
     connectionIds
   ) {
@@ -31385,6 +31542,10 @@ function removeGraphConnectionsFromState(
     graphIncidentConnectionLookupCache.clear();
     graphConnectedPortKeysSource = null;
     graphConnectedPortKeysLength = -1;
+    synchronizeGraphConnectedSocketClasses(
+      graphStructuralAffectedNodeIds
+    );
+
     for (const connectionId of removed) {
       graphConnectionGeometryCache.delete(
         connectionId
@@ -32265,22 +32426,10 @@ function hideUnusedApiCompositeNodePortsIncludingVisible(
     }
 
     if (hasExposedUnused) {
-      /*
-       * The canonical Composite helper removes real boundary contracts and
-       * already performs a full node/wire refresh. That refresh also clears
-       * any purely visual retained-unconnected sockets.
-       */
       return hideUnusedApiCompositeNodePorts(
         nodeId
       );
     }
-
-    /*
-     * A just-disconnected port may still be intentionally visible in the
-     * current Composite editor even though it was never exposed as an outer
-     * boundary. Hide is therefore a presentation operation only: no boundary
-     * contract or wire topology is changed.
-     */
     renderGraphNodesAndWires();
     renderGraphInspector({
       force: true
@@ -40477,6 +40626,16 @@ function finishConnectionDrag(
       mutationConnectionIds.add(
         interaction.detachedConnection.id
       );
+      for (const nodeId of [
+        interaction.detachedConnection.fromNode,
+        interaction.detachedConnection.toNode
+      ]) {
+        if (!nodeId) continue;
+        mutationNodeIds.add(nodeId);
+        mutationNodeContentIds.add(
+          nodeId
+        );
+      }
     }
 
     let connected = false;
@@ -42644,6 +42803,12 @@ function initializeNodeGraphHost() {
     graph = sanitizeBuilderProjectGraphState(
       initialExtensionState
     );
+    if (
+      typeof synchronizeGraphNodeDefinitionCacheEnvironment ===
+        "function"
+    ) {
+      synchronizeGraphNodeDefinitionCacheEnvironment();
+    }
     graph.lastOpenPage =
       savedPresentationPage();
     const restoreRuntimePresentation =
@@ -44726,6 +44891,126 @@ function catalogFactoryIdentityMatches(
     );
   }
 
+function repairStaleValidApiPresentation() {
+  if (
+    !graphHostInitialized ||
+    !bridge ||
+    !graph ||
+    graph.active !== true ||
+    !runtimeGraphViewActive ||
+    !dom?.nodesHost
+  ) {
+    return 0;
+  }
+
+  synchronizeGraphNodeDefinitionCacheEnvironment();
+
+  const staleNodes = [];
+  for (const node of Array.isArray(graph.nodes) ? graph.nodes : []) {
+    if (
+      node?.kind !== "operator" ||
+      !String(node?.operatorId || "").startsWith("api.")
+    ) {
+      continue;
+    }
+
+    const definition = nodeDefinition(node);
+    if (!definition || definition.unavailableApiContract === true) {
+      continue;
+    }
+
+    const host = dom.nodesHost.querySelector(
+      `[data-graph-node-id="${CSS.escape(String(node.id || ""))}"]`
+    );
+    if (
+      host &&
+      /Unavailable API/i.test(String(host.textContent || ""))
+    ) {
+      staleNodes.push(node);
+    }
+  }
+
+  if (staleNodes.length === 0) {
+    return 0;
+  }
+
+  currentAnalysis =
+    currentAnalysis ||
+    analyzeConnections(graph.connections);
+  rememberCurrentGraphAnalysis();
+
+  const ids = new Set(
+    staleNodes.map(node => String(node.id))
+  );
+
+  synchronizeGraphNodeMutationElements(
+    staleNodes,
+    desiredRenderedGraphNodes(),
+    ids
+  );
+
+  if (graphViewPreparing()) {
+    graphViewPreparation.rebuildNodes = true;
+    graphViewPreparation.geometryDirty = true;
+  }
+
+  scheduleRenderedNodeResizeLimitRefresh(ids);
+  scheduleGraphWireRender();
+  renderGraphInspector();
+  scheduleGraphPaletteRender();
+  return staleNodes.length;
+}
+
+let graphStaleApiPresentationRepairQueued = false;
+
+function scheduleStaleValidApiPresentationRepair() {
+  if (graphStaleApiPresentationRepairQueued) {
+    return;
+  }
+  graphStaleApiPresentationRepairQueued = true;
+  queueMicrotask(() => {
+    requestProjectAnimationFrame(() => {
+      graphStaleApiPresentationRepairQueued = false;
+      repairStaleValidApiPresentation();
+    });
+  });
+}
+
+function handleGraphPresentationCompleteApiRepair() {
+  repairStaleValidApiPresentation();
+}
+
+let graphCatalogReadyPresentationRefreshQueued = false;
+
+function forceCurrentGraphCatalogPresentationRefresh() {
+  if (graphCatalogReadyPresentationRefreshQueued) {
+    return;
+  }
+  graphCatalogReadyPresentationRefreshQueued = true;
+  queueMicrotask(() => {
+    requestProjectAnimationFrame(() => {
+      graphCatalogReadyPresentationRefreshQueued = false;
+      if (
+        !graphHostInitialized ||
+        !bridge ||
+        !graph?.active ||
+        !runtimeGraphViewActive ||
+        !graphCatalogDefinitionsReady(graph)
+      ) {
+        return;
+      }
+      graphNodeDefinitionCache = new WeakMap();
+      typedGraphCodegenCacheKey = "";
+      typedGraphCodegenCache = null;
+      resetGraphRenderCaches({ capturePresentation: true });
+      scheduleGraphPaletteRender();
+      renderGraphNodesAndWires();
+      renderGraphInspector();
+      bridge.requestGeneratedOutputRefresh?.();
+    });
+  });
+}
+
 function updateGraphCatalogReadiness(
     error = graphCatalogGateError
   ) {
@@ -44743,9 +45028,14 @@ function updateGraphCatalogReadiness(
       missingGraphCatalogOperatorIds();
 
     if (graphCatalogDefinitionsReady()) {
+      const becameReady =
+        graphCatalogReadiness !== "ready";
       graphCatalogReadiness = "ready";
       graphCatalogReadinessMessage = "";
       updatePackButton();
+      if (becameReady) {
+        forceCurrentGraphCatalogPresentationRefresh();
+      }
       return true;
     }
 
@@ -44789,6 +45079,7 @@ function restoreSavedPresentationIfReady() {
 
 function handleApiNodeFactoryReady() {
     graphCatalogGateSettled = true;
+    scheduleStaleValidApiPresentationRepair();
     graphCatalogGateError = null;
 
     if (!updateGraphCatalogReadiness()) {
@@ -44798,9 +45089,7 @@ function handleApiNodeFactoryReady() {
         });
       return;
     }
-
-
-
+    forceCurrentGraphCatalogPresentationRefresh();
 
     const revision = Number(
       window.__RMLNodeDefinitionRevision
@@ -44810,9 +45099,12 @@ function handleApiNodeFactoryReady() {
       revision !==
         lastGraphCatalogRefreshRevision
     ) {
-      lastGraphCatalogRefreshRevision =
-        revision;
-      refreshAfterNodeModulesReady();
+      const refreshed =
+        refreshAfterNodeModulesReady();
+      if (refreshed) {
+        lastGraphCatalogRefreshRevision =
+          revision;
+      }
     }
 
 
@@ -44940,6 +45232,7 @@ function refreshAfterNodeModulesReady(
       scheduleGraphPaletteRender();
       renderGraphNodesAndWires();
       renderGraphInspector();
+      scheduleStaleValidApiPresentationRepair();
     }
 
     schedulePrunedGraphPersistenceAfterPaint(
@@ -45019,6 +45312,10 @@ async function initializeImmediately() {
       "rml-catalog:loaded",
       handleGraphCatalogLoaded
     );
+    document.addEventListener(
+      "rml-graph:presentation-complete",
+      handleGraphPresentationCompleteApiRepair
+    );
 
 
     Promise.resolve(
@@ -45040,9 +45337,12 @@ async function initializeImmediately() {
             revision !==
               lastGraphCatalogRefreshRevision
           ) {
-            lastGraphCatalogRefreshRevision =
-              revision;
-            refreshAfterNodeModulesReady();
+            const refreshed =
+              refreshAfterNodeModulesReady();
+            if (refreshed) {
+              lastGraphCatalogRefreshRevision =
+                revision;
+            }
           }
         }
         if (catalogReady) {
@@ -45070,7 +45370,7 @@ Object.defineProperty(
   "RMLNodeGraphViewModuleId",
   {
     value:
-      "1.20.31-universal-presentation-dev27",
+      "1.20.31-universal-presentation-dev39-clean-stale-api-repair",
     writable: false,
     enumerable: true,
     configurable: true

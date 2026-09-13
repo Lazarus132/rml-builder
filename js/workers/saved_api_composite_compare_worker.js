@@ -5,21 +5,13 @@ function savedApiCompositeCompareWorkerMain(
   workerScope
 ) {
 const self = workerScope;
-
-
-
-
 const SAVED_API_COMPOSITE_COMPARE_WORKER_MODULE_ID =
-  "1.20.31-universal-presentation-dev27";
+  "1.20.31-universal-presentation-dev39-clean-stale-api-repair";
 const SAVED_API_COMPOSITE_CANONICAL_SCHEMA_VERSION = 4;
 const MESSAGE_TYPE = "rml-saved-api-composite-compare";
 const RESULT_TYPE = `${MESSAGE_TYPE}-result`;
 
 const GRAPH_CACHE_KEYS = new Set([
-
-
-
-
   "revision",
   "contentFingerprint",
   "fingerprintNameKey",
@@ -34,11 +26,6 @@ const GRAPH_PRESENTATION_KEYS = new Set([
   "selectedWirePoint"
 ]);
 const CUSTOM_CSHARP_GRAPH_DERIVED_KEYS = new Set([
-
-
-
-
-
   "catalogFingerprint",
   "catalogEngineVersion",
   "catalogSource",
@@ -89,9 +76,6 @@ const STREAM_PAGE_TOKEN = Object.freeze({
   stringPart: 14,
   endString: 15
 });
-
-
-
 const MAX_STREAMED_JSON_CHARACTERS = Math.max(
   512 * 1024 * 1024,
   positiveWorkerLimit(
@@ -1984,7 +1968,7 @@ if (savedApiCompositeCompareWorkerThread) {
     {
       value: Object.freeze({
         moduleId:
-          "1.20.31-universal-presentation-dev27",
+          "1.20.31-universal-presentation-dev39-clean-stale-api-repair",
         canonicalSchemaVersion:
           4,
         source:

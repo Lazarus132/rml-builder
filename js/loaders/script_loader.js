@@ -3,7 +3,7 @@
   // RML Builder loaders: script_loader.
 
   const SCRIPT_LOADER_MODULE_ID =
-    "1.20.31-universal-presentation-dev27";
+    "1.20.31-universal-presentation-dev39-clean-stale-api-repair";
 
   if (
     Object.hasOwn(
@@ -184,7 +184,7 @@
       dependencies: Object.freeze([]),
       files: Object.freeze([
         Object.freeze({
-          url: "../catalog/catalog_loader.js?v=1.20.31-universal-presentation-dev27",
+          url: "../catalog/catalog_loader.js?v=1.20.31-universal-presentation-dev39-clean-stale-api-repair",
           ready: () =>
             window.RMLCatalogImportGate?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -236,7 +236,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/node_graph_codegen.js?v=1.20.31-universal-presentation-dev27",
+          url: "../graph/node_graph_codegen.js?v=1.20.31-universal-presentation-dev39-clean-stale-api-repair",
           ready: () =>
             window.RMLTypedNodeGraphGenerator?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -253,7 +253,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev27",
+          url: "../workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev39-clean-stale-api-repair",
           ready: () =>
             window.RMLSavedApiCompositeCompareWorkerBootstrap
               ?.moduleId === SCRIPT_LOADER_MODULE_ID &&
@@ -262,13 +262,13 @@
               ?.source === "string"
         }),
         Object.freeze({
-          url: "../graph/node_graph_composites.js?v=1.20.31-universal-presentation-dev27",
+          url: "../graph/node_graph_composites.js?v=1.20.31-universal-presentation-dev39-clean-stale-api-repair",
           ready: () =>
             window.RMLNodeGraphCompositesModuleId ===
               SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_custom_csharp.js?v=1.20.31-universal-presentation-dev27",
+          url: "../graph/node_graph_custom_csharp.js?v=1.20.31-universal-presentation-dev39-clean-stale-api-repair",
           ready: () =>
             window.RMLNodeGraphCustomCSharpModuleId ===
               SCRIPT_LOADER_MODULE_ID
@@ -277,13 +277,13 @@
           url: "../graph/node_graph_guided.js?v=1-physical-modules-v748"
         }),
         Object.freeze({
-          url: "../graph/node_graph_view.js?v=1.20.31-universal-presentation-dev27",
+          url: "../graph/node_graph_view.js?v=1.20.31-universal-presentation-dev39-clean-stale-api-repair",
           ready: () =>
             window.RMLNodeGraphViewModuleId ===
               SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_bootstrap.js?v=1.20.31-universal-presentation-dev27",
+          url: "../graph/node_graph_bootstrap.js?v=1.20.31-universal-presentation-dev39-clean-stale-api-repair",
           ready: () =>
             window.RMLDynamicGraphHost?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&

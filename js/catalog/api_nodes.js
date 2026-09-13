@@ -3,7 +3,7 @@
   // RML Builder catalog: api_nodes.
 
   const API_FACTORY_MODULE_ID =
-    "1.20.31-universal-presentation-dev27";
+    "1.20.31-universal-presentation-dev39-clean-stale-api-repair";
   const FACTORY_VERSION = 38;
   const API_VERIFICATION_SCHEMA_VERSION = 3;
   const CATALOG_PROJECTION_INDEX_VERSION = 1;

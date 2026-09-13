@@ -3,7 +3,7 @@
   // RML Builder catalog: catalog_loader.
 
   const CATALOG_LOADER_MODULE_ID =
-    "1.20.31-universal-presentation-dev27";
+    "1.20.31-universal-presentation-dev39-clean-stale-api-repair";
   const LOADER_VERSION = 84;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
@@ -68,7 +68,7 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=1.20.31-universal-presentation-dev27",
+    "api_nodes.js?v=1.20.31-universal-presentation-dev39-clean-stale-api-repair",
     scriptUrl
   ).href;
 
@@ -1260,12 +1260,6 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
   let scannerCheckPromise = null;
   let scannerCheckGeneration = -1;
   let cachedCatalogRecord = null;
-
-  /*
-   * Authoritative catalog availability owned by the catalog loader.
-   * RuntimeBridge mode "cached" means only "not live"; it does not prove
-   * that IndexedDB contains a catalog.
-   */
   let catalogAvailabilityKnown = false;
   let catalogAvailable = false;
   let cachedCatalogReadPromise = null;
@@ -1326,11 +1320,6 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
         ?.getConnectionState?.() ||
       null;
 
-    /*
-     * The transport state "cached" only means "not connected live".
-     * It must never be rendered as a cached API catalog unless an
-     * actual catalog is active.
-     */
     if (!catalog) {
       element.dataset.source =
         "unavailable";
@@ -2903,14 +2892,6 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
         cached.sourceUrl || ""
       );
     }
-
-    /*
-     * Startup intentionally stops here.
-     *
-     * No IndexedDB catalog means API Unavailable.
-     * A user click connects to the Live scanner; there is no Builder-local
-     * resonite_api_catalog.json fallback.
-     */
     catalogAvailabilityKnown = true;
     catalogAvailable = false;
     updateUnavailableStatus();
@@ -2950,10 +2931,6 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
     manualCatalogActivationPromise =
       Promise.resolve()
         .then(async () => {
-          /*
-           * Match the import path exactly: import prepares runtime-core before
-           * it reads RMLRuntimeBridge and calls bridge.connect().
-           */
           const scriptLoader =
             window.RMLScriptLoader;
 
@@ -2990,11 +2967,6 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
             bridge.getConnectionState?.() ||
             currentScannerConnection();
 
-          /*
-           * The API badge is the actual Live/Cached/Unavailable toggle.
-           * A click must NEVER be discarded merely because a cached catalog
-           * exists: Cached -> click means "probe scanner ports and go Live".
-           */
           if (before?.mode === "live") {
             console.info(
               "[RML API Catalog] Disconnecting Live scanner and returning to cached/offline mode."
@@ -3032,12 +3004,6 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
                 bridge.getConnectionState?.() ||
                 currentScannerConnection();
 
-              /*
-               * synchronizeConnectedSession() may already have started this
-               * exact generation. synchronizeScannerStatus() shares that
-               * scannerCheckPromise, so the click waits for the SAME operation
-               * instead of requiring a second click.
-               */
               const synchronized =
                 await synchronizeScannerStatus({
                   manualSession: session,
@@ -3065,11 +3031,6 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
             }
           }
 
-          /*
-           * No usable Live scanner/catalog.
-           * Keep a real IndexedDB catalog active if one exists; otherwise
-           * remain unavailable. There is no static/local JSON fallback.
-           */
           const existing =
             statusCatalog();
 
@@ -3113,10 +3074,6 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
     manualCatalogActivationInstalled = true;
 
     const reassertUnavailable = () => {
-      /*
-       * Never overwrite the explicit checking state while a manual scanner
-       * discovery/catalog synchronization is still in progress.
-       */
       if (manualCatalogActivationPromise) {
         return;
       }
@@ -3139,11 +3096,6 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
     element.addEventListener(
       "click",
       event => {
-        /*
-         * Own the badge click in every state. This prevents a stale
-         * catalogAvailable flag or another generic toggle handler from
-         * swallowing the action before scanner discovery starts.
-         */
         event.preventDefault();
         event.stopImmediatePropagation();
 
@@ -3173,11 +3125,6 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
     );
   }
 
-
-  /*
-   * Install immediately. catalogReady may involve IndexedDB work and must not
-   * gate whether the user can click the API status button.
-   */
   installManualUnavailableCatalogActivation();
 
   if (!manualCatalogActivationInstalled) {
@@ -3540,12 +3487,41 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
       );
     }
 
-    await controller.rebuild(
-      catalog,
-      {
-        createCatalogPublication
+    const rebuildOptions = {
+      createCatalogPublication
+    };
+    let rebuildError = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        await controller.rebuild(
+          catalog,
+          rebuildOptions
+        );
+        rebuildError = null;
+        break;
+      } catch (error) {
+        rebuildError = error;
+        const message = String(
+          error?.message || error || ""
+        );
+        const registryChanged =
+          message.includes(
+            "The graph registry changed before committing the rebuilt catalog factory."
+          ) ||
+          message.includes(
+            "The graph registry instance changed before committing the rebuilt catalog factory."
+          );
+        if (!registryChanged || attempt >= 2) {
+          throw error;
+        }
+        await new Promise(resolve =>
+          window.setTimeout(resolve, 0)
+        );
       }
-    );
+    }
+    if (rebuildError) {
+      throw rebuildError;
+    }
     report =
       window.RMLApiNodeFactoryReport;
     return assertCatalogFactoryCommit(
@@ -3612,14 +3588,6 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
     const pending = Promise.resolve().then(async () => {
       try {
         assertSession();
-
-        /*
-         * The RuntimeBridge health probe proves only that the scanner server is
-         * reachable. The catalog scan can still be running at that exact moment.
-         * Never permanently cache that pre-scan health snapshot for this scanner
-         * generation. Wait for the scanner's catalog-ready barrier, then read a
-         * fresh /health snapshot containing the final catalog fingerprint.
-         */
         let scannerHealth = session.health;
         if (
           scannerHealth?.catalogReady !== true ||
@@ -5400,12 +5368,6 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
     connection = currentScannerConnection()
   ) {
     if (connection.mode === "live") {
-      /*
-       * A Live transport connection is not yet a Live catalog. Keep the UI in
-       * checking state until fingerprint verification, cache commit and factory
-       * activation have all completed. This removes the first-click
-       * checking -> unavailable -> second-click -> Live race.
-       */
       renderManualCatalogChecking();
 
       void synchronizeScannerStatus({

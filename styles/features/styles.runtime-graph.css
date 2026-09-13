@@ -3187,28 +3187,6 @@ body.rml-node-graph-mode.rml-graph-edit-mode #inspector-content {
     0 0 8px rgba(255, 47, 69, 0.72);
 }
 
-.rml-graph-node.import-recovery-broken::after {
-  content: "UNRESOLVED";
-  position: absolute;
-  top: 6px;
-  right: 8px;
-  padding: 2px 5px;
-  border: 1px solid rgba(255, 160, 169, 0.78);
-  border-radius: 4px;
-  background: rgba(80, 0, 12, 0.9);
-  font-size: 9px;
-  font-weight: 900;
-  letter-spacing: .08em;
-  color: #ffd5d9;
-  pointer-events: none;
-}
-
-/*
- * Broken/unavailable API visuals are semantic classes, not per-element
- * inline styling. Normal typed wire colors continue using the existing
- * data-driven color path; the exceptional recovery state is a cheap class
- * toggle and therefore does not require rebuilding style text.
- */
 .rml-graph-wire.import-recovery-broken,
 .rml-graph-wire-preview.import-recovery-broken {
   stroke: #ff2f45 !important;

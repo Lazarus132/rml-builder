@@ -2,7 +2,7 @@
 // RML Builder workers: graph_codegen_worker.
 
 const GRAPH_CODEGEN_WORKER_MODULE_ID =
-  "1.20.31-universal-presentation-dev27";
+  "1.20.31-universal-presentation-dev39-clean-stale-api-repair";
 const GRAPH_CODEGEN_WORKER_FACTORY_VERSION =
   38;
 
@@ -682,7 +682,7 @@ async function ensureRuntime(
       "../compiler/visual_csharp.js?v=83-empty-custom-csharp-ignored"
     );
     importScripts(
-      "../catalog/api_nodes.js?v=1.20.31-universal-presentation-dev27"
+      "../catalog/api_nodes.js?v=1.20.31-universal-presentation-dev39-clean-stale-api-repair"
     );
 
     if (
@@ -726,7 +726,7 @@ async function ensureRuntime(
     }
 
     importScripts(
-      "../graph/node_graph_codegen.js?v=1.20.31-universal-presentation-dev27"
+      "../graph/node_graph_codegen.js?v=1.20.31-universal-presentation-dev39-clean-stale-api-repair"
     );
 
     if (

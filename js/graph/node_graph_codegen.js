@@ -253,6 +253,40 @@ const graphSvgWirePointCache = new Map();
 
 let graphNodeDefinitionCache = new WeakMap();
 
+// A node can survive an asynchronous API-catalog/factory rebuild while its
+// cached definition still points at the temporary unavailable placeholder.
+// Track the definition environment with the cache itself so any later render
+// automatically observes the current registry, even if the factory-ready
+// event happened before the graph host was installed.
+let graphNodeDefinitionCacheEnvironmentKey = "";
+
+function currentGraphNodeDefinitionEnvironmentKey() {
+  return [
+    Number(window.__RMLNodeDefinitionRevision) || 0,
+    Number(window.__RMLApiNodeFactoryVersion) || 0,
+    String(
+      window.RMLApiNodeFactoryReport?.catalogFingerprint ||
+      window.RMLResoniteApiCatalog?.catalogFingerprint ||
+      ""
+    ),
+    String(
+      window.RMLApiNodeFactoryReport?.engineVersion ||
+      window.RMLResoniteApiCatalog?.engineVersion ||
+      ""
+    )
+  ].join("\u0002");
+}
+
+function synchronizeGraphNodeDefinitionCacheEnvironment() {
+  const key = currentGraphNodeDefinitionEnvironmentKey();
+  if (key !== graphNodeDefinitionCacheEnvironmentKey) {
+    graphNodeDefinitionCache = new WeakMap();
+    graphNodeDefinitionCacheEnvironmentKey = key;
+    return true;
+  }
+  return false;
+}
+
 let graphNodeLookupCache = new Map();
 
 let graphConnectionLookupCache = new Map();
@@ -6801,6 +6835,7 @@ function resolveNodeDefinition(node) {
   }
 
 function nodeDefinition(node) {
+    synchronizeGraphNodeDefinitionCacheEnvironment();
     if (!node || typeof node !== "object") {
       return resolveNodeDefinition(node || {});
     }
@@ -7807,7 +7842,7 @@ function createGraphAnalysisCertificate(
       schemaVersion:
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION,
       moduleId:
-        "1.20.31-universal-presentation-dev27",
+        "1.20.31-universal-presentation-dev39-clean-stale-api-repair",
       semanticToken: token,
       nodeCount: graph.nodes.length,
       connectionCount: connections.length,
@@ -7840,7 +7875,7 @@ function graphAnalysisCertificateEnvelopeValid(
       Number(certificate.schemaVersion) ===
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION &&
       certificate.moduleId ===
-        "1.20.31-universal-presentation-dev27" &&
+        "1.20.31-universal-presentation-dev39-clean-stale-api-repair" &&
       certificate.valid === true &&
       typeof certificate.semanticToken ===
         "string" &&
@@ -16754,7 +16789,7 @@ Object.defineProperty(
     {
       value: Object.freeze({
         moduleId:
-          "1.20.31-universal-presentation-dev27",
+          "1.20.31-universal-presentation-dev39-clean-stale-api-repair",
         build:
           buildTypedNodeGraphCSharpContribution,
         validateDocument:
