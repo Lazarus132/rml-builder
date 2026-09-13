@@ -3,7 +3,7 @@
   // RML Builder bootstrap: architecture_gate.
 
   const MODULE_ID =
-    "1.20.31-universal-presentation-dev57-outline-first-paint-spinner";
+    "1.20.31-universal-presentation-dev72-synchronous-retained-drag";
   const GATE_VERSION = 1;
   const DETECTION_TIMEOUT_MS = 5000;
   const HIGH_ENTROPY_HINTS = Object.freeze([

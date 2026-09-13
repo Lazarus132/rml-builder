@@ -2260,7 +2260,7 @@ function buildCustomCSharpFragmentInWorker(nodeId, source, parseResult, options)
     }
     const worker = new Worker(
       new URL(
-        "js/workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev57-outline-first-paint-spinner",
+        "js/workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev72-synchronous-retained-drag",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -2727,6 +2727,12 @@ async function openCustomCSharpFileGraphSynced(nodeId, options = {}) {
           normalizedNodeId,
           ""
         );
+        if (
+          customCSharpSynchronizations.size ===
+          0
+        ) {
+          restoreSavedPresentationIfReady();
+        }
       }
     }
   }
@@ -5422,7 +5428,7 @@ function prepareCustomCSharpEditorHost(
       hostWindow.document.createElement("link");
     stylesheet.rel = "stylesheet";
     stylesheet.href = new URL(
-      "styles/features/styles.runtime-graph.css?v=1.20.31-universal-presentation-dev57-outline-first-paint-spinner",
+      "styles/features/styles.runtime-graph.css?v=1.20.31-universal-presentation-dev72-synchronous-retained-drag",
       window.location.href
     ).href;
     hostWindow.document.head.appendChild(
@@ -6900,7 +6906,7 @@ Object.defineProperty(
   "RMLNodeGraphCustomCSharpModuleId",
   {
     value:
-      "1.20.31-universal-presentation-dev57-outline-first-paint-spinner",
+      "1.20.31-universal-presentation-dev72-synchronous-retained-drag",
     writable: false,
     enumerable: true,
     configurable: true

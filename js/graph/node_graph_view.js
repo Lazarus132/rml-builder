@@ -500,35 +500,6 @@ let runtimeGraphViewActive = false;
 
 let runtimeGraphPresentationPending = false;
 
-let graphOutlineDeferredRenderSequence = 0;
-let graphOutlineDeferredRenderFrame = 0;
-let graphOutlineDeferredRenderTimer = 0;
-let graphOutlineDeferredRenderHost = null;
-
-function cancelGraphOutlineDeferredRender() {
-    graphOutlineDeferredRenderSequence += 1;
-    if (graphOutlineDeferredRenderFrame) {
-      window.cancelAnimationFrame(
-        graphOutlineDeferredRenderFrame
-      );
-      graphOutlineDeferredRenderFrame = 0;
-    }
-    if (graphOutlineDeferredRenderTimer) {
-      window.clearTimeout(
-        graphOutlineDeferredRenderTimer
-      );
-      graphOutlineDeferredRenderTimer = 0;
-    }
-    const host = graphOutlineDeferredRenderHost;
-    graphOutlineDeferredRenderHost = null;
-    if (host) {
-      host.inert = false;
-      host.removeAttribute("aria-busy");
-      delete host.dataset
-        .rmlOutlinePreparing;
-    }
-  }
-
 let graphNavigationTransitionSequence = 0;
 
 let graphRestoreReadinessSequence = 0;
@@ -3741,7 +3712,6 @@ let graphConnectionDragTelemetry = {
   };
 
 function cancelProjectScopedGraphWork() {
-    cancelGraphOutlineDeferredRender();
     graphNavigationTransitionSequence += 1;
     graphRestoreReadinessSequence += 1;
     cancelGraphWireHandleWork(true);
@@ -12457,11 +12427,6 @@ function ensurePackButton() {
         { passive: true, once: true }
       );
       button.addEventListener(
-        "pointerdown",
-        warmRuntimeGraphStyles,
-        { passive: true, once: true }
-      );
-      button.addEventListener(
         "focus",
         warmRuntimeGraphStyles,
         { once: true }
@@ -12497,10 +12462,7 @@ function graphPresentationVisible() {
     );
     return Boolean(
       graph?.active === true &&
-      (
-        runtimeGraphViewActive === true ||
-        graphSurfaceVisible
-      )
+      graphSurfaceVisible
     );
   }
 
@@ -12541,21 +12503,13 @@ function markGraphPackPresentationPending() {
       "Runtime Graph";
   }
 
-function updatePackButton() {
-    if (!dom.packButton) {
-      return;
-    }
-
-    const graphVisible =
-      graphPresentationVisible();
+function runtimeGraphTransitionState() {
     const hostLoading =
       !graphHostError &&
       (
         !graphHostInitialized ||
-        (
-          !bridge ||
-          !graph
-        )
+        !bridge ||
+        !graph
       );
     const hostFailed =
       Boolean(graphHostError);
@@ -12567,18 +12521,42 @@ function updatePackButton() {
         runtimeGraphPresentationPending &&
         Boolean(customCSharpEditor)
       );
-    const graphLoading =
+    const loading =
       hostLoading ||
       runtimeGraphStyleTransitionPending ||
       runtimeGraphStyleActivationQueued ||
-      runtimeGraphStylePromise !== null ||
       runtimeGraphPresentationPending ||
+      graphViewPreparing() ||
       customCSharpLoading ||
       (
         catalogDependent &&
         graphCatalogReadiness ===
           "pending"
       );
+
+    return {
+      hostLoading,
+      hostFailed,
+      catalogDependent,
+      customCSharpLoading,
+      loading
+    };
+  }
+
+function updatePackButton() {
+    if (!dom.packButton) {
+      return;
+    }
+
+    const graphVisible =
+      graphPresentationVisible();
+    const {
+      hostLoading,
+      hostFailed,
+      catalogDependent,
+      customCSharpLoading,
+      loading: graphLoading
+    } = runtimeGraphTransitionState();
     const catalogFailed =
       hostFailed ||
       (
@@ -12588,10 +12566,10 @@ function updatePackButton() {
           "failed"
       );
 
-    const visualState = graphVisible
-      ? "outline-toggle"
-      : graphLoading
-        ? "loading"
+    const visualState = graphLoading
+      ? "loading"
+      : graphVisible
+        ? "outline-toggle"
         : catalogFailed
           ? hostFailed
             ? "failed-host"
@@ -12609,37 +12587,36 @@ function updatePackButton() {
         .rmlRuntimeButtonVisual =
         visualState;
       dom.packButton.innerHTML =
-        graphVisible
-          ? `${graphOutlineToggleMarkup()}<span class="top-action-label">Configuration Outline</span>`
-          : graphLoading
-            ? `<span class="brand-mark rml-pack-brand-mark rml-runtime-graph-loader rml-runtime-graph-spinner" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">${customCSharpLoading ? "Loading Custom C# Graph…" : "Loading Runtime Graph…"}</span>`
+        graphLoading
+          ? `<span class="brand-mark rml-pack-brand-mark rml-runtime-graph-loader rml-runtime-graph-spinner" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">${customCSharpLoading ? "Loading Custom C# Graph…" : "Loading Runtime Graph…"}</span>`
+          : graphVisible
+            ? `${graphOutlineToggleMarkup()}<span class="top-action-label">Configuration Outline</span>`
             : catalogFailed
             ? `<span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">${hostFailed ? "Runtime Graph unavailable" : "Repair Runtime Graph…"}</span>`
             : graph?.active
-              ? `<span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">Open Last Graph</span>`
+              ? `<span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">Open Runtime Graph</span>`
               : `<span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">Pack into Node</span>`;
     }
 
     dom.packButton.setAttribute(
       "aria-label",
-      graphVisible
-        ? "Show Configuration Outline"
-        : graphLoading
-          ? customCSharpLoading
+      graphLoading
+        ? customCSharpLoading
             ? "Custom C# Graph is loading"
             : "Runtime Graph is loading"
+        : graphVisible
+          ? "Show Configuration Outline"
           : catalogFailed
           ? hostFailed
             ? "Runtime Graph is unavailable"
             : "Review catalog replacements for the Runtime Graph"
           : graph?.active
-            ? "Open last Graph level"
+            ? "Open Runtime Graph"
             : "Pack into Node"
     );
 
     if (
-      graphLoading &&
-      !graphVisible
+      graphLoading
     ) {
       dom.packButton.setAttribute(
         "aria-busy",
@@ -12652,10 +12629,10 @@ function updatePackButton() {
     }
 
     dom.packButton.dataset.runtimeReadiness =
-      graphVisible
-        ? "ready"
-        : graphLoading
-          ? "loading"
+      graphLoading
+        ? "loading"
+        : graphVisible
+          ? "ready"
           : catalogFailed
             ? "failed"
             : "ready";
@@ -12676,16 +12653,18 @@ function updatePackButton() {
 
 
 
-    const sourceNodeCount = Array.isArray(
-      graph?.configSnapshot?.nodes
+    const liveSourceNodeCount = Number(
+      bridge?.getConfigurationNodeCount?.()
+    );
+    const sourceNodeCount = Number.isFinite(
+      liveSourceNodeCount
     )
-      ? graph.configSnapshot.nodes.length
-      : Math.max(
-          0,
-          Number(
-            bridge?.getConfigurationNodeCount?.()
-          ) || 0
-        );
+      ? Math.max(0, liveSourceNodeCount)
+      : Array.isArray(
+          graph?.configSnapshot?.nodes
+        )
+        ? graph.configSnapshot.nodes.length
+        : 0;
 
     setGraphButtonAvailability(
       dom.packButton,
@@ -12699,9 +12678,7 @@ function updatePackButton() {
     );
 
     dom.packButton.dataset.help =
-      graphVisible
-        ? "Show the Configuration Outline. The current Graph path, viewport and selection are preserved."
-        : graphLoading
+      graphLoading
         ? customCSharpLoading
           ? "The Runtime Graph remains busy until the Custom C# graph has been parsed, materialized and presented."
           : runtimeGraphStyleTransitionPending ||
@@ -12710,8 +12687,17 @@ function updatePackButton() {
           ? "The Runtime Graph stylesheet is being prepared locally before the view changes."
           : hostLoading
           ? "The Runtime Graph control is ready. The locally restored project state is still being connected to it."
-          : graphCatalogReadinessMessage ||
-            "The saved graph is available. Its catalog-generated API definitions are still being restored."
+          : graphViewPreparing() ||
+            runtimeGraphPresentationPending
+          ? "The saved Runtime Graph scene is being rendered and becomes interactive automatically when its first complete frame is ready."
+          : catalogDependent &&
+            graphCatalogReadiness ===
+              "pending"
+          ? graphCatalogReadinessMessage ||
+            "The saved graph is available while its catalog-generated API definitions are being restored."
+          : "The Runtime Graph is completing its current transition."
+        : graphVisible
+          ? "Show the Configuration Outline. The current Graph path, viewport and selection are preserved."
         : catalogFailed
           ? hostFailed
             ? `The Runtime Graph base modules failed: ${
@@ -12721,10 +12707,10 @@ function updatePackButton() {
             }`
             : graphCatalogReadinessMessage ||
             "Click to review deterministic replacements for incompatible API nodes, including nodes inside placed API Composites."
-        : sourceNodeCount === 0
-        ? "Add at least one Configuration Outline item before opening the Typed Runtime Graph."
         : graph?.active
-          ? "Open the last visible Graph level with its Breadcrumb path, viewport and selection."
+          ? "Open the preserved Runtime Graph with its Breadcrumb path, viewport and selection."
+        : sourceNodeCount === 0
+          ? "Add at least one Configuration Outline item before opening the Typed Runtime Graph."
           : "Open the automatically synchronized Typed Runtime Graph. The Configuration Outline remains preserved.";
     dom.packButton.removeAttribute("title");
   }
@@ -12909,6 +12895,32 @@ function ensureConfigurationNode() {
   }
 
 async function togglePackedNodeMode() {
+    const transition =
+      runtimeGraphTransitionState();
+    if (transition.loading) {
+      const graphVisible =
+        graphPresentationVisible();
+      if (!graphVisible && graph?.active) {
+        commitPresentationPage(
+          "runtime-graph",
+          "runtime-graph-open-request"
+        );
+      }
+      markGraphPackPresentationPending();
+      window.RMLScriptLoader
+        ?.reportRuntimeViewStillLoading?.(
+          graphVisible
+            ? {
+                title:
+                  "Runtime Graph update was already running",
+                message:
+                  "An update was already running when you clicked. This click does not start another update; the existing graph remains open and becomes interactive automatically when that update completes."
+              }
+            : undefined
+        );
+      return false;
+    }
+
     if (graphPresentationVisible()) {
       unpackToOutline();
       return;
@@ -13457,52 +13469,9 @@ function unpackToOutline() {
 
 
 
-    cancelGraphOutlineDeferredRender();
-    const projectEpoch = builderProjectEpoch;
-    const sequence =
-      graphOutlineDeferredRenderSequence;
-    const host = dom.builderCanvas;
-    graphOutlineDeferredRenderHost = host;
-    if (host) {
-      host.inert = true;
-      host.setAttribute("aria-busy", "true");
-      host.dataset.rmlOutlinePreparing =
-        "true";
-    }
-    graphOutlineDeferredRenderFrame =
-      window.requestAnimationFrame(() => {
-      graphOutlineDeferredRenderFrame = 0;
-      graphOutlineDeferredRenderTimer =
-        window.setTimeout(() => {
-        graphOutlineDeferredRenderTimer = 0;
-        if (
-          sequence !==
-            graphOutlineDeferredRenderSequence ||
-          projectEpoch !== builderProjectEpoch ||
-          runtimeGraphViewActive
-        ) {
-          if (
-            sequence ===
-              graphOutlineDeferredRenderSequence
-          ) {
-            cancelGraphOutlineDeferredRender();
-          }
-          return;
-        }
-        try {
-          bridge.requestPaletteRender();
-          bridge.requestRender();
-          updatePackButton();
-        } finally {
-          if (
-            sequence ===
-              graphOutlineDeferredRenderSequence
-          ) {
-            cancelGraphOutlineDeferredRender();
-          }
-        }
-      }, 0);
-    });
+    bridge.requestPaletteRender();
+    bridge.requestRender();
+    updatePackButton();
     return true;
   }
 
@@ -14467,7 +14436,6 @@ function presentRuntimeGraphRestoreShell() {
   }
 
 function activateGraphMode() {
-    cancelGraphOutlineDeferredRender();
     if (!runtimeGraphStylesLoaded()) {
       if (!runtimeGraphStyleActivationQueued) {
         runtimeGraphStyleActivationQueued = true;
@@ -14606,6 +14574,24 @@ function deactivateGraphMode(
     cancelGraphViewPreparation();
     releaseGraphNavigationResponsiveTracking();
     runtimeGraphViewActive = false;
+    if (graphNodeVirtualizationFrame) {
+      cancelAnimationFrame(
+        graphNodeVirtualizationFrame
+      );
+      graphNodeVirtualizationFrame = 0;
+    }
+    if (graphWireRenderFrame) {
+      cancelAnimationFrame(
+        graphWireRenderFrame
+      );
+      graphWireRenderFrame = 0;
+    }
+    graphWireFullRenderPending = false;
+    graphWirePartialConnectionIds.clear();
+    releaseGraphToolbarResizeTracking();
+    detachGraphHybridRenderer();
+    graphActivePresentationRoot = null;
+    graphNodeVirtualizationSignature = "";
     window.RMLUniversalScrollLayers?.refresh?.();
     graphPaletteIndicatorCleanup?.();
     graphPaletteIndicatorCleanup = null;
@@ -14645,25 +14631,6 @@ function deactivateGraphMode(
     if (dom.toast) {
       dom.toast.hidden = true;
     }
-
-    if (graphNodeVirtualizationFrame) {
-      cancelAnimationFrame(
-        graphNodeVirtualizationFrame
-      );
-      graphNodeVirtualizationFrame = 0;
-    }
-    if (graphWireRenderFrame) {
-      cancelAnimationFrame(
-        graphWireRenderFrame
-      );
-      graphWireRenderFrame = 0;
-    }
-    graphWireFullRenderPending = false;
-    graphWirePartialConnectionIds.clear();
-    releaseGraphToolbarResizeTracking();
-    detachGraphHybridRenderer();
-    graphActivePresentationRoot = null;
-    graphNodeVirtualizationSignature = "";
 
     dom.root = null;
     dom.navigationTrail = null;
@@ -38418,7 +38385,6 @@ function updateWireSegmentDrag(
 
 
       synchronizeGraphWireHandles();
-      graphHybridRenderer?.drawNow?.();
     }
   }
 
@@ -41872,6 +41838,7 @@ function runAutoPan(
       applyViewportTransform({
         deferAuxiliary: true
       });
+      graphInteractionRendererDrawPending = true;
       if (!deferCallback) {
         state.applying = true;
         try {
@@ -41992,6 +41959,7 @@ function applyGraphInteractionMotion(
       applyViewportTransform({
         deferAuxiliary: true
       });
+      graphInteractionRendererDrawPending = true;
     } else if (activeInteraction.kind === "node") {
       updateNodeDragPosition(
         clientX,
@@ -42057,14 +42025,7 @@ function queueGraphInteractionMotion(
       clientX,
       clientY
     };
-    if (
-      activeInteraction?.kind ===
-        "connection"
-    ) {
-      flushGraphInteractionMotion(pointerId);
-      return;
-    }
-    scheduleGraphInteractionFrame();
+    flushGraphInteractionMotion(pointerId);
   }
 
 function flushGraphInteractionMotion(
@@ -42906,7 +42867,7 @@ function handleBuilderRendered(event) {
     }
 
     if (runtimeGraphRestoreRequested()) {
-      activateGraphMode();
+      restoreSavedPresentationIfReady();
       if (restoredGraphNeedsReadinessCheck) {
         scheduleRestoredGraphReadinessAfterPaint();
       }
@@ -43329,7 +43290,7 @@ function initializeNodeGraphHost() {
     ) {
       activateGraphMode();
     } else if (runtimeGraphRestoreRequested()) {
-      activateGraphMode();
+      restoreSavedPresentationIfReady();
       scheduleRestoredGraphReadinessAfterPaint();
     }
 
@@ -45296,6 +45257,7 @@ function updateGraphCatalogReadiness(
       updatePackButton();
       if (
         becameReady &&
+        runtimeGraphViewActive &&
         activeCatalogTransitionRequiresGraphReconciliation()
       ) {
         forceCurrentGraphCatalogPresentationRefresh();
@@ -45332,6 +45294,8 @@ function restoreSavedPresentationIfReady() {
       !graph ||
       graph.active !== true ||
       savedPresentationPage() !== "runtime-graph" ||
+      !graphCatalogGateSettled ||
+      graphCatalogReadiness !== "ready" ||
       runtimeGraphViewActive
     ) {
       return false;
@@ -45342,6 +45306,8 @@ function restoreSavedPresentationIfReady() {
   }
 
 function handleApiNodeFactoryReady() {
+    const presentationWasActive =
+      runtimeGraphViewActive;
     const refreshPresentation =
       activeCatalogTransitionRequiresGraphReconciliation();
     graphCatalogGateSettled = true;
@@ -45351,7 +45317,9 @@ function handleApiNodeFactoryReady() {
       refreshPresentation
         ? updateGraphCatalogReadiness()
         : acceptCurrentCachedGraphPresentation();
-    scheduleStaleApiPresentationRepair(true);
+    if (presentationWasActive) {
+      scheduleStaleApiPresentationRepair(true);
+    }
     if (!catalogReady) {
       void scheduleOpenGraphCatalogReconciliation()
         .finally(() => {
@@ -45363,7 +45331,10 @@ function handleApiNodeFactoryReady() {
       window.__RMLNodeDefinitionRevision
     ) || 0;
 
-    if (refreshPresentation) {
+    if (
+      refreshPresentation &&
+      presentationWasActive
+    ) {
       forceCurrentGraphCatalogPresentationRefresh();
     }
 
@@ -45422,7 +45393,11 @@ function handleGraphCatalogLoaded() {
 
 
 
-      activateGraphMode();
+      if (runtimeGraphViewActive) {
+        activateGraphMode();
+      } else {
+        presentRuntimeGraphRestoreShell();
+      }
     }
 
     markGraphPackPresentationPending();
@@ -45666,7 +45641,7 @@ Object.defineProperty(
   "RMLNodeGraphViewModuleId",
   {
     value:
-      "1.20.31-universal-presentation-dev57-outline-first-paint-spinner",
+      "1.20.31-universal-presentation-dev72-synchronous-retained-drag",
     writable: false,
     enumerable: true,
     configurable: true

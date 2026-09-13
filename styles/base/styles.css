@@ -2734,6 +2734,10 @@ body:has(.node-pointer-ghost) .builder-canvas {
   overflow: hidden;
 }
 
+.rml-pack-button * {
+  pointer-events: none;
+}
+
 .rml-pack-button .rml-pack-brand-mark {
   width: 22px;
   height: 22px;

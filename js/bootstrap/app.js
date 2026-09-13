@@ -43,14 +43,16 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "1.20.31-universal-presentation-dev57-outline-first-paint-spinner";
+  "1.20.31-universal-presentation-dev72-synchronous-retained-drag";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
 let alwaysClickableButtonFeedbackTimer = 0;
+let alwaysClickableButtonFeedbackOwner = null;
 
 function showAlwaysClickableButtonFeedback(
-  message
+  message,
+  owner = null
 ) {
   let feedback = document.getElementById(
     "rml-button-action-feedback"
@@ -71,12 +73,16 @@ function showAlwaysClickableButtonFeedback(
       "This action is not available in the current state."
   );
   feedback.hidden = false;
+  alwaysClickableButtonFeedbackOwner =
+    owner;
   window.clearTimeout(
     alwaysClickableButtonFeedbackTimer
   );
   alwaysClickableButtonFeedbackTimer =
     window.setTimeout(() => {
       feedback.hidden = true;
+      alwaysClickableButtonFeedbackOwner =
+        null;
     }, 3600);
 }
 
@@ -111,6 +117,23 @@ function setAlwaysClickableButtonAvailability(
       );
   } else {
     delete button.dataset.unavailableReason;
+    if (
+      alwaysClickableButtonFeedbackOwner ===
+        button
+    ) {
+      const feedback =
+        document.getElementById(
+          "rml-button-action-feedback"
+        );
+      window.clearTimeout(
+        alwaysClickableButtonFeedbackTimer
+      );
+      alwaysClickableButtonFeedbackTimer = 0;
+      alwaysClickableButtonFeedbackOwner = null;
+      if (feedback) {
+        feedback.hidden = true;
+      }
+    }
   }
 }
 
@@ -169,11 +192,45 @@ document.addEventListener(
       'button[aria-disabled="true"]'
     );
     if (!button) return;
+    if (button.id === "pack-into-node") {
+      const bridge = window.RMLBuilderBridge;
+      const graph =
+        bridge?.getExtensionStateReference?.(
+          "typedNodeGraph"
+        );
+      const nodeCount = Number(
+        bridge?.getConfigurationNodeCount?.()
+      );
+      if (
+        button.getAttribute("aria-busy") ===
+          "true" ||
+        graph?.active === true ||
+        (
+          Number.isFinite(nodeCount) &&
+          nodeCount > 0
+        )
+      ) {
+        setAlwaysClickableButtonAvailability(
+          button,
+          true
+        );
+        return;
+      }
+      if (
+        !bridge ||
+        !Number.isFinite(nodeCount) ||
+        button.dataset.runtimeReadiness !==
+          "ready"
+      ) {
+        return;
+      }
+    }
     event.preventDefault();
     event.stopImmediatePropagation();
     showAlwaysClickableButtonFeedback(
       button.dataset.unavailableReason ||
-        button.title
+        button.title,
+      button
     );
   },
   true
@@ -4292,7 +4349,7 @@ function ensureGraphCodegenWorker() {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev57-outline-first-paint-spinner",
+      "../workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev72-synchronous-retained-drag",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -9607,6 +9664,7 @@ function isImportRecoveryExportOnlyDiagnostic(
   ) {
     return true;
   }
+  
   for (const nodeId of
     scope.nodeIds) {
     if (
@@ -26717,12 +26775,31 @@ function beginStartupStatus(
     label?.closest?.(".local-state") ||
     label?.parentElement ||
     null;
+  const workSession = beginBuilderWork({
+    kicker: "Builder startup",
+    title: initialText,
+    message:
+      "The saved workspace and its requested page are being restored.",
+    detail:
+      "The interface opens automatically when its first usable frame is ready.",
+    progress: 8,
+    timeout: 120000
+  });
   let finished = false;
 
-  const set = value => {
+  const set = changes => {
     if (!label || finished) {
       return false;
     }
+    const update =
+      changes &&
+      typeof changes === "object"
+        ? changes
+        : { title: changes };
+    const value =
+      update.title ||
+      update.message ||
+      initialText;
     label.textContent = String(
       value ||
       "Restoring local workspace…"
@@ -26731,6 +26808,10 @@ function beginStartupStatus(
       container.dataset.state =
         "loading";
     }
+    updateBuilderWork(
+      workSession,
+      update
+    );
     return true;
   };
 
@@ -26738,11 +26819,7 @@ function beginStartupStatus(
 
   return Object.freeze({
     update(changes = {}) {
-      return set(
-        changes.title ||
-        changes.message ||
-        initialText
-      );
+      return set(changes);
     },
     finish() {
       if (finished) {
@@ -26757,10 +26834,11 @@ function beginStartupStatus(
         container.dataset.state =
           "ready";
       }
+      finishBuilderWork(workSession);
       return true;
     },
     get visible() {
-      return false;
+      return true;
     }
   });
 }
@@ -27947,7 +28025,7 @@ function promiseWithBuilderTimeout(
 
 function assertProjectRuntimeModuleCoherence() {
   const expectedModuleId =
-    "1.20.31-universal-presentation-dev57-outline-first-paint-spinner";
+    "1.20.31-universal-presentation-dev72-synchronous-retained-drag";
   const requiredFactoryVersion = 38;
   const mismatches = [];
   const requireModuleId = (
@@ -36681,8 +36759,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "../../templates/help_template.html?v=1.20.31-universal-presentation-dev57-outline-first-paint-spinner",
-    "../templates/help_template.js?v=1.20.31-universal-presentation-dev57-outline-first-paint-spinner",
+    "../../templates/help_template.html?v=1.20.31-universal-presentation-dev72-synchronous-retained-drag",
+    "../templates/help_template.js?v=1.20.31-universal-presentation-dev72-synchronous-retained-drag",
     "help-template",
     "RMLHelpTemplateMarkup"
   )
@@ -43042,13 +43120,6 @@ async function initialize() {
     });
   }
   await paintBuilderUi();
-  if (startupRuntimeGraphRequested) {
-    await Promise.resolve(
-      window.RMLScriptLoader?.ensure?.(
-        "node-registry"
-      ) || true
-    ).catch(() => false);
-  }
 
   exposeBuilderBridge();
   beginTypedNodeGraphModulesTracking();
@@ -43091,9 +43162,7 @@ async function initialize() {
           : "Workspace restoration completed successfully.",
       progress: 100
     });
-  if (startupWork.visible) {
-    await paintBuilderUi();
-  }
+  await paintBuilderUi();
   startupWork.finish();
 
   document.dispatchEvent(

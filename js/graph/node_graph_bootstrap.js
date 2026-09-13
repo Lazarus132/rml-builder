@@ -4,7 +4,7 @@
 
 
 const GRAPH_BOOTSTRAP_MODULE_ID =
-  "1.20.31-universal-presentation-dev57-outline-first-paint-spinner";
+  "1.20.31-universal-presentation-dev72-synchronous-retained-drag";
 
 function assertGraphBootstrapModuleCoherence() {
   const mismatches = [];
@@ -262,6 +262,11 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
       moduleId:
         GRAPH_BOOTSTRAP_MODULE_ID,
       getState() { return graph; },
+      openPresentation() {
+        return graphPresentationVisible()
+          ? true
+          : togglePackedNodeMode();
+      },
       whenViewReady: whenGraphViewReady,
       hasPendingEditorEdits() {
         return customCSharpEditorPersistenceDirty || graphParameterPersistenceDirty;
@@ -1416,7 +1421,7 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
           savedPage:
             savedPresentationPage(),
           page:
-            runtimeGraphViewActive
+            graphPresentationVisible()
               ? "runtime-graph"
               : "configuration-outline"
         });

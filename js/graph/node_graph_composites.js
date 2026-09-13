@@ -677,7 +677,7 @@ const savedApiCompositeSearchTextCache =
     `${SAVED_API_COMPOSITE_COMPARE_MESSAGE_TYPE}-result`;
 
   const SAVED_API_COMPOSITE_COMPARE_MODULE_ID =
-    "1.20.31-universal-presentation-dev57-outline-first-paint-spinner";
+    "1.20.31-universal-presentation-dev72-synchronous-retained-drag";
 
   const SAVED_API_COMPOSITE_COMPARE_CANONICAL_SCHEMA_VERSION =
     4;
@@ -941,7 +941,7 @@ const savedApiCompositeSearchTextCache =
       );
     }
     const workerUrl = new URL(
-      "js/workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev57-outline-first-paint-spinner&canonical-schema=4",
+      "js/workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev72-synchronous-retained-drag&canonical-schema=4",
       document.baseURI
     );
     const workerOptions = {
@@ -16794,7 +16794,7 @@ Object.defineProperty(
   "RMLNodeGraphCompositesModuleId",
   {
     value:
-      "1.20.31-universal-presentation-dev57-outline-first-paint-spinner",
+      "1.20.31-universal-presentation-dev72-synchronous-retained-drag",
     writable: false,
     enumerable: true,
     configurable: true

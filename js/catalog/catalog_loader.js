@@ -3,7 +3,7 @@
   // RML Builder catalog: catalog_loader.
 
   const CATALOG_LOADER_MODULE_ID =
-    "1.20.31-universal-presentation-dev57-outline-first-paint-spinner";
+    "1.20.31-universal-presentation-dev72-synchronous-retained-drag";
   const LOADER_VERSION = 84;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
@@ -69,7 +69,7 @@
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=1.20.31-universal-presentation-dev57-outline-first-paint-spinner",
+    "api_nodes.js?v=1.20.31-universal-presentation-dev72-synchronous-retained-drag",
     scriptUrl
   ).href;
 
