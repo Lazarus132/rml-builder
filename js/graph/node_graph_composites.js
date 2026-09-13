@@ -677,7 +677,7 @@ const savedApiCompositeSearchTextCache =
     `${SAVED_API_COMPOSITE_COMPARE_MESSAGE_TYPE}-result`;
 
   const SAVED_API_COMPOSITE_COMPARE_MODULE_ID =
-    "1.20.31-universal-presentation-dev39-clean-stale-api-repair";
+    "1.20.31-universal-presentation-dev55-retained-disconnected-ports";
 
   const SAVED_API_COMPOSITE_COMPARE_CANONICAL_SCHEMA_VERSION =
     4;
@@ -941,7 +941,7 @@ const savedApiCompositeSearchTextCache =
       );
     }
     const workerUrl = new URL(
-      "js/workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev39-clean-stale-api-repair&canonical-schema=4",
+      "js/workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev55-retained-disconnected-ports&canonical-schema=4",
       document.baseURI
     );
     const workerOptions = {
@@ -6564,6 +6564,141 @@ function applyApiCompositeBoundaries(
     window.RMLResetGraphBoundaryTopologyCaches?.();
   }
 
+function captureDisconnectedApiCompositePortCandidates(
+    connections
+  ) {
+    if (
+      !apiCompositeEditor ||
+      customCSharpEditor ||
+      !Array.isArray(connections)
+    ) {
+      return [];
+    }
+    const candidates = [];
+    const endpointKeys = new Set();
+    for (const connection of connections) {
+      for (const endpoint of [
+        {
+          direction: "output",
+          internalNodeId:
+            connection?.fromNode,
+          internalPortId:
+            connection?.fromPort
+        },
+        {
+          direction: "input",
+          internalNodeId:
+            connection?.toNode,
+          internalPortId:
+            connection?.toPort
+        }
+      ]) {
+        const endpointKey =
+          apiCompositeBoundaryEndpointKey(
+            endpoint
+          );
+        if (
+          !endpoint.internalNodeId ||
+          !endpoint.internalPortId ||
+          endpointKeys.has(endpointKey)
+        ) {
+          continue;
+        }
+        const descriptor =
+          apiCompositePortDescriptor(
+            endpoint.internalNodeId,
+            endpoint.internalPortId,
+            endpoint.direction,
+            ""
+          );
+        if (!descriptor) continue;
+        descriptor.autoExposed = true;
+        candidates.push(descriptor);
+        endpointKeys.add(endpointKey);
+      }
+    }
+    return candidates;
+  }
+
+function retainDisconnectedApiCompositePorts(
+    candidates
+  ) {
+    if (
+      !apiCompositeEditor ||
+      customCSharpEditor ||
+      !Array.isArray(candidates) ||
+      candidates.length === 0
+    ) {
+      return 0;
+    }
+    const composite =
+      apiCompositeEditorDocument(
+        apiCompositeEditor
+      );
+    if (!composite) return 0;
+    const boundaries =
+      apiCompositeBoundaryRecords(
+        composite.boundaryPorts
+      );
+    const endpointKeys = new Set(
+      boundaries.map(
+        apiCompositeBoundaryEndpointKey
+      )
+    );
+    const connectedEndpointKeys = new Set();
+    for (const connection of graph.connections) {
+      connectedEndpointKeys.add(
+        `output\u0000${connection.fromNode}\u0000${connection.fromPort}`
+      );
+      connectedEndpointKeys.add(
+        `input\u0000${connection.toNode}\u0000${connection.toPort}`
+      );
+    }
+    let added = 0;
+    for (const candidate of candidates) {
+      const endpointKey =
+        apiCompositeBoundaryEndpointKey(
+          candidate
+        );
+      if (
+        endpointKeys.has(endpointKey) ||
+        connectedEndpointKeys.has(endpointKey) ||
+        !findPortSpec(
+          candidate.internalNodeId,
+          candidate.internalPortId,
+          candidate.direction
+        )
+      ) {
+        continue;
+      }
+      boundaries.push({
+        ...candidate,
+        id: nextApiCompositeBoundaryId(
+          candidate.direction,
+          boundaries
+        ),
+        autoExposed: true
+      });
+      endpointKeys.add(endpointKey);
+      added += 1;
+    }
+    if (added === 0) return 0;
+    applyApiCompositeBoundaries(boundaries);
+    apiCompositeEditor.boundaryUpdate = {
+      added:
+        (Number(
+          apiCompositeEditor.boundaryUpdate
+            ?.added
+        ) || 0) + added,
+      removed:
+        Number(
+          apiCompositeEditor.boundaryUpdate
+            ?.removed
+        ) || 0
+    };
+    return added;
+  }
+
 function apiCompositeRootDocumentForMutation() {
     if (!graph) return null;
     if (!apiCompositeEditor) return graph;
@@ -6896,8 +7031,7 @@ function openApiCompositeGraph(
   ) {
     if (
       !graph ||
-      customCSharpEditor ||
-      !apiCompositeCatalogAvailable()
+      customCSharpEditor
     ) {
       return false;
     }
@@ -16660,7 +16794,7 @@ Object.defineProperty(
   "RMLNodeGraphCompositesModuleId",
   {
     value:
-      "1.20.31-universal-presentation-dev39-clean-stale-api-repair",
+      "1.20.31-universal-presentation-dev55-retained-disconnected-ports",
     writable: false,
     enumerable: true,
     configurable: true

@@ -716,6 +716,17 @@
   }
 
   function runtimeBridgeChannelForDynamicSettings() {
+    const sharedChannel =
+      window.RMLRuntimeBridge
+        ?.projectChannel?.(
+          state?.metadata?.namespaceName,
+          state?.metadata?.className
+        );
+
+    if (sharedChannel) {
+      return sharedChannel;
+    }
+
     const namespaceName =
       String(
         state?.metadata?.namespaceName ||
@@ -2010,6 +2021,11 @@ csString(graphClass)]);
   document.addEventListener(
     "rml-builder:rendered",
     scheduleRuntimeBridgeSubscriptionRefresh
+  );
+
+  document.addEventListener(
+    "rml-builder:project-replacement",
+    stopRuntimeBridgeSubscription
   );
 
   document.addEventListener(

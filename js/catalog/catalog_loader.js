@@ -3,13 +3,14 @@
   // RML Builder catalog: catalog_loader.
 
   const CATALOG_LOADER_MODULE_ID =
-    "1.20.31-universal-presentation-dev39-clean-stale-api-repair";
+    "1.20.31-universal-presentation-dev55-retained-disconnected-ports";
   const LOADER_VERSION = 84;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
   const CATALOG_PATH = "/resonite_api_catalog.json";
   const HEALTH_PATH = "/health";
-const CATALOG_FETCH_TIMEOUT_MS = 0;
+  const CATALOG_READY_TIMEOUT_MS = 16000;
+  const CATALOG_TRANSFER_TIMEOUT_MS = 30000;
   const CACHE_DATABASE_NAME =
     "rml-resonite-api-catalog";
   const CACHE_DATABASE_VERSION = 1;
@@ -60,7 +61,7 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
     document.currentScript?.src ||
     window.location.href;
   const modNodesUrl = new URL(
-    "mod_nodes.js?v=794-shared-loader-runtime",
+    "mod_nodes.js?v=799-single-state-no-rebuild",
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
@@ -68,7 +69,7 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=1.20.31-universal-presentation-dev39-clean-stale-api-repair",
+    "api_nodes.js?v=1.20.31-universal-presentation-dev55-retained-disconnected-ports",
     scriptUrl
   ).href;
 
@@ -229,6 +230,58 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
   function scannerCatalogFingerprint(raw) {
     return scannerFingerprintContract(raw)
       ?.fingerprint || "";
+  }
+
+  function cachedCatalogMatchesScannerHealth(
+    catalog,
+    health
+  ) {
+    const cachedContract =
+      scannerFingerprintContract(catalog);
+    const liveContract =
+      scannerFingerprintContract(health);
+    const cachedAssemblyFingerprint = String(
+      catalog?.assemblyFingerprint || ""
+    ).trim().toLowerCase();
+    const liveAssemblyFingerprint = String(
+      health?.catalogAssemblyFingerprint ||
+      health?.assemblyFingerprint ||
+      ""
+    ).trim().toLowerCase();
+    const knownTransportOnlyUpgrade =
+      /^1\.11\.[1-4]$/.test(
+        cachedContract?.scannerVersion || ""
+      ) &&
+      liveContract?.scannerVersion ===
+        "1.11.5";
+
+    return Boolean(
+      cachedContract &&
+      liveContract &&
+      knownTransportOnlyUpgrade &&
+      cachedAssemblyFingerprint &&
+      cachedAssemblyFingerprint ===
+        liveAssemblyFingerprint &&
+      cachedContract.schemaVersion ===
+        liveContract.schemaVersion &&
+      cachedContract.methodIdentityVersion ===
+        liveContract.methodIdentityVersion &&
+      cachedContract.methodIdentityAlgorithm ===
+        liveContract.methodIdentityAlgorithm &&
+      cachedContract.reloadSafetyContractVersion ===
+        liveContract.reloadSafetyContractVersion &&
+      cachedContract.reloadSafetyPolicy ===
+        liveContract.reloadSafetyPolicy &&
+      cachedContract.reloadSafetyMinimumReaderVersion ===
+        liveContract.reloadSafetyMinimumReaderVersion &&
+      cachedContract.reloadSafetyMaximumReaderVersion ===
+        liveContract.reloadSafetyMaximumReaderVersion &&
+      Number(
+        catalog?.suppressedDuplicateTypeDefinitions
+      ) === Number(
+        health?.suppressedDuplicateTypeDefinitions
+      )
+    );
   }
 
   function strictCachedScannerContract(raw) {
@@ -594,31 +647,9 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
       return value;
     }
 
-    const pending = [value];
-    while (pending.length > 0) {
-      const current = pending.pop();
-      if (
-        !current ||
-        typeof current !== "object" ||
-        Object.isFrozen(current)
-      ) {
-        continue;
-      }
-
-      Object.freeze(current);
-      for (const child of
-        Object.values(current)) {
-        if (
-          child &&
-          typeof child === "object" &&
-          !Object.isFrozen(child)
-        ) {
-          pending.push(child);
-        }
-      }
-    }
-
-    return value;
+    return Object.isFrozen(value)
+      ? value
+      : Object.freeze(value);
   }
 
   function legacyScannerFingerprint(raw) {
@@ -1260,6 +1291,7 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
   let scannerCheckPromise = null;
   let scannerCheckGeneration = -1;
   let cachedCatalogRecord = null;
+  let cachedCatalogStatus = null;
   let catalogAvailabilityKnown = false;
   let catalogAvailable = false;
   let cachedCatalogReadPromise = null;
@@ -1283,8 +1315,6 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
 
 
   function updateStatus() {
-    window.RMLRuntimeBridge?.renderStatus?.();
-
     const element =
       document.getElementById(
         "api-catalog-state"
@@ -1294,76 +1324,56 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
       return;
     }
 
-    const catalog =
-      statusCatalog();
-    const report =
-      window.RMLApiNodeFactoryReport ||
-      null;
-
-    if (
-      catalogAvailabilityKnown &&
-      catalogAvailable !== true
-    ) {
-      element.dataset.source =
-        "unavailable";
-      element.textContent =
-        "Resonite API · unavailable";
-      element.removeAttribute("title");
-      element.setAttribute(
-        "aria-label",
-        "Resonite API · unavailable"
-      );
-      return;
-    }
     const connection =
       window.RMLRuntimeBridge
         ?.getConnectionState?.() ||
       null;
 
+    if (
+      connection?.mode === "checking" ||
+      connection?.mode === "live"
+    ) {
+      return;
+    }
+
+    const catalog =
+      statusCatalog() ||
+      cachedCatalogStatus;
+
+    if (
+      catalogAvailabilityKnown &&
+      catalogAvailable !== true &&
+      !catalog
+    ) {
+      element.dataset.source =
+        "unavailable";
+      element.textContent =
+        "Resonite API · Unavailable";
+      element.removeAttribute("title");
+      element.setAttribute(
+        "aria-label",
+        "Resonite API · Unavailable"
+      );
+      return;
+    }
     if (!catalog) {
       element.dataset.source =
         "unavailable";
       element.textContent =
-        "Resonite API · unavailable";
+        "Resonite API · Unavailable";
       element.removeAttribute(
         "title"
       );
       element.setAttribute(
         "aria-label",
-        "Resonite API · unavailable"
+        "Resonite API · Unavailable"
       );
       return;
     }
 
-    const version =
-      String(
-        catalog.engineVersion ||
-        "unknown"
-      );
-
-    const live =
-      connection?.mode === "live" &&
-      report
-        ?.liveCatalogVerified === true &&
-      String(
-        report?.catalogFingerprint || ""
-      ) ===
-        String(
-          catalog
-            ?.catalogFingerprint || ""
-        );
-
-    element.dataset.source =
-      live
-        ? "scanner"
-        : "cache";
-
+    element.dataset.source = "cache";
     element.textContent =
-      `Resonite API ${version} · ${
-        live
-          ? "Live"
-          : "cached"
-      }`;
+      "Resonite API · Cached";
 
     element.setAttribute(
       "aria-label",
@@ -1466,7 +1476,7 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
     const fetched = live?.raw ||
       await fetchJson(
         live.catalogFetchUrl || live.url,
-        CATALOG_FETCH_TIMEOUT_MS,
+        CATALOG_TRANSFER_TIMEOUT_MS,
         live.signal
       );
     const raw =
@@ -2823,7 +2833,8 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
 
   async function writeCachedLiveCatalog(
     raw,
-    sourceUrl
+    sourceUrl,
+    { retainInMemory = true } = {}
   ) {
     let database;
     const fingerprint =
@@ -2858,9 +2869,11 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
         ...manifest,
         catalog: catalogSnapshot
       });
-      cachedCatalogRecord = stored;
-      cachedCatalogReadPromise =
-        Promise.resolve(stored);
+      if (retainInMemory) {
+        cachedCatalogRecord = stored;
+        cachedCatalogReadPromise =
+          Promise.resolve(stored);
+      }
       return true;
     } catch (error) {
       console.warn(
@@ -2875,14 +2888,13 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
 
 
   async function loadCatalog() {
-
-
-
     const cached =
       await readCachedLiveCatalog();
 
     if (cached) {
       cachedCatalogRecord = cached;
+      cachedCatalogStatus =
+        cached.catalog;
       catalogAvailabilityKnown = true;
       catalogAvailable = true;
 
@@ -2892,6 +2904,7 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
         cached.sourceUrl || ""
       );
     }
+    cachedCatalogStatus = null;
     catalogAvailabilityKnown = true;
     catalogAvailable = false;
     updateUnavailableStatus();
@@ -2925,7 +2938,10 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
 
   async function activateCatalogFromUserClick() {
     if (manualCatalogActivationPromise) {
-      return manualCatalogActivationPromise;
+      window.RMLRuntimeBridge?.disconnect?.(
+        "Scanner connection cancelled."
+      );
+      return false;
     }
 
     manualCatalogActivationPromise =
@@ -2944,11 +2960,11 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
           }
 
           console.info(
-            "[RML API Catalog] Preparing runtime-core exactly as project import does."
+            "[RML API Catalog] Preparing the scanner connection."
           );
 
           await scriptLoader.ensure(
-            "runtime-core"
+            "scanner-connection"
           );
 
           const bridge =
@@ -3032,7 +3048,8 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
           }
 
           const existing =
-            statusCatalog();
+            statusCatalog() ||
+            cachedCatalogStatus;
 
           catalogAvailabilityKnown = true;
           catalogAvailable =
@@ -3301,12 +3318,6 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
       report,
       nextReport
     );
-    window.dispatchEvent(
-      new CustomEvent(
-        "rml-api-node-factory-ready",
-        { detail: nextReport }
-      )
-    );
     return true;
   }
 
@@ -3554,7 +3565,6 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
       report,
       next
     );
-    window.dispatchEvent(new CustomEvent("rml-api-node-factory-ready", { detail: next }));
   }
 
   async function synchronizeScannerStatus(options = {}) {
@@ -3586,29 +3596,34 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
     };
     scannerCheckGeneration = session.generation;
     const pending = Promise.resolve().then(async () => {
+      const builderWork =
+        window.RMLBuilderWork;
+      let catalogUpdateWork = 0;
+      let factoryActivated = false;
+      let cacheWriteFailed = false;
       try {
         assertSession();
         let scannerHealth = session.health;
-        if (
-          scannerHealth?.catalogReady !== true ||
-          scannerHealth?.catalogAvailable !== true
-        ) {
-          const ready = await fetchJson(
-            `${session.scannerBaseUrl}/catalog/ready`,
-            CATALOG_FETCH_TIMEOUT_MS,
-            signal
-          );
+          if (
+            scannerHealth?.catalogReady !== true ||
+            scannerHealth?.catalogAvailable !== true
+          ) {
+            const ready = await fetchJson(
+              `${session.scannerBaseUrl}/catalog/ready`,
+              CATALOG_READY_TIMEOUT_MS,
+              signal
+            );
           assertSession();
           if (ready?.ready !== true) {
             throw new Error(
               "Scanner catalog-ready barrier returned without a ready catalog."
             );
           }
-          scannerHealth = await fetchJson(
-            `${session.scannerBaseUrl}/health`,
-            CATALOG_FETCH_TIMEOUT_MS,
-            signal
-          );
+            scannerHealth = await fetchJson(
+              `${session.scannerBaseUrl}/health`,
+              CATALOG_READY_TIMEOUT_MS,
+              signal
+            );
           assertSession();
         }
 
@@ -3631,22 +3646,36 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
         let cached = cachedCatalogRecord;
         if (!cached) cached = await readCachedLiveCatalog();
         assertSession();
+        const cachedFingerprint =
+          String(
+            cached?.fingerprint ||
+            (
+              live.legacy === true
+                ? legacyCacheFingerprint(
+                    cached?.catalog
+                  )
+                : scannerFingerprintContract(
+                    cached?.catalog
+                  )?.fingerprint
+            ) ||
+            ""
+          ).trim().toLowerCase();
         const fingerprintMatchedCache =
           Boolean(
             cached?.catalog &&
             (
-              live.legacy === true
-                ? legacyCacheFingerprint(
-                    cached.catalog
+              (
+                cachedFingerprint &&
+                String(live.fingerprint || "") ===
+                  String(
+                    cachedFingerprint || ""
                   )
-                : scannerFingerprintContract(
-                    cached.catalog
-                  )?.fingerprint
-            ) &&
-            String(live.fingerprint || "") ===
-              String(
-                cached.fingerprint || ""
+              ) ||
+              cachedCatalogMatchesScannerHealth(
+                cached.catalog,
+                scannerHealth
               )
+            )
           );
         notifyCatalogGate(
           fingerprintMatchedCache
@@ -3659,10 +3688,27 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
                 : "catalog-refresh",
             message:
               fingerprintMatchedCache
-                ? "The scanner fingerprint matches the cached catalog. Reusing the existing catalog bytes."
+                ? "The scanner catalog contract matches the cached catalog. Reusing the existing catalog bytes."
                 : "The scanner fingerprint changed. Downloading and verifying the updated catalog once."
           }
         );
+        if (
+          !fingerprintMatchedCache &&
+          builderWork?.version >= 1
+        ) {
+          catalogUpdateWork =
+            builderWork.begin({
+              kicker: "API CATALOG",
+              title: "Updating catalog…",
+              message:
+                "A genuine catalog change was detected. The new snapshot is being verified and cached.",
+              detail:
+                "The synchronized catalog and its API nodes become active before this update finishes.",
+              progress: 20,
+              timeout: 120000
+            });
+          await builderWork.paint();
+        }
         const liveRaw =
           fingerprintMatchedCache
             ? null
@@ -3670,36 +3716,11 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
                 live
               );
         assertSession();
-        if (!fingerprintMatchedCache) {
-          notifyCatalogGate(
-            options.onCatalogCacheWrite,
-            {
-              phase: "catalog-cache-write",
-              message:
-                "The changed Live catalog finished downloading and passed fingerprint verification. Persisting it as the new cache snapshot now."
-            }
-          );
-        }
-        const cacheUpdatedFromLive =
-          !fingerprintMatchedCache
-            ? await writeCachedLiveCatalog(
-                liveRaw,
-                live.url
-              )
-            : false;
-        if (
-          !fingerprintMatchedCache &&
-          !cacheUpdatedFromLive
-        ) {
-          throw new Error(
-            "The changed Live catalog was verified, but its synchronized cache snapshot could not be persisted. The Builder did not activate the uncached Live payload."
-          );
-        }
-        assertSession();
+        let cacheUpdatedFromLive = false;
         const synchronizedRaw =
           fingerprintMatchedCache
             ? cached.catalog
-            : cachedCatalogRecord.catalog;
+            : liveRaw;
         const activeCacheMatches =
           Boolean(
             activeBeforeSync &&
@@ -3717,7 +3738,9 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
             ? activeBeforeSync
             : normalizeCatalog(
                 synchronizedRaw,
-                "scanner-cache",
+                fingerprintMatchedCache
+                  ? "scanner-cache"
+                  : "scanner",
                 live.url
               );
 
@@ -3728,19 +3751,83 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
             message:
               fingerprintMatchedCache
                 ? "Using the fingerprint-confirmed cached API contracts."
-                : "The changed Live catalog is cached. Activating API contracts exclusively from that synchronized cache."
+                : "The changed Live catalog passed verification. Activating its API contracts now."
           }
         );
+        builderWork?.update?.(
+          catalogUpdateWork,
+          {
+            title: "Activating catalog…",
+            message:
+              "The verified synchronized catalog is building its API nodes.",
+            progress: 65
+          }
+        );
+        await builderWork?.paint?.();
         await activateCatalogAndFactory(
           confirmedCatalog
         );
-        assertSession();
+        factoryActivated = true;
         promoteFactoryReportForCatalog(
           confirmedCatalog,
           {
             liveFingerprintVerified: true
           }
         );
+        if (!fingerprintMatchedCache) {
+          notifyCatalogGate(
+            options.onCatalogCacheWrite,
+            {
+              phase: "catalog-cache-write",
+              message:
+                "The changed Live catalog and its API nodes are active. Persisting the verified snapshot as the new cache now."
+            }
+          );
+          builderWork?.update?.(
+            catalogUpdateWork,
+            {
+              title: "Updating catalog…",
+              message:
+                "API nodes are active. Writing the verified cache snapshot…",
+              progress: 85
+            }
+          );
+          await builderWork?.paint?.();
+          cacheUpdatedFromLive =
+            await writeCachedLiveCatalog(
+              liveRaw,
+              live.url
+            );
+          if (!cacheUpdatedFromLive) {
+            cacheWriteFailed = true;
+          }
+        }
+        builderWork?.update?.(
+          catalogUpdateWork,
+          {
+            title: "Catalog ready",
+            message:
+              cacheUpdatedFromLive || fingerprintMatchedCache
+                ? "The verified catalog and its API nodes are active."
+                : "The verified Live catalog is active; its cache could not be updated.",
+            progress: 100
+          }
+        );
+        await builderWork?.paint?.();
+        if (cacheWriteFailed) {
+          window.setTimeout(() => {
+            void window.RMLBuilderDialog?.notice?.({
+              tone: "danger",
+              kicker: "API CATALOG",
+              title: "Catalog cache update failed",
+              message:
+                "The verified Live catalog is active, but its cache snapshot could not be saved.",
+              details:
+                "The previous cached catalog remains unchanged. Reconnect later to retry caching this Live catalog.",
+              confirmLabel: "OK"
+            });
+          }, 0);
+        }
 
         lastScannerFingerprintSync =
           Object.freeze({
@@ -3751,9 +3838,16 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
             fingerprint:
               catalogIdentity(
                 confirmedCatalog
-              )
+              ),
+            error: cacheWriteFailed
+              ? "The verified Live catalog is active, but its cache snapshot could not be saved."
+              : ""
           });
 
+        catalogAvailabilityKnown = true;
+        catalogAvailable = true;
+        cachedCatalogStatus =
+          confirmedCatalog;
         updateStatus(
           confirmedCatalog,
           {
@@ -3768,16 +3862,53 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
         return true;
       } catch (error) {
         if (currentScannerConnection().generation === session.generation) {
-          demoteLiveFactoryReport();
-          lastScannerFingerprintSync = Object.freeze({ liveReached: false,
+          const message =
+            error?.message || String(error);
+          lastScannerFingerprintSync = Object.freeze({ liveReached: factoryActivated,
             fingerprintMatchedCache: false, cacheUpdatedFromLive: false,
-            cacheFallback: true, fingerprint: String(cachedCatalogRecord?.fingerprint || ""),
-            error: error?.message || String(error) });
+            cacheFallback: !factoryActivated, fingerprint: factoryActivated
+              ? String(statusCatalog()?.catalogFingerprint || "")
+              : String(cachedCatalogRecord?.fingerprint || ""),
+            error: message });
+          if (!factoryActivated) {
+            demoteLiveFactoryReport();
+            window.RMLRuntimeBridge?.disconnect?.(
+              "Catalog synchronization failed."
+            );
+          }
+          catalogAvailabilityKnown = true;
+          catalogAvailable =
+            Boolean(statusCatalog());
           updateStatus();
+          window.setTimeout(() => {
+            void window.RMLBuilderDialog?.notice?.({
+              tone: "danger",
+              kicker: "API CATALOG",
+              title: factoryActivated
+                ? "Catalog finalization failed"
+                : "Catalog update rejected",
+              message,
+              details:
+                factoryActivated
+                  ? "The verified catalog and its API nodes are active, but a later cache or status step did not complete."
+                  : "The incompatible update was not activated. Any previously verified catalog remains unchanged.",
+              confirmLabel: "OK"
+            });
+          }, 0);
         }
-        if (options.throwOnFailure === true) throw error;
-        return false;
+        if (
+          options.throwOnFailure === true &&
+          !factoryActivated
+        ) {
+          throw error;
+        }
+        return factoryActivated;
       } finally {
+        if (catalogUpdateWork) {
+          builderWork?.finish?.(
+            catalogUpdateWork
+          );
+        }
         if (scannerCheckGeneration === session.generation) scannerCheckPromise = null;
       }
     });
@@ -4628,6 +4759,49 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
   async function ensureCatalogForReplacement(
     options = {}
   ) {
+    const activeCatalog = statusCatalog();
+    const activeReport =
+      window.RMLApiNodeFactoryReport;
+    if (
+      activeCatalog &&
+      factoryMatchesCatalog(
+        activeCatalog,
+        activeReport
+      )
+    ) {
+      const activeLive = Boolean(
+        currentScannerConnection().mode ===
+          "live" &&
+        activeReport?.liveCatalogVerified ===
+          true
+      );
+      return Object.freeze({
+        available: true,
+        live: activeLive,
+        cacheFallback: !activeLive,
+        catalogBackedByCache: true,
+        liveAttempted:
+          currentScannerConnection().mode ===
+            "live",
+        source: activeLive
+          ? "scanner-verified-cache"
+          : "scanner-cache",
+        catalogFingerprint: String(
+          activeCatalog.catalogFingerprint ||
+          ""
+        ),
+        engineVersion: String(
+          activeCatalog.engineVersion || ""
+        ),
+        fingerprintMatchedCache:
+          lastScannerFingerprintSync
+            .fingerprintMatchedCache === true,
+        cacheUpdatedFromLive:
+          lastScannerFingerprintSync
+            .cacheUpdatedFromLive === true
+      });
+    }
+
     notifyCatalogGate(
       options.onLiveLookup,
       {
@@ -4649,7 +4823,7 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
           options.onCatalogRefresh,
         onFactoryActivation:
           options.onFactoryActivation
-      });
+      }) === true;
 
     if (!connected) {
       notifyCatalogGate(
@@ -5368,8 +5542,6 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
     connection = currentScannerConnection()
   ) {
     if (connection.mode === "live") {
-      renderManualCatalogChecking();
-
       void synchronizeScannerStatus({
         manualSession: connection,
         showChecking: true,
@@ -5383,7 +5555,11 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
         }
 
         if (!manualCatalogActivationPromise) {
-          const existing = statusCatalog();
+          const existing =
+            statusCatalog() ||
+            cachedCatalogRecord?.catalog ||
+            cachedCatalogStatus ||
+            null;
           catalogAvailabilityKnown = true;
           catalogAvailable = Boolean(existing);
           if (existing) {
@@ -5402,7 +5578,11 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
       return;
     }
 
-    const existing = statusCatalog();
+    const existing =
+      statusCatalog() ||
+      cachedCatalogRecord?.catalog ||
+      cachedCatalogStatus ||
+      null;
     catalogAvailabilityKnown = true;
     catalogAvailable = Boolean(existing);
 
@@ -5458,6 +5638,10 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
           await activateCatalogAndFactory(
             catalog
           );
+          catalogAvailabilityKnown = true;
+          catalogAvailable = true;
+          cachedCatalogStatus = catalog;
+          updateStatus();
         } else {
           console.info(
             "RML API catalog nodes are unavailable until a live or cached catalog is available. Stored API contracts remain editable in offline-preservation mode."
@@ -5518,7 +5702,14 @@ const CATALOG_FETCH_TIMEOUT_MS = 0;
         updateUnavailableStatus();
       }
 
-      synchronizeConnectedSession();
+      if (
+        currentScannerConnection().mode ===
+          "live"
+      ) {
+        synchronizeConnectedSession();
+      } else if (statusCatalog()) {
+        updateStatus();
+      }
 
       queueMicrotask(() => {
         if (

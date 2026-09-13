@@ -4,7 +4,7 @@
 
 
 const GRAPH_BOOTSTRAP_MODULE_ID =
-  "1.20.31-universal-presentation-dev39-clean-stale-api-repair";
+  "1.20.31-universal-presentation-dev55-retained-disconnected-ports";
 
 function assertGraphBootstrapModuleCoherence() {
   const mismatches = [];

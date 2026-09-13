@@ -43,7 +43,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "1.20.31-universal-presentation-dev39-clean-stale-api-repair";
+  "1.20.31-universal-presentation-dev55-retained-disconnected-ports";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -4292,7 +4292,7 @@ function ensureGraphCodegenWorker() {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev39-clean-stale-api-repair",
+      "../workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev55-retained-disconnected-ports",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -9607,14 +9607,6 @@ function isImportRecoveryExportOnlyDiagnostic(
   ) {
     return true;
   }
-
-  /*
-   * A preserved recovery node may intentionally retain old port IDs.
-   * Connections incident to that node are therefore expected to be
-   * structurally unresolved until the user repairs/removes the node.
-   * Those diagnostics remain export blockers, but must not restart
-   * the import replacement transaction.
-   */
   for (const nodeId of
     scope.nodeIds) {
     if (
@@ -25448,6 +25440,7 @@ function closeSettingsPreview(
   returnValue = ""
 ) {
   settingsPreviewOpenSequence += 1;
+  rmlRuntimeDisplayReleasePreviewBridge();
   if (
     !dialog ||
     !dialog.open ||
@@ -25662,9 +25655,23 @@ function nextBuilderVisualFrame() {
   }
 
   return new Promise(resolve => {
-    window.requestAnimationFrame(
-      () => resolve()
+    let settled = false;
+    let fallback = 0;
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (fallback) {
+        window.clearTimeout(fallback);
+      }
+      resolve();
+    };
+    fallback = window.setTimeout(
+      finish,
+      100
     );
+    window.requestAnimationFrame(finish);
   });
 }
 
@@ -26682,6 +26689,23 @@ function finishBuilderWork(session) {
   );
   return true;
 }
+
+Object.defineProperty(
+  window,
+  "RMLBuilderWork",
+  {
+    value: Object.freeze({
+      version: 1,
+      begin: beginBuilderWork,
+      update: updateBuilderWork,
+      paint: paintBuilderUi,
+      finish: finishBuilderWork
+    }),
+    writable: false,
+    enumerable: false,
+    configurable: true
+  }
+);
 
 function beginStartupStatus(
   initialText =
@@ -27923,7 +27947,7 @@ function promiseWithBuilderTimeout(
 
 function assertProjectRuntimeModuleCoherence() {
   const expectedModuleId =
-    "1.20.31-universal-presentation-dev39-clean-stale-api-repair";
+    "1.20.31-universal-presentation-dev55-retained-disconnected-ports";
   const requiredFactoryVersion = 38;
   const mismatches = [];
   const requireModuleId = (
@@ -28067,7 +28091,7 @@ async function ensureProjectRuntimePrerequisites(
     catalogOnly = false,
     catalogPreflight = null,
     allowOfflineCompatibility = true,
-    allowAutomaticLiveRetry = true
+    allowAutomaticLiveRetry = false
   } = {}
 ) {
   const graph =
@@ -28285,7 +28309,9 @@ async function ensureProjectRuntimePrerequisites(
         message:
           `This project uses ${requiredCatalogNodes.length.toLocaleString("de-DE")} catalog contract famil${requiredCatalogNodes.length === 1 ? "y" : "ies"}. The available catalog is checked for every stored operator identity, parameter set and referenced port before any replacement is selected.`,
         detail:
-          "The verified cache is tried first. If it cannot resolve every stored contract, the import performs one bounded Live scanner attempt before replacement or omission is decided.",
+          allowAutomaticLiveRetry === true
+            ? "The verified cache is tried first. A single bounded Live scanner attempt is allowed only when explicitly enabled for this operation."
+            : "The verified cache is used without a Live scanner request. Missing contracts remain portable or are handled by the existing offline rules.",
         progress: 44
       }
     );
@@ -28315,7 +28341,9 @@ async function ensureProjectRuntimePrerequisites(
                 message:
                   String(detail?.message || "Using the catalog available for the current connection mode."),
                 detail:
-                  "The verified cache is activated first. A single bounded Live scanner attempt is made only if required contracts remain unresolved.",
+                  allowAutomaticLiveRetry === true
+                    ? "The verified cache is activated first. A single bounded Live scanner attempt is allowed only for this explicitly enabled operation."
+                    : "The verified cache is activated without probing or connecting to a scanner.",
                 progress: 48
               }
             );
@@ -28349,7 +28377,7 @@ async function ensureProjectRuntimePrerequisites(
                     "Downloading the changed Live catalog."
                   ),
                 detail:
-                  "This full transfer occurs only because the source fingerprint is different. There is no automatic time limit; the Builder remains here until the scanner transfer completes or reports an error.",
+                  "This full transfer occurs only because the source fingerprint is different. A stalled scanner falls back to the stored portable contracts instead of blocking project import.",
                 progress: 50
               }
             );
@@ -28635,31 +28663,12 @@ async function ensureProjectRuntimePrerequisites(
 
     if (unresolvedRequirements.length > 0) {
       if (catalogResult?.available !== true) {
-        const activeCatalog =
-          window.RMLResoniteApiCatalog ||
-          window.RMLFrooxComponentCatalog ||
-          null;
-        const factoryReport =
-          window.RMLApiNodeFactoryReport ||
-          null;
         const planner =
           window.RMLDynamicGraphHost
             ?.planPreservedCatalogOperatorsForImport;
-        const catalogStatePresent =
-          Boolean(
-            activeCatalog ||
-            String(
-              factoryReport
-                ?.catalogFingerprint ||
-              ""
-            ).trim() ||
-            factoryReport
-              ?.verificationPassed === true
-          );
         if (
           allowOfflineCompatibility !==
             true ||
-          catalogStatePresent ||
           typeof planner !== "function"
         ) {
           throw new Error(
@@ -30294,7 +30303,7 @@ async function resolveSavedApiCompositeGraph(
           allowOfflineCompatibility:
             true,
           allowAutomaticLiveRetry:
-            true
+            false
         }
       );
     updateBuilderWork(
@@ -32511,7 +32520,7 @@ async function loadProjectJsonFile(
           title:
             "Catalog verification is still required",
           message:
-            `The Saved Composite was imported instead of being rejected. ${offlinePreservedApiNodes.toLocaleString("de-DE")} API node${offlinePreservedApiNodes === 1 ? " was" : "s were"} retained from complete, conflict-free stored contracts because neither the verified cache nor one bounded Live scanner attempt provided a usable current catalog.`,
+            `The Saved Composite was imported instead of being rejected. ${offlinePreservedApiNodes.toLocaleString("de-DE")} API node${offlinePreservedApiNodes === 1 ? " was" : "s were"} retained from complete, conflict-free stored contracts because the verified cache did not provide a usable current catalog.`,
           details:
             `${offlinePreservationDetails.map(value => `${String(value?.compositeName || "Saved API Composite")}: ${Math.max(0, Number(value?.nodeCount) || 0).toLocaleString("de-DE")} preserved API node${Number(value?.nodeCount) === 1 ? "" : "s"}`).join(" | ")} No node was guessed or deleted merely because the catalog was unavailable. The Builder will reconcile these contracts when a verified cache or Live catalog becomes available.`,
           confirmLabel: "OK"
@@ -36672,8 +36681,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "../../templates/help_template.html?v=1.20.31-universal-presentation-dev39-clean-stale-api-repair",
-    "../templates/help_template.js?v=1.20.31-universal-presentation-dev39-clean-stale-api-repair",
+    "../../templates/help_template.html?v=1.20.31-universal-presentation-dev55-retained-disconnected-ports",
+    "../templates/help_template.js?v=1.20.31-universal-presentation-dev55-retained-disconnected-ports",
     "help-template",
     "RMLHelpTemplateMarkup"
   )
@@ -41975,10 +41984,38 @@ async function initialize() {
     beginStartupStatus(
       "Restoring local workspace…"
     );
+  let startupNodeRegistryReady =
+    readPageStateStore().activePage ===
+      "runtime-graph"
+      ? Promise.resolve(
+          window.RMLScriptLoader?.ensure?.(
+            "node-registry"
+          ) || true
+        ).catch(() => false)
+      : null;
   await paintBuilderUi();
 
   preventGlobalDoubleSelection();
   await restore();
+  const startupGraph =
+    state.extensions?.typedNodeGraph;
+  const startupRuntimeGraphRequested =
+    startupGraph?.active === true &&
+    (
+      state.activePage ||
+      startupGraph.lastOpenPage
+    ) === "runtime-graph";
+  if (
+    startupRuntimeGraphRequested &&
+    !startupNodeRegistryReady
+  ) {
+    startupNodeRegistryReady =
+      Promise.resolve(
+        window.RMLScriptLoader?.ensure?.(
+          "node-registry"
+        ) || true
+      ).catch(() => false);
+  }
   startupWork.update({
       title: "Preparing controls and dialogs…",
       message:
@@ -43018,11 +43055,19 @@ async function initialize() {
   );
   startUniversalCustomSelectObserver();
 
+  if (
+    startupRuntimeGraphRequested &&
+    startupNodeRegistryReady
+  ) {
+    startupWork.update({
+      title: "Preparing cached Runtime Graph nodes…"
+    });
+    await startupNodeRegistryReady;
+  }
+
   exposeBuilderBridge();
   beginTypedNodeGraphModulesTracking();
 
-  const startupGraph =
-    state.extensions?.typedNodeGraph;
   const startupExpectedNodes =
     Array.isArray(startupGraph?.nodes)
       ? startupGraph.nodes.length
@@ -44793,6 +44838,18 @@ let rmlRuntimeDisplayPreviewUnsubscribe =
 let rmlRuntimeDisplayPreviewChannel =
   "";
 
+function rmlRuntimeDisplayReleasePreviewBridge() {
+  try {
+    rmlRuntimeDisplayPreviewUnsubscribe?.();
+  } catch {
+  }
+
+  rmlRuntimeDisplayPreviewUnsubscribe =
+    null;
+  rmlRuntimeDisplayPreviewChannel =
+    "";
+}
+
 function rmlRuntimeDisplayPreviewText(
   record,
   fallback
@@ -44877,6 +44934,11 @@ function rmlRuntimeDisplayPreviewCopyIcon() {
 
 function rmlRuntimeDisplayEnsurePreviewBridge() {
   const channel =
+    window.RMLRuntimeBridge
+      ?.projectChannel?.(
+        state.metadata.namespaceName,
+        state.metadata.className
+      ) ||
     `${state.metadata.namespaceName}.${state.metadata.className}`;
 
   if (
@@ -44887,14 +44949,7 @@ function rmlRuntimeDisplayEnsurePreviewBridge() {
     return;
   }
 
-  try {
-    rmlRuntimeDisplayPreviewUnsubscribe
-      ?.();
-  } catch {
-  }
-
-  rmlRuntimeDisplayPreviewUnsubscribe =
-    null;
+  rmlRuntimeDisplayReleasePreviewBridge();
   rmlRuntimeDisplayPreviewChannel =
     channel;
 
@@ -45041,6 +45096,7 @@ function rmlRuntimeDisplayRenderPreviewRows() {
     !dialog?.open ||
     !host
   ) {
+    rmlRuntimeDisplayReleasePreviewBridge();
     return;
   }
 
@@ -45057,6 +45113,7 @@ function rmlRuntimeDisplayRenderPreviewRows() {
       .map(rmlRuntimeDisplayNormalizeNode);
 
   if (displays.length === 0) {
+    rmlRuntimeDisplayReleasePreviewBridge();
     return;
   }
 
@@ -45541,3 +45598,8 @@ window.addEventListener("rml-scanner-connection", () => {
     rmlRuntimeDisplayRenderPreviewRows();
   }
 });
+
+document.addEventListener(
+  "rml-builder:project-replacement",
+  rmlRuntimeDisplayReleasePreviewBridge
+);

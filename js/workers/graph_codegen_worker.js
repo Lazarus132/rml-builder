@@ -2,7 +2,7 @@
 // RML Builder workers: graph_codegen_worker.
 
 const GRAPH_CODEGEN_WORKER_MODULE_ID =
-  "1.20.31-universal-presentation-dev39-clean-stale-api-repair";
+  "1.20.31-universal-presentation-dev55-retained-disconnected-ports";
 const GRAPH_CODEGEN_WORKER_FACTORY_VERSION =
   38;
 
@@ -673,16 +673,16 @@ async function ensureRuntime(
     }
 
     importScripts(
-      "../graph/node_graph_registry.js?v=1-physical-modules-v748"
+      "../graph/node_graph_registry.js?v=1-physical-modules-v750-offline-core-types"
     );
     importScripts(
-      "../catalog/mod_nodes.js?v=794-shared-loader-runtime"
+      "../catalog/mod_nodes.js?v=799-single-state-no-rebuild"
     );
     importScripts(
       "../compiler/visual_csharp.js?v=83-empty-custom-csharp-ignored"
     );
     importScripts(
-      "../catalog/api_nodes.js?v=1.20.31-universal-presentation-dev39-clean-stale-api-repair"
+      "../catalog/api_nodes.js?v=1.20.31-universal-presentation-dev55-retained-disconnected-ports"
     );
 
     if (
@@ -726,7 +726,7 @@ async function ensureRuntime(
     }
 
     importScripts(
-      "../graph/node_graph_codegen.js?v=1.20.31-universal-presentation-dev39-clean-stale-api-repair"
+      "../graph/node_graph_codegen.js?v=1.20.31-universal-presentation-dev55-retained-disconnected-ports"
     );
 
     if (

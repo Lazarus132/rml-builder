@@ -238,17 +238,8 @@
   const RAW_CSHARP_GROUP =
     "Advanced / Raw C#";
 
-  const NUMERIC_VECTOR_TYPES = [
-    "int2",
-    "int3",
-    "int4",
-    "float2",
-    "float3",
-    "float4",
-    "double2",
-    "double3",
-    "double4"
-  ];
+  const NUMERIC_VECTOR_TYPES =
+    GRAPH_CONFIGURABLE_VECTOR_TYPES;
 
   const COMMON_VALUE_TYPES = [
     "bool",
@@ -2081,7 +2072,7 @@
     group: "Values",
     symbol: "VEC",
     description:
-      "An intelligent int/float/double 2D, 3D or 4D vector constant. Auto follows compatible connected vector sockets; an explicit type remains available.",
+      "An intelligent Elements.Core bool or numeric 2D, 3D or 4D vector constant. Auto follows compatible connected vector sockets; an explicit type remains available.",
     configurableTypeVar: "T",
     configurableTypes:
       NUMERIC_VECTOR_TYPES,
@@ -2094,7 +2085,7 @@
         "components",
         "Components",
         "0, 0, 0",
-        "One numeric field per vector component.",
+        "One value field per vector component.",
         { kind: "vector" }
       )
     ],
@@ -2103,36 +2094,32 @@
         "value",
         "Value",
         "T",
-        "arithmetic"
+        "value"
       )
     ],
     codegenExpression(api) {
-      const type =
-        NUMERIC_VECTOR_TYPES.includes(
-          api.type
-        )
-          ? api.type
-          : numericVectorDescriptor(
-              api.node
-            ).type;
-      const count = Number(type.slice(-1));
-      const scalar = type.startsWith("int")
-        ? "int"
-        : type.startsWith("double")
-          ? "double"
-          : "float";
+      const information =
+        numericVectorDescriptor(
+          NUMERIC_VECTOR_TYPES.includes(api.type)
+            ? api.type
+            : api.node
+        );
       const parts = String(
         api.node.parameters.components || ""
       )
         .split(",")
         .map(value => value.trim())
         .filter(Boolean);
-      while (parts.length < count) {
-        parts.push("0");
+      while (parts.length < information.componentCount) {
+        parts.push(information.boolean ? "false" : "0");
       }
-      return `new ${type}(${parts
-        .slice(0, count)
-        .map(value => api.numberLiteral(value, scalar))
+      return `new ${api.csType(information.type)}(${parts
+        .slice(0, information.componentCount)
+        .map(value => information.boolean
+          ? (String(value).trim().toLowerCase() === "true"
+              ? "true"
+              : "false")
+          : api.numberLiteral(value, information.scalarType))
         .join(", ")})`;
     },
     previewEvaluate({
@@ -2151,33 +2138,34 @@
         );
       }
 
-      const raw = String(
-        node.parameters?.components ||
-          ""
-      )
-        .split(",")
-        .map(value => value.trim());
-      const values = [];
-
-      for (
-        let index = 0;
-        index <
-          information.componentCount;
-        index += 1
-      ) {
-        const number = Number(
-          raw[index] || "0"
+      const parsed =
+        validateNumericVectorValue(
+          node.parameters?.components ||
+            (information.boolean
+              ? "false, false"
+              : "0, 0"),
+          information.type,
+          { coerce: false }
         );
 
-        if (!Number.isFinite(number)) {
-          return unknown(
-            type,
-            "A vector component is not finite."
-          );
-        }
-
-        values.push(number);
+      if (!parsed.valid) {
+        return unknown(type, parsed.reason);
       }
+
+      const values = parsed.components.map(value =>
+        information.boolean
+          ? value === "true"
+          : (graphNumericScalarDescriptor(
+                information.scalarType
+              )?.integer &&
+              ["long", "ulong"].includes(
+                graphNumericScalarDescriptor(
+                  information.scalarType
+                )?.family
+              )
+              ? value
+              : Number(value))
+      );
 
       return known(type, values);
     }
@@ -2203,22 +2191,10 @@
       )
         ? requestedType
         : "float3";
-    const match = type.match(
-      /^(int|float|double)([234])$/
+    return (
+      graphVectorDescriptor(type) ||
+      graphVectorDescriptor("float3")
     );
-
-    return {
-      type,
-      scalarType:
-        match?.[1] || "float",
-      componentCount:
-        Number(match?.[2]) || 3,
-      componentIds:
-        ["x", "y", "z", "w"].slice(
-          0,
-          Number(match?.[2]) || 3
-        )
-    };
   }
 
   function ensureNumericVectorRuntime(
@@ -2236,7 +2212,7 @@
     group: "Values",
     symbol: "VEC+",
     description:
-      "Builds any int/float/double 2D, 3D or 4D vector. Auto follows connected vector targets and scalar component sources; an explicit type can be locked in the inspector.",
+      "Builds any supported Elements.Core bool or numeric 2D, 3D or 4D vector. Auto follows connected vector targets and scalar component sources; an explicit type can be locked in the inspector.",
     configurableTypeVar: "T",
     configurableTypes:
       NUMERIC_VECTOR_TYPES,
@@ -2275,7 +2251,7 @@
           api.node
         );
 
-      return `new ${information.type}(${information.componentIds
+      return `new ${api.csType(information.type)}(${information.componentIds
         .map(id => api.input(id).code)
         .join(", ")})`;
     },
@@ -2302,7 +2278,9 @@
         }
 
         values.push(
-          Number(current.value) || 0
+          information.boolean
+            ? Boolean(current.value)
+            : current.value
         );
       }
 
@@ -2318,7 +2296,7 @@
     group: "Values",
     symbol: "VEC−",
     description:
-      "Splits any int/float/double 2D, 3D or 4D vector. Auto follows the connected vector source and compatible scalar targets; an explicit type can be locked in the inspector.",
+      "Splits any supported Elements.Core bool or numeric 2D, 3D or 4D vector. Auto follows the connected vector source and compatible scalar targets; an explicit type can be locked in the inspector.",
     configurableTypeVar: "T",
     configurableTypes:
       NUMERIC_VECTOR_TYPES,
@@ -2360,7 +2338,7 @@
           api.node
         );
 
-      return `ReadNumericComponent<${information.scalarType}>(${api.input("value").code}, "${api.portId}")`;
+      return `ReadNumericComponent<${api.csType(information.scalarType)}>(${api.input("value").code}, "${api.portId}")`;
     },
     previewEvaluate({
       node,
@@ -2388,7 +2366,8 @@
 
       return known(
         information.scalarType,
-        value.value?.[index] ?? 0
+        value.value?.[index] ??
+          (information.boolean ? false : 0)
       );
     }
   });
@@ -5843,6 +5822,446 @@ faulted ? `\n        ${faulted}();` : ""])
     "double"
   ];
 
+  const NORMAL_COLLECTION_EXCLUDED_TYPES =
+    new Set([
+      "impulse",
+      "generic",
+      "auto",
+      "enum",
+      "rmlDisplaySlot",
+      "rmlConfigurationMenu",
+      "rmlConfigurationMenuItem",
+      "action"
+    ]);
+
+  const NORMAL_COLLECTION_CS_ALIASES =
+    Object.freeze({
+      bool: "System.Boolean",
+      byte: "System.Byte",
+      sbyte: "System.SByte",
+      short: "System.Int16",
+      ushort: "System.UInt16",
+      int: "System.Int32",
+      uint: "System.UInt32",
+      long: "System.Int64",
+      ulong: "System.UInt64",
+      nint: "System.IntPtr",
+      nuint: "System.UIntPtr",
+      char: "System.Char",
+      float: "System.Single",
+      double: "System.Double",
+      decimal: "System.Decimal",
+      string: "System.String",
+      object: "System.Object",
+      Uri: "System.Uri"
+    });
+
+  const NORMAL_COLLECTION_CS_ALIAS_PATTERN =
+    new RegExp(
+      `(^|[<,])(${Object.keys(
+        NORMAL_COLLECTION_CS_ALIASES
+      ).join("|")})(?=$|[>,\\[])`,
+      "g"
+    );
+
+  let normalCollectionTypeOptionsCache = null;
+
+  function normalSelectOptionValue(option) {
+    if (Array.isArray(option)) {
+      return String(option[0] ?? "");
+    }
+    if (
+      option &&
+      typeof option === "object"
+    ) {
+      return String(option.value ?? "");
+    }
+    return String(option ?? "");
+  }
+
+  function normalAllowedTypeValues(
+    allowed,
+    node
+  ) {
+    const options =
+      typeof allowed === "function"
+        ? allowed(node)
+        : allowed;
+    return (Array.isArray(options) ? options : [])
+      .map(normalSelectOptionValue)
+      .filter(Boolean);
+  }
+
+  function normalCollectionCsType(
+    type,
+    information
+  ) {
+    return String(
+      information?.csType || type || ""
+    ).trim();
+  }
+
+  function normalCollectionCsTypeKey(value) {
+    const source = String(value || "")
+      .replace(/global::/g, "")
+      .replace(/\s+/g, "")
+      .replace(/\?/g, "");
+    return source.replace(
+      NORMAL_COLLECTION_CS_ALIAS_PATTERN,
+      (_match, prefix, alias) =>
+        `${prefix}${NORMAL_COLLECTION_CS_ALIASES[alias]}`
+    );
+  }
+
+  function normalClosedCollectionCsType(value) {
+    const source = String(value || "").trim();
+    const normalized = source
+      .replace(/global::/g, "")
+      .replace(/\s+/g, "");
+    return Boolean(
+      normalized &&
+      normalized !== "void" &&
+      normalized !== "System.Void" &&
+      !/[&*`(){};=]/.test(normalized) &&
+      !/(?:^|[<,])(?:T|T[A-Z][A-Za-z0-9_]*)(?=$|[>,\[])/.test(
+        normalized
+      )
+    );
+  }
+
+  function normalCollectionEnumType(
+    type,
+    information
+  ) {
+    return Boolean(
+      information?.enumType === true ||
+      String(type || "").startsWith(
+        CATALOG_ENUM_TYPE_PREFIX
+      ) ||
+      (Array.isArray(information?.constraints) &&
+        information.constraints.includes(
+          "enumOrString"
+        ))
+    );
+  }
+
+  function normalCollectionControlType(
+    type,
+    information
+  ) {
+    const csType = normalCollectionCsType(
+      type,
+      information
+    );
+    return Boolean(
+      NORMAL_COLLECTION_EXCLUDED_TYPES.has(type) ||
+      information?.controlType === true ||
+      information?.catalogStaticClass === true ||
+      information?.genericType === true ||
+      information?.openGenericType === true ||
+      (Array.isArray(information?.constraints) &&
+        information.constraints.includes("delegate")) ||
+      /^System\.(?:ReadOnly)?Span</.test(
+        csType
+      ) ||
+      /^(?:System\.)?(?:Action|Func|Predicate|Comparison)(?:<|$)/.test(
+        csType
+      )
+    );
+  }
+
+  function normalRegisteredCollectionType(
+    type,
+    information,
+    { preserveUnavailable = false } = {}
+  ) {
+    if (
+      !type ||
+      !information ||
+      normalCollectionControlType(
+        type,
+        information
+      ) ||
+      information.syntheticCollectionType ===
+        true ||
+      information.syntheticArrayType === true ||
+      information.dictionaryType === true ||
+      String(type).startsWith("collectList:") ||
+      String(type).startsWith("normalArray:") ||
+      String(type).startsWith(
+        "normalDictionary:"
+      ) ||
+      (
+        information.unavailableApiType ===
+          true &&
+        !preserveUnavailable
+      )
+    ) {
+      return false;
+    }
+
+    const isEnum = normalCollectionEnumType(
+      type,
+      information
+    );
+    if (
+      information.valueType !== true &&
+      !isEnum &&
+      !NORMAL_CORE_VALUE_TYPES.includes(type)
+    ) {
+      return false;
+    }
+
+    return normalClosedCollectionCsType(
+      normalCollectionCsType(
+        type,
+        information
+      )
+    );
+  }
+
+  function normalStableDictionaryKeyType(
+    type,
+    information
+  ) {
+    if (type === "string" || type === "Uri") {
+      return true;
+    }
+    if (
+      NORMAL_CORE_VALUE_TYPES.includes(type)
+    ) {
+      return type !== "object";
+    }
+    return Boolean(
+      normalCollectionEnumType(
+        type,
+        information
+      ) ||
+      (
+        information?.valueType === true &&
+        information?.referenceType !== true &&
+        information?.collectionType !== true
+      )
+    );
+  }
+
+  function normalCollectionTypeOption(
+    type,
+    information,
+    existing = false
+  ) {
+    const csType = normalCollectionCsType(
+      type,
+      information
+    );
+    const label = String(
+      information?.label || type
+    );
+    const detail =
+      label === csType
+        ? label
+        : `${label} — ${csType}`;
+    return {
+      value: type,
+      label: existing
+        ? `${detail} (existing selection)`
+        : detail
+    };
+  }
+
+  function normalCollectionTypeOptions() {
+    const definitions =
+      registry.getTypeDefinitions?.() || {};
+    const revision = Number(
+      window.__RMLNodeDefinitionRevision
+    ) || 0;
+    const factoryVersion = Number(
+      window.__RMLApiNodeFactoryVersion
+    ) || 0;
+
+    if (
+      normalCollectionTypeOptionsCache &&
+      normalCollectionTypeOptionsCache
+        .definitions === definitions &&
+      normalCollectionTypeOptionsCache
+        .revision === revision &&
+      normalCollectionTypeOptionsCache
+        .factoryVersion === factoryVersion
+    ) {
+      return normalCollectionTypeOptionsCache;
+    }
+
+    const values = [];
+    const keys = [];
+    const valueCsTypes = new Set();
+    const keyCsTypes = new Set();
+    const add = (
+      target,
+      seen,
+      type,
+      information
+    ) => {
+      const key = normalCollectionCsTypeKey(
+        normalCollectionCsType(
+          type,
+          information
+        )
+      );
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      target.push(
+        normalCollectionTypeOption(
+          type,
+          information
+        )
+      );
+    };
+
+    for (const type of NORMAL_CORE_VALUE_TYPES) {
+      const information = definitions[type] || {
+        label: type,
+        csType: type,
+        valueType: true
+      };
+      add(values, valueCsTypes, type, information);
+      if (
+        normalStableDictionaryKeyType(
+          type,
+          information
+        )
+      ) {
+        add(keys, keyCsTypes, type, information);
+      }
+    }
+    for (const type of NORMAL_DICTIONARY_KEY_TYPES) {
+      const information = definitions[type] || {
+        label: type,
+        csType: type,
+        valueType: true
+      };
+      add(keys, keyCsTypes, type, information);
+    }
+
+    const registered = Object.entries(definitions)
+      .filter(([type, information]) =>
+        !NORMAL_CORE_VALUE_TYPES.includes(type) &&
+        normalRegisteredCollectionType(
+          type,
+          information
+        )
+      )
+      .sort((left, right) => {
+        const leftGenerated =
+          left[1]?.catalogGenerated === true
+            ? 1
+            : 0;
+        const rightGenerated =
+          right[1]?.catalogGenerated === true
+            ? 1
+            : 0;
+        return (
+          leftGenerated - rightGenerated ||
+          normalCollectionCsType(
+            left[0],
+            left[1]
+          ).localeCompare(
+            normalCollectionCsType(
+              right[0],
+              right[1]
+            )
+          )
+        );
+      });
+
+    for (const [type, information] of registered) {
+      add(values, valueCsTypes, type, information);
+      if (
+        normalStableDictionaryKeyType(
+          type,
+          information
+        )
+      ) {
+        add(keys, keyCsTypes, type, information);
+      }
+    }
+
+    normalCollectionTypeOptionsCache = {
+      definitions,
+      revision,
+      factoryVersion,
+      values: Object.freeze(values),
+      keys: Object.freeze(keys)
+    };
+    return normalCollectionTypeOptionsCache;
+  }
+
+  function normalCollectionOptionsWithSelection(
+    options,
+    node,
+    key
+  ) {
+    const selected = String(
+      node?.parameters?.[key] || ""
+    ).trim();
+    if (
+      !selected ||
+      options.some(
+        option =>
+          normalSelectOptionValue(option) ===
+          selected
+      )
+    ) {
+      return options;
+    }
+
+    const information =
+      registry.getTypeDefinitions?.()?.[
+        selected
+      ];
+    if (
+      !normalRegisteredCollectionType(
+        selected,
+        information,
+        { preserveUnavailable: true }
+      )
+    ) {
+      return options;
+    }
+
+    return [
+      ...options,
+      normalCollectionTypeOption(
+        selected,
+        information,
+        true
+      )
+    ];
+  }
+
+  function normalListValueTypeOptions(node) {
+    return normalCollectionOptionsWithSelection(
+      normalCollectionTypeOptions().values,
+      node,
+      "itemType"
+    );
+  }
+
+  function normalDictionaryKeyTypeOptions(node) {
+    return normalCollectionOptionsWithSelection(
+      normalCollectionTypeOptions().keys,
+      node,
+      "keyType"
+    );
+  }
+
+  function normalDictionaryValueTypeOptions(node) {
+    return normalCollectionOptionsWithSelection(
+      normalCollectionTypeOptions().values,
+      node,
+      "dictionaryValueType"
+    );
+  }
+
   function normalSelectedType(
     node,
     key = "valueType",
@@ -5852,7 +6271,43 @@ faulted ? `\n        ${faulted}();` : ""])
     const candidate = String(
       node?.parameters?.[key] || fallback
     ).trim();
-    return allowed.includes(candidate)
+    if (
+      typeof allowed === "function" &&
+      (
+        allowed === normalListValueTypeOptions ||
+        allowed ===
+          normalDictionaryValueTypeOptions ||
+        allowed === normalDictionaryKeyTypeOptions
+      )
+    ) {
+      const information =
+        registry.getTypeDefinitions?.()?.[
+          candidate
+        ];
+      const valueAllowed =
+        normalRegisteredCollectionType(
+          candidate,
+          information,
+          { preserveUnavailable: true }
+        );
+      return valueAllowed &&
+        (
+          allowed !==
+            normalDictionaryKeyTypeOptions ||
+          normalStableDictionaryKeyType(
+            candidate,
+            information
+          )
+        )
+          ? candidate
+          : fallback;
+    }
+    const allowedValues =
+      normalAllowedTypeValues(
+        allowed,
+        node
+      );
+    return allowedValues.includes(candidate)
       ? candidate
       : fallback;
   }
@@ -5916,6 +6371,139 @@ faulted ? `\n        ${faulted}();` : ""])
     return id;
   }
 
+  function normalArrayType(type) {
+    return `normalArray:${type}`;
+  }
+
+  function normalLegacyArrayType(
+    itemType,
+    information
+  ) {
+    const key = normalCollectionCsTypeKey(
+      normalCollectionCsType(
+        itemType,
+        information
+      )
+    );
+    return {
+      "System.Byte": "byteArray",
+      "System.String": "stringArray",
+      "System.Object": "objectArray"
+    }[key] || "";
+  }
+
+  function ensureNormalArrayType(type) {
+    const id = normalArrayType(type);
+    const existing =
+      registry.getTypeDefinitions()?.[id];
+    if (existing) return id;
+    const information =
+      normalTypeInformation(type);
+    const itemCsType =
+      information.csType || type;
+    const legacyType = normalLegacyArrayType(
+      type,
+      information
+    );
+    registerType(id, {
+      label: `${information.label || type}[]`,
+      short: `${information.short || "T"}[]`,
+      color: information.color || "#9da8b4",
+      csType: `${itemCsType}[]`,
+      defaultCs:
+        `System.Array.Empty<${itemCsType}>()`,
+      referenceType: true,
+      valueType: true,
+      globalGenericCandidate: false,
+      collectionType: true,
+      syntheticArrayType: true,
+      collectorCollection: true,
+      enumerableElementType: type,
+      enumerableElementCsType: itemCsType,
+      assignableTo: [
+        "object",
+        ...(legacyType ? [legacyType] : [])
+      ],
+      acceptsTypes:
+        legacyType ? [legacyType] : [],
+      constraints: [
+        "reference",
+        "serializable",
+        "enumerable"
+      ],
+      assembly: information.assembly || "",
+      assemblies:
+        Array.isArray(information.assemblies)
+          ? information.assemblies
+          : [],
+      assemblyReferences:
+        Array.isArray(information.assemblyReferences)
+          ? information.assemblyReferences
+          : []
+    });
+    return id;
+  }
+
+  function normalMergedAssemblyMetadata(
+    ...types
+  ) {
+    const references = new Map();
+    const assemblies = new Map();
+
+    for (const information of types) {
+      for (const assembly of [
+        ...(Array.isArray(information?.assemblies)
+          ? information.assemblies
+          : []),
+        information?.assembly
+      ]) {
+        const include = String(
+          assembly || ""
+        ).trim();
+        if (include) {
+          assemblies.set(
+            include.toLowerCase(),
+            include
+          );
+        }
+      }
+
+      for (const reference of
+        Array.isArray(
+          information?.assemblyReferences
+        )
+          ? information.assemblyReferences
+          : []) {
+        const include = String(
+          reference?.include || ""
+        ).trim();
+        if (!include) continue;
+        const key = include.toLowerCase();
+        const previous = references.get(key);
+        references.set(key, {
+          include,
+          hintPath:
+            String(
+              reference?.hintPath || ""
+            ).trim() ||
+            previous?.hintPath ||
+            "",
+          private:
+            reference?.private === true ||
+            previous?.private === true
+        });
+        assemblies.set(key, include);
+      }
+    }
+
+    return {
+      assembly: [...assemblies.values()][0] || "",
+      assemblies: [...assemblies.values()],
+      assemblyReferences:
+        [...references.values()]
+    };
+  }
+
   function normalDictionaryType(
     keyType,
     valueType
@@ -5942,6 +6530,11 @@ faulted ? `\n        ${faulted}();` : ""])
       keyInformation.csType || keyType;
     const valueCsType =
       valueInformation.csType || valueType;
+    const assemblyMetadata =
+      normalMergedAssemblyMetadata(
+        keyInformation,
+        valueInformation
+      );
     registerType(id, {
       label:
         `Dictionary<${keyInformation.label || keyType}, ${valueInformation.label || valueType}>`,
@@ -5958,22 +6551,18 @@ faulted ? `\n        ${faulted}();` : ""])
       dictionaryKeyType: keyType,
       dictionaryValueType: valueType,
       assignableTo: ["object"],
-      constraints: ["reference", "serializable"]
+      constraints: ["reference", "serializable"],
+      ...assemblyMetadata
     });
     return id;
   }
 
-  for (const type of NORMAL_CORE_VALUE_TYPES) {
-    ensureNormalListType(type);
-  }
-  for (const keyType of NORMAL_DICTIONARY_KEY_TYPES) {
-    for (const valueType of NORMAL_CORE_VALUE_TYPES) {
-      ensureNormalDictionaryType(
-        keyType,
-        valueType
-      );
-    }
-  }
+  ensureNormalListType("string");
+  ensureNormalArrayType("string");
+  ensureNormalDictionaryType(
+    "string",
+    "string"
+  );
 
   function normalVariadicIds(count) {
     return Array.from(
@@ -5996,10 +6585,34 @@ faulted ? `\n        ${faulted}();` : ""])
   }
 
   const normalGraphTypeByCs = new Map();
+  let normalGraphTypeIndexDefinitions = null;
+  let normalGraphTypeIndexRevision = -1;
+  let normalGraphTypeIndexFactoryVersion = -1;
 
   function refreshNormalGraphTypeIndex() {
+    const definitions =
+      registry.getTypeDefinitions();
+    const revision = Number(
+      window.__RMLNodeDefinitionRevision
+    ) || 0;
+    const factoryVersion = Number(
+      window.__RMLApiNodeFactoryVersion
+    ) || 0;
+
+    if (
+      definitions ===
+        normalGraphTypeIndexDefinitions &&
+      revision ===
+        normalGraphTypeIndexRevision &&
+      factoryVersion ===
+        normalGraphTypeIndexFactoryVersion
+    ) {
+      return;
+    }
+
+    normalGraphTypeByCs.clear();
     for (const [graphType, information] of Object.entries(
-      registry.getTypeDefinitions()
+      definitions
     )) {
       const csType = normalizedCatalogTypeName(
         information?.csType || ""
@@ -6008,6 +6621,12 @@ faulted ? `\n        ${faulted}();` : ""])
         normalGraphTypeByCs.set(csType, graphType);
       }
     }
+    normalGraphTypeIndexDefinitions =
+      definitions;
+    normalGraphTypeIndexRevision =
+      revision;
+    normalGraphTypeIndexFactoryVersion =
+      factoryVersion;
   }
 
   refreshNormalGraphTypeIndex();
@@ -6361,6 +6980,557 @@ faulted ? `\n        ${faulted}();` : ""])
     );
   }
 
+  function normalExactValuePort(
+    id,
+    label,
+    csType
+  ) {
+    return port(
+      id,
+      label,
+      ensureNormalExactGraphType(csType)
+    );
+  }
+
+  function normalTextConstant(
+    id,
+    title,
+    symbol,
+    csType,
+    defaultValue,
+    expression,
+    help
+  ) {
+    registerNode(id, {
+      title,
+      group: "Values",
+      symbol,
+      description: help,
+      parameters: [
+        pText(
+          "value",
+          "Value",
+          defaultValue,
+          help
+        )
+      ],
+      outputs: [port("value", "Value", "object")],
+      resolveDefinition() {
+        return {
+          outputs: [
+            normalExactValuePort(
+              "value",
+              "Value",
+              csType
+            )
+          ]
+        };
+      },
+      codegenExpression(api) {
+        return expression(
+          api,
+          String(
+            api.node.parameters?.value ??
+              defaultValue
+          )
+        );
+      }
+    });
+  }
+
+  function normalCharLiteral(value) {
+    const character = String(value || "\0").charAt(0);
+    return `'\\u${character
+      .charCodeAt(0)
+      .toString(16)
+      .padStart(4, "0")}'`;
+  }
+
+  normalTextConstant(
+    "constant.character",
+    "Character Constant",
+    "CHAR",
+    "System.Char",
+    "A",
+    (_api, value) => normalCharLiteral(value),
+    "One editable UTF-16 character."
+  );
+  normalTextConstant(
+    "constant.guid",
+    "GUID Constant",
+    "GUID",
+    "System.Guid",
+    "00000000-0000-0000-0000-000000000000",
+    (api, value) =>
+      `new System.Guid("${api.escapeString(value)}")`,
+    "An editable GUID in the standard dashed format."
+  );
+  normalTextConstant(
+    "constant.dateTime",
+    "Date/Time Constant",
+    "DATE",
+    "System.DateTime",
+    "1970-01-01T00:00:00.0000000Z",
+    (api, value) =>
+      `System.DateTime.Parse("${api.escapeString(value)}", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind)`,
+    "An editable ISO-8601 DateTime value."
+  );
+  normalTextConstant(
+    "constant.dateTimeOffset",
+    "Date/Time Offset Constant",
+    "DATE±",
+    "System.DateTimeOffset",
+    "1970-01-01T00:00:00.0000000+00:00",
+    (api, value) =>
+      `System.DateTimeOffset.Parse("${api.escapeString(value)}", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind)`,
+    "An editable ISO-8601 DateTimeOffset value."
+  );
+  normalTextConstant(
+    "constant.timeSpan",
+    "TimeSpan Constant",
+    "SPAN",
+    "System.TimeSpan",
+    "00:00:00",
+    (api, value) =>
+      `System.TimeSpan.Parse("${api.escapeString(value)}", System.Globalization.CultureInfo.InvariantCulture)`,
+    "An editable invariant TimeSpan value."
+  );
+
+  const NORMAL_MATRIX_TYPES = Object.freeze([
+    { csType: "Elements.Core.float2x2", label: "Float 2×2", scalarType: "float", dimension: 2 },
+    { csType: "Elements.Core.float3x3", label: "Float 3×3", scalarType: "float", dimension: 3 },
+    { csType: "Elements.Core.float4x4", label: "Float 4×4", scalarType: "float", dimension: 4 },
+    { csType: "Elements.Core.double2x2", label: "Double 2×2", scalarType: "double", dimension: 2 },
+    { csType: "Elements.Core.double3x3", label: "Double 3×3", scalarType: "double", dimension: 3 },
+    { csType: "Elements.Core.double4x4", label: "Double 4×4", scalarType: "double", dimension: 4 }
+  ]);
+
+  const NORMAL_QUATERNION_TYPES = Object.freeze([
+    { csType: "Elements.Core.floatQ", label: "Float quaternion", scalarType: "float" },
+    { csType: "Elements.Core.doubleQ", label: "Double quaternion", scalarType: "double" }
+  ]);
+
+  const NORMAL_COLOR_TYPES = Object.freeze([
+    { csType: "Elements.Core.color", label: "Float color", scalarCsType: "System.Single", alphaDefault: "1.0f" },
+    { csType: "Elements.Core.color32", label: "Color32", scalarCsType: "System.Byte", alphaDefault: "255" }
+  ]);
+
+  function normalStructuredOptions(descriptors) {
+    return descriptors.map(descriptor => [
+      descriptor.csType,
+      descriptor.label
+    ]);
+  }
+
+  function normalStructuredDescriptor(
+    node,
+    key,
+    descriptors
+  ) {
+    const candidate = String(
+      node?.parameters?.[key] || ""
+    );
+    return descriptors.find(
+      descriptor =>
+        descriptor.csType === candidate
+    ) || descriptors[0];
+  }
+
+  function normalMatrixComponents(descriptor) {
+    return Array.from(
+      { length: descriptor.dimension ** 2 },
+      (_, index) => {
+        const row = Math.floor(
+          index / descriptor.dimension
+        );
+        const column =
+          index % descriptor.dimension;
+        return `m${row}${column}`;
+      }
+    );
+  }
+
+  registerNode("value.composeMatrix", {
+    title: "Compose Matrix",
+    group: "Values",
+    symbol: "MAT+",
+    description:
+      "Builds an exactly typed Elements.Core float or double 2×2, 3×3 or 4×4 matrix in row-major order.",
+    selfContainedSource: true,
+    parameters: [
+      pSelect(
+        "matrixType",
+        "Matrix type",
+        normalStructuredOptions(
+          NORMAL_MATRIX_TYPES
+        ),
+        NORMAL_MATRIX_TYPES[0].csType,
+        "Selects the matrix size and scalar type.",
+        { affectsPorts: true }
+      )
+    ],
+    inputs: [],
+    outputs: [port("value", "Value", "object")],
+    resolveDefinition(node) {
+      const descriptor =
+        normalStructuredDescriptor(
+          node,
+          "matrixType",
+          NORMAL_MATRIX_TYPES
+        );
+      const components =
+        normalMatrixComponents(descriptor);
+      return {
+        inputs: components.map(component =>
+          port(
+            component,
+            component.toUpperCase(),
+            descriptor.scalarType
+          )
+        ),
+        outputs: [
+          normalExactValuePort(
+            "value",
+            "Value",
+            descriptor.csType
+          )
+        ]
+      };
+    },
+    codegenExpression(api) {
+      const descriptor =
+        normalStructuredDescriptor(
+          api.node,
+          "matrixType",
+          NORMAL_MATRIX_TYPES
+        );
+      return `new ${descriptor.csType}(${normalMatrixComponents(descriptor)
+        .map(component =>
+          api.input(component).code
+        )
+        .join(", ")})`;
+    }
+  });
+
+  registerNode("value.decomposeMatrix", {
+    title: "Decompose Matrix",
+    group: "Values",
+    symbol: "MAT−",
+    description:
+      "Splits an Elements.Core matrix into its exactly typed row-major scalar components.",
+    parameters: [
+      pSelect(
+        "matrixType",
+        "Matrix type",
+        normalStructuredOptions(
+          NORMAL_MATRIX_TYPES
+        ),
+        NORMAL_MATRIX_TYPES[0].csType,
+        "Selects the matrix size and scalar type.",
+        { affectsPorts: true }
+      )
+    ],
+    inputs: [port("value", "Value", "object")],
+    outputs: [],
+    resolveDefinition(node) {
+      const descriptor =
+        normalStructuredDescriptor(
+          node,
+          "matrixType",
+          NORMAL_MATRIX_TYPES
+        );
+      return {
+        inputs: [
+          normalExactValuePort(
+            "value",
+            "Value",
+            descriptor.csType
+          )
+        ],
+        outputs: normalMatrixComponents(
+          descriptor
+        ).map(component =>
+          port(
+            component,
+            component.toUpperCase(),
+            descriptor.scalarType
+          )
+        )
+      };
+    },
+    codegenCollect(api) {
+      ensureNumericVectorRuntime(api);
+    },
+    codegenExpression(api) {
+      const descriptor =
+        normalStructuredDescriptor(
+          api.node,
+          "matrixType",
+          NORMAL_MATRIX_TYPES
+        );
+      return `ReadNumericComponent<${api.csType(descriptor.scalarType)}>(${api.input("value").code}, "${api.portId}")`;
+    }
+  });
+
+  registerNode("value.composeQuaternion", {
+    title: "Compose Quaternion",
+    group: "Values",
+    symbol: "QUAT+",
+    description:
+      "Builds an exactly typed floatQ or doubleQ from X, Y, Z and W.",
+    selfContainedSource: true,
+    parameters: [
+      pSelect(
+        "quaternionType",
+        "Quaternion type",
+        normalStructuredOptions(
+          NORMAL_QUATERNION_TYPES
+        ),
+        NORMAL_QUATERNION_TYPES[0].csType,
+        "Selects float or double precision.",
+        { affectsPorts: true }
+      )
+    ],
+    inputs: [],
+    outputs: [port("value", "Value", "floatQ")],
+    resolveDefinition(node) {
+      const descriptor =
+        normalStructuredDescriptor(
+          node,
+          "quaternionType",
+          NORMAL_QUATERNION_TYPES
+        );
+      return {
+        inputs: ["x", "y", "z", "w"].map(
+          component =>
+            port(
+              component,
+              component.toUpperCase(),
+              descriptor.scalarType,
+              component === "w"
+                ? {
+                    defaultCs:
+                      descriptor.scalarType === "float"
+                        ? "1.0f"
+                        : "1.0d"
+                  }
+                : {}
+            )
+        ),
+        outputs: [
+          normalExactValuePort(
+            "value",
+            "Value",
+            descriptor.csType
+          )
+        ]
+      };
+    },
+    codegenExpression(api) {
+      const descriptor =
+        normalStructuredDescriptor(
+          api.node,
+          "quaternionType",
+          NORMAL_QUATERNION_TYPES
+        );
+      return `new ${descriptor.csType}(${["x", "y", "z", "w"]
+        .map(component =>
+          api.input(component).code
+        )
+        .join(", ")})`;
+    }
+  });
+
+  registerNode("value.decomposeQuaternion", {
+    title: "Decompose Quaternion",
+    group: "Values",
+    symbol: "QUAT−",
+    description:
+      "Splits a floatQ or doubleQ into X, Y, Z and W.",
+    parameters: [
+      pSelect(
+        "quaternionType",
+        "Quaternion type",
+        normalStructuredOptions(
+          NORMAL_QUATERNION_TYPES
+        ),
+        NORMAL_QUATERNION_TYPES[0].csType,
+        "Selects float or double precision.",
+        { affectsPorts: true }
+      )
+    ],
+    inputs: [port("value", "Value", "floatQ")],
+    outputs: [],
+    resolveDefinition(node) {
+      const descriptor =
+        normalStructuredDescriptor(
+          node,
+          "quaternionType",
+          NORMAL_QUATERNION_TYPES
+        );
+      return {
+        inputs: [
+          normalExactValuePort(
+            "value",
+            "Value",
+            descriptor.csType
+          )
+        ],
+        outputs: ["x", "y", "z", "w"].map(
+          component =>
+            port(
+              component,
+              component.toUpperCase(),
+              descriptor.scalarType
+            )
+        )
+      };
+    },
+    codegenCollect(api) {
+      ensureNumericVectorRuntime(api);
+    },
+    codegenExpression(api) {
+      const descriptor =
+        normalStructuredDescriptor(
+          api.node,
+          "quaternionType",
+          NORMAL_QUATERNION_TYPES
+        );
+      return `ReadNumericComponent<${api.csType(descriptor.scalarType)}>(${api.input("value").code}, "${api.portId}")`;
+    }
+  });
+
+  registerNode("value.composeColor", {
+    title: "Compose Color",
+    group: "Values",
+    symbol: "RGBA",
+    description:
+      "Builds an exactly typed Elements.Core color or color32 from RGBA channels.",
+    selfContainedSource: true,
+    parameters: [
+      pSelect(
+        "colorType",
+        "Color type",
+        normalStructuredOptions(
+          NORMAL_COLOR_TYPES
+        ),
+        NORMAL_COLOR_TYPES[0].csType,
+        "Selects float channels or 8-bit channels.",
+        { affectsPorts: true }
+      )
+    ],
+    inputs: [],
+    outputs: [port("value", "Value", "object")],
+    resolveDefinition(node) {
+      const descriptor =
+        normalStructuredDescriptor(
+          node,
+          "colorType",
+          NORMAL_COLOR_TYPES
+        );
+      const scalarType =
+        ensureNormalExactGraphType(
+          descriptor.scalarCsType
+        );
+      return {
+        inputs: ["r", "g", "b", "a"].map(
+          component =>
+            port(
+              component,
+              component.toUpperCase(),
+              scalarType,
+              component === "a"
+                ? { defaultCs: descriptor.alphaDefault }
+                : {}
+            )
+        ),
+        outputs: [
+          normalExactValuePort(
+            "value",
+            "Value",
+            descriptor.csType
+          )
+        ]
+      };
+    },
+    codegenExpression(api) {
+      const descriptor =
+        normalStructuredDescriptor(
+          api.node,
+          "colorType",
+          NORMAL_COLOR_TYPES
+        );
+      return `new ${descriptor.csType}(${["r", "g", "b", "a"]
+        .map(component =>
+          api.input(component).code
+        )
+        .join(", ")})`;
+    }
+  });
+
+  registerNode("value.decomposeColor", {
+    title: "Decompose Color",
+    group: "Values",
+    symbol: "RGBA−",
+    description:
+      "Splits an Elements.Core color or color32 into RGBA channels.",
+    parameters: [
+      pSelect(
+        "colorType",
+        "Color type",
+        normalStructuredOptions(
+          NORMAL_COLOR_TYPES
+        ),
+        NORMAL_COLOR_TYPES[0].csType,
+        "Selects float channels or 8-bit channels.",
+        { affectsPorts: true }
+      )
+    ],
+    inputs: [port("value", "Value", "object")],
+    outputs: [],
+    resolveDefinition(node) {
+      const descriptor =
+        normalStructuredDescriptor(
+          node,
+          "colorType",
+          NORMAL_COLOR_TYPES
+        );
+      const scalarType =
+        ensureNormalExactGraphType(
+          descriptor.scalarCsType
+        );
+      return {
+        inputs: [
+          normalExactValuePort(
+            "value",
+            "Value",
+            descriptor.csType
+          )
+        ],
+        outputs: ["r", "g", "b", "a"].map(
+          component =>
+            port(
+              component,
+              component.toUpperCase(),
+              scalarType
+            )
+        )
+      };
+    },
+    codegenCollect(api) {
+      ensureNumericVectorRuntime(api);
+    },
+    codegenExpression(api) {
+      const descriptor =
+        normalStructuredDescriptor(
+          api.node,
+          "colorType",
+          NORMAL_COLOR_TYPES
+        );
+      return `ReadNumericComponent<${descriptor.scalarCsType}>(${api.input("value").code}, "${api.portId}")`;
+    }
+  });
+
   function ensureNormalConversionRuntime(api) {
     api.addUsing("System.Globalization");
     api.addMember(
@@ -6368,6 +7538,136 @@ faulted ? `\n        ${faulted}();` : ""])
       globalThis.RMLCodeTemplates.text("nodes", "Normal_conversion_helpers", [])
     );
   }
+
+  let normalNumericTypeOptionsCache = null;
+
+  function normalNumericTypeOptions() {
+    const definitions =
+      registry.getTypeDefinitions();
+    const revision = Number(
+      window.__RMLNodeDefinitionRevision
+    ) || 0;
+    if (
+      normalNumericTypeOptionsCache &&
+      normalNumericTypeOptionsCache
+        .definitions === definitions &&
+      normalNumericTypeOptionsCache
+        .revision === revision
+    ) {
+      return normalNumericTypeOptionsCache
+        .options;
+    }
+    const options = Object.entries(
+      definitions
+    )
+      .filter(([type]) =>
+        nodeGraphIsScalarNumericType(type)
+      )
+      .sort((left, right) =>
+        typeLabel(left[0]).localeCompare(
+          typeLabel(right[0])
+        )
+      )
+      .map(([type, information]) => [
+        type,
+        `${information.label || type} — ${information.csType || type}`
+      ]);
+    normalNumericTypeOptionsCache = {
+      definitions,
+      revision,
+      options: Object.freeze(options)
+    };
+    return normalNumericTypeOptionsCache.options;
+  }
+
+  function normalSelectedNumericType(
+    node,
+    key,
+    fallback = "float"
+  ) {
+    const candidate = String(
+      node?.parameters?.[key] || fallback
+    );
+    return nodeGraphIsScalarNumericType(
+      candidate
+    )
+      ? candidate
+      : fallback;
+  }
+
+  registerNode("normal.convertNumeric", {
+    title: "Convert Numeric",
+    group: "Conversions",
+    symbol: "#→#",
+    description:
+      "Performs one explicit C# numeric conversion across the complete CLR numeric family, including Half, with selectable overflow behavior.",
+    parameters: [
+      pSelect(
+        "inputType",
+        "Input type",
+        normalNumericTypeOptions,
+        "float",
+        "The exact numeric type accepted by the input port.",
+        { affectsPorts: true }
+      ),
+      pSelect(
+        "outputType",
+        "Output type",
+        normalNumericTypeOptions,
+        "float",
+        "The exact numeric type emitted by the output port.",
+        { affectsPorts: true }
+      ),
+      pSelect(
+        "overflowMode",
+        "Overflow",
+        [
+          ["checked", "Checked — throw on overflow"],
+          ["unchecked", "Unchecked — C# cast semantics"]
+        ],
+        "checked"
+      )
+    ],
+    inputs: [port("value", "Value", "float")],
+    outputs: [port("result", "Result", "float")],
+    resolveDefinition(node) {
+      return {
+        inputs: [
+          port(
+            "value",
+            "Value",
+            normalSelectedNumericType(
+              node,
+              "inputType"
+            )
+          )
+        ],
+        outputs: [
+          port(
+            "result",
+            "Result",
+            normalSelectedNumericType(
+              node,
+              "outputType"
+            )
+          )
+        ]
+      };
+    },
+    codegenExpression(api) {
+      const outputType =
+        normalSelectedNumericType(
+          api.node,
+          "outputType"
+        );
+      const operation =
+        api.node.parameters?.overflowMode ===
+          "unchecked"
+          ? "unchecked"
+          : "checked";
+      return `${operation}((${api.csType(outputType)})(${api.input("value").code}))`;
+    }
+  });
 
   registerNode("normal.isNull", {
     title: "Is Null",
@@ -7359,7 +8659,7 @@ faulted ? `\n        ${faulted}();` : ""])
 
   function normalListNodeParameters(
     fallback = "string",
-    allowed = NORMAL_CORE_VALUE_TYPES
+    allowed = normalListValueTypeOptions
   ) {
     return [
       pSelect(
@@ -7373,7 +8673,7 @@ faulted ? `\n        ${faulted}();` : ""])
 
   function normalListNodeType(
     node,
-    allowed = NORMAL_CORE_VALUE_TYPES,
+    allowed = normalListValueTypeOptions,
     fallback = "string"
   ) {
     const itemType = normalSelectedType(
@@ -7396,7 +8696,7 @@ faulted ? `\n        ${faulted}();` : ""])
   ) {
     const information = normalListNodeType(
       node,
-      options.allowed || NORMAL_CORE_VALUE_TYPES,
+      options.allowed || normalListValueTypeOptions,
       options.fallback || "string"
     );
     return {
@@ -7442,6 +8742,88 @@ faulted ? `\n        ${faulted}();` : ""])
       ]
     };
   }
+
+  function normalArrayNodeType(node) {
+    const itemType = normalSelectedType(
+      node,
+      "itemType",
+      "string",
+      normalListValueTypeOptions
+    );
+    return {
+      itemType,
+      arrayType: ensureNormalArrayType(itemType)
+    };
+  }
+
+  registerNode("collection.createArray", {
+    title: "Create Array",
+    group: "Collections",
+    symbol: "T[]",
+    description:
+      "Packs two or more values into an exact typed array. Select the node and use + / − in the inspector to change the item count.",
+    parameters: normalListNodeParameters(),
+    inputs: [
+      port("a", "A", "string"),
+      port("b", "B", "string")
+    ],
+    variadicInputs: {
+      minimum: 2,
+      defaultCount: 2,
+      maximum: 64,
+      preserveAB: true,
+      template: port("a", "A", "string")
+    },
+    outputs: [
+      port(
+        "value",
+        "Array",
+        normalArrayType("string")
+      )
+    ],
+    resolveDefinition(node) {
+      const { itemType, arrayType } =
+        normalArrayNodeType(node);
+      return {
+        inputs: [
+          port("a", "A", itemType),
+          port("b", "B", itemType)
+        ],
+        outputs: [
+          port("value", "Array", arrayType)
+        ],
+        variadicInputs: {
+          minimum: 2,
+          defaultCount: 2,
+          maximum: 64,
+          preserveAB: true,
+          template: port(
+            "a",
+            "A",
+            itemType
+          )
+        }
+      };
+    },
+    codegenExpression(api) {
+      const { itemType } =
+        normalArrayNodeType(api.node);
+      const count = Math.max(
+        2,
+        Math.min(
+          64,
+          Number(
+            api.node.parameters
+              ?.variadicInputCount
+          ) || 2
+        )
+      );
+      const values = normalVariadicIds(count)
+        .map(id => api.input(id).code)
+        .join(", ");
+      return `new ${api.csType(itemType)}[] { ${values} }`;
+    }
+  });
 
   registerNode("collection.createList", {
     title: "Create List",
@@ -7505,7 +8887,7 @@ faulted ? `\n        ${faulted}();` : ""])
       description: options.description || "Mutates a strongly typed list and reports the resulting count.",
       parameters: normalListNodeParameters(
         options.fallback || "string",
-        options.allowed || NORMAL_CORE_VALUE_TYPES
+        options.allowed || normalListValueTypeOptions
       ).concat(options.parameters || []),
       inputs: [
         port("call", "Call", "impulse"),
@@ -7538,7 +8920,7 @@ faulted ? `\n        ${faulted}();` : ""])
           {
             action: true,
             fallback: options.fallback || "string",
-            allowed: options.allowed || NORMAL_CORE_VALUE_TYPES
+            allowed: options.allowed || normalListValueTypeOptions
           }
         );
       },
@@ -7661,7 +9043,7 @@ faulted ? `\n        ${faulted}();` : ""])
       symbol,
       parameters: normalListNodeParameters(
         options.fallback || "string",
-        options.allowed || NORMAL_CORE_VALUE_TYPES
+        options.allowed || normalListValueTypeOptions
       ),
       inputs: [
         port("list", "List", normalListType(options.fallback || "string")),
@@ -7697,7 +9079,7 @@ faulted ? `\n        ${faulted}();` : ""])
           outputs,
           {
             fallback: options.fallback || "string",
-            allowed: options.allowed || NORMAL_CORE_VALUE_TYPES
+            allowed: options.allowed || normalListValueTypeOptions
           }
         );
       },
@@ -7763,7 +9145,8 @@ faulted ? `\n        ${faulted}();` : ""])
       const type = normalSelectedType(
         api.node,
         "itemType",
-        "string"
+        "string",
+        normalListValueTypeOptions
       );
       const csType = api.csType(type);
       return `${api.input("list").code}.Where(item => EqualityComparer<${csType}>.Default.Equals(item, ${api.input("value").code})).ToList()`;
@@ -7794,12 +9177,13 @@ faulted ? `\n        ${faulted}();` : ""])
       node,
       "keyType",
       "string",
-      NORMAL_DICTIONARY_KEY_TYPES
+      normalDictionaryKeyTypeOptions
     );
     const valueType = normalSelectedType(
       node,
       "dictionaryValueType",
-      "string"
+      "string",
+      normalDictionaryValueTypeOptions
     );
     return {
       keyType,
@@ -7819,13 +9203,13 @@ faulted ? `\n        ${faulted}();` : ""])
       pSelect(
         "keyType",
         "Key type",
-        NORMAL_DICTIONARY_KEY_TYPES,
+        normalDictionaryKeyTypeOptions,
         "string"
       ),
       pSelect(
         "dictionaryValueType",
         "Value type",
-        NORMAL_CORE_VALUE_TYPES,
+        normalDictionaryValueTypeOptions,
         "string"
       )
     ];
@@ -9040,14 +10424,30 @@ attempt ? `\n    ${attempt}();` : ""])
           parameterByKey.set(parameter.key, { ...parameter });
         } else if (parameter.kind === "select") {
           const existing = parameterByKey.get(parameter.key);
-          const options = [...(existing.options || []), ...(parameter.options || [])];
-          const seen = new Set();
-          existing.options = options.filter(option => {
-            const value = String(Array.isArray(option) ? option[0] : option?.value ?? option);
-            if (seen.has(value)) return false;
-            seen.add(value);
-            return true;
-          });
+          const previousOptions = existing.options;
+          const nextOptions = parameter.options;
+          const mergeOptions = (node, resolvedDefinition) => {
+            const resolve = source =>
+              typeof source === "function"
+                ? source(node, resolvedDefinition)
+                : source || [];
+            const options = [
+              ...resolve(previousOptions),
+              ...resolve(nextOptions)
+            ];
+            const seen = new Set();
+            return options.filter(option => {
+              const value = normalSelectOptionValue(option);
+              if (seen.has(value)) return false;
+              seen.add(value);
+              return true;
+            });
+          };
+          existing.options =
+            typeof previousOptions === "function" ||
+            typeof nextOptions === "function"
+              ? mergeOptions
+              : mergeOptions(null, null);
         }
       }
       definition.hiddenFromPalette = true;

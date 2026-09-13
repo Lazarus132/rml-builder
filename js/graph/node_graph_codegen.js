@@ -693,17 +693,8 @@ function typeLabel(type) {
     return typeInfo(type).label;
   }
 
-const SCALAR_NUMERIC_TYPES = Object.freeze([
-    "int",
-    "float",
-    "double"
-  ]);
-
-const NUMERIC_TYPE_RANK = Object.freeze({
-    int: 0,
-    float: 1,
-    double: 2
-  });
+const SCALAR_NUMERIC_TYPES =
+    GRAPH_CONFIGURABLE_NUMBER_TYPES;
 
 const GRAPH_INT32_MIN = -2147483648;
 
@@ -712,37 +703,53 @@ const GRAPH_INT32_MAX = 2147483647;
 const GRAPH_FLOAT32_MAX = 3.4028234663852886e38;
 
 function nodeGraphIsScalarNumericType(type) {
-    return Object.hasOwn(
-      NUMERIC_TYPE_RANK,
-      type
+    return Boolean(
+      graphNumericScalarDescriptor(type)
     );
   }
 
 function scalarNumericRank(type) {
-    return nodeGraphIsScalarNumericType(type)
-      ? NUMERIC_TYPE_RANK[type]
-      : -1;
+    return (
+      graphNumericScalarDescriptor(type)
+        ?.preference ?? -1
+    );
   }
 
 function scalarNumericTypeAtRank(rank) {
-    return SCALAR_NUMERIC_TYPES[
+    const ordered = [...SCALAR_NUMERIC_TYPES]
+      .filter(nodeGraphIsScalarNumericType)
+      .sort(
+        (left, right) =>
+          scalarNumericRank(left) -
+          scalarNumericRank(right)
+      );
+    const exact = ordered.find(
+      type => scalarNumericRank(type) === rank
+    );
+    return exact || ordered[
       nodeGraphClamp(
         Math.trunc(rank),
         0,
-        SCALAR_NUMERIC_TYPES.length - 1
+        Math.max(0, ordered.length - 1)
       )
-    ];
+    ] || "float";
   }
 
 function canImplicitlyConvertScalarNumber(
     fromType,
     toType
   ) {
-    return (
-      nodeGraphIsScalarNumericType(fromType) &&
-      nodeGraphIsScalarNumericType(toType) &&
-      scalarNumericRank(fromType) <=
-        scalarNumericRank(toType)
+    const from =
+      graphNumericScalarDescriptor(fromType);
+    const to =
+      graphNumericScalarDescriptor(toType);
+    return Boolean(
+      from &&
+      to &&
+      (
+        from.csType === to.csType ||
+        from.implicitTo.includes(to.csType)
+      )
     );
   }
 
@@ -755,13 +762,27 @@ function promotedScalarNumericType(types) {
       return null;
     }
 
-    return scalarNumericTypeAtRank(
-      Math.max(
-        ...numeric.map(
-          scalarNumericRank
+    const candidates = [
+      ...new Set([
+        ...numeric,
+        ...SCALAR_NUMERIC_TYPES
+      ])
+    ]
+      .filter(nodeGraphIsScalarNumericType)
+      .sort(
+        (left, right) =>
+          scalarNumericRank(left) -
+          scalarNumericRank(right)
+      );
+
+    return candidates.find(candidate =>
+      numeric.every(type =>
+        canImplicitlyConvertScalarNumber(
+          type,
+          candidate
         )
       )
-    );
+    ) || null;
   }
 
 function definitionAllowsAutoType(
@@ -776,7 +797,7 @@ function definitionAllowsAutoType(
 function graphNumberText(value) {
     let text = String(value ?? "")
       .trim()
-      .replace(/[fFdD]$/, "");
+      .replace(/[fFdDmM]$/, "");
 
     if (
       /^[+-]?\d+,\d+(?:[eE][+-]?\d+)?$/.test(
@@ -789,6 +810,73 @@ function graphNumberText(value) {
     return text;
   }
 
+function normalizeExactDecimal(text) {
+    const match = String(text || "").match(
+      /^([+-]?)(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/
+    );
+
+    if (!match) {
+      return null;
+    }
+
+    const sign = match[1] === "-" ? "-" : "";
+    const integer = match[2] || "0";
+    const fraction = match[3] ?? match[4] ?? "";
+    let digits = `${integer}${fraction}`.replace(/^0+/, "");
+
+    if (!digits) {
+      return "0";
+    }
+
+    let exponent;
+    try {
+      exponent = BigInt(match[5] || "0");
+    } catch {
+      return null;
+    }
+
+    let scale = BigInt(fraction.length) - exponent;
+
+    while (scale > 0n && digits.endsWith("0")) {
+      digits = digits.slice(0, -1);
+      scale -= 1n;
+    }
+
+    if (scale < 0n) {
+      const zeroCount = -scale;
+      if (zeroCount > 29n) {
+        return null;
+      }
+      digits += "0".repeat(Number(zeroCount));
+      scale = 0n;
+    }
+
+    if (scale > 28n || digits.length > 29) {
+      return null;
+    }
+
+    const decimalMaximum =
+      "79228162514264337593543950335";
+    const padded = digits.padStart(
+      decimalMaximum.length,
+      "0"
+    );
+    if (
+      padded.length > decimalMaximum.length ||
+      padded > decimalMaximum
+    ) {
+      return null;
+    }
+
+    const scaleNumber = Number(scale);
+    const magnitude = scaleNumber === 0
+      ? digits
+      : digits.length > scaleNumber
+        ? `${digits.slice(0, -scaleNumber)}.${digits.slice(-scaleNumber)}`
+        : `0.${"0".repeat(scaleNumber - digits.length)}${digits}`;
+    return `${sign}${magnitude}`;
+  }
+
 function validateNumericValue(
     rawValue,
     type,
@@ -798,8 +886,20 @@ function validateNumericValue(
       options.coerce === true;
     const text =
       graphNumberText(rawValue);
+    const descriptor =
+      graphNumericScalarDescriptor(type);
     const pattern =
       /^[+-]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:[eE][+-]?\d+)?$/;
+
+    if (!descriptor) {
+      return {
+        valid: false,
+        value: "0",
+        number: 0,
+        reason:
+          `${typeLabel(type)} is not a scalar number type.`
+      };
+    }
 
     if (!text || !pattern.test(text)) {
       return {
@@ -809,6 +909,76 @@ function validateNumericValue(
         reason:
           "Enter one finite decimal number."
       };
+    }
+
+    if (descriptor.integer) {
+      if (!/^[+-]?\d+$/.test(text)) {
+        return {
+          valid: false,
+          value: "0",
+          number: 0,
+          reason:
+            `${descriptor.csType} values cannot contain decimal places.`
+        };
+      }
+
+      let exact;
+      try {
+        exact = BigInt(text);
+      } catch {
+        exact = 0n;
+      }
+
+      const minimum = BigInt(descriptor.min);
+      const maximum = BigInt(descriptor.max);
+      if (exact < minimum || exact > maximum) {
+        const corrected = coerce
+          ? exact < minimum
+            ? minimum
+            : maximum
+          : 0n;
+        return {
+          valid: false,
+          value: corrected.toString(),
+          number: corrected.toString(),
+          reason:
+            `The value must fit in ${descriptor.csType} (${descriptor.min} through ${descriptor.max}).`
+        };
+      }
+
+      const value = exact.toString();
+      const safelyRepresentable =
+        exact >= BigInt(Number.MIN_SAFE_INTEGER) &&
+        exact <= BigInt(Number.MAX_SAFE_INTEGER);
+      const preserveAsText =
+        descriptor.family === "long" ||
+        descriptor.family === "ulong";
+      return {
+        valid: true,
+        value,
+        number: !preserveAsText && safelyRepresentable
+          ? Number(value)
+          : value,
+        reason: ""
+      };
+    }
+
+    if (descriptor.decimal) {
+      const value = normalizeExactDecimal(text);
+      return value === null
+        ? {
+            valid: false,
+            value: "0",
+            number: "0",
+            reason:
+              "The value must fit exactly in System.Decimal (96-bit coefficient and scale 0 through 28)."
+          }
+        : {
+            valid: true,
+            value,
+            number: value,
+            reason: ""
+          };
     }
 
     let number = Number(text);
@@ -823,51 +993,16 @@ function validateNumericValue(
       };
     }
 
-    if (type === "int") {
-      if (coerce) {
-        number = nodeGraphClamp(
-          Math.trunc(number),
-          GRAPH_INT32_MIN,
-          GRAPH_INT32_MAX
-        );
-      }
-
-      if (
-        !Number.isInteger(number) ||
-        number < GRAPH_INT32_MIN ||
-        number > GRAPH_INT32_MAX
-      ) {
-        return {
-          valid: false,
-          value: String(
-            nodeGraphClamp(
-              Math.trunc(number || 0),
-              GRAPH_INT32_MIN,
-              GRAPH_INT32_MAX
-            )
-          ),
-          number,
-          reason:
-            "Integer values cannot contain decimal places and must fit in System.Int32."
-        };
-      }
-    } else if (type === "float") {
-      if (Math.abs(number) > GRAPH_FLOAT32_MAX) {
-        return {
-          valid: false,
-          value: "0",
-          number,
-          reason:
-            "The value is outside the System.Single range."
-        };
-      }
-    } else if (type !== "double") {
+    if (
+      Math.abs(number) >
+        descriptor.maxFinite
+    ) {
       return {
         valid: false,
         value: "0",
         number,
         reason:
-          `${typeLabel(type)} is not a scalar number type.`
+          `The value is outside the ${descriptor.csType} range.`
       };
     }
 
@@ -884,17 +1019,77 @@ function validateNumericValue(
   }
 
 function numericVectorInfo(type) {
-    const match = String(type || "").match(
-      /^(int|float|double)([234])$/
-    );
+    return graphVectorDescriptor(type);
+  }
 
-    return match
-      ? {
-          scalarType: match[1],
-          componentCount:
-            Number(match[2])
-        }
-      : null;
+function graphVectorTypeForScalarAndDimension(
+    scalarType,
+    componentCount,
+    allowed = GRAPH_CONFIGURABLE_VECTOR_TYPES
+  ) {
+    const scalarCsType =
+      graphCanonicalCsType(scalarType);
+    return allowed.find(type => {
+      const information =
+        numericVectorInfo(type);
+      return Boolean(
+        information &&
+        information.scalarCsType === scalarCsType &&
+        information.componentCount === componentCount
+      );
+    }) || null;
+  }
+
+function nodeGraphIsVectorScalarType(type) {
+    return type === "bool" ||
+      nodeGraphIsScalarNumericType(type);
+  }
+
+function promotedVectorScalarType(types) {
+    const values = types.filter(
+      nodeGraphIsVectorScalarType
+    );
+    if (values.length === 0) {
+      return null;
+    }
+    if (values.every(type => type === "bool")) {
+      return "bool";
+    }
+    if (values.some(type => type === "bool")) {
+      return null;
+    }
+    return promotedScalarNumericType(values);
+  }
+
+function scalarTypeForOutgoingTargets(types) {
+    const values = types.filter(
+      nodeGraphIsVectorScalarType
+    );
+    if (values.length === 0) {
+      return null;
+    }
+    if (values.every(type => type === "bool")) {
+      return "bool";
+    }
+    if (values.some(type => type === "bool")) {
+      return null;
+    }
+
+    return [...SCALAR_NUMERIC_TYPES]
+      .filter(nodeGraphIsScalarNumericType)
+      .sort(
+        (left, right) =>
+          scalarNumericRank(left) -
+          scalarNumericRank(right)
+      )
+      .find(candidate =>
+        values.every(target =>
+          canImplicitlyConvertScalarNumber(
+            candidate,
+            target
+          )
+        )
+      ) || null;
   }
 
 const AUTO_VECTOR_OPERATOR_IDS =
@@ -999,12 +1194,33 @@ function validateNumericVectorValue(
     );
 
     while (components.length < information.componentCount) {
-      components.push("0");
+      components.push(
+        information.boolean ? "false" : "0"
+      );
     }
 
     const normalized = [];
 
     for (const component of components) {
+      if (information.boolean) {
+        const value = String(
+          component || "false"
+        )
+          .trim()
+          .toLowerCase();
+        if (value !== "true" && value !== "false") {
+          return {
+            valid: false,
+            value: String(rawValue ?? ""),
+            components: [],
+            reason:
+              `${typeLabel(type)} components must be true or false.`
+          };
+        }
+        normalized.push(value);
+        continue;
+      }
+
       const result = validateNumericValue(
         component || "0",
         information.scalarType,
@@ -1236,43 +1452,59 @@ function normalizeNodeParametersObject(
 
     if (definition.parameterKind === "number") {
       const configured = parameters.valueType;
-      const numericType = nodeGraphIsScalarNumericType(configured)
-        ? configured
-        : fallbackTypeForDefinition(definition);
-      const result = validateNumericValue(
-        parameters.value ?? "0",
-        numericType,
-        {
-          coerce:
-            coerce && configured !== "auto"
-        }
-      );
+      if (configured === "auto") {
+        const exactText = graphNumberText(
+          parameters.value ?? "0"
+        );
+        const allowed =
+          definition.configurableTypes ||
+          SCALAR_NUMERIC_TYPES;
+        parameters.value = allowed.some(type =>
+          validateNumericValue(
+            exactText,
+            type,
+            { coerce: false }
+          ).valid
+        )
+          ? exactText
+          : "0";
+      } else {
+        const numericType =
+          nodeGraphIsScalarNumericType(configured)
+            ? configured
+            : fallbackTypeForDefinition(definition);
+        const result = validateNumericValue(
+          parameters.value ?? "0",
+          numericType,
+          { coerce }
+        );
 
-      parameters.value = result.valid
-        ? result.value
-        : validateNumericValue(
-            parameters.value ?? "0",
-            "double",
-            { coerce: true }
-          ).value;
+        parameters.value = result.value;
+      }
     }
 
     if (operatorId === "constant.vector") {
       const configured = parameters.valueType;
-      const vectorType = numericVectorInfo(configured)
-        ? configured
-        : fallbackTypeForDefinition(definition);
-      const result = validateNumericVectorValue(
-        parameters.components || "0, 0, 0",
-        vectorType,
-        {
-          coerce:
-            coerce && configured !== "auto"
-        }
-      );
+      if (configured === "auto") {
+        parameters.components = String(
+          parameters.components || "0, 0, 0"
+        )
+          .split(",")
+          .map(value => value.trim())
+          .join(", ");
+      } else {
+        const vectorType = numericVectorInfo(configured)
+          ? configured
+          : fallbackTypeForDefinition(definition);
+        const result = validateNumericVectorValue(
+          parameters.components || "0, 0, 0",
+          vectorType,
+          { coerce }
+        );
 
-      if (result.valid) {
-        parameters.components = result.value;
+        if (result.valid || coerce) {
+          parameters.components = result.value;
+        }
       }
     }
 
@@ -1453,31 +1685,31 @@ function typeMatchesConstraint(
       constraint === "scalar" ||
       constraint === "ordered"
     ) {
-      return [
-        "int",
-        "float",
-        "double"
-      ].includes(type);
+      return nodeGraphIsScalarNumericType(type);
     }
 
     if (constraint === "arithmetic") {
-      return /^(?:int|float|double)(?:[234])?$/.test(
-        type
+      return Boolean(
+        nodeGraphIsScalarNumericType(type) ||
+        numericVectorInfo(type)?.numeric
       );
     }
 
     if (constraint === "interpolatable") {
-      return [
-        "float",
-        "double",
-        "float2",
-        "float3",
-        "float4",
-        "double2",
-        "double3",
-        "double4",
-        "colorX"
-      ].includes(type);
+      const scalar =
+        graphNumericScalarDescriptor(type);
+      const vector =
+        numericVectorInfo(type);
+      return Boolean(
+        type === "colorX" ||
+        scalar?.floating ||
+        (
+          vector?.numeric &&
+          graphNumericScalarDescriptor(
+            vector.scalarType
+          )?.floating
+        )
+      );
     }
 
     return false;
@@ -7142,21 +7374,21 @@ function genericVariableDefault(variable) {
 
 function numericPreferenceFromConstant(variable) {
     if (variable.node.operatorId === "constant.number") {
-      const parsed = validateNumericValue(
-        variable.node.parameters?.value ?? "0",
-        "double",
-        { coerce: false }
+      const raw =
+        variable.node.parameters?.value ?? "0";
+      const preferred = [
+        "int", "float", "double",
+        ...SCALAR_NUMERIC_TYPES
+      ];
+      return [...new Set(preferred)].filter(
+        type =>
+          variable.domain.has(type) &&
+          validateNumericValue(
+            raw,
+            type,
+            { coerce: false }
+          ).valid
       );
-
-      if (!parsed.valid) {
-        return [];
-      }
-
-      return Number.isInteger(parsed.number) &&
-        parsed.number >= GRAPH_INT32_MIN &&
-        parsed.number <= GRAPH_INT32_MAX
-          ? ["int", "float", "double"]
-          : ["float", "double"];
     }
 
     if (variable.node.operatorId === "constant.vector") {
@@ -7168,23 +7400,24 @@ function numericPreferenceFromConstant(variable) {
         2,
         4
       );
-      const allIntegers = raw
-        .split(",")
-        .map(part => part.trim())
-        .every(part =>
-          validateNumericValue(
-            part || "0",
-            "int",
+      const preferred = [
+        `int${componentCount}`,
+        `float${componentCount}`,
+        `double${componentCount}`,
+        ...GRAPH_CONFIGURABLE_VECTOR_TYPES
+      ];
+      return [...new Set(preferred)].filter(type => {
+        const information = numericVectorInfo(type);
+        return Boolean(
+          variable.domain.has(type) &&
+          information?.componentCount === componentCount &&
+          validateNumericVectorValue(
+            raw,
+            type,
             { coerce: false }
           ).valid
         );
-      const families = allIntegers
-        ? ["int", "float", "double"]
-        : ["float", "double"];
-
-      return families.map(
-        family => `${family}${componentCount}`
-      );
+      });
     }
 
     return [];
@@ -7199,8 +7432,10 @@ function typeSortValue(type) {
     const vector = numericVectorInfo(type);
     if (vector) {
       return 10 +
-        vector.componentCount * 3 +
-        scalarNumericRank(vector.scalarType);
+        vector.componentCount * 20 +
+        (vector.boolean
+          ? 0
+          : scalarNumericRank(vector.scalarType) + 1);
     }
 
     const preferred = [
@@ -7842,7 +8077,7 @@ function createGraphAnalysisCertificate(
       schemaVersion:
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION,
       moduleId:
-        "1.20.31-universal-presentation-dev39-clean-stale-api-repair",
+        "1.20.31-universal-presentation-dev55-retained-disconnected-ports",
       semanticToken: token,
       nodeCount: graph.nodes.length,
       connectionCount: connections.length,
@@ -7875,7 +8110,7 @@ function graphAnalysisCertificateEnvelopeValid(
       Number(certificate.schemaVersion) ===
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION &&
       certificate.moduleId ===
-        "1.20.31-universal-presentation-dev39-clean-stale-api-repair" &&
+        "1.20.31-universal-presentation-dev55-retained-disconnected-ports" &&
       certificate.valid === true &&
       typeof certificate.semanticToken ===
         "string" &&
@@ -9246,7 +9481,7 @@ function inferAutoVectorType(
                 analysis
               );
 
-            if (nodeGraphIsScalarNumericType(type)) {
+            if (nodeGraphIsVectorScalarType(type)) {
               scalarInputTypes.push(type);
             }
           }
@@ -9293,7 +9528,7 @@ function inferAutoVectorType(
                 analysis
               );
 
-            if (nodeGraphIsScalarNumericType(type)) {
+            if (nodeGraphIsVectorScalarType(type)) {
               scalarOutputTypes.push(type);
             }
           }
@@ -9322,7 +9557,7 @@ function inferAutoVectorType(
       scalarInputTypes.length > 0
     ) {
       scalarType =
-        promotedScalarNumericType(
+        promotedVectorScalarType(
           scalarInputTypes
         ) || scalarType;
     } else if (
@@ -9331,20 +9566,19 @@ function inferAutoVectorType(
       scalarOutputTypes.length > 0
     ) {
       scalarType =
-        scalarNumericTypeAtRank(
-          Math.min(
-            ...scalarOutputTypes.map(
-              scalarNumericRank
-            )
-          )
-        );
+        scalarTypeForOutgoingTargets(
+          scalarOutputTypes
+        ) || scalarType;
     }
 
-    return `${scalarType}${nodeGraphClamp(
-      minimumDimension,
-      2,
-      4
-    )}`;
+    return graphVectorTypeForScalarAndDimension(
+      scalarType,
+      nodeGraphClamp(
+        minimumDimension,
+        2,
+        4
+      )
+    ) || currentType;
   }
 
 function analyzeWithAutoVectors(
@@ -10781,6 +11015,7 @@ const GRAPH_CS_PRIMITIVE_DEFAULTS = new Map([
       ["System.Single", new Set(["0", "0f", "0F", "0.0f", "0.0F"])],
       ["double", new Set(["0", "0d", "0D", "0.0d", "0.0D"])],
       ["System.Double", new Set(["0", "0d", "0D", "0.0d", "0.0D"])],
+      ["System.Half", new Set(["0", "default(System.Half)"])],
       ["decimal", new Set(["0", "0m", "0M", "0.0m", "0.0M"])],
       ["System.Decimal", new Set(["0", "0m", "0M", "0.0m", "0.0M"])],
       ["char", new Set(["'\\0'", "'\\u0000'"])],
@@ -10859,6 +11094,8 @@ function graphCsDefaultInitializerIsRedundant(
     const isKnownValueType =
       String(type || "").startsWith("enum:") ||
       GRAPH_CS_KNOWN_VALUE_TYPES.has(baseType) ||
+      Boolean(graphNumericScalarDescriptor(baseType)) ||
+      Boolean(numericVectorInfo(baseType)) ||
       information.referenceType === false;
     return (
       isKnownValueType &&
@@ -10894,29 +11131,52 @@ function graphCsNumberLiteral(
     value,
     type
   ) {
-    const number =
-      previewNumber(value);
-
-    if (type === "int") {
-      return String(
-        Math.trunc(number)
-      );
+    const descriptor =
+      graphNumericScalarDescriptor(type);
+    if (!descriptor) {
+      return "0";
     }
 
-    const text =
-      Number.isFinite(number)
-        ? String(number)
-        : "0";
+    const result = validateNumericValue(
+      value,
+      type,
+      { coerce: false }
+    );
+    const text = result.valid
+      ? result.value
+      : "0";
 
-    if (type === "double") {
-      return /[.eE]/.test(text)
-        ? `${text}d`
-        : `${text}.0d`;
+    switch (descriptor.family) {
+      case "sbyte":
+      case "byte":
+      case "short":
+      case "ushort":
+        return `(${descriptor.csType})(${text})`;
+      case "int":
+        return text;
+      case "uint":
+        return `${text}U`;
+      case "long":
+        return text === descriptor.min
+          ? "System.Int64.MinValue"
+          : `${text}L`;
+      case "ulong":
+        return `${text}UL`;
+      case "half":
+        return `System.Half.Parse("${text}", System.Globalization.CultureInfo.InvariantCulture)`;
+      case "float":
+        return /[.eE]/.test(text)
+          ? `${text}f`
+          : `${text}.0f`;
+      case "double":
+        return /[.eE]/.test(text)
+          ? `${text}d`
+          : `${text}.0d`;
+      case "decimal":
+        return `${text}m`;
+      default:
+        return "0";
     }
-
-    return /[.eE]/.test(text)
-      ? `${text}f`
-      : `${text}.0f`;
   }
 
 function graphCsColorLiteral(
@@ -16789,7 +17049,7 @@ Object.defineProperty(
     {
       value: Object.freeze({
         moduleId:
-          "1.20.31-universal-presentation-dev39-clean-stale-api-repair",
+          "1.20.31-universal-presentation-dev55-retained-disconnected-ports",
         build:
           buildTypedNodeGraphCSharpContribution,
         validateDocument:

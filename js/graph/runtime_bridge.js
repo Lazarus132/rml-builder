@@ -2,15 +2,19 @@
   "use strict";
   // Runtime Graph live-runtime bridge.
 
-  const BRIDGE_VERSION = 7;
+  const BRIDGE_VERSION = 10;
   const BRIDGE_PROTOCOL_VERSION = 1;
   const PROBE_TIMEOUT_MS = 3000;
   const STREAM_OPEN_TIMEOUT_MS = 5000;
   const SNAPSHOT_TIMEOUT_MS = 5000;
-  const PRESENCE_CHANNEL = "__rml_builder_scanner_connection__";
+  const PROJECT_RESERVED_IDENTIFIERS = new Set(["Class", "Namespace", "Event",
+    "String", "Int", "Float", "Double", "Bool", "Object", "Default", "New",
+    "Static", "Public", "Private", "Internal", "Void"]);
   if (window.RMLRuntimeBridge?.version >= BRIDGE_VERSION) return;
 
   const channels = new Map();
+  let activeStreamState = null;
+  let channelRequestSequence = 0;
   let epoch = 0;
   let mode = "cached";
   let phase = "cached";
@@ -18,10 +22,8 @@
   let health = null;
   let lastError = "";
   let controller = null;
-  let presenceSource = null;
-  let presenceTimer = null;
-  let settlePresence = null;
   let connectPromise = null;
+  let connectionHealthCheckPromise = null;
 
   function safeLocalStorageValue(key) {
     try { return window.localStorage?.getItem(key) || ""; }
@@ -72,10 +74,20 @@
     const element = document.getElementById("api-catalog-state");
     if (!element) return;
     const catalog = window.RMLResoniteApiCatalog || window.RMLFrooxComponentCatalog;
+    if (
+      mode === "cached" &&
+      !catalog &&
+      ["cache", "updating"].includes(
+        String(element.dataset.source || "")
+      )
+    ) {
+      return;
+    }
     const version = String(catalog?.engineVersion || "");
-    const prefix = version ? `Resonite API ${version}` : "Resonite API";
-    const checking = mode === "checking";
-    const live = mode === "live";
+    const prefix = "Resonite API";
+    const checking = mode === "checking" ||
+      (mode === "live" && phase === "checking");
+    const live = mode === "live" && !checking;
     const cached = Boolean(catalog) && !checking && !live;
     element.textContent = checking
       ? `${prefix} · checking…`
@@ -83,7 +95,7 @@
         ? `${prefix} · Live`
         : cached
           ? `${prefix} · Cached`
-          : "Resonite API · unavailable";
+          : "Resonite API · Unavailable";
     element.dataset.source = checking
       ? "updating"
       : live
@@ -121,12 +133,32 @@
     return String(value || "").trim().slice(0, 240);
   }
 
+  function projectIdentifier(value, fallback) {
+    const words = String(value || "")
+      .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+      .split(/[^A-Za-z0-9_]+/)
+      .filter(Boolean);
+    let result = words
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join("") || fallback;
+    if (/^[0-9]/.test(result)) result = `Value${result}`;
+    return PROJECT_RESERVED_IDENTIFIERS.has(result) ? `${result}Value` : result;
+  }
+
+  function projectChannel(namespaceName, className) {
+    const namespaceValue = String(namespaceName || "")
+      .split(".")
+      .map(part => projectIdentifier(part, "Namespace"))
+      .join(".") || "YourModNamespace";
+    return `${namespaceValue}.${projectIdentifier(className, "YourMod")}`;
+  }
+
   function createChannelState(channel) {
     return { channel, listeners: new Set(), values: new Map(), connected: false,
       active: false, scannerBaseUrl: "", sessionId: "", lastSeenUtc: "",
       eventSource: null, generation: 0, streamTimer: null, requestController: null,
       refreshPromise: null, phase: mode === "checking" ? phase : "cached",
-      lastError, disposed: false };
+      lastError, disposed: false, requestOrder: 0 };
   }
 
   function publicState(state) {
@@ -174,6 +206,46 @@
     state.lastError = lastError;
   }
 
+  function failChannel(state, reason) {
+    state.generation += 1;
+    clearStreamTimer(state);
+    const source = state.eventSource;
+    state.eventSource = null;
+    closeSource(source);
+    state.requestController?.abort();
+    state.requestController = null;
+    state.refreshPromise = null;
+    state.connected = false;
+    state.active = false;
+    state.scannerBaseUrl = scannerBaseUrl;
+    state.phase = "unavailable";
+    state.lastError = String(
+      reason?.message || reason || ""
+    );
+    if (!state.disposed) {
+      notify(state, "connection");
+    }
+  }
+
+  function reconcileActiveStream(preferredState = null) {
+    const next = preferredState && !preferredState.disposed && preferredState.listeners.size
+      ? preferredState
+      : [...channels.values()]
+          .filter(state => !state.disposed && state.listeners.size)
+          .sort((left, right) => right.requestOrder - left.requestOrder)[0] || null;
+    if (activeStreamState === next) {
+      if (next && mode === "live") openChannel(next);
+      return;
+    }
+    const previous = activeStreamState;
+    activeStreamState = next;
+    if (previous) {
+      stopChannel(previous);
+      if (!previous.disposed) notify(previous, "connection");
+    }
+    if (next && mode === "live") openChannel(next);
+  }
+
   function disconnect(reason = "") {
     ++epoch;
     mode = "cached";
@@ -183,14 +255,6 @@
     health = null;
     controller?.abort();
     controller = null;
-    if (presenceTimer !== null) window.clearTimeout(presenceTimer);
-    presenceTimer = null;
-    const oldPresence = presenceSource;
-    presenceSource = null;
-    closeSource(oldPresence);
-    const settle = settlePresence;
-    settlePresence = null;
-    settle?.(false);
     connectPromise = null;
 
     const affected = [...channels.values()];
@@ -232,11 +296,41 @@
 
   function channelIsCurrent(state, source, token, generation) {
     return isCurrent(token) && mode === "live" && !state.disposed &&
+      state === activeStreamState &&
       state.eventSource === source && state.generation === generation;
   }
 
+  function confirmScannerConnection(token) {
+    if (connectionHealthCheckPromise) return connectionHealthCheckPromise;
+    const base = scannerBaseUrl;
+    phase = "checking";
+    renderStatus();
+    const pending = fetchJson(`${base}/health`, 1000, controller?.signal)
+      .then(result => {
+        if (!isCurrent(token)) return false;
+        if (result.ok !== true || result.runtimeBridgeReady !== true ||
+            Number(result.runtimeBridgeVersion) !== BRIDGE_PROTOCOL_VERSION) {
+          return disconnect("Scanner connection lost.");
+        }
+        health = Object.freeze({ ...result });
+        phase = "connected";
+        renderStatus();
+        return true;
+      })
+      .catch(() => {
+        if (isCurrent(token)) disconnect("Scanner connection lost.");
+        return false;
+      })
+      .finally(() => {
+        if (connectionHealthCheckPromise === pending) connectionHealthCheckPromise = null;
+      });
+    connectionHealthCheckPromise = pending;
+    return pending;
+  }
+
   function openChannel(state) {
-    if (mode !== "live" || state.disposed || !state.listeners.size || state.eventSource) return;
+    if (mode !== "live" || state !== activeStreamState || state.disposed ||
+        !state.listeners.size || state.eventSource) return;
     const token = epoch;
     const generation = ++state.generation;
     state.phase = "connecting";
@@ -245,7 +339,7 @@
     let source;
     try {
       source = new EventSource(`${scannerBaseUrl}/runtime/events?channel=${encodeURIComponent(state.channel)}`);
-    } catch (error) { disconnect(error); return; }
+    } catch (error) { failChannel(state, error); return; }
     state.eventSource = source;
     source.onopen = () => {
       if (!channelIsCurrent(state, source, token, generation)) return;
@@ -263,60 +357,20 @@
           throw new Error("Scanner returned an invalid live event.");
         }
         applyEnvelope(state, envelope);
-      } catch (error) { disconnect(error); }
+      } catch (error) { failChannel(state, error); }
     };
     source.onerror = () => {
       if (!channelIsCurrent(state, source, token, generation)) return;
-
-      disconnect("Scanner stream interrupted. Click Cached to reconnect.");
+      failChannel(state, "Runtime value stream interrupted.");
+      void confirmScannerConnection(token);
     };
     state.streamTimer = window.setTimeout(() => {
       if (channelIsCurrent(state, source, token, generation) && !state.connected) {
-        disconnect("Scanner stream did not open. Click Cached to reconnect.");
+        failChannel(state, "Runtime value stream did not open.");
+        void confirmScannerConnection(token);
       }
     }, STREAM_OPEN_TIMEOUT_MS);
     notify(state, "connection");
-  }
-
-  function openPresence(baseUrl, token) {
-    return new Promise(resolve => {
-      if (!isCurrent(token)) { resolve(false); return; }
-      settlePresence = resolve;
-      const source = new EventSource(`${baseUrl}/runtime/events?channel=${encodeURIComponent(PRESENCE_CHANNEL)}`);
-      presenceSource = source;
-      const current = () => isCurrent(token) && presenceSource === source;
-      source.onopen = () => {
-        if (!current()) return;
-        if (presenceTimer !== null) window.clearTimeout(presenceTimer);
-        presenceTimer = null;
-        mode = "live";
-        phase = "connected";
-        const settle = settlePresence;
-        settlePresence = null;
-        publishConnection();
-        for (const state of [...channels.values()]) {
-          if (!current()) break;
-          openChannel(state);
-        }
-        settle?.(current());
-      };
-      source.onmessage = event => {
-        if (!current()) return;
-        try {
-          const envelope = JSON.parse(event.data);
-          if (!validEnvelope(envelope, PRESENCE_CHANNEL) ||
-              (envelope.kind === "snapshot" && !Array.isArray(envelope.values))) {
-            throw new Error("Scanner returned an invalid connection event.");
-          }
-        } catch (error) { disconnect(error); }
-      };
-      source.onerror = () => {
-        if (current()) disconnect("Scanner stream interrupted. Click Cached to reconnect.");
-      };
-      presenceTimer = window.setTimeout(() => {
-        if (current() && mode !== "live") disconnect("Scanner stream did not open. Click Cached to reconnect.");
-      }, STREAM_OPEN_TIMEOUT_MS);
-    });
   }
 
   function connect() {
@@ -360,11 +414,13 @@
         if (!base) throw new Error(`No compatible scanner found after checking ${candidates.length} endpoint(s). ${probeError}`);
         health = Object.freeze({ ...result });
         scannerBaseUrl = base;
-        phase = "connecting";
+        mode = "live";
+        phase = "connected";
         try { window.localStorage?.setItem("rml-resonite-api-last-scanner-url", `${base}/resonite_api_catalog.json`); } catch {}
         publishConnection();
         if (!isCurrent(token)) return false;
-        return await openPresence(base, token);
+        reconcileActiveStream();
+        return isCurrent(token);
       } catch (error) {
         if (isCurrent(token)) disconnect(error?.message || "Scanner health check failed.");
         return false;
@@ -600,17 +656,22 @@
   function subscribe(channel, listener) {
     if (typeof listener !== "function") throw new TypeError("Runtime bridge listener must be a function.");
     const key = normalizeChannel(channel);
-    if (!key || key === PRESENCE_CHANNEL) throw new TypeError("Runtime bridge channel must be a non-empty project channel.");
+    if (!key) throw new TypeError("Runtime bridge channel must be a non-empty project channel.");
     let state = channels.get(key);
     if (!state) { state = createChannelState(key); channels.set(key, state); }
+    const firstListener = state.listeners.size === 0;
     state.listeners.add(listener);
+    if (firstListener) {
+      state.requestOrder = ++channelRequestSequence;
+      reconcileActiveStream(state);
+    }
     queueMicrotask(() => {
       if (!state.disposed && state.listeners.has(listener)) {
         listener(Object.freeze({ kind: "state", state: publicState(state), record: null }));
       }
     });
 
-    if (mode === "live") queueMicrotask(() => openChannel(state));
+    if (mode === "live" && state === activeStreamState) queueMicrotask(() => openChannel(state));
     let unsubscribed = false;
     return () => {
       if (unsubscribed) return;
@@ -620,6 +681,10 @@
         state.disposed = true;
         stopChannel(state);
         if (channels.get(key) === state) channels.delete(key);
+        if (activeStreamState === state) {
+          activeStreamState = null;
+          reconcileActiveStream();
+        }
       }
     };
   }
@@ -657,7 +722,7 @@
         applyEnvelope(state, value);
         return channelIsCurrent(state, source, token, generation);
       } catch (error) {
-        if (channelIsCurrent(state, source, token, generation)) disconnect(error);
+        if (channelIsCurrent(state, source, token, generation)) failChannel(state, error);
         return false;
       } finally {
         if (state.requestController === request) { state.requestController = null; state.refreshPromise = null; }
@@ -679,7 +744,7 @@
 
   Object.defineProperty(window, "RMLRuntimeBridge", {
     value: Object.freeze({ version: BRIDGE_VERSION, subscribe, getState, getValue, refresh,
-      connect, disconnect, toggle, renderStatus, getConnectionState,
+      connect, disconnect, toggle, renderStatus, getConnectionState, projectChannel,
       getSessionSignal: () => controller?.signal || null,
       discoverScanner: () => Promise.resolve(mode === "live" ? scannerBaseUrl : "") }),
     writable: false, enumerable: true, configurable: true

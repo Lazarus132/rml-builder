@@ -3,7 +3,7 @@
   // RML Builder loaders: script_loader.
 
   const SCRIPT_LOADER_MODULE_ID =
-    "1.20.31-universal-presentation-dev39-clean-stale-api-repair";
+    "1.20.31-universal-presentation-dev55-retained-disconnected-ports";
 
   if (
     Object.hasOwn(
@@ -140,8 +140,8 @@
     "scanner-connection": Object.freeze({
       dependencies: Object.freeze([]),
       files: Object.freeze([Object.freeze({
-        url: "../graph/runtime_bridge.js?v=797-manual-port-discovery",
-        ready: () => window.RMLRuntimeBridge?.version >= 6 &&
+        url: "../graph/runtime_bridge.js?v=1000-live-loss-status",
+        ready: () => window.RMLRuntimeBridge?.version >= 10 &&
           typeof window.RMLRuntimeBridge?.connect === "function"
       })])
     }),
@@ -184,7 +184,7 @@
       dependencies: Object.freeze([]),
       files: Object.freeze([
         Object.freeze({
-          url: "../catalog/catalog_loader.js?v=1.20.31-universal-presentation-dev39-clean-stale-api-repair",
+          url: "../catalog/catalog_loader.js?v=1.20.31-universal-presentation-dev55-retained-disconnected-ports",
           ready: () =>
             window.RMLCatalogImportGate?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -202,17 +202,23 @@
             )
         }),
         Object.freeze({
-          url: "../graph/node_graph_registry.js?v=1-physical-modules-v748",
+          url: "../graph/node_graph_registry.js?v=1-physical-modules-v750-offline-core-types",
           ready: () =>
             typeof window.RMLModNodeRegistry?.getNodeDefinitions ===
               "function"
         })
       ]),
       settle: async () => {
-        await Promise.resolve(
-          window.RMLBaseModNodesReady ||
-          window.RMLModNodesReady
-        );
+        try {
+          await Promise.resolve(
+            window.RMLModNodesReady ||
+            window.RMLBaseModNodesReady
+          );
+        } catch {
+          await Promise.resolve(
+            window.RMLBaseModNodesReady
+          );
+        }
         if (
           typeof window.RMLModNodeRegistry?.getNodeDefinitions !==
           "function"
@@ -236,7 +242,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/node_graph_codegen.js?v=1.20.31-universal-presentation-dev39-clean-stale-api-repair",
+          url: "../graph/node_graph_codegen.js?v=1.20.31-universal-presentation-dev55-retained-disconnected-ports",
           ready: () =>
             window.RMLTypedNodeGraphGenerator?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -253,7 +259,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev39-clean-stale-api-repair",
+          url: "../workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev55-retained-disconnected-ports",
           ready: () =>
             window.RMLSavedApiCompositeCompareWorkerBootstrap
               ?.moduleId === SCRIPT_LOADER_MODULE_ID &&
@@ -262,13 +268,13 @@
               ?.source === "string"
         }),
         Object.freeze({
-          url: "../graph/node_graph_composites.js?v=1.20.31-universal-presentation-dev39-clean-stale-api-repair",
+          url: "../graph/node_graph_composites.js?v=1.20.31-universal-presentation-dev55-retained-disconnected-ports",
           ready: () =>
             window.RMLNodeGraphCompositesModuleId ===
               SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_custom_csharp.js?v=1.20.31-universal-presentation-dev39-clean-stale-api-repair",
+          url: "../graph/node_graph_custom_csharp.js?v=1.20.31-universal-presentation-dev55-retained-disconnected-ports",
           ready: () =>
             window.RMLNodeGraphCustomCSharpModuleId ===
               SCRIPT_LOADER_MODULE_ID
@@ -277,13 +283,13 @@
           url: "../graph/node_graph_guided.js?v=1-physical-modules-v748"
         }),
         Object.freeze({
-          url: "../graph/node_graph_view.js?v=1.20.31-universal-presentation-dev39-clean-stale-api-repair",
+          url: "../graph/node_graph_view.js?v=1.20.31-universal-presentation-dev55-retained-disconnected-ports",
           ready: () =>
             window.RMLNodeGraphViewModuleId ===
               SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_bootstrap.js?v=1.20.31-universal-presentation-dev39-clean-stale-api-repair",
+          url: "../graph/node_graph_bootstrap.js?v=1.20.31-universal-presentation-dev55-retained-disconnected-ports",
           ready: () =>
             window.RMLDynamicGraphHost?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -307,7 +313,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/graph_gpu_renderer.js?v=806-universal-graph-presentation",
+          url: "../graph/graph_gpu_renderer.js?v=807-webgpu-texture-limits",
           ready: () =>
             typeof window.RMLGraphHybridRenderer?.create === "function"
         })
@@ -928,7 +934,7 @@
         status.setAttribute("aria-label", `${status.textContent}. ${status.title}`);
         return;
       }
-      if (window.RMLRuntimeBridge?.version >= 6) {
+      if (window.RMLRuntimeBridge?.version >= 10) {
         await window.RMLRuntimeBridge.toggle();
         return;
       }

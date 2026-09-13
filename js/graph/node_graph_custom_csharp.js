@@ -2260,7 +2260,7 @@ function buildCustomCSharpFragmentInWorker(nodeId, source, parseResult, options)
     }
     const worker = new Worker(
       new URL(
-        "js/workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev39-clean-stale-api-repair",
+        "js/workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev55-retained-disconnected-ports",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -5422,7 +5422,7 @@ function prepareCustomCSharpEditorHost(
       hostWindow.document.createElement("link");
     stylesheet.rel = "stylesheet";
     stylesheet.href = new URL(
-      "styles/features/styles.runtime-graph.css?v=1.20.31-universal-presentation-dev39-clean-stale-api-repair",
+      "styles/features/styles.runtime-graph.css?v=1.20.31-universal-presentation-dev55-retained-disconnected-ports",
       window.location.href
     ).href;
     hostWindow.document.head.appendChild(
@@ -5831,13 +5831,15 @@ function customCSharpBuiltInNodeDropRepresentation(
           renderNode.parameters?.valueType ||
             "float"
         );
+        const concreteType =
+          type === "auto" ? "float" : type;
         returnType =
           customCSharpNodeDropQualifiedType(
-            type === "auto" ? "float" : type
+            graphCsType(concreteType)
           );
         expression = graphCsNumberLiteral(
           renderNode.parameters?.value ?? 0,
-          type === "auto" ? "float" : type
+          concreteType
         );
         break;
       }
@@ -6898,7 +6900,7 @@ Object.defineProperty(
   "RMLNodeGraphCustomCSharpModuleId",
   {
     value:
-      "1.20.31-universal-presentation-dev39-clean-stale-api-repair",
+      "1.20.31-universal-presentation-dev55-retained-disconnected-ports",
     writable: false,
     enumerable: true,
     configurable: true

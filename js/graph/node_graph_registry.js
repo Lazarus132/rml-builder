@@ -154,6 +154,560 @@ const TYPE_INFO = {
     }
   };
 
+const GRAPH_CSHARP_PRIMITIVE_NAMES =
+  Object.freeze({
+    bool: "System.Boolean",
+    byte: "System.Byte",
+    sbyte: "System.SByte",
+    short: "System.Int16",
+    ushort: "System.UInt16",
+    int: "System.Int32",
+    uint: "System.UInt32",
+    long: "System.Int64",
+    ulong: "System.UInt64",
+    Half: "System.Half",
+    half: "System.Half",
+    char: "System.Char",
+    float: "System.Single",
+    double: "System.Double",
+    decimal: "System.Decimal"
+  });
+
+const GRAPH_NUMERIC_SCALAR_METADATA =
+  Object.freeze({
+    "System.SByte": Object.freeze({
+      family: "sbyte",
+      integer: true,
+      signed: true,
+      min: "-128",
+      max: "127",
+      preference: 0,
+      implicitTo: Object.freeze([
+        "System.Int16", "System.Int32", "System.Int64",
+        "System.Half", "System.Single", "System.Double",
+        "System.Decimal"
+      ])
+    }),
+    "System.Byte": Object.freeze({
+      family: "byte",
+      integer: true,
+      signed: false,
+      min: "0",
+      max: "255",
+      preference: 1,
+      implicitTo: Object.freeze([
+        "System.Int16", "System.UInt16", "System.Int32",
+        "System.UInt32", "System.Int64", "System.UInt64",
+        "System.Half", "System.Single", "System.Double",
+        "System.Decimal"
+      ])
+    }),
+    "System.Int16": Object.freeze({
+      family: "short",
+      integer: true,
+      signed: true,
+      min: "-32768",
+      max: "32767",
+      preference: 2,
+      implicitTo: Object.freeze([
+        "System.Int32", "System.Int64", "System.Single",
+        "System.Double", "System.Decimal"
+      ])
+    }),
+    "System.UInt16": Object.freeze({
+      family: "ushort",
+      integer: true,
+      signed: false,
+      min: "0",
+      max: "65535",
+      preference: 3,
+      implicitTo: Object.freeze([
+        "System.Int32", "System.UInt32", "System.Int64",
+        "System.UInt64", "System.Single", "System.Double",
+        "System.Decimal"
+      ])
+    }),
+    "System.Int32": Object.freeze({
+      family: "int",
+      integer: true,
+      signed: true,
+      min: "-2147483648",
+      max: "2147483647",
+      preference: 4,
+      implicitTo: Object.freeze([
+        "System.Int64", "System.Single", "System.Double",
+        "System.Decimal"
+      ])
+    }),
+    "System.UInt32": Object.freeze({
+      family: "uint",
+      integer: true,
+      signed: false,
+      min: "0",
+      max: "4294967295",
+      preference: 5,
+      implicitTo: Object.freeze([
+        "System.Int64", "System.UInt64", "System.Single",
+        "System.Double", "System.Decimal"
+      ])
+    }),
+    "System.Int64": Object.freeze({
+      family: "long",
+      integer: true,
+      signed: true,
+      min: "-9223372036854775808",
+      max: "9223372036854775807",
+      preference: 6,
+      implicitTo: Object.freeze([
+        "System.Single", "System.Double", "System.Decimal"
+      ])
+    }),
+    "System.UInt64": Object.freeze({
+      family: "ulong",
+      integer: true,
+      signed: false,
+      min: "0",
+      max: "18446744073709551615",
+      preference: 7,
+      implicitTo: Object.freeze([
+        "System.Single", "System.Double", "System.Decimal"
+      ])
+    }),
+    "System.Half": Object.freeze({
+      family: "half",
+      floating: true,
+      maxFinite: 65504,
+      preference: 8,
+      implicitTo: Object.freeze([])
+    }),
+    "System.Single": Object.freeze({
+      family: "float",
+      floating: true,
+      maxFinite: 3.4028234663852886e38,
+      preference: 9,
+      implicitTo: Object.freeze(["System.Double"])
+    }),
+    "System.Double": Object.freeze({
+      family: "double",
+      floating: true,
+      maxFinite: Number.MAX_VALUE,
+      preference: 10,
+      implicitTo: Object.freeze([])
+    }),
+    "System.Decimal": Object.freeze({
+      family: "decimal",
+      decimal: true,
+      preference: 11,
+      implicitTo: Object.freeze([])
+    })
+  });
+
+const GRAPH_VECTOR_SCALAR_CSHARP_TYPES =
+  Object.freeze({
+    bool: "System.Boolean",
+    byte: "System.Byte",
+    sbyte: "System.SByte",
+    short: "System.Int16",
+    ushort: "System.UInt16",
+    int: "System.Int32",
+    uint: "System.UInt32",
+    long: "System.Int64",
+    ulong: "System.UInt64",
+    half: "System.Half",
+    float: "System.Single",
+    double: "System.Double"
+  });
+
+const GRAPH_TYPE_BY_CSHARP_TYPE =
+  new Map();
+
+function graphCanonicalCsType(typeOrCsType) {
+  const id = String(typeOrCsType || "").trim();
+  const information = TYPE_INFO[typeBase(id)] || {};
+  const declared = String(
+    information.csType || id
+  )
+    .trim()
+    .replace(/^global::/, "");
+
+  return GRAPH_CSHARP_PRIMITIVE_NAMES[declared] || declared;
+}
+
+function indexGraphTypeCsType(type, information) {
+  const declared = String(
+    information?.csType || type
+  )
+    .trim()
+    .replace(/^global::/, "");
+  const canonical =
+    GRAPH_CSHARP_PRIMITIVE_NAMES[declared] || declared;
+
+  if (
+    canonical &&
+    !GRAPH_TYPE_BY_CSHARP_TYPE.has(canonical)
+  ) {
+    GRAPH_TYPE_BY_CSHARP_TYPE.set(
+      canonical,
+      type
+    );
+  }
+}
+
+for (const [type, information] of
+  Object.entries(TYPE_INFO)) {
+  indexGraphTypeCsType(type, information);
+}
+
+function defineGraphStaticValueType(
+  type,
+    information
+  ) {
+    TYPE_INFO[type] = {
+      ...(TYPE_INFO[type] || {}),
+      ...information,
+      referenceType: false,
+      valueType: true
+    };
+    indexGraphTypeCsType(
+      type,
+      TYPE_INFO[type]
+    );
+
+    if (!VALUE_TYPES.includes(type)) {
+      VALUE_TYPES.push(type);
+    }
+  }
+
+const GRAPH_STATIC_SCALAR_TYPES =
+  Object.freeze({
+    bool: {
+      csType: "System.Boolean",
+      defaultCs: "false"
+    },
+    sbyte: {
+      label: "SByte",
+      short: "I8",
+      color: "#ff9f70",
+      csType: "System.SByte",
+      defaultCs: "0"
+    },
+    byte: {
+      label: "Byte",
+      short: "U8",
+      color: "#ffb170",
+      csType: "System.Byte",
+      defaultCs: "0"
+    },
+    short: {
+      label: "Int16",
+      short: "I16",
+      color: "#ff9b70",
+      csType: "System.Int16",
+      defaultCs: "0"
+    },
+    ushort: {
+      label: "UInt16",
+      short: "U16",
+      color: "#ffad70",
+      csType: "System.UInt16",
+      defaultCs: "0"
+    },
+    int: {
+      csType: "System.Int32",
+      defaultCs: "0"
+    },
+    uint: {
+      label: "UInt32",
+      short: "U32",
+      color: "#ffa970",
+      csType: "System.UInt32",
+      defaultCs: "0U"
+    },
+    long: {
+      label: "Int64",
+      short: "I64",
+      color: "#ff8f70",
+      csType: "System.Int64",
+      defaultCs: "0L"
+    },
+    ulong: {
+      label: "UInt64",
+      short: "U64",
+      color: "#ffa570",
+      csType: "System.UInt64",
+      defaultCs: "0UL"
+    },
+    half: {
+      label: "Half",
+      short: "F16",
+      color: "#62c9ff",
+      csType: "System.Half",
+      defaultCs: "default(System.Half)"
+    },
+    float: {
+      csType: "System.Single",
+      defaultCs: "0f"
+    },
+    double: {
+      csType: "System.Double",
+      defaultCs: "0d"
+    },
+    decimal: {
+      label: "Decimal",
+      short: "DEC",
+      color: "#c7a1ff",
+      csType: "System.Decimal",
+      defaultCs: "0m"
+    },
+    char: {
+      label: "Character",
+      short: "CHAR",
+      color: "#ff83bd",
+      csType: "System.Char",
+      defaultCs: "'\\u0000'"
+    },
+    guid: {
+      label: "GUID",
+      short: "GUID",
+      color: "#70d6c8",
+      csType: "System.Guid",
+      defaultCs: "default(System.Guid)"
+    },
+    dateTime: {
+      label: "Date/Time",
+      short: "DATE",
+      color: "#78c8e8",
+      csType: "System.DateTime",
+      defaultCs: "default(System.DateTime)"
+    },
+    dateTimeOffset: {
+      label: "Date/Time Offset",
+      short: "DATE±",
+      color: "#78b8e8",
+      csType: "System.DateTimeOffset",
+      defaultCs: "default(System.DateTimeOffset)"
+    },
+    timeSpan: {
+      label: "TimeSpan",
+      short: "SPAN",
+      color: "#75c7d8",
+      csType: "System.TimeSpan",
+      defaultCs: "default(System.TimeSpan)"
+    }
+  });
+
+for (const [type, information] of
+  Object.entries(GRAPH_STATIC_SCALAR_TYPES)) {
+  defineGraphStaticValueType(
+    type,
+    information
+  );
+}
+
+const GRAPH_STATIC_VECTOR_PRESENTATION =
+  Object.freeze({
+    bool: ["Boolean", "B", "#6ce89b"],
+    byte: ["Byte", "U8", "#ffb170"],
+    sbyte: ["SByte", "I8", "#ff9f70"],
+    short: ["Int16", "I16", "#ff9b70"],
+    ushort: ["UInt16", "U16", "#ffad70"],
+    int: ["Integer", "I", "#ffae70"],
+    uint: ["UInt32", "U32", "#ffa970"],
+    long: ["Int64", "I64", "#ff8f70"],
+    ulong: ["UInt64", "U64", "#ffa570"],
+    half: ["Half", "H", "#62c9ff"],
+    float: ["Float", "F", "#58d2ff"],
+    double: ["Double", "D", "#c5a2ff"]
+  });
+
+for (const [family, presentation] of
+  Object.entries(GRAPH_STATIC_VECTOR_PRESENTATION)) {
+  for (const dimension of [2, 3, 4]) {
+    const type = `${family}${dimension}`;
+    defineGraphStaticValueType(type, {
+      label: `${presentation[0]} ${dimension}`,
+      short: `${presentation[1]}${dimension}`,
+      color: presentation[2],
+      csType: `Elements.Core.${type}`,
+      defaultCs:
+        `default(Elements.Core.${type})`,
+      assembly: "Elements.Core"
+    });
+  }
+}
+
+const GRAPH_STATIC_STRUCTURED_TYPES =
+  Object.freeze({
+    float2x2: "Float 2×2 Matrix",
+    float3x3: "Float 3×3 Matrix",
+    float4x4: "Float 4×4 Matrix",
+    double2x2: "Double 2×2 Matrix",
+    double3x3: "Double 3×3 Matrix",
+    double4x4: "Double 4×4 Matrix",
+    floatQ: "Float Quaternion",
+    doubleQ: "Double Quaternion",
+    color: "Float Color",
+    color32: "Color32"
+  });
+
+for (const [type, label] of
+  Object.entries(GRAPH_STATIC_STRUCTURED_TYPES)) {
+  defineGraphStaticValueType(type, {
+    label,
+    short: type.toUpperCase(),
+    color:
+      type.startsWith("double")
+        ? "#c5a2ff"
+        : type.startsWith("color")
+          ? "#ff67dc"
+          : "#58d2ff",
+    csType: `Elements.Core.${type}`,
+    defaultCs:
+      `default(Elements.Core.${type})`,
+    assembly: "Elements.Core"
+  });
+}
+
+const GRAPH_CONFIGURABLE_NUMBER_TYPES = [
+    "sbyte", "byte", "short", "ushort",
+    "int", "uint", "long", "ulong",
+    "half", "float", "double", "decimal"
+  ];
+
+const GRAPH_CONFIGURABLE_VECTOR_TYPES =
+  Object.keys(
+    GRAPH_STATIC_VECTOR_PRESENTATION
+  ).flatMap(family =>
+    [2, 3, 4].map(
+      dimension => `${family}${dimension}`
+    )
+  );
+
+function graphTypeForCsType(csType) {
+    const canonical = graphCanonicalCsType(csType);
+
+    const indexed =
+      GRAPH_TYPE_BY_CSHARP_TYPE.get(
+        canonical
+      );
+    if (
+      indexed &&
+      TYPE_INFO[indexed] &&
+      graphCanonicalCsType(indexed) ===
+        canonical
+    ) {
+      return indexed;
+    }
+
+    GRAPH_TYPE_BY_CSHARP_TYPE.delete(
+      canonical
+    );
+
+    for (const [type, information] of Object.entries(TYPE_INFO)) {
+      const declared = String(
+        information?.csType || type
+      )
+        .trim()
+        .replace(/^global::/, "");
+      if (
+        (GRAPH_CSHARP_PRIMITIVE_NAMES[declared] || declared) ===
+        canonical
+      ) {
+        GRAPH_TYPE_BY_CSHARP_TYPE.set(
+          canonical,
+          type
+        );
+        return type;
+      }
+    }
+
+    return null;
+  }
+
+function graphNumericScalarDescriptor(type) {
+    const csType = graphCanonicalCsType(type);
+    const metadata = GRAPH_NUMERIC_SCALAR_METADATA[csType];
+
+    return metadata
+      ? {
+          ...metadata,
+          type: typeBase(type),
+          csType
+        }
+      : null;
+  }
+
+function graphVectorDescriptor(type) {
+    const graphType = typeBase(type);
+    const csType = graphCanonicalCsType(graphType);
+    const match = csType.match(
+      /^Elements\.Core\.(bool|byte|sbyte|short|ushort|int|uint|long|ulong|half|float|double)([234])$/
+    );
+
+    if (!match) {
+      return null;
+    }
+
+    const scalarCsType =
+      GRAPH_VECTOR_SCALAR_CSHARP_TYPES[match[1]];
+    return {
+      type: graphType,
+      csType,
+      family: match[1],
+      scalarCsType,
+      scalarType:
+        graphTypeForCsType(scalarCsType),
+      componentCount: Number(match[2]),
+      componentIds:
+        ["x", "y", "z", "w"].slice(0, Number(match[2])),
+      boolean: match[1] === "bool",
+      numeric: match[1] !== "bool"
+    };
+  }
+
+function graphConfigurableTypeSort(left, right) {
+    const leftScalar = graphNumericScalarDescriptor(left);
+    const rightScalar = graphNumericScalarDescriptor(right);
+    if (leftScalar && rightScalar) {
+      return leftScalar.preference - rightScalar.preference;
+    }
+
+    const families = Object.keys(GRAPH_VECTOR_SCALAR_CSHARP_TYPES);
+    const leftVector = graphVectorDescriptor(left);
+    const rightVector = graphVectorDescriptor(right);
+    if (leftVector && rightVector) {
+      return (
+        families.indexOf(leftVector.family) -
+          families.indexOf(rightVector.family) ||
+        leftVector.componentCount - rightVector.componentCount
+      );
+    }
+
+    return String(left).localeCompare(String(right));
+  }
+
+function registerGraphConfigurableValueType(type) {
+    if (
+      graphNumericScalarDescriptor(type) &&
+      !GRAPH_CONFIGURABLE_NUMBER_TYPES.includes(type)
+    ) {
+      GRAPH_CONFIGURABLE_NUMBER_TYPES.push(type);
+      GRAPH_CONFIGURABLE_NUMBER_TYPES.sort(
+        graphConfigurableTypeSort
+      );
+    }
+
+    if (
+      graphVectorDescriptor(type) &&
+      !GRAPH_CONFIGURABLE_VECTOR_TYPES.includes(type)
+    ) {
+      GRAPH_CONFIGURABLE_VECTOR_TYPES.push(type);
+      GRAPH_CONFIGURABLE_VECTOR_TYPES.sort(
+        graphConfigurableTypeSort
+      );
+    }
+  }
+
 const RUNTIME_BEHAVIORS = {
     stored: {
       label: "Stored value",
@@ -252,9 +806,10 @@ const OPERATOR_DEFINITIONS = {
       group: "Values",
       symbol: "#",
       description:
-        "An intelligent scalar number. Auto infers int, float or double from connected sockets; explicit modes remain available.",
+        "An intelligent CLR scalar number. Auto follows compatible connected sockets; every catalog numeric type remains selectable explicitly.",
       configurableTypeVar: "T",
-      configurableTypes: ["int", "float", "double"],
+      configurableTypes:
+        GRAPH_CONFIGURABLE_NUMBER_TYPES,
       allowAutoType: true,
       defaultType: "auto",
       autoFallbackType: "float",
@@ -1105,6 +1660,13 @@ function registerGraphType(
       assemblies,
       assemblyReferences
     };
+
+    indexGraphTypeCsType(
+      id,
+      TYPE_INFO[id]
+    );
+
+    registerGraphConfigurableValueType(id);
 
     if (
         information.valueType === true &&

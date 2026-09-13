@@ -1268,10 +1268,6 @@ button.rml-graph-navigation-level:disabled {
   filter: drop-shadow(0 0 7px currentColor);
 }
 
-.rml-graph-wire.branch-target-invalid {
-  opacity: 0.28;
-}
-
 .rml-graph-wire-hit {
   fill: none;
   stroke: transparent;

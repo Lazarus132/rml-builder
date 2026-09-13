@@ -3,7 +3,7 @@
   // RML Builder catalog: api_nodes.
 
   const API_FACTORY_MODULE_ID =
-    "1.20.31-universal-presentation-dev39-clean-stale-api-repair";
+    "1.20.31-universal-presentation-dev55-retained-disconnected-ports";
   const FACTORY_VERSION = 38;
   const API_VERIFICATION_SCHEMA_VERSION = 3;
   const CATALOG_PROJECTION_INDEX_VERSION = 1;
@@ -631,6 +631,15 @@
     );
     window.RMLApiNodeFactoryReport =
       nextReport;
+    if (
+      factoryRegistryIntegrityCache
+        ?.report === expectedReport
+    ) {
+      factoryRegistryIntegrityCache = {
+        ...factoryRegistryIntegrityCache,
+        report: nextReport
+      };
+    }
     publishCatalogProjectionIndex(nextIndex);
     catalogProjectionIndexByReport.set(
       nextReport,
@@ -3175,12 +3184,6 @@
         );
       }
 
-      window.dispatchEvent(
-        new CustomEvent(
-          "rml-api-node-factory-ready",
-          { detail: report }
-        )
-      );
       try {
         catalogPublication?.notify?.();
       } catch (catalogEventError) {
@@ -3189,6 +3192,13 @@
           catalogEventError
         );
       }
+      await yieldToBrowser();
+      window.dispatchEvent(
+        new CustomEvent(
+          "rml-api-node-factory-ready",
+          { detail: report }
+        )
+      );
 
       completeFactoryReady(report);
       return report;
@@ -3390,9 +3400,19 @@
         typeof requestAnimationFrame ===
         "function"
       ) {
-        requestAnimationFrame(() =>
-          resolve()
+        let settled = false;
+        let fallback = 0;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(fallback);
+          resolve();
+        };
+        fallback = window.setTimeout(
+          finish,
+          100
         );
+        requestAnimationFrame(finish);
       } else {
         window.setTimeout(resolve, 0);
       }
@@ -4068,6 +4088,8 @@
 
           catalogGenerated: true,
           apiCatalogType: csType,
+          catalogStaticClass:
+              information.kind === "static-class",
           assembly:
               String(information.assembly || "").trim(),
           assemblies:
@@ -6142,6 +6164,8 @@
         isByRef:
           parameter?.isByRef === true ||
           parameter?.isOut === true,
+        isIn:
+          parameter?.isIn === true,
         isOut:
           parameter?.isOut === true,
         isOptional:
@@ -6178,7 +6202,11 @@
         inputs.push(parameterPort(parameter));
       }
       const outParameters = parameters.filter(parameter =>
-        parameter.isOut || parameter.isByRef
+        parameter.isOut ||
+        (
+          parameter.isByRef &&
+          parameter.isIn !== true
+        )
       );
       const outputs = [
         port("done", "Done", "impulse"),
@@ -6319,7 +6347,11 @@
       }
 
       const outParameters = parameters.filter(parameter =>
-        parameter.isOut || parameter.isByRef
+        parameter.isOut ||
+        (
+          parameter.isByRef &&
+          parameter.isIn !== true
+        )
       );
       const outputs = [port("done", "Done", "impulse")];
       if (!isVoid) {
@@ -6808,7 +6840,13 @@
         });
       const outAssignments = parameters
         .filter(parameter =>
-          (parameter.isOut || parameter.isByRef) &&
+          (
+            parameter.isOut ||
+            (
+              parameter.isByRef &&
+              parameter.isIn !== true
+            )
+          ) &&
           generatedApiOutputIsUsed(api, `out${parameter.position}`)
         )
         .map(parameter => `${fields.out(parameter.position)} = apiArguments[${parameter.position}]!;`)
@@ -6866,7 +6904,13 @@
         : api.input("target").code;
       const outAssignments = parameters
         .filter(parameter =>
-          (parameter.isOut || parameter.isByRef) &&
+          (
+            parameter.isOut ||
+            (
+              parameter.isByRef &&
+              parameter.isIn !== true
+            )
+          ) &&
           generatedApiOutputIsUsed(api, `out${parameter.position}`)
         )
         .map(parameter => `${fields.out(parameter.position)} = apiArguments[${parameter.position}]!;`)
@@ -7014,8 +7058,16 @@
           }
         } else if (parameter.isByRef) {
           declarations.push(`${csType} ${local} = ${api.input(`arg${position}`).code};`);
-          argumentsList.push(`ref ${local}`);
-          if (generatedApiOutputIsUsed(api, `out${position}`)) {
+          argumentsList.push(
+            `${parameter.isIn === true ? "in" : "ref"} ${local}`
+          );
+          if (
+            parameter.isIn !== true &&
+            generatedApiOutputIsUsed(
+              api,
+              `out${position}`
+            )
+          ) {
             assignments.push(`${fields.out(position)} = ${local};`);
           }
         } else {
@@ -7243,7 +7295,9 @@
       const modifier = parameter?.isOut
         ? "out "
         : parameter?.isByRef
-          ? "ref "
+          ? parameter?.isIn === true
+            ? "in "
+            : "ref "
           : "";
       return `${modifier}${type}`;
     }
@@ -7695,8 +7749,8 @@
 
   function looksLikeValueType(value) {
     const text = normalizeCsType(value);
-    return /^(?:System\.)?(?:Boolean|Byte|SByte|Int16|UInt16|Int32|UInt32|Int64|UInt64|Single|Double|Decimal|Char|DateTime|TimeSpan|Guid)$/.test(text) ||
-      /(?:^|\.)(?:int|float|double|byte|sbyte|short|ushort|uint|long|ulong)[234]$/.test(text);
+    return /^(?:System\.)?(?:Boolean|Byte|SByte|Int16|UInt16|Int32|UInt32|Int64|UInt64|Half|Single|Double|Decimal|Char|DateTime|DateTimeOffset|TimeSpan|Guid)$/.test(text) ||
+      /^(?:Elements\.Core\.)?(?:(?:bool|byte|sbyte|short|ushort|int|uint|long|ulong|half|float|double)[234]|(?:float|double)(?:2x2|3x3|4x4)|(?:float|double)Q|color(?:32|X)?)$/.test(text);
   }
 
   function apiGraphTypeId(csType) {

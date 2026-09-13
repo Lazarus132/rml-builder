@@ -2,7 +2,7 @@
   "use strict";
   // Runtime Graph GPU renderer and retained presentation.
 
-  const VERSION = 23;
+  const VERSION = 24;
   const WIRE_CULL_CELL_SIZE = 960;
   const NODE_CELL_SIZE = 360;
   const WIRE_LINEAR_PICK_LIMIT = 512;
@@ -260,8 +260,30 @@
       if (!adapter) {
         return false;
       }
+      const supportedTextureDimension = Math.max(
+        8192,
+        Math.floor(
+          finite(
+            adapter.limits?.maxTextureDimension2D,
+            8192
+          )
+        )
+      );
+      const requestedTextureDimension = Math.min(
+        16384,
+        supportedTextureDimension
+      );
       const device =
-        await adapter.requestDevice();
+        await adapter.requestDevice(
+          requestedTextureDimension > 8192
+            ? {
+                requiredLimits: {
+                  maxTextureDimension2D:
+                    requestedTextureDimension
+                }
+              }
+            : undefined
+        );
       const format =
         navigator.gpu.getPreferredCanvasFormat();
       device.pushErrorScope("validation");
@@ -1783,9 +1805,26 @@
         1,
         finite(window.devicePixelRatio, 1)
       );
-      const ratio = Math.max(
+      const requestedRatio = Math.max(
         0.5,
         nativeRatio * this.rasterScale
+      );
+      const maximumRasterDimension = Math.max(
+        1,
+        finite(
+          this.gpuDevice
+            ?.limits
+            ?.maxTextureDimension2D ||
+          this.gl?.getParameter?.(
+            this.gl.MAX_RENDERBUFFER_SIZE
+          ),
+          8192
+        )
+      );
+      const ratio = Math.min(
+        requestedRatio,
+        maximumRasterDimension /
+          Math.max(width, height)
       );
       const pixelWidth = Math.max(1, Math.round(width * ratio));
       const pixelHeight = Math.max(1, Math.round(height * ratio));
@@ -2796,7 +2835,7 @@
       target[offset + 7] = curve.p3.y;
       writeColorComponents(
         record.color,
-        invalid ? 0.28 : 1,
+        1,
         target,
         offset + 8
       );
