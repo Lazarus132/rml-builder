@@ -677,7 +677,7 @@ const savedApiCompositeSearchTextCache =
     `${SAVED_API_COMPOSITE_COMPARE_MESSAGE_TYPE}-result`;
 
   const SAVED_API_COMPOSITE_COMPARE_MODULE_ID =
-    "1.20.31-universal-presentation-dev72-synchronous-retained-drag";
+    "1.20.31-universal-presentation-dev79-demand-catalog-nonblocking-presentation";
 
   const SAVED_API_COMPOSITE_COMPARE_CANONICAL_SCHEMA_VERSION =
     4;
@@ -941,7 +941,7 @@ const savedApiCompositeSearchTextCache =
       );
     }
     const workerUrl = new URL(
-      "js/workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev72-synchronous-retained-drag&canonical-schema=4",
+      "js/workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev79-demand-catalog-nonblocking-presentation&canonical-schema=4",
       document.baseURI
     );
     const workerOptions = {
@@ -7240,19 +7240,34 @@ function openApiCompositeGraph(
         normalizedOwnerId
       ])
     };
-    applyGraphView(
-      graphViewFrom(composite)
-    );
-    apiCompositeEditor.openViewState =
-      apiCompositeEditorViewState(graph);
-    resetGraphRenderCaches();
-    if (
-      typeof restoreCurrentGraphAnalysis ===
-        "function"
-    ) {
-      restoreCurrentGraphAnalysis();
+    const workSession =
+      beginGraphTransitionWork({
+        kicker: "API Composite",
+        title: `Opening ${apiCompositeEditor.title}…`,
+        message:
+          "The Composite appears when its complete interactive graph is ready.",
+        detail:
+          "Preparing internal nodes, ports and connections…",
+        progress: 28
+      });
+    try {
+      applyGraphView(
+        graphViewFrom(composite)
+      );
+      apiCompositeEditor.openViewState =
+        apiCompositeEditorViewState(graph);
+      resetGraphRenderCaches();
+      if (
+        typeof restoreCurrentGraphAnalysis ===
+          "function"
+      ) {
+        restoreCurrentGraphAnalysis();
+      }
+      activateGraphMode();
+    } catch (error) {
+      finishGraphTransitionWork(workSession);
+      throw error;
     }
-    activateGraphMode();
     showGraphMessage(
       `Opened ${apiCompositeEditor.title}.`,
       "success"
@@ -7362,8 +7377,28 @@ function closeApiCompositeGraph({
       closingEditor.parentEditor ||
       closingEditor.parent ||
       null;
+    const workSession = commit
+      ? beginGraphTransitionWork({
+          kicker: parentEditor
+            ? "API Composite"
+            : "Runtime Graph",
+          title: parentEditor
+            ? "Opening parent Composite…"
+            : "Returning to Runtime Graph…",
+          message:
+            "The parent graph appears when its complete interactive frame is ready.",
+          detail:
+            "Preserving the Composite and restoring its owner graph…",
+          progress: 34
+        })
+      : 0;
     apiCompositeEditor = parentEditor;
-    applyGraphView(mainView);
+    try {
+      applyGraphView(mainView);
+    } catch (error) {
+      finishGraphTransitionWork(workSession);
+      throw error;
+    }
     if (commit) {
       graphNodeDefinitionCache =
         new WeakMap();
@@ -7386,7 +7421,12 @@ function closeApiCompositeGraph({
       ) {
         restoreCurrentGraphAnalysis();
       }
-      activateGraphMode();
+      try {
+        activateGraphMode();
+      } catch (error) {
+        finishGraphTransitionWork(workSession);
+        throw error;
+      }
       if (!completeStateUnchanged) {
         scheduleGraphPersistenceAfterPaint({
           refreshGeneratedOutput:
@@ -16794,7 +16834,7 @@ Object.defineProperty(
   "RMLNodeGraphCompositesModuleId",
   {
     value:
-      "1.20.31-universal-presentation-dev72-synchronous-retained-drag",
+      "1.20.31-universal-presentation-dev79-demand-catalog-nonblocking-presentation",
     writable: false,
     enumerable: true,
     configurable: true

@@ -93,6 +93,7 @@ function ensureRuntimeGraphStyles() {
   }
 
 function reportRuntimeGraphStyleFailure(error) {
+    finishGraphTransitionWork();
     if (runtimeGraphStyleFailureReported) return;
     runtimeGraphStyleFailureReported = true;
     showGraphMessage(
@@ -757,6 +758,7 @@ function enforceGraphSvgSafety() {
     graphNodeVirtualizationSignature = "";
     runtimeGraphPresentationPending = false;
     updatePackButton();
+    finishGraphTransitionWork();
     return true;
   }
 
@@ -840,11 +842,16 @@ function updateGraphPreparationStatus(
     if (
       graphViewPreparationCurrent(
         preparation
-      ) &&
-      preparation.status?.isConnected
+      )
     ) {
-      preparation.status.textContent =
-        message;
+      if (preparation.status?.isConnected) {
+        preparation.status.textContent =
+          message;
+      }
+      window.RMLBuilderWork?.update?.(
+        graphTransitionWorkSession,
+        { detail: message }
+      );
     }
   }
 
@@ -1586,6 +1593,95 @@ function whenGraphViewReady() {
     return graphViewPreparation?.promise || Promise.resolve(false);
   }
 
+let graphTransitionWorkSession = 0;
+let graphTransitionWorkTarget = "";
+
+function graphPresentationIdentity(
+    detail = {}
+  ) {
+    return JSON.stringify([
+      Number(detail.projectEpoch || 0),
+      String(detail.scope || ""),
+      Array.isArray(detail.apiCompositeOwnerPath)
+        ? detail.apiCompositeOwnerPath.map(value =>
+            String(value || "")
+          )
+        : [],
+      String(detail.fileNodeId || "")
+    ]);
+  }
+
+function beginGraphTransitionWork(
+    options = {}
+  ) {
+    const work = window.RMLBuilderWork;
+    if (!work?.begin) return 0;
+    if (graphTransitionWorkSession) {
+      work.update?.(
+        graphTransitionWorkSession,
+        options
+      );
+      return graphTransitionWorkSession;
+    }
+    graphTransitionWorkTarget = "";
+    graphTransitionWorkSession =
+      work.begin({
+        kicker: "Runtime Graph",
+        title: "Preparing graph…",
+        message:
+          "The requested graph appears as soon as its complete interactive frame is ready.",
+        detail:
+          "Preparing nodes, ports and connections…",
+        progress: 24,
+        timeout: 120000,
+        ...options
+      });
+    return graphTransitionWorkSession;
+  }
+
+function bindGraphTransitionWorkTarget() {
+    if (!graphTransitionWorkSession) {
+      return false;
+    }
+    graphTransitionWorkTarget =
+      graphPresentationIdentity(
+        graphRenderCompleteDetail()
+      );
+    return true;
+  }
+
+function finishGraphTransitionWork(
+    session = graphTransitionWorkSession
+  ) {
+    if (
+      !session ||
+      session !== graphTransitionWorkSession
+    ) {
+      return false;
+    }
+    graphTransitionWorkSession = 0;
+    graphTransitionWorkTarget = "";
+    return Boolean(
+      window.RMLBuilderWork?.finish?.(
+        session
+      )
+    );
+  }
+
+function handleGraphTransitionPresentationComplete(
+    event
+  ) {
+    if (
+      graphTransitionWorkSession &&
+      graphTransitionWorkTarget &&
+      graphPresentationIdentity(
+        event?.detail || {}
+      ) === graphTransitionWorkTarget
+    ) {
+      finishGraphTransitionWork();
+    }
+  }
+
 let graphCatalogReadiness = "ready";
 
 let graphCatalogReadinessMessage = "";
@@ -2090,6 +2186,14 @@ let graphPaletteCatalogDefinitionCount = 0;
 
 const graphPaletteDefinitionIndexes = new Map();
 
+let graphPaletteDemandIndexSource = null;
+
+let graphPaletteDemandIndexRevision = "";
+
+let graphPaletteDemandIndexEntries = [];
+
+let graphPaletteDemandIndexById = new Map();
+
 let graphPaletteRenderedSignature = "";
 
 let graphPaletteRenderFrame = 0;
@@ -2097,6 +2201,9 @@ let graphPaletteRenderFrame = 0;
 let graphPaletteRenderTimer = 0;
 
 let graphPaletteRenderSequence = 0;
+
+let graphPaletteRenderAfterPreparation =
+  null;
 
 let graphPaletteRowsRefreshFrame = 0;
 
@@ -3502,7 +3609,7 @@ function restoreCachedGraphPresentation() {
 
 
 
-      pending: false,
+      pending: true,
       rebuildNodes: false,
       geometryDirty: false,
       measuring: false,
@@ -3537,11 +3644,10 @@ function restoreCachedGraphPresentation() {
       dom.itemCount.textContent =
         String(graph.nodes.length);
     }
-    entry.root.dataset.rmlGraphPhase = "ready";
-    entry.root.removeAttribute("aria-busy");
-    references.viewport.inert = false;
-    references.toolbar.inert = false;
-    runtimeGraphPresentationPending = false;
+    entry.root.dataset.rmlGraphPhase = "preparing";
+    entry.root.setAttribute("aria-busy", "true");
+    references.viewport.inert = true;
+    references.toolbar.inert = true;
     if (
       graphNodeVirtualizationRefreshRequired()
     ) {
@@ -4893,6 +4999,11 @@ function graphNavigationRetainedPresentation(
           candidate.presentationKey ===
             presentationKey
       );
+    const sameGraphArrays = Boolean(
+      entry &&
+      entry.nodes === view.nodes &&
+      entry.connections === view.connections
+    );
     if (
       !entry ||
       entry.presentationKey !==
@@ -4902,6 +5013,11 @@ function graphNavigationRetainedPresentation(
       !graphPresentationReferenceMatches(
         entry,
         view
+      ) ||
+      (
+        sameGraphArrays &&
+        entry.contentRevision !==
+          graphViewContentRevision(view.nodes)
       ) ||
       entry.renderer?.available !==
         entry.rendererAvailable ||
@@ -4935,64 +5051,112 @@ function navigateToGraphNavigationLevel(
     const target = graphNavigationLevels()
       .find(level => level.id === targetId);
 
-
-
-
     if (
       target?.exists &&
-      !target.current &&
-      graphNavigationRetainedPresentation(
-        target
-      )
+      !target.current
     ) {
-      graphNavigationTransitionSequence += 1;
-      return commitGraphNavigationLevel(
-        targetId
-      );
-    }
-    const sequence =
-      ++graphNavigationTransitionSequence;
-    const feedback =
-      beginGraphNavigationFeedback();
-    void waitForGraphPaintOpportunity()
-      .then(painted => {
-        if (
-          !painted ||
-          sequence !==
-            graphNavigationTransitionSequence ||
-          feedback?.projectEpoch !==
-            builderProjectEpoch
-        ) {
-          finishGraphNavigationFeedback(
-            feedback
-          );
-          return false;
-        }
+      const workOptions = {
+        kicker:
+          target.kind === "runtime"
+            ? "Runtime Graph"
+            : target.kind === "api-composite"
+              ? "API Composite"
+              : "Custom C#",
+        title: `Opening ${target.label}…`,
+        message:
+          "The selected graph level appears when its complete interactive frame is ready.",
+        detail:
+          "Restoring the requested graph level…",
+        progress: 32
+      };
+      const retainedPresentation =
+        graphNavigationRetainedPresentation(
+          target
+        );
+      if (retainedPresentation) {
+        graphNavigationTransitionSequence += 1;
         const committed =
           commitGraphNavigationLevel(
             targetId
           );
-        if (!committed) {
+        if (
+          committed &&
+          (
+            graphActivePresentationRoot !==
+              retainedPresentation.root ||
+            graphViewPreparation?.root !==
+              retainedPresentation.root
+          ) &&
+          graphViewPreparing()
+        ) {
+          beginGraphTransitionWork(
+            workOptions
+          );
+          bindGraphTransitionWorkTarget();
+        }
+        return committed;
+      }
+
+      const workSession =
+        beginGraphTransitionWork(
+          workOptions
+        );
+
+      graphNavigationTransitionSequence += 1;
+      const sequence =
+        graphNavigationTransitionSequence;
+      const feedback =
+        beginGraphNavigationFeedback();
+      void waitForGraphPaintOpportunity()
+        .then(painted => {
+          if (
+            !painted ||
+            sequence !==
+              graphNavigationTransitionSequence ||
+            feedback?.projectEpoch !==
+              builderProjectEpoch
+          ) {
+            finishGraphNavigationFeedback(
+              feedback
+            );
+            finishGraphTransitionWork(
+              workSession
+            );
+            return false;
+          }
+          const committed =
+            commitGraphNavigationLevel(
+              targetId
+            );
+          if (!committed) {
+            finishGraphNavigationFeedback(
+              feedback
+            );
+            finishGraphTransitionWork(
+              workSession
+            );
+          }
+          return committed;
+        })
+        .catch(error => {
           finishGraphNavigationFeedback(
             feedback
           );
-        }
-        return committed;
-      })
-      .catch(error => {
-        finishGraphNavigationFeedback(
-          feedback
-        );
-        showGraphMessage(
-          `The selected graph level could not be opened: ${
-            error instanceof Error
-              ? error.message
-              : String(error)
-          }`,
-          "error"
-        );
-      });
-    return true;
+          finishGraphTransitionWork(
+            workSession
+          );
+          showGraphMessage(
+            `The selected graph level could not be opened: ${
+              error instanceof Error
+                ? error.message
+                : String(error)
+            }`,
+            "error"
+          );
+        });
+      return true;
+    }
+    return false;
   }
 
 function createGraphNavigationTrail(
@@ -6035,6 +6199,7 @@ function commitRootRuntimeGraphView(view) {
   }
 
 function handleProjectReplacement(event) {
+    finishGraphTransitionWork();
     persistGraphNavigation();
     clearGraphPresentationCache();
     graphNavigationRestorePending = true;
@@ -12476,17 +12641,7 @@ function markGraphPackPresentationPending() {
       updatePackButton();
       return;
     }
-    if (
-      dom.packButton.dataset
-        .rmlRuntimeButtonVisual !==
-        "loading"
-    ) {
-      dom.packButton.dataset
-        .rmlRuntimeButtonVisual =
-        "loading";
-      dom.packButton.innerHTML =
-        `<span class="brand-mark rml-pack-brand-mark rml-runtime-graph-loader rml-runtime-graph-spinner" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">Loading Runtime Graph…</span>`;
-    }
+    updatePackButton();
     dom.packButton.setAttribute(
       "aria-label",
       "Runtime Graph is loading"
@@ -12566,17 +12721,15 @@ function updatePackButton() {
           "failed"
       );
 
-    const visualState = graphLoading
-      ? "loading"
-      : graphVisible
-        ? "outline-toggle"
-        : catalogFailed
-          ? hostFailed
-            ? "failed-host"
-            : "failed-catalog"
-          : graph?.active
-            ? "graph-open"
-            : "graph-pack";
+    const visualState = graphVisible
+      ? "outline-toggle"
+      : catalogFailed
+        ? hostFailed
+          ? "failed-host"
+          : "failed-catalog"
+        : graph?.active
+          ? "graph-open"
+          : "graph-pack";
 
     if (
       dom.packButton.dataset
@@ -12587,15 +12740,13 @@ function updatePackButton() {
         .rmlRuntimeButtonVisual =
         visualState;
       dom.packButton.innerHTML =
-        graphLoading
-          ? `<span class="brand-mark rml-pack-brand-mark rml-runtime-graph-loader rml-runtime-graph-spinner" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">${customCSharpLoading ? "Loading Custom C# Graph…" : "Loading Runtime Graph…"}</span>`
-          : graphVisible
-            ? `${graphOutlineToggleMarkup()}<span class="top-action-label">Configuration Outline</span>`
-            : catalogFailed
-            ? `<span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">${hostFailed ? "Runtime Graph unavailable" : "Repair Runtime Graph…"}</span>`
-            : graph?.active
-              ? `<span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">Open Runtime Graph</span>`
-              : `<span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">Pack into Node</span>`;
+        graphVisible
+          ? `${graphOutlineToggleMarkup()}<span class="top-action-label">Configuration Outline</span>`
+          : catalogFailed
+          ? `<span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">${hostFailed ? "Runtime Graph unavailable" : "Repair Runtime Graph…"}</span>`
+          : graph?.active
+            ? `<span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">Open Runtime Graph</span>`
+            : `<span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">Pack into Node</span>`;
     }
 
     dom.packButton.setAttribute(
@@ -12907,23 +13058,13 @@ async function togglePackedNodeMode() {
         );
       }
       markGraphPackPresentationPending();
-      window.RMLScriptLoader
-        ?.reportRuntimeViewStillLoading?.(
-          graphVisible
-            ? {
-                title:
-                  "Runtime Graph update was already running",
-                message:
-                  "An update was already running when you clicked. This click does not start another update; the existing graph remains open and becomes interactive automatically when that update completes."
-              }
-            : undefined
-        );
       return false;
     }
 
-    if (graphPresentationVisible()) {
-      unpackToOutline();
-      return;
+    const graphVisible =
+      graphPresentationVisible();
+    if (graphVisible) {
+      return unpackToOutline();
     }
 
     if (
@@ -12942,38 +13083,105 @@ async function togglePackedNodeMode() {
           : "The Runtime Graph control is visible and the locally restored project state is still being connected. It will become available automatically when the builder bridge-ready event arrives.",
         graphHostError ? "error" : ""
       );
-      return;
+      return false;
     }
 
     if (runtimeGraphStyleTransitionPending) {
-      return;
+      return false;
     }
 
-    runtimeGraphStyleTransitionPending = true;
-    updatePackButton();
+    const workOptions = {
+      kicker: "Runtime Graph",
+      title: "Preparing Runtime Graph…",
+      message:
+        "The graph appears as soon as nodes, ports and connections are interactive.",
+      detail:
+        "Preparing the requested graph presentation…",
+      progress: 24
+    };
+    let workSession = 0;
+
     try {
-      await ensureRuntimeGraphStyles();
-    } catch (error) {
-      reportRuntimeGraphStyleFailure(error);
-      runtimeGraphStyleTransitionPending = false;
+      if (!runtimeGraphStylesLoaded()) {
+        workSession =
+          beginGraphTransitionWork(
+            workOptions
+          );
+      }
+      runtimeGraphStyleTransitionPending = true;
       updatePackButton();
-      return;
-    }
-    runtimeGraphStyleTransitionPending = false;
+      try {
+        await ensureRuntimeGraphStyles();
+      } catch (error) {
+        reportRuntimeGraphStyleFailure(error);
+        runtimeGraphStyleTransitionPending = false;
+        updatePackButton();
+        return false;
+      }
+      runtimeGraphStyleTransitionPending = false;
 
-    if (graph?.active) {
-      commitPresentationPage(
-        "runtime-graph",
-        "runtime-graph-open"
-      );
-      runtimeGraphViewActive = true;
-      graphNavigationRestorePending = true;
-      graphNavigationLastWrite = "";
-      synchronizePackedSnapshot(false);
-      activateGraphMode();
-      persistGraphView(true);
-    } else {
-      packIntoNode();
+      if (graph?.active) {
+        commitPresentationPage(
+          "runtime-graph",
+          "runtime-graph-open"
+        );
+        runtimeGraphViewActive = true;
+        graphNavigationRestorePending = true;
+        graphNavigationLastWrite = "";
+        const packedChanged =
+          synchronizePackedSnapshot(false);
+        restoreGraphNavigation();
+        const levels = graphNavigationLevels();
+        const retainedPresentation =
+          packedChanged
+            ? null
+            : graphNavigationRetainedPresentation(
+                levels[levels.length - 1]
+              );
+        if (
+          !workSession &&
+          !retainedPresentation
+        ) {
+          workSession =
+            beginGraphTransitionWork(
+              workOptions
+            );
+        }
+        activateGraphMode();
+        if (
+          retainedPresentation &&
+          !workSession &&
+          (
+            graphActivePresentationRoot !==
+              retainedPresentation.root ||
+            graphViewPreparation?.root !==
+              retainedPresentation.root
+          ) &&
+          graphViewPreparing()
+        ) {
+          workSession =
+            beginGraphTransitionWork(
+              workOptions
+            );
+          bindGraphTransitionWorkTarget();
+        }
+        persistGraphView(true);
+      } else {
+        if (!workSession) {
+          workSession =
+            beginGraphTransitionWork(
+              workOptions
+            );
+        }
+        packIntoNode();
+      }
+      return await whenGraphViewReady();
+    } finally {
+      if (workSession) {
+        finishGraphTransitionWork(
+          workSession
+        );
+      }
     }
   }
 
@@ -14222,6 +14430,14 @@ function markRestoredGraphCatalogCheckPending() {
     graphCatalogReadiness = "pending";
     graphCatalogReadinessMessage =
       "Checking the restored Runtime Graph and every placed API Composite against the current catalog…";
+    window.RMLBuilderWork?.update?.(
+      graphTransitionWorkSession,
+      {
+        detail:
+          graphCatalogReadinessMessage,
+        progress: 38
+      }
+    );
   }
 
 function evaluateRestoredGraphCatalogReadiness() {
@@ -14321,6 +14537,19 @@ function presentRuntimeGraphRestoreShell() {
     ) {
       return false;
     }
+    const workSession =
+      beginGraphTransitionWork({
+        kicker: "Runtime Graph",
+        title:
+          "Preparing cached Runtime Graph…",
+        message:
+          "The restored graph appears as soon as its complete interactive frame is ready.",
+        detail:
+          graphCatalogReadinessMessage ||
+          "Preparing nodes, ports and connections…",
+        progress: 38
+      });
+    bindGraphTransitionWorkTarget();
     const existing = dom.root;
     if (
       existing?.isConnected &&
@@ -14329,14 +14558,17 @@ function presentRuntimeGraphRestoreShell() {
       existing._rmlGraph === graph &&
       existing._rmlNodes === graph.nodes
     ) {
-      const status = existing.querySelector(
+      existing.querySelector(
         ":scope > .rml-graph-preparation-status"
+      )?.remove();
+      window.RMLBuilderWork?.update?.(
+        workSession,
+        {
+          detail:
+            graphCatalogReadinessMessage ||
+            "Preparing nodes, ports and connections…"
+        }
       );
-      if (status) {
-        status.textContent =
-          graphCatalogReadinessMessage ||
-          "Preparing the saved Runtime Graph…";
-      }
       markGraphPackPresentationPending();
       return true;
     }
@@ -14367,7 +14599,7 @@ function presentRuntimeGraphRestoreShell() {
     }
     if (dom.activeContainerName) {
       dom.activeContainerName.textContent =
-        "Restoring saved graph";
+        "Exact type matching";
     }
 
     const root = document.createElement("div");
@@ -14382,14 +14614,6 @@ function presentRuntimeGraphRestoreShell() {
     root.setAttribute("aria-busy", "true");
     root._rmlGraph = graph;
     root._rmlNodes = graph.nodes;
-    const status = document.createElement("div");
-    status.className =
-      "rml-graph-preparation-status";
-    status.setAttribute("role", "status");
-    status.textContent =
-      graphCatalogReadinessMessage ||
-      "Preparing the saved Runtime Graph…";
-    root.appendChild(status);
     dom.builderCanvas.replaceChildren(root);
     dom.root = root;
     dom.navigationTrail = null;
@@ -14404,22 +14628,8 @@ function presentRuntimeGraphRestoreShell() {
     dom.sourceBadge = null;
     dom.editModeButton = null;
 
-    for (const [host, message] of [
-      [dom.paletteContent, "Preparing node library…"],
-      [dom.inspectorContent, "Preparing graph inspector…"]
-    ]) {
-      if (!host) continue;
-      const placeholder =
-        document.createElement("div");
-      placeholder.className =
-        "rml-graph-inspector-empty";
-      placeholder.setAttribute(
-        "role",
-        "status"
-      );
-      placeholder.textContent = message;
-      host.replaceChildren(placeholder);
-    }
+    dom.paletteContent?.replaceChildren();
+    dom.inspectorContent?.replaceChildren();
     markGraphPackPresentationPending();
     window.RMLUniversalScrollLayers?.refresh?.();
     void ensureRuntimeGraphStyles()
@@ -14462,6 +14672,7 @@ function activateGraphMode() {
     }
 
     if (graphCanvasMatchesCurrentView()) {
+      bindGraphTransitionWorkTarget();
       synchronizeRuntimeBridgeSubscription(
         true
       );
@@ -14469,6 +14680,7 @@ function activateGraphMode() {
         markGraphPackPresentationPending();
       } else {
         updatePackButton();
+        finishGraphTransitionWork();
       }
       return true;
     }
@@ -14481,6 +14693,7 @@ function activateGraphMode() {
     document.body.classList.add(
       "rml-node-graph-mode"
     );
+    bindGraphTransitionWorkTarget();
 
     loadGraphPanelLayout();
     ensureGraphPanelToggles();
@@ -14529,19 +14742,7 @@ function activateGraphMode() {
     ) {
       renderGraphInspector();
     } else if (dom.inspectorContent) {
-      const inspectorStatus =
-        document.createElement("div");
-      inspectorStatus.className =
-        "rml-graph-inspector-empty";
-      inspectorStatus.setAttribute(
-        "role",
-        "status"
-      );
-      inspectorStatus.textContent =
-        "Preparing graph inspector…";
-      dom.inspectorContent.replaceChildren(
-        inspectorStatus
-      );
+      dom.inspectorContent.replaceChildren();
     }
     scheduleGraphPaletteRender();
     window.RMLUniversalScrollLayers?.refresh?.();
@@ -14837,16 +15038,300 @@ function graphPaletteDefinitionContextKey() {
         : "runtime-root";
   }
 
+function graphPaletteDemandCache() {
+    const cache =
+      window.RMLCatalogDemandCache;
+    return cache &&
+      typeof cache === "object"
+      ? cache
+      : null;
+  }
+
+function graphPaletteDemandIndex() {
+    const cache =
+      graphPaletteDemandCache();
+    if (!cache) {
+      graphPaletteDemandIndexSource = null;
+      graphPaletteDemandIndexRevision = "";
+      graphPaletteDemandIndexEntries = [];
+      graphPaletteDemandIndexById =
+        new Map();
+      return {
+        revision: "",
+        entries:
+          graphPaletteDemandIndexEntries,
+        byId:
+          graphPaletteDemandIndexById
+      };
+    }
+
+    let source = null;
+    try {
+      source =
+        typeof cache.getPaletteIndex ===
+          "function"
+          ? cache.getPaletteIndex()
+          : cache.paletteIndex ??
+            (
+              typeof cache.getIndex ===
+                "function"
+                ? cache.getIndex()
+                : null
+            );
+    } catch {
+      source = null;
+    }
+
+    const rows = Array.isArray(source)
+      ? source
+      : Array.isArray(source?.entries)
+        ? source.entries
+        : Array.isArray(source?.operators)
+          ? source.operators
+          : Array.isArray(
+              source?.paletteEntries
+            )
+            ? source.paletteEntries
+            : null;
+    const revision = String(
+      source?.revision ||
+      source?.contentHash ||
+      source?.catalogFingerprint ||
+      cache.revision ||
+      cache.contentHash ||
+      cache.catalogFingerprint ||
+      ""
+    );
+
+    if (
+      !rows ||
+      rows.length === 0
+    ) {
+      graphPaletteDemandIndexSource = null;
+      graphPaletteDemandIndexRevision =
+        revision;
+      graphPaletteDemandIndexEntries = [];
+      graphPaletteDemandIndexById =
+        new Map();
+      return {
+        revision,
+        entries:
+          graphPaletteDemandIndexEntries,
+        byId:
+          graphPaletteDemandIndexById
+      };
+    }
+
+    if (
+      rows ===
+        graphPaletteDemandIndexSource &&
+      revision ===
+        graphPaletteDemandIndexRevision
+    ) {
+      return {
+        revision,
+        entries:
+          graphPaletteDemandIndexEntries,
+        byId:
+          graphPaletteDemandIndexById
+      };
+    }
+
+    const entries = [];
+    const byId = new Map();
+    const customCSharpKinds = new Set([
+      "method",
+      "constructor",
+      "property-get",
+      "property-set",
+      "field-get",
+      "field-set",
+      "type"
+    ]);
+    for (const row of rows) {
+      const compactRow =
+        source?.compact === true &&
+        Array.isArray(row);
+      const sourceDefinition =
+        !compactRow &&
+        row?.definition &&
+        typeof row.definition === "object"
+          ? row.definition
+          : row;
+      const operatorId = String(
+        (compactRow ? row[0] : "") ||
+        row?.operatorId ||
+        row?.id ||
+        sourceDefinition?.operatorId ||
+        sourceDefinition?.id ||
+        ""
+      ).trim();
+      if (
+        !operatorId.startsWith("api.") ||
+        byId.has(operatorId)
+      ) {
+        continue;
+      }
+      const apiMemberKind = String(
+        (compactRow
+          ? source.memberKinds?.[
+              Number(row[5])
+            ]
+          : sourceDefinition?.apiMemberKind) ||
+        row?.apiMemberKind ||
+        ""
+      );
+      const flags = compactRow
+        ? Number(row[4]) || 0
+        : 0;
+      const owner = compactRow
+        ? String(
+            source.typeRouting?.[
+              Number(row[1])
+            ]?.[0] || ""
+          )
+        : "";
+      const definition = compactRow
+        ? {
+            title: String(
+              row[2] || operatorId
+            ),
+            description: "",
+            apiSearchText:
+              `${owner} ${row[7] || ""}`
+                .trim(),
+            group: String(
+              source.groups?.[
+                Number(row[3])
+              ] || "Other"
+            ),
+            symbol: String(
+              source.symbols?.[
+                Number(row[6])
+              ] || "API"
+            ),
+            expertOnly:
+              (flags & 1) !== 0,
+            hiddenFromPalette:
+              (flags & 4) !== 0,
+            catalogGenerated: true,
+            apiMemberKind,
+            customCSharpCatalogNode:
+              (flags & 2) !== 0 ||
+              customCSharpKinds.has(
+                apiMemberKind
+              )
+          }
+        : {
+        title: String(
+          sourceDefinition?.title ||
+          operatorId
+        ),
+        description: String(
+          sourceDefinition?.description ||
+          ""
+        ),
+        apiSearchText: String(
+          sourceDefinition?.apiSearchText ||
+          ""
+        ),
+        group: String(
+          sourceDefinition?.group ||
+          "Other"
+        ),
+        symbol: String(
+          sourceDefinition?.symbol ||
+          "API"
+        ),
+        expertOnly:
+          sourceDefinition?.expertOnly ===
+          true,
+        hiddenFromPalette:
+          sourceDefinition
+            ?.hiddenFromPalette === true,
+        catalogGenerated: true,
+        apiMemberKind,
+        customCSharpCatalogNode:
+          sourceDefinition
+            ?.customCSharpCatalogNode ===
+            true ||
+          customCSharpKinds.has(
+            apiMemberKind
+          )
+      };
+      entries.push(operatorId);
+      byId.set(
+        operatorId,
+        definition
+      );
+    }
+
+    graphPaletteDemandIndexSource = rows;
+    graphPaletteDemandIndexRevision =
+      revision;
+    graphPaletteDemandIndexEntries = entries;
+    graphPaletteDemandIndexById = byId;
+    return {
+      revision,
+      entries,
+      byId
+    };
+  }
+
+function ensureGraphPaletteOperators(
+    operatorIds
+  ) {
+    const missing = [
+      ...new Set(
+        (operatorIds || []).filter(
+          operatorId =>
+            typeof operatorId ===
+              "string" &&
+            operatorId.startsWith("api.") &&
+            !OPERATOR_DEFINITIONS[
+              operatorId
+            ]
+        )
+      )
+    ];
+    if (missing.length === 0) {
+      return Promise.resolve(true);
+    }
+    const ensure =
+      graphPaletteDemandCache()
+        ?.ensureOperators;
+    if (typeof ensure !== "function") {
+      return Promise.resolve(false);
+    }
+    return Promise.resolve()
+      .then(() => ensure(missing))
+      .then(() =>
+        missing.every(
+          operatorId =>
+            Boolean(
+              OPERATOR_DEFINITIONS[
+                operatorId
+              ]
+            )
+        )
+      )
+      .catch(() => false);
+  }
+
 function graphPaletteDefinitionIndex(
     showAdvanced
   ) {
+    const demandIndex =
+      graphPaletteDemandIndex();
     const revision = [
       Number(
         window.__RMLNodeDefinitionRevision
       ) || 0,
       Number(
         window.__RMLApiNodeFactoryVersion
-      ) || 0
+      ) || 0,
+      demandIndex.revision,
+      demandIndex.entries.length
     ].join(":");
     if (
       revision !==
@@ -14854,14 +15339,35 @@ function graphPaletteDefinitionIndex(
     ) {
       graphPaletteDefinitionIndexRevision =
         revision;
-      graphPaletteDefinitionIds =
+      const registeredIds =
         Object.keys(OPERATOR_DEFINITIONS);
+      const demandIds =
+        demandIndex.entries;
+      const demandIdSet =
+        new Set(demandIds);
+      graphPaletteDefinitionIds = [
+        ...registeredIds.filter(
+          operatorId =>
+            OPERATOR_DEFINITIONS[
+              operatorId
+            ]?.catalogGenerated !==
+              true ||
+            !demandIdSet.has(operatorId)
+        ),
+        ...demandIds
+      ];
       graphPaletteCatalogDefinitionCount = 0;
       for (const operatorId of
         graphPaletteDefinitionIds) {
         if (
-          OPERATOR_DEFINITIONS[operatorId]
-            ?.catalogGenerated === true
+          (
+            OPERATOR_DEFINITIONS[
+              operatorId
+            ] ||
+            demandIndex.byId.get(
+              operatorId
+            )
+          )?.catalogGenerated === true
         ) {
           graphPaletteCatalogDefinitionCount += 1;
         }
@@ -14882,7 +15388,8 @@ function graphPaletteDefinitionIndex(
     for (const operatorId of
       graphPaletteDefinitionIds) {
       const definition =
-        OPERATOR_DEFINITIONS[operatorId];
+        OPERATOR_DEFINITIONS[operatorId] ||
+        demandIndex.byId.get(operatorId);
       if (
         !definition ||
         definition.hiddenFromPalette === true ||
@@ -14943,6 +15450,8 @@ function graphPaletteDefinitionIndex(
   }
 
 function graphPaletteRenderSignature() {
+    const demandIndex =
+      graphPaletteDemandIndex();
     const savedRevision =
       typeof savedApiCompositePaletteStateRevision ===
         "function"
@@ -14963,6 +15472,8 @@ function graphPaletteRenderSignature() {
       Number(
         window.__RMLApiNodeFactoryVersion
       ) || 0,
+      demandIndex.revision,
+      demandIndex.entries.length,
       apiCompositeCatalogAvailable()
         ? "catalog-ready"
         : "catalog-unavailable",
@@ -15078,6 +15589,48 @@ function scheduleVisibleSavedApiCompositePaletteRowsRefresh() {
   }
 
 function scheduleGraphPaletteRender() {
+    if (
+      !graph?.active ||
+      !runtimeGraphViewActive ||
+      !dom.paletteContent
+    ) {
+      return;
+    }
+    if (graphViewPreparing()) {
+      const preparation =
+        graphViewPreparation;
+      if (
+        graphPaletteRenderAfterPreparation !==
+          preparation
+      ) {
+        graphPaletteRenderAfterPreparation =
+          preparation;
+        const resume = () => {
+          if (
+            graphPaletteRenderAfterPreparation !==
+              preparation
+          ) {
+            return;
+          }
+          graphPaletteRenderAfterPreparation =
+            null;
+          if (
+            graphViewPreparation !== preparation ||
+            graphViewPreparing()
+          ) {
+            return;
+          }
+          requestProjectAnimationFrame(() => {
+            scheduleGraphPaletteRender();
+          });
+        };
+        Promise.resolve(
+          preparation?.promise
+        ).then(resume, resume);
+      }
+      return;
+    }
+    graphPaletteRenderAfterPreparation = null;
     const signature =
       graphPaletteRenderSignature();
     if (
@@ -15090,7 +15643,6 @@ function scheduleGraphPaletteRender() {
       scheduleVisibleSavedApiCompositePaletteRowsRefresh();
       return;
     }
-    if (!dom.paletteContent) return;
     if (graphPaletteRenderFrame) {
       cancelAnimationFrame(
         graphPaletteRenderFrame
@@ -15533,8 +16085,10 @@ function renderGraphPalette(
       let rendered = 0;
       let initialized = false;
       let moreButton = null;
+      let hydration = null;
 
       const renderNextBatch = () => {
+        if (hydration) return;
         initialized = true;
 
         if (entries.length === 0) {
@@ -15556,48 +16110,92 @@ function renderGraphPalette(
           rendered +
             CATALOG_GROUP_BATCH_SIZE
         );
-        const fragment =
-          document.createDocumentFragment();
+        const batch = entries.slice(
+          rendered,
+          end
+        );
+        const appendHydratedBatch = () => {
+          if (!details.isConnected) return;
+          const fragment =
+            document.createDocumentFragment();
+          let appended = 0;
 
-        while (rendered < end) {
-          const operatorId = entries[rendered];
-          const definition =
-            OPERATOR_DEFINITIONS[operatorId];
-          if (!definition) {
-            rendered += 1;
-            continue;
+          for (const operatorId of batch) {
+            const definition =
+              OPERATOR_DEFINITIONS[
+                operatorId
+              ];
+            if (!definition) continue;
+            fragment.appendChild(
+              createPaletteItem(
+                operatorId,
+                definition
+              )
+            );
+            appended += 1;
           }
-          fragment.appendChild(
-            createPaletteItem(
-              operatorId,
-              definition
+
+          rendered = end;
+          list.appendChild(fragment);
+
+          if (appended === 0) {
+            const unavailable =
+              document.createElement("div");
+            unavailable.className =
+              "rml-graph-palette-status";
+            unavailable.textContent =
+              "These API nodes could not be loaded from the catalog cache.";
+            list.appendChild(unavailable);
+          }
+
+          if (rendered < entries.length) {
+            moreButton =
+              document.createElement("button");
+            moreButton.type = "button";
+            moreButton.className =
+              "rml-graph-palette-more";
+            const remaining =
+              entries.length - rendered;
+            moreButton.textContent =
+              `Show next ${Math.min(
+                CATALOG_GROUP_BATCH_SIZE,
+                remaining
+              ).toLocaleString()} · ${rendered.toLocaleString()} of ${entries.length.toLocaleString()} loaded`;
+            moreButton.addEventListener(
+              "click",
+              renderNextBatch,
+              { once: true }
+            );
+            list.appendChild(moreButton);
+          }
+        };
+
+        if (
+          batch.every(operatorId =>
+            Boolean(
+              OPERATOR_DEFINITIONS[
+                operatorId
+              ]
             )
-          );
-          rendered += 1;
+          )
+        ) {
+          appendHydratedBatch();
+          return;
         }
 
-        list.appendChild(fragment);
-
-        if (rendered < entries.length) {
-          moreButton =
-            document.createElement("button");
-          moreButton.type = "button";
-          moreButton.className =
-            "rml-graph-palette-more";
-          const remaining =
-            entries.length - rendered;
-          moreButton.textContent =
-            `Show next ${Math.min(
-              CATALOG_GROUP_BATCH_SIZE,
-              remaining
-            ).toLocaleString()} · ${rendered.toLocaleString()} of ${entries.length.toLocaleString()} loaded`;
-          moreButton.addEventListener(
-            "click",
-            renderNextBatch,
-            { once: true }
-          );
-          list.appendChild(moreButton);
-        }
+        list.setAttribute(
+          "aria-busy",
+          "true"
+        );
+        hydration =
+          ensureGraphPaletteOperators(batch)
+            .then(() => {
+              hydration = null;
+              list.removeAttribute(
+                "aria-busy"
+              );
+              appendHydratedBatch();
+            });
       };
 
       const ensureFirstBatch = () => {
@@ -15686,6 +16284,8 @@ function renderGraphPalette(
     ) => {
       const sequence = ++searchSequence;
       const matches = [];
+      const demandDefinitions =
+        graphPaletteDemandIndex().byId;
       let operatorIds = null;
       let offset = 0;
       const current = () =>
@@ -15695,6 +16295,37 @@ function renderGraphPalette(
           query &&
         graph.showAdvancedNodes ===
           showAdvanced;
+      const finish = () => {
+        const publish = () => {
+          if (!current()) return;
+          renderEntries({
+            query,
+            matches: matches.filter(
+              operatorId =>
+                Boolean(
+                  OPERATOR_DEFINITIONS[
+                    operatorId
+                  ]
+                )
+            )
+          });
+        };
+        if (
+          matches.every(operatorId =>
+            Boolean(
+              OPERATOR_DEFINITIONS[
+                operatorId
+              ]
+            )
+          )
+        ) {
+          publish();
+          return;
+        }
+        ensureGraphPaletteOperators(
+          matches
+        ).then(publish);
+      };
       const step = () => {
         searchTimer = 0;
         if (!current()) return;
@@ -15715,7 +16346,8 @@ function renderGraphPalette(
           const operatorId =
             operatorIds[offset++];
           const definition =
-            OPERATOR_DEFINITIONS[operatorId];
+            OPERATOR_DEFINITIONS[operatorId] ||
+            demandDefinitions.get(operatorId);
           if (
             definition &&
             searchableText(
@@ -15730,10 +16362,7 @@ function renderGraphPalette(
           offset >= operatorIds.length ||
           matches.length >= MAX_SEARCH_RESULTS
         ) {
-          renderEntries({
-            query,
-            matches
-          });
+          finish();
           return;
         }
         searchTimer =
@@ -44853,6 +45482,12 @@ async function reconcileOpenGraphForCatalog(
       graphCatalogReadinessMessage =
         "The compatible catalog update was not applied. Click the Runtime Graph button to review the replacements again.";
       updatePackButton();
+      if (
+        dom.root?.dataset
+          .rmlCatalogRestoreShell === "true"
+      ) {
+        finishGraphTransitionWork();
+      }
       return {
         stale: false,
         declined: true,
@@ -44906,8 +45541,7 @@ function scheduleOpenGraphCatalogReconciliation(
       savedApiCompositeCatalogKey();
     if (
       !catalogKey ||
-      !graph?.active ||
-      !graphUsesCatalogOperators(graph)
+      !graph?.active
     ) {
       return Promise.resolve(null);
     }
@@ -44925,6 +45559,9 @@ function scheduleOpenGraphCatalogReconciliation(
       openGraphCatalogReconciliationCompletedKey ===
         catalogKey
     ) {
+      return Promise.resolve(null);
+    }
+    if (!graphUsesCatalogOperators(graph)) {
       return Promise.resolve(null);
     }
     if (savedApiCompositeReconciliationPromise) {
@@ -45007,6 +45644,12 @@ function scheduleOpenGraphCatalogReconciliation(
           graphCatalogReadinessMessage =
             `${error instanceof Error ? error.message : String(error)} Click the Runtime Graph button to retry the deterministic replacement flow.`;
           updatePackButton();
+          if (
+            dom.root?.dataset
+              .rmlCatalogRestoreShell === "true"
+          ) {
+            finishGraphTransitionWork();
+          }
           openGraphCatalogReconciliationCompletedKey =
             catalogKey;
           console.warn(
@@ -45284,6 +45927,33 @@ function updateGraphCatalogReadiness(
         ? `The available API catalog does not provide ${missing.length} required Runtime Graph operator${missing.length === 1 ? "" : "s"}: ${missing.slice(0, 4).join(", ")}${missing.length > 4 ? ", …" : ""}`
         : "The restored Runtime Graph contains preserved API contracts that require the normal confirmed catalog-replacement flow before they can use the current catalog.";
     updatePackButton();
+    if (
+      dom.root?.dataset
+        .rmlCatalogRestoreShell === "true"
+    ) {
+      const alreadyFailed =
+        dom.root.dataset.rmlGraphPhase ===
+          "catalog-failed";
+      dom.root.dataset.rmlGraphPhase =
+        "catalog-failed";
+      dom.root.removeAttribute("aria-busy");
+      finishGraphTransitionWork();
+      if (!alreadyFailed) {
+        document.dispatchEvent(
+          new CustomEvent(
+            "rml-graph:presentation-complete",
+            {
+              detail: {
+                ...graphRenderCompleteDetail(),
+                failed: true,
+                error:
+                  graphCatalogReadinessMessage
+              }
+            }
+          )
+        );
+      }
+    }
     return false;
   }
 
@@ -45635,13 +46305,17 @@ async function initializeImmediately() {
   }
 
 installGraphSearchShortcutHandlers();
+document.addEventListener(
+  "rml-graph:presentation-complete",
+  handleGraphTransitionPresentationComplete
+);
 
 Object.defineProperty(
   window,
   "RMLNodeGraphViewModuleId",
   {
     value:
-      "1.20.31-universal-presentation-dev72-synchronous-retained-drag",
+      "1.20.31-universal-presentation-dev79-demand-catalog-nonblocking-presentation",
     writable: false,
     enumerable: true,
     configurable: true

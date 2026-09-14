@@ -4,7 +4,7 @@
 
 
 const GRAPH_BOOTSTRAP_MODULE_ID =
-  "1.20.31-universal-presentation-dev72-synchronous-retained-drag";
+  "1.20.31-universal-presentation-dev79-demand-catalog-nonblocking-presentation";
 
 function assertGraphBootstrapModuleCoherence() {
   const mismatches = [];
@@ -1407,11 +1407,23 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
           viewReady: graphViewPreparationCurrent() && !graphViewPreparation?.pending &&
             dom.root?.dataset.rmlGraphPhase === "ready",
           viewFailed:
-            dom.root?.dataset
-              .rmlGraphPhase === "failed",
+            [
+              "failed",
+              "catalog-failed"
+            ].includes(
+              dom.root?.dataset
+                .rmlGraphPhase
+            ),
           viewError:
             String(
               graphViewPreparation?.error ||
+              (
+                dom.root?.dataset
+                  .rmlGraphPhase ===
+                    "catalog-failed"
+                  ? graphCatalogReadinessMessage
+                  : ""
+              ) ||
               ""
             ),
           renderBlocked,

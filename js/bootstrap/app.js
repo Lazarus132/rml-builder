@@ -43,7 +43,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "1.20.31-universal-presentation-dev72-synchronous-retained-drag";
+  "1.20.31-universal-presentation-dev79-demand-catalog-nonblocking-presentation";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -4349,7 +4349,7 @@ function ensureGraphCodegenWorker() {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev72-synchronous-retained-drag",
+      "../workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev79-demand-catalog-nonblocking-presentation",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -9664,7 +9664,7 @@ function isImportRecoveryExportOnlyDiagnostic(
   ) {
     return true;
   }
-  
+
   for (const nodeId of
     scope.nodeIds) {
     if (
@@ -10484,6 +10484,7 @@ function setBuilderActivePage(
   const changed =
     state.activePage !== normalized;
   state.activePage = normalized;
+  setTopMenuOpen(false);
 
   if (writeMarker) {
     const projectFingerprint =
@@ -25421,7 +25422,7 @@ async function openSettingsPreview() {
   elements.settingsPreviewContent.innerHTML = `
     <div class="rml-inline-dialog-loading">
       <div>
-        <div class="builder-work-spinner" aria-hidden="true"></div>
+        <div class="builder-work-spinner brand-mark rml-pack-brand-mark rml-runtime-graph-loader" aria-hidden="true"><span></span><span></span></div>
         <p>Preparing the runtime preview…</p>
       </div>
     </div>`;
@@ -25701,6 +25702,8 @@ function setProjectFileStatus(
 
 let activeProjectLoadSession = 0;
 let activeBuilderWorkSession = 0;
+let builderWorkSessionSequence = 0;
+const builderWorkSessions = new Set();
 let builderWorkWatchdog = 0;
 let activeBuilderReplacementPrompt = 0;
 
@@ -26685,20 +26688,27 @@ async function requestBuilderReplacementChoice(
 }
 
 function beginBuilderWork(options = {}) {
-  activeBuilderWorkSession += 1;
+  const overlayWasActive =
+    builderWorkSessions.size > 0;
   const session =
-    activeBuilderWorkSession;
+    ++builderWorkSessionSequence;
+  builderWorkSessions.add(session);
+  activeBuilderWorkSession = session;
 
   window.clearTimeout(
     builderWorkWatchdog
   );
 
-  resetBuilderReplacementUi();
-
-  elements.builderWorkOverlay.hidden = false;
-  document.body.classList.add(
-    "rml-builder-work-active"
-  );
+  if (
+    !overlayWasActive &&
+    elements.builderWorkOverlay
+  ) {
+    resetBuilderReplacementUi();
+    elements.builderWorkOverlay.hidden = false;
+    document.body.classList.add(
+      "rml-builder-work-active"
+    );
+  }
   updateBuilderWork(session, options);
 
   const timeout = clamp(
@@ -26730,16 +26740,30 @@ function beginBuilderWork(options = {}) {
 
 function finishBuilderWork(session) {
   if (
-    session !== activeBuilderWorkSession ||
+    !builderWorkSessions.has(session) ||
     !elements.builderWorkOverlay
   ) {
     return false;
+  }
+
+  builderWorkSessions.delete(session);
+  if (
+    session !== activeBuilderWorkSession
+  ) {
+    return true;
   }
 
   window.clearTimeout(
     builderWorkWatchdog
   );
   builderWorkWatchdog = 0;
+  if (builderWorkSessions.size > 0) {
+    activeBuilderWorkSession = Math.max(
+      ...builderWorkSessions
+    );
+    return true;
+  }
+  activeBuilderWorkSession = 0;
   resetBuilderReplacementUi();
   elements.builderWorkOverlay.hidden = true;
   document.body.classList.remove(
@@ -26753,11 +26777,14 @@ Object.defineProperty(
   "RMLBuilderWork",
   {
     value: Object.freeze({
-      version: 1,
+      version: 2,
       begin: beginBuilderWork,
       update: updateBuilderWork,
       paint: paintBuilderUi,
-      finish: finishBuilderWork
+      finish: finishBuilderWork,
+      active() {
+        return builderWorkSessions.size > 0;
+      }
     }),
     writable: false,
     enumerable: false,
@@ -28025,7 +28052,7 @@ function promiseWithBuilderTimeout(
 
 function assertProjectRuntimeModuleCoherence() {
   const expectedModuleId =
-    "1.20.31-universal-presentation-dev72-synchronous-retained-drag";
+    "1.20.31-universal-presentation-dev79-demand-catalog-nonblocking-presentation";
   const requiredFactoryVersion = 38;
   const mismatches = [];
   const requireModuleId = (
@@ -31294,10 +31321,7 @@ function waitForImportedGraphUi(
       ) {
         return;
       }
-      const current = hostStateMatches();
-      if (current.matches) {
-        finish(false);
-      }
+      inspectNow();
     };
     const handleReplacement = event => {
       const replacementProjectEpoch =
@@ -36759,8 +36783,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "../../templates/help_template.html?v=1.20.31-universal-presentation-dev72-synchronous-retained-drag",
-    "../templates/help_template.js?v=1.20.31-universal-presentation-dev72-synchronous-retained-drag",
+    "../../templates/help_template.html?v=1.20.31-universal-presentation-dev79-demand-catalog-nonblocking-presentation",
+    "../templates/help_template.js?v=1.20.31-universal-presentation-dev79-demand-catalog-nonblocking-presentation",
     "help-template",
     "RMLHelpTemplateMarkup"
   )
@@ -43165,6 +43189,8 @@ async function initialize() {
   await paintBuilderUi();
   startupWork.finish();
 
+  document.documentElement.dataset
+    .rmlBuilderReady = "true";
   document.dispatchEvent(
     new CustomEvent(
       "rml-builder:ready"

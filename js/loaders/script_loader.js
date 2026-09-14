@@ -3,7 +3,7 @@
   // RML Builder loaders: script_loader.
 
   const SCRIPT_LOADER_MODULE_ID =
-    "1.20.31-universal-presentation-dev72-synchronous-retained-drag";
+    "1.20.31-universal-presentation-dev79-demand-catalog-nonblocking-presentation";
 
   if (
     Object.hasOwn(
@@ -19,7 +19,7 @@
   }
 
   if (
-    window.RMLScriptLoader?.version >= 40 &&
+    window.RMLScriptLoader?.version >= 41 &&
     window.RMLScriptLoader?.moduleId ===
       SCRIPT_LOADER_MODULE_ID
   ) {
@@ -35,7 +35,6 @@
   const prefetchedFiles = new Set();
   let runtimeViewPreparationPromise = null;
   let runtimeViewOpenAfterLoadPromise = null;
-  let runtimeViewLoadingNoticePromise = null;
   const GRAPH_SEARCH_SHORTCUT_CAPTURE_VERSION = 18;
   const provisionalGraphShortcutKeys = new Set();
 
@@ -184,7 +183,7 @@
       dependencies: Object.freeze([]),
       files: Object.freeze([
         Object.freeze({
-          url: "../catalog/catalog_loader.js?v=1.20.31-universal-presentation-dev72-synchronous-retained-drag",
+          url: "../catalog/catalog_loader.js?v=1.20.31-universal-presentation-dev79-demand-catalog-nonblocking-presentation",
           ready: () =>
             window.RMLCatalogImportGate?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -236,7 +235,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/node_graph_codegen.js?v=1.20.31-universal-presentation-dev72-synchronous-retained-drag",
+          url: "../graph/node_graph_codegen.js?v=1.20.31-universal-presentation-dev79-demand-catalog-nonblocking-presentation",
           ready: () =>
             window.RMLTypedNodeGraphGenerator?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -253,7 +252,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev72-synchronous-retained-drag",
+          url: "../workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev79-demand-catalog-nonblocking-presentation",
           ready: () =>
             window.RMLSavedApiCompositeCompareWorkerBootstrap
               ?.moduleId === SCRIPT_LOADER_MODULE_ID &&
@@ -262,13 +261,13 @@
               ?.source === "string"
         }),
         Object.freeze({
-          url: "../graph/node_graph_composites.js?v=1.20.31-universal-presentation-dev72-synchronous-retained-drag",
+          url: "../graph/node_graph_composites.js?v=1.20.31-universal-presentation-dev79-demand-catalog-nonblocking-presentation",
           ready: () =>
             window.RMLNodeGraphCompositesModuleId ===
               SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_custom_csharp.js?v=1.20.31-universal-presentation-dev72-synchronous-retained-drag",
+          url: "../graph/node_graph_custom_csharp.js?v=1.20.31-universal-presentation-dev79-demand-catalog-nonblocking-presentation",
           ready: () =>
             window.RMLNodeGraphCustomCSharpModuleId ===
               SCRIPT_LOADER_MODULE_ID
@@ -277,13 +276,13 @@
           url: "../graph/node_graph_guided.js?v=1-physical-modules-v748"
         }),
         Object.freeze({
-          url: "../graph/node_graph_view.js?v=1.20.31-universal-presentation-dev72-synchronous-retained-drag",
+          url: "../graph/node_graph_view.js?v=1.20.31-universal-presentation-dev79-demand-catalog-nonblocking-presentation",
           ready: () =>
             window.RMLNodeGraphViewModuleId ===
               SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_bootstrap.js?v=1.20.31-universal-presentation-dev72-synchronous-retained-drag",
+          url: "../graph/node_graph_bootstrap.js?v=1.20.31-universal-presentation-dev79-demand-catalog-nonblocking-presentation",
           ready: () =>
             window.RMLDynamicGraphHost?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -464,29 +463,6 @@
     definition.files.forEach(prefetchFile);
   }
 
-  function afterRuntimeLoadingPaint() {
-    return new Promise(resolve => {
-      let settled = false;
-      const finish = () => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        resolve(true);
-      };
-      const fallback = window.setTimeout(
-        finish,
-        80
-      );
-      window.requestAnimationFrame(() => {
-        window.requestAnimationFrame(() => {
-          window.clearTimeout(fallback);
-          finish();
-        });
-      });
-    });
-  }
-
   function bundleState(name) {
     if (!bundleStates.has(name)) {
       bundleStates.set(name, {
@@ -641,28 +617,25 @@
       : loading
         ? "loading"
         : "ready";
-    const visualState = loading
-      ? "loading"
-      : failed
-        ? "failed-loader"
-        : graph?.active === true
-          ? "graph-open"
-          : "graph-pack";
+    const visualState = failed
+      ? "failed-loader"
+      : graph?.active === true
+        ? "graph-open"
+        : "graph-pack";
     if (
       button.dataset.rmlRuntimeButtonVisual !==
         visualState
     ) {
       button.dataset.rmlRuntimeButtonVisual =
         visualState;
-      button.innerHTML = loading
-        ? '<span class="brand-mark rml-pack-brand-mark rml-runtime-graph-loader rml-runtime-graph-spinner" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">Loading Runtime Graph…</span>'
-        : '<span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">' +
-          (failed
-            ? "Retry Runtime Graph"
-            : graph?.active === true
-              ? "Open Runtime Graph"
-              : "Pack into Node") +
-          "</span>";
+      button.innerHTML =
+        '<span class="brand-mark rml-pack-brand-mark" aria-hidden="true"><span></span><span></span></span><span class="top-action-label">' +
+        (failed
+          ? "Retry Runtime Graph"
+          : graph?.active === true
+            ? "Open Runtime Graph"
+            : "Pack into Node") +
+        "</span>";
     }
     button.dataset.help = failed
       ? "Retry loading the local Runtime Graph modules."
@@ -694,11 +667,7 @@
       return runtimeViewPreparationPromise;
     }
 
-    const preparation = (async () => {
-      await afterRuntimeLoadingPaint();
-      await prepareRuntimeView();
-      return true;
-    })();
+    const preparation = prepareRuntimeView();
     runtimeViewPreparationPromise = preparation;
     updateRuntimeButton();
     void preparation.then(
@@ -732,37 +701,6 @@
     return true;
   }
 
-  function reportRuntimeViewStillLoading(
-    {
-      title = "Runtime Graph opening is already queued",
-      message =
-        "Loading was already in progress when you clicked. This click does not start a second load; the requested graph opens automatically as soon as that preparation completes."
-    } = {}
-  ) {
-    const notice =
-      window.RMLBuilderDialog?.notice;
-    if (
-      typeof notice !== "function" ||
-      runtimeViewLoadingNoticePromise
-    ) {
-      return;
-    }
-    runtimeViewLoadingNoticePromise =
-      Promise.resolve(
-        notice({
-          tone: "info",
-          kicker: "Runtime Graph",
-          title,
-          message,
-          confirmLabel: "OK"
-        })
-      )
-        .catch(() => {})
-        .finally(() => {
-          runtimeViewLoadingNoticePromise = null;
-        });
-  }
-
   function installRuntimeButton() {
     const button = runtimeButton();
     if (!button || button.dataset.rmlLazyScriptBound === "true") {
@@ -783,10 +721,7 @@
     button.addEventListener("click", event => {
       if (
         button.dataset.rmlGraphActionBound === "true" &&
-        status("runtime-view").status === "loaded" &&
-        document.body.classList.contains(
-          "rml-node-graph-mode"
-        )
+        status("runtime-view").status === "loaded"
       ) {
         return;
       }
@@ -803,49 +738,70 @@
       }
       button.setAttribute("aria-disabled", "true");
       if (runtimeViewOpenAfterLoadPromise) {
-        reportRuntimeViewStillLoading();
         updateRuntimeButton();
         return;
       }
-      const continuation =
-        startRuntimeViewPreparation();
+      const builderWork =
+        window.RMLBuilderWork;
+      const workSession =
+        builderWork?.begin?.({
+          kicker: "Runtime Graph",
+          title: "Preparing Runtime Graph…",
+          message:
+            "The graph appears as soon as its complete interactive frame is ready.",
+          detail:
+            "Loading the local graph modules…",
+          progress: 12,
+          timeout: 120000
+        }) || 0;
+      const continuation = (async () => {
+        await startRuntimeViewPreparation();
+        const host =
+          window.RMLDynamicGraphHost;
+        const openPresentation =
+          host?.openPresentation;
+        if (typeof openPresentation !== "function") {
+          throw new Error(
+            "The Runtime Graph host loaded without its presentation handler."
+          );
+        }
+        builderWork?.update?.(
+          workSession,
+          {
+            detail:
+              "Rendering nodes, ports and connections…",
+            progress: 58
+          }
+        );
+        const opened =
+          await openPresentation();
+        if (opened === false) {
+          return false;
+        }
+        return await host.whenViewReady?.();
+      })();
       runtimeViewOpenAfterLoadPromise = continuation;
       updateRuntimeButton();
       void continuation
-        .then(() => {
-          if (
-            runtimeViewOpenAfterLoadPromise !==
-              continuation
-          ) {
-            return;
-          }
-          runtimeViewOpenAfterLoadPromise = null;
-          updateRuntimeButton();
-          button.disabled = false;
-          button.setAttribute("aria-disabled", "false");
-          button.removeAttribute("aria-busy");
-          delete button.dataset.unavailableReason;
-          const openPresentation =
-            window.RMLDynamicGraphHost
-              ?.openPresentation;
-          if (typeof openPresentation !== "function") {
-            throw new Error(
-              "The Runtime Graph host loaded without its presentation handler."
-            );
-          }
-          const result = openPresentation();
-          return result;
-        })
         .catch(error => {
+          console.error(
+            "Runtime Graph modules could not be prepared.",
+            error
+          );
+        })
+        .finally(() => {
           if (
             runtimeViewOpenAfterLoadPromise ===
               continuation
           ) {
             runtimeViewOpenAfterLoadPromise = null;
           }
-          console.error(
-            "Runtime Graph modules could not be prepared.",
-            error
+          button.disabled = false;
+          button.setAttribute("aria-disabled", "false");
+          button.removeAttribute("aria-busy");
+          delete button.dataset.unavailableReason;
+          builderWork?.finish?.(
+            workSession
           );
           updateRuntimeButton();
         });
@@ -879,14 +835,13 @@
 
   Object.defineProperty(window, "RMLScriptLoader", {
     value: Object.freeze({
-      version: 40,
+      version: 41,
       moduleId: SCRIPT_LOADER_MODULE_ID,
       ensure,
       isLoaded(name) {
         return bundleState(name).status === "loaded";
       },
       status,
-      reportRuntimeViewStillLoading,
       bundles: Object.freeze(Object.keys(bundles))
     }),
     writable: false,

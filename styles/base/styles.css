@@ -3662,11 +3662,10 @@ textarea {
 .builder-work-spinner {
   width: 42px;
   height: 42px;
-  border: 4px solid rgba(125, 203, 255, 0.18);
-  border-top-color: #69d8ff;
-  border-right-color: #8d82ff;
-  border-radius: 50%;
-  animation: rml-builder-work-spin 800ms linear infinite;
+  margin: 0 auto;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .builder-work-copy {
@@ -3718,12 +3717,6 @@ body.rml-builder-work-active {
   text-align: center;
 }
 
-@keyframes rml-builder-work-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 @media (max-width: 520px) {
 .builder-work-card {
     grid-template-columns: 1fr;
@@ -3736,10 +3729,6 @@ body.rml-builder-work-active {
 }
 
 @media (prefers-reduced-motion: reduce) {
-.builder-work-spinner {
-    animation-duration: 1600ms;
-  }
-
 .builder-work-progress > span {
     transition: none;
   }

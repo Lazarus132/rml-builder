@@ -968,7 +968,22 @@ function openCustomCSharpFileGraph(fileNodeId) {
           ? pendingPreparation
           : null
     };
-    applyGraphView(graphViewFrom(customGraph));
+    const workSession =
+      beginGraphTransitionWork({
+        kicker: "Custom C#",
+        title: `Opening ${customCSharpEditor.fileName}…`,
+        message:
+          "The file graph appears when its complete interactive frame is ready.",
+        detail:
+          "Preparing syntax nodes, ports and connections…",
+        progress: 42
+      });
+    try {
+      applyGraphView(graphViewFrom(customGraph));
+    } catch (error) {
+      finishGraphTransitionWork(workSession);
+      throw error;
+    }
     resetGraphRenderCaches();
     const reusedAnalysis =
       typeof restoreCurrentGraphAnalysis ===
@@ -977,7 +992,12 @@ function openCustomCSharpFileGraph(fileNodeId) {
     if (!reusedAnalysis) {
       currentAnalysis = null;
     }
-    activateGraphMode();
+    try {
+      activateGraphMode();
+    } catch (error) {
+      finishGraphTransitionWork(workSession);
+      throw error;
+    }
     const provisionalOpen = Boolean(
       customCSharpEditor.openPreparation
     );
@@ -1260,8 +1280,28 @@ function closeCustomCSharpFileGraph({
       }
     }
     const mainView = closingEditor.mainView;
+    const workSession = commit
+      ? beginGraphTransitionWork({
+          kicker: apiCompositeEditor
+            ? "API Composite"
+            : "Runtime Graph",
+          title: apiCompositeEditor
+            ? "Returning to Composite…"
+            : "Returning to Runtime Graph…",
+          message:
+            "The owning graph appears when its complete interactive frame is ready.",
+          detail:
+            "Preserving the Custom C# file and restoring its owner graph…",
+          progress: 46
+        })
+      : 0;
     customCSharpEditor = null;
-    applyGraphView(mainView);
+    try {
+      applyGraphView(mainView);
+    } catch (error) {
+      finishGraphTransitionWork(workSession);
+      throw error;
+    }
     if (commit) {
       resetGraphRenderCaches();
       const restoredAnalysis =
@@ -1272,7 +1312,12 @@ function closeCustomCSharpFileGraph({
       if (!restoredAnalysis) {
         pruneConnections();
       }
-      activateGraphMode();
+      try {
+        activateGraphMode();
+      } catch (error) {
+        finishGraphTransitionWork(workSession);
+        throw error;
+      }
       if (!exactUnchanged) {
         scheduleGraphPersistenceAfterPaint({
           refreshGeneratedOutput:
@@ -2260,7 +2305,7 @@ function buildCustomCSharpFragmentInWorker(nodeId, source, parseResult, options)
     }
     const worker = new Worker(
       new URL(
-        "js/workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev72-synchronous-retained-drag",
+        "js/workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev79-demand-catalog-nonblocking-presentation",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -2579,6 +2624,18 @@ async function openCustomCSharpFileGraphSynced(nodeId, options = {}) {
     const normalizedNodeId = String(nodeId || "");
     const openAfterSync =
       options.openAfterSync !== false;
+    const workSession = openAfterSync
+      ? beginGraphTransitionWork({
+          kicker: "Custom C#",
+          title: "Preparing Custom C# Graph…",
+          message:
+            "Source synchronization and graph presentation complete before the editor appears.",
+          detail:
+            "Synchronizing source and syntax nodes…",
+          progress: 18
+        })
+      : 0;
+    try {
     const previousTask =
       customCSharpSynchronizationTasks.get(
         normalizedNodeId
@@ -2618,7 +2675,7 @@ async function openCustomCSharpFileGraphSynced(nodeId, options = {}) {
         ) {
           return false;
         }
-        return openCustomCSharpFileGraphSynced(
+        return await openCustomCSharpFileGraphSynced(
           normalizedNodeId,
           options
         );
@@ -2734,6 +2791,9 @@ async function openCustomCSharpFileGraphSynced(nodeId, options = {}) {
           restoreSavedPresentationIfReady();
         }
       }
+    }
+    } finally {
+      finishGraphTransitionWork(workSession);
     }
   }
 
@@ -5171,6 +5231,20 @@ function restoreGraphAfterCustomCSharpInlineEditor(
       return;
     }
     customCSharpInlineEditorKey = "";
+    const workSession =
+      beginGraphTransitionWork({
+        kicker: customCSharpEditor
+          ? "Custom C#"
+          : apiCompositeEditor
+            ? "API Composite"
+            : "Runtime Graph",
+        title: "Restoring graph…",
+        message:
+          "The graph appears when its complete interactive frame is ready.",
+        detail:
+          "Restoring nodes, ports and connections…",
+        progress: 38
+      });
     if (dom.canvasTitle) {
       dom.canvasTitle.innerHTML =
         customCSharpEditor
@@ -5192,7 +5266,19 @@ function restoreGraphAfterCustomCSharpInlineEditor(
       runtimeGraphViewActive &&
       dom.builderCanvas
     ) {
-      renderGraphCanvas();
+      try {
+        bindGraphTransitionWorkTarget();
+        renderGraphCanvas();
+      } catch (error) {
+        finishGraphTransitionWork(
+          workSession
+        );
+        throw error;
+      }
+    } else {
+      finishGraphTransitionWork(
+        workSession
+      );
     }
     updatePackButton();
   }
@@ -5428,7 +5514,7 @@ function prepareCustomCSharpEditorHost(
       hostWindow.document.createElement("link");
     stylesheet.rel = "stylesheet";
     stylesheet.href = new URL(
-      "styles/features/styles.runtime-graph.css?v=1.20.31-universal-presentation-dev72-synchronous-retained-drag",
+      "styles/features/styles.runtime-graph.css?v=1.20.31-universal-presentation-dev79-demand-catalog-nonblocking-presentation",
       window.location.href
     ).href;
     hostWindow.document.head.appendChild(
@@ -6906,7 +6992,7 @@ Object.defineProperty(
   "RMLNodeGraphCustomCSharpModuleId",
   {
     value:
-      "1.20.31-universal-presentation-dev72-synchronous-retained-drag",
+      "1.20.31-universal-presentation-dev79-demand-catalog-nonblocking-presentation",
     writable: false,
     enumerable: true,
     configurable: true
