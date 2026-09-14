@@ -2305,7 +2305,7 @@ function buildCustomCSharpFragmentInWorker(nodeId, source, parseResult, options)
     }
     const worker = new Worker(
       new URL(
-        "js/workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev79-demand-catalog-nonblocking-presentation",
+        "js/workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev80-composite-incompatible-node-import",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -5514,7 +5514,7 @@ function prepareCustomCSharpEditorHost(
       hostWindow.document.createElement("link");
     stylesheet.rel = "stylesheet";
     stylesheet.href = new URL(
-      "styles/features/styles.runtime-graph.css?v=1.20.31-universal-presentation-dev79-demand-catalog-nonblocking-presentation",
+      "styles/features/styles.runtime-graph.css?v=1.20.31-universal-presentation-dev80-composite-incompatible-node-import",
       window.location.href
     ).href;
     hostWindow.document.head.appendChild(
@@ -6992,7 +6992,7 @@ Object.defineProperty(
   "RMLNodeGraphCustomCSharpModuleId",
   {
     value:
-      "1.20.31-universal-presentation-dev79-demand-catalog-nonblocking-presentation",
+      "1.20.31-universal-presentation-dev80-composite-incompatible-node-import",
     writable: false,
     enumerable: true,
     configurable: true

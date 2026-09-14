@@ -6,7 +6,7 @@ function savedApiCompositeCompareWorkerMain(
 ) {
 const self = workerScope;
 const SAVED_API_COMPOSITE_COMPARE_WORKER_MODULE_ID =
-  "1.20.31-universal-presentation-dev79-demand-catalog-nonblocking-presentation";
+  "1.20.31-universal-presentation-dev80-composite-incompatible-node-import";
 const SAVED_API_COMPOSITE_CANONICAL_SCHEMA_VERSION = 4;
 const MESSAGE_TYPE = "rml-saved-api-composite-compare";
 const RESULT_TYPE = `${MESSAGE_TYPE}-result`;
@@ -1968,7 +1968,7 @@ if (savedApiCompositeCompareWorkerThread) {
     {
       value: Object.freeze({
         moduleId:
-          "1.20.31-universal-presentation-dev79-demand-catalog-nonblocking-presentation",
+          "1.20.31-universal-presentation-dev80-composite-incompatible-node-import",
         canonicalSchemaVersion:
           4,
         source:

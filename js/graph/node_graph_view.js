@@ -46315,7 +46315,7 @@ Object.defineProperty(
   "RMLNodeGraphViewModuleId",
   {
     value:
-      "1.20.31-universal-presentation-dev79-demand-catalog-nonblocking-presentation",
+      "1.20.31-universal-presentation-dev80-composite-incompatible-node-import",
     writable: false,
     enumerable: true,
     configurable: true

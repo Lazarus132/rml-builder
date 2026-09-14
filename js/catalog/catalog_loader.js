@@ -3,7 +3,7 @@
   // RML Builder catalog: catalog_loader.
 
   const CATALOG_LOADER_MODULE_ID =
-    "1.20.31-universal-presentation-dev79-demand-catalog-nonblocking-presentation";
+    "1.20.31-universal-presentation-dev80-composite-incompatible-node-import";
   const LOADER_VERSION = 84;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
@@ -76,7 +76,7 @@
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=1.20.31-universal-presentation-dev79-demand-catalog-nonblocking-presentation",
+    "api_nodes.js?v=1.20.31-universal-presentation-dev80-composite-incompatible-node-import",
     scriptUrl
   ).href;
 

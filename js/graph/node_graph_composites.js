@@ -677,7 +677,7 @@ const savedApiCompositeSearchTextCache =
     `${SAVED_API_COMPOSITE_COMPARE_MESSAGE_TYPE}-result`;
 
   const SAVED_API_COMPOSITE_COMPARE_MODULE_ID =
-    "1.20.31-universal-presentation-dev79-demand-catalog-nonblocking-presentation";
+    "1.20.31-universal-presentation-dev80-composite-incompatible-node-import";
 
   const SAVED_API_COMPOSITE_COMPARE_CANONICAL_SCHEMA_VERSION =
     4;
@@ -941,7 +941,7 @@ const savedApiCompositeSearchTextCache =
       );
     }
     const workerUrl = new URL(
-      "js/workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev79-demand-catalog-nonblocking-presentation&canonical-schema=4",
+      "js/workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev80-composite-incompatible-node-import&canonical-schema=4",
       document.baseURI
     );
     const workerOptions = {
@@ -6170,6 +6170,217 @@ function savedApiCompositeMatchesCurrentCatalog(
     });
   }
 
+function repairSavedApiCompositeMissingPortTopology(
+    composite,
+    visited = new Set()
+  ) {
+    if (
+      !composite ||
+      typeof composite !== "object" ||
+      Array.isArray(composite) ||
+      visited.has(composite)
+    ) {
+      return Object.freeze({
+        disconnectedConnections: 0,
+        removedBoundaries: 0
+      });
+    }
+    visited.add(composite);
+
+    let disconnectedConnections = 0;
+    let removedBoundaries = 0;
+
+    for (const [ownerNodeId, nested] of
+      Object.entries(
+        composite.apiCompositeGraphs || {}
+      )) {
+      const nestedRepair =
+        repairSavedApiCompositeMissingPortTopology(
+          nested,
+          visited
+        );
+      disconnectedConnections +=
+        Number(
+          nestedRepair?.disconnectedConnections
+        ) || 0;
+      removedBoundaries +=
+        Number(
+          nestedRepair?.removedBoundaries
+        ) || 0;
+
+      const owner =
+        (Array.isArray(composite.nodes)
+          ? composite.nodes
+          : []
+        ).find(node =>
+          String(node?.id || "") ===
+          String(ownerNodeId || "")
+        );
+      if (owner) {
+        owner.parameters =
+          owner.parameters &&
+          typeof owner.parameters === "object" &&
+          !Array.isArray(owner.parameters)
+            ? owner.parameters
+            : {};
+        owner.parameters.boundaryPorts =
+          nodeGraphClone(
+            apiCompositeBoundaryRecords(
+              nested?.boundaryPorts
+            )
+          );
+      }
+    }
+
+    const previousGraph = graph;
+    try {
+      graph = composite;
+
+      const connections = Array.isArray(
+        composite.connections
+      )
+        ? composite.connections
+        : [];
+      const invalidConnectionIds = new Set();
+
+      for (const connection of connections) {
+        const source = findPortSpec(
+          connection?.fromNode,
+          connection?.fromPort,
+          "output"
+        );
+        const target = findPortSpec(
+          connection?.toNode,
+          connection?.toPort,
+          "input"
+        );
+        if (!source || !target) {
+          invalidConnectionIds.add(
+            String(connection?.id || "")
+          );
+        }
+      }
+
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const connection of connections) {
+          const connectionId = String(
+            connection?.id || ""
+          );
+          if (
+            !connectionId ||
+            invalidConnectionIds.has(connectionId)
+          ) {
+            continue;
+          }
+          const branch =
+            connection?.branchFrom ||
+            composite.branchRouting?.[
+              connectionId
+            ] ||
+            null;
+          const parentConnectionId = String(
+            branch?.connectionId || ""
+          );
+          if (
+            parentConnectionId &&
+            invalidConnectionIds.has(
+              parentConnectionId
+            )
+          ) {
+            invalidConnectionIds.add(
+              connectionId
+            );
+            changed = true;
+          }
+        }
+      }
+
+      if (invalidConnectionIds.size > 0) {
+        const before = connections.length;
+        composite.connections =
+          connections.filter(connection =>
+            !invalidConnectionIds.has(
+              String(connection?.id || "")
+            )
+          );
+        disconnectedConnections +=
+          before - composite.connections.length;
+
+        const branchRouting =
+          composite.branchRouting &&
+          typeof composite.branchRouting ===
+            "object" &&
+          !Array.isArray(
+            composite.branchRouting
+          )
+            ? composite.branchRouting
+            : {};
+        for (const [connectionId, branch] of
+          Object.entries(branchRouting)) {
+          if (
+            invalidConnectionIds.has(
+              String(connectionId)
+            ) ||
+            invalidConnectionIds.has(
+              String(
+                branch?.connectionId || ""
+              )
+            )
+          ) {
+            delete branchRouting[connectionId];
+          }
+        }
+        composite.branchRouting = branchRouting;
+
+        if (
+          invalidConnectionIds.has(
+            String(
+              composite.selectedConnectionId ||
+              ""
+            )
+          )
+        ) {
+          composite.selectedConnectionId = null;
+          composite.selectedWirePoint = null;
+        }
+      }
+
+      const boundaries =
+        apiCompositeBoundaryRecords(
+          composite.boundaryPorts
+        );
+      const validBoundaries =
+        boundaries.filter(boundary =>
+          Boolean(
+            findPortSpec(
+              boundary.internalNodeId,
+              boundary.internalPortId,
+              boundary.direction
+            )
+          )
+        );
+      if (
+        validBoundaries.length !==
+        boundaries.length
+      ) {
+        removedBoundaries +=
+          boundaries.length -
+          validBoundaries.length;
+        composite.boundaryPorts =
+          validBoundaries;
+      }
+    } finally {
+      graph = previousGraph;
+    }
+
+    return Object.freeze({
+      disconnectedConnections,
+      removedBoundaries
+    });
+  }
+
 function savedApiCompositeValidationGraph(
     record
   ) {
@@ -6454,6 +6665,29 @@ async function resolveSavedApiCompositeForCurrentCatalog(
         });
       changed = true;
     }
+    const topologyRepairSource =
+      nodeGraphClone(resolved.composite);
+    const topologyRepair =
+      repairSavedApiCompositeMissingPortTopology(
+        topologyRepairSource
+      );
+    if (
+      topologyRepair.disconnectedConnections > 0 ||
+      topologyRepair.removedBoundaries > 0
+    ) {
+      resolved =
+        sanitizeSavedApiCompositeRecord({
+          ...resolved,
+          updatedAt:
+            new Date().toISOString(),
+          composite: {
+            ...topologyRepairSource,
+            title: resolved.name
+          }
+        });
+      changed = true;
+    }
+
     if (persistResolved && changed) {
       const [stored] =
         await persistSavedApiCompositeRecords([
@@ -16834,7 +17068,7 @@ Object.defineProperty(
   "RMLNodeGraphCompositesModuleId",
   {
     value:
-      "1.20.31-universal-presentation-dev79-demand-catalog-nonblocking-presentation",
+      "1.20.31-universal-presentation-dev80-composite-incompatible-node-import",
     writable: false,
     enumerable: true,
     configurable: true
