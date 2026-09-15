@@ -3,7 +3,7 @@
   // RML Builder catalog: api_nodes.
 
   const API_FACTORY_MODULE_ID =
-    "1.20.31-universal-presentation-dev84-preserved-api-contract-presentation";
+    "1.20.31-universal-presentation-dev86-natural-batch-progress";
   const FACTORY_VERSION = 38;
   const API_VERIFICATION_SCHEMA_VERSION = 3;
   const CATALOG_PROJECTION_INDEX_VERSION = 1;

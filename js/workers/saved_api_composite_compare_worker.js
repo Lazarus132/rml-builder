@@ -6,7 +6,7 @@ function savedApiCompositeCompareWorkerMain(
 ) {
 const self = workerScope;
 const SAVED_API_COMPOSITE_COMPARE_WORKER_MODULE_ID =
-  "1.20.31-universal-presentation-dev84-preserved-api-contract-presentation";
+  "1.20.31-universal-presentation-dev86-natural-batch-progress";
 const SAVED_API_COMPOSITE_CANONICAL_SCHEMA_VERSION = 4;
 const MESSAGE_TYPE = "rml-saved-api-composite-compare";
 const RESULT_TYPE = `${MESSAGE_TYPE}-result`;
@@ -36,8 +36,6 @@ const COMPOSITE_LINK_PARAMETER_KEYS = new Set([
   "savedApiCompositeId",
   "savedApiCompositeUpdatedAt",
   "apiCompositeFingerprint",
-
-
   "boundaryPorts",
   "memberCount"
 ]);
@@ -148,8 +146,6 @@ function assertJsonScalar(value, path) {
     case "undefined":
     case "function":
     case "symbol":
-
-
       return null;
     default:
       throw jsonError(
@@ -352,7 +348,6 @@ function canonicalNode(node, index, state, path, scopes) {
           continue;
         }
 
-
         if (
           parameterKey === "portLayout" &&
           parameters[parameterKey] !== "mirrored"
@@ -387,8 +382,6 @@ function canonicalNode(node, index, state, path, scopes) {
       ]);
       continue;
     }
-
-
 
     if (
       (key === "width" || key === "height") &&
@@ -507,7 +500,6 @@ function canonicalConnection(connection, index, state, path, scopes) {
           )
     ]);
   }
-
 
   void sourceConnectionId;
   return canonicalPropertyEntries(entries, path);
@@ -756,10 +748,6 @@ function canonicalGraph(
     const scopes = [scope, ...ancestorScopes];
     const entries = [];
     for (const key of Object.keys(graph)) {
-
-
-
-
       if (
         GRAPH_CACHE_KEYS.has(key) ||
         GRAPH_PRESENTATION_KEYS.has(key) ||
@@ -770,9 +758,6 @@ function canonicalGraph(
       ) {
         continue;
       }
-
-
-
 
       if (
         graphKind === "custom-csharp" &&
@@ -1548,8 +1533,6 @@ function executeCompositeOperation(
       ok: true,
       stale: false,
       transport,
-
-
       equivalent: baseline.serialized === candidate.serialized,
       baselineRevision: baseline.revision,
       baselineFingerprint: baseline.fingerprint,
@@ -1620,9 +1603,6 @@ function processRequest(request) {
         `Unsupported streamed Composite target operation '${String(request.targetOperation)}'.`
       );
     }
-
-
-
     for (const [activeKey, snapshot] of streamedSnapshots) {
       if (snapshot.identityKey === key) {
         discardStreamedSnapshot(activeKey);
@@ -1802,8 +1782,6 @@ function processRequest(request) {
       });
     }
 
-
-
     dropRetainedBaseline(sourceBaselineKey);
     const baseline = {
       ...staged,
@@ -1882,9 +1860,6 @@ function handleWorkerMessage(event) {
 }
 
 self.addEventListener("message", handleWorkerMessage);
-
-
-
 Object.defineProperty(self, "RMLSavedApiCompositeCompareWorker", {
   value: Object.freeze({
     moduleId: SAVED_API_COMPOSITE_COMPARE_WORKER_MODULE_ID,
@@ -1958,17 +1933,13 @@ if (savedApiCompositeCompareWorkerThread) {
   typeof savedApiCompositeCompareWorkerScope ===
     "object"
 ) {
-
-
-
-
   Object.defineProperty(
     savedApiCompositeCompareWorkerScope,
     "RMLSavedApiCompositeCompareWorkerBootstrap",
     {
       value: Object.freeze({
         moduleId:
-          "1.20.31-universal-presentation-dev84-preserved-api-contract-presentation",
+          "1.20.31-universal-presentation-dev86-natural-batch-progress",
         canonicalSchemaVersion:
           4,
         source:

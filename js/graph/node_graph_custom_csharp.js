@@ -1,8 +1,6 @@
 "use strict";
 // Custom C# graph and editor integration.
 
-
-
 const customCSharpSourceSyncTimers = new Map();
 const customCSharpLiveDiagnosticTimers = new Map();
 const customCSharpLiveDiagnosticRevisions = new Map();
@@ -2305,7 +2303,7 @@ function buildCustomCSharpFragmentInWorker(nodeId, source, parseResult, options)
     }
     const worker = new Worker(
       new URL(
-        "js/workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev84-preserved-api-contract-presentation",
+        "js/workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev86-natural-batch-progress",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -5514,7 +5512,7 @@ function prepareCustomCSharpEditorHost(
       hostWindow.document.createElement("link");
     stylesheet.rel = "stylesheet";
     stylesheet.href = new URL(
-      "styles/features/styles.runtime-graph.css?v=1.20.31-universal-presentation-dev84-preserved-api-contract-presentation",
+      "styles/features/styles.runtime-graph.css?v=1.20.31-universal-presentation-dev86-natural-batch-progress",
       window.location.href
     ).href;
     hostWindow.document.head.appendChild(
@@ -6992,7 +6990,7 @@ Object.defineProperty(
   "RMLNodeGraphCustomCSharpModuleId",
   {
     value:
-      "1.20.31-universal-presentation-dev84-preserved-api-contract-presentation",
+      "1.20.31-universal-presentation-dev86-natural-batch-progress",
     writable: false,
     enumerable: true,
     configurable: true

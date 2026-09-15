@@ -194,70 +194,39 @@ function apiCompositeOwnedContainerAllowed(
   }
 
 let bridge = null;
-
 let graph = null;
-
 let customCSharpEditor = null;
-
 let apiCompositeEditor = null;
-
 let apiCompositeRootOperation = false;
-
 let customCSharpRootOperation = false;
-
 let currentAnalysis = null;
 
 const GRAPH_ANALYSIS_CACHE_LIMIT = 4;
-
 const GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION = 1;
-
 const graphAnalysisCache = new Map();
-
 const graphAnalysisIdentityTokens = new WeakMap();
-
 const trustedGraphAnalysisCertificates = new WeakSet();
 
 let lastGraphAnalysisRecord = null;
-
 let pendingGraphAnalysisCertificate = null;
-
 let graphAnalysisCoreRunCount = 0;
-
 let graphAnalysisAsyncRequestSequence = 0;
-
 let lastPersistedGraphReference = null;
-
 let graphCodegenRevision = 1;
-
 let activeInteraction = null;
-
 let graphStructuralPaintFrame = 0;
-
 let graphStructuralCommitFrame = 0;
-
 let graphNodeVirtualizationSignature = "";
-
 let graphNodeVirtualizationAnchor = null;
-
 let graphGpuOverviewMode = false;
 
 const graphNodeGeometryCache = new Map();
-
 const graphForcedNodeIds = new Set();
-
 const graphSocketElementCache = new Map();
-
 const graphSvgWirePathCache = new Map();
-
 const graphSvgWirePointCache = new Map();
 
 let graphNodeDefinitionCache = new WeakMap();
-
-// A node can survive an asynchronous API-catalog/factory rebuild while its
-// cached definition still points at the temporary unavailable placeholder.
-// Track the definition environment with the cache itself so any later render
-// automatically observes the current registry, even if the factory-ready
-// event happened before the graph host was installed.
 let graphNodeDefinitionCacheEnvironmentKey = "";
 
 function currentGraphNodeDefinitionEnvironmentKey() {
@@ -7005,11 +6974,6 @@ function resolveNodeDefinition(node) {
         node.operatorId
       ];
 
-    // A portable API contract is the authoritative presentation fallback when
-    // its catalog operator no longer exists. Never collapse such a node to the
-    // generic unknown-operator "?" definition: the stored contract must keep
-    // its API? identity, sockets, red-wire interaction and unavailable-API
-    // inspector actions intact in root graphs and every Composite level.
     if (
       !definition &&
       node?.kind === "operator" &&
@@ -8123,7 +8087,7 @@ function createGraphAnalysisCertificate(
       schemaVersion:
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION,
       moduleId:
-        "1.20.31-universal-presentation-dev84-preserved-api-contract-presentation",
+        "1.20.31-universal-presentation-dev86-natural-batch-progress",
       semanticToken: token,
       nodeCount: graph.nodes.length,
       connectionCount: connections.length,
@@ -8156,7 +8120,7 @@ function graphAnalysisCertificateEnvelopeValid(
       Number(certificate.schemaVersion) ===
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION &&
       certificate.moduleId ===
-        "1.20.31-universal-presentation-dev84-preserved-api-contract-presentation" &&
+        "1.20.31-universal-presentation-dev86-natural-batch-progress" &&
       certificate.valid === true &&
       typeof certificate.semanticToken ===
         "string" &&
@@ -17095,7 +17059,7 @@ Object.defineProperty(
     {
       value: Object.freeze({
         moduleId:
-          "1.20.31-universal-presentation-dev84-preserved-api-contract-presentation",
+          "1.20.31-universal-presentation-dev86-natural-batch-progress",
         build:
           buildTypedNodeGraphCSharpContribution,
         validateDocument:

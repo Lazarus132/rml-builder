@@ -106,7 +106,6 @@
     }
   }
 
-
   function readSafeAreaInsets() {
     const probe =
       document.createElement("div");

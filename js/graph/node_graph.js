@@ -3,7 +3,7 @@
   // Runtime Graph entrypoint and module loader.
 
   const NODE_GRAPH_RELEASE_ID =
-    "1.20.31-universal-presentation-dev84-preserved-api-contract-presentation";
+    "1.20.31-universal-presentation-dev86-natural-batch-progress";
 
   if (
     window.RMLTypedNodeGraphGenerator?.moduleId ===
@@ -26,7 +26,7 @@
     "../core/code_templates.js?v=794-shared-loader-runtime",
     "../core/guidance.js?v=793",
     "node_graph_registry.js?v=1-physical-modules-v750-offline-core-types",
-    "node_graph_codegen.js?v=1.20.31-universal-presentation-dev84-preserved-api-contract-presentation"
+    "node_graph_codegen.js?v=1.20.31-universal-presentation-dev86-natural-batch-progress"
   ];
 
   if (
@@ -83,7 +83,7 @@
     const link = document.createElement("link");
     link.rel = "stylesheet";
     link.href = new URL(
-      "../../styles/features/styles.runtime-graph.css?v=1.20.31-universal-presentation-dev84-preserved-api-contract-presentation",
+      "../../styles/features/styles.runtime-graph.css?v=1.20.31-universal-presentation-dev86-natural-batch-progress",
       scriptUrl
     ).href;
     link.dataset.rmlStyleBundle = "runtime-graph";
@@ -104,19 +104,19 @@
       window.RMLClassStyles
         ? []
         : [
-            "../loaders/style_loader.js?v=1.20.31-universal-presentation-dev84-preserved-api-contract-presentation"
+            "../loaders/style_loader.js?v=1.20.31-universal-presentation-dev86-natural-batch-progress"
           ]
     ),
     "node_graph_registry.js?v=1-physical-modules-v750-offline-core-types",
-    "node_graph_codegen.js?v=1.20.31-universal-presentation-dev84-preserved-api-contract-presentation",
+    "node_graph_codegen.js?v=1.20.31-universal-presentation-dev86-natural-batch-progress",
     "runtime_bridge.js?v=1000-live-loss-status",
-    "../workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev84-preserved-api-contract-presentation",
-    "node_graph_composites.js?v=1.20.31-universal-presentation-dev84-preserved-api-contract-presentation",
-    "node_graph_custom_csharp.js?v=1.20.31-universal-presentation-dev84-preserved-api-contract-presentation",
+    "../workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev86-natural-batch-progress",
+    "node_graph_composites.js?v=1.20.31-universal-presentation-dev86-natural-batch-progress",
+    "node_graph_custom_csharp.js?v=1.20.31-universal-presentation-dev86-natural-batch-progress",
     "node_graph_guided.js?v=1-physical-modules-v748",
-    "node_graph_view.js?v=1.20.31-universal-presentation-dev84-preserved-api-contract-presentation",
+    "node_graph_view.js?v=1.20.31-universal-presentation-dev86-natural-batch-progress",
     "graph_gpu_renderer.js?v=807-webgpu-texture-limits",
-    "node_graph_bootstrap.js?v=1.20.31-universal-presentation-dev84-preserved-api-contract-presentation"
+    "node_graph_bootstrap.js?v=1.20.31-universal-presentation-dev86-natural-batch-progress"
   ];
 
   const ready = files.reduce(

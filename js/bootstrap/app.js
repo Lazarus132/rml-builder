@@ -43,7 +43,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "1.20.31-universal-presentation-dev84-preserved-api-contract-presentation";
+  "1.20.31-universal-presentation-dev86-natural-batch-progress";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -136,7 +136,6 @@ function setAlwaysClickableButtonAvailability(
     }
   }
 }
-
 
 function setExportControlAvailability(
   button,
@@ -1221,9 +1220,6 @@ function requestExportPreflight({ prepareStyles = false } = {}) {
           })
         );
       } else {
-
-
-
         const catalog =
           window.RMLResoniteApiCatalog ||
           window.RMLFrooxComponentCatalog;
@@ -1446,8 +1442,6 @@ function requestGeneratedOutputUpdate() {
     elements.codeSummary.textContent =
       "Large runtime graph loaded · generated files are being refreshed";
   }
-
-
   updateGeneratedOutput();
 }
 
@@ -2277,10 +2271,6 @@ function recoverProjectIoRequest(
   }
 
   if (pending.recoveryAttempted) {
-
-
-
-
     dispatchProjectIoRequestOnMainThread(
       pending
     );
@@ -2784,9 +2774,6 @@ let graphCodegenWorkerCachedKey = "";
 let graphCodegenWorkerCachedResult = null;
 let graphCodegenWorkerLastError = null;
 let graphCodegenWorkerFailedKey = "";
-
-
-
 let pendingImportedGraphAnalysisCertificate = null;
 let graphCodegenProjectEpoch = 1;
 
@@ -2883,10 +2870,6 @@ function largeGraphCodegenKey(
     window.RMLResoniteApiCatalog ||
     window.RMLFrooxComponentCatalog ||
     null;
-
-
-
-
 
   return JSON.stringify({
     projectEpoch:
@@ -3522,9 +3505,6 @@ function graphCodegenContractsMatch(
   if (!semanticIdentityMatches) {
     return false;
   }
-
-
-
   return true;
 }
 
@@ -4285,7 +4265,6 @@ function releaseIdleGraphCodegenWorker() {
     return false;
   }
 
-
   terminateGraphCodegenWorker();
   return true;
 }
@@ -4349,7 +4328,7 @@ function ensureGraphCodegenWorker() {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev84-preserved-api-contract-presentation",
+      "../workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev86-natural-batch-progress",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -5311,7 +5290,6 @@ function clamp(value, minimum, maximum) {
     )
   );
 }
-
 
 function normalizeColorProfile(profile) {
   return String(profile || "").toLowerCase() === "srgb"
@@ -6420,7 +6398,6 @@ window.RMLInlineRowLayout =
     appendInspectorControls:
       appendInlineRowInspectorControls
   });
-
 
 function findNode(nodes, id) {
   for (const node of nodes) {
@@ -7809,7 +7786,6 @@ function getTypedNodeGraphContribution() {
       typeof extensionState.configSnapshot === "object" &&
       Array.isArray(extensionState.configSnapshot.nodes)
     );
-
 
   if (!hasPackedRuntimeGraph) {
     return null;
@@ -9556,8 +9532,6 @@ escapeXml(
       )]);
 }
 
-
-
 function importRecoveryDiagnosticScope(
   extensionState
 ) {
@@ -10186,7 +10160,6 @@ function projectIdFromSource(source) {
   if (explicit) {
     return explicit;
   }
-
 
   return `legacy-${projectContentFingerprint(source)}`;
 }
@@ -11552,7 +11525,6 @@ function reconcilePackedGraphConfiguration(
     );
   }
 
-
   if (
     Array.isArray(graph.nodes) &&
     graph.nodes.some(node =>
@@ -12154,12 +12126,6 @@ function clearLegacyLocalDraft(revision) {
   ) {
     return false;
   }
-
-
-
-
-
-
   try {
     localStorage.removeItem(
       ACTIVE_STORAGE_KEY
@@ -12421,10 +12387,6 @@ function persist(immediate = false) {
 function flushProjectDraftForLifecycle() {
   projectDraftDiagnostics
     .lifecycleFlushes += 1;
-
-
-
-
   window.RMLDynamicGraphHost
     ?.flushPendingEditorEdits?.();
 
@@ -12606,7 +12568,6 @@ async function parseProjectJsonText(
   }
 }
 
-
 async function readJsonFileSource(
   file,
   displayName = "JSON document"
@@ -12655,7 +12616,6 @@ async function readJsonFileSource(
     throw error;
   }
 }
-
 
 async function readExampleProjectDocument() {
   const url = exampleProjectUrl();
@@ -13477,7 +13437,6 @@ const nextOptionDirection =
   </article>`;
 }
 
-
 function clearDragFeedback() {
   state.dragOverContainer = null;
   state.dragInsertContainer = null;
@@ -14131,7 +14090,6 @@ function ensureDragPlaceholder() {
   return dragFeedbackPlaceholder;
 }
 
-
 function nodeInsertionGeometry(
   host,
   insertionIndex
@@ -14483,7 +14441,6 @@ function unlockOptionDropTarget() {
   lockedOptionTargetCard =
     null;
 }
-
 
 function positionOptionInsertPlaceholder(
   host,
@@ -15702,7 +15659,6 @@ function clearOptionPointerGhost() {
 
   optionPointerSourceLane = null;
 }
-
 
 function createNodePointerGhost(
   card
@@ -17148,7 +17104,6 @@ function finishNodePointerDrag(
   renderAll();
 }
 
-
 function prepareNodePointerDrag(
   card,
   event
@@ -17297,7 +17252,6 @@ function startNodePointerDrag(
   );
 }
 
-
 function pointInsideRectangle(
   clientX,
   clientY,
@@ -17323,7 +17277,6 @@ function rectangleArea(
   );
 }
 
-
 function clearPointerEdgeFeedback() {
   document
     .querySelectorAll(
@@ -17335,7 +17288,6 @@ function clearPointerEdgeFeedback() {
       );
     });
 }
-
 
 function setPointerContainerTarget(
   containerId,
@@ -17395,7 +17347,6 @@ function setPointerContainerTarget(
   event.dataTransfer.dropEffect =
     "move";
 }
-
 
 function optionContainsContainer(
   option,
@@ -23099,7 +23050,6 @@ function settingsPreviewNodesMarkup(nodes) {
       continue;
     }
 
-
     const labelVisible =
       settingsPreviewNodeLabelVisible(
         node
@@ -25640,7 +25590,6 @@ async function copyText(text, button) {
   }, 1400);
 }
 
-
 async function copyGeneratedCodeForCurrentView(button) {
   if (exportPreflightRequest || exportDeliveryBusy) return;
   try {
@@ -25651,7 +25600,6 @@ async function copyGeneratedCodeForCurrentView(button) {
     if (error?.code !== "RML_EXPORT_CANCELLED") void showExportPreparationFailure(error);
   }
 }
-
 
 function downloadBlob(blob, filename) {
   const link = document.createElement("a");
@@ -25808,6 +25756,29 @@ function cancelActiveProjectLoad() {
   setProjectLoadProgress(false);
 }
 
+let builderWorkVisibleProgress = 0;
+
+function advanceBuilderWorkProgress(
+  requestedProgress
+) {
+  const requested = Number(requestedProgress);
+  const nested = builderWorkSessions.size > 1;
+
+  if (Number.isFinite(requested) && requested <= 0) {
+    return builderWorkVisibleProgress <= 0
+      ? 0
+      : builderWorkVisibleProgress;
+  }
+
+  if (Number.isFinite(requested) && requested >= 100 && !nested) {
+    return 100;
+  }
+
+  const remaining = Math.max(0, 100 - builderWorkVisibleProgress);
+  const increment = Math.max(0.35, remaining * 0.075);
+  return Math.min(99, builderWorkVisibleProgress + increment);
+}
+
 function updateBuilderWork(
   session,
   {
@@ -25843,8 +25814,10 @@ function updateBuilderWork(
   }
 
   if (progress !== undefined) {
+    builderWorkVisibleProgress =
+      advanceBuilderWorkProgress(progress);
     const normalized = clamp(
-      Number(progress) || 0,
+      builderWorkVisibleProgress,
       0,
       100
     );
@@ -26703,6 +26676,13 @@ function beginBuilderWork(options = {}) {
     !overlayWasActive &&
     elements.builderWorkOverlay
   ) {
+    builderWorkVisibleProgress = 0;
+    elements.builderWorkProgress.dataset
+      .rmlLoadProgress = "0%";
+    elements.builderWorkProgress.setAttribute(
+      "aria-valuenow",
+      "0"
+    );
     resetBuilderReplacementUi();
     elements.builderWorkOverlay.hidden = false;
     document.body.classList.add(
@@ -28052,7 +28032,7 @@ function promiseWithBuilderTimeout(
 
 function assertProjectRuntimeModuleCoherence() {
   const expectedModuleId =
-    "1.20.31-universal-presentation-dev84-preserved-api-contract-presentation";
+    "1.20.31-universal-presentation-dev86-natural-batch-progress";
   const requiredFactoryVersion = 38;
   const mismatches = [];
   const requireModuleId = (
@@ -29819,14 +29799,6 @@ async function ensureProjectRuntimePrerequisites(
   }
 
   }
-
-
-
-
-
-
-
-
 
   const compositeTopology =
     window.RMLTypedNodeGraphGenerator
@@ -32036,11 +32008,6 @@ async function openProjectDialog() {
   if (sequence !== projectDialogOpenSequence) {
     return;
   }
-
-
-
-
-
   await waitForBuilderMessageQueueIdle();
 
   if (sequence !== projectDialogOpenSequence) {
@@ -32095,8 +32062,6 @@ let builderMessageQueueTail =
   Promise.resolve();
 
 async function waitForBuilderMessageQueueIdle() {
-
-
   while (true) {
     const observedTail =
       builderMessageQueueTail;
@@ -32208,9 +32173,6 @@ function presentBuilderMessage({
 }
 
 function showBuilderMessage(options = {}) {
-
-
-
   const present = () =>
     presentBuilderMessage(options);
   const queued =
@@ -32303,8 +32265,6 @@ async function saveProjectJson() {
     setProjectFileStatus(
       "Preparing and compressing project JSON…"
     );
-
-
     captureVisibleBuilderPage(
       "save-json",
       true
@@ -32411,10 +32371,6 @@ async function loadProjectJsonFile(
         `The selected file is larger than the ${formatProjectByteLimit(PROJECT_FILE_MAX_BYTES)} project limit.`
       );
     }
-
-
-
-
     releaseIdleBuilderMemory({
       discardGeneratedBuild: true
     });
@@ -32485,9 +32441,6 @@ async function loadProjectJsonFile(
         host.importSavedApiComposites(
           projectSource
         );
-
-
-
       projectFile.value = null;
       projectSource = null;
       const imported = await importPromise;
@@ -32628,10 +32581,6 @@ async function loadProjectJsonFile(
           confirmLabel: "OK"
         });
       }
-
-
-
-
       await openProjectDialog();
       return;
     }
@@ -36783,8 +36732,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "../../templates/help_template.html?v=1.20.31-universal-presentation-dev84-preserved-api-contract-presentation",
-    "../templates/help_template.js?v=1.20.31-universal-presentation-dev84-preserved-api-contract-presentation",
+    "../../templates/help_template.html?v=1.20.31-universal-presentation-dev86-natural-batch-progress",
+    "../templates/help_template.js?v=1.20.31-universal-presentation-dev86-natural-batch-progress",
     "help-template",
     "RMLHelpTemplateMarkup"
   )
@@ -40049,7 +39998,6 @@ function installUniversalScrollLayerSelector() {
       return null;
     };
 
-
   const dynamicAncestorElements =
     (
       target,
@@ -41415,7 +41363,6 @@ function installUniversalScrollLayerSelector() {
         return;
       }
 
-
       if (
         insideInformationDialog &&
         !universalOwnsWheel
@@ -42664,7 +42611,6 @@ async function initialize() {
     }
   );
 
-
   document.addEventListener(
     "drop",
     event => {
@@ -43008,10 +42954,6 @@ async function initialize() {
   elements.builderMessageDialog.addEventListener(
     "close",
     () => {
-
-
-
-
       if (
         !elements.builderMessageDialog.open &&
         activeBuilderMessageResolver
@@ -43212,7 +43154,6 @@ async function initialize() {
       confirmLabel: "OK"
     });
   }
-
 
   await paintBuilderUi();
   const visualTourTest =
@@ -43564,7 +43505,6 @@ function rmlRuntimeDisplayBindingsFor(
     }
   );
 }
-
 
 function rmlRuntimeDisplaySyncOrder(
   node,
@@ -44293,8 +44233,6 @@ function rmlRuntimeDisplayInspector() {
     "Used only as the stable RML configuration key. The displayed row is continuously synchronized from the graph and manual edits are overwritten.";
   keyLabel.appendChild(keyHelp);
   form.appendChild(keyLabel);
-
-
   host.appendChild(form);
   window.RMLInlineRowLayout
     ?.appendInspectorControls?.(
@@ -44599,7 +44537,6 @@ ${keys}
 
   const providerMembers =
 globalThis.RMLCodeTemplates.text("configuration", "source_012", [providerDisplays]);
-
 
   const runtimeMembers =
 globalThis.RMLCodeTemplates.text("configuration", "Runtime_menu_display_bridge", [providerMembers,

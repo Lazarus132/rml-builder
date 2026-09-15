@@ -677,7 +677,7 @@ const savedApiCompositeSearchTextCache =
     `${SAVED_API_COMPOSITE_COMPARE_MESSAGE_TYPE}-result`;
 
   const SAVED_API_COMPOSITE_COMPARE_MODULE_ID =
-    "1.20.31-universal-presentation-dev84-preserved-api-contract-presentation";
+    "1.20.31-universal-presentation-dev86-natural-batch-progress";
 
   const SAVED_API_COMPOSITE_COMPARE_CANONICAL_SCHEMA_VERSION =
     4;
@@ -941,7 +941,7 @@ const savedApiCompositeSearchTextCache =
       );
     }
     const workerUrl = new URL(
-      "js/workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev84-preserved-api-contract-presentation&canonical-schema=4",
+      "js/workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev86-natural-batch-progress&canonical-schema=4",
       document.baseURI
     );
     const workerOptions = {
@@ -4150,10 +4150,7 @@ function resolveSavedApiCompositeSaveTarget(
       matches.length > 1 ||
       foreignNameMatches.length > 0
     );
-    // Library identity is explicit and persistent. A matching name is never
-    // sufficient to turn an independent or nested Composite into a Library
-    // update target. Nested Composites only get Update when they actually
-    // carry their own savedApiCompositeId.
+
     const record = ambiguous
       ? null
       : linkedRecord;
@@ -10188,12 +10185,7 @@ function savedApiCompositeRecordsFromJson(
           source,
           { preserveId: true }
         );
-      // Import is the only automatic topology-repair boundary. Saved
-      // Composites are container documents just like projects: obsolete
-      // missing-port topology may be disconnected while importing the file,
-      // but opening, navigating, resolving, refreshing and placing an
-      // existing Composite must preserve its document byte-for-byte in
-      // semantic content and leave incompatible nodes/ports visibly red.
+
       const importedComposite =
         nodeGraphClone(record.composite);
       const importRepair =
@@ -12455,8 +12447,7 @@ function savedApiCompositeContextMatchesRecord(
     const recordId = String(
       record?.id || ""
     ).trim();
-    // A placed Composite belongs to a Library record only through its
-    // explicit persistent identity. Name equality is deliberately ignored.
+
     return Boolean(
       linkedId &&
       recordId &&
@@ -15613,19 +15604,12 @@ async function instantiateSavedApiCompositeAt(
       try {
         graph = expanded;
 
-        // Saved Composites intentionally preserve stale topology. A catalog
-        // change may leave a connection pointing at a port that no longer
-        // exists on the current API definition. That is an editable
-        // compatibility state (rendered unavailable/red), not a reason to
-        // reject opening or placing the Composite. Validate the still-live
-        // topology only; never mutate the stored/placed Composite here.
         const expandedConnections =
           Array.isArray(expanded.connections)
             ? expanded.connections
             : [];
         const skippedConnectionIds = new Set();
 
-        // First mark only genuinely stale endpoints.
         for (const connection of expandedConnections) {
           const sourceExists = !!findPortSpec(
             connection?.fromNode,
@@ -15646,9 +15630,6 @@ async function instantiateSavedApiCompositeAt(
           }
         }
 
-        // Branches whose parent is stale are validation-only omissions too.
-        // Iterate because branch chains are not required to be stored in
-        // parent-before-child order.
         let addedSkippedBranch = true;
         while (addedSkippedBranch) {
           addedSkippedBranch = false;
@@ -16671,17 +16652,12 @@ function savedApiCompositeUpdateActionState(
         owner.id === openContext.ownerId
       )
     );
-    // Opening/navigation is read-only. A stale comparison for the currently
-    // open instance is never enough to create an Update action by itself.
-    // Graph -> Library requires BOTH a real content mutation since Open and
-    // a canonical difference from the linked Library record.
+
     const updatesOpenComposite = Boolean(
       openContentChanged &&
       openCanonicalChanged
     );
-    // The currently open instance must also never fall through to the
-    // Library -> Graph direction merely because comparison normalization or
-    // catalog presentation reports it as stale after Open.
+
     const matchingInstances =
       openContext
         ? staleInstances.filter(owner =>
@@ -17155,7 +17131,7 @@ Object.defineProperty(
   "RMLNodeGraphCompositesModuleId",
   {
     value:
-      "1.20.31-universal-presentation-dev84-preserved-api-contract-presentation",
+      "1.20.31-universal-presentation-dev86-natural-batch-progress",
     writable: false,
     enumerable: true,
     configurable: true
