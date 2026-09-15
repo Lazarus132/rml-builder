@@ -24570,6 +24570,18 @@ function updateNodeResize(
     synchronizeGraphNodeGeometryStyles(
       interaction.article
     );
+    if (Number.isFinite(node.width)) {
+      interaction.article.style.width = `${node.width}px`;
+    }
+    if (Number.isFinite(node.height)) {
+      interaction.article.style.height = `${node.height}px`;
+    }
+    syncNodeBodyOverflow(interaction.article);
+    invalidateGraphGpuNodeRecord(node.id);
+    synchronizeGpuOverviewNodeMutation(
+      [node.id],
+      { deferDraw: true }
+    );
     renderGraphWireConnectionsImmediately(
       interaction.connectionIds,
       {
@@ -24645,22 +24657,34 @@ function finishNodeResize(
           interaction.originalHeight;
       } else if (commit) {
         if (Number.isFinite(node.width)) {
-          node.width = nodeGraphClamp(
-            Math.round(
-              node.width / GRAPH_GRID
-            ) * GRAPH_GRID,
-            interaction.minimumWidth,
-            interaction.maximumWidth
-          );
+          const atMinimumWidth =
+            Math.abs(node.width - interaction.minimumWidth) < 0.001;
+          const atMaximumWidth =
+            Math.abs(node.width - interaction.maximumWidth) < 0.001;
+          node.width = atMinimumWidth
+            ? interaction.minimumWidth
+            : atMaximumWidth
+              ? interaction.maximumWidth
+              : nodeGraphClamp(
+                  Math.round(node.width / GRAPH_GRID) * GRAPH_GRID,
+                  interaction.minimumWidth,
+                  interaction.maximumWidth
+                );
         }
         if (Number.isFinite(node.height)) {
-          node.height = nodeGraphClamp(
-            Math.round(
-              node.height / GRAPH_GRID
-            ) * GRAPH_GRID,
-            interaction.minimumHeight,
-            interaction.maximumHeight
-          );
+          const atMinimumHeight =
+            Math.abs(node.height - interaction.minimumHeight) < 0.001;
+          const atMaximumHeight =
+            Math.abs(node.height - interaction.maximumHeight) < 0.001;
+          node.height = atMinimumHeight
+            ? interaction.minimumHeight
+            : atMaximumHeight
+              ? interaction.maximumHeight
+              : nodeGraphClamp(
+                  Math.round(node.height / GRAPH_GRID) * GRAPH_GRID,
+                  interaction.minimumHeight,
+                  interaction.maximumHeight
+                );
         }
       }
       invalidateGraphNodeViewportSpatialIndex(
@@ -24670,6 +24694,12 @@ function finishNodeResize(
 
     interaction.article?.classList.remove(
       "resizing"
+    );
+    interaction.article?.style.removeProperty(
+      "width"
+    );
+    interaction.article?.style.removeProperty(
+      "height"
     );
     activeInteraction = null;
     const changed = Boolean(node && (
@@ -25322,29 +25352,37 @@ function estimatedGraphNodeGeometry(node) {
       footerHeight > 0
         ? GRAPH_NODE_MIN_HEIGHT
         : 45;
+    const liveResize =
+      activeInteraction?.kind ===
+        "node-resize" &&
+      activeInteraction.nodeId === node.id;
     const width =
-      cached?.width ||
-      (
-        Number.isFinite(node.width)
-          ? node.width
-          : nodeDefaultWidth(
-              node,
-              definition
-            )
-      );
+      liveResize && Number.isFinite(node.width)
+        ? node.width
+        : cached?.width ||
+          (
+            Number.isFinite(node.width)
+              ? node.width
+              : nodeDefaultWidth(
+                  node,
+                  definition
+                )
+          );
     const height =
-      cached?.height ||
-      (
-        Number.isFinite(node.height)
-          ? node.height
-          : Math.max(
-              minimumHeight,
-              45 +
-                portBodyHeight +
-                monitorHeight +
-                footerHeight
-            )
-      );
+      liveResize && Number.isFinite(node.height)
+        ? node.height
+        : cached?.height ||
+          (
+            Number.isFinite(node.height)
+              ? node.height
+              : Math.max(
+                  minimumHeight,
+                  45 +
+                    portBodyHeight +
+                    monitorHeight +
+                    footerHeight
+                )
+          );
 
     return {
       x: node.x,
@@ -45994,7 +46032,7 @@ Object.defineProperty(
   "RMLNodeGraphViewModuleId",
   {
     value:
-      "1.20.31-universal-presentation-dev95-clean-production",
+      "1.20.31-universal-presentation-dev108-live-content-layout-parity",
     writable: false,
     enumerable: true,
     configurable: true

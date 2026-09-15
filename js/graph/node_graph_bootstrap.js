@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_BOOTSTRAP_MODULE_ID =
-  "1.20.31-universal-presentation-dev95-clean-production";
+  "1.20.31-universal-presentation-dev108-live-content-layout-parity";
 
 function assertGraphBootstrapModuleCoherence() {
   const mismatches = [];

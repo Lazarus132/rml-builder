@@ -3202,3 +3202,26 @@ body.rml-node-graph-mode.rml-graph-edit-mode #inspector-content {
       0 0 5px rgba(255, 47, 69, 0.9)
     );
 }
+
+.rml-graph-node-body {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.rml-graph-node-body::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+.rml-graph-port-column.outputs {
+  transform: translateX(2px);
+}
+
+.rml-graph-node.manually-sized-width .rml-graph-node-body {
+  overflow-x: hidden;
+}
+
+.rml-graph-node.manually-sized-width .rml-graph-node-body-content[data-rml-min-width] {
+  min-width: 0;
+}

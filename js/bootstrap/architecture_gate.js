@@ -2,7 +2,7 @@
   "use strict";
 
   const MODULE_ID =
-    "1.20.31-universal-presentation-dev95-clean-production";
+    "1.20.31-universal-presentation-dev108-live-content-layout-parity";
   const GATE_VERSION = 1;
   const DETECTION_TIMEOUT_MS = 5000;
   const HIGH_ENTROPY_HINTS = Object.freeze([

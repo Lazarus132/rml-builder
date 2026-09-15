@@ -2,7 +2,7 @@
   "use strict";
 
   const CATALOG_LOADER_MODULE_ID =
-    "1.20.31-universal-presentation-dev95-clean-production";
+    "1.20.31-universal-presentation-dev108-live-content-layout-parity";
   const LOADER_VERSION = 84;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
@@ -75,7 +75,7 @@
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=1.20.31-universal-presentation-dev95-clean-production",
+    "api_nodes.js?v=1.20.31-universal-presentation-dev108-live-content-layout-parity",
     scriptUrl
   ).href;
 
