@@ -677,7 +677,7 @@ const savedApiCompositeSearchTextCache =
     `${SAVED_API_COMPOSITE_COMPARE_MESSAGE_TYPE}-result`;
 
   const SAVED_API_COMPOSITE_COMPARE_MODULE_ID =
-    "1.20.31-universal-presentation-dev80-composite-incompatible-node-import";
+    "1.20.31-universal-presentation-dev83-open-never-update-invariant";
 
   const SAVED_API_COMPOSITE_COMPARE_CANONICAL_SCHEMA_VERSION =
     4;
@@ -941,7 +941,7 @@ const savedApiCompositeSearchTextCache =
       );
     }
     const workerUrl = new URL(
-      "js/workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev80-composite-incompatible-node-import&canonical-schema=4",
+      "js/workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev83-open-never-update-invariant&canonical-schema=4",
       document.baseURI
     );
     const workerOptions = {
@@ -3834,18 +3834,15 @@ function openApiCompositeOwnerContextForRecord(
     record
   ) {
     if (!record) return null;
+    const recordId = String(record.id || "").trim();
+    if (!recordId) return null;
     return openApiCompositeOwnerContexts()
-      .find(context => {
-        const target =
-          resolveSavedApiCompositeSaveTarget(
-            context.owner,
-            context.composite
-          );
-        return Boolean(
-          target.mode === "update" &&
-          target.record?.id === record.id
-        );
-      }) || null;
+      .find(context =>
+        String(
+          context.owner?.parameters
+            ?.savedApiCompositeId || ""
+        ).trim() === recordId
+      ) || null;
   }
 
 function apiCompositeEditorContentUnchangedSinceOpen(
@@ -4153,12 +4150,13 @@ function resolveSavedApiCompositeSaveTarget(
       matches.length > 1 ||
       foreignNameMatches.length > 0
     );
+    // Library identity is explicit and persistent. A matching name is never
+    // sufficient to turn an independent or nested Composite into a Library
+    // update target. Nested Composites only get Update when they actually
+    // carry their own savedApiCompositeId.
     const record = ambiguous
       ? null
-      : linkedRecord ||
-        (!linkedId && matches.length === 1
-          ? matches[0]
-          : null);
+      : linkedRecord;
     const mode = ambiguous
       ? "ambiguous"
       : record
@@ -6381,6 +6379,7 @@ function repairSavedApiCompositeMissingPortTopology(
     });
   }
 
+
 function savedApiCompositeValidationGraph(
     record
   ) {
@@ -6665,29 +6664,6 @@ async function resolveSavedApiCompositeForCurrentCatalog(
         });
       changed = true;
     }
-    const topologyRepairSource =
-      nodeGraphClone(resolved.composite);
-    const topologyRepair =
-      repairSavedApiCompositeMissingPortTopology(
-        topologyRepairSource
-      );
-    if (
-      topologyRepair.disconnectedConnections > 0 ||
-      topologyRepair.removedBoundaries > 0
-    ) {
-      resolved =
-        sanitizeSavedApiCompositeRecord({
-          ...resolved,
-          updatedAt:
-            new Date().toISOString(),
-          composite: {
-            ...topologyRepairSource,
-            title: resolved.name
-          }
-        });
-      changed = true;
-    }
-
     if (persistResolved && changed) {
       const [stored] =
         await persistSavedApiCompositeRecords([
@@ -10207,11 +10183,36 @@ function savedApiCompositeRecordsFromJson(
             ?.contentFingerprint ||
           ""
         ).trim();
-      const record =
+      let record =
         sanitizeSavedApiCompositeImportRecord(
           source,
           { preserveId: true }
         );
+      // Import is the only automatic topology-repair boundary. Saved
+      // Composites are container documents just like projects: obsolete
+      // missing-port topology may be disconnected while importing the file,
+      // but opening, navigating, resolving, refreshing and placing an
+      // existing Composite must preserve its document byte-for-byte in
+      // semantic content and leave incompatible nodes/ports visibly red.
+      const importedComposite =
+        nodeGraphClone(record.composite);
+      const importRepair =
+        repairSavedApiCompositeMissingPortTopology(
+          importedComposite
+        );
+      if (
+        importRepair.disconnectedConnections > 0 ||
+        importRepair.removedBoundaries > 0
+      ) {
+        record =
+          sanitizeSavedApiCompositeRecord({
+            ...record,
+            composite: {
+              ...importedComposite,
+              title: record.name
+            }
+          });
+      }
       if (fingerprintWasMissing) {
         Object.defineProperty(
           record,
@@ -12454,15 +12455,12 @@ function savedApiCompositeContextMatchesRecord(
     const recordId = String(
       record?.id || ""
     ).trim();
-    if (linkedId) {
-      return Boolean(
-        recordId && linkedId === recordId
-      );
-    }
-    return savedApiCompositeNodeMatchesName(
-      node,
-      composite,
-      record?.name
+    // A placed Composite belongs to a Library record only through its
+    // explicit persistent identity. Name equality is deliberately ignored.
+    return Boolean(
+      linkedId &&
+      recordId &&
+      linkedId === recordId
     );
   }
 
@@ -15614,8 +15612,73 @@ async function instantiateSavedApiCompositeAt(
       let analysis;
       try {
         graph = expanded;
+
+        // Saved Composites intentionally preserve stale topology. A catalog
+        // change may leave a connection pointing at a port that no longer
+        // exists on the current API definition. That is an editable
+        // compatibility state (rendered unavailable/red), not a reason to
+        // reject opening or placing the Composite. Validate the still-live
+        // topology only; never mutate the stored/placed Composite here.
+        const expandedConnections =
+          Array.isArray(expanded.connections)
+            ? expanded.connections
+            : [];
+        const skippedConnectionIds = new Set();
+
+        // First mark only genuinely stale endpoints.
+        for (const connection of expandedConnections) {
+          const sourceExists = !!findPortSpec(
+            connection?.fromNode,
+            connection?.fromPort,
+            "output"
+          );
+          const targetExists = !!findPortSpec(
+            connection?.toNode,
+            connection?.toPort,
+            "input"
+          );
+          if (!sourceExists || !targetExists) {
+            if (connection?.id) {
+              skippedConnectionIds.add(
+                String(connection.id)
+              );
+            }
+          }
+        }
+
+        // Branches whose parent is stale are validation-only omissions too.
+        // Iterate because branch chains are not required to be stored in
+        // parent-before-child order.
+        let addedSkippedBranch = true;
+        while (addedSkippedBranch) {
+          addedSkippedBranch = false;
+          for (const connection of expandedConnections) {
+            const id = String(connection?.id || "");
+            if (id && skippedConnectionIds.has(id)) {
+              continue;
+            }
+            const parentConnectionId = String(
+              connection?.branch?.parentConnectionId || ""
+            );
+            if (
+              parentConnectionId &&
+              skippedConnectionIds.has(parentConnectionId)
+            ) {
+              if (id) skippedConnectionIds.add(id);
+              addedSkippedBranch = true;
+            }
+          }
+        }
+
+        const liveValidationConnections =
+          expandedConnections.filter(connection =>
+            !skippedConnectionIds.has(
+              String(connection?.id || "")
+            )
+          );
+
         analysis = analyzeConnections(
-          expanded.connections
+          liveValidationConnections
         );
       } finally {
         graph = previousGraph;
@@ -16587,7 +16650,7 @@ function savedApiCompositeUpdateActionState(
       openApiCompositeOwnerContextForRecord(
         record
       );
-    const matchingInstances =
+    const staleInstances =
       matchingSavedApiCompositeInstances(
         record,
         null,
@@ -16596,6 +16659,35 @@ function savedApiCompositeUpdateActionState(
           contexts: availableContexts
         }
       );
+    const openContentChanged = Boolean(
+      openContext &&
+      !apiCompositeEditorContentUnchangedSinceOpen(
+        openContext.editor
+      )
+    );
+    const openCanonicalChanged = Boolean(
+      openContext &&
+      staleInstances.some(owner =>
+        owner.id === openContext.ownerId
+      )
+    );
+    // Opening/navigation is read-only. A stale comparison for the currently
+    // open instance is never enough to create an Update action by itself.
+    // Graph -> Library requires BOTH a real content mutation since Open and
+    // a canonical difference from the linked Library record.
+    const updatesOpenComposite = Boolean(
+      openContentChanged &&
+      openCanonicalChanged
+    );
+    // The currently open instance must also never fall through to the
+    // Library -> Graph direction merely because comparison normalization or
+    // catalog presentation reports it as stale after Open.
+    const matchingInstances =
+      openContext
+        ? staleInstances.filter(owner =>
+            owner.id !== openContext.ownerId
+          )
+        : staleInstances;
     const comparisonPending =
       availableContexts.some(context => {
         if (
@@ -16617,12 +16709,7 @@ function savedApiCompositeUpdateActionState(
       matchingInstances,
       openContext,
       comparisonPending,
-      updatesOpenComposite: Boolean(
-        openContext &&
-        matchingInstances.some(owner =>
-          owner.id === openContext.ownerId
-        )
-      )
+      updatesOpenComposite
     };
   }
 
@@ -17068,7 +17155,7 @@ Object.defineProperty(
   "RMLNodeGraphCompositesModuleId",
   {
     value:
-      "1.20.31-universal-presentation-dev80-composite-incompatible-node-import",
+      "1.20.31-universal-presentation-dev83-open-never-update-invariant",
     writable: false,
     enumerable: true,
     configurable: true

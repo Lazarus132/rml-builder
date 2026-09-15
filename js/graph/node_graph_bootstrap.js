@@ -4,7 +4,7 @@
 
 
 const GRAPH_BOOTSTRAP_MODULE_ID =
-  "1.20.31-universal-presentation-dev80-composite-incompatible-node-import";
+  "1.20.31-universal-presentation-dev83-open-never-update-invariant";
 
 function assertGraphBootstrapModuleCoherence() {
   const mismatches = [];
