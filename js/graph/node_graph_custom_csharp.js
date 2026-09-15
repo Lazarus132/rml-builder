@@ -2305,7 +2305,7 @@ function buildCustomCSharpFragmentInWorker(nodeId, source, parseResult, options)
     }
     const worker = new Worker(
       new URL(
-        "js/workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev83-open-never-update-invariant",
+        "js/workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev84-preserved-api-contract-presentation",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -5514,7 +5514,7 @@ function prepareCustomCSharpEditorHost(
       hostWindow.document.createElement("link");
     stylesheet.rel = "stylesheet";
     stylesheet.href = new URL(
-      "styles/features/styles.runtime-graph.css?v=1.20.31-universal-presentation-dev83-open-never-update-invariant",
+      "styles/features/styles.runtime-graph.css?v=1.20.31-universal-presentation-dev84-preserved-api-contract-presentation",
       window.location.href
     ).href;
     hostWindow.document.head.appendChild(
@@ -6992,7 +6992,7 @@ Object.defineProperty(
   "RMLNodeGraphCustomCSharpModuleId",
   {
     value:
-      "1.20.31-universal-presentation-dev83-open-never-update-invariant",
+      "1.20.31-universal-presentation-dev84-preserved-api-contract-presentation",
     writable: false,
     enumerable: true,
     configurable: true

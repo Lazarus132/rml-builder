@@ -43,7 +43,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "1.20.31-universal-presentation-dev83-open-never-update-invariant";
+  "1.20.31-universal-presentation-dev84-preserved-api-contract-presentation";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -4349,7 +4349,7 @@ function ensureGraphCodegenWorker() {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev83-open-never-update-invariant",
+      "../workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev84-preserved-api-contract-presentation",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -28052,7 +28052,7 @@ function promiseWithBuilderTimeout(
 
 function assertProjectRuntimeModuleCoherence() {
   const expectedModuleId =
-    "1.20.31-universal-presentation-dev83-open-never-update-invariant";
+    "1.20.31-universal-presentation-dev84-preserved-api-contract-presentation";
   const requiredFactoryVersion = 38;
   const mismatches = [];
   const requireModuleId = (
@@ -36783,8 +36783,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "../../templates/help_template.html?v=1.20.31-universal-presentation-dev83-open-never-update-invariant",
-    "../templates/help_template.js?v=1.20.31-universal-presentation-dev83-open-never-update-invariant",
+    "../../templates/help_template.html?v=1.20.31-universal-presentation-dev84-preserved-api-contract-presentation",
+    "../templates/help_template.js?v=1.20.31-universal-presentation-dev84-preserved-api-contract-presentation",
     "help-template",
     "RMLHelpTemplateMarkup"
   )

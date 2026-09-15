@@ -7000,10 +7000,56 @@ function resolveNodeDefinition(node) {
       return configurationMenuDefinition();
     }
 
-    const definition =
+    let definition =
       OPERATOR_DEFINITIONS[
         node.operatorId
       ];
+
+    // A portable API contract is the authoritative presentation fallback when
+    // its catalog operator no longer exists. Never collapse such a node to the
+    // generic unknown-operator "?" definition: the stored contract must keep
+    // its API? identity, sockets, red-wire interaction and unavailable-API
+    // inspector actions intact in root graphs and every Composite level.
+    if (
+      !definition &&
+      node?.kind === "operator" &&
+      node?.apiContract &&
+      typeof node.apiContract === "object" &&
+      !Array.isArray(node.apiContract)
+    ) {
+      const contract = node.apiContract;
+      const portablePorts = (direction) => {
+        const key = direction === "input" ? "inputPorts" : "outputPorts";
+        return (Array.isArray(contract[key]) ? contract[key] : [])
+          .filter(spec => String(spec?.id || ""))
+          .map(spec => port(
+            String(spec.id),
+            String(spec.label || spec.id),
+            String(spec.type || "object"),
+            {
+              optional: spec.optional === true,
+              unavailableApiPort: true,
+              semanticRole: String(spec.role || "")
+            }
+          ));
+      };
+      const ownerType = String(contract.ownerType || "").trim();
+      const memberName = String(contract.memberName || contract.name || "").trim();
+      const displayName = [ownerType, memberName].filter(Boolean).join(".") || String(node.operatorId || "API");
+      definition = {
+        title: `Unavailable API · ${displayName}`,
+        group: "Unavailable API",
+        symbol: "API?",
+        description: "The stored portable API contract is preserved, but the current catalog has no matching operator. The node remains fully editable and reconnectable; export stays blocked until it is resolved.",
+        hiddenFromPalette: true,
+        expertOnly: true,
+        unavailableApiContract: true,
+        preservedApiContract: contract,
+        inputs: portablePorts("input"),
+        outputs: portablePorts("output"),
+        parameters: []
+      };
+    }
 
     if (
       node.operatorId ===
@@ -8077,7 +8123,7 @@ function createGraphAnalysisCertificate(
       schemaVersion:
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION,
       moduleId:
-        "1.20.31-universal-presentation-dev83-open-never-update-invariant",
+        "1.20.31-universal-presentation-dev84-preserved-api-contract-presentation",
       semanticToken: token,
       nodeCount: graph.nodes.length,
       connectionCount: connections.length,
@@ -8110,7 +8156,7 @@ function graphAnalysisCertificateEnvelopeValid(
       Number(certificate.schemaVersion) ===
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION &&
       certificate.moduleId ===
-        "1.20.31-universal-presentation-dev83-open-never-update-invariant" &&
+        "1.20.31-universal-presentation-dev84-preserved-api-contract-presentation" &&
       certificate.valid === true &&
       typeof certificate.semanticToken ===
         "string" &&
@@ -17049,7 +17095,7 @@ Object.defineProperty(
     {
       value: Object.freeze({
         moduleId:
-          "1.20.31-universal-presentation-dev83-open-never-update-invariant",
+          "1.20.31-universal-presentation-dev84-preserved-api-contract-presentation",
         build:
           buildTypedNodeGraphCSharpContribution,
         validateDocument:
