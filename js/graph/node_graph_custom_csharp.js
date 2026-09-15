@@ -2300,7 +2300,7 @@ function buildCustomCSharpFragmentInWorker(nodeId, source, parseResult, options)
     }
     const worker = new Worker(
       new URL(
-        "js/workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev108-live-content-layout-parity",
+        "js/workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev109-hidden-configuration-node-scrollbar",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -5503,7 +5503,7 @@ function prepareCustomCSharpEditorHost(
       hostWindow.document.createElement("link");
     stylesheet.rel = "stylesheet";
     stylesheet.href = new URL(
-      "styles/features/styles.runtime-graph.css?v=1.20.31-universal-presentation-dev108-live-content-layout-parity",
+      "styles/features/styles.runtime-graph.css?v=1.20.31-universal-presentation-dev109-hidden-configuration-node-scrollbar",
       window.location.href
     ).href;
     hostWindow.document.head.appendChild(
@@ -6981,7 +6981,7 @@ Object.defineProperty(
   "RMLNodeGraphCustomCSharpModuleId",
   {
     value:
-      "1.20.31-universal-presentation-dev108-live-content-layout-parity",
+      "1.20.31-universal-presentation-dev109-hidden-configuration-node-scrollbar",
     writable: false,
     enumerable: true,
     configurable: true

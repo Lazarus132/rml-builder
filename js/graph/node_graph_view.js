@@ -46032,7 +46032,7 @@ Object.defineProperty(
   "RMLNodeGraphViewModuleId",
   {
     value:
-      "1.20.31-universal-presentation-dev108-live-content-layout-parity",
+      "1.20.31-universal-presentation-dev109-hidden-configuration-node-scrollbar",
     writable: false,
     enumerable: true,
     configurable: true

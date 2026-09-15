@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_CODEGEN_WORKER_MODULE_ID =
-  "1.20.31-universal-presentation-dev108-live-content-layout-parity";
+  "1.20.31-universal-presentation-dev109-hidden-configuration-node-scrollbar";
 const GRAPH_CODEGEN_WORKER_FACTORY_VERSION =
   38;
 
@@ -679,7 +679,7 @@ async function ensureRuntime(
       "../compiler/visual_csharp.js?v=83-empty-custom-csharp-ignored"
     );
     importScripts(
-      "../catalog/api_nodes.js?v=1.20.31-universal-presentation-dev108-live-content-layout-parity"
+      "../catalog/api_nodes.js?v=1.20.31-universal-presentation-dev109-hidden-configuration-node-scrollbar"
     );
 
     if (
@@ -723,7 +723,7 @@ async function ensureRuntime(
     }
 
     importScripts(
-      "../graph/node_graph_codegen.js?v=1.20.31-universal-presentation-dev108-live-content-layout-parity"
+      "../graph/node_graph_codegen.js?v=1.20.31-universal-presentation-dev109-hidden-configuration-node-scrollbar"
     );
 
     if (

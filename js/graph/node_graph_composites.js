@@ -676,7 +676,7 @@ const savedApiCompositeSearchTextCache =
     `${SAVED_API_COMPOSITE_COMPARE_MESSAGE_TYPE}-result`;
 
   const SAVED_API_COMPOSITE_COMPARE_MODULE_ID =
-    "1.20.31-universal-presentation-dev108-live-content-layout-parity";
+    "1.20.31-universal-presentation-dev109-hidden-configuration-node-scrollbar";
 
   const SAVED_API_COMPOSITE_COMPARE_CANONICAL_SCHEMA_VERSION =
     4;
@@ -934,7 +934,7 @@ const savedApiCompositeSearchTextCache =
       );
     }
     const workerUrl = new URL(
-      "js/workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev108-live-content-layout-parity&canonical-schema=4",
+      "js/workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev109-hidden-configuration-node-scrollbar&canonical-schema=4",
       document.baseURI
     );
     const workerOptions = {
@@ -17067,7 +17067,7 @@ Object.defineProperty(
   "RMLNodeGraphCompositesModuleId",
   {
     value:
-      "1.20.31-universal-presentation-dev108-live-content-layout-parity",
+      "1.20.31-universal-presentation-dev109-hidden-configuration-node-scrollbar",
     writable: false,
     enumerable: true,
     configurable: true
