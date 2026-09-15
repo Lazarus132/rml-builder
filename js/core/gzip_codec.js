@@ -1,6 +1,5 @@
 (() => {
   "use strict";
-  // RML Builder core: gzip_codec.
 
   if (
     globalThis.RMLGzipCodec?.version >= 1

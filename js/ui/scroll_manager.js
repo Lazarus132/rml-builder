@@ -1,6 +1,5 @@
 (() => {
   "use strict";
-  // RML Builder ui: scroll_manager.
 
   if (window.RMLScrollManager) return;
 
@@ -78,8 +77,6 @@
       }
     }
   }
-
-
 
   function createCyclicWheelStepper(options = {}) {
     const threshold =
@@ -178,7 +175,6 @@
       }
     });
   }
-
 
   function registerRevealProvider(name, provider, priority = 0) {
     if (typeof provider !== "function") {

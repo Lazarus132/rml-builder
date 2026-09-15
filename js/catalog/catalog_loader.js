@@ -1,9 +1,8 @@
 (() => {
   "use strict";
-  // RML Builder catalog: catalog_loader.
 
   const CATALOG_LOADER_MODULE_ID =
-    "1.20.31-universal-presentation-dev86-natural-batch-progress";
+    "1.20.31-universal-presentation-dev95-clean-production";
   const LOADER_VERSION = 84;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
@@ -76,10 +75,9 @@
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=1.20.31-universal-presentation-dev86-natural-batch-progress",
+    "api_nodes.js?v=1.20.31-universal-presentation-dev95-clean-production",
     scriptUrl
   ).href;
-
 
   let resolveRegistryReady;
   let registryResolved = false;
@@ -136,7 +134,6 @@
       window.RMLModNodeRegistry
     );
   }
-
 
   function stableCatalogHash(value) {
     return window.RMLCrypto.stableHash64(
@@ -361,8 +358,6 @@
     let encodedPayload =
       new TextEncoder().encode(payload);
 
-
-
     payload = "";
     const digest = await subtle.digest(
       "SHA-256",
@@ -402,10 +397,6 @@
     }
     return bytes;
   }
-
-
-
-
 
   function boundedCatalogJson(
     value,
@@ -1331,8 +1322,6 @@
       null
     );
   }
-
-
 
   function updateStatus() {
     const element =
@@ -4148,7 +4137,6 @@
             activeGeneration
         ) {
 
-
           await clearOwnedCatalogStaging(
             database,
             staleGeneration
@@ -4220,9 +4208,6 @@
         );
       manifest.contentHash =
         integrity.hash;
-
-
-
 
       await commitCatalogCacheManifest(
         database,
@@ -4321,8 +4306,6 @@
         "The verified legacy catalog cache could not be migrated to chunks.",
         error
       );
-
-
 
       return verifiedV2;
     }
@@ -4583,7 +4566,6 @@
       { once: true }
     );
   }
-
 
   async function loadCatalog() {
     const cached =
@@ -4849,7 +4831,6 @@
       { once: true }
     );
   }
-
 
   function loadScript(
     url,
@@ -5170,9 +5151,6 @@
           existingReport
       );
     }
-
-
-
 
     await baseModNodesReady;
     await ensureApiNodesModuleLoaded();
@@ -5935,9 +5913,6 @@
       }
     }
 
-
-
-
     const registry =
       window.RMLModNodeRegistry;
     const definitions =
@@ -6455,9 +6430,6 @@
     const activeCatalog = statusCatalog();
     const activeReport =
       window.RMLApiNodeFactoryReport;
-
-
-
 
     if (
       activeCatalog &&
@@ -7376,10 +7348,6 @@
   const catalogReady =
     loadCatalog();
 
-
-
-
-
   const baseModNodesReady =
     Promise.resolve(registryReady)
       .then(async () => {
@@ -7393,9 +7361,6 @@
           "visual-csharp-nodes",
           "visual_csharp.js"
         );
-
-
-
 
         await ensureApiNodesModuleLoaded();
 

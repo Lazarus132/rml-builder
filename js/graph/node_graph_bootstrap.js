@@ -1,8 +1,7 @@
 "use strict";
-// Runtime Graph module bootstrap and coherence gate.
 
 const GRAPH_BOOTSTRAP_MODULE_ID =
-  "1.20.31-universal-presentation-dev86-natural-batch-progress";
+  "1.20.31-universal-presentation-dev95-clean-production";
 
 function assertGraphBootstrapModuleCoherence() {
   const mismatches = [];
@@ -39,6 +38,7 @@ function assertGraphBootstrapModuleCoherence() {
 }
 
 assertGraphBootstrapModuleCoherence();
+
 installGraphRevealProvider();
 
 Object.defineProperty(
@@ -152,6 +152,7 @@ if (
     mutationClass = "topology",
     analysisChanged = null
   } = {}) {
+
     return scheduleAcceptedGraphPersistenceAfterPaint({
       refreshGeneratedOutput:
         refreshGeneratedOutput === true,
@@ -272,6 +273,7 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
       prepareForExport() {
         if (!graph || !graphHostInitialized || !bridge) return false;
         if (activeInteraction) cancelInteraction(true);
+
         persistGraph(true);
         return true;
       },

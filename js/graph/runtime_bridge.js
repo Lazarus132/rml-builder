@@ -1,6 +1,5 @@
 (() => {
   "use strict";
-  // Runtime Graph live-runtime bridge.
 
   const BRIDGE_VERSION = 10;
   const BRIDGE_PROTOCOL_VERSION = 1;
@@ -51,7 +50,6 @@
     const candidates = new Set([preferred]);
     const url = new URL(preferred);
 
-
     const first = 42719;
     const last = 42729;
     const port = Number(url.port);
@@ -68,7 +66,6 @@
     return Object.freeze({ mode, phase, connected: mode === "live", scannerBaseUrl,
       health, lastError, generation: epoch, retrying: false });
   }
-
 
   function renderStatus() {
     const element = document.getElementById("api-catalog-state");
@@ -652,7 +649,6 @@
       (kind ? envelope.kind === kind : ["snapshot", "display"].includes(envelope.kind));
   }
 
-
   function subscribe(channel, listener) {
     if (typeof listener !== "function") throw new TypeError("Runtime bridge listener must be a function.");
     const key = normalizeChannel(channel);
@@ -737,7 +733,6 @@
   }
 
   document.addEventListener("rml-catalog:loaded", renderStatus);
-
 
   window.addEventListener("offline", () => { if (mode !== "cached") disconnect("The browser is offline. Click Cached to reconnect."); });
   window.addEventListener("pagehide", () => { if (mode !== "cached") disconnect(); });

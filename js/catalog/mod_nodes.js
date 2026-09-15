@@ -1,6 +1,5 @@
 (() => {
   "use strict";
-  // RML Builder catalog: mod_nodes.
 
   const registry = window.RMLModNodeRegistry;
   const requiredRegistryCapabilities = [
@@ -183,7 +182,6 @@
       : identifier;
   }
 
-
   const componentCatalog =
     window.RMLResoniteApiCatalog ||
     window.RMLFrooxComponentCatalog ||
@@ -203,7 +201,6 @@
             typeof value === "object"
         )
       : [];
-
 
   const CATALOG_ENUMS =
     Array.isArray(componentCatalog.enums)
@@ -941,7 +938,6 @@
     }
   }
 
-
   for (const enumInfo of CATALOG_ENUMS) {
     const firstValue =
       enumInfo.values[0]?.name ||
@@ -1572,7 +1568,6 @@
     return code;
   }
 
-
   function addStatefulField(
     api,
     suffix,
@@ -1625,7 +1620,6 @@
       ? api.csDefault(api.type)
       : expression;
   }
-
 
   const MATERIAL_GRAPH_TYPES = new Map([
     ["FrooxEngine.PBS_Metallic", "pbsMetallic"],
@@ -1721,7 +1715,6 @@
 
     return Boolean(source && type() && index === source.length);
   }
-
 
   function graphMaterialType(value) {
     return MATERIAL_GRAPH_TYPES.get(
@@ -1822,8 +1815,6 @@
     };
   }
 
-
-
   const CATALOG_TYPE_BY_NAME =
     new Map(
       CATALOG_TYPES
@@ -1845,7 +1836,6 @@
       .replace(/\s+/g, "")
       .replace(/&$/, "");
   }
-
 
   function normalizedCatalogCsType(value) {
     let type = String(value || "")
@@ -3313,7 +3303,6 @@ body ? `\n        ${body}();` : ""])
     }
   });
 
-
   registerNode("collection.getItemAtIndex", {
     title: "Get Item At Index",
     group: "Collections",
@@ -4673,7 +4662,6 @@ failureSource]);
     }
   });
 
-
   registerNode("file.combinePath", {
     title: "Combine Path",
     group: "Files & JSON",
@@ -5779,7 +5767,6 @@ faulted ? `\n        ${faulted}();` : ""])
       return emit ? `${emit}();` : "";
     }
   });
-
 
   registerGroup("Text", { after: "Values" });
   registerGroup("Dictionaries", { after: "Collections" });

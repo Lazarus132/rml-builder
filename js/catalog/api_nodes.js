@@ -1,9 +1,8 @@
 (() => {
   "use strict";
-  // RML Builder catalog: api_nodes.
 
   const API_FACTORY_MODULE_ID =
-    "1.20.31-universal-presentation-dev86-natural-batch-progress";
+    "1.20.31-universal-presentation-dev95-clean-production";
   const FACTORY_VERSION = 38;
   const API_VERIFICATION_SCHEMA_VERSION = 3;
   const CATALOG_PROJECTION_INDEX_VERSION = 1;
@@ -177,12 +176,6 @@
       )
     ].join("|");
   }
-
-
-
-
-
-
 
   function catalogProjectionTypeName(value) {
     return String(value || "")
@@ -3146,10 +3139,6 @@
         );
       }
 
-
-
-
-
       publishCatalogProjectionIndex(
         stagedCatalogProjectionIndex
       );
@@ -3491,9 +3480,6 @@
       }
       return factoryReady;
     }
-
-
-
 
     factoryBuildPromise =
       queueFactoryOperation(

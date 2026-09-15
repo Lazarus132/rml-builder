@@ -1,5 +1,4 @@
 "use strict";
-// Saved API Composite and boundary behavior.
 
 const SAVED_API_COMPOSITE_NESTING_LIMIT =
     typeof API_COMPOSITE_MAX_NESTING_DEPTH ===
@@ -677,7 +676,7 @@ const savedApiCompositeSearchTextCache =
     `${SAVED_API_COMPOSITE_COMPARE_MESSAGE_TYPE}-result`;
 
   const SAVED_API_COMPOSITE_COMPARE_MODULE_ID =
-    "1.20.31-universal-presentation-dev86-natural-batch-progress";
+    "1.20.31-universal-presentation-dev95-clean-production";
 
   const SAVED_API_COMPOSITE_COMPARE_CANONICAL_SCHEMA_VERSION =
     4;
@@ -768,12 +767,6 @@ const savedApiCompositeSearchTextCache =
 
   let savedApiCompositeCompareStreamQueueGeneration =
     0;
-
-
-
-
-
-
 
   let savedApiCompositeCompareAcceptedMutationGeneration =
     0;
@@ -941,7 +934,7 @@ const savedApiCompositeSearchTextCache =
       );
     }
     const workerUrl = new URL(
-      "js/workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev86-natural-batch-progress&canonical-schema=4",
+      "js/workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev95-clean-production&canonical-schema=4",
       document.baseURI
     );
     const workerOptions = {
@@ -1152,16 +1145,9 @@ const savedApiCompositeSearchTextCache =
           "function"
       ) {
 
-
-
-
-
-
         const waitForFrameBudget = () =>
           window.requestAnimationFrame(() => {
             window.requestIdleCallback(deadline => {
-
-
 
               if (
                 !deadline.didTimeout &&
@@ -1188,7 +1174,6 @@ const savedApiCompositeSearchTextCache =
           "function"
       ) {
         window.requestAnimationFrame(() => {
-
 
           window.setTimeout(
             () => resolve(null),
@@ -1719,7 +1704,6 @@ const savedApiCompositeSearchTextCache =
       index += 1
     ) {
 
-
       view.setUint16(
         offset,
         value.charCodeAt(index),
@@ -2061,10 +2045,6 @@ const savedApiCompositeSearchTextCache =
             currentPage = null;
           }
 
-
-
-
-
           if (
             (
               (sliceTokens & 7) === 0 ||
@@ -2192,10 +2172,6 @@ const savedApiCompositeSearchTextCache =
   async function streamSavedApiCompositeComparison(
     options
   ) {
-
-
-
-
 
     const queueGeneration =
       savedApiCompositeCompareStreamQueueGeneration;
@@ -2366,7 +2342,6 @@ const savedApiCompositeSearchTextCache =
           "baseline-not-installed"
       ) {
 
-
         installed = await install();
         if (
           !installed?.ok ||
@@ -2407,7 +2382,6 @@ const savedApiCompositeSearchTextCache =
           `${operationIdentity}:cleanup`
         );
       } catch {
-
 
       }
     }
@@ -2556,20 +2530,7 @@ const savedApiCompositeSearchTextCache =
     context
   ) {
     const composite = context?.composite || {};
-    const owner = context?.owner || {};
-    return {
-      ...composite,
-      title:
-        savedApiCompositeCurrentName(
-          owner,
-          composite
-        ),
-      portLayout:
-        owner.parameters?.portLayout ===
-          "mirrored"
-          ? "mirrored"
-          : "standard"
-    };
+    return composite;
   }
 
   function savedApiCompositeCompareCandidateDescriptor(
@@ -2913,10 +2874,6 @@ const savedApiCompositeSearchTextCache =
     mutationClass = "content"
   } = {}) {
 
-
-
-
-
     if (
       String(mutationClass || "")
         .trim()
@@ -2950,10 +2907,6 @@ const savedApiCompositeSearchTextCache =
       return false;
     }
 
-
-
-
-
     savedApiCompositeCompareCommittedMutationGeneration =
       savedApiCompositeCompareAcceptedMutationGeneration;
     savedApiCompositeCompareCandidateStates.clear();
@@ -2968,8 +2921,6 @@ const savedApiCompositeSearchTextCache =
     mutationClass = "content"
   } = {}) {
 
-
-
     if (
       String(mutationClass || "")
         .trim()
@@ -2980,9 +2931,6 @@ const savedApiCompositeSearchTextCache =
     const releasedAcceptedMutation =
       savedApiCompositeCompareCommittedMutationGeneration !==
         savedApiCompositeCompareAcceptedMutationGeneration;
-
-
-
 
     savedApiCompositeCompareCommittedMutationGeneration =
       savedApiCompositeCompareAcceptedMutationGeneration;
@@ -3168,10 +3116,6 @@ function markCommittedGraphMutation({
     ownerPath = null,
     mutationClass = "topology"
   } = {}) {
-
-
-
-
 
     const normalizedMutationClass =
       [
@@ -3569,8 +3513,6 @@ function sanitizeSavedApiCompositeImportRecord(
       );
     }
 
-
-
     savedApiCompositeGraphStats(sourceGraph);
     const recoveredSource =
       nodeGraphClone(raw);
@@ -3674,6 +3616,70 @@ function savedApiCompositeCanonicalValue(
     }
     return value;
   }
+
+const SAVED_API_COMPOSITE_NAVIGATION_FINGERPRINT_IGNORED_KEYS = new Set([
+  "viewport",
+  "selectedNodeId",
+  "selectedNodeIds",
+  "selectedConnectionId",
+  "selectedWirePoint",
+  "nextSequence",
+  "revision",
+  "contentFingerprint",
+  "fingerprintNameKey",
+  "fingerprintPortLayout",
+  "fingerprintNestedSignature",
+  "catalogFingerprint",
+  "catalogEngineVersion",
+  "catalogSource",
+  "catalogDefinitionRevision",
+  "coordinateSpaceVersion",
+  "savedApiCompositeUpdatedAt"
+]);
+
+function savedApiCompositeNavigationFingerprintValue(value) {
+  if (Array.isArray(value)) {
+    return value.map(item =>
+      savedApiCompositeNavigationFingerprintValue(item)
+    );
+  }
+  if (value && typeof value === "object") {
+    const result = {};
+    for (const key of Object.keys(value).sort()) {
+      if (SAVED_API_COMPOSITE_NAVIGATION_FINGERPRINT_IGNORED_KEYS.has(key)) {
+        continue;
+      }
+      const item = value[key];
+      if (item === undefined || typeof item === "function" || typeof item === "symbol") {
+        continue;
+      }
+      result[key] = savedApiCompositeNavigationFingerprintValue(item);
+    }
+    return result;
+  }
+  if (typeof value === "number" && !Number.isFinite(value)) return null;
+  return value;
+}
+
+function savedApiCompositeNavigationFingerprint(value) {
+  return JSON.stringify(
+    savedApiCompositeNavigationFingerprintValue(value || {})
+  );
+}
+
+function apiCompositeEditorCurrentContentFingerprint(
+  editor = apiCompositeEditor,
+  view = graph
+) {
+  const documentValue = apiCompositeEditorDocument(editor) || {};
+  const viewValue = view && Array.isArray(view.nodes) && Array.isArray(view.connections)
+    ? graphViewFrom(view)
+    : {};
+  return savedApiCompositeNavigationFingerprint({
+    ...documentValue,
+    ...viewValue
+  });
+}
 
 function savedApiCompositeNameKey(value) {
     return window.RMLCrypto.normalizeName(
@@ -3870,10 +3876,6 @@ function apiCompositeEditorContentUnchangedSinceOpen(
     ) {
       return false;
     }
-
-
-
-
 
     return Number.isFinite(localRevision) &&
       Number.isFinite(localBaseline)
@@ -4150,7 +4152,6 @@ function resolveSavedApiCompositeSaveTarget(
       matches.length > 1 ||
       foreignNameMatches.length > 0
     );
-
     const record = ambiguous
       ? null
       : linkedRecord;
@@ -4602,13 +4603,6 @@ function savedApiCompositeBoundaryNormalizationIsValid(
         }
         childResults.set(ownerId, childResult);
       }
-
-
-
-
-
-
-
 
       const expectedBoundaryCandidates = [
         ...sourceBoundaryState.records
@@ -5752,8 +5746,6 @@ function loadSavedApiCompositeLibrary() {
             }
           }
 
-
-
           return true;
         })
         .catch(error => {
@@ -5824,7 +5816,6 @@ async function persistSavedApiCompositeRecords(
             record
           )
         );
-
 
     assertSavedApiCompositePersistenceBatch(
       normalized
@@ -5940,8 +5931,6 @@ async function applySavedApiCompositeReconciliation(
         ).filter(Boolean)
       )
     ];
-
-
 
     assertSavedApiCompositePersistenceBatch(
       normalizedUpdates,
@@ -6375,7 +6364,6 @@ function repairSavedApiCompositeMissingPortTopology(
       removedBoundaries
     });
   }
-
 
 function savedApiCompositeValidationGraph(
     record
@@ -7327,69 +7315,6 @@ function openApiCompositeGraph(
     }
 
     if (parentEditor) {
-      const addedBefore = Number(
-        parentEditor.boundaryUpdate?.added
-      ) || 0;
-      const removedBefore = Number(
-        parentEditor.boundaryUpdate?.removed
-      ) || 0;
-      const parentContentUnchanged =
-        apiCompositeEditorContentUnchangedSinceOpen(
-          parentEditor
-        );
-      const parentCompleteStateUnchanged =
-        parentContentUnchanged &&
-        apiCompositeEditorViewUnchangedSinceOpen(
-          parentEditor
-        );
-      const capturedParent =
-        parentCompleteStateUnchanged
-          ? apiCompositeEditorDocument(
-              parentEditor
-            )
-          : captureApiCompositeEditorView(
-              parentContentUnchanged
-                ? {
-                    synchronizeBoundaries:
-                      false
-                  }
-                : {}
-            );
-      if (!capturedParent) {
-        showGraphMessage(
-          "The current Composite could not be preserved before entering its child. Nothing was changed.",
-          "error"
-        );
-        return false;
-      }
-      if (!parentCompleteStateUnchanged) {
-        markCommittedGraphMutation({
-          nodes: capturedParent.nodes,
-          document: capturedParent,
-          ownerPath: parentPath,
-          mutationClass:
-            parentContentUnchanged
-              ? "view"
-              : "topology"
-        });
-      }
-      if (
-        (Number(
-          parentEditor.boundaryUpdate?.added
-        ) || 0) !== addedBefore ||
-        (Number(
-          parentEditor.boundaryUpdate?.removed
-        ) || 0) !== removedBefore
-      ) {
-        if (
-          typeof invalidateGraphViewAnalysis ===
-            "function"
-        ) {
-          invalidateGraphViewAnalysis(
-            parentEditor.mainView?.nodes
-          );
-        }
-      }
       composite =
         apiCompositeVisibleOwnedGraph(
           normalizedOwnerId
@@ -7439,6 +7364,9 @@ function openApiCompositeGraph(
           : 0,
       contentMutationRevision: 0,
       contentMutationRevisionAtOpen: 0,
+      navigationContentFingerprintAtOpen:
+        savedApiCompositeNavigationFingerprint(composite),
+      navigationPendingFingerprint: null,
       previousPresentation,
       mainView: graphViewFrom(graph),
       parentEditor,
@@ -7458,9 +7386,18 @@ function openApiCompositeGraph(
         progress: 28
       });
     try {
-      applyGraphView(
-        graphViewFrom(composite)
-      );
+      window.__RML_API_COMPOSITE_NAVIGATION_DEPTH__ =
+        (Number(window.__RML_API_COMPOSITE_NAVIGATION_DEPTH__) || 0) + 1;
+      try {
+        applyGraphView(
+          graphViewFrom(composite)
+        );
+      } finally {
+        window.__RML_API_COMPOSITE_NAVIGATION_DEPTH__ = Math.max(
+          0,
+          (Number(window.__RML_API_COMPOSITE_NAVIGATION_DEPTH__) || 1) - 1
+        );
+      }
       apiCompositeEditor.openViewState =
         apiCompositeEditorViewState(graph);
       resetGraphRenderCaches();
@@ -7527,26 +7464,25 @@ function closeApiCompositeGraph({
     ) {
       rememberCurrentGraphAnalysis();
     }
+    const baselineFingerprint = String(
+      closingEditor.navigationContentFingerprintAtOpen ||
+      savedApiCompositeNavigationFingerprint(activeComposite)
+    );
+    const candidateFingerprint =
+      apiCompositeEditorCurrentContentFingerprint(
+        closingEditor,
+        graph
+      );
+    closingEditor.navigationPendingFingerprint =
+      candidateFingerprint;
     const contentUnchanged =
-      apiCompositeEditorContentUnchangedSinceOpen(
-        closingEditor
-      );
+      candidateFingerprint === baselineFingerprint;
     const completeStateUnchanged =
-      contentUnchanged &&
-      apiCompositeEditorViewUnchangedSinceOpen(
-        closingEditor
-      );
+      contentUnchanged;
     const captured =
-      completeStateUnchanged
+      contentUnchanged
         ? activeComposite
-        : captureApiCompositeEditorView(
-            contentUnchanged
-              ? {
-                  synchronizeBoundaries:
-                    false
-                }
-              : {}
-          );
+        : captureApiCompositeEditorView();
     if (!captured) {
       showGraphMessage(
         "The open Composite could not be preserved. Nothing was closed.",
@@ -7559,9 +7495,6 @@ function closeApiCompositeGraph({
         closingEditor
       );
     if (!completeStateUnchanged) {
-
-
-
 
       markCommittedGraphMutation({
         nodes: captured.nodes,
@@ -7601,7 +7534,16 @@ function closeApiCompositeGraph({
       : 0;
     apiCompositeEditor = parentEditor;
     try {
-      applyGraphView(mainView);
+      window.__RML_API_COMPOSITE_NAVIGATION_DEPTH__ =
+        (Number(window.__RML_API_COMPOSITE_NAVIGATION_DEPTH__) || 0) + 1;
+      try {
+        applyGraphView(mainView);
+      } finally {
+        window.__RML_API_COMPOSITE_NAVIGATION_DEPTH__ = Math.max(
+          0,
+          (Number(window.__RML_API_COMPOSITE_NAVIGATION_DEPTH__) || 1) - 1
+        );
+      }
     } catch (error) {
       finishGraphTransitionWork(workSession);
       throw error;
@@ -7640,9 +7582,6 @@ function closeApiCompositeGraph({
             boundaryChanged ||
             !contentUnchanged,
           refreshCompositeActions: true,
-
-
-
 
           mutationClass: "view",
           acceptedMutation:
@@ -8476,8 +8415,6 @@ function buildApiCompositeExtensionCandidate(
       ""
     );
 
-
-
     const newFingerprint = "";
     composite.contentFingerprint =
       newFingerprint;
@@ -8529,8 +8466,6 @@ function buildApiCompositeExtensionCandidate(
       oldFingerprint,
       newFingerprint,
 
-
-
       changed: true,
       addedNodeCount:
         plan.peerNodes.length,
@@ -8574,9 +8509,6 @@ function createApiCompositeFromSelection() {
         : graph;
     const commitWorkingCandidate =
       candidate => {
-
-
-
 
         const liveNodes = graph.nodes;
         const liveConnections =
@@ -9277,9 +9209,6 @@ function unpackApiCompositeNode(
       );
     }
 
-
-
-
     const liveNodes = graph.nodes;
     const liveConnections =
       graph.connections;
@@ -9778,9 +9707,6 @@ async function saveApiCompositeNode(
       stagedRecordBaselineIdentity = "";
     } catch (error) {
 
-
-
-
       savedApiCompositeCompareRecordChanged(
         stored.id,
         stored
@@ -10185,7 +10111,12 @@ function savedApiCompositeRecordsFromJson(
           source,
           { preserveId: true }
         );
-
+      // Import is the only automatic topology-repair boundary. Saved
+      // Composites are container documents just like projects: obsolete
+      // missing-port topology may be disconnected while importing the file,
+      // but opening, navigating, resolving, refreshing and placing an
+      // existing Composite must preserve its document byte-for-byte in
+      // semantic content and leave incompatible nodes/ports visibly red.
       const importedComposite =
         nodeGraphClone(record.composite);
       const importRepair =
@@ -10985,9 +10916,6 @@ async function importSavedApiCompositePayload(
               )
             : [];
         if (!existing) {
-
-
-
 
           pending.push(incoming);
           knownById.set(
@@ -12447,7 +12375,8 @@ function savedApiCompositeContextMatchesRecord(
     const recordId = String(
       record?.id || ""
     ).trim();
-
+    // A placed Composite belongs to a Library record only through its
+    // explicit persistent identity. Name equality is deliberately ignored.
     return Boolean(
       linkedId &&
       recordId &&
@@ -12488,9 +12417,6 @@ function matchingSavedApiCompositeInstances(
           return false;
         }
         if (!staleOnly) return true;
-
-
-
 
         return (
           savedApiCompositeInstanceComparisonStatus(
@@ -12743,16 +12669,8 @@ function mapSavedApiCompositeReplacementNodes(
       }
       if (allowNestedContentChange) {
 
-
-
-
-
-
-
         return true;
       }
-
-
 
       return false;
     };
@@ -15604,12 +15522,19 @@ async function instantiateSavedApiCompositeAt(
       try {
         graph = expanded;
 
+        // Saved Composites intentionally preserve stale topology. A catalog
+        // change may leave a connection pointing at a port that no longer
+        // exists on the current API definition. That is an editable
+        // compatibility state (rendered unavailable/red), not a reason to
+        // reject opening or placing the Composite. Validate the still-live
+        // topology only; never mutate the stored/placed Composite here.
         const expandedConnections =
           Array.isArray(expanded.connections)
             ? expanded.connections
             : [];
         const skippedConnectionIds = new Set();
 
+        // First mark only genuinely stale endpoints.
         for (const connection of expandedConnections) {
           const sourceExists = !!findPortSpec(
             connection?.fromNode,
@@ -15630,6 +15555,9 @@ async function instantiateSavedApiCompositeAt(
           }
         }
 
+        // Branches whose parent is stale are validation-only omissions too.
+        // Iterate because branch chains are not required to be stored in
+        // parent-before-child order.
         let addedSkippedBranch = true;
         while (addedSkippedBranch) {
           addedSkippedBranch = false;
@@ -16652,12 +16580,20 @@ function savedApiCompositeUpdateActionState(
         owner.id === openContext.ownerId
       )
     );
-
-    const updatesOpenComposite = Boolean(
-      openContentChanged &&
-      openCanonicalChanged
-    );
-
+    // Opening/navigation is read-only. A stale comparison for the currently
+    // open instance is never enough to create an Update action by itself.
+    // Graph -> Library requires BOTH a real content mutation since Open and
+    // a canonical difference from the linked Library record.
+    // HARD INVARIANT: an actively open Library Composite is navigation-only
+    // from the Library action perspective. Never expose Update for that same
+    // record while it is open, regardless of comparison, normalization,
+    // catalog refresh, presentation work, or incidental mutation counters.
+    // After leaving the Composite, the normal canonical stale-instance path
+    // may expose the appropriate Library update action.
+    const updatesOpenComposite = false;
+    // The currently open instance must also never fall through to the
+    // Library -> Graph direction merely because comparison normalization or
+    // catalog presentation reports it as stale after Open.
     const matchingInstances =
       openContext
         ? staleInstances.filter(owner =>
@@ -17131,7 +17067,7 @@ Object.defineProperty(
   "RMLNodeGraphCompositesModuleId",
   {
     value:
-      "1.20.31-universal-presentation-dev86-natural-batch-progress",
+      "1.20.31-universal-presentation-dev95-clean-production",
     writable: false,
     enumerable: true,
     configurable: true

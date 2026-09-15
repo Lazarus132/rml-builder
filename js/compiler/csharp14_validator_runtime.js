@@ -1,6 +1,5 @@
 (() => {
   "use strict";
-  // RML Builder compiler: csharp14_validator_runtime.
 
   const ASSEMBLY = "RmlCSharp14ParserWasm";
   const LANGUAGE_VERSION = "14.0";

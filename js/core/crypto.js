@@ -1,6 +1,5 @@
 (() => {
   "use strict";
-  // RML Builder core: crypto.
 
   function normalizeName(value) {
     return String(value || "")

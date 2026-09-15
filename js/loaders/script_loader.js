@@ -1,9 +1,8 @@
 (() => {
   "use strict";
-  // RML Builder loaders: script_loader.
 
   const SCRIPT_LOADER_MODULE_ID =
-    "1.20.31-universal-presentation-dev86-natural-batch-progress";
+    "1.20.31-universal-presentation-dev95-clean-production";
 
   if (
     Object.hasOwn(
@@ -183,7 +182,7 @@
       dependencies: Object.freeze([]),
       files: Object.freeze([
         Object.freeze({
-          url: "../catalog/catalog_loader.js?v=1.20.31-universal-presentation-dev86-natural-batch-progress",
+          url: "../catalog/catalog_loader.js?v=1.20.31-universal-presentation-dev95-clean-production",
           ready: () =>
             window.RMLCatalogImportGate?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -235,7 +234,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/node_graph_codegen.js?v=1.20.31-universal-presentation-dev86-natural-batch-progress",
+          url: "../graph/node_graph_codegen.js?v=1.20.31-universal-presentation-dev95-clean-production",
           ready: () =>
             window.RMLTypedNodeGraphGenerator?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -252,7 +251,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev86-natural-batch-progress",
+          url: "../workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev95-clean-production",
           ready: () =>
             window.RMLSavedApiCompositeCompareWorkerBootstrap
               ?.moduleId === SCRIPT_LOADER_MODULE_ID &&
@@ -261,13 +260,13 @@
               ?.source === "string"
         }),
         Object.freeze({
-          url: "../graph/node_graph_composites.js?v=1.20.31-universal-presentation-dev86-natural-batch-progress",
+          url: "../graph/node_graph_composites.js?v=1.20.31-universal-presentation-dev95-clean-production",
           ready: () =>
             window.RMLNodeGraphCompositesModuleId ===
               SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_custom_csharp.js?v=1.20.31-universal-presentation-dev86-natural-batch-progress",
+          url: "../graph/node_graph_custom_csharp.js?v=1.20.31-universal-presentation-dev95-clean-production",
           ready: () =>
             window.RMLNodeGraphCustomCSharpModuleId ===
               SCRIPT_LOADER_MODULE_ID
@@ -276,13 +275,13 @@
           url: "../graph/node_graph_guided.js?v=1-physical-modules-v748"
         }),
         Object.freeze({
-          url: "../graph/node_graph_view.js?v=1.20.31-universal-presentation-dev86-natural-batch-progress",
+          url: "../graph/node_graph_view.js?v=1.20.31-universal-presentation-dev95-clean-production",
           ready: () =>
             window.RMLNodeGraphViewModuleId ===
               SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_bootstrap.js?v=1.20.31-universal-presentation-dev86-natural-batch-progress",
+          url: "../graph/node_graph_bootstrap.js?v=1.20.31-universal-presentation-dev95-clean-production",
           ready: () =>
             window.RMLDynamicGraphHost?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&

@@ -1,5 +1,4 @@
 "use strict";
-// RML Builder bootstrap: app.
 
 const STORAGE_KEY = "rml-configuration-builder-standalone-v1";
 const PREVIEW_STORAGE_KEY = "rml-preview-values-v2";
@@ -43,7 +42,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "1.20.31-universal-presentation-dev86-natural-batch-progress";
+  "1.20.31-universal-presentation-dev95-clean-production";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -1220,6 +1219,7 @@ function requestExportPreflight({ prepareStyles = false } = {}) {
           })
         );
       } else {
+
         const catalog =
           window.RMLResoniteApiCatalog ||
           window.RMLFrooxComponentCatalog;
@@ -1442,6 +1442,7 @@ function requestGeneratedOutputUpdate() {
     elements.codeSummary.textContent =
       "Large runtime graph loaded · generated files are being refreshed";
   }
+
   updateGeneratedOutput();
 }
 
@@ -2271,6 +2272,7 @@ function recoverProjectIoRequest(
   }
 
   if (pending.recoveryAttempted) {
+
     dispatchProjectIoRequestOnMainThread(
       pending
     );
@@ -2774,6 +2776,7 @@ let graphCodegenWorkerCachedKey = "";
 let graphCodegenWorkerCachedResult = null;
 let graphCodegenWorkerLastError = null;
 let graphCodegenWorkerFailedKey = "";
+
 let pendingImportedGraphAnalysisCertificate = null;
 let graphCodegenProjectEpoch = 1;
 
@@ -3505,6 +3508,7 @@ function graphCodegenContractsMatch(
   if (!semanticIdentityMatches) {
     return false;
   }
+
   return true;
 }
 
@@ -4328,7 +4332,7 @@ function ensureGraphCodegenWorker() {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev86-natural-batch-progress",
+      "../workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev95-clean-production",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -12126,6 +12130,7 @@ function clearLegacyLocalDraft(revision) {
   ) {
     return false;
   }
+
   try {
     localStorage.removeItem(
       ACTIVE_STORAGE_KEY
@@ -12387,6 +12392,7 @@ function persist(immediate = false) {
 function flushProjectDraftForLifecycle() {
   projectDraftDiagnostics
     .lifecycleFlushes += 1;
+
   window.RMLDynamicGraphHost
     ?.flushPendingEditorEdits?.();
 
@@ -28032,7 +28038,7 @@ function promiseWithBuilderTimeout(
 
 function assertProjectRuntimeModuleCoherence() {
   const expectedModuleId =
-    "1.20.31-universal-presentation-dev86-natural-batch-progress";
+    "1.20.31-universal-presentation-dev95-clean-production";
   const requiredFactoryVersion = 38;
   const mismatches = [];
   const requireModuleId = (
@@ -32008,6 +32014,7 @@ async function openProjectDialog() {
   if (sequence !== projectDialogOpenSequence) {
     return;
   }
+
   await waitForBuilderMessageQueueIdle();
 
   if (sequence !== projectDialogOpenSequence) {
@@ -32062,6 +32069,7 @@ let builderMessageQueueTail =
   Promise.resolve();
 
 async function waitForBuilderMessageQueueIdle() {
+
   while (true) {
     const observedTail =
       builderMessageQueueTail;
@@ -32173,6 +32181,7 @@ function presentBuilderMessage({
 }
 
 function showBuilderMessage(options = {}) {
+
   const present = () =>
     presentBuilderMessage(options);
   const queued =
@@ -32265,6 +32274,7 @@ async function saveProjectJson() {
     setProjectFileStatus(
       "Preparing and compressing project JSON…"
     );
+
     captureVisibleBuilderPage(
       "save-json",
       true
@@ -32371,6 +32381,7 @@ async function loadProjectJsonFile(
         `The selected file is larger than the ${formatProjectByteLimit(PROJECT_FILE_MAX_BYTES)} project limit.`
       );
     }
+
     releaseIdleBuilderMemory({
       discardGeneratedBuild: true
     });
@@ -32441,6 +32452,7 @@ async function loadProjectJsonFile(
         host.importSavedApiComposites(
           projectSource
         );
+
       projectFile.value = null;
       projectSource = null;
       const imported = await importPromise;
@@ -32581,6 +32593,7 @@ async function loadProjectJsonFile(
           confirmLabel: "OK"
         });
       }
+
       await openProjectDialog();
       return;
     }
@@ -36732,8 +36745,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "../../templates/help_template.html?v=1.20.31-universal-presentation-dev86-natural-batch-progress",
-    "../templates/help_template.js?v=1.20.31-universal-presentation-dev86-natural-batch-progress",
+    "../../templates/help_template.html?v=1.20.31-universal-presentation-dev95-clean-production",
+    "../templates/help_template.js?v=1.20.31-universal-presentation-dev95-clean-production",
     "help-template",
     "RMLHelpTemplateMarkup"
   )
@@ -42954,6 +42967,7 @@ async function initialize() {
   elements.builderMessageDialog.addEventListener(
     "close",
     () => {
+
       if (
         !elements.builderMessageDialog.open &&
         activeBuilderMessageResolver
@@ -44233,6 +44247,7 @@ function rmlRuntimeDisplayInspector() {
     "Used only as the stable RML configuration key. The displayed row is continuously synchronized from the graph and manual edits are overwritten.";
   keyLabel.appendChild(keyHelp);
   form.appendChild(keyLabel);
+
   host.appendChild(form);
   window.RMLInlineRowLayout
     ?.appendInspectorControls?.(

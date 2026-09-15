@@ -1,6 +1,5 @@
 (() => {
   "use strict";
-  // RML Builder ui: colorpicker_adaptive_fit.
 
   const PORTRAIT_WIDTH = 435;
   const PORTRAIT_HEIGHT = 1242;

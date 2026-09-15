@@ -1,6 +1,5 @@
 (() => {
   "use strict";
-  // RML Builder tour: setup_assistant.
 
   const SCRIPT_BASE = document.currentScript?.src || window.location.href;
   const TEMPLATE_URL = new URL("../../templates/setup_template.html?v=132-no-small-viewport-warning-v347f1", SCRIPT_BASE).href;
@@ -428,7 +427,6 @@
       ? graphConstraintProof(profile)
       : null;
   }
-
 
   function recordConstraintCertificate(certificate, context = {}) {
     const recorded = {
@@ -1636,7 +1634,6 @@
     }
     return rect;
   }
-
 
   function tourPlainText(value) {
     const holder = document.createElement("div");
@@ -3350,7 +3347,6 @@
         : "clear";
   }
 
-
   function transitionSemanticScene(targets, label = "section") {
     if (!activeSemanticScene?.locked) return null;
     const nextElements = (Array.isArray(targets) ? targets : [targets])
@@ -3589,7 +3585,6 @@
         ? "fallback"
         : "clear";
   }
-
 
   function revealActiveNarrationTargets() {
     const visible = activeNarrationTargets.filter(tourElementActuallyVisible);
@@ -5341,7 +5336,6 @@
     );
   }
 
-
   function hideMouse() {
     const { mouse } = elements();
     if (!mouse) return;
@@ -5393,7 +5387,6 @@
     });
     return hidden;
   }
-
 
   function directChildrenWithClass(host, className) {
     return [...(host?.children || [])].filter(
@@ -6062,13 +6055,11 @@
     return bestVerticalOutlineScene()?.host || null;
   }
 
-
   async function waitForAnimationFrames(count = 2) {
     for (let index = 0; index < count; index += 1) {
       await tourNextVisualFrame();
     }
   }
-
 
   function teacherMouseCoordinates() {
     const mouse = elements().mouse;
@@ -6435,7 +6426,6 @@
       String(point.y);
     return true;
   }
-
 
   function centerOf(element, xFactor = .5, yFactor = .5) {
     const rect = element?.getBoundingClientRect();
@@ -7898,7 +7888,6 @@
     }
   }
 
-
   async function nativeGraphViewportPan(
     viewport,
     from,
@@ -8025,7 +8014,6 @@
 
     return runId === demoRunId;
   }
-
 
   function nativeProductDragGhostVisible() {
     return [
@@ -11121,7 +11109,6 @@
     };
   }
 
-
   function dispatchNativeSectionPointer(
     target,
     type,
@@ -11200,7 +11187,6 @@
     target.dispatchEvent(event);
     return event.defaultPrevented;
   }
-
 
   function tourPerceptionElementLabel(element) {
     if (!(element instanceof Element)) return "";
@@ -13336,7 +13322,6 @@
     return runOutlineVerticalAfterBuild259Horizontal(runId);
   }
 
-
   function graphStep11IsCurrentLesson() {
     return steps[stepIndex]?.demo === "graph-route";
   }
@@ -13891,7 +13876,6 @@
     );
     return revealComplete ? item : null;
   }
-
 
   async function ensureGraphDemoNodes(runId = demoRunId) {
     const host = window.RMLDynamicGraphHost;
@@ -15442,7 +15426,6 @@
     };
   }
 
-
   async function nativeGraphNodeDrag(article, targetCenter, duration, runId) {
     const header = article?.querySelector(".rml-graph-node-header") || article;
     if (!header || !targetCenter || runId !== demoRunId) return false;
@@ -15512,7 +15495,6 @@
       mouse?.classList.remove("pressed");
     }
   }
-
 
   async function nativeGraphPointerDrag(
     startElement,
@@ -15993,7 +15975,6 @@
     };
   }
 
-
   function graphDemoConnectionPaths(connectionId) {
     if (!connectionId) return [];
     return [...document.querySelectorAll(
@@ -16008,7 +15989,6 @@
         Number(b.dataset.segmentIndex || 0)
       );
   }
-
 
   function graphDemoSafeEmptyDropPoint(
     viewport,
@@ -16752,7 +16732,6 @@
 
     return false;
   }
-
 
   function graphDemoConnectionFor(output, input) {
     if (!output || !input) return null;
@@ -17796,7 +17775,6 @@
       { runId }
     );
   }
-
 
   function setRealPortGlow(socket, active) {
     if (!(socket instanceof Element)) return;
@@ -20566,7 +20544,6 @@
     }
   }
 
-
   function tourElementActuallyVisible(element) {
     if (!(element instanceof Element) || !element.isConnected) return false;
     const rect = element.getBoundingClientRect();
@@ -22897,7 +22874,6 @@
     return tourPageRootCenteringPlan(target).useful === true;
   }
 
-
   function tourTargetComfortablyVisible(target) {
     if (!target || !tourElementActuallyVisible(target)) return false;
     return tourPageRootCenteringPlan(target).useful !== true;
@@ -24402,7 +24378,6 @@
     return true;
   }
 
-
   function assertActionOnlyDemonstration(stage) {
     const ui = elements();
     const forbidden = [...document.querySelectorAll(
@@ -24490,7 +24465,6 @@
     });
     return effectiveSuccess;
   }
-
 
   function restoreControlledRepeatDialogPresentation(index, phase) {
     const ui = elements();

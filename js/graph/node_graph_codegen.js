@@ -1,7 +1,4 @@
 "use strict";
-// Runtime Graph validation and C# generation.
-
-
 
 const EXTENSION_NAME = "typedNodeGraph";
 const GRAPH_SCHEMA_VERSION = 33;
@@ -194,39 +191,65 @@ function apiCompositeOwnedContainerAllowed(
   }
 
 let bridge = null;
+
 let graph = null;
+
 let customCSharpEditor = null;
+
 let apiCompositeEditor = null;
+
 let apiCompositeRootOperation = false;
+
 let customCSharpRootOperation = false;
+
 let currentAnalysis = null;
 
 const GRAPH_ANALYSIS_CACHE_LIMIT = 4;
+
 const GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION = 1;
+
 const graphAnalysisCache = new Map();
+
 const graphAnalysisIdentityTokens = new WeakMap();
+
 const trustedGraphAnalysisCertificates = new WeakSet();
 
 let lastGraphAnalysisRecord = null;
+
 let pendingGraphAnalysisCertificate = null;
+
 let graphAnalysisCoreRunCount = 0;
+
 let graphAnalysisAsyncRequestSequence = 0;
+
 let lastPersistedGraphReference = null;
+
 let graphCodegenRevision = 1;
+
 let activeInteraction = null;
+
 let graphStructuralPaintFrame = 0;
+
 let graphStructuralCommitFrame = 0;
+
 let graphNodeVirtualizationSignature = "";
+
 let graphNodeVirtualizationAnchor = null;
+
 let graphGpuOverviewMode = false;
 
 const graphNodeGeometryCache = new Map();
+
 const graphForcedNodeIds = new Set();
+
 const graphSocketElementCache = new Map();
+
 const graphSvgWirePathCache = new Map();
+
 const graphSvgWirePointCache = new Map();
 
 let graphNodeDefinitionCache = new WeakMap();
+
 let graphNodeDefinitionCacheEnvironmentKey = "";
 
 function currentGraphNodeDefinitionEnvironmentKey() {
@@ -338,7 +361,6 @@ function cloneCustomCSharpFileGraph(
         );
       }
     } catch {
-
 
     }
     return cloned;
@@ -2098,12 +2120,6 @@ function activeGraphCustomCSharpFileRegistry({
     create = false
   } = {}) {
 
-
-
-
-
-
-
     const customOwnerDocument =
       typeof customCSharpEditor !==
           "undefined" &&
@@ -2692,11 +2708,6 @@ function apiCompositeBoundaryPortSpecification(
       return currentSpecification;
     }
 
-
-
-
-
-
     if (
       definition &&
       definition.unavailableApiContract !==
@@ -2704,12 +2715,6 @@ function apiCompositeBoundaryPortSpecification(
     ) {
       return null;
     }
-
-
-
-
-
-
 
     const storedContract =
       node.apiContract &&
@@ -3147,10 +3152,6 @@ function reconcileApiCompositeBoundaryTree(
             Array.isArray(child.nodes)
               ? child.nodes.length
               : 0;
-
-
-
-
 
           if (!isRoot) {
             for (const childBoundary of
@@ -4348,10 +4349,6 @@ function captureApiCompositeEditorView(
         ...graphViewFrom(graph)
       };
 
-
-
-
-
       return apiCompositeEditorCommitDocument(
         apiCompositeEditor,
         captured
@@ -5056,8 +5053,6 @@ function withRuntimeRootGraph(callback) {
         }
       }
 
-
-
       currentAnalysis =
         savedPresentationAnalysis;
       customCSharpRootOperation = false;
@@ -5490,10 +5485,6 @@ function sanitizeGraphState(
 
     result.active =
       raw.active === true;
-
-
-
-
 
     result.lastOpenPage =
       raw.lastOpenPage === "runtime-graph"
@@ -6271,9 +6262,6 @@ function sanitizeGraphState(
         ...graphViewFrom(sanitizedView)
       };
     }
-
-
-
 
     const migratedSyntaxIds = new Set();
     for (const owner of result.nodes.filter(node =>
@@ -7794,9 +7782,6 @@ function graphAnalysisSemanticToken(
       return identityCached.token;
     }
 
-
-
-
     graphConcreteTypes();
 
     const fingerprint =
@@ -8087,7 +8072,7 @@ function createGraphAnalysisCertificate(
       schemaVersion:
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION,
       moduleId:
-        "1.20.31-universal-presentation-dev86-natural-batch-progress",
+        "1.20.31-universal-presentation-dev95-clean-production",
       semanticToken: token,
       nodeCount: graph.nodes.length,
       connectionCount: connections.length,
@@ -8120,7 +8105,7 @@ function graphAnalysisCertificateEnvelopeValid(
       Number(certificate.schemaVersion) ===
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION &&
       certificate.moduleId ===
-        "1.20.31-universal-presentation-dev86-natural-batch-progress" &&
+        "1.20.31-universal-presentation-dev95-clean-production" &&
       certificate.valid === true &&
       typeof certificate.semanticToken ===
         "string" &&
@@ -9882,14 +9867,11 @@ async function analyzeGraphConnectionsAsync(
       }
     );
 
-
-
     assertCurrent();
     const result = analyzeWithAutoVectors(
       requestedConnections,
       null
     );
-
 
     assertCurrent({
       verifySemanticToken: false
@@ -11323,9 +11305,6 @@ function synchronizeGraphForCodegen(
     typedGraphCodegenCacheKey = "";
     typedGraphCodegenCache = null;
     if (acceptedAnalysisCertificate) {
-
-
-
 
       normalizeConnectionRouting(
         graph.connections
@@ -13814,9 +13793,6 @@ function buildTypedNodeGraphCSharpContribution(
       flattenConfiguration(
         graph.configSnapshot.nodes || []
       );
-
-
-
 
     const configurationValueEntries =
       configurationEntries.filter(entry => {
@@ -17059,7 +17035,7 @@ Object.defineProperty(
     {
       value: Object.freeze({
         moduleId:
-          "1.20.31-universal-presentation-dev86-natural-batch-progress",
+          "1.20.31-universal-presentation-dev95-clean-production",
         build:
           buildTypedNodeGraphCSharpContribution,
         validateDocument:
@@ -17074,7 +17050,6 @@ Object.defineProperty(
         acceptTransferredAnalysisCertificate(
           certificate
         ) {
-
 
           return acceptGraphAnalysisCertificate(
             certificate,

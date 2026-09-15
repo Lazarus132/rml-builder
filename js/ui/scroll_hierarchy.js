@@ -1,6 +1,5 @@
 (() => {
   "use strict";
-  // RML Builder ui: scroll_hierarchy.
 
   if (window.RMLScrollHierarchy?.version >= 9) {
     return;
@@ -226,7 +225,6 @@
     remainder.splice(parentPosition, 0, parent, ...descendants);
     return remainder;
   }
-
 
   const api = Object.freeze({
     version: 9,

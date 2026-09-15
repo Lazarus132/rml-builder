@@ -1,6 +1,5 @@
 (() => {
   "use strict";
-  // RML Builder compiler: visual_csharp.
 
   const registry = window.RMLModNodeRegistry;
   if (!registry) {
@@ -3620,11 +3619,6 @@
     }, 0, fileName);
     connect(rootSyntaxNodeId, fileId, "content");
 
-
-
-
-
-
     const childrenByParent = new Map();
     for (const edge of connections) {
       const list = childrenByParent.get(edge.toNode) || [];
@@ -3660,9 +3654,6 @@
       columnNodes.push(node);
       nodesByColumn.set(column, columnNodes);
     }
-
-
-
 
     for (const columnNodes of nodesByColumn.values()) {
       columnNodes.sort((left, right) => left.y - right.y);

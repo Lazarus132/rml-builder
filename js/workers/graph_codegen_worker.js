@@ -1,8 +1,7 @@
 "use strict";
-// RML Builder workers: graph_codegen_worker.
 
 const GRAPH_CODEGEN_WORKER_MODULE_ID =
-  "1.20.31-universal-presentation-dev86-natural-batch-progress";
+  "1.20.31-universal-presentation-dev95-clean-production";
 const GRAPH_CODEGEN_WORKER_FACTORY_VERSION =
   38;
 
@@ -666,8 +665,6 @@ async function ensureRuntime(
         catalog;
     } else {
 
-
-
       delete self.RMLResoniteApiCatalog;
       delete self.RMLFrooxComponentCatalog;
     }
@@ -682,7 +679,7 @@ async function ensureRuntime(
       "../compiler/visual_csharp.js?v=83-empty-custom-csharp-ignored"
     );
     importScripts(
-      "../catalog/api_nodes.js?v=1.20.31-universal-presentation-dev86-natural-batch-progress"
+      "../catalog/api_nodes.js?v=1.20.31-universal-presentation-dev95-clean-production"
     );
 
     if (
@@ -726,7 +723,7 @@ async function ensureRuntime(
     }
 
     importScripts(
-      "../graph/node_graph_codegen.js?v=1.20.31-universal-presentation-dev86-natural-batch-progress"
+      "../graph/node_graph_codegen.js?v=1.20.31-universal-presentation-dev95-clean-production"
     );
 
     if (
@@ -1000,9 +997,6 @@ function customCSharpCatalogDefinitions(support) {
   if (!verified) {
     return definitions;
   }
-
-
-
 
   for (let index = 0; index < typeNames.length; index += 1) {
     const typeName = String(

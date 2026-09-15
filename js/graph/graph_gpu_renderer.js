@@ -1,6 +1,5 @@
 (() => {
   "use strict";
-  // Runtime Graph GPU renderer and retained presentation.
 
   const VERSION = 24;
   const WIRE_CULL_CELL_SIZE = 960;
@@ -17,6 +16,7 @@
   const WIRE_LAYERS_PER_SEGMENT = 1;
   const FLOATS_PER_NODE_INSTANCE = 6;
   const WEBGPU_WORKGROUP_SIZE = 128;
+
   const GPU_CULL_OVERSCAN_PIXELS = 384;
   const GPU_CULL_SCALE_REUSE_RATIO = 1.125;
   const WEBGPU_ASYNC_INDEX_THRESHOLD = 20000;
@@ -164,8 +164,6 @@
 
   function webGpuAdapterOptions() {
 
-
-
     return undefined;
   }
 
@@ -174,8 +172,6 @@
   let activeRendererBackend = "none";
   const RENDERER_BACKEND_RETRY_BASE_MILLISECONDS = 750;
   const RENDERER_BACKEND_RETRY_MAX_MILLISECONDS = 8000;
-
-
 
   const rendererBackendSubmissionFailures = new Map();
 
@@ -435,7 +431,6 @@
     }
     return length;
   }
-
 
   function curveFromSegment(segment) {
     if (segment?.curve?.p0) {
@@ -3422,9 +3417,6 @@
         return false;
       }
 
-
-
-
       const plans = [];
       const connectionIds = new Set();
       for (const patch of patches) {
@@ -6155,7 +6147,6 @@
     ) {
       try {
 
-
         this.ensureWebGpuBuffers();
       } catch (error) {
         this.handleGpuOperationException(
@@ -6197,7 +6188,6 @@
               failedIndices
             );
           } catch {
-
 
           }
         }
@@ -6643,9 +6633,6 @@
       this.invalidateGpuCulling();
     }
   }
-
-
-
 
   function guardRendererGpuOperations(
     RendererClass,

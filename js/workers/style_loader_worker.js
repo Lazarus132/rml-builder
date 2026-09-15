@@ -1,5 +1,4 @@
 "use strict";
-// RML Builder workers: style_loader_worker.
 
 function validateStylesheetText(text, url) {
   if (!text.trim()) {

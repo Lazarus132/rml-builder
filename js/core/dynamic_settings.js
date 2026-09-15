@@ -1,6 +1,5 @@
 (() => {
   "use strict";
-  // RML Builder core: dynamic_settings.
 
   const VERSION = 10;
   const IMPULSE_BUTTON_VALUE_TYPE =
@@ -291,7 +290,6 @@
 
     scheduleRuntimeBridgeSubscriptionRefresh();
   }
-
 
   function installPalette() {
     document.querySelectorAll("[data-rml-dynamic-palette], .rml-dynamic-settings-palette")
@@ -2046,7 +2044,6 @@ csString(graphClass)]);
   boot();
 })();
 
-
 (() => {
   "use strict";
 
@@ -2623,7 +2620,6 @@ csString(graphClass)]);
 
     return core || null;
   }
-
 
   function installEditablePalette() {
     const existing =

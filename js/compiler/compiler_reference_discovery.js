@@ -1,6 +1,5 @@
 (() => {
   "use strict";
-  // RML Builder compiler: compiler_reference_discovery.
 
   function normalizeAssemblyName(value) {
     return String(value || "")

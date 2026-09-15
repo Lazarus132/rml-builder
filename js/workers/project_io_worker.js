@@ -1,13 +1,9 @@
 "use strict";
-// RML Builder workers: project_io_worker.
 
 const DEFAULT_PROJECT_MAX_BYTES =
   512 * 1024 * 1024;
 const GZIP_MAGIC_FIRST = 0x1f;
 const GZIP_MAGIC_SECOND = 0x8b;
-
-
-
 
 const PROJECT_STREAM_TOKEN = Object.freeze({
   null: 1,
