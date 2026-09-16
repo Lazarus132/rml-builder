@@ -7,7 +7,7 @@
       content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
     <meta
       name="rml-builder-build"
-      content="1.20.31-universal-presentation-dev109-hidden-configuration-node-scrollbar">
+      content="1.20.31-universal-presentation-dev140-atomic-avatar-preload">
     <meta
       name="description"
       content="Build complete typed ResoniteModLoader projects visually with automatic dependencies; optional Raw C# tools remain an expert fallback.">
@@ -18,7 +18,7 @@
         "RMLBuilderBuildId",
         {
            value:
-             "1.20.31-universal-presentation-dev109-hidden-configuration-node-scrollbar",
+             "1.20.31-universal-presentation-dev140-atomic-avatar-preload",
            writable: false,
            enumerable: true,
            configurable: false
@@ -41,8 +41,8 @@
         );
       })();
     </script>
-    <script src="js/bootstrap/architecture_gate.js?v=1.20.31-universal-presentation-dev109-hidden-configuration-node-scrollbar"></script>
-    <link rel="stylesheet" href="styles/base/styles.css?v=285-unified-loading-state">
+    <script src="js/bootstrap/architecture_gate.js?v=1.20.31-universal-presentation-dev140-atomic-avatar-preload"></script>
+    <link rel="stylesheet" href="styles/base/styles.css?v=286-atomic-avatar-preload">
     <link rel="shortcut icon" href="assets/icons/favicon.svg">
     <link rel="icon" href="assets/icons/favicon.svg">
   </head>
@@ -224,8 +224,11 @@
           <span class="top-action-label">Preview</span>
         </button>
         <button id="project-manager" class="button secondary top-action-button" type="button"
-          aria-label="Project manager" data-help="Save the current project or import a Builder project or API Composite from JSON or GZIP.">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h7l2 2h9v10H3z M3 7V5h7l2 2"></path></svg>
+          aria-label="Project & Preferences" data-help="Save, import and switch projects, or customize your personal Builder experience.">
+          <span class="top-action-profile-avatar" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"></circle><path d="M4.5 21a7.5 7.5 0 0 1 15 0"></path></svg>
+            <img id="top-builder-profile-avatar-image" alt="" hidden>
+          </span>
           <span class="top-action-label">Project</span>
         </button>
         <button id="pack-into-node" class="button secondary top-action-button rml-pack-button" type="button"
@@ -470,10 +473,19 @@
       tabindex="-1"
       aria-labelledby="project-dialog-title">
       <div class="export-dialog-header">
-        <div>
-          <small>Local Builder files</small>
-          <h2 id="project-dialog-title">Save or import Builder data</h2>
+        <div class="project-profile-heading">
+          <span id="builder-profile-avatar" class="builder-profile-avatar" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"></circle><path d="M4.5 21a7.5 7.5 0 0 1 15 0"></path></svg>
+            <img id="builder-profile-avatar-image" alt="" hidden>
+          </span>
+          <div>
+            <small id="builder-profile-kicker">Builder profile</small>
+            <h2 id="project-dialog-title">Project &amp; Preferences</h2>
+          </div>
         </div>
+        <button id="builder-settings-open" class="project-settings-icon" type="button" aria-expanded="false" aria-controls="builder-settings-panel" aria-label="Builder settings" title="Builder settings">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.1A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.1A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.1A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.12.38.34.72.64 1 .3.27.68.4 1.06.4h.1v4h-.1c-.38 0-.76.13-1.06.4-.3.28-.52.62-.64 1Z"></path></svg>
+        </button>
         <button
           id="project-close"
           class="dialog-close"
@@ -512,6 +524,17 @@
             Load Complete Example
           </button>
         </div>
+
+        <section id="builder-settings-panel" class="builder-settings-panel" hidden aria-label="Builder settings">
+          <div class="builder-settings-heading"><div class="builder-settings-heading-copy"><button id="builder-settings-back" class="button secondary builder-settings-back" type="button" aria-label="Back to Builder profile">← Back to Profile</button><div><small>Personal Builder experience</small><h3>Settings</h3><p>Presentation settings stay local to this browser and never modify the project.</p></div></div><button id="builder-settings-reset" class="button secondary" type="button">Reset to defaults</button></div>
+          <div class="builder-settings-dashboard">
+            <article class="builder-settings-card"><div class="builder-settings-card-heading"><span class="builder-settings-card-icon">G</span><div><h4>Graph</h4><p>Node presentation without changing graph data.</p></div></div><label class="builder-settings-toggle"><span><strong>Node scrollbars</strong><small>Show native scrollbars inside resized nodes.</small></span><input id="builder-settings-node-scrollbars" type="checkbox"></label><label class="builder-settings-range"><span><span><strong>Node text size</strong><small>Safe scaling with live graph remeasurement.</small></span><output id="builder-settings-node-text-output">100%</output></span><input id="builder-settings-node-text" type="range" min="90" max="115" step="5" value="100"></label></article>
+            <article class="builder-settings-card"><div class="builder-settings-card-heading"><span class="builder-settings-card-icon">UI</span><div><h4>Interface</h4><p>Scale Builder controls independently from graph nodes.</p></div></div><label class="builder-settings-range"><span><span><strong>UX text size</strong><small>Dialogs, inspector, palette and Builder controls.</small></span><output id="builder-settings-ux-text-output">100%</output></span><input id="builder-settings-ux-text" type="range" min="90" max="110" step="5" value="100"></label></article>
+            <article class="builder-settings-card builder-settings-card-editor"><div class="builder-settings-card-heading"><span class="builder-settings-card-icon">C#</span><div><h4>Code Editor</h4><p>Editor settings live here instead of inside the editor.</p></div></div><div id="builder-settings-editor-controls"><label class="builder-settings-field"><span>Debug &amp; Problems output</span><select id="builder-settings-editor-diagnostic"><option value="Builder">Builder</option><option value="Roslyn">Roslyn</option></select></label><div id="builder-settings-editor-colors" class="builder-settings-color-grid"></div></div></article>
+          </div>
+          <aside id="builder-settings-inspector" class="builder-settings-inspector" aria-label="Setting inspector"><div id="builder-settings-inspector-empty" class="builder-settings-inspector-empty empty-inspector"><span>⌁</span><h2>Select a setting</h2><p>Choose a Code Editor color to edit it here.</p></div><div id="builder-settings-inspector-active" class="builder-settings-inspector-active" hidden><div class="builder-settings-inspector-heading"><button id="builder-settings-inspector-back" class="button secondary builder-settings-inspector-back" type="button">← Settings</button><div><small>Color inspector</small><h4 id="builder-settings-inspector-title">Color</h4></div></div><div id="builder-settings-inspector-picker" class="builder-settings-inspector-picker"></div></div></aside>
+          <p id="builder-settings-status" class="builder-settings-status" aria-live="polite"></p>
+        </section>
 
         <input
           id="project-file-input"
@@ -872,13 +895,13 @@
 
     <script>
       window.RMLArchitectureGate.bootstrap([
-        "js/loaders/style_loader.js?v=1.20.31-universal-presentation-dev109-hidden-configuration-node-scrollbar",
-        "js/loaders/script_loader.js?v=1.20.31-universal-presentation-dev109-hidden-configuration-node-scrollbar",
+        "js/loaders/style_loader.js?v=1.20.31-universal-presentation-dev140-atomic-avatar-preload",
+        "js/loaders/script_loader.js?v=1.20.31-universal-presentation-dev140-atomic-avatar-preload",
         "js/ui/scroll_manager.js?v=35-custom-csharp-atomic-scroll-tabs-v784",
         "js/ui/scroll_hierarchy.js?v=10-custom-csharp-atomic-scroll-tabs-v784",
         "js/core/crypto.js?v=5-guidance-comments-global-v723",
         "js/core/code_templates.js?v=794-shared-loader-runtime",
-        "js/bootstrap/app.js?v=1.20.31-universal-presentation-dev109-hidden-configuration-node-scrollbar",
+        "js/bootstrap/app.js?v=1.20.31-universal-presentation-dev140-atomic-avatar-preload",
         "js/core/dynamic_settings.js?v=794-shared-loader-runtime"
       ]).catch(error => {
         console.error(

@@ -2,7 +2,7 @@
   "use strict";
 
   const API_FACTORY_MODULE_ID =
-    "1.20.31-universal-presentation-dev109-hidden-configuration-node-scrollbar";
+    "1.20.31-universal-presentation-dev140-atomic-avatar-preload";
   const FACTORY_VERSION = 38;
   const API_VERIFICATION_SCHEMA_VERSION = 3;
   const CATALOG_PROJECTION_INDEX_VERSION = 1;

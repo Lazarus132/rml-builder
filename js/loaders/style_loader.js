@@ -2,7 +2,7 @@
   "use strict";
 
   const STYLE_LOADER_MODULE_ID =
-    "1.20.31-universal-presentation-dev109-hidden-configuration-node-scrollbar";
+    "1.20.31-universal-presentation-dev140-atomic-avatar-preload";
 
   if (
     Object.hasOwn(
@@ -715,7 +715,7 @@
     setup: "../../styles/features/styles.setup.css?v=5-source-comment-pruning-v776",
     project: "../../styles/features/styles.project.css?v=4-max-graph-performance-v755",
     export: "../../styles/features/styles.export.css?v=2-max-graph-performance-v755",
-    "runtime-graph": "../../styles/features/styles.runtime-graph.css?v=1.20.31-universal-presentation-dev109-hidden-configuration-node-scrollbar"
+    "runtime-graph": "../../styles/features/styles.runtime-graph.css?v=1.20.31-universal-presentation-dev140-atomic-avatar-preload"
   });
   const bundleOrder = Object.freeze([
     "preview",

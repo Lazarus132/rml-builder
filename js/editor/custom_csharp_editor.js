@@ -9,6 +9,7 @@
   }
 
   const CUSTOM_CSHARP_SHORTCUT_BOOTSTRAP_VERSION = 18;
+  const mountedEditors = new Set();
 
   function customCSharpSearchNavigationDirection(event) {
     const key = String(event?.key || "").toLowerCase();
@@ -1008,8 +1009,15 @@
         );
       }
     };
-    const commitDiagnosticSource = source => {
-      diagnosticSource = normalizedDiagnosticSource(source);
+    const commitDiagnosticSource = (source, commitOptions = {}) => {
+      const beforeDiagnosticSource = diagnosticSource;
+      const nextDiagnosticSource = normalizedDiagnosticSource(source);
+      const notify = commitOptions.notify !== false;
+      if (nextDiagnosticSource === beforeDiagnosticSource) {
+        synchronizeDiagnosticSourceControls();
+        return false;
+      }
+      diagnosticSource = nextDiagnosticSource;
       synchronizeDiagnosticSourceControls();
       try {
         popup.localStorage.setItem(
@@ -1017,6 +1025,7 @@
           diagnosticSource
         );
       } catch {}
+      if (notify) options.onDiagnosticSourceChange?.(diagnosticSource);
       updateEditorPresentation(() => {
         renderDebugEntries();
         renderDiagnostics();
@@ -2070,21 +2079,18 @@
     });
     showFind.addEventListener("click", () => toggleFind(false));
     showReplace.addEventListener("click", () => toggleFind(true));
-    synchronizeFindToggleButtons();
-    synchronizeSettingsToggleButton();
     showSettings.addEventListener("click", event => {
       event.stopPropagation();
       presentationDropdown.close(false);
-      const open = settingsOverlay.hidden;
-      settingsOverlay.hidden = !open;
+      if (!findWidget.hidden) closeFind();
+      const nextOpen = settingsOverlay.hidden;
+      settingsOverlay.hidden = !nextOpen;
       synchronizeSettingsToggleButton();
-      if (!open) {
-        closeAppearancePicker();
-      }
-      if (open && !findWidget.hidden) {
-        closeFind();
-      }
+      closeAppearancePicker();
     });
+    synchronizeFindToggleButtons();
+    synchronizeSettingsToggleButton();
+
     settingsOverlay.addEventListener("click", event => {
       event.stopPropagation();
     });
@@ -2718,6 +2724,27 @@
           }
         }
       },
+      getSettings() {
+        return { appearance: { ...appearanceState }, diagnosticSource };
+      },
+      setAppearanceValue(key, value) {
+        if (!Object.prototype.hasOwnProperty.call(appearanceState, key)) return false;
+        commitAppearance(key, value);
+        return true;
+      },
+      setDiagnosticSource(source) {
+        commitDiagnosticSource(source, { notify: false });
+        return true;
+      },
+      openSettings() {
+        presentationDropdown.close(false);
+        if (!findWidget.hidden) closeFind();
+        settingsOverlay.hidden = false;
+        synchronizeSettingsToggleButton();
+        closeAppearancePicker();
+        popup.focus();
+        return true;
+      },
       setAppearance(appearance) {
         appearanceState = normalizedAppearance(appearance);
         applyAppearance(
@@ -2775,7 +2802,7 @@
         });
       },
       setDiagnosticSource(source) {
-        commitDiagnosticSource(source);
+        commitDiagnosticSource(source, { notify: false });
       },
       setPageAreasHidden(hidden) {
         pageAreasHidden = hidden === true;
@@ -2799,6 +2826,7 @@
       dispose() {
         if (presentationDisposed) return;
         presentationDisposed = true;
+        mountedEditors.delete(record);
         shortcutBootstrap?.dispose?.();
         editorShortcutAbort.abort();
         handledEditorShortcutKeys.clear();
@@ -2820,6 +2848,7 @@
       },
       refresh
     });
+    mountedEditors.add(record);
 
     let closedNotified = false;
     const notifyClosed = () => {
@@ -2885,8 +2914,26 @@
     "RMLCustomCSharpDetachedEditor",
     {
       value: Object.freeze({
-        version: 37,
-        mount
+        version: 38,
+        mount,
+        openSettings() {
+          return false;
+        },
+        getActiveSettings() {
+          const records = Array.from(mountedEditors);
+          const record = records[records.length - 1];
+          return record?.getSettings?.() || null;
+        },
+        setActiveAppearanceValue(key, value) {
+          const records = Array.from(mountedEditors);
+          const record = records[records.length - 1];
+          return record?.setAppearanceValue?.(key, value) === true;
+        },
+        setActiveDiagnosticSource(source) {
+          const records = Array.from(mountedEditors);
+          const record = records[records.length - 1];
+          return record?.setDiagnosticSource?.(source) === true;
+        }
       }),
       writable: false,
       enumerable: true,

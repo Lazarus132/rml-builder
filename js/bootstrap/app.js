@@ -42,7 +42,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "1.20.31-universal-presentation-dev109-hidden-configuration-node-scrollbar";
+  "1.20.31-universal-presentation-dev140-atomic-avatar-preload";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -4332,7 +4332,7 @@ function ensureGraphCodegenWorker() {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev109-hidden-configuration-node-scrollbar",
+      "../workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev140-atomic-avatar-preload",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -28038,7 +28038,7 @@ function promiseWithBuilderTimeout(
 
 function assertProjectRuntimeModuleCoherence() {
   const expectedModuleId =
-    "1.20.31-universal-presentation-dev109-hidden-configuration-node-scrollbar";
+    "1.20.31-universal-presentation-dev140-atomic-avatar-preload";
   const requiredFactoryVersion = 38;
   const mismatches = [];
   const requireModuleId = (
@@ -31985,6 +31985,210 @@ async function applyLoadedProjectWithFeedback(
   }
 }
 
+const RML_PERSONAL_SETTINGS_STORAGE_KEY = "rml-builder-personal-settings-v3";
+const RML_PERSONAL_SETTINGS_DEFAULTS = Object.freeze({ nodeScrollbars: false, nodeTextScale: 100, uxTextScale: 100 });
+const RML_EDITOR_APPEARANCE_DEFAULTS = Object.freeze({ workbench:"#181818", background:"#000000", gutter:"#000000", panel:"#181818", overlay:"#252526", status:"#68217a", selection:"#264f78", text:"#ffffff", uiText:"#cccccc", gutterText:"#858585", statusText:"#ffffff", accent:"#b789ff", caret:"#ffffff" });
+const RML_EDITOR_APPEARANCE_LABELS = Object.freeze({ background:"Editor Background", gutter:"Line Gutter Background", workbench:"Workbench Background", panel:"Output Panel Background", overlay:"Overlay Background", status:"Status Bar Background", selection:"Selection Background", text:"Editor Text", uiText:"Interface Text", gutterText:"Line Number Text", statusText:"Status Bar Text", accent:"Accent", caret:"Cursor" });
+let rmlPersonalSettings = { ...RML_PERSONAL_SETTINGS_DEFAULTS };
+let rmlEditorPersonalSettings = { appearance:{...RML_EDITOR_APPEARANCE_DEFAULTS}, diagnosticSource:"Roslyn" };
+let rmlPersonalSettingsApplyTimer = 0;
+function clampRmlPersonalSetting(value, minimum, maximum, fallback) { const number=Number(value); return Number.isFinite(number)?Math.min(maximum,Math.max(minimum,number)):fallback; }
+function normalizeRmlEditorAppearance(value={}) { const result={}; for(const [key,fallback] of Object.entries(RML_EDITOR_APPEARANCE_DEFAULTS)){const candidate=String(value?.[key]||"").trim();result[key]=/^#[0-9a-f]{6}$/i.test(candidate)?candidate.toLowerCase():fallback;}return result; }
+function loadRmlPersonalSettings() { let stored=null; try { stored=JSON.parse(localStorage.getItem(RML_PERSONAL_SETTINGS_STORAGE_KEY)||localStorage.getItem("rml-builder-personal-settings-v2")||localStorage.getItem("rml-builder-personal-settings-v1")||"null"); } catch {} rmlPersonalSettings={ nodeScrollbars:stored?.nodeScrollbars===true, nodeTextScale:clampRmlPersonalSetting(stored?.nodeTextScale,90,115,100), uxTextScale:clampRmlPersonalSetting(stored?.uxTextScale,90,110,100) }; rmlEditorPersonalSettings={appearance:normalizeRmlEditorAppearance(stored?.editorAppearance),diagnosticSource:["Builder","Roslyn"].includes(stored?.editorDiagnosticSource)?stored.editorDiagnosticSource:"Roslyn"}; }
+function saveRmlPersonalSettings() { try { localStorage.setItem(RML_PERSONAL_SETTINGS_STORAGE_KEY,JSON.stringify({...rmlPersonalSettings,editorAppearance:rmlEditorPersonalSettings.appearance,editorDiagnosticSource:rmlEditorPersonalSettings.diagnosticSource})); } catch {} }
+function publishRmlEditorPersonalSettings(){window.RMLBuilderEditorPersonalSettings=Object.freeze({appearance:{...rmlEditorPersonalSettings.appearance},diagnosticSource:rmlEditorPersonalSettings.diagnosticSource});}
+function refreshRmlGraphPresentationAfterSettings() { document.dispatchEvent(new CustomEvent("rml-builder:presentation-settings-changed",{detail:{nodeScrollbars:rmlPersonalSettings.nodeScrollbars,nodeTextScale:rmlPersonalSettings.nodeTextScale}})); window.dispatchEvent(new Event("resize")); requestAnimationFrame(()=>{ window.dispatchEvent(new Event("resize")); try { window.RMLGraphHybridRenderer?.invalidate?.(); } catch {} }); }
+function applyRmlPersonalSettings() { document.documentElement.dataset.rmlNodeScrollbars=rmlPersonalSettings.nodeScrollbars?"visible":"hidden"; const nodeScale=rmlPersonalSettings.nodeTextScale/100; document.documentElement.style.setProperty("--rml-node-symbol-font-size",`${10*nodeScale}px`); document.documentElement.style.setProperty("--rml-node-title-font-size",`${11*nodeScale}px`); document.documentElement.style.setProperty("--rml-node-subtitle-font-size",`${8*nodeScale}px`); document.documentElement.style.setProperty("--rml-node-port-title-font-size",`${9*nodeScale}px`); document.documentElement.style.setProperty("--rml-node-port-meta-font-size",`${7*nodeScale}px`); document.documentElement.style.setProperty("--rml-ux-text-scale",String(rmlPersonalSettings.uxTextScale/100)); document.documentElement.style.fontSize=`${rmlPersonalSettings.uxTextScale}%`; publishRmlEditorPersonalSettings(); refreshRmlGraphPresentationAfterSettings(); }
+function scheduleRmlPersonalSettingsApply() { if (rmlPersonalSettingsApplyTimer) clearTimeout(rmlPersonalSettingsApplyTimer); rmlPersonalSettingsApplyTimer=window.setTimeout(()=>{rmlPersonalSettingsApplyTimer=0;applyRmlPersonalSettings();},0); }
+function synchronizeRmlPersonalSettingsControls() { const scrollbars=document.getElementById("builder-settings-node-scrollbars"),nodeText=document.getElementById("builder-settings-node-text"),uxText=document.getElementById("builder-settings-ux-text"); if(scrollbars)scrollbars.checked=rmlPersonalSettings.nodeScrollbars;if(nodeText)nodeText.value=String(rmlPersonalSettings.nodeTextScale);if(uxText)uxText.value=String(rmlPersonalSettings.uxTextScale);const no=document.getElementById("builder-settings-node-text-output"),uo=document.getElementById("builder-settings-ux-text-output");if(no)no.value=`${rmlPersonalSettings.nodeTextScale}%`;if(uo)uo.value=`${rmlPersonalSettings.uxTextScale}%`; }
+function currentRmlEditorSettings(){return window.RMLCustomCSharpDetachedEditor?.getActiveSettings?.()||rmlEditorPersonalSettings;}
+let rmlEditorDashboardColorPicker = null;
+function closeRmlEditorDashboardColorPicker() {
+  if (rmlEditorDashboardColorPicker?.popover) {
+    rmlEditorDashboardColorPicker.popover.remove();
+  }
+  const inspectorActive = document.getElementById("builder-settings-inspector-active");
+  const inspectorEmpty = document.getElementById("builder-settings-inspector-empty");
+  const inspector = document.getElementById("builder-settings-inspector");
+  if (inspectorActive) inspectorActive.hidden = true;
+  if (inspectorEmpty) inspectorEmpty.hidden = false;
+  inspector?.classList.remove("is-active");
+  if (rmlEditorDashboardColorPicker?.trigger) {
+    rmlEditorDashboardColorPicker.trigger.setAttribute("aria-expanded", "false");
+    rmlEditorDashboardColorPicker.trigger.closest(".builder-settings-color")?.classList.remove("is-selected");
+  }
+  rmlEditorDashboardColorPicker = null;
+}
+function openRmlEditorDashboardColorPicker(key, label, trigger) {
+  const current = currentRmlEditorSettings();
+  const value = current.appearance?.[key] || RML_EDITOR_APPEARANCE_DEFAULTS[key];
+  if (rmlEditorDashboardColorPicker?.trigger === trigger) {
+    closeRmlEditorDashboardColorPicker();
+    return;
+  }
+  closeRmlEditorDashboardColorPicker();
+  const popover = document.createElement("div");
+  popover.className = "builder-settings-color-popover";
+  const editor = createReusableColorXEditor({
+    label: `${label} color`,
+    expression: value,
+    profile: "srgb",
+    strength: 1,
+    onChange() {
+      const pickerHex = editor.querySelector("[data-color-hex]")?.value;
+      const normalized = normalizeRmlEditorAppearance({ [key]: pickerHex })[key];
+      commitRmlEditorAppearance(key, normalized);
+      trigger.style.setProperty("--builder-settings-color", normalized);
+      trigger.dataset.colorValue = normalized;
+    }
+  });
+  editor.classList.add("rml-detached-editor-color-picker");
+  for (const selector of [".custom-color-profile-tabs", ".alpha-control", ".strength-control"]) {
+    const element = editor.querySelector(selector);
+    if (element) element.hidden = true;
+  }
+  const expressionInput = editor.querySelector("[data-color-expression]");
+  const expressionLabel = expressionInput?.closest("label");
+  if (expressionLabel) expressionLabel.hidden = true;
+  popover.appendChild(editor);
+  const inspector = document.getElementById("builder-settings-inspector");
+  const inspectorPicker = document.getElementById("builder-settings-inspector-picker");
+  const inspectorActive = document.getElementById("builder-settings-inspector-active");
+  const inspectorEmpty = document.getElementById("builder-settings-inspector-empty");
+  const inspectorTitle = document.getElementById("builder-settings-inspector-title");
+  if (inspectorTitle) inspectorTitle.textContent = label;
+  if (inspectorEmpty) inspectorEmpty.hidden = true;
+  if (inspectorActive) inspectorActive.hidden = false;
+  inspector?.classList.add("is-active");
+  (inspectorPicker || inspector)?.appendChild(popover);
+  trigger.setAttribute("aria-expanded", "true");
+  trigger.closest(".builder-settings-color")?.classList.add("is-selected");
+  rmlEditorDashboardColorPicker = { popover, trigger, key };
+}
+function synchronizeRmlEditorDiagnosticSelect(value) {
+  const select = document.getElementById("builder-settings-editor-diagnostic");
+  if (!select) return null;
+  const normalized = ["Builder", "Roslyn"].includes(value) ? value : "Roslyn";
+  for (const option of Array.from(select.options)) {
+    option.selected = option.value === normalized;
+  }
+  select.value = normalized;
+  select.selectedIndex = normalized === "Builder" ? 0 : 1;
+  const customSelect = select._rmlUniversalCustomSelect || ensureUniversalCustomSelect(select);
+  customSelect?.refresh?.();
+  return select;
+}
+function synchronizeRmlEditorDashboard() {
+  const colors = document.getElementById("builder-settings-editor-colors");
+  const settings = currentRmlEditorSettings();
+  synchronizeRmlEditorDiagnosticSelect(rmlEditorPersonalSettings.diagnosticSource);
+  closeRmlEditorDashboardColorPicker();
+  if (!colors) return;
+  colors.replaceChildren();
+  for (const [key, label] of Object.entries(RML_EDITOR_APPEARANCE_LABELS)) {
+    const row = document.createElement("div");
+    row.className = "builder-settings-color";
+    const text = document.createElement("span");
+    text.textContent = label;
+    const trigger = document.createElement("button");
+    const value = settings.appearance?.[key] || RML_EDITOR_APPEARANCE_DEFAULTS[key];
+    trigger.type = "button";
+    trigger.className = "builder-settings-color-trigger";
+    trigger.dataset.editorAppearanceKey = key;
+    trigger.dataset.colorValue = value;
+    trigger.style.setProperty("--builder-settings-color", value);
+    trigger.setAttribute("aria-label", `Open ${label} color picker`);
+    trigger.setAttribute("aria-haspopup", "dialog");
+    trigger.setAttribute("aria-expanded", "false");
+    trigger.addEventListener("click", () => openRmlEditorDashboardColorPicker(key, label, trigger));
+    row.append(text, trigger);
+    colors.appendChild(row);
+  }
+}
+function commitRmlPersonalSettings(patch) { rmlPersonalSettings={...rmlPersonalSettings,...patch,nodeTextScale:clampRmlPersonalSetting(patch.nodeTextScale??rmlPersonalSettings.nodeTextScale,90,115,100),uxTextScale:clampRmlPersonalSetting(patch.uxTextScale??rmlPersonalSettings.uxTextScale,90,110,100)};saveRmlPersonalSettings();synchronizeRmlPersonalSettingsControls();applyRmlPersonalSettings(); }
+function commitRmlEditorAppearance(key,value){rmlEditorPersonalSettings={...rmlEditorPersonalSettings,appearance:normalizeRmlEditorAppearance({...rmlEditorPersonalSettings.appearance,[key]:value})};saveRmlPersonalSettings();publishRmlEditorPersonalSettings();window.RMLCustomCSharpDetachedEditor?.setActiveAppearanceValue?.(key,value);}
+function commitRmlEditorDiagnostic(source){
+  const value=["Builder","Roslyn"].includes(source)?source:"Roslyn";
+  rmlEditorPersonalSettings={...rmlEditorPersonalSettings,diagnosticSource:value};
+  synchronizeRmlEditorDiagnosticSelect(value);
+  saveRmlPersonalSettings();
+  publishRmlEditorPersonalSettings();
+  window.RMLCustomCSharpDetachedEditor?.setActiveDiagnosticSource?.(value);
+}
+function hardSynchronizeRmlEditorSettingsFromActiveEditor(){
+  const active=window.RMLCustomCSharpDetachedEditor?.getActiveSettings?.();
+  if(active&&typeof active==="object"){
+    const source=["Builder","Roslyn"].includes(active.diagnosticSource)?active.diagnosticSource:rmlEditorPersonalSettings.diagnosticSource;
+    const appearance=active.appearance&&typeof active.appearance==="object"?normalizeRmlEditorAppearance({...rmlEditorPersonalSettings.appearance,...active.appearance}):rmlEditorPersonalSettings.appearance;
+    rmlEditorPersonalSettings={...rmlEditorPersonalSettings,appearance,diagnosticSource:source};
+    saveRmlPersonalSettings();
+    publishRmlEditorPersonalSettings();
+  }
+  synchronizeRmlEditorDashboard();
+}
+window.RMLBuilderEditorPersonalSettingsController=Object.freeze({
+  setAppearanceValue(key,value){
+    if(!Object.prototype.hasOwnProperty.call(RML_EDITOR_APPEARANCE_DEFAULTS,key)) return false;
+    commitRmlEditorAppearance(key,value);
+    synchronizeRmlEditorDashboard();
+    return true;
+  },
+  setDiagnosticSource(source){ commitRmlEditorDiagnostic(source); synchronizeRmlEditorDashboard(); return true; },
+  getSettings(){ return {appearance:{...rmlEditorPersonalSettings.appearance},diagnosticSource:rmlEditorPersonalSettings.diagnosticSource}; }
+});
+async function synchronizeRmlBuilderProfileFromScanner() {
+  const state = window.RMLRuntimeBridge?.getConnectionState?.();
+  if (state?.mode !== "live" || !state?.scannerBaseUrl) return false;
+  const avatar = document.getElementById("builder-profile-avatar");
+  const image = document.getElementById("builder-profile-avatar-image");
+  const topImage = document.getElementById("top-builder-profile-avatar-image");
+  const kicker = document.getElementById("builder-profile-kicker");
+  if (!avatar || !image) return false;
+  try {
+    const response = await fetch(`${state.scannerBaseUrl}/profile`, { cache: "no-store" });
+    if (!response.ok) return false;
+    const profile = await response.json();
+    const url = typeof profile?.avatarUrl === "string" ? profile.avatarUrl : "";
+    if (profile?.displayName && kicker) kicker.textContent = String(profile.displayName);
+    const apply = target => {
+      if (!target) return;
+      const slot = target.parentElement;
+      const showFallback = () => {
+        target.hidden = true;
+        target.removeAttribute("src");
+        slot?.classList.remove("has-profile-image");
+      };
+      if (!(url && /^(https?:|data:image\/)/i.test(url))) {
+        showFallback();
+        return;
+      }
+
+      target.hidden = true;
+      slot?.classList.remove("has-profile-image");
+      const preload = new Image();
+      preload.decoding = "async";
+      preload.onload = async () => {
+        try { await preload.decode?.(); } catch {}
+        if (preload.src !== url && preload.currentSrc !== url) return;
+        target.src = url;
+        target.hidden = false;
+        slot?.classList.add("has-profile-image");
+      };
+      preload.onerror = showFallback;
+      preload.src = url;
+    };
+    apply(image);
+    apply(topImage);
+    return true;
+  } catch { return false; }
+}
+
+document.addEventListener("rml-scanner:manual-live-activated", () => {
+  void synchronizeRmlBuilderProfileFromScanner();
+});
+
+function installRmlPersonalSettings() { loadRmlPersonalSettings();synchronizeRmlPersonalSettingsControls();applyRmlPersonalSettings();const panel=document.getElementById("builder-settings-panel"),open=document.getElementById("builder-settings-open"),status=document.getElementById("builder-settings-status"),back=document.getElementById("builder-settings-back"),inspectorBack=document.getElementById("builder-settings-inspector-back");const setSettingsWorkspace=show=>{if(panel)panel.hidden=!show;open?.setAttribute("aria-expanded",String(show));elements.projectDialog?.classList.toggle("builder-settings-workspace",show);const title=document.getElementById("project-dialog-title"),kicker=elements.projectDialog?.querySelector(".export-dialog-header small");if(title)title.textContent=show?"Settings":"Project & Preferences";if(kicker)kicker.textContent=show?"Personal Builder experience":"Builder profile";if(show){synchronizeRmlPersonalSettingsControls();hardSynchronizeRmlEditorSettingsFromActiveEditor();}else{closeRmlEditorDashboardColorPicker();}requestAnimationFrame(()=>updateAdaptiveUtilityDialog(elements.projectDialog));};open?.addEventListener("click",()=>setSettingsWorkspace(true));back?.addEventListener("click",()=>setSettingsWorkspace(false));inspectorBack?.addEventListener("click",()=>closeRmlEditorDashboardColorPicker());document.getElementById("builder-settings-node-scrollbars")?.addEventListener("change",event=>commitRmlPersonalSettings({nodeScrollbars:event.currentTarget.checked===true}));document.getElementById("builder-settings-node-text")?.addEventListener("input",event=>commitRmlPersonalSettings({nodeTextScale:Number(event.currentTarget.value)}));document.getElementById("builder-settings-ux-text")?.addEventListener("input",event=>commitRmlPersonalSettings({uxTextScale:Number(event.currentTarget.value)}));document.getElementById("builder-settings-reset")?.addEventListener("click",()=>{rmlPersonalSettings={...RML_PERSONAL_SETTINGS_DEFAULTS};rmlEditorPersonalSettings={appearance:{...RML_EDITOR_APPEARANCE_DEFAULTS},diagnosticSource:"Roslyn"};saveRmlPersonalSettings();synchronizeRmlPersonalSettingsControls();synchronizeRmlEditorDashboard();applyRmlPersonalSettings();if(status)status.textContent="Defaults restored.";});const diagnosticSelect=document.getElementById("builder-settings-editor-diagnostic");diagnosticSelect?.addEventListener("change",event=>commitRmlEditorDiagnostic(event.currentTarget.value));synchronizeRmlEditorDiagnosticSelect(rmlEditorPersonalSettings.diagnosticSource);if(typeof MutationObserver==="function"){new MutationObserver(records=>{let changed=false;for(const record of records){for(const node of Array.from(record.addedNodes||[])){if(node?.tagName==="LINK"){changed=true;node.addEventListener("load",scheduleRmlPersonalSettingsApply,{once:true});}else if(node?.tagName==="STYLE")changed=true;}}if(changed)scheduleRmlPersonalSettingsApply();}).observe(document.head,{childList:true});} }
+
 let projectDialogOpenSequence = 0;
 
 async function openProjectDialog() {
@@ -32049,8 +32253,18 @@ async function openProjectDialog() {
 function closeProjectDialog() {
   projectDialogOpenSequence += 1;
   elements.projectDialog.classList.remove(
-    "mobile-full-modal"
+    "mobile-full-modal",
+    "builder-settings-workspace"
   );
+  const settingsPanel = document.getElementById("builder-settings-panel");
+  const settingsOpen = document.getElementById("builder-settings-open");
+  if (settingsPanel) settingsPanel.hidden = true;
+  settingsOpen?.setAttribute("aria-expanded", "false");
+  closeRmlEditorDashboardColorPicker();
+  const projectDialogTitle = document.getElementById("project-dialog-title");
+  const projectDialogKicker = elements.projectDialog?.querySelector(".export-dialog-header small");
+  if (projectDialogTitle) projectDialogTitle.textContent = "Project & Preferences";
+  if (projectDialogKicker) projectDialogKicker.textContent = "Local Builder files";
 
   if (
     typeof elements.projectDialog.close ===
@@ -36745,8 +36959,8 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "../../templates/help_template.html?v=1.20.31-universal-presentation-dev109-hidden-configuration-node-scrollbar",
-    "../templates/help_template.js?v=1.20.31-universal-presentation-dev109-hidden-configuration-node-scrollbar",
+    "../../templates/help_template.html?v=1.20.31-universal-presentation-dev140-atomic-avatar-preload",
+    "../templates/help_template.js?v=1.20.31-universal-presentation-dev140-atomic-avatar-preload",
     "help-template",
     "RMLHelpTemplateMarkup"
   )
@@ -42039,6 +42253,7 @@ async function initialize() {
   installPalettePointerDragBridge();
 
   cacheElements();
+  installRmlPersonalSettings();
   flushGeneratedOutputRefreshAfterDomReady();
   exposeBuilderDialogBridge();
 

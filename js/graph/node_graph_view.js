@@ -46021,6 +46021,23 @@ async function initializeImmediately() {
       });
   }
 
+function refreshGraphPresentationForPersonalSettings() {
+  if (!dom.nodesHost || !graph?.active) return;
+  const articles = Array.from(dom.nodesHost.querySelectorAll(":scope > .rml-graph-node"));
+  const ids = new Set();
+  for (const article of articles) {
+    delete article._rmlResizeLimits;
+    ids.add(article.dataset.graphNodeId);
+    syncNodeBodyOverflow(article);
+  }
+  refreshRenderedNodeResizeLimits(ids, articles, { presentationOnly: true });
+  scheduleGraphNodeVirtualization();
+  try { window.RMLGraphHybridRenderer?.invalidate?.(); } catch {}
+}
+document.addEventListener("rml-builder:presentation-settings-changed", () => {
+  requestAnimationFrame(refreshGraphPresentationForPersonalSettings);
+});
+
 installGraphSearchShortcutHandlers();
 document.addEventListener(
   "rml-graph:presentation-complete",
@@ -46032,7 +46049,7 @@ Object.defineProperty(
   "RMLNodeGraphViewModuleId",
   {
     value:
-      "1.20.31-universal-presentation-dev109-hidden-configuration-node-scrollbar",
+      "1.20.31-universal-presentation-dev140-atomic-avatar-preload",
     writable: false,
     enumerable: true,
     configurable: true

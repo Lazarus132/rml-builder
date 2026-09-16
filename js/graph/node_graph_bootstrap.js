@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_BOOTSTRAP_MODULE_ID =
-  "1.20.31-universal-presentation-dev109-hidden-configuration-node-scrollbar";
+  "1.20.31-universal-presentation-dev140-atomic-avatar-preload";
 
 function assertGraphBootstrapModuleCoherence() {
   const mismatches = [];

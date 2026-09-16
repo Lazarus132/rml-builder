@@ -15,13 +15,13 @@
   border-radius: 9px;
   background: rgba(255, 168, 54, 0.09);
   color: #ffd28b;
-  font-size: 10px;
+  font-size: calc(10px * var(--rml-ux-text-scale, 1));
   line-height: 1.55;
 }
 
 .export-api-compatibility-warning strong {
   color: #ffe0a8;
-  font-size: 11px;
+  font-size: calc(11px * var(--rml-ux-text-scale, 1));
 }
 
 .export-api-compatibility-warning p {
@@ -44,7 +44,7 @@
   display: grid;
   gap: 8px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -61,7 +61,7 @@
   background: var(--panel-deep);
   color: var(--text);
   font-family: Consolas, "Courier New", monospace;
-  font-size: 11px;
+  font-size: calc(11px * var(--rml-ux-text-scale, 1));
   letter-spacing: 0;
   text-transform: none;
 }
@@ -84,7 +84,7 @@
 .export-path-field small,
 .export-hint {
   color: var(--faint);
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   font-weight: 400;
   line-height: 1.55;
   letter-spacing: 0;
@@ -102,7 +102,7 @@
   border-radius: 7px;
   background: rgba(255, 209, 129, 0.06);
   color: #e2c992;
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   line-height: 1.55;
 }
 
@@ -127,7 +127,7 @@
   grid-column: 1 / -1;
   margin-bottom: 7px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -167,7 +167,7 @@
 }
 
 .export-option strong {
-  font-size: 11px;
+  font-size: calc(11px * var(--rml-ux-text-scale, 1));
 }
 
 .export-option small {
@@ -175,7 +175,7 @@
   margin-top: 4px;
   color: var(--faint);
   font-family: Consolas, "Courier New", monospace;
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -218,7 +218,7 @@
 
 .export-generated-package-heading small {
   color: var(--faint);
-  font-size: 8px;
+  font-size: calc(8px * var(--rml-ux-text-scale, 1));
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -226,7 +226,7 @@
 
 .export-generated-package-heading strong {
   overflow: hidden;
-  font-size: 11px;
+  font-size: calc(11px * var(--rml-ux-text-scale, 1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -238,7 +238,7 @@
   border-radius: 6px;
   background: var(--panel-raised);
   color: var(--muted);
-  font-size: 8px;
+  font-size: calc(8px * var(--rml-ux-text-scale, 1));
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -275,14 +275,14 @@
 }
 
 .export-generated-project strong {
-  font-size: 10px;
+  font-size: calc(10px * var(--rml-ux-text-scale, 1));
 }
 
 .export-generated-project small {
   grid-column: 1;
   color: var(--faint);
   font-family: Consolas, "Courier New", monospace;
-  font-size: 8px;
+  font-size: calc(8px * var(--rml-ux-text-scale, 1));
 }
 
 .export-generated-project b {
@@ -290,7 +290,7 @@
   grid-column: 2;
   align-self: center;
   color: #cdb7ff;
-  font-size: 8px;
+  font-size: calc(8px * var(--rml-ux-text-scale, 1));
   white-space: nowrap;
 }
 
@@ -345,7 +345,7 @@
   background: var(--accent-soft);
   color: #d6c5ff;
   font-family: Consolas, "Courier New", monospace;
-  font-size: 7px;
+  font-size: calc(7px * var(--rml-ux-text-scale, 1));
   font-weight: 900;
 }
 
@@ -382,12 +382,12 @@
 
 .export-generated-file-copy strong {
   font-family: Consolas, "Courier New", monospace;
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
 }
 
 .export-generated-file-copy small {
   color: var(--faint);
-  font-size: 8px;
+  font-size: calc(8px * var(--rml-ux-text-scale, 1));
 }
 
 .export-generated-file-target {
@@ -395,7 +395,7 @@
   border-radius: 5px;
   background: rgba(255, 255, 255, 0.035);
   color: var(--muted);
-  font-size: 7px;
+  font-size: calc(7px * var(--rml-ux-text-scale, 1));
   white-space: nowrap;
 }
 
@@ -405,7 +405,7 @@
   border: 1px dashed var(--line-strong);
   border-radius: 7px;
   color: var(--faint);
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   text-align: center;
 }
 

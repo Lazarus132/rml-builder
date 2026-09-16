@@ -3236,3 +3236,61 @@ body.rml-node-graph-mode.rml-graph-edit-mode #inspector-content {
 .rml-graph-node.manually-sized-width .rml-graph-node-body-content[data-rml-min-width] {
   min-width: 0;
 }
+
+html[data-rml-node-scrollbars="hidden"] .rml-graph-node .rml-graph-node-body,
+html[data-rml-node-scrollbars="hidden"] .rml-graph-node.configuration .rml-graph-node-body {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+html[data-rml-node-scrollbars="hidden"] .rml-graph-node .rml-graph-node-body::-webkit-scrollbar,
+html[data-rml-node-scrollbars="hidden"] .rml-graph-node.configuration .rml-graph-node-body::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+}
+html[data-rml-node-scrollbars="visible"] .rml-graph-node .rml-graph-node-body {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+html[data-rml-node-scrollbars="visible"] .rml-graph-node .rml-graph-node-body.rml-scroll-x,
+html[data-rml-node-scrollbars="visible"] .rml-graph-node .rml-graph-node-body.rml-scroll-y {
+  scrollbar-width: thin !important;
+  scrollbar-color: rgba(143, 155, 167, .58) transparent;
+  -ms-overflow-style: auto !important;
+  border-radius: 0 0 14px 14px;
+}
+html[data-rml-node-scrollbars="visible"] .rml-graph-node .rml-graph-node-body::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+}
+html[data-rml-node-scrollbars="visible"] .rml-graph-node .rml-graph-node-body.rml-scroll-x::-webkit-scrollbar,
+html[data-rml-node-scrollbars="visible"] .rml-graph-node .rml-graph-node-body.rml-scroll-y::-webkit-scrollbar {
+  width: 8px !important;
+  height: 8px !important;
+  display: block !important;
+}
+html[data-rml-node-scrollbars="visible"] .rml-graph-node .rml-graph-node-body.rml-scroll-x::-webkit-scrollbar-track,
+html[data-rml-node-scrollbars="visible"] .rml-graph-node .rml-graph-node-body.rml-scroll-y::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 0 0 14px 14px;
+}
+html[data-rml-node-scrollbars="visible"] .rml-graph-node .rml-graph-node-body.rml-scroll-x::-webkit-scrollbar-thumb,
+html[data-rml-node-scrollbars="visible"] .rml-graph-node .rml-graph-node-body.rml-scroll-y::-webkit-scrollbar-thumb {
+  background: rgba(143, 155, 167, .58);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+html[data-rml-node-scrollbars="visible"] .rml-graph-node .rml-graph-node-body.rml-scroll-x::-webkit-scrollbar-corner,
+html[data-rml-node-scrollbars="visible"] .rml-graph-node .rml-graph-node-body.rml-scroll-y::-webkit-scrollbar-corner {
+  background: transparent;
+  border-bottom-right-radius: 14px;
+}
+
+.rml-graph-node-symbol { font-size: var(--rml-node-symbol-font-size, 10px) !important; }
+.rml-graph-node-title strong { font-size: var(--rml-node-title-font-size, 11px) !important; }
+.rml-graph-node-title small { font-size: var(--rml-node-subtitle-font-size, 8px) !important; }
+.rml-graph-port-copy strong { font-size: var(--rml-node-port-title-font-size, 9px) !important; }
+.rml-graph-port-copy small { font-size: var(--rml-node-port-meta-font-size, 7px) !important; }
+

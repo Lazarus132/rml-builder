@@ -2,7 +2,7 @@
   "use strict";
 
   const MODULE_ID =
-    "1.20.31-universal-presentation-dev109-hidden-configuration-node-scrollbar";
+    "1.20.31-universal-presentation-dev140-atomic-avatar-preload";
   const GATE_VERSION = 1;
   const DETECTION_TIMEOUT_MS = 5000;
   const HIGH_ENTROPY_HINTS = Object.freeze([

@@ -122,7 +122,7 @@ button {
 .code-toolbar small {
   display: block;
   color: var(--accent);
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   font-weight: 800;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -130,7 +130,7 @@ button {
 
 .brand-copy h1 {
   margin: 3px 0 0;
-  font-size: 18px;
+  font-size: calc(18px * var(--rml-ux-text-scale, 1));
   letter-spacing: -0.02em;
 }
 
@@ -139,7 +139,7 @@ button {
   align-items: center;
   gap: 8px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: calc(11px * var(--rml-ux-text-scale, 1));
 }
 
 .local-state-dot {
@@ -166,7 +166,7 @@ button {
   border-radius: 7px;
   background: rgba(24, 22, 34, 0.72);
   color: var(--muted);
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   font-weight: 700;
   white-space: nowrap;
 }
@@ -227,7 +227,7 @@ button {
   padding: 0 14px;
   border: 1px solid transparent;
   border-radius: 8px;
-  font-size: 11px;
+  font-size: calc(11px * var(--rml-ux-text-scale, 1));
   font-weight: 750;
   cursor: pointer;
 }
@@ -296,7 +296,7 @@ footer {
   display: flex;
   align-items: center;
   gap: 11px;
-  font-size: 12px;
+  font-size: calc(12px * var(--rml-ux-text-scale, 1));
   font-weight: 750;
 }
 
@@ -312,7 +312,7 @@ footer {
   border-radius: 6px;
   background: var(--accent-soft);
   color: #d0bbff;
-  font-size: 10px;
+  font-size: calc(10px * var(--rml-ux-text-scale, 1));
 }
 
 .identity-grid {
@@ -328,7 +328,7 @@ label {
   flex-direction: column;
   gap: 6px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   font-weight: 780;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -336,7 +336,7 @@ label {
 
 label small {
   color: var(--faint);
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   font-weight: 500;
   letter-spacing: 0;
   line-height: 1.45;
@@ -354,7 +354,7 @@ select {
   outline: none;
   background: var(--panel-deep);
   color: var(--text);
-  font-size: 11px;
+  font-size: calc(11px * var(--rml-ux-text-scale, 1));
   font-weight: 520;
   letter-spacing: 0;
   text-transform: none;
@@ -401,7 +401,7 @@ input[type="checkbox"] {
   margin: 0;
   padding: 11px 13px 2px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: calc(10px * var(--rml-ux-text-scale, 1));
   line-height: 1.5;
 }
 
@@ -413,7 +413,7 @@ input[type="checkbox"] {
 fieldset legend {
   margin: 0 0 8px;
   color: var(--faint);
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   font-weight: 820;
   letter-spacing: 0.13em;
   text-transform: uppercase;
@@ -457,7 +457,7 @@ fieldset legend {
   border: 1px solid var(--line);
   border-radius: 6px;
   color: var(--muted);
-  font-size: 8px;
+  font-size: calc(8px * var(--rml-ux-text-scale, 1));
   letter-spacing: 0;
 }
 
@@ -514,17 +514,17 @@ fieldset legend {
   background: #0c0b11;
   color: #c1a5ff;
   font-family: Consolas, monospace;
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   font-weight: 800;
 }
 
 .palette-item strong {
-  font-size: 11px;
+  font-size: calc(11px * var(--rml-ux-text-scale, 1));
 }
 
 .palette-item > b {
   color: var(--muted);
-  font-size: 15px;
+  font-size: calc(15px * var(--rml-ux-text-scale, 1));
 }
 
 .structure {
@@ -549,7 +549,7 @@ fieldset legend {
 .structure p {
   margin: 8px 2px 0;
   color: var(--faint);
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   line-height: 1.5;
 }
 
@@ -566,7 +566,7 @@ fieldset legend {
   border: 1px solid var(--line);
   border-radius: 6px;
   color: var(--faint);
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   font-style: normal;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -606,18 +606,18 @@ fieldset legend {
   border-radius: 15px;
   background: var(--accent-soft);
   color: var(--accent);
-  font-size: 25px;
+  font-size: calc(25px * var(--rml-ux-text-scale, 1));
 }
 
 .empty-inspector h2 {
   margin: 14px 0 6px;
-  font-size: 14px;
+  font-size: calc(14px * var(--rml-ux-text-scale, 1));
 }
 
 .empty-inspector p {
   margin: 0;
   color: var(--muted);
-  font-size: 10px;
+  font-size: calc(10px * var(--rml-ux-text-scale, 1));
   line-height: 1.55;
 }
 
@@ -647,7 +647,7 @@ fieldset legend {
 .node-card.layoutRow .node-icon {
   background: rgba(92, 205, 228, 0.12);
   color: #79d9eb;
-  font-size: 17px;
+  font-size: calc(17px * var(--rml-ux-text-scale, 1));
 }
 
 .node-head {
@@ -665,7 +665,7 @@ fieldset legend {
 
 .controller .node-icon {
   background: var(--accent-soft);
-  font-size: 17px;
+  font-size: calc(17px * var(--rml-ux-text-scale, 1));
 }
 
 .node-copy {
@@ -678,7 +678,7 @@ fieldset legend {
 
 .node-copy strong {
   overflow: hidden;
-  font-size: 11px;
+  font-size: calc(11px * var(--rml-ux-text-scale, 1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -686,7 +686,7 @@ fieldset legend {
 .node-copy small {
   overflow: hidden;
   color: var(--muted);
-  font-size: 8px;
+  font-size: calc(8px * var(--rml-ux-text-scale, 1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -757,13 +757,13 @@ fieldset legend {
   justify-content: space-between;
   padding: 0 9px;
   border-bottom: 1px solid var(--line);
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   font-weight: 760;
 }
 
 .option-heading small {
   color: var(--faint);
-  font-size: 8px;
+  font-size: calc(8px * var(--rml-ux-text-scale, 1));
 }
 
 .drop-zone {
@@ -807,13 +807,13 @@ fieldset legend {
   padding: 0 9px;
   border-bottom: 1px solid rgba(92, 205, 228, 0.16);
   color: #cbeef5;
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   font-weight: 760;
 }
 
 .layout-row-heading small {
   color: var(--faint);
-  font-size: 8px;
+  font-size: calc(8px * var(--rml-ux-text-scale, 1));
 }
 
 .layout-row-drop-zone.drop-zone {
@@ -856,12 +856,12 @@ fieldset legend {
   border: 1px dashed var(--line-strong);
   border-radius: 6px;
   color: var(--faint);
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
 }
 
 .empty-drop span {
   color: var(--accent);
-  font-size: 15px;
+  font-size: calc(15px * var(--rml-ux-text-scale, 1));
 }
 
 .empty-inspector {
@@ -892,7 +892,7 @@ fieldset legend {
   background: var(--accent-soft);
   color: #d0bbff;
   font-family: Consolas, monospace;
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   font-weight: 800;
 }
 
@@ -900,7 +900,7 @@ fieldset legend {
   border: 0;
   background: transparent;
   color: var(--red);
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   font-weight: 750;
   cursor: pointer;
 }
@@ -951,7 +951,7 @@ fieldset legend {
 
 .vector-default-editor > small {
   color: var(--faint);
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   line-height: 1.45;
 }
 
@@ -1061,7 +1061,7 @@ fieldset legend {
 
 .custom-color-control-heading > span {
   color: #c9c4d7;
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   font-weight: 750;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1071,7 +1071,7 @@ fieldset legend {
   overflow: hidden;
   color: var(--muted);
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 10px;
+  font-size: calc(10px * var(--rml-ux-text-scale, 1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1190,7 +1190,7 @@ fieldset legend {
   min-height: 16px;
   margin: 0;
   color: var(--faint);
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   line-height: 1.5;
 }
 
@@ -1247,7 +1247,7 @@ fieldset legend {
   max-width: 150px;
   color: var(--muted);
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1276,7 +1276,7 @@ fieldset legend {
   border-radius: 6px;
   background: transparent;
   color: #ceb8ff;
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   font-weight: 750;
   cursor: pointer;
 }
@@ -1302,12 +1302,12 @@ fieldset legend {
 .code-toolbar h2 {
   display: inline;
   margin: 0 8px 0 0;
-  font-size: 14px;
+  font-size: calc(14px * var(--rml-ux-text-scale, 1));
 }
 
 .code-toolbar span {
   color: var(--faint);
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
 }
 
 .guide-toggle {
@@ -1315,7 +1315,7 @@ fieldset legend {
   align-items: center;
   gap: 7px;
   padding: 0 7px;
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   text-transform: none;
 }
 
@@ -1324,7 +1324,7 @@ fieldset legend {
   border-bottom: 1px solid rgba(255, 209, 129, 0.28);
   background: rgba(255, 209, 129, 0.08);
   color: #ffe0a7;
-  font-size: 10px;
+  font-size: calc(10px * var(--rml-ux-text-scale, 1));
 }
 
 .diagnostics ul {
@@ -1340,7 +1340,7 @@ pre {
   background: #0c0b12;
   color: #d9d4e8;
   font-family: Consolas, "Courier New", monospace;
-  font-size: 10px;
+  font-size: calc(10px * var(--rml-ux-text-scale, 1));
   line-height: 1.65;
   tab-size: 4;
 }
@@ -1350,7 +1350,7 @@ footer {
   justify-content: space-between;
   padding: 19px 4px 28px;
   color: var(--faint);
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
 }
 
 footer strong {
@@ -1394,7 +1394,7 @@ footer strong {
 
 .export-dialog-header small {
   color: var(--accent);
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   font-weight: 800;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -1402,7 +1402,7 @@ footer strong {
 
 .export-dialog-header h2 {
   margin: 4px 0 0;
-  font-size: 18px;
+  font-size: calc(18px * var(--rml-ux-text-scale, 1));
 }
 
 .dialog-close {
@@ -1412,7 +1412,7 @@ footer strong {
   border-radius: 8px;
   background: var(--panel-raised);
   color: var(--muted);
-  font-size: 23px;
+  font-size: calc(23px * var(--rml-ux-text-scale, 1));
   line-height: 1;
   cursor: pointer;
 }
@@ -1443,7 +1443,7 @@ footer strong {
 
 .generated-file-switcher label {
   color: var(--muted);
-  font-size: 8px;
+  font-size: calc(8px * var(--rml-ux-text-scale, 1));
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1460,7 +1460,7 @@ footer strong {
   background: var(--panel-deep);
   color: var(--text);
   font-family: Consolas, "Courier New", monospace;
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   letter-spacing: 0;
   text-transform: none;
   cursor: pointer;
@@ -1488,7 +1488,7 @@ footer strong {
   );
   color: var(--text);
   font-family: Consolas, "Courier New", monospace;
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   font-weight: 600;
   box-shadow:
     inset 0 1px rgba(255, 255, 255, 0.035);
@@ -1546,7 +1546,7 @@ footer strong {
   padding: 7px 9px 4px;
   color: #d0bbff;
   font-family: Arial, Helvetica, sans-serif;
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   font-weight: 800;
   letter-spacing: 0.04em;
   line-height: 1.2;
@@ -1557,7 +1557,7 @@ footer strong {
   min-height: 31px;
   padding: 7px 9px;
   font-family: Consolas, "Courier New", monospace;
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   font-weight: 600;
 }
 
@@ -1908,7 +1908,7 @@ select,
   border-radius: 4px;
   background: rgba(12, 11, 18, 0.78);
   color: var(--muted);
-  font-size: 8px;
+  font-size: calc(8px * var(--rml-ux-text-scale, 1));
   line-height: 1;
   cursor: pointer;
 }
@@ -1966,7 +1966,7 @@ select,
   border-radius: 4px;
   background: rgba(12, 11, 18, 0.78);
   color: var(--muted);
-  font-size: 11px;
+  font-size: calc(11px * var(--rml-ux-text-scale, 1));
   font-weight: 800;
   line-height: 1;
   cursor: pointer;
@@ -2187,7 +2187,7 @@ body:has(.controller-options.option-drag-over) {
   background: rgba(8, 15, 22, 0.92);
   color: #a9ddff;
   content: "Mausrad: vorherige / nächste Position";
-  font-size: 8px;
+  font-size: calc(8px * var(--rml-ux-text-scale, 1));
   font-weight: 700;
   letter-spacing: 0.02em;
   pointer-events: none;
@@ -2410,7 +2410,7 @@ body:has(.node-pointer-ghost) .builder-canvas {
   width: 20px;
   height: 20px;
   place-items: center;
-  font-size: 18px;
+  font-size: calc(18px * var(--rml-ux-text-scale, 1));
   font-weight: 850;
   line-height: 1;
   pointer-events: none;
@@ -2475,11 +2475,11 @@ body:has(.node-pointer-ghost) .builder-canvas {
   }
 
 .brand-copy h1 {
-    font-size: 16px;
+    font-size: calc(16px * var(--rml-ux-text-scale, 1));
   }
 
 .local-state {
-    font-size: 9px;
+    font-size: calc(9px * var(--rml-ux-text-scale, 1));
   }
 
 .api-catalog-state {
@@ -2494,7 +2494,7 @@ body:has(.node-pointer-ghost) .builder-canvas {
 
 .api-catalog-state {
     max-width: 225px;
-    font-size: 8px;
+    font-size: calc(8px * var(--rml-ux-text-scale, 1));
   }
 }
 
@@ -2534,7 +2534,7 @@ body:has(.node-pointer-ghost) .builder-canvas {
   }
 
 .brand-copy small {
-    font-size: 7px;
+    font-size: calc(7px * var(--rml-ux-text-scale, 1));
   }
 
 .brand-copy h1 {
@@ -2767,7 +2767,7 @@ body:has(.node-pointer-ghost) .builder-canvas {
 .rml-button-help-bubble {
   position: fixed;
   z-index: 10000;
-  font-size: 10px;
+  font-size: calc(10px * var(--rml-ux-text-scale, 1));
   font-weight: 650;
   line-height: 1.4;
   letter-spacing: 0;
@@ -3062,7 +3062,7 @@ body {
   border-radius: 8px;
   background: rgba(8, 7, 12, 0.38);
   color: var(--muted);
-  font-size: 10px;
+  font-size: calc(10px * var(--rml-ux-text-scale, 1));
   line-height: 1.45;
 }
 
@@ -3074,12 +3074,12 @@ body {
 
 .rml-runtime-display-layout-toggle strong {
   color: var(--text);
-  font-size: 10px;
+  font-size: calc(10px * var(--rml-ux-text-scale, 1));
 }
 
 .rml-runtime-display-layout-toggle small {
   color: var(--muted);
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   line-height: 1.45;
   text-transform: none;
   letter-spacing: 0;
@@ -3095,7 +3095,7 @@ body {
 
 .rml-dynamic-settings-palette > strong {
   color: var(--accent);
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
@@ -3243,7 +3243,7 @@ dialog.builder-message-dialog::backdrop {
   display: block;
   margin-bottom: 5px;
   color: var(--amber);
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   font-weight: 850;
   letter-spacing: 0.14em;
   line-height: 1.2;
@@ -3265,7 +3265,7 @@ dialog.builder-message-dialog::backdrop {
 .builder-message-content h2 {
   margin: 0;
   color: #f7f4ff;
-  font-size: 19px;
+  font-size: calc(19px * var(--rml-ux-text-scale, 1));
   line-height: 1.22;
   letter-spacing: -0.02em;
 }
@@ -3273,7 +3273,7 @@ dialog.builder-message-dialog::backdrop {
 .builder-message-content > p {
   margin: 10px 0 0;
   color: #b8b3c8;
-  font-size: 12px;
+  font-size: calc(12px * var(--rml-ux-text-scale, 1));
   line-height: 1.55;
 }
 
@@ -3370,7 +3370,7 @@ dialog.builder-message-dialog::backdrop {
   background: rgba(164, 118, 255, 0.1);
   color: #c9b1ff;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 11px;
+  font-size: calc(11px * var(--rml-ux-text-scale, 1));
   font-weight: 900;
   line-height: 1;
 }
@@ -3384,7 +3384,7 @@ dialog.builder-message-dialog::backdrop {
 .rml-help-bubble-kicker {
   color: #b99bff;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 8px;
+  font-size: calc(8px * var(--rml-ux-text-scale, 1));
   font-weight: 850;
   letter-spacing: 0.13em;
   line-height: 1.2;
@@ -3393,7 +3393,7 @@ dialog.builder-message-dialog::backdrop {
 
 .rml-help-bubble-text {
   color: #ddd8ea;
-  font-size: 10px;
+  font-size: calc(10px * var(--rml-ux-text-scale, 1));
   font-weight: 650;
   letter-spacing: 0;
   line-height: 1.45;
@@ -3782,7 +3782,7 @@ body.rml-builder-work-active {
   min-width: 0;
   padding: 5px 7px;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: calc(12px * var(--rml-ux-text-scale, 1));
   background: rgba(255, 255, 255, .035);
 }
 
@@ -3828,7 +3828,7 @@ body.rml-builder-work-active {
 }
 
 .builder-work-replacement input {
-  font-size: 16px;
+  font-size: calc(16px * var(--rml-ux-text-scale, 1));
 }
 
 .builder-work-replacement-list {
@@ -3896,7 +3896,7 @@ body.rml-builder-work-active {
   background: #0b1119;
   background: color-mix(in srgb, var(--rml-node-icon-color, #8fdcff) 17%, #0b1119);
   font-family: Consolas, monospace;
-  font-size: 10px;
+  font-size: calc(10px * var(--rml-ux-text-scale, 1));
   font-weight: 900;
   letter-spacing: .04em;
   overflow: hidden;
@@ -3917,13 +3917,13 @@ body.rml-builder-work-active {
 }
 
 .builder-work-replacement-copy strong {
-  font-size: 14px;
+  font-size: calc(14px * var(--rml-ux-text-scale, 1));
   line-height: 16px;
 }
 
 .builder-work-replacement-copy small {
   opacity: .76;
-  font-size: 10px;
+  font-size: calc(10px * var(--rml-ux-text-scale, 1));
   line-height: 11px;
 }
 
@@ -4185,7 +4185,7 @@ dialog[open] > * {
   outline: none;
   background: var(--panel-deep);
   color: var(--text);
-  font-size: 11px;
+  font-size: calc(11px * var(--rml-ux-text-scale, 1));
   font-weight: 520;
   line-height: 1.2;
   text-align: left;
@@ -4262,7 +4262,7 @@ dialog[open] > * {
   outline: none;
   background: #0b0a11;
   color: var(--text);
-  font-size: 10px;
+  font-size: calc(10px * var(--rml-ux-text-scale, 1));
   font-weight: 520;
 }
 
@@ -4301,7 +4301,7 @@ dialog[open] > * {
   border-radius: 6px;
   background: transparent;
   color: #d9d4e8;
-  font-size: 10px;
+  font-size: calc(10px * var(--rml-ux-text-scale, 1));
   font-weight: 520;
   line-height: 1.25;
   text-align: left;
@@ -4339,7 +4339,7 @@ dialog[open] > * {
 .rml-graph-searchable-empty {
   padding: 12px 10px;
   color: var(--faint);
-  font-size: 9px;
+  font-size: calc(9px * var(--rml-ux-text-scale, 1));
   line-height: 1.4;
   text-align: center;
 }
@@ -5054,4 +5054,27 @@ html[data-rml-architecture-gate="blocked"] body > :not(#rml-architecture-gate) {
     animation: none !important;
     transition: none !important;
   }
+}
+
+.top-action-profile-avatar {
+  position: relative;
+  width: 24px; height: 24px; min-width: 24px; min-height: 24px; max-width: 24px; max-height: 24px;
+  flex: 0 0 24px; display: grid; place-items: center; overflow: hidden; border-radius: 50%;
+}
+.builder-profile-avatar {
+  position: relative;
+  width: 38px; height: 38px; min-width: 38px; min-height: 38px; max-width: 38px; max-height: 38px;
+  flex: 0 0 38px; display: grid; place-items: center; overflow: hidden; border-radius: 50%;
+}
+.top-action-profile-avatar > svg, .top-action-profile-avatar > img,
+.builder-profile-avatar > svg, .builder-profile-avatar > img { grid-area: 1 / 1; }
+.top-action-profile-avatar > img, .builder-profile-avatar > img {
+  position: absolute; inset: 0; width: 100%; height: 100%; min-width: 0; min-height: 0; max-width: 100%; max-height: 100%;
+  object-fit: cover; border-radius: inherit; visibility: hidden; display: block;
+}
+.top-action-profile-avatar > img[hidden], .builder-profile-avatar > img[hidden] { display: none !important; }
+.top-action-profile-avatar.has-profile-image > img, .builder-profile-avatar.has-profile-image > img { visibility: visible; }
+.top-action-profile-avatar.has-profile-image > svg, .builder-profile-avatar.has-profile-image > svg { visibility: hidden; }
+@media (max-width:620px) {
+  .builder-profile-avatar { width:34px; height:34px; min-width:34px; min-height:34px; max-width:34px; max-height:34px; flex-basis:34px; }
 }

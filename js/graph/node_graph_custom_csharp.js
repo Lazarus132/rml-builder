@@ -2300,7 +2300,7 @@ function buildCustomCSharpFragmentInWorker(nodeId, source, parseResult, options)
     }
     const worker = new Worker(
       new URL(
-        "js/workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev109-hidden-configuration-node-scrollbar",
+        "js/workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev140-atomic-avatar-preload",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -4092,7 +4092,7 @@ function loadCustomCSharpDetachedEditorModule() {
         const script =
           document.createElement("script");
         script.src = new URL(
-          "js/editor/custom_csharp_editor.js?v=1.8-native-search-shortcut-ownership",
+          "js/editor/custom_csharp_editor.js?v=1.10-settings-dashboard",
           document.baseURI
         ).href;
         script.async = true;
@@ -5503,7 +5503,7 @@ function prepareCustomCSharpEditorHost(
       hostWindow.document.createElement("link");
     stylesheet.rel = "stylesheet";
     stylesheet.href = new URL(
-      "styles/features/styles.runtime-graph.css?v=1.20.31-universal-presentation-dev109-hidden-configuration-node-scrollbar",
+      "styles/features/styles.runtime-graph.css?v=1.20.31-universal-presentation-dev140-atomic-avatar-preload",
       window.location.href
     ).href;
     hostWindow.document.head.appendChild(
@@ -6352,7 +6352,7 @@ function mountCustomCSharpEditorPresentation({
             initialValue
           ),
           appearance:
-            customCSharpEditorAppearance(node),
+            window.RMLBuilderEditorPersonalSettings?.appearance || customCSharpEditorAppearance(node),
           styleUrls: Array.from(
             document.querySelectorAll(
               'link[rel="stylesheet"][href]'
@@ -6408,7 +6408,14 @@ function mountCustomCSharpEditorPresentation({
             ]) {
               const element =
                 colorEditor.querySelector(selector);
-              if (element) element.hidden = true;
+              if (element) {
+                element.hidden = true;
+                element.style.setProperty(
+                  "display",
+                  "none",
+                  "important"
+                );
+              }
             }
             const expressionInput =
               colorEditor.querySelector(
@@ -6421,6 +6428,8 @@ function mountCustomCSharpEditorPresentation({
             }
             return colorEditor;
           },
+          diagnosticSource:
+            window.RMLBuilderEditorPersonalSettings?.diagnosticSource || "Roslyn",
           status:
             customCSharpSynchronizationStatus.get(
               nodeId
@@ -6446,21 +6455,24 @@ function mountCustomCSharpEditorPresentation({
               hostWindow.focus?.();
             }
           },
+          onDiagnosticSourceChange(source) {
+            const controller = window.RMLBuilderEditorPersonalSettingsController;
+            if (controller?.setDiagnosticSource) {
+              controller.setDiagnosticSource(source);
+            }
+          },
           onAppearanceChange(appearance) {
-            const liveNode =
-              customCSharpEditorNode(nodeId);
-            if (!commitCustomCSharpEditorAppearance(
-              liveNode,
-              appearance
-            )) return;
-            refreshCustomCSharpEditorAppearance(
-              liveNode
-            );
-            scheduleAcceptedGraphPersistenceAfterPaint({
-              refreshGeneratedOutput: true,
-              refreshCompositeActions: true,
-              mutationClass: "parameter"
-            });
+            const controller = window.RMLBuilderEditorPersonalSettingsController;
+            if (controller?.setAppearanceValue) {
+              const current = controller.getSettings?.().appearance || {};
+              for (const [key, value] of Object.entries(appearance || {})) {
+                if (current[key] !== value) controller.setAppearanceValue(key, value);
+              }
+              return;
+            }
+            const liveNode = customCSharpEditorNode(nodeId);
+            if (!commitCustomCSharpEditorAppearance(liveNode, appearance)) return;
+            refreshCustomCSharpEditorAppearance(liveNode);
           },
           onInput(value) {
             commitCustomCSharpEditorValue(
@@ -6981,7 +6993,7 @@ Object.defineProperty(
   "RMLNodeGraphCustomCSharpModuleId",
   {
     value:
-      "1.20.31-universal-presentation-dev109-hidden-configuration-node-scrollbar",
+      "1.20.31-universal-presentation-dev140-atomic-avatar-preload",
     writable: false,
     enumerable: true,
     configurable: true
