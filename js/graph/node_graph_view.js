@@ -728,7 +728,7 @@ function enforceGraphSvgSafety() {
       "strong"
     );
     heading.textContent =
-      "Graph rendering paused for browser safety";
+      window.RMLI18n.t("{{i18n:js.presentation.562d8ae935dd}}");
     const detail = document.createElement("span");
     detail.textContent =
       ` ${assessment.nodes.toLocaleString()} nodes, ` +
@@ -1015,7 +1015,7 @@ function resetGraphPreparationForRetry(
       ) || preparation.status;
     if (preparation.status) {
       preparation.status.textContent =
-        "Recovering graph presentation…";
+        window.RMLI18n.t("{{i18n:js.presentation.fbde9ad19bb3}}");
       preparation.status.dataset
         .rmlPreparationRecovery = "true";
     }
@@ -1084,11 +1084,11 @@ function releaseEmergencyGraphPreparation(
       status.replaceChildren();
       const text = document.createElement("span");
       text.textContent =
-        "The graph model is intact. Its presentation needs another attempt.";
+        window.RMLI18n.t("{{i18n:js.presentation.d66da5f82ac4}}");
       const retry = document.createElement("button");
       retry.type = "button";
       retry.className = "secondary";
-      retry.textContent = "Retry graph presentation";
+      retry.textContent = window.RMLI18n.t("{{i18n:js.presentation.2a29b7bb612c}}");
       retry.addEventListener("click", () => {
         try {
           if (
@@ -4791,7 +4791,7 @@ function beginGraphNavigationFeedback() {
       root.appendChild(status);
     }
     status.textContent =
-      "Opening the selected graph level…";
+      window.RMLI18n.t("{{i18n:js.presentation.54ee9b0f6a4d}}");
     root.dataset.rmlGraphPhase =
       "navigating";
     root.setAttribute("aria-busy", "true");
@@ -5069,7 +5069,7 @@ function createGraphNavigationTrail(
       "rml-graph-navigation";
     navigation.setAttribute(
       "aria-label",
-      "Current graph hierarchy"
+      window.RMLI18n.t("{{i18n:js.presentation.6bf3d2a623c4}}")
     );
     navigation.title =
       graphNavigationPathText(options);
@@ -5095,10 +5095,10 @@ function createGraphNavigationTrail(
       .graphNavigationKind = "overflow";
     overflowButton.textContent = "…";
     overflowButton.title =
-      "Open older graph levels";
+      window.RMLI18n.t("{{i18n:js.presentation.690d039dd653}}");
     overflowButton.setAttribute(
       "aria-label",
-      "Open older graph levels"
+      window.RMLI18n.t("{{i18n:js.presentation.690d039dd653}}")
     );
     overflowButton.setAttribute(
       "aria-haspopup",
@@ -5223,7 +5223,7 @@ function createGraphNavigationTrail(
     );
     overflowMenu.setAttribute(
       "aria-label",
-      "Older graph levels"
+      window.RMLI18n.t("{{i18n:js.presentation.28137b46e3c7}}")
     );
     Object.assign(
       overflowMenu.style,
@@ -12483,7 +12483,7 @@ function graphPresentationVisible() {
   }
 
 function graphOutlineToggleMarkup() {
-    return `<svg class="rml-pack-outline-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4" width="17" height="16" rx="2"></rect><circle cx="7" cy="8" r="0.75"></circle><circle cx="7" cy="12" r="0.75"></circle><circle cx="7" cy="16" r="0.75"></circle><path d="M10 8h6.5 M10 12h6.5 M10 16h4.5"></path></svg>`;
+    return `<svg class="rml-pack-outline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev170-console-noise-cleanup#icon-outline"></use></svg>`;
   }
 
 function markGraphPackPresentationPending() {
@@ -12495,7 +12495,7 @@ function markGraphPackPresentationPending() {
     updatePackButton();
     dom.packButton.setAttribute(
       "aria-label",
-      "Runtime Graph is loading"
+      window.RMLI18n.t("{{i18n:js.presentation.6c1ebb1343c2}}")
     );
     dom.packButton.setAttribute(
       "aria-busy",
@@ -12815,9 +12815,6 @@ function showGraphMessage(
           confirmLabel: "OK"
         });
       } else {
-        console.info(
-          `[Runtime Graph] ${text}`
-        );
       }
       return;
     }
@@ -13177,10 +13174,6 @@ function synchronizePackedSnapshot(
       showGraphMessage(
         `${removedConnections.length} connection${removedConnections.length === 1 ? "" : "s"} from removed Configuration Outline items were detached safely.`,
         "warning"
-      );
-      console.info(
-        "Detached connections whose Configuration Outline ports were removed.",
-        removedConnections
       );
     }
 
@@ -13805,6 +13798,11 @@ function restoreGraphPaletteScroll(
     });
   }
 
+function setGraphPanelToggleIcon(button, iconName) {
+  if (!button) return;
+  button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev170-console-noise-cleanup#icon-${iconName}"></use></svg>`;
+}
+
 function applyGraphPanelLayout() {
     const stacked = graphPanelsAreStacked();
     if (stacked) {
@@ -13826,10 +13824,10 @@ function applyGraphPanelLayout() {
         "aria-hidden",
         String(stacked)
       );
-      dom.leftPanelToggle.textContent =
-        graphLeftPanelCollapsed
-          ? "▶"
-          : "◀";
+      setGraphPanelToggleIcon(
+        dom.leftPanelToggle,
+        graphLeftPanelCollapsed ? "chevron-right" : "chevron-left"
+      );
       dom.leftPanelToggle.title =
         graphLeftPanelCollapsed
           ? "Show node library"
@@ -13850,10 +13848,10 @@ function applyGraphPanelLayout() {
         "aria-hidden",
         String(stacked)
       );
-      dom.rightPanelToggle.textContent =
-        graphRightPanelCollapsed
-          ? "◀"
-          : "▶";
+      setGraphPanelToggleIcon(
+        dom.rightPanelToggle,
+        graphRightPanelCollapsed ? "chevron-left" : "chevron-right"
+      );
       dom.rightPanelToggle.title =
         graphRightPanelCollapsed
           ? "Show node inspector"
@@ -14429,7 +14427,7 @@ function presentRuntimeGraphRestoreShell() {
     }
     if (dom.activeContainerName) {
       dom.activeContainerName.textContent =
-        "Exact type matching";
+        window.RMLI18n.t("{{i18n:js.presentation.cca9041e0ecb}}");
     }
 
     const root = document.createElement("div");
@@ -15502,7 +15500,7 @@ function scheduleGraphPaletteRender() {
       dom.paletteContent.prepend(status);
     }
     status.textContent =
-      "Updating node library…";
+      window.RMLI18n.t("{{i18n:js.presentation.506d1e882b55}}");
     graphPaletteRenderFrame =
       requestProjectAnimationFrame(() => {
         graphPaletteRenderFrame = 0;
@@ -15586,7 +15584,7 @@ function renderGraphPalette(
     searchWrap.className =
       "rml-graph-palette-search";
     searchWrap.textContent =
-      "Find node";
+      window.RMLI18n.t("{{i18n:js.presentation.ab970a6cd9f2}}");
 
     const search =
       document.createElement("input");
@@ -15618,7 +15616,7 @@ function renderGraphPalette(
     const modeTitle =
       document.createElement("strong");
     modeTitle.textContent =
-      "Show Advanced / Raw C#";
+      window.RMLI18n.t("{{i18n:js.presentation.bcf88f61f0db}}");
     modeCopy.appendChild(
       modeTitle
     );
@@ -15925,7 +15923,7 @@ function renderGraphPalette(
           empty.className =
             "rml-graph-palette-status";
           empty.textContent =
-            "No nodes of this category were generated from the loaded API catalog.";
+            window.RMLI18n.t("{{i18n:js.presentation.507c417b6b5a}}");
           list.appendChild(empty);
           return;
         }
@@ -15972,7 +15970,7 @@ function renderGraphPalette(
             unavailable.className =
               "rml-graph-palette-status";
             unavailable.textContent =
-              "These API nodes could not be loaded from the catalog cache.";
+              window.RMLI18n.t("{{i18n:js.presentation.b813f4114c50}}");
             list.appendChild(unavailable);
           }
 
@@ -16071,7 +16069,7 @@ function renderGraphPalette(
         const title =
           document.createElement("span");
         title.textContent =
-          "Saved API Composites";
+          window.RMLI18n.t("{{i18n:js.presentation.6368399b82b5}}");
         const count =
           document.createElement("b");
         count.textContent =
@@ -16231,7 +16229,7 @@ function renderGraphPalette(
       const configSummaryText =
         document.createElement("span");
       configSummaryText.textContent =
-        "Packed Configuration";
+        window.RMLI18n.t("{{i18n:js.presentation.da5ee0698fa0}}");
       const configCount =
         document.createElement("b");
       configCount.textContent = "1";
@@ -18360,40 +18358,20 @@ function createToolbarButton(
 const GRAPH_TOOLBAR_ICONS =
     Object.freeze({
       center: `
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"></path>
-          <circle cx="12" cy="12" r="2.5"></circle>
-        </svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev170-console-noise-cleanup#icon-center"></use></svg>`,
       clear: `
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"></path>
-        </svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev170-console-noise-cleanup#icon-delete"></use></svg>`,
       zoomOut: `
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <circle cx="10.5" cy="10.5" r="6.5"></circle>
-          <path d="M15.5 15.5 21 21M7.5 10.5h6"></path>
-        </svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev170-console-noise-cleanup#icon-zoom-out"></use></svg>`,
       zoomIn: `
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <circle cx="10.5" cy="10.5" r="6.5"></circle>
-          <path d="M15.5 15.5 21 21M7.5 10.5h6M10.5 7.5v6"></path>
-        </svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev170-console-noise-cleanup#icon-zoom-in"></use></svg>`,
       editMode: `
-        <svg class="rml-graph-edit-enter-icon" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"></path>
-        </svg>
-        <svg class="rml-graph-edit-exit-icon" viewBox="0 0 24 24" aria-hidden="true" hidden>
-          <path d="M4 9h5V4M20 9h-5V4M4 15h5v5M20 15h-5v5"></path>
-        </svg>`,
+        <svg class="rml-graph-edit-enter-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev170-console-noise-cleanup#icon-expand"></use></svg>
+        <svg class="rml-graph-edit-exit-icon" viewBox="0 0 24 24" aria-hidden="true" hidden><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev170-console-noise-cleanup#icon-collapse"></use></svg>`,
       search: `
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <circle cx="10.5" cy="10.5" r="6.5"></circle>
-          <path d="M15.5 15.5 21 21"></path>
-        </svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev170-console-noise-cleanup#icon-search"></use></svg>`,
       next: `
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M5 6h14M12 5v13M7.5 14.5 12 19l4.5-4.5"></path>
-        </svg>`
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev170-console-noise-cleanup#icon-next"></use></svg>`
     });
 
 function createToolbarIconButton(
@@ -18755,11 +18733,11 @@ function renderGraphCanvas() {
     nodeSearch.className = "rml-graph-node-search";
     const nodeSearchInput = document.createElement("input");
     nodeSearchInput.type = "search";
-    nodeSearchInput.placeholder = "Find node in graph…";
+    nodeSearchInput.placeholder = window.RMLI18n.t("{{i18n:js.presentation.a00d3271edfc}}");
     nodeSearchInput.autocomplete = "off";
     nodeSearchInput.setAttribute(
       "aria-label",
-      "Find node in graph"
+      window.RMLI18n.t("{{i18n:js.presentation.f0d095db4021}}")
     );
     nodeSearchInput.setAttribute(
       "aria-keyshortcuts",
@@ -18775,7 +18753,7 @@ function renderGraphCanvas() {
         )
     );
     nodeSearchNext.title =
-      "Next matching node (F3 or Ctrl/Command+G)";
+      window.RMLI18n.t("{{i18n:js.presentation.0974c97fb1a2}}");
     nodeSearchNext.dataset.help =
       nodeSearchNext.title;
     nodeSearchNext.setAttribute(
@@ -18830,12 +18808,12 @@ function renderGraphCanvas() {
     compactSearchButton.classList.add(
       "rml-graph-compact-search-button"
     );
-    compactSearchButton.title = "Find node in graph";
+    compactSearchButton.title = window.RMLI18n.t("{{i18n:js.presentation.f0d095db4021}}");
     compactSearchButton.dataset.help =
       compactSearchButton.title;
     compactSearchButton.setAttribute(
       "aria-label",
-      "Find node in graph"
+      window.RMLI18n.t("{{i18n:js.presentation.f0d095db4021}}")
     );
     compactSearchButton.setAttribute(
       "aria-keyshortcuts",
@@ -18852,7 +18830,7 @@ function renderGraphCanvas() {
       <div class="rml-graph-search-overlay-card" role="dialog" aria-modal="true" aria-label="Find node in graph">
         <div class="rml-graph-search-overlay-head">
           <strong>Find node in graph</strong>
-          <button class="rml-graph-search-overlay-close" type="button" aria-label="Close search">×</button>
+          <button class="rml-graph-search-overlay-close" type="button" aria-label="Close search"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev170-console-noise-cleanup#icon-close"></use></svg></button>
         </div>
         <div class="rml-graph-search-overlay-body">
           <input type="search" autocomplete="off" placeholder="Find node in graph…" aria-label="Find node in graph" aria-keyshortcuts="F3 Shift+F3 Control+G Control+Shift+G Meta+G Meta+Shift+G">
@@ -19128,7 +19106,7 @@ function renderGraphCanvas() {
       status.dataset.rmlRendererRecovery =
         "true";
       status.textContent =
-        "Recovering graphics…";
+        window.RMLI18n.t("{{i18n:js.presentation.fd75772a7971}}");
       updatePackButton();
       return true;
     };
@@ -19543,7 +19521,7 @@ function renderGraphCanvas() {
     const status = document.createElement("div");
     status.className = "rml-graph-preparation-status";
     status.setAttribute("role", "status");
-    status.textContent = "Preparing graph…";
+    status.textContent = window.RMLI18n.t("{{i18n:js.presentation.0e7bd3b6fa39}}");
     root.appendChild(status);
     root.dataset.rmlGraphPhase = "preparing";
     root.setAttribute("aria-busy", "true");
@@ -24958,7 +24936,7 @@ function createGraphNodeElementRmlOriginal(
     remove.className =
       "rml-graph-node-delete";
     remove.type = "button";
-    remove.textContent = "×";
+    remove.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev170-console-noise-cleanup#icon-close"></use></svg>`;
     remove.title =
       node.kind === "configuration"
         ? "Delete start node (it remains available in the palette)"
@@ -25148,7 +25126,7 @@ function createGraphNodeElementRmlOriginal(
       note.className =
         "rml-graph-node-footer-note";
       note.textContent =
-        "● stored · ▶ startup · ■ saved · ◆ startup + saved. Delete this node safely; restore it from the left palette.";
+        window.RMLI18n.t("{{i18n:js.presentation.fabcda0fdaab}}");
       bodyContent.appendChild(note);
     }
 
@@ -33100,7 +33078,7 @@ function renderGraphInspector(options = {}) {
             : "Select at least two nodes to create a Composite.";
       } else if (extensionPlan?.valid) {
         copy.textContent =
-          "The additional nodes will be integrated into the selected Composite. Its identity, position, ports, explicit exposed ports, wire routes and Saved Composite link will be preserved.";
+          window.RMLI18n.t("{{i18n:js.presentation.6e0528af8cb3}}");
       } else {
         copy.textContent =
           extensionPlan?.reason ||
@@ -33175,7 +33153,7 @@ function renderGraphInspector(options = {}) {
       empty.className =
         "empty-inspector";
       empty.innerHTML =
-        `<span>⌁</span>
+        `<span class="empty-inspector-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev170-console-noise-cleanup#icon-lightning"></use></svg></span>
          <h2>Select a graph node, wire or route point</h2>
          <p>Typed ports, wire routing points and connection details appear here.</p>`;
       dom.inspectorContent.appendChild(
@@ -33212,10 +33190,10 @@ function installGraphInspectorSearch(root) {
 
       const wrap = document.createElement("label");
       wrap.className = "rml-graph-inspector-search";
-      wrap.textContent = "Search inspector";
+      wrap.textContent = window.RMLI18n.t("{{i18n:js.presentation.f1b690c9beff}}");
       const input = document.createElement("input");
       input.type = "search";
-      input.placeholder = "Filter visible inspector entries…";
+      input.placeholder = window.RMLI18n.t("{{i18n:js.presentation.7849996d490e}}");
       input.autocomplete = "off";
       wrap.appendChild(input);
       root.insertBefore(wrap, root.firstChild);
@@ -33647,7 +33625,7 @@ function searchableSelectWrapper(
         empty.className =
           "rml-graph-searchable-empty";
         empty.textContent =
-          "No matching entries";
+          window.RMLI18n.t("{{i18n:js.presentation.110d2a90a3b0}}");
         optionsHost.appendChild(empty);
         positionPopup();
         return;
@@ -36136,7 +36114,7 @@ function nodeInspectorCard(node) {
       notice.className =
         "rml-graph-unavailable-notice";
       notice.textContent =
-        "This preserved node cannot execute with the current catalog. Replacement choices are intentionally available only before a JSON import is installed; this inspector never changes the node contract.";
+        window.RMLI18n.t("{{i18n:js.presentation.6f62a07a475b}}");
       card.appendChild(notice);
     }
 
@@ -36191,7 +36169,7 @@ function nodeInspectorCard(node) {
       const label =
         document.createElement("label");
       label.textContent =
-        "Custom node label";
+        window.RMLI18n.t("{{i18n:js.presentation.f87334e945c2}}");
       const input =
         document.createElement("input");
       input.value =
@@ -36257,7 +36235,7 @@ function nodeInspectorCard(node) {
           );
         automatic.value = "auto";
         automatic.textContent =
-          "Auto · infer safely from wires";
+          window.RMLI18n.t("{{i18n:js.presentation.a91a4c15e1ce}}");
         automatic.selected =
           node.parameters.valueType ===
             "auto";
@@ -36533,7 +36511,7 @@ function nodeInspectorCard(node) {
     if (node.kind === "configuration") {
       actions.appendChild(
         inspectorButton(
-          "Edit Configuration Outline",
+          window.RMLI18n.t("{{i18n:js.presentation.19e098720353}}"),
           unpackToOutline,
           "primary"
         )
@@ -36547,7 +36525,7 @@ function nodeInspectorCard(node) {
       ) {
         actions.appendChild(
           inspectorButton(
-            "Expose unconnected ports",
+            window.RMLI18n.t("{{i18n:js.presentation.83100d4a62b2}}"),
             () =>
               exposeApiCompositeNodePorts(
                 node.id
@@ -36569,7 +36547,7 @@ function nodeInspectorCard(node) {
       ) {
         actions.appendChild(
           inspectorButton(
-            "Hide all unused ports",
+            window.RMLI18n.t("{{i18n:js.presentation.ed2c21d7da47}}"),
             () =>
               hideUnusedApiCompositeNodePortsIncludingVisible(
                 node.id
@@ -36586,7 +36564,7 @@ function nodeInspectorCard(node) {
       ) {
         actions.appendChild(
           inspectorButton(
-            "Select connected API chain",
+            window.RMLI18n.t("{{i18n:js.presentation.48be00ad9dc1}}"),
             () =>
               selectConnectedApiNodes(
                 node.id
@@ -36606,7 +36584,7 @@ function nodeInspectorCard(node) {
         )
       ) {
         const open = inspectorButton(
-          "Edit Internal API & Logic Graph",
+          window.RMLI18n.t("{{i18n:js.presentation.4514676808b3}}"),
           () =>
             openApiCompositeGraph(
               node.id
@@ -36614,11 +36592,11 @@ function nodeInspectorCard(node) {
           "primary"
         );
         open.title =
-          "Edit Internal API & Logic Graph — newly added nodes expose their currently unconnected ports automatically so they can be wired immediately; unused ports can be hidden again at any time.";
+          window.RMLI18n.t("{{i18n:js.presentation.4bf1767429bf}}");
         actions.appendChild(open);
         actions.appendChild(
           inspectorButton(
-            "Unpack Composite",
+            window.RMLI18n.t("{{i18n:js.presentation.8b13a2d21740}}"),
             () => {
               try {
                 unpackApiCompositeNode(
@@ -36673,7 +36651,7 @@ function nodeInspectorCard(node) {
       ) {
         actions.appendChild(
           inspectorButton(
-            "Duplicate",
+            window.RMLI18n.t("{{i18n:js.presentation.972d57379db3}}"),
             () => duplicateGraphNode(node)
           )
         );
@@ -36686,7 +36664,7 @@ function nodeInspectorCard(node) {
     ) {
       actions.appendChild(
         inspectorButton(
-          "Reset size",
+          window.RMLI18n.t("{{i18n:js.presentation.38216c44f78a}}"),
           () => resetNodeSize(node.id)
         )
       );
@@ -37746,7 +37724,7 @@ function appendParameterControl(
       if (customCSharpCodeControl) {
         const openDetached =
           inspectorButton(
-            "Open code editor",
+            window.RMLI18n.t("{{i18n:js.presentation.e3b65256eca5}}"),
             event => {
               event?.preventDefault?.();
               event?.stopPropagation?.();
@@ -37772,167 +37750,33 @@ function appendParameterControl(
   }
 
 function inspectorButtonIconMarkup(text) {
-    const label = String(text || "")
-      .trim()
-      .toLowerCase();
-    const svg = paths =>
-      `<svg viewBox="0 0 24 24" aria-hidden="true">${paths}</svg>`;
-
-    if (label === "+") {
-      return svg(
-        `<path d="M12 5v14M5 12h14"></path>`
-      );
-    }
-    if (label === "−" || label === "-") {
-      return svg(
-        `<path d="M5 12h14"></path>`
-      );
-    }
-    if (label.includes("open code editor")) {
-      return svg(
-        `<path d="M8 6 3 12l5 6M16 6l5 6-5 6M14 4l-4 16"></path>`
-      );
-    }
-    if (
-      label.includes("new window")
-    ) {
-      return svg(
-        `<path d="M14 4h6v6M20 4l-9 9"></path><path d="M18 13v6H5V6h6"></path>`
-      );
-    }
-    if (label.includes("delete saved composite")) {
-      return svg(
-        `<path d="M5 4h11l3 3v13H5zM8 4v6h7V4"></path><path d="M10 14l5 5M15 14l-5 5"></path>`
-      );
-    }
-    if (label.includes("delete point")) {
-      return svg(
-        `<path d="M3 12h5M16 12h5"></path><circle cx="12" cy="12" r="4"></circle><path d="M10.5 10.5l3 3M13.5 10.5l-3 3"></path>`
-      );
-    }
-    if (label.includes("delete wire")) {
-      return svg(
-        `<path d="M3 7h5l3 5-3 5H3M21 7h-5l-1.2 2"></path><path d="M14 13l5 5M19 13l-5 5"></path>`
-      );
-    }
-    if (label.includes("delete") || label.includes("discard")) {
-      return svg(
-        `<path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"></path>`
-      );
-    }
-    if (label.includes("duplicate")) {
-      return svg(
-        `<rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M16 8V5H5v11h3"></path>`
-      );
-    }
-    if (label === "update") {
-      return svg(
-        `<path d="M20 7v5h-5M4 17v-5h5"></path><path d="M6.2 8a7 7 0 0 1 11.5-1.5L20 9M4 15l2.3 2.5A7 7 0 0 0 18 16"></path>`
-      );
-    }
-    if (label === "save new") {
-      return svg(
-        `<path d="M6 3h8l4 4v14H6zM14 3v5h5"></path><path d="M12 12v6M9 15h6"></path>`
-      );
-    }
-    if (label.includes("save")) {
-      return svg(
-        `<path d="M5 4h12l2 2v14H5z"></path><path d="M8 4v6h8V4M8 20v-6h8v6"></path>`
-      );
-    }
-    if (
-      label.includes("open node graph") ||
-      label.includes("optimize & open")
-    ) {
-      if (label.includes("optimize")) {
-        return svg(
-          `<circle cx="6" cy="8" r="2"></circle><circle cx="13" cy="17" r="2"></circle><path d="M8 9.5l4 5M8 8h6"></path><path d="M18 3l.7 2.3L21 6l-2.3.7L18 9l-.7-2.3L15 6l2.3-.7z"></path>`
-        );
-      }
-      return svg(
-        `<circle cx="6" cy="7" r="2"></circle><circle cx="18" cy="7" r="2"></circle><circle cx="12" cy="17" r="2"></circle><path d="M8 8.5l3 6M16 8.5l-3 6M8 7h8"></path>`
-      );
-    }
-    if (label.includes("edit internal api")) {
-      return svg(
-        `<circle cx="5" cy="7" r="2"></circle><circle cx="12" cy="17" r="2"></circle><path d="M7 8.5l4 6M7 7h6"></path><path d="M15 5l2-2 4 4-8.5 8.5-3 .5.5-3z"></path>`
-      );
-    }
-    if (
-      label.includes("create api composite") ||
-      label.includes("create composite") ||
-      label.includes("extend api composite") ||
-      label.includes("extend composite")
-    ) {
-      return svg(
-        `<rect x="3" y="5" width="6" height="5" rx="1"></rect><rect x="3" y="14" width="6" height="5" rx="1"></rect><path d="M9 7.5h4M9 16.5h4M13 7.5v9"></path><rect x="13" y="9" width="8" height="6" rx="1.5"></rect>`
-      );
-    }
-    if (
-      label.includes("select connected") ||
-      label.includes("select whole wire")
-    ) {
-      return svg(
-        `<path d="M8.5 14.5l-2 2a3 3 0 0 0 4.2 4.2l3-3a3 3 0 0 0 0-4.2"></path><path d="M15.5 9.5l2-2a3 3 0 0 0-4.2-4.2l-3 3a3 3 0 0 0 0 4.2M9 15l6-6"></path>`
-      );
-    }
-    if (
-      label.includes("expose unconnected ports")
-    ) {
-      return svg(
-        `<rect x="6" y="5" width="8" height="14" rx="2"></rect><path d="M14 9h4M14 15h4M20 6v6M17 9h6"></path>`
-      );
-    }
-    if (
-      label.includes("hide all unused ports")
-    ) {
-      return svg(
-        `<rect x="6" y="5" width="8" height="14" rx="2"></rect><path d="M14 9h4M14 15h4M17 12h6"></path>`
-      );
-    }
-    if (
-      label.includes("detach")
-    ) {
-      return svg(
-        `<path d="M8 16l-1.5 1.5a3 3 0 0 0 4.2 4.2l2.3-2.3M16 8l1.5-1.5a3 3 0 0 0-4.2-4.2L11 4.6M8 8l8 8M4 12H1M23 12h-3"></path>`
-      );
-    }
-    if (label.includes("unpack")) {
-      return svg(
-        `<path d="M12 12L5 5M5 5h5M5 5v5M12 12l7-7M19 5h-5M19 5v5M12 12l7 7M19 19h-5M19 19v-5M12 12l-7 7M5 19h5M5 19v-5"></path>`
-      );
-    }
-    if (
-      label.includes("reset") ||
-      label.includes("straighten")
-    ) {
-      return svg(
-        `<path d="M4 7v5h5"></path><path d="M5.5 16a8 8 0 1 0 .5-9L4 9"></path>`
-      );
-    }
-    if (
-      label.includes("edit configuration")
-    ) {
-      return svg(
-        `<path d="M4 20l4.5-1 10-10-3.5-3.5-10 10zM13.5 7l3.5 3.5"></path>`
-      );
-    }
-    if (label.includes("select")) {
-      return svg(
-        `<path d="M5 4l12 8-5 1.5L10.5 19z"></path><path d="M14 16l4 4"></path>`
-      );
-    }
-    if (
-      label === "abbrechen" ||
-      label.includes("cancel")
-    ) {
-      return svg(
-        `<circle cx="12" cy="12" r="9"></circle><path d="M9 9l6 6M15 9l-6 6"></path>`
-      );
-    }
-    return svg(
-      `<circle cx="6" cy="12" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="18" cy="12" r="1"></circle>`
-    );
+    const label = String(text || "").trim().toLowerCase();
+    const icon = name => `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev170-console-noise-cleanup#icon-${name}"></use></svg>`;
+    if (label === "+") return icon("add");
+    if (label === "−" || label === "-") return icon("minus");
+    if (label.includes("open code editor")) return icon("code");
+    if (label.includes("new window")) return icon("new-window");
+    if (label.includes("delete saved composite")) return icon("delete-saved");
+    if (label.includes("delete point")) return icon("delete-point");
+    if (label.includes("delete wire")) return icon("delete-wire");
+    if (label.includes("delete") || label.includes("discard")) return icon("delete");
+    if (label.includes("duplicate")) return icon("duplicate");
+    if (label === "update") return icon("update");
+    if (label === "save new") return icon("save-new");
+    if (label.includes("save")) return icon("save");
+    if (label.includes("open node graph") || label.includes("optimize & open")) return icon(label.includes("optimize") ? "graph-optimize" : "graph-open");
+    if (label.includes("edit internal api")) return icon("edit-api");
+    if (label.includes("create api composite") || label.includes("create composite") || label.includes("extend api composite") || label.includes("extend composite")) return icon("composite");
+    if (label.includes("select connected") || label.includes("select whole wire")) return icon("connected");
+    if (label.includes("expose unconnected ports")) return icon("expose");
+    if (label.includes("hide all unused ports")) return icon("hide-unused");
+    if (label.includes("detach")) return icon("detach");
+    if (label.includes("unpack")) return icon("unpack");
+    if (label.includes("reset") || label.includes("straighten")) return icon("reset");
+    if (label.includes("edit configuration")) return icon("edit");
+    if (label.includes("select")) return icon("select");
+    if (label === "abbrechen" || label.includes("cancel")) return icon("cancel");
+    return icon("more");
   }
 
 function inspectorButtonTone(text) {
@@ -39284,7 +39128,7 @@ function wirePointInspectorCard(
 
     actions.appendChild(
       inspectorButton(
-        "Select whole wire",
+        window.RMLI18n.t("{{i18n:js.presentation.5cba3c085702}}"),
         () =>
           selectGraphConnection(
             connection.id
@@ -39295,7 +39139,7 @@ function wirePointInspectorCard(
     if (junction) {
       actions.appendChild(
         inspectorButton(
-          "Detach branches",
+          window.RMLI18n.t("{{i18n:js.presentation.ba34bb9a2656}}"),
           () =>
             detachWirePointBranches(
               connection.id,
@@ -39307,7 +39151,7 @@ function wirePointInspectorCard(
 
     actions.appendChild(
       inspectorButton(
-        "Delete point",
+        window.RMLI18n.t("{{i18n:js.presentation.24dc6e65d5bd}}"),
         () =>
           removeWirePoint(
             connection.id,
@@ -39366,7 +39210,7 @@ function connectionInspectorCard(
     const heading =
       document.createElement("h3");
     heading.textContent =
-      "Typed wire";
+      window.RMLI18n.t("{{i18n:js.presentation.c47de3ff22b9}}");
 
     const description =
       document.createElement("p");
@@ -39411,7 +39255,7 @@ function connectionInspectorCard(
     const help =
       document.createElement("p");
     help.textContent =
-      "Drag a wire segment to add a bend. Every manual bend and junction is independently selectable and removable with Delete/Backspace. Drag an input socket onto a compatible wire to create a typed branch. A crossing without a junction marker remains purely visual.";
+      window.RMLI18n.t("{{i18n:js.presentation.1ea50e27035e}}");
 
     const actions =
       document.createElement("div");
@@ -39421,7 +39265,7 @@ function connectionInspectorCard(
     if (connection.branchFrom) {
       actions.appendChild(
         inspectorButton(
-          "Detach from junction",
+          window.RMLI18n.t("{{i18n:js.presentation.9b7143fc646e}}"),
           () =>
             detachWireBranch(
               connection.id
@@ -39433,7 +39277,7 @@ function connectionInspectorCard(
     if (wireNeedsStraightening(connection)) {
       actions.appendChild(
         inspectorButton(
-          "Straighten wire",
+          window.RMLI18n.t("{{i18n:js.presentation.a41a7bb2572f}}"),
           () =>
             straightenWire(
               connection.id
@@ -39444,7 +39288,7 @@ function connectionInspectorCard(
 
     actions.appendChild(
       inspectorButton(
-        "Delete wire",
+        window.RMLI18n.t("{{i18n:js.presentation.23bc176ca05e}}"),
         deleteSelectedGraphItem
       )
     );
@@ -46049,7 +45893,7 @@ Object.defineProperty(
   "RMLNodeGraphViewModuleId",
   {
     value:
-      "1.20.31-universal-presentation-dev140-atomic-avatar-preload",
+      "1.20.32-universal-presentation-dev170-console-noise-cleanup",
     writable: false,
     enumerable: true,
     configurable: true

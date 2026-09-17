@@ -300,7 +300,7 @@
     const select = document.createElement("select");
     const empty = document.createElement("option");
     empty.value = "";
-    empty.textContent = "— Select Display Value —";
+    empty.textContent = window.RMLI18n.t("{{i18n:js.presentation.644de7c01848}}");
     select.appendChild(empty);
     for (const monitor of monitorNodes()) {
       const option = document.createElement("option");
@@ -473,7 +473,7 @@
         "inspector-note";
 
       sourceNote.textContent =
-        "Options come directly from the linked Collect To List at runtime. No separate Labels or Stable Values source is required.";
+        window.RMLI18n.t("{{i18n:js.presentation.c0eae02b96a5}}");
 
       inspectorBody.appendChild(
         sourceNote
@@ -1417,7 +1417,7 @@
           "rml-preview-control rml-preview-enum-value";
         valueButton.setAttribute(
           "aria-label",
-          "Current value"
+          window.RMLI18n.t("{{i18n:js.presentation.ed2757f1ed21}}")
         );
 
         const previousButton =
@@ -1429,7 +1429,7 @@
         previousButton.textContent = "◀";
         previousButton.setAttribute(
           "aria-label",
-          "Previous value"
+          window.RMLI18n.t("{{i18n:js.presentation.5caa1fc4e7c2}}")
         );
 
         const nextButton =
@@ -1441,7 +1441,7 @@
         nextButton.textContent = "▶";
         nextButton.setAttribute(
           "aria-label",
-          "Next value"
+          window.RMLI18n.t("{{i18n:js.presentation.c400ec237248}}")
         );
 
         let selection =
@@ -2719,7 +2719,7 @@ csString(graphClass)]);
         document.createElement(
           "span"
         );
-      badge.textContent = "DYN";
+      badge.textContent = window.RMLI18n.t("{{i18n:js.presentation.adddc72949b2}}");
 
       const title =
         document.createElement(
@@ -2739,7 +2739,7 @@ csString(graphClass)]);
       );
 
       button.title =
-        "Runtime collection-backed dynamic enum. Drag it into the Configuration Outline to create the setting.";
+        window.RMLI18n.t("{{i18n:js.presentation.4401fc52018a}}");
 
       button.addEventListener(
         "click",

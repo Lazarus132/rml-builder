@@ -468,22 +468,22 @@
     heading.textContent = String(options.tabTitle || "Custom C#");
     const headerActions = popupDocument.createElement("div");
     headerActions.className = "editor-header-actions";
-    const createHeaderButton = (label, paths) => {
+    const iconSpriteUrl = new URL("assets/rml-icons.svg?v=1.20.32-universal-presentation-dev170-console-noise-cleanup", window.location.href).href;
+    const createHeaderButton = (label, iconName) => {
       const button = popupDocument.createElement("button");
       button.type = "button";
       button.title = label;
       button.setAttribute("aria-label", label);
-      button.innerHTML =
-        `<svg viewBox="0 0 24 24" aria-hidden="true">${paths}</svg>`;
+      button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="${iconSpriteUrl}#icon-${iconName}"></use></svg>`;
       return button;
     };
     const showFind = createHeaderButton(
       "Find (Ctrl/Command+F)",
-      '<circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5L21 21"></path>'
+      "search"
     );
     const showReplace = createHeaderButton(
       "Find and replace (Ctrl+H / Command+Option+F)",
-      '<path d="M4 7h11M12 4l3 3-3 3M20 17H9M12 14l-3 3 3 3"></path>'
+      "replace"
     );
     for (const button of [showFind, showReplace]) {
       button.setAttribute("aria-pressed", "false");
@@ -491,7 +491,7 @@
     }
     const showSettings = createHeaderButton(
       "Settings Overlay",
-      '<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.1A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.1A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.1A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.12.38.34.72.64 1 .3.27.68.4 1.06.4h.1v4h-.1c-.38 0-.76.13-1.06.4-.3.28-.52.62-.64 1Z"></path>'
+      "settings"
     );
     const presentationMode =
       ["inline", "overlay", "external"].includes(
@@ -505,10 +505,7 @@
       presentationMode === "external";
     let pageAreasHidden =
       options.pageAreasHidden === true;
-    const pageAreasIcon = hidden =>
-      hidden
-        ? '<path d="M4 9h5V4M20 9h-5V4M4 15h5v5M20 15h-5v5"></path>'
-        : '<path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"></path>';
+    const pageAreasIcon = hidden => hidden ? "collapse" : "expand";
     const togglePageAreas = createHeaderButton(
       "",
       pageAreasIcon(pageAreasHidden)
@@ -526,13 +523,12 @@
         "aria-pressed",
         String(pageAreasHidden)
       );
-      togglePageAreas.innerHTML =
-        `<svg viewBox="0 0 24 24" aria-hidden="true">${pageAreasIcon(pageAreasHidden)}</svg>`;
+      togglePageAreas.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="${iconSpriteUrl}#icon-${pageAreasIcon(pageAreasHidden)}"></use></svg>`;
     };
     synchronizePageAreasButton();
     const popupReturnToEmbedded = createHeaderButton(
       "Return to embedded editor",
-      '<path d="M9 7 4 12l5 5"></path><path d="M4 12h10a6 6 0 0 1 6 6"></path>'
+      "back"
     );
     popupReturnToEmbedded.addEventListener(
       "click",
@@ -545,12 +541,12 @@
     presentationPicker.className =
       "editor-presentation-picker";
     presentationPicker.title =
-      "Choose how the Custom C# code editor is displayed";
+      window.RMLI18n.t("{{i18n:js.presentation.70c4eb6293b7}}");
     const presentationSelect =
       popupDocument.createElement("select");
     presentationSelect.setAttribute(
       "aria-label",
-      "Open embedded code editor as"
+      window.RMLI18n.t("{{i18n:js.presentation.a043d4557a23}}")
     );
     for (const [value, label] of [
       ["overlay", "Overlay"],
@@ -591,7 +587,7 @@
         "rml-graph-searchable-trigger rml-universal-select-trigger";
       trigger.setAttribute(
         "aria-label",
-        "Choose code editor presentation"
+        window.RMLI18n.t("{{i18n:js.presentation.318c9dd406f7}}")
       );
       trigger.setAttribute("aria-haspopup", "listbox");
       trigger.setAttribute("aria-expanded", "false");
@@ -599,7 +595,7 @@
         popupDocument.createElement("span");
       triggerText.className =
         "rml-graph-searchable-trigger-text";
-      triggerText.textContent = "Open as…";
+      triggerText.textContent = window.RMLI18n.t("{{i18n:js.presentation.0397379d7f0a}}");
       trigger.appendChild(triggerText);
       wrapper.appendChild(trigger);
 
@@ -615,7 +611,7 @@
       optionsHost.setAttribute("role", "listbox");
       optionsHost.setAttribute(
         "aria-label",
-        "Code editor presentation targets"
+        window.RMLI18n.t("{{i18n:js.presentation.27804ea2503a}}")
       );
       menu.appendChild(optionsHost);
       wrapper.appendChild(menu);
@@ -894,7 +890,7 @@
     findWidget.className = "find-widget";
     findWidget.hidden = true;
     findWidget.setAttribute("role", "search");
-    findWidget.setAttribute("aria-label", "Find and replace");
+    findWidget.setAttribute("aria-label", window.RMLI18n.t("{{i18n:js.presentation.2c6b404bf87f}}"));
     showFind.setAttribute("aria-controls", findWidget.id);
     showReplace.setAttribute("aria-controls", findWidget.id);
     const findFields = popupDocument.createElement("div");
@@ -905,16 +901,20 @@
     findInput.type = "text";
     findInput.autocomplete = "off";
     findInput.spellcheck = false;
-    findInput.placeholder = "Find";
-    findInput.setAttribute("aria-label", "Find");
+    findInput.placeholder = window.RMLI18n.t("{{i18n:js.presentation.df251b06eefd}}");
+    findInput.setAttribute("aria-label", window.RMLI18n.t("{{i18n:js.presentation.df251b06eefd}}"));
     const findOptions = popupDocument.createElement("div");
     findOptions.className = "find-options";
-    const createFindButton = (label, text) => {
+    const createFindButton = (label, text, iconName = "") => {
       const button = popupDocument.createElement("button");
       button.type = "button";
       button.title = label;
       button.setAttribute("aria-label", label);
-      button.textContent = text;
+      if (iconName) {
+        button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="${iconSpriteUrl}#icon-${iconName}"></use></svg>`;
+      } else {
+        button.textContent = text;
+      }
       return button;
     };
     const matchCase = createFindButton("Match case", "Aa");
@@ -932,19 +932,19 @@
     replaceInput.type = "text";
     replaceInput.autocomplete = "off";
     replaceInput.spellcheck = false;
-    replaceInput.placeholder = "Replace";
-    replaceInput.setAttribute("aria-label", "Replace");
+    replaceInput.placeholder = window.RMLI18n.t("{{i18n:js.presentation.a7cf7b25a703}}");
+    replaceInput.setAttribute("aria-label", window.RMLI18n.t("{{i18n:js.presentation.a7cf7b25a703}}"));
     replaceInputRow.appendChild(replaceInput);
     findFields.append(findInputRow, replaceInputRow);
     const findActions = popupDocument.createElement("div");
     findActions.className = "find-actions";
-    const previousMatch = createFindButton("Previous match", "↑");
-    const nextMatch = createFindButton("Next match", "↓");
-    const hideFind = createFindButton("Close find and replace", "×");
-    previousMatch.title = "Previous match (Shift+F3 or Ctrl/Command+Shift+G)";
+    const previousMatch = createFindButton("Previous match", "", "chevron-up");
+    const nextMatch = createFindButton("Next match", "", "chevron-down");
+    const hideFind = createFindButton("Close find and replace", "", "close");
+    previousMatch.title = window.RMLI18n.t("{{i18n:js.presentation.284288e693fe}}");
     previousMatch.setAttribute("aria-label", previousMatch.title);
     previousMatch.setAttribute("aria-keyshortcuts", "Shift+F3 Control+Shift+G Meta+Shift+G");
-    nextMatch.title = "Next match (F3 or Ctrl/Command+G)";
+    nextMatch.title = window.RMLI18n.t("{{i18n:js.presentation.793e244924bd}}");
     nextMatch.setAttribute("aria-label", nextMatch.title);
     nextMatch.setAttribute("aria-keyshortcuts", "F3 Control+G Meta+G");
     findActions.append(previousMatch, nextMatch, hideFind);
@@ -953,7 +953,7 @@
     const matchCount = popupDocument.createElement("output");
     matchCount.className = "find-match-count";
     matchCount.setAttribute("aria-live", "polite");
-    matchCount.textContent = "No results";
+    matchCount.textContent = window.RMLI18n.t("{{i18n:js.presentation.b993b0c53719}}");
     const replaceCurrent = createFindButton("Replace current match", "Replace");
     const replaceAll = createFindButton("Replace all matches", "Replace All");
     replaceCurrent.hidden = true;
@@ -986,19 +986,19 @@
     const settingsOverlay = popupDocument.createElement("section");
     settingsOverlay.className = "settings-overlay";
     settingsOverlay.hidden = true;
-    settingsOverlay.setAttribute("aria-label", "Editor Settings Overlay");
+    settingsOverlay.setAttribute("aria-label", window.RMLI18n.t("{{i18n:js.presentation.f751059b0b5e}}"));
     const diagnosticSettingsTitle = popupDocument.createElement("h2");
-    diagnosticSettingsTitle.textContent = "Debug & Problems";
+    diagnosticSettingsTitle.textContent = window.RMLI18n.t("{{i18n:js.presentation.f17a2346fedb}}");
     const diagnosticSourceSetting = popupDocument.createElement("div");
     diagnosticSourceSetting.className = "settings-source";
     const diagnosticSourceLabel = popupDocument.createElement("span");
-    diagnosticSourceLabel.textContent = "Output source";
+    diagnosticSourceLabel.textContent = window.RMLI18n.t("{{i18n:js.presentation.db8618646acc}}");
     const diagnosticSourceToggle = popupDocument.createElement("div");
     diagnosticSourceToggle.className = "settings-source-toggle";
     diagnosticSourceToggle.setAttribute("role", "group");
     diagnosticSourceToggle.setAttribute(
       "aria-label",
-      "Debug and problems output source"
+      window.RMLI18n.t("{{i18n:js.presentation.29b937887813}}")
     );
     const diagnosticSourceButtons = new Map();
     const synchronizeDiagnosticSourceControls = () => {
@@ -1051,7 +1051,7 @@
       diagnosticSourceToggle
     );
     const settingsTitle = popupDocument.createElement("h2");
-    settingsTitle.textContent = "Editor Colors";
+    settingsTitle.textContent = window.RMLI18n.t("{{i18n:js.presentation.c41759c2fc0e}}");
     const settingsColors = popupDocument.createElement("div");
     settingsColors.className = "settings-colors";
     const appearanceControls = new Map();
@@ -1160,7 +1160,21 @@
       appearanceControls.set(key, { input, line, trigger });
     }
     synchronizeAppearanceControls();
+    const resetEditorSettings = popupDocument.createElement("button");
+    resetEditorSettings.type = "button";
+    resetEditorSettings.className = "settings-reset button secondary";
+    resetEditorSettings.textContent = window.RMLI18n.t("{{i18n:js.presentation.ddefe47d697b}}");
+    resetEditorSettings.setAttribute("aria-label", window.RMLI18n.t("{{i18n:js.presentation.e5cc543977f7}}"));
+    resetEditorSettings.addEventListener("click", () => {
+      closeAppearancePicker();
+      appearanceState = normalizedAppearance(DEFAULT_APPEARANCE);
+      applyAppearance(popupDocument, editorShell, gutter, textarea, appearanceState);
+      synchronizeAppearanceControls();
+      options.onAppearanceChange?.({ ...appearanceState });
+      commitDiagnosticSource("Roslyn");
+    });
     settingsOverlay.append(
+      resetEditorSettings,
       diagnosticSettingsTitle,
       diagnosticSourceSetting,
       settingsTitle,
@@ -1175,18 +1189,18 @@
     statusRight.className = "status-right";
     const cursorPosition = popupDocument.createElement("output");
     const encoding = popupDocument.createElement("span");
-    encoding.textContent = "UTF-8";
+    encoding.textContent = window.RMLI18n.t("{{i18n:js.presentation.663b90c899fa}}");
     const language = popupDocument.createElement("span");
-    language.textContent = "C#";
+    language.textContent = window.RMLI18n.t("{{i18n:js.presentation.e4bc4b105929}}");
     statusRight.append(cursorPosition, encoding, language);
     statusBar.append(statusMessage, statusRight);
 
     const debugPanel = popupDocument.createElement("section");
     debugPanel.className = "debug-panel";
-    debugPanel.setAttribute("aria-label", "Editor output and diagnostics");
+    debugPanel.setAttribute("aria-label", window.RMLI18n.t("{{i18n:js.presentation.250c98b6399d}}"));
     const debugTabs = popupDocument.createElement("nav");
     debugTabs.className = "debug-tabs";
-    debugTabs.setAttribute("aria-label", "Debug output views");
+    debugTabs.setAttribute("aria-label", window.RMLI18n.t("{{i18n:js.presentation.606f30f0762f}}"));
     const debugViews = popupDocument.createElement("div");
     debugViews.className = "debug-views";
     const viewDefinitions = [
@@ -1207,7 +1221,7 @@
       if (id === "problems") {
         const count = popupDocument.createElement("output");
         count.textContent = "0";
-        count.setAttribute("aria-label", "0 problems");
+        count.setAttribute("aria-label", window.RMLI18n.t("{{i18n:js.presentation.daec1a69c8d2}}"));
         button.appendChild(count);
       }
       const view = popupDocument.createElement("div");
@@ -1804,13 +1818,13 @@
     const updateMatchStatus = error => {
       matchCount.classList.toggle("error", Boolean(error));
       if (error) {
-        matchCount.textContent = "Invalid expression";
+        matchCount.textContent = window.RMLI18n.t("{{i18n:js.presentation.f8f0786c2dcd}}");
         matchCount.title = String(error.message || error);
       } else if (!findInput.value) {
-        matchCount.textContent = "No query";
+        matchCount.textContent = window.RMLI18n.t("{{i18n:js.presentation.da93e15a0bf6}}");
         matchCount.removeAttribute("title");
       } else if (!findMatches.length) {
-        matchCount.textContent = "No results";
+        matchCount.textContent = window.RMLI18n.t("{{i18n:js.presentation.b993b0c53719}}");
         matchCount.removeAttribute("title");
       } else {
         matchCount.textContent =
@@ -2685,7 +2699,7 @@
             options.onNodeDrop?.(payload);
           if (!insertNodeSnippet(resolved)) {
             statusMessage.textContent =
-              "This node cannot be represented in the current C# field.";
+              window.RMLI18n.t("{{i18n:js.presentation.6bb4e8f1b8ca}}");
             statusMessage.dataset.tone =
               "error";
           }

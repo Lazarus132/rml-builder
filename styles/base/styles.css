@@ -451,8 +451,8 @@ fieldset legend {
 
 .palette-group > summary > b {
   display: grid;
-  min-width: 19px;
-  height: 19px;
+  min-width: var(--rml-ui-icon-size, 19px);
+  height: var(--rml-ui-icon-size, 19px);
   place-items: center;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -609,6 +609,37 @@ fieldset legend {
   font-size: calc(25px * var(--rml-ux-text-scale, 1));
 }
 
+
+.empty-inspector > .empty-inspector-icon {
+  transform: none;
+  display: grid;
+  width: 54px;
+  height: 54px;
+  place-items: center;
+  box-sizing: border-box;
+  border: 1px dashed var(--accent-dark);
+  border-radius: 15px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.empty-inspector > .empty-inspector-icon > svg {
+  display: block;
+  width: 24px;
+  height: 24px;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  box-shadow: none;
+}
+
 .empty-inspector h2 {
   margin: 14px 0 6px;
   font-size: calc(14px * var(--rml-ux-text-scale, 1));
@@ -705,11 +736,24 @@ fieldset legend {
   cursor: pointer;
 }
 
+.delete-node > .delete-node-icon {
+  display: block;
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
 .delete-node:hover,
 .remove-option:hover:not(:disabled) {
   border-color: rgba(255, 113, 136, 0.3);
   background: rgba(255, 113, 136, 0.08);
   color: var(--red);
+  --rml-signal-fill: rgba(255, 113, 136, 0.12);
 }
 
 .controller-options {
@@ -1124,8 +1168,8 @@ fieldset legend {
 }
 
 .custom-color-slider::-webkit-slider-thumb {
-  width: 18px;
-  height: 18px;
+  width: var(--rml-ui-icon-size, 19px);
+  height: var(--rml-ui-icon-size, 19px);
   border: 2px solid #fff;
   border-radius: 50%;
   -webkit-appearance: none;
@@ -2394,8 +2438,8 @@ body:has(.node-pointer-ghost) .builder-canvas {
 }
 
 .top-action-button svg {
-  width: 18px;
-  height: 18px;
+  width: var(--rml-ui-icon-size, 19px);
+  height: var(--rml-ui-icon-size, 19px);
   overflow: visible;
   fill: none;
   stroke: currentColor;
@@ -2843,8 +2887,8 @@ body:has(.node-pointer-ghost) .builder-canvas {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 18px;
-  height: 18px;
+  width: var(--rml-ui-icon-size, 19px);
+  height: var(--rml-ui-icon-size, 19px);
   margin: 0;
   transform-origin: center;
   transition:
@@ -3190,19 +3234,6 @@ dialog.builder-message-dialog::backdrop {
   overflow: visible;
 }
 
-.builder-message-signal-shape {
-  fill: rgba(255, 209, 129, 0.12);
-  stroke: currentColor;
-  stroke-linejoin: round;
-  stroke-width: 2.25;
-}
-
-.builder-message-signal-mark {
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-width: 3.25;
-}
 
 .builder-message-dialog[data-tone="danger"] .builder-message-signal {
   border-color: rgba(255, 113, 136, 0.34);
@@ -3210,29 +3241,22 @@ dialog.builder-message-dialog::backdrop {
   color: var(--red);
 }
 
-.builder-message-dialog[data-tone="danger"] .builder-message-signal-shape {
-  fill: rgba(255, 113, 136, 0.12);
-}
 
 .builder-message-dialog[data-tone="info"] .builder-message-signal {
   border-color: rgba(164, 118, 255, 0.34);
   background: rgba(164, 118, 255, 0.08);
   color: #c9b1ff;
+  --rml-signal-fill: rgba(164, 118, 255, 0.12);
 }
 
-.builder-message-dialog[data-tone="info"] .builder-message-signal-shape {
-  fill: rgba(164, 118, 255, 0.12);
-}
 
 .builder-message-dialog[data-tone="success"] .builder-message-signal {
   border-color: rgba(108, 232, 155, 0.34);
   background: rgba(108, 232, 155, 0.08);
   color: var(--green);
+  --rml-signal-fill: rgba(108, 232, 155, 0.12);
 }
 
-.builder-message-dialog[data-tone="success"] .builder-message-signal-shape {
-  fill: rgba(108, 232, 155, 0.12);
-}
 
 .builder-message-content {
   min-width: 0;
@@ -5055,7 +5079,6 @@ html[data-rml-architecture-gate="blocked"] body > :not(#rml-architecture-gate) {
     transition: none !important;
   }
 }
-
 .top-action-profile-avatar {
   position: relative;
   width: 24px; height: 24px; min-width: 24px; min-height: 24px; max-width: 24px; max-height: 24px;
@@ -5066,8 +5089,17 @@ html[data-rml-architecture-gate="blocked"] body > :not(#rml-architecture-gate) {
   width: 38px; height: 38px; min-width: 38px; min-height: 38px; max-width: 38px; max-height: 38px;
   flex: 0 0 38px; display: grid; place-items: center; overflow: hidden; border-radius: 50%;
 }
-.top-action-profile-avatar > svg, .top-action-profile-avatar > img,
-.builder-profile-avatar > svg, .builder-profile-avatar > img { grid-area: 1 / 1; }
+.top-action-profile-avatar > svg {
+  grid-area: 1 / 1; width: 23px !important; height: 23px !important; min-width: 23px; min-height: 23px; max-width: 23px; max-height: 23px;
+  display: block; fill: none; stroke: currentColor; stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round;
+  transform: none !important; pointer-events: none;
+}
+.builder-profile-avatar > svg {
+  grid-area: 1 / 1; width: 23px !important; height: 23px !important; min-width: 23px; min-height: 23px; max-width: 23px; max-height: 23px;
+  display: block; fill: none; stroke: currentColor; stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round;
+  transform: none !important; pointer-events: none;
+}
+.top-action-profile-avatar > img, .builder-profile-avatar > img { grid-area: 1 / 1; }
 .top-action-profile-avatar > img, .builder-profile-avatar > img {
   position: absolute; inset: 0; width: 100%; height: 100%; min-width: 0; min-height: 0; max-width: 100%; max-height: 100%;
   object-fit: cover; border-radius: inherit; visibility: hidden; display: block;
@@ -5078,3 +5110,22 @@ html[data-rml-architecture-gate="blocked"] body > :not(#rml-architecture-gate) {
 @media (max-width:620px) {
   .builder-profile-avatar { width:34px; height:34px; min-width:34px; min-height:34px; max-width:34px; max-height:34px; flex-basis:34px; }
 }
+
+:root { --rml-ui-icon-size: 19px; }
+.rml-graph-panel-toggle > svg,
+.dialog-close > svg,
+.rml-preview-close > svg,
+.top-action-question,
+.builder-settings-inspector-back > svg {
+  width: var(--rml-ui-icon-size, 19px);
+  height: var(--rml-ui-icon-size, 19px);
+  display: block;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+.builder-settings-inspector-back { display: inline-flex; align-items: center; justify-content: center; gap: .35rem; }

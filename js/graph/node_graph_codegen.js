@@ -8072,7 +8072,7 @@ function createGraphAnalysisCertificate(
       schemaVersion:
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION,
       moduleId:
-        "1.20.31-universal-presentation-dev140-atomic-avatar-preload",
+        "1.20.32-universal-presentation-dev170-console-noise-cleanup",
       semanticToken: token,
       nodeCount: graph.nodes.length,
       connectionCount: connections.length,
@@ -8105,7 +8105,7 @@ function graphAnalysisCertificateEnvelopeValid(
       Number(certificate.schemaVersion) ===
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION &&
       certificate.moduleId ===
-        "1.20.31-universal-presentation-dev140-atomic-avatar-preload" &&
+        "1.20.32-universal-presentation-dev170-console-noise-cleanup" &&
       certificate.valid === true &&
       typeof certificate.semanticToken ===
         "string" &&
@@ -17035,7 +17035,7 @@ Object.defineProperty(
     {
       value: Object.freeze({
         moduleId:
-          "1.20.31-universal-presentation-dev140-atomic-avatar-preload",
+          "1.20.32-universal-presentation-dev170-console-noise-cleanup",
         build:
           buildTypedNodeGraphCSharpContribution,
         validateDocument:

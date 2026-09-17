@@ -676,7 +676,7 @@ const savedApiCompositeSearchTextCache =
     `${SAVED_API_COMPOSITE_COMPARE_MESSAGE_TYPE}-result`;
 
   const SAVED_API_COMPOSITE_COMPARE_MODULE_ID =
-    "1.20.31-universal-presentation-dev140-atomic-avatar-preload";
+    "1.20.32-universal-presentation-dev170-console-noise-cleanup";
 
   const SAVED_API_COMPOSITE_COMPARE_CANONICAL_SCHEMA_VERSION =
     4;
@@ -934,7 +934,7 @@ const savedApiCompositeSearchTextCache =
       );
     }
     const workerUrl = new URL(
-      "js/workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev140-atomic-avatar-preload&canonical-schema=4",
+      "js/workers/saved_api_composite_compare_worker.js?v=1.20.32-universal-presentation-dev170-console-noise-cleanup&canonical-schema=4",
       document.baseURI
     );
     const workerOptions = {
@@ -16108,7 +16108,7 @@ function removeSavedApiCompositePaletteItem(
         message.className =
           "rml-graph-palette-status";
         message.textContent =
-          "No node matches this search.";
+          window.RMLI18n.t("{{i18n:js.presentation.5d9081058da3}}");
         scroll.appendChild(message);
       }
     }
@@ -16332,7 +16332,7 @@ function synchronizeApiCompositeInspectorDeleteAction(
     }
     if (!deleteAction) {
       deleteAction = inspectorButton(
-        "Delete Saved Composite",
+        window.RMLI18n.t("{{i18n:js.presentation.6b5be4a55679}}"),
         () =>
           removeSavedApiCompositeForNode(
             node.id
@@ -16720,7 +16720,7 @@ function synchronizeSavedApiCompositeUpdateAction(
       updateGraphButton =
         document.createElement("button");
       updateGraphButton.type = "button";
-      updateGraphButton.textContent = "↻";
+      updateGraphButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev170-console-noise-cleanup#icon-update"></use></svg>`;
       updateGraphButton.dataset
         .savedApiCompositeGraphUpdate =
         "true";
@@ -16793,10 +16793,10 @@ function synchronizeSavedApiCompositeUpdateAction(
       updatesOpenComposite
         ? "graph-to-library"
         : "library-to-graph";
-    updateGraphButton.textContent =
-      updatesOpenComposite
-        ? "↑"
-        : "↓";
+    // Use the same semantic update/sync glyph in the Library and Composite Actions.
+    // Direction remains encoded in the action, aria-label and tooltip rather than
+    // overloading upload/download arrows that read as import/export controls.
+    updateGraphButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev170-console-noise-cleanup#icon-update"></use></svg>`;
     updateGraphButton.setAttribute(
       "aria-label",
       updatesOpenComposite
@@ -16974,7 +16974,7 @@ function createSavedApiCompositePaletteItem(
     const exportButton =
       document.createElement("button");
     exportButton.type = "button";
-    exportButton.textContent = "⇩";
+    exportButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev170-console-noise-cleanup#icon-download"></use></svg>`;
     exportButton.title =
       `Export '${record.name}' as compressed JSON`;
     exportButton.addEventListener(
@@ -17033,7 +17033,7 @@ function createSavedApiCompositePaletteItem(
     const deleteButton =
       document.createElement("button");
     deleteButton.type = "button";
-    deleteButton.textContent = "×";
+    deleteButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev170-console-noise-cleanup#icon-close"></use></svg>`;
     deleteButton.title =
       `Delete '${record.name}' from Saved API Composites`;
     deleteButton.addEventListener(
@@ -17058,7 +17058,108 @@ function createSavedApiCompositePaletteItem(
       record,
       contexts
     );
-    row.append(button, actions);
+
+    const menuTrigger = document.createElement("button");
+    menuTrigger.type = "button";
+    menuTrigger.className = "rml-saved-api-composite-menu-trigger";
+    menuTrigger.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev170-console-noise-cleanup#icon-more"></use></svg>`;
+    menuTrigger.setAttribute("aria-haspopup", "menu");
+    menuTrigger.setAttribute("aria-expanded", "false");
+    menuTrigger.setAttribute(
+      "aria-label",
+      `Actions for Saved API Composite '${record.name}'`
+    );
+    menuTrigger.title = `Actions for '${record.name}'`;
+
+    actions.setAttribute("role", "menu");
+    actions.hidden = true;
+    for (const actionButton of actions.querySelectorAll("button")) {
+      actionButton.setAttribute("role", "menuitem");
+    }
+
+    const closeActions = ({ restoreFocus = false } = {}) => {
+      if (actions.hidden) return;
+      actions.hidden = true;
+      row.classList.remove("actions-open");
+      menuTrigger.setAttribute("aria-expanded", "false");
+      if (restoreFocus && menuTrigger.isConnected) {
+        menuTrigger.focus({ preventScroll: true });
+      }
+    };
+    const openActions = () => {
+      for (const openRow of document.querySelectorAll(
+        ".rml-saved-api-composite-row.actions-open"
+      )) {
+        if (openRow === row) continue;
+        openRow.querySelector(
+          ".rml-saved-api-composite-actions"
+        )?.setAttribute("hidden", "");
+        openRow.classList.remove("actions-open");
+        openRow.querySelector(
+          ".rml-saved-api-composite-menu-trigger"
+        )?.setAttribute("aria-expanded", "false");
+      }
+      actions.hidden = false;
+      row.classList.add("actions-open");
+      menuTrigger.setAttribute("aria-expanded", "true");
+    };
+    const toggleActions = () => {
+      if (actions.hidden) openActions();
+      else closeActions();
+    };
+
+    menuTrigger.addEventListener("pointerdown", event => {
+      event.stopPropagation();
+    });
+    menuTrigger.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleActions();
+    });
+    row.addEventListener("contextmenu", event => {
+      if (event.target.closest(".rml-saved-api-composite-actions")) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      openActions();
+      menuTrigger.focus({ preventScroll: true });
+    });
+    row.addEventListener("keydown", event => {
+      if (event.key === "Escape" && !actions.hidden) {
+        event.preventDefault();
+        event.stopPropagation();
+        closeActions({ restoreFocus: true });
+      }
+    });
+    actions.addEventListener("click", event => {
+      if (event.target.closest("button")) {
+        queueMicrotask(() => closeActions());
+      }
+    });
+    const armOutsideClose = () => {
+      if (actions.hidden || !row.isConnected) return;
+      document.addEventListener(
+        "pointerdown",
+        event => {
+          if (actions.hidden || !row.isConnected) return;
+          if (row.contains(event.target)) {
+            queueMicrotask(armOutsideClose);
+            return;
+          }
+          closeActions();
+        },
+        { capture: true, once: true }
+      );
+    };
+    menuTrigger.addEventListener("click", () => {
+      if (!actions.hidden) queueMicrotask(armOutsideClose);
+    });
+    row.addEventListener("contextmenu", () => {
+      if (!actions.hidden) queueMicrotask(armOutsideClose);
+    });
+
+    row.append(button, menuTrigger, actions);
     return row;
   }
 
@@ -17067,7 +17168,7 @@ Object.defineProperty(
   "RMLNodeGraphCompositesModuleId",
   {
     value:
-      "1.20.31-universal-presentation-dev140-atomic-avatar-preload",
+      "1.20.32-universal-presentation-dev170-console-noise-cleanup",
     writable: false,
     enumerable: true,
     configurable: true

@@ -2,7 +2,7 @@
   "use strict";
 
   const API_FACTORY_MODULE_ID =
-    "1.20.31-universal-presentation-dev140-atomic-avatar-preload";
+    "1.20.32-universal-presentation-dev170-console-noise-cleanup";
   const FACTORY_VERSION = 38;
   const API_VERIFICATION_SCHEMA_VERSION = 3;
   const CATALOG_PROJECTION_INDEX_VERSION = 1;
@@ -5549,12 +5549,6 @@
           "undefined" &&
         globalThis instanceof
           WorkerGlobalScope;
-      console.info(
-        workerContext
-          ? "RML API Node Factory ready (graph-codegen worker)."
-          : "RML API Node Factory ready (main thread).",
-        report
-      );
     }
 
     return report;

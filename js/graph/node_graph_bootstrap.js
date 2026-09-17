@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_BOOTSTRAP_MODULE_ID =
-  "1.20.31-universal-presentation-dev140-atomic-avatar-preload";
+  "1.20.32-universal-presentation-dev170-console-noise-cleanup";
 
 function assertGraphBootstrapModuleCoherence() {
   const mismatches = [];

@@ -3,7 +3,6 @@
 
   const SCRIPT_BASE = document.currentScript?.src || window.location.href;
   const TEMPLATE_URL = new URL("../../templates/setup_template.html?v=132-no-small-viewport-warning-v347f1", SCRIPT_BASE).href;
-  const TEMPLATE_SCRIPT_URL = new URL("../templates/setup_template.js?v=132-no-small-viewport-warning-v347f1", SCRIPT_BASE).href;
   let templatePromise = null;
   let snapshot = null;
   let snapshotFingerprint = "";
@@ -1368,47 +1367,12 @@
     }
   ];
 
-  function loadTemplateScript() {
-    if (typeof window.RMLSetupTemplateMarkup === "string") {
-      return Promise.resolve(window.RMLSetupTemplateMarkup);
-    }
-    return new Promise((resolve, reject) => {
-      let script = document.querySelector('script[data-rml-setup-template="true"]');
-      const finish = () => {
-        const markup = window.RMLSetupTemplateMarkup;
-        if (typeof markup === "string") resolve(markup);
-        else reject(new Error("setup_template.js loaded without RMLSetupTemplateMarkup."));
-      };
-      if (script) {
-        if (script.dataset.loaded === "true") {
-          finish();
-          return;
-        }
-        script.addEventListener("load", finish, { once: true });
-        script.addEventListener("error", () => reject(new Error("setup_template.js could not be loaded.")), { once: true });
-        return;
-      }
-      script = document.createElement("script");
-      script.src = TEMPLATE_SCRIPT_URL;
-      script.async = true;
-      script.dataset.rmlSetupTemplate = "true";
-      script.addEventListener("load", () => {
-        script.dataset.loaded = "true";
-        finish();
-      }, { once: true });
-      script.addEventListener("error", () => reject(new Error("setup_template.js could not be loaded.")), { once: true });
-      document.body.appendChild(script);
-    });
-  }
-
   function loadTemplateMarkup() {
-    if (window.location.protocol === "file:") return loadTemplateScript();
     return fetch(TEMPLATE_URL, { cache: "no-store" })
       .then(response => {
         if (!response.ok) throw new Error(`Setup template: ${response.status}`);
         return response.text();
-      })
-      .catch(() => loadTemplateScript());
+      });
   }
 
   function ensureTemplate() {
@@ -17680,7 +17644,6 @@
   }
 
   async function runGraphWireDemo(runId) {
-    console.info("[RML Tour · Step 8] Connecting the packed Start node to the existing NOT node.", { runId });
 
     const ensuredPair = await ensureGraphDemoNodes(runId);
     if (runId !== demoRunId) return;
@@ -17770,10 +17733,6 @@
     await wait(1350);
     clearGraphConnectionScene();
     hideMouse();
-    console.info(
-      "[RML Tour · Step 8] Packed Start → existing NOT completed without adding helper nodes.",
-      { runId }
-    );
   }
 
   function setRealPortGlow(socket, active) {
@@ -23892,17 +23851,17 @@
     }
 
     if (phase === "demonstrating") {
-      ui.kicker.textContent = "Live demonstration";
-      ui.next.textContent = "Demonstrating…";
+      ui.kicker.textContent = window.RMLI18n.t("{{i18n:js.presentation.c1d7d2f70ee6}}");
+      ui.next.textContent = window.RMLI18n.t("{{i18n:js.presentation.f449ff67fe27}}");
     } else if (phase === "preparing") {
-      ui.kicker.textContent = "Preparing next lesson";
-      ui.next.textContent = "Preparing…";
+      ui.kicker.textContent = window.RMLI18n.t("{{i18n:js.presentation.047aa6266fb0}}");
+      ui.next.textContent = window.RMLI18n.t("{{i18n:js.presentation.0b1d6c0b1a56}}");
     } else if (phase === "narrating") {
-      ui.kicker.textContent = "Explanation · Left-click to reveal / continue";
-      ui.next.textContent = "Demonstrate";
+      ui.kicker.textContent = window.RMLI18n.t("{{i18n:js.presentation.946218560173}}");
+      ui.next.textContent = window.RMLI18n.t("{{i18n:js.presentation.c951743e7c82}}");
     } else if (phase === "ready") {
-      ui.kicker.textContent = "Ready to demonstrate";
-      ui.next.textContent = "Demonstrate";
+      ui.kicker.textContent = window.RMLI18n.t("{{i18n:js.presentation.fde6e2e26844}}");
+      ui.next.textContent = window.RMLI18n.t("{{i18n:js.presentation.c951743e7c82}}");
       if (step.demo) {
         tourDebugAssert(
           `tour-step-${stepIndex}-single-demonstration-skip-available`,
@@ -24265,10 +24224,6 @@
             rawError: preparationError.message,
             constraintCertificate
           });
-          console.info(
-            "[RML Tour] An unavoidable, mathematically certified layout constraint was recorded as viewport noise.",
-            constraintCertificate
-          );
         } else {
           tourDebugRecord("lesson-preparation-contained-error", {
             preparedStepIndex: index,
@@ -24910,10 +24865,6 @@
               constraintCertificate,
               continuationPreparation
             }
-          );
-          console.info(
-            "[RML Tour] An unavoidable, mathematically certified layout constraint was recorded as viewport noise.",
-            constraintCertificate
           );
           return await advancePastFailedStep(
             failedStepIndex,

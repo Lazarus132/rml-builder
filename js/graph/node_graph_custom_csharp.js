@@ -2300,7 +2300,7 @@ function buildCustomCSharpFragmentInWorker(nodeId, source, parseResult, options)
     }
     const worker = new Worker(
       new URL(
-        "js/workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev140-atomic-avatar-preload",
+        "js/workers/graph_codegen_worker.js?v=1.20.32-universal-presentation-dev170-console-noise-cleanup",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -4873,7 +4873,7 @@ function createCustomCSharpInlineFrame(
     }
     if (dom.activeContainerName) {
       dom.activeContainerName.textContent =
-        "Editor · synchronized with node";
+        window.RMLI18n.t("{{i18n:js.presentation.f8d8a83a9d7b}}");
     }
     updatePackButton();
     return frame;
@@ -4943,23 +4943,13 @@ function createCustomCSharpOverlayFrame(
       document.createElement("div");
     actions.className =
       "rml-custom-csharp-overlay-window-actions";
-    const windowIcon = paths =>
-      `<svg viewBox="0 0 24 24" aria-hidden="true">${paths}</svg>`;
-    const returnIcon = windowIcon(
-      '<path d="M9 7 4 12l5 5"></path><path d="M4 12h10a6 6 0 0 1 6 6"></path>'
-    );
-    const minimizeIcon = windowIcon(
-      '<path d="M6 16h12"></path>'
-    );
-    const maximizeIcon = windowIcon(
-      '<rect x="6" y="6" width="12" height="12" rx="1"></rect>'
-    );
-    const restoreIcon = windowIcon(
-      '<path d="M9 8V6h9v9h-2"></path><rect x="6" y="9" width="9" height="9" rx="1"></rect>'
-    );
-    const closeIcon = windowIcon(
-      '<path d="m7 7 10 10M17 7 7 17"></path>'
-    );
+    const windowIcon = name =>
+      `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev170-console-noise-cleanup#icon-${name}"></use></svg>`;
+    const returnIcon = windowIcon("back");
+    const minimizeIcon = windowIcon("minimize");
+    const maximizeIcon = windowIcon("maximize");
+    const restoreIcon = windowIcon("restore");
+    const closeIcon = windowIcon("close");
     const windowButton = (
       label,
       icon,
@@ -5006,10 +4996,10 @@ function createCustomCSharpOverlayFrame(
           maximize.innerHTML = maximizeIcon;
           maximize.setAttribute(
             "aria-label",
-            "Maximize editor overlay"
+            window.RMLI18n.t("{{i18n:js.presentation.2cda3d1fddc5}}")
           );
           maximize.title =
-            "Maximize editor overlay";
+            window.RMLI18n.t("{{i18n:js.presentation.2cda3d1fddc5}}");
         }
         button.setAttribute(
           "aria-label",
@@ -5034,10 +5024,10 @@ function createCustomCSharpOverlayFrame(
         );
         minimize.setAttribute(
           "aria-label",
-          "Minimize editor overlay"
+          window.RMLI18n.t("{{i18n:js.presentation.4a0f44da0881}}")
         );
         minimize.title =
-          "Minimize editor overlay";
+          window.RMLI18n.t("{{i18n:js.presentation.4a0f44da0881}}");
         const maximized =
           overlay.classList.toggle(
             "maximized"
@@ -5503,7 +5493,7 @@ function prepareCustomCSharpEditorHost(
       hostWindow.document.createElement("link");
     stylesheet.rel = "stylesheet";
     stylesheet.href = new URL(
-      "styles/features/styles.runtime-graph.css?v=1.20.31-universal-presentation-dev140-atomic-avatar-preload",
+      "styles/features/styles.runtime-graph.css?v=1.20.32-universal-presentation-dev170-console-noise-cleanup",
       window.location.href
     ).href;
     hostWindow.document.head.appendChild(
@@ -5514,7 +5504,7 @@ function prepareCustomCSharpEditorHost(
     loading.className =
       "rml-custom-csharp-loading";
     loading.textContent =
-      "Loading Custom C# editor…";
+      window.RMLI18n.t("{{i18n:js.presentation.528235088292}}");
     hostWindow.document.body.appendChild(loading);
     return shortcutBootstrap;
   }
@@ -6993,7 +6983,7 @@ Object.defineProperty(
   "RMLNodeGraphCustomCSharpModuleId",
   {
     value:
-      "1.20.31-universal-presentation-dev140-atomic-avatar-preload",
+      "1.20.32-universal-presentation-dev170-console-noise-cleanup",
     writable: false,
     enumerable: true,
     configurable: true

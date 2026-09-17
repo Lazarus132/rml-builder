@@ -967,8 +967,8 @@
 }
 
 .rml-preview-vertical-hue input[type="range"]::-moz-range-thumb {
-  width: 18px;
-  height: 18px;
+  width: var(--rml-ui-icon-size, 19px);
+  height: var(--rml-ui-icon-size, 19px);
   border: 3px solid #ffffff;
   border-radius: 50%;
   background: transparent;
@@ -3071,8 +3071,8 @@ dialog.settings-preview-dialog {
 }
 
 .rml-preview-runtime-display-value-copy svg {
-  width: 16px;
-  height: 16px;
+  width: var(--rml-ui-icon-size, 19px);
+  height: var(--rml-ui-icon-size, 19px);
   fill: none;
   stroke: currentColor;
   stroke-width: 1.8;

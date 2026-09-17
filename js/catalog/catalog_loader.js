@@ -2,7 +2,7 @@
   "use strict";
 
   const CATALOG_LOADER_MODULE_ID =
-    "1.20.31-universal-presentation-dev140-atomic-avatar-preload";
+    "1.20.32-universal-presentation-dev170-console-noise-cleanup";
   const LOADER_VERSION = 84;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
@@ -75,7 +75,7 @@
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=1.20.31-universal-presentation-dev140-atomic-avatar-preload",
+    "api_nodes.js?v=1.20.32-universal-presentation-dev170-console-noise-cleanup",
     scriptUrl
   ).href;
 
@@ -4220,10 +4220,6 @@
           generation
         );
       } catch (cleanupError) {
-        console.debug(
-          "Committed catalog staging metadata could not be removed.",
-          cleanupError
-        );
       }
 
       if (
@@ -4239,10 +4235,6 @@
             Number(previousRecord.chunkCount)
           );
         } catch (cleanupError) {
-          console.debug(
-            "The previous catalog cache generation could not be removed.",
-            cleanupError
-          );
         }
       }
       return manifest;
@@ -4259,10 +4251,6 @@
             generation
           );
         } catch (cleanupError) {
-          console.debug(
-            "Incomplete catalog cache generation cleanup failed.",
-            cleanupError
-          );
         }
       }
       throw error;
@@ -4302,10 +4290,6 @@
         catalog: raw
       });
     } catch (error) {
-      console.debug(
-        "The verified legacy catalog cache could not be migrated to chunks.",
-        error
-      );
 
       return verifiedV2;
     }
@@ -4331,10 +4315,6 @@
                 stored
               );
           } catch (error) {
-            console.debug(
-              "The catalog demand index could not satisfy this graph; the complete verified cache is used.",
-              error
-            );
           }
           if (!current) {
             current =
@@ -4366,10 +4346,6 @@
       }
       return null;
     } catch (error) {
-      console.debug(
-        "No cached live Resonite API catalog is available.",
-        error
-      );
       return null;
     } finally {
       database?.close?.();
@@ -4438,10 +4414,6 @@
           manifest
         );
       } catch (error) {
-        console.debug(
-          "The optional catalog demand index could not be saved; the complete verified cache remains available.",
-          error
-        );
       }
       catalogDemandState = null;
       const stored = Object.freeze({
@@ -4499,10 +4471,6 @@
             record
           );
         } catch (error) {
-          console.debug(
-            "The optional catalog demand index could not be prepared; future loads continue to use the complete verified cache.",
-            error
-          );
           return false;
         } finally {
           database?.close?.();
@@ -4639,9 +4607,6 @@
             );
           }
 
-          console.info(
-            "[RML API Catalog] Preparing the scanner connection."
-          );
 
           await scriptLoader.ensure(
             "scanner-connection"
@@ -4664,9 +4629,6 @@
             currentScannerConnection();
 
           if (before?.mode === "live") {
-            console.info(
-              "[RML API Catalog] Disconnecting Live scanner and returning to cached/offline mode."
-            );
             bridge.disconnect?.();
             catalogAvailabilityKnown = true;
             catalogAvailable =
@@ -4677,9 +4639,6 @@
 
           renderManualCatalogChecking();
 
-          console.info(
-            `[RML API Catalog] Manual scanner discovery started. Probing ports ${DEFAULT_PORT_FIRST}-${DEFAULT_PORT_LAST} via ${HEALTH_PATH}.`
-          );
 
           let connected = false;
 
@@ -4714,9 +4673,6 @@
                 catalogAvailabilityKnown = true;
                 catalogAvailable = true;
                 updateStatus();
-                console.info(
-                  "[RML API Catalog] Live scanner catalog synchronized and activated."
-                );
                 document.dispatchEvent(new CustomEvent("rml-scanner:manual-live-activated", { detail: session }));
                 return true;
               }
@@ -4742,9 +4698,6 @@
             updateUnavailableStatus();
           }
 
-          console.info(
-            "[RML API Catalog] No usable Live scanner catalog was activated."
-          );
           return false;
         })
         .finally(() => {
@@ -4797,9 +4750,6 @@
         event.preventDefault();
         event.stopImmediatePropagation();
 
-        console.info(
-          "[RML API Catalog] API status button clicked."
-        );
 
         void activateCatalogFromUserClick()
           .catch(error => {
@@ -6420,10 +6370,6 @@
     try {
       callback(Object.freeze(detail));
     } catch (error) {
-      console.debug(
-        "The catalog progress callback failed.",
-        error
-      );
     }
   }
 
@@ -7407,9 +7353,6 @@
             preparedCatalog;
           updateStatus();
         } else {
-          console.info(
-            "RML API catalog nodes are unavailable until a live or cached catalog is available. Stored API contracts remain editable in offline-preservation mode."
-          );
         }
 
         return true;

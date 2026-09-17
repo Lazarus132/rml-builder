@@ -42,7 +42,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "1.20.31-universal-presentation-dev140-atomic-avatar-preload";
+  "1.20.32-universal-presentation-dev170-console-noise-cleanup";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -280,9 +280,6 @@ function exposeRmlBuilderBuildId() {
 }
 
 exposeRmlBuilderBuildId();
-console.info(
-  `[RML Builder] ${RML_BUILDER_BUILD_ID}`
-);
 const DEFAULT_LAYOUT_ROW_DESCRIPTION =
   "Places its direct Configuration Outline items next to each other.";
 const OUTLINE_CONTAINER_LANE_SELECTOR =
@@ -1433,14 +1430,14 @@ function requestGeneratedOutputUpdate() {
     elements.generatedCode
   ) {
     elements.generatedCode.textContent =
-      "// Generating the large runtime graph…\n";
+      window.RMLI18n.t("{{i18n:js.presentation.21ac5d12aa18}}");
   }
   if (
     currentTypedRuntimeGraphIsLarge() &&
     elements.codeSummary
   ) {
     elements.codeSummary.textContent =
-      "Large runtime graph loaded · generated files are being refreshed";
+      window.RMLI18n.t("{{i18n:js.presentation.d7fd8660eb83}}");
   }
 
   updateGeneratedOutput();
@@ -4332,7 +4329,7 @@ function ensureGraphCodegenWorker() {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=1.20.31-universal-presentation-dev140-atomic-avatar-preload",
+      "../workers/graph_codegen_worker.js?v=1.20.32-universal-presentation-dev170-console-noise-cleanup",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -6340,11 +6337,11 @@ function appendInlineRowInspectorControls(
     document.createElement("span");
   const strong =
     document.createElement("strong");
-  strong.textContent = "Hide label";
+  strong.textContent = window.RMLI18n.t("{{i18n:js.presentation.4c0e1284b2a1}}");
   const small =
     document.createElement("small");
   small.textContent =
-    "Uses the complete cell width for the editor or button.";
+    window.RMLI18n.t("{{i18n:js.presentation.3b1f986c3ac8}}");
   toggleText.append(strong, small);
 
   const hide =
@@ -11518,15 +11515,6 @@ function reconcilePackedGraphConfiguration(
     restoredFromSnapshot.length > 0 ||
     preservedFromOutline.length > 0
   ) {
-    console.info(
-      "Reconciled the packed configuration snapshot with the project outline without dropping either side's unique items.",
-      {
-        restoredFromSnapshot,
-        preservedFromOutline,
-        activePackedSnapshotAuthoritative:
-          graph.active === true
-      }
-    );
   }
 
   if (
@@ -12113,10 +12101,6 @@ async function readProjectDraftRecord() {
       project: response.value
     };
   } catch (error) {
-    console.debug(
-      "No IndexedDB project draft is available.",
-      error
-    );
     return null;
   } finally {
     database?.close?.();
@@ -13433,7 +13417,10 @@ const nextOptionDirection =
         type="button"
         draggable="false"
         data-delete-node="${escapeHtml(node.id)}"
-        title="Delete">×</button>
+        title="Delete"
+        aria-label="Delete ${escapeHtml(displayName)}">
+        <svg class="delete-node-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="assets/rml-icons.svg#icon-close"></use></svg>
+      </button>
     </div>
     ${body}
     <div
@@ -18775,7 +18762,7 @@ function bindCanvasInteractions() {
 
   elements.builderCanvas.onclick = () => {
     state.activeContainerId = ROOT_CONTAINER;
-    elements.activeContainerName.textContent = "Root";
+    elements.activeContainerName.textContent = window.RMLI18n.t("{{i18n:js.presentation.e96857c58f71}}");
   };
   const isDraggedSectionOption =
     event =>
@@ -21221,10 +21208,10 @@ function ensureUniversalCustomSelect(select) {
   const search = document.createElement("input");
   search.type = "search";
   search.className = "rml-graph-searchable-search";
-  search.placeholder = "Search…";
+  search.placeholder = window.RMLI18n.t("{{i18n:js.presentation.f54fbca187d2}}");
   search.autocomplete = "off";
   search.spellcheck = false;
-  search.setAttribute("aria-label", "Search options");
+  search.setAttribute("aria-label", window.RMLI18n.t("{{i18n:js.presentation.5616c8722256}}"));
 
   const optionsHost = document.createElement("div");
   optionsHost.className = "rml-graph-searchable-options";
@@ -21454,7 +21441,7 @@ function ensureUniversalCustomSelect(select) {
     if (renderedButtons.length === 0) {
       const empty = document.createElement("div");
       empty.className = "rml-graph-searchable-empty";
-      empty.textContent = "No matching options";
+      empty.textContent = window.RMLI18n.t("{{i18n:js.presentation.0f909d160af7}}");
       optionsHost.appendChild(empty);
     }
 
@@ -21734,12 +21721,12 @@ function ensureGeneratedArtifactCustomSelect(select) {
   search.type = "search";
   search.className =
     "rml-graph-searchable-search";
-  search.placeholder = "Search generated file…";
+  search.placeholder = window.RMLI18n.t("{{i18n:js.presentation.efd55d2a2310}}");
   search.autocomplete = "off";
   search.spellcheck = false;
   search.setAttribute(
     "aria-label",
-    "Search generated file"
+    window.RMLI18n.t("{{i18n:js.presentation.ac900744f3e9}}")
   );
 
   const optionsHost =
@@ -22035,7 +22022,7 @@ function ensureGeneratedArtifactCustomSelect(select) {
       empty.className =
         "rml-graph-searchable-empty";
       empty.textContent =
-        "No matching generated files";
+        window.RMLI18n.t("{{i18n:js.presentation.44f8344e962c}}");
       optionsHost.appendChild(empty);
     }
 
@@ -22335,7 +22322,7 @@ function updateGeneratedOutput() {
         ? error.message
         : String(error);
     const pending = message === GUIDANCE_PENDING_MESSAGE || message === "C# source templates are loading…";
-    if (!pending) elements.generatedCode.textContent = "// Generated output is not ready.\n";
+    if (!pending) elements.generatedCode.textContent = window.RMLI18n.t("{{i18n:js.presentation.bffd2f9d10de}}");
     elements.generatedCode.setAttribute("aria-busy", String(pending));
     elements.codeSummary.textContent = pending ? message : "Generated project files are not ready.";
     updateExportPreviewStatus([], [pending ? message : `Generated project: ${message}`]);
@@ -25374,7 +25361,7 @@ async function openSettingsPreview() {
     "rml-overlay-animating"
   );
   elements.settingsPreviewStatus.textContent =
-    "Preparing preview…";
+    window.RMLI18n.t("{{i18n:js.presentation.312e7be9c8a7}}");
   elements.settingsPreviewContent.innerHTML = `
     <div class="rml-inline-dialog-loading">
       <div>
@@ -25445,7 +25432,7 @@ async function openSettingsPreview() {
     elements.settingsPreviewContent.innerHTML =
       '<div class="rml-inline-dialog-loading">The preview could not be prepared. Close this dialog and review Diagnostics.</div>';
     elements.settingsPreviewStatus.textContent =
-      "Preview preparation failed.";
+      window.RMLI18n.t("{{i18n:js.presentation.504d704a291d}}");
   }
 }
 
@@ -25554,10 +25541,10 @@ async function copyText(text, button) {
       button.classList.add("is-copied");
       button.setAttribute(
         "aria-label",
-        "C# copied"
+        window.RMLI18n.t("{{i18n:js.presentation.1f7c25c7fd4a}}")
       );
     } else {
-      button.textContent = "Copied";
+      button.textContent = window.RMLI18n.t("{{i18n:js.presentation.8e3df45a49db}}");
     }
   } catch (error) {
     console.error(error);
@@ -25566,10 +25553,10 @@ async function copyText(text, button) {
       button.classList.add("copy-failed");
       button.setAttribute(
         "aria-label",
-        "Copy failed"
+        window.RMLI18n.t("{{i18n:js.presentation.bd5acbff6370}}")
       );
     } else {
-      button.textContent = "Copy failed";
+      button.textContent = window.RMLI18n.t("{{i18n:js.presentation.bd5acbff6370}}");
     }
   }
 
@@ -25887,7 +25874,7 @@ function resetBuilderReplacementUi() {
       null;
 
     elements.builderWorkReplacementSkip.textContent =
-      "Skip for now";
+      window.RMLI18n.t("{{i18n:js.presentation.6fc09607aee5}}");
 
     elements.builderWorkReplacementSkip.hidden =
       false;
@@ -25896,7 +25883,7 @@ function resetBuilderReplacementUi() {
     elements.builderWorkReplacementConfirm.onclick =
       null;
     elements.builderWorkReplacementConfirm.textContent =
-      "Use selected replacement";
+      window.RMLI18n.t("{{i18n:js.presentation.b648584a4eb8}}");
     setAlwaysClickableButtonAvailability(
       elements.builderWorkReplacementConfirm,
       true
@@ -26201,7 +26188,7 @@ async function requestBuilderReplacementChoice(
       `${matchCount.toLocaleString("de-DE")} visible candidate${matchCount === 1 ? "" : "s"} · source: ${sourceDescription}.`;
     if (!selected) {
       confirm.textContent =
-        "Use selected replacement";
+        window.RMLI18n.t("{{i18n:js.presentation.b648584a4eb8}}");
       summary.textContent = base;
       return;
     }
@@ -26417,7 +26404,7 @@ async function requestBuilderReplacementChoice(
       empty.className =
         "builder-work-replacement-empty";
       empty.textContent =
-        "No compatible node matches this search.";
+        window.RMLI18n.t("{{i18n:js.presentation.ef10da90616f}}");
       fragment.appendChild(empty);
     }
 
@@ -26841,7 +26828,7 @@ function beginStartupStatus(
       finished = true;
       if (label) {
         label.textContent =
-          "Draft saved locally";
+          window.RMLI18n.t("{{i18n:js.presentation.d5839c5ced50}}");
       }
       if (container?.dataset) {
         container.dataset.state =
@@ -28038,7 +28025,7 @@ function promiseWithBuilderTimeout(
 
 function assertProjectRuntimeModuleCoherence() {
   const expectedModuleId =
-    "1.20.31-universal-presentation-dev140-atomic-avatar-preload";
+    "1.20.32-universal-presentation-dev170-console-noise-cleanup";
   const requiredFactoryVersion = 38;
   const mismatches = [];
   const requireModuleId = (
@@ -32136,49 +32123,92 @@ window.RMLBuilderEditorPersonalSettingsController=Object.freeze({
   setDiagnosticSource(source){ commitRmlEditorDiagnostic(source); synchronizeRmlEditorDashboard(); return true; },
   getSettings(){ return {appearance:{...rmlEditorPersonalSettings.appearance},diagnosticSource:rmlEditorPersonalSettings.diagnosticSource}; }
 });
+const RML_BUILDER_PROFILE_STORAGE_KEY = "rml-builder-resonite-profile-v1";
+let rmlBuilderProfilePresentation = null;
+
+function normalizeRmlBuilderProfile(profile) {
+  if (!profile || typeof profile !== "object") return null;
+  const displayName = typeof profile.displayName === "string" ? profile.displayName.trim() : "";
+  const userId = typeof profile.userId === "string" ? profile.userId.trim() : "";
+  const avatarUrl = typeof profile.avatarUrl === "string" ? profile.avatarUrl.trim() : "";
+  const avatarSource = typeof profile.avatarSource === "string" ? profile.avatarSource.trim() : "";
+  if (!displayName && !userId && !avatarUrl) return null;
+  return {
+    displayName: displayName || null,
+    userId: userId || null,
+    avatarUrl: avatarUrl || null,
+    avatarSource: avatarSource || null
+  };
+}
+
+function loadRmlBuilderProfilePresentation() {
+  try {
+    rmlBuilderProfilePresentation = normalizeRmlBuilderProfile(
+      JSON.parse(localStorage.getItem(RML_BUILDER_PROFILE_STORAGE_KEY) || "null")
+    );
+  } catch {
+    rmlBuilderProfilePresentation = null;
+  }
+  return rmlBuilderProfilePresentation;
+}
+
+function saveRmlBuilderProfilePresentation(profile) {
+  const normalized = normalizeRmlBuilderProfile(profile);
+  if (!normalized) return false;
+  const before = rmlBuilderProfilePresentation ? JSON.stringify(rmlBuilderProfilePresentation) : "";
+  const after = JSON.stringify(normalized);
+  rmlBuilderProfilePresentation = normalized;
+  if (before === after) return false;
+  try { localStorage.setItem(RML_BUILDER_PROFILE_STORAGE_KEY, after); } catch {}
+  return true;
+}
+
+function renderRmlBuilderProfilePresentation(profile = rmlBuilderProfilePresentation) {
+  const normalized = normalizeRmlBuilderProfile(profile);
+  const kicker = document.getElementById("builder-profile-kicker");
+  if (kicker) kicker.textContent = normalized?.displayName || "Builder profile";
+  const url = normalized?.avatarUrl || "";
+  const apply = target => {
+    if (!target) return;
+    const slot = target.parentElement;
+    const showFallback = () => {
+      target.hidden = true;
+      target.removeAttribute("src");
+      slot?.classList.remove("has-profile-image");
+    };
+    if (!(url && /^(https?:|data:image\/)/i.test(url))) {
+      showFallback();
+      return;
+    }
+    if (target.src === url && !target.hidden && slot?.classList.contains("has-profile-image")) return;
+    target.hidden = true;
+    slot?.classList.remove("has-profile-image");
+    const preload = new Image();
+    preload.decoding = "async";
+    preload.onload = async () => {
+      try { await preload.decode?.(); } catch {}
+      if (rmlBuilderProfilePresentation?.avatarUrl !== url) return;
+      target.src = url;
+      target.hidden = false;
+      slot?.classList.add("has-profile-image");
+    };
+    preload.onerror = showFallback;
+    preload.src = url;
+  };
+  apply(document.getElementById("builder-profile-avatar-image"));
+  apply(document.getElementById("top-builder-profile-avatar-image"));
+}
+
 async function synchronizeRmlBuilderProfileFromScanner() {
   const state = window.RMLRuntimeBridge?.getConnectionState?.();
   if (state?.mode !== "live" || !state?.scannerBaseUrl) return false;
-  const avatar = document.getElementById("builder-profile-avatar");
-  const image = document.getElementById("builder-profile-avatar-image");
-  const topImage = document.getElementById("top-builder-profile-avatar-image");
-  const kicker = document.getElementById("builder-profile-kicker");
-  if (!avatar || !image) return false;
   try {
     const response = await fetch(`${state.scannerBaseUrl}/profile`, { cache: "no-store" });
     if (!response.ok) return false;
-    const profile = await response.json();
-    const url = typeof profile?.avatarUrl === "string" ? profile.avatarUrl : "";
-    if (profile?.displayName && kicker) kicker.textContent = String(profile.displayName);
-    const apply = target => {
-      if (!target) return;
-      const slot = target.parentElement;
-      const showFallback = () => {
-        target.hidden = true;
-        target.removeAttribute("src");
-        slot?.classList.remove("has-profile-image");
-      };
-      if (!(url && /^(https?:|data:image\/)/i.test(url))) {
-        showFallback();
-        return;
-      }
-
-      target.hidden = true;
-      slot?.classList.remove("has-profile-image");
-      const preload = new Image();
-      preload.decoding = "async";
-      preload.onload = async () => {
-        try { await preload.decode?.(); } catch {}
-        if (preload.src !== url && preload.currentSrc !== url) return;
-        target.src = url;
-        target.hidden = false;
-        slot?.classList.add("has-profile-image");
-      };
-      preload.onerror = showFallback;
-      preload.src = url;
-    };
-    apply(image);
-    apply(topImage);
+    const profile = normalizeRmlBuilderProfile(await response.json());
+    if (!profile) return false;
+    saveRmlBuilderProfilePresentation(profile);
+    renderRmlBuilderProfilePresentation();
     return true;
   } catch { return false; }
 }
@@ -32187,7 +32217,7 @@ document.addEventListener("rml-scanner:manual-live-activated", () => {
   void synchronizeRmlBuilderProfileFromScanner();
 });
 
-function installRmlPersonalSettings() { loadRmlPersonalSettings();synchronizeRmlPersonalSettingsControls();applyRmlPersonalSettings();const panel=document.getElementById("builder-settings-panel"),open=document.getElementById("builder-settings-open"),status=document.getElementById("builder-settings-status"),back=document.getElementById("builder-settings-back"),inspectorBack=document.getElementById("builder-settings-inspector-back");const setSettingsWorkspace=show=>{if(panel)panel.hidden=!show;open?.setAttribute("aria-expanded",String(show));elements.projectDialog?.classList.toggle("builder-settings-workspace",show);const title=document.getElementById("project-dialog-title"),kicker=elements.projectDialog?.querySelector(".export-dialog-header small");if(title)title.textContent=show?"Settings":"Project & Preferences";if(kicker)kicker.textContent=show?"Personal Builder experience":"Builder profile";if(show){synchronizeRmlPersonalSettingsControls();hardSynchronizeRmlEditorSettingsFromActiveEditor();}else{closeRmlEditorDashboardColorPicker();}requestAnimationFrame(()=>updateAdaptiveUtilityDialog(elements.projectDialog));};open?.addEventListener("click",()=>setSettingsWorkspace(true));back?.addEventListener("click",()=>setSettingsWorkspace(false));inspectorBack?.addEventListener("click",()=>closeRmlEditorDashboardColorPicker());document.getElementById("builder-settings-node-scrollbars")?.addEventListener("change",event=>commitRmlPersonalSettings({nodeScrollbars:event.currentTarget.checked===true}));document.getElementById("builder-settings-node-text")?.addEventListener("input",event=>commitRmlPersonalSettings({nodeTextScale:Number(event.currentTarget.value)}));document.getElementById("builder-settings-ux-text")?.addEventListener("input",event=>commitRmlPersonalSettings({uxTextScale:Number(event.currentTarget.value)}));document.getElementById("builder-settings-reset")?.addEventListener("click",()=>{rmlPersonalSettings={...RML_PERSONAL_SETTINGS_DEFAULTS};rmlEditorPersonalSettings={appearance:{...RML_EDITOR_APPEARANCE_DEFAULTS},diagnosticSource:"Roslyn"};saveRmlPersonalSettings();synchronizeRmlPersonalSettingsControls();synchronizeRmlEditorDashboard();applyRmlPersonalSettings();if(status)status.textContent="Defaults restored.";});const diagnosticSelect=document.getElementById("builder-settings-editor-diagnostic");diagnosticSelect?.addEventListener("change",event=>commitRmlEditorDiagnostic(event.currentTarget.value));synchronizeRmlEditorDiagnosticSelect(rmlEditorPersonalSettings.diagnosticSource);if(typeof MutationObserver==="function"){new MutationObserver(records=>{let changed=false;for(const record of records){for(const node of Array.from(record.addedNodes||[])){if(node?.tagName==="LINK"){changed=true;node.addEventListener("load",scheduleRmlPersonalSettingsApply,{once:true});}else if(node?.tagName==="STYLE")changed=true;}}if(changed)scheduleRmlPersonalSettingsApply();}).observe(document.head,{childList:true});} }
+function installRmlPersonalSettings() { loadRmlPersonalSettings();loadRmlBuilderProfilePresentation();renderRmlBuilderProfilePresentation();synchronizeRmlPersonalSettingsControls();applyRmlPersonalSettings();const panel=document.getElementById("builder-settings-panel"),open=document.getElementById("builder-settings-open"),status=document.getElementById("builder-settings-status"),inspectorBack=document.getElementById("builder-settings-inspector-back");const setSettingsWorkspace=show=>{if(panel)panel.hidden=!show;open?.setAttribute("aria-expanded",String(show));elements.projectDialog?.classList.toggle("builder-settings-workspace",show);const title=document.getElementById("project-dialog-title"),kicker=elements.projectDialog?.querySelector(".export-dialog-header small");if(title)title.textContent=show?"Settings":"Project & Preferences";if(kicker)kicker.textContent=show?"Personal Builder experience":(rmlBuilderProfilePresentation?.displayName||"Builder profile");if(show){synchronizeRmlPersonalSettingsControls();hardSynchronizeRmlEditorSettingsFromActiveEditor();}else{closeRmlEditorDashboardColorPicker();renderRmlBuilderProfilePresentation();}requestAnimationFrame(()=>updateAdaptiveUtilityDialog(elements.projectDialog));};open?.addEventListener("click",()=>{const show=!elements.projectDialog?.classList.contains("builder-settings-workspace");if(!show)closeRmlEditorDashboardColorPicker();setSettingsWorkspace(show);});inspectorBack?.addEventListener("click",()=>closeRmlEditorDashboardColorPicker());document.getElementById("builder-settings-node-scrollbars")?.addEventListener("change",event=>commitRmlPersonalSettings({nodeScrollbars:event.currentTarget.checked===true}));document.getElementById("builder-settings-node-text")?.addEventListener("input",event=>commitRmlPersonalSettings({nodeTextScale:Number(event.currentTarget.value)}));document.getElementById("builder-settings-ux-text")?.addEventListener("input",event=>commitRmlPersonalSettings({uxTextScale:Number(event.currentTarget.value)}));document.getElementById("builder-settings-reset")?.addEventListener("click",()=>{rmlPersonalSettings={...RML_PERSONAL_SETTINGS_DEFAULTS};rmlEditorPersonalSettings={appearance:{...RML_EDITOR_APPEARANCE_DEFAULTS},diagnosticSource:"Roslyn"};saveRmlPersonalSettings();synchronizeRmlPersonalSettingsControls();applyRmlPersonalSettings();for(const [key,value] of Object.entries(RML_EDITOR_APPEARANCE_DEFAULTS)){window.RMLCustomCSharpDetachedEditor?.setActiveAppearanceValue?.(key,value);}window.RMLCustomCSharpDetachedEditor?.setActiveDiagnosticSource?.("Roslyn");synchronizeRmlEditorDashboard();if(status)status.textContent=window.RMLI18n.t("{{i18n:js.presentation.0efcb476e33e}}");});const diagnosticSelect=document.getElementById("builder-settings-editor-diagnostic");diagnosticSelect?.addEventListener("change",event=>commitRmlEditorDiagnostic(event.currentTarget.value));synchronizeRmlEditorDiagnosticSelect(rmlEditorPersonalSettings.diagnosticSource);if(typeof MutationObserver==="function"){new MutationObserver(records=>{let changed=false;for(const record of records){for(const node of Array.from(record.addedNodes||[])){if(node?.tagName==="LINK"){changed=true;node.addEventListener("load",scheduleRmlPersonalSettingsApply,{once:true});}else if(node?.tagName==="STYLE")changed=true;}}if(changed)scheduleRmlPersonalSettingsApply();}).observe(document.head,{childList:true});} }
 
 let projectDialogOpenSequence = 0;
 
@@ -32263,8 +32293,8 @@ function closeProjectDialog() {
   closeRmlEditorDashboardColorPicker();
   const projectDialogTitle = document.getElementById("project-dialog-title");
   const projectDialogKicker = elements.projectDialog?.querySelector(".export-dialog-header small");
-  if (projectDialogTitle) projectDialogTitle.textContent = "Project & Preferences";
-  if (projectDialogKicker) projectDialogKicker.textContent = "Local Builder files";
+  if (projectDialogTitle) projectDialogTitle.textContent = window.RMLI18n.t("{{i18n:js.presentation.83e22c2a18d3}}");
+  if (projectDialogKicker) projectDialogKicker.textContent = rmlBuilderProfilePresentation?.displayName || "Builder profile";
 
   if (
     typeof elements.projectDialog.close ===
@@ -32958,14 +32988,6 @@ async function loadProjectJsonFile(
       error?.code ===
         "RML_PROJECT_IMPORT_CANCELLED";
     if (importCancelled) {
-      console.info(
-        "Builder project import cancelled.",
-        {
-          source:
-            error.cancelSource ||
-            "explicit user action"
-        }
-      );
     } else {
       console.warn(
         documentKind ===
@@ -34653,13 +34675,13 @@ function updateBrowserCompilerStatus(
 
   if (browserCompilerReferenceSearchRunning) {
     elements.exportCompilerBuildStatus.textContent =
-      "Finding required DLLs…";
+      window.RMLI18n.t("{{i18n:js.presentation.13b772bea046}}");
   } else if (!available) {
     elements.exportCompilerBuildStatus.textContent =
-      "The bundled local browser compiler is unavailable.";
+      window.RMLI18n.t("{{i18n:js.presentation.ab68393968dd}}");
   } else if (browserCompilerBuilding) {
     elements.exportCompilerBuildStatus.textContent =
-      "Roslyn is compiling the generated projects…";
+      window.RMLI18n.t("{{i18n:js.presentation.19c59c5f8401}}");
   } else if (cacheReady) {
     elements.exportCompilerBuildStatus.textContent =
       `${browserCompilerBuildCache.outputs.length} DLL${browserCompilerBuildCache.outputs.length === 1 ? "" : "s"} ready for the ZIP.`;
@@ -34670,7 +34692,7 @@ function updateBrowserCompilerStatus(
         : "Build ZIP will ask for the Resonite folder.";
   } else {
     elements.exportCompilerBuildStatus.textContent =
-      "Ready. Files stay on this device.";
+      window.RMLI18n.t("{{i18n:js.presentation.9cb7a5a88476}}");
   }
 
   setExportControlAvailability(
@@ -34979,7 +35001,7 @@ function renderExportGeneratedFiles(
     empty.className =
       "export-generated-empty";
     empty.textContent =
-      "No files are selected for export.";
+      window.RMLI18n.t("{{i18n:js.presentation.a3e75bb14825}}");
     host.replaceChildren(empty);
     return;
   }
@@ -35153,7 +35175,7 @@ function updateExportCopyButtonState(
       !unavailable
     );
     elements.exportCopySelectedFile.textContent =
-      "Copy";
+      window.RMLI18n.t("{{i18n:js.presentation.af74f7c5362a}}");
     elements.exportCopySelectedFile.title =
       artifact
         ? artifact.relativePath
@@ -35342,7 +35364,7 @@ function updateExportDialog() {
   const guidanceStatus = generatedGuidanceStatus();
   if (guidanceStatus) {
     elements.exportPackageSummary.textContent = guidanceStatus;
-    elements.exportPackageMode.textContent = "Not ready";
+    elements.exportPackageMode.textContent = window.RMLI18n.t("{{i18n:js.presentation.2b50ff807d04}}");
     elements.exportProjectSummary.replaceChildren();
     elements.exportGeneratedFiles.textContent = guidanceStatus;
     return;
@@ -35505,9 +35527,9 @@ function updateExportDialog() {
 
   if (!hasSelection) {
     elements.exportDownloadSelected.textContent =
-      "Download";
+      window.RMLI18n.t("{{i18n:js.presentation.a479c9c34e87}}");
     elements.exportDownloadHint.textContent =
-      "Select at least one generated file group to download.";
+      window.RMLI18n.t("{{i18n:js.presentation.d4342f6c8bb7}}");
     return;
   }
 
@@ -35545,7 +35567,7 @@ function updateExportDialog() {
     ];
 
     elements.exportDownloadSelected.textContent =
-      "Download ZIP";
+      window.RMLI18n.t("{{i18n:js.presentation.7bd0e4b0ebc2}}");
     elements.exportDownloadHint.textContent =
       `The live manifest above is the exact ZIP content: ${displayCatalog.artifacts.length} files across ${activeProjectCount} independently compiled projects${destinations.length > 0 ? `, deploying to ${destinations.join(" and ")}` : ""}.`;
     return;
@@ -35555,7 +35577,7 @@ function updateExportDialog() {
     const artifact =
       catalog.artifacts[0];
     elements.exportDownloadSelected.textContent =
-      "Download";
+      window.RMLI18n.t("{{i18n:js.presentation.a479c9c34e87}}");
     elements.exportDownloadHint.textContent =
       artifact.requiresResonitePath &&
       !pathAvailable
@@ -35565,7 +35587,7 @@ function updateExportDialog() {
   }
 
   elements.exportDownloadSelected.textContent =
-    "Download ZIP";
+    window.RMLI18n.t("{{i18n:js.presentation.7bd0e4b0ebc2}}");
   elements.exportDownloadHint.textContent =
     `The live manifest above contains the exact ${catalog.artifacts.length} files that will be bundled into the ZIP.`;
 }
@@ -35696,7 +35718,7 @@ async function downloadSelectedExport() {
     elements.exportDownloadSelected,
     false
   );
-  elements.exportDownloadSelected.textContent = "Checking…";
+  elements.exportDownloadSelected.textContent = window.RMLI18n.t("{{i18n:js.presentation.820d6004b037}}");
   elements.exportDownloadHint.classList.remove("error");
   let result;
   let resolvingReferences = false;
@@ -35710,7 +35732,7 @@ async function downloadSelectedExport() {
     if (state.exportOptions.includeCompiled) {
       resolvingReferences = true;
       elements.exportDownloadSelected.textContent =
-        "Finding DLLs…";
+        window.RMLI18n.t("{{i18n:js.presentation.30ee6a1d77ea}}");
       const referencePromise =
         ensureBrowserCompilerReferences(
           completeCatalog
@@ -35719,7 +35741,7 @@ async function downloadSelectedExport() {
       assertExportRequestCurrent(checked.request, true);
       resolvingReferences = false;
       elements.exportDownloadSelected.textContent =
-        "Checking…";
+        window.RMLI18n.t("{{i18n:js.presentation.820d6004b037}}");
     }
     assertExportRequestCurrent(checked.request, true);
     result = buildSelectedExportFiles(
@@ -35728,7 +35750,7 @@ async function downloadSelectedExport() {
     );
     if (state.exportOptions.includeCompiled) {
       elements.exportDownloadSelected.textContent =
-        "Building…";
+        window.RMLI18n.t("{{i18n:js.presentation.7cc766ce5323}}");
       const compiled =
         await compileGeneratedBrowserDlls();
       assertExportRequestCurrent(checked.request, true);
@@ -36041,16 +36063,16 @@ function informationNodeCard(operatorId, definition) {
   if (definition.hiddenFromPalette === true) {
     const badge = document.createElement("span");
     badge.className = "information-node-badge internal";
-    badge.textContent = "Internal helper";
-    badge.title = "This registered node is intentionally not shown as a normal palette button, but it is part of the runtime node system and is documented here for completeness.";
+    badge.textContent = window.RMLI18n.t("{{i18n:js.presentation.23e2991f40b0}}");
+    badge.title = window.RMLI18n.t("{{i18n:js.presentation.2b9aaf0c0f92}}");
     heading.appendChild(badge);
   }
 
   if (informationNodeIsAdvanced(definition)) {
     const badge = document.createElement("span");
     badge.className = "information-node-badge advanced";
-    badge.textContent = "Advanced / Raw C#";
-    badge.title = "Expert-level node: this bypasses part of the normal typed/safe abstraction and can require exact C#, reflection, compiler, assembly or load-phase knowledge.";
+    badge.textContent = window.RMLI18n.t("{{i18n:js.presentation.493e463115c3}}");
+    badge.title = window.RMLI18n.t("{{i18n:js.presentation.b0bcc38b772a}}");
     heading.appendChild(badge);
   }
 
@@ -36060,24 +36082,24 @@ function informationNodeCard(operatorId, definition) {
   ) {
     const badge = document.createElement("span");
     badge.className = "information-node-badge file-graph";
-    badge.textContent = "Custom C# File Graph only";
-    badge.title = "This node is available only inside the isolated graph opened from a Custom C# File node.";
+    badge.textContent = window.RMLI18n.t("{{i18n:js.presentation.e76516439348}}");
+    badge.title = window.RMLI18n.t("{{i18n:js.presentation.b607a5f08802}}");
     heading.appendChild(badge);
   }
 
   if (definition.apiCompositeCustomCSharp === true) {
     const badge = document.createElement("span");
     badge.className = "information-node-badge composite";
-    badge.textContent = "Runtime + API & Logic";
-    badge.title = "This Custom C# node is available both in the main Runtime Graph and inside an API Composite's internal API & Logic Graph.";
+    badge.textContent = window.RMLI18n.t("{{i18n:js.presentation.a7fc5b38fedd}}");
+    badge.title = window.RMLI18n.t("{{i18n:js.presentation.21e9063df9c5}}");
     heading.appendChild(badge);
   }
 
   if (operatorId === "csharp.file") {
     const badge = document.createElement("span");
     badge.className = "information-node-badge hybrid";
-    badge.textContent = "One hybrid node · 5 modes";
-    badge.title = "Mode switches this single node between File, Action, Expression, Runtime Graph Member and Main Mod Member without adding redundant palette entries.";
+    badge.textContent = window.RMLI18n.t("{{i18n:js.presentation.85a4ef0d73ab}}");
+    badge.title = window.RMLI18n.t("{{i18n:js.presentation.b008dc59b0cc}}");
     heading.appendChild(badge);
   }
 
@@ -36929,24 +36951,16 @@ function loadLazyTemplateScript(fileName, marker, globalName) {
   });
 }
 
-function loadLazyHtmlTemplate(htmlFileName, jsFileName, marker, globalName) {
-  if (window.location.protocol === "file:") {
-    return loadLazyTemplateScript(jsFileName, marker, globalName);
-  }
-
+function loadLazyHtmlTemplate(htmlFileName) {
   return fetch(
     new URL(htmlFileName, APP_SCRIPT_BASE_URL).href,
     { cache: "no-store" }
-  )
-    .then(response => {
-      if (!response.ok) {
-        throw new Error(`${htmlFileName}: ${response.status} ${response.statusText}`);
-      }
-      return response.text();
-    })
-    .catch(() =>
-      loadLazyTemplateScript(jsFileName, marker, globalName)
-    );
+  ).then(response => {
+    if (!response.ok) {
+      throw new Error(`${htmlFileName}: ${response.status} ${response.statusText}`);
+    }
+    return response.text();
+  });
 }
 
 async function ensureInformationDialogLoaded() {
@@ -36959,10 +36973,7 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "../../templates/help_template.html?v=1.20.31-universal-presentation-dev140-atomic-avatar-preload",
-    "../templates/help_template.js?v=1.20.31-universal-presentation-dev140-atomic-avatar-preload",
-    "help-template",
-    "RMLHelpTemplateMarkup"
+    "../../templates/help_template.html?v=1.20.32-universal-presentation-dev170-console-noise-cleanup"
   )
     .then(markup => {
       const host = document.getElementById("lazy-dialog-host") || document.body;
@@ -36978,7 +36989,7 @@ async function ensureInformationDialogLoaded() {
       );
       if (nodeReferenceIntro) {
         nodeReferenceIntro.textContent =
-          "This Help list documents every fixed built-in node and intentionally contains no scanner-generated catalog nodes. Use Node Search for the version-derived Resonite, FrooxEngine and HarmonyLib API catalog.";
+          window.RMLI18n.t("{{i18n:js.presentation.335777a6e289}}");
       }
       bindInformationDialogEvents();
       return elements.informationDialog;
@@ -44102,7 +44113,7 @@ function rmlRuntimeDisplayInspector() {
       "span"
     );
   type.textContent =
-    "RML MENU DISPLAY";
+    window.RMLI18n.t("{{i18n:js.presentation.093dbe4fac1c}}");
 
   const remove =
     document.createElement(
@@ -44110,7 +44121,7 @@ function rmlRuntimeDisplayInspector() {
     );
   remove.type = "button";
   remove.textContent =
-    "Delete";
+    window.RMLI18n.t("{{i18n:js.presentation.f6fdbe48dc54}}");
   remove.addEventListener(
     "click",
     async () => {
@@ -44227,7 +44238,7 @@ function rmlRuntimeDisplayInspector() {
 
   if (orderedBindings.length === 0) {
     bindingStatus.textContent =
-      "Not connected yet. In Typed Runtime Graph, connect this Start-node output to the RML Menu input of one or more Display Value nodes.";
+      window.RMLI18n.t("{{i18n:js.presentation.353c4c39cd79}}");
   } else {
     const bindingTitle =
       document.createElement("strong");
@@ -44390,11 +44401,11 @@ function rmlRuntimeDisplayInspector() {
   const stackToggleTitle =
     document.createElement("strong");
   stackToggleTitle.textContent =
-    "Stack values vertically";
+    window.RMLI18n.t("{{i18n:js.presentation.7348b0f2b33c}}");
   const stackToggleHelp =
     document.createElement("small");
   stackToggleHelp.textContent =
-    "Off (default): every connected Display Value stays beside the others in one row. On: values are intentionally shown underneath each other.";
+    window.RMLI18n.t("{{i18n:js.presentation.08bd93cd0c8f}}");
   stackToggleText.append(
     stackToggleTitle,
     stackToggleHelp
@@ -44459,7 +44470,7 @@ function rmlRuntimeDisplayInspector() {
       "small"
     );
   keyHelp.textContent =
-    "Used only as the stable RML configuration key. The displayed row is continuously synchronized from the graph and manual edits are overwritten.";
+    window.RMLI18n.t("{{i18n:js.presentation.51620cf9887c}}");
   keyLabel.appendChild(keyHelp);
   form.appendChild(keyLabel);
 
@@ -44515,7 +44526,7 @@ function rmlRuntimeDisplayUpdatePaletteAvailability() {
     true
   );
   button.title =
-    "Add a read-only RML menu display. After packing, connect its Start-node output to the RML Menu input of one or more Display Value nodes. Multiple values stay side by side in one row by default; Properties can reorder them or intentionally stack them vertically.";
+    window.RMLI18n.t("{{i18n:js.presentation.4f153c3b493d}}");
   button.dataset.help =
     button.title;
 }
@@ -45171,10 +45182,7 @@ function rmlRuntimeDisplayPreviewItems(
 
 function rmlRuntimeDisplayPreviewCopyIcon() {
   return `
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <rect x="8" y="8" width="11" height="11" rx="2"></rect>
-      <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path>
-    </svg>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev170-console-noise-cleanup#icon-copy"></use></svg>
   `;
 }
 
@@ -45596,7 +45604,7 @@ function rmlRuntimeDisplayRenderPreviewRows() {
         );
 
         copyButton.title =
-          "Copy this value";
+          window.RMLI18n.t("{{i18n:js.presentation.644470b5d763}}");
 
         copyButton.addEventListener(
           "click",

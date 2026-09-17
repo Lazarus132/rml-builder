@@ -547,8 +547,8 @@
 }
 
 .information-page-tab svg {
-  width: 16px;
-  height: 16px;
+  width: var(--rml-ui-icon-size, 19px);
+  height: var(--rml-ui-icon-size, 19px);
   fill: none;
   stroke: currentColor;
   stroke-width: 1.8;
@@ -558,8 +558,8 @@
 
 .information-page-tab-icon {
   display: grid;
-  width: 16px;
-  height: 16px;
+  width: var(--rml-ui-icon-size, 19px);
+  height: var(--rml-ui-icon-size, 19px);
   place-items: center;
   font-size: calc(15px * var(--rml-ux-text-scale, 1));
   font-weight: 900;

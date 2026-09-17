@@ -2,7 +2,7 @@
   "use strict";
 
   const SCRIPT_LOADER_MODULE_ID =
-    "1.20.31-universal-presentation-dev140-atomic-avatar-preload";
+    "1.20.32-universal-presentation-dev170-console-noise-cleanup";
 
   if (
     Object.hasOwn(
@@ -182,7 +182,7 @@
       dependencies: Object.freeze([]),
       files: Object.freeze([
         Object.freeze({
-          url: "../catalog/catalog_loader.js?v=1.20.31-universal-presentation-dev140-atomic-avatar-preload",
+          url: "../catalog/catalog_loader.js?v=1.20.32-universal-presentation-dev170-console-noise-cleanup",
           ready: () =>
             window.RMLCatalogImportGate?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -234,7 +234,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/node_graph_codegen.js?v=1.20.31-universal-presentation-dev140-atomic-avatar-preload",
+          url: "../graph/node_graph_codegen.js?v=1.20.32-universal-presentation-dev170-console-noise-cleanup",
           ready: () =>
             window.RMLTypedNodeGraphGenerator?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -251,7 +251,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../workers/saved_api_composite_compare_worker.js?v=1.20.31-universal-presentation-dev140-atomic-avatar-preload",
+          url: "../workers/saved_api_composite_compare_worker.js?v=1.20.32-universal-presentation-dev170-console-noise-cleanup",
           ready: () =>
             window.RMLSavedApiCompositeCompareWorkerBootstrap
               ?.moduleId === SCRIPT_LOADER_MODULE_ID &&
@@ -260,13 +260,13 @@
               ?.source === "string"
         }),
         Object.freeze({
-          url: "../graph/node_graph_composites.js?v=1.20.31-universal-presentation-dev140-atomic-avatar-preload",
+          url: "../graph/node_graph_composites.js?v=1.20.32-universal-presentation-dev170-console-noise-cleanup",
           ready: () =>
             window.RMLNodeGraphCompositesModuleId ===
               SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_custom_csharp.js?v=1.20.31-universal-presentation-dev140-atomic-avatar-preload",
+          url: "../graph/node_graph_custom_csharp.js?v=1.20.32-universal-presentation-dev170-console-noise-cleanup",
           ready: () =>
             window.RMLNodeGraphCustomCSharpModuleId ===
               SCRIPT_LOADER_MODULE_ID
@@ -275,13 +275,13 @@
           url: "../graph/node_graph_guided.js?v=1-physical-modules-v748"
         }),
         Object.freeze({
-          url: "../graph/node_graph_view.js?v=1.20.31-universal-presentation-dev140-atomic-avatar-preload",
+          url: "../graph/node_graph_view.js?v=1.20.32-universal-presentation-dev170-console-noise-cleanup",
           ready: () =>
             window.RMLNodeGraphViewModuleId ===
               SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_bootstrap.js?v=1.20.31-universal-presentation-dev140-atomic-avatar-preload",
+          url: "../graph/node_graph_bootstrap.js?v=1.20.32-universal-presentation-dev170-console-noise-cleanup",
           ready: () =>
             window.RMLDynamicGraphHost?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -888,9 +888,9 @@
         loading = false;
         window.RMLRuntimeBridge?.disconnect?.();
         status.dataset.source = "cache";
-        status.textContent = "Resonite API · Cached";
+        status.textContent = window.RMLI18n.t("{{i18n:js.presentation.925dcc9e0d7e}}");
         status.setAttribute("aria-busy", "false");
-        status.title = "Click to check the scanner once and connect. No automatic retries.";
+        status.title = window.RMLI18n.t("{{i18n:js.presentation.74ffabbb71b1}}");
         status.setAttribute("aria-label", `${status.textContent}. ${status.title}`);
         return;
       }
@@ -901,9 +901,9 @@
       const intent = ++loadIntent;
       loading = true;
       status.dataset.source = "updating";
-      status.textContent = "Resonite API · checking…";
+      status.textContent = window.RMLI18n.t("{{i18n:js.presentation.be775996d3f7}}");
       status.setAttribute("aria-busy", "true");
-      status.title = "Click to cancel the connection attempt.";
+      status.title = window.RMLI18n.t("{{i18n:js.presentation.bca30505a2a6}}");
       status.setAttribute("aria-label", `${status.textContent}. ${status.title}`);
       try {
         await window.RMLScriptLoader.ensure("scanner-connection");
@@ -916,7 +916,7 @@
         if (window.RMLRuntimeBridge) window.RMLRuntimeBridge.disconnect(error);
         else {
           status.dataset.source = "cache";
-          status.textContent = "Resonite API · Cached";
+          status.textContent = window.RMLI18n.t("{{i18n:js.presentation.925dcc9e0d7e}}");
           status.setAttribute("aria-busy", "false");
           status.title = `Connection module could not be loaded. Click to try again. ${error?.message || error}`;
           status.setAttribute("aria-label", `${status.textContent}. ${status.title}`);
