@@ -1,5 +1,3 @@
-
-
 @supports (scrollbar-gutter: stable) {
 .rml-preview-layout-row.horizontal {
     scrollbar-gutter: stable;

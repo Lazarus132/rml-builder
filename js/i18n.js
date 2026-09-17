@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const VERSION = "1.20.32-universal-presentation-dev177-project-dialog-structural-footer";
+  const VERSION = "1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch";
   const STORAGE_KEY = "rml-builder-language-v1";
   const state = { language: localStorage.getItem(STORAGE_KEY) || "en", fallback: {}, active: {}, manifest: null, ready: null, catalogs: new Map() };
   const norm = value => String(value ?? "").replace(/\s+/g, " ").trim();

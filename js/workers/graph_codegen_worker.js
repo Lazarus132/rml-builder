@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_CODEGEN_WORKER_MODULE_ID =
-  "1.20.32-universal-presentation-dev177-project-dialog-structural-footer";
+  "1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch";
 const GRAPH_CODEGEN_WORKER_FACTORY_VERSION =
   38;
 
@@ -679,7 +679,7 @@ async function ensureRuntime(
       "../compiler/visual_csharp.js?v=83-empty-custom-csharp-ignored"
     );
     importScripts(
-      "../catalog/api_nodes.js?v=1.20.32-universal-presentation-dev177-project-dialog-structural-footer"
+      "../catalog/api_nodes.js?v=1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch"
     );
 
     if (
@@ -723,7 +723,7 @@ async function ensureRuntime(
     }
 
     importScripts(
-      "../graph/node_graph_codegen.js?v=1.20.32-universal-presentation-dev177-project-dialog-structural-footer"
+      "../graph/node_graph_codegen.js?v=1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch"
     );
 
     if (

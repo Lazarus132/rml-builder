@@ -1,5 +1,3 @@
-
-
 @supports (scrollbar-gutter: stable) {
 #rml-setup-assistant.rml-setup-adaptive-narration-card
   .rml-setup-card > p[data-setup-text] {

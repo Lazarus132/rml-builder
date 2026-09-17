@@ -1,5 +1,3 @@
-
-
 .export-dialog-body {
   display: grid;
   gap: 18px;
@@ -692,4 +690,26 @@ dialog#export-dialog {
       -webkit-overflow-scrolling: touch;
     }
 }
+}
+
+dialog#export-dialog[open],
+dialog#export-dialog.mobile-full-modal[open] {
+  display: grid !important;
+  grid-template-rows: auto minmax(0, 1fr) auto !important;
+  overflow: hidden !important;
+}
+
+dialog#export-dialog > .export-dialog-header,
+dialog#export-dialog > .export-dialog-actions {
+  position: relative !important;
+  top: auto !important;
+  bottom: auto !important;
+  flex: 0 0 auto !important;
+}
+
+dialog#export-dialog > .export-dialog-body {
+  min-height: 0 !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain !important;
 }

@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_BOOTSTRAP_MODULE_ID =
-  "1.20.32-universal-presentation-dev177-project-dialog-structural-footer";
+  "1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch";
 
 function assertGraphBootstrapModuleCoherence() {
   const mismatches = [];

@@ -2,7 +2,7 @@
   "use strict";
 
   const CATALOG_LOADER_MODULE_ID =
-    "1.20.32-universal-presentation-dev177-project-dialog-structural-footer";
+    "1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch";
   const LOADER_VERSION = 84;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
@@ -75,7 +75,7 @@
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=1.20.32-universal-presentation-dev177-project-dialog-structural-footer",
+    "api_nodes.js?v=1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch",
     scriptUrl
   ).href;
 

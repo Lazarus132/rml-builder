@@ -1,5 +1,3 @@
-
-
 @supports (scrollbar-gutter: stable) {
 .project-dialog {
     scrollbar-gutter: stable;
@@ -716,7 +714,10 @@ dialog#project-dialog.builder-settings-workspace .builder-settings-color.is-sele
   }
 }
 
-.project-dialog {
+.project-dialog:not([open]) {
+  display:none;
+}
+.project-dialog[open] {
   display:grid;
   grid-template-rows:auto minmax(0,1fr) auto;
   overflow:hidden;
@@ -732,3 +733,84 @@ dialog#project-dialog.builder-settings-workspace .builder-settings-color.is-sele
   overflow-y:auto;
   overscroll-behavior:contain;
 }
+
+.project-dialog > .export-dialog-actions {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding-inline: clamp(8px, 4dvw, 19px);
+  overflow: hidden;
+}
+.project-dialog > .export-dialog-actions > * {
+  min-width: 0;
+  max-width: 100%;
+  flex-shrink: 1;
+}
+#project-done {
+  box-sizing: border-box;
+  max-width: 100%;
+}
+@media (max-width: 320px) {
+  .project-dialog > .export-dialog-actions {
+    justify-content: stretch;
+    gap: 8px;
+    padding: 10px 8px max(10px, env(safe-area-inset-bottom));
+  }
+  #project-done {
+    width: 100%;
+    flex: 1 1 100%;
+  }
+}
+
+.project-dialog.builder-settings-workspace[open] {
+  display: block;
+  overflow: hidden;
+}
+@media (max-width:780px) {
+  dialog#project-dialog.builder-settings-workspace .builder-settings-inspector {
+    display:none;
+    grid-column:1;
+    grid-row:2;
+    position:static;
+    width:100%;
+    height:100%;
+    min-width:0;
+    min-height:0;
+    box-sizing:border-box;
+    overflow:hidden;
+    z-index:auto;
+  }
+  dialog#project-dialog.builder-settings-workspace .builder-settings-inspector.is-active {
+    display:grid;
+  }
+  dialog#project-dialog.builder-settings-workspace .builder-settings-panel:has(.builder-settings-inspector.is-active) .builder-settings-dashboard {
+    display:none;
+  }
+  dialog#project-dialog.builder-settings-workspace .builder-settings-inspector-active {
+    display:grid;
+    width:100%;
+    height:100%;
+    min-width:0;
+    min-height:0;
+    grid-template-rows:auto minmax(0,1fr);
+    overflow:hidden;
+  }
+  dialog#project-dialog.builder-settings-workspace .builder-settings-inspector-picker {
+    min-width:0;
+    min-height:0;
+    overflow-x:hidden;
+    overflow-y:auto;
+    overscroll-behavior:contain;
+    -webkit-overflow-scrolling:touch;
+  }
+  dialog#project-dialog.builder-settings-workspace .builder-settings-color-popover,
+  dialog#project-dialog.builder-settings-workspace .builder-settings-color-popover .rml-detached-editor-color-picker {
+    display:block;
+    width:100%;
+    min-width:0;
+    max-width:100%;
+    box-sizing:border-box;
+  }
+}
+
