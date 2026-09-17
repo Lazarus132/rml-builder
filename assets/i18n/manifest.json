@@ -16,5 +16,6 @@
   "catalogs": [
     "base",
     "templates"
-  ]
+  ],
+  "fallbackFlag": "assets/i18n/flags/fallback.svg"
 }

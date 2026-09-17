@@ -2,7 +2,7 @@
   "use strict";
 
   const API_FACTORY_MODULE_ID =
-    "1.20.32-universal-presentation-dev170-console-noise-cleanup";
+    "1.20.32-universal-presentation-dev177-project-dialog-structural-footer";
   const FACTORY_VERSION = 38;
   const API_VERIFICATION_SCHEMA_VERSION = 3;
   const CATALOG_PROJECTION_INDEX_VERSION = 1;

@@ -1,4 +1,4 @@
-/* Runtime Graph canvas, node, wire and inspector styles. */
+
 
 .rml-graph-node-search {
   display: flex;
@@ -72,9 +72,6 @@ body.rml-node-graph-mode .rml-graph-inspector [data-rml-inspector-filtered] {
   z-index: 9990;
   pointer-events: none;
   border: 2px solid rgba(112, 207, 255, 0.96);
-
-
-
 
   opacity: 0.001;
   box-shadow:
@@ -3173,7 +3170,6 @@ body.rml-node-graph-mode.rml-graph-edit-mode #inspector-content {
   font: 13px system-ui, sans-serif;
 }
 
-
 .rml-graph-root[data-rml-graph-phase="preparing"] > .rml-graph-viewport,
 .rml-graph-root[data-rml-graph-phase="failed"] > .rml-graph-viewport {
   visibility: hidden;
@@ -3186,7 +3182,6 @@ body.rml-node-graph-mode.rml-graph-edit-mode #inspector-content {
   color: var(--muted);
   pointer-events: none;
 }
-
 
 .rml-graph-root[data-rml-graph-phase="svg-blocked"] > .rml-graph-viewport {
   visibility: hidden;

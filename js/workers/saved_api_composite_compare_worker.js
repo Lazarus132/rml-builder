@@ -5,7 +5,7 @@ function savedApiCompositeCompareWorkerMain(
 ) {
 const self = workerScope;
 const SAVED_API_COMPOSITE_COMPARE_WORKER_MODULE_ID =
-  "1.20.32-universal-presentation-dev170-console-noise-cleanup";
+  "1.20.32-universal-presentation-dev177-project-dialog-structural-footer";
 const SAVED_API_COMPOSITE_CANONICAL_SCHEMA_VERSION = 4;
 const MESSAGE_TYPE = "rml-saved-api-composite-compare";
 const RESULT_TYPE = `${MESSAGE_TYPE}-result`;
@@ -1946,7 +1946,7 @@ if (savedApiCompositeCompareWorkerThread) {
     {
       value: Object.freeze({
         moduleId:
-          "1.20.32-universal-presentation-dev170-console-noise-cleanup",
+          "1.20.32-universal-presentation-dev177-project-dialog-structural-footer",
         canonicalSchemaVersion:
           4,
         source:

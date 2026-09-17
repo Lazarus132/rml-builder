@@ -468,7 +468,7 @@
     heading.textContent = String(options.tabTitle || "Custom C#");
     const headerActions = popupDocument.createElement("div");
     headerActions.className = "editor-header-actions";
-    const iconSpriteUrl = new URL("assets/rml-icons.svg?v=1.20.32-universal-presentation-dev170-console-noise-cleanup", window.location.href).href;
+    const iconSpriteUrl = new URL("assets/rml-icons.svg?v=1.20.32-universal-presentation-dev177-project-dialog-structural-footer", window.location.href).href;
     const createHeaderButton = (label, iconName) => {
       const button = popupDocument.createElement("button");
       button.type = "button";

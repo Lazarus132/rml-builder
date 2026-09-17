@@ -676,7 +676,7 @@ const savedApiCompositeSearchTextCache =
     `${SAVED_API_COMPOSITE_COMPARE_MESSAGE_TYPE}-result`;
 
   const SAVED_API_COMPOSITE_COMPARE_MODULE_ID =
-    "1.20.32-universal-presentation-dev170-console-noise-cleanup";
+    "1.20.32-universal-presentation-dev177-project-dialog-structural-footer";
 
   const SAVED_API_COMPOSITE_COMPARE_CANONICAL_SCHEMA_VERSION =
     4;
@@ -934,7 +934,7 @@ const savedApiCompositeSearchTextCache =
       );
     }
     const workerUrl = new URL(
-      "js/workers/saved_api_composite_compare_worker.js?v=1.20.32-universal-presentation-dev170-console-noise-cleanup&canonical-schema=4",
+      "js/workers/saved_api_composite_compare_worker.js?v=1.20.32-universal-presentation-dev177-project-dialog-structural-footer&canonical-schema=4",
       document.baseURI
     );
     const workerOptions = {
@@ -10111,12 +10111,6 @@ function savedApiCompositeRecordsFromJson(
           source,
           { preserveId: true }
         );
-      // Import is the only automatic topology-repair boundary. Saved
-      // Composites are container documents just like projects: obsolete
-      // missing-port topology may be disconnected while importing the file,
-      // but opening, navigating, resolving, refreshing and placing an
-      // existing Composite must preserve its document byte-for-byte in
-      // semantic content and leave incompatible nodes/ports visibly red.
       const importedComposite =
         nodeGraphClone(record.composite);
       const importRepair =
@@ -12375,8 +12369,6 @@ function savedApiCompositeContextMatchesRecord(
     const recordId = String(
       record?.id || ""
     ).trim();
-    // A placed Composite belongs to a Library record only through its
-    // explicit persistent identity. Name equality is deliberately ignored.
     return Boolean(
       linkedId &&
       recordId &&
@@ -15522,19 +15514,12 @@ async function instantiateSavedApiCompositeAt(
       try {
         graph = expanded;
 
-        // Saved Composites intentionally preserve stale topology. A catalog
-        // change may leave a connection pointing at a port that no longer
-        // exists on the current API definition. That is an editable
-        // compatibility state (rendered unavailable/red), not a reason to
-        // reject opening or placing the Composite. Validate the still-live
-        // topology only; never mutate the stored/placed Composite here.
         const expandedConnections =
           Array.isArray(expanded.connections)
             ? expanded.connections
             : [];
         const skippedConnectionIds = new Set();
 
-        // First mark only genuinely stale endpoints.
         for (const connection of expandedConnections) {
           const sourceExists = !!findPortSpec(
             connection?.fromNode,
@@ -15555,9 +15540,6 @@ async function instantiateSavedApiCompositeAt(
           }
         }
 
-        // Branches whose parent is stale are validation-only omissions too.
-        // Iterate because branch chains are not required to be stored in
-        // parent-before-child order.
         let addedSkippedBranch = true;
         while (addedSkippedBranch) {
           addedSkippedBranch = false;
@@ -16580,20 +16562,7 @@ function savedApiCompositeUpdateActionState(
         owner.id === openContext.ownerId
       )
     );
-    // Opening/navigation is read-only. A stale comparison for the currently
-    // open instance is never enough to create an Update action by itself.
-    // Graph -> Library requires BOTH a real content mutation since Open and
-    // a canonical difference from the linked Library record.
-    // HARD INVARIANT: an actively open Library Composite is navigation-only
-    // from the Library action perspective. Never expose Update for that same
-    // record while it is open, regardless of comparison, normalization,
-    // catalog refresh, presentation work, or incidental mutation counters.
-    // After leaving the Composite, the normal canonical stale-instance path
-    // may expose the appropriate Library update action.
     const updatesOpenComposite = false;
-    // The currently open instance must also never fall through to the
-    // Library -> Graph direction merely because comparison normalization or
-    // catalog presentation reports it as stale after Open.
     const matchingInstances =
       openContext
         ? staleInstances.filter(owner =>
@@ -16720,7 +16689,7 @@ function synchronizeSavedApiCompositeUpdateAction(
       updateGraphButton =
         document.createElement("button");
       updateGraphButton.type = "button";
-      updateGraphButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev170-console-noise-cleanup#icon-update"></use></svg>`;
+      updateGraphButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev177-project-dialog-structural-footer#icon-update"></use></svg>`;
       updateGraphButton.dataset
         .savedApiCompositeGraphUpdate =
         "true";
@@ -16793,10 +16762,7 @@ function synchronizeSavedApiCompositeUpdateAction(
       updatesOpenComposite
         ? "graph-to-library"
         : "library-to-graph";
-    // Use the same semantic update/sync glyph in the Library and Composite Actions.
-    // Direction remains encoded in the action, aria-label and tooltip rather than
-    // overloading upload/download arrows that read as import/export controls.
-    updateGraphButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev170-console-noise-cleanup#icon-update"></use></svg>`;
+    updateGraphButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev177-project-dialog-structural-footer#icon-update"></use></svg>`;
     updateGraphButton.setAttribute(
       "aria-label",
       updatesOpenComposite
@@ -16974,7 +16940,7 @@ function createSavedApiCompositePaletteItem(
     const exportButton =
       document.createElement("button");
     exportButton.type = "button";
-    exportButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev170-console-noise-cleanup#icon-download"></use></svg>`;
+    exportButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev177-project-dialog-structural-footer#icon-download"></use></svg>`;
     exportButton.title =
       `Export '${record.name}' as compressed JSON`;
     exportButton.addEventListener(
@@ -17033,7 +16999,7 @@ function createSavedApiCompositePaletteItem(
     const deleteButton =
       document.createElement("button");
     deleteButton.type = "button";
-    deleteButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev170-console-noise-cleanup#icon-close"></use></svg>`;
+    deleteButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev177-project-dialog-structural-footer#icon-close"></use></svg>`;
     deleteButton.title =
       `Delete '${record.name}' from Saved API Composites`;
     deleteButton.addEventListener(
@@ -17062,7 +17028,7 @@ function createSavedApiCompositePaletteItem(
     const menuTrigger = document.createElement("button");
     menuTrigger.type = "button";
     menuTrigger.className = "rml-saved-api-composite-menu-trigger";
-    menuTrigger.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev170-console-noise-cleanup#icon-more"></use></svg>`;
+    menuTrigger.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev177-project-dialog-structural-footer#icon-more"></use></svg>`;
     menuTrigger.setAttribute("aria-haspopup", "menu");
     menuTrigger.setAttribute("aria-expanded", "false");
     menuTrigger.setAttribute(
@@ -17168,7 +17134,7 @@ Object.defineProperty(
   "RMLNodeGraphCompositesModuleId",
   {
     value:
-      "1.20.32-universal-presentation-dev170-console-noise-cleanup",
+      "1.20.32-universal-presentation-dev177-project-dialog-structural-footer",
     writable: false,
     enumerable: true,
     configurable: true

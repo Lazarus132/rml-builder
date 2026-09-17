@@ -2,7 +2,7 @@
   "use strict";
 
   const MODULE_ID =
-    "1.20.32-universal-presentation-dev170-console-noise-cleanup";
+    "1.20.32-universal-presentation-dev177-project-dialog-structural-footer";
   const GATE_VERSION = 1;
   const DETECTION_TIMEOUT_MS = 5000;
   const HIGH_ENTROPY_HINTS = Object.freeze([

@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_BOOTSTRAP_MODULE_ID =
-  "1.20.32-universal-presentation-dev170-console-noise-cleanup";
+  "1.20.32-universal-presentation-dev177-project-dialog-structural-footer";
 
 function assertGraphBootstrapModuleCoherence() {
   const mismatches = [];

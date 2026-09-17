@@ -1,4 +1,3 @@
-// Bundled compiler runtime: dotnet.native.
 
 var createDotnetRuntime = (() => {
   var _scriptDir = import.meta.url;

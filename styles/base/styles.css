@@ -1,4 +1,4 @@
-/* RML Builder base layout and shared component styles. */
+
 
 :root {
   color-scheme: dark;
@@ -608,7 +608,6 @@ fieldset legend {
   color: var(--accent);
   font-size: calc(25px * var(--rml-ux-text-scale, 1));
 }
-
 
 .empty-inspector > .empty-inspector-icon {
   transform: none;
@@ -3234,13 +3233,11 @@ dialog.builder-message-dialog::backdrop {
   overflow: visible;
 }
 
-
 .builder-message-dialog[data-tone="danger"] .builder-message-signal {
   border-color: rgba(255, 113, 136, 0.34);
   background: rgba(255, 113, 136, 0.08);
   color: var(--red);
 }
-
 
 .builder-message-dialog[data-tone="info"] .builder-message-signal {
   border-color: rgba(164, 118, 255, 0.34);
@@ -3249,14 +3246,12 @@ dialog.builder-message-dialog::backdrop {
   --rml-signal-fill: rgba(164, 118, 255, 0.12);
 }
 
-
 .builder-message-dialog[data-tone="success"] .builder-message-signal {
   border-color: rgba(108, 232, 155, 0.34);
   background: rgba(108, 232, 155, 0.08);
   color: var(--green);
   --rml-signal-fill: rgba(108, 232, 155, 0.12);
 }
-
 
 .builder-message-content {
   min-width: 0;
@@ -4630,7 +4625,6 @@ pre {
     var(--rml-attr-rml-load-progress, 8%);
 }
 
-
 html[data-rml-architecture-gate="pending"],
 html[data-rml-architecture-gate="blocked"] {
   background: #030912;
@@ -5079,6 +5073,7 @@ html[data-rml-architecture-gate="blocked"] body > :not(#rml-architecture-gate) {
     transition: none !important;
   }
 }
+
 .top-action-profile-avatar {
   position: relative;
   width: 24px; height: 24px; min-width: 24px; min-height: 24px; max-width: 24px; max-height: 24px;
@@ -5089,6 +5084,7 @@ html[data-rml-architecture-gate="blocked"] body > :not(#rml-architecture-gate) {
   width: 38px; height: 38px; min-width: 38px; min-height: 38px; max-width: 38px; max-height: 38px;
   flex: 0 0 38px; display: grid; place-items: center; overflow: hidden; border-radius: 50%;
 }
+
 .top-action-profile-avatar > svg {
   grid-area: 1 / 1; width: 23px !important; height: 23px !important; min-width: 23px; min-height: 23px; max-width: 23px; max-height: 23px;
   display: block; fill: none; stroke: currentColor; stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round;
@@ -5112,6 +5108,7 @@ html[data-rml-architecture-gate="blocked"] body > :not(#rml-architecture-gate) {
 }
 
 :root { --rml-ui-icon-size: 19px; }
+
 .rml-graph-panel-toggle > svg,
 .dialog-close > svg,
 .rml-preview-close > svg,

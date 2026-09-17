@@ -2,7 +2,7 @@
   "use strict";
 
   const CATALOG_LOADER_MODULE_ID =
-    "1.20.32-universal-presentation-dev170-console-noise-cleanup";
+    "1.20.32-universal-presentation-dev177-project-dialog-structural-footer";
   const LOADER_VERSION = 84;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
@@ -75,7 +75,7 @@
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=1.20.32-universal-presentation-dev170-console-noise-cleanup",
+    "api_nodes.js?v=1.20.32-universal-presentation-dev177-project-dialog-structural-footer",
     scriptUrl
   ).href;
 
@@ -4607,7 +4607,6 @@
             );
           }
 
-
           await scriptLoader.ensure(
             "scanner-connection"
           );
@@ -4638,7 +4637,6 @@
           }
 
           renderManualCatalogChecking();
-
 
           let connected = false;
 
@@ -4749,7 +4747,6 @@
       event => {
         event.preventDefault();
         event.stopImmediatePropagation();
-
 
         void activateCatalogFromUserClick()
           .catch(error => {

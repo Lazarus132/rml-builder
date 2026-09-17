@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const VERSION = "1.20.32-universal-presentation-dev170-console-noise-cleanup";
+  const VERSION = "1.20.32-universal-presentation-dev177-project-dialog-structural-footer";
   const STORAGE_KEY = "rml-builder-language-v1";
   const state = { language: localStorage.getItem(STORAGE_KEY) || "en", fallback: {}, active: {}, manifest: null, ready: null, catalogs: new Map() };
   const norm = value => String(value ?? "").replace(/\s+/g, " ").trim();
@@ -50,7 +50,6 @@
         const templates=await fetchJson(`assets/i18n/templates/${lang}.json?v=${VERSION}`);
         return Object.assign({},base,templates);
       } catch(error) {
-        // A language may intentionally have no template overlay yet. English is canonical.
         if(lang==="en") throw error;
         return base;
       }
@@ -62,12 +61,9 @@
   async function loadLanguage(lang) {
     const safe = state.manifest?.languages?.[lang] ? lang : (state.manifest?.default || "en");
     const previous=state.language;
-    // Commit the requested language immediately. UI selection must never depend on
-    // the popover remaining open while network/cache reads complete.
     state.language=safe; localStorage.setItem(STORAGE_KEY,safe); document.documentElement.lang=safe; syncLanguageControl();
     try {
       const [fallback,active]=await Promise.all([getCatalog("en"),getCatalog(safe)]);
-      // Ignore a stale completion when the user selected another language meanwhile.
       if(state.language!==safe) return state.language;
       state.fallback=fallback; state.active=active; translateTree(document); syncLanguageControl();
       window.dispatchEvent(new CustomEvent("rml-language-changed",{detail:{language:safe}}));
@@ -80,16 +76,38 @@
   function languageMeta(code=state.language) {
     return state.manifest?.languages?.[code] || { label:code, tooltip:code, flag:"" };
   }
+  function setFlagImage(img,source) {
+    if(!img) return;
+    const fallback=state.manifest?.fallbackFlag || "assets/i18n/flags/fallback.svg";
+    img.onerror=()=>{
+      img.onerror=null;
+      if(img.src.endsWith(fallback)) { img.removeAttribute("src"); return; }
+      img.src=fallback;
+    };
+    img.src=source || fallback;
+  }
   function syncLanguageControl() {
     const button=document.getElementById('builder-language-open'); if(!button) return;
     const meta=languageMeta(); const tip=meta.tooltip || meta.label || state.language;
     button.title=tip; button.setAttribute('aria-label',tip);
-    const img=document.getElementById('builder-language-flag'); if(img && meta.flag) img.src=meta.flag;
+    const img=document.getElementById('builder-language-flag'); setFlagImage(img,meta.flag);
     document.querySelectorAll('#rml-language-menu [data-language]').forEach(b=>b.setAttribute('aria-checked',String(b.dataset.language===state.language)));
   }
   function closeLanguageMenu() {
     const menu=document.getElementById('rml-language-menu'), button=document.getElementById('builder-language-open');
-    if(menu){ try { if(menu.matches(':popover-open')) menu.hidePopover(); } catch(_) {} menu.hidden=true; } if(button) button.setAttribute('aria-expanded','false');
+    if(menu){ try { if(menu.matches(':popover-open')) menu.hidePopover(); } catch(_) {} menu.hidden=true; menu.style.maxHeight=''; } if(button) button.setAttribute('aria-expanded','false');
+  }
+  function positionLanguageMenu(menu,button) {
+    if(!menu || !button || menu.hidden) return;
+    const r=button.getBoundingClientRect();
+    const header=button.closest('.export-dialog-header');
+    const hr=header?.getBoundingClientRect();
+    const top=Math.max(8,r.bottom+6,Number.isFinite(hr?.bottom)?hr.bottom+6:0);
+    const available=Math.max(0,innerHeight-top-8);
+    menu.style.maxHeight=`${available}px`;
+    const mw=menu.offsetWidth||170;
+    menu.style.top=`${top}px`;
+    menu.style.left=`${Math.max(8,Math.min(innerWidth-mw-8,r.right-mw))}px`;
   }
   function installLanguageControl() {
     document.querySelector('.builder-settings-language')?.remove();
@@ -100,18 +118,12 @@
       for(const [code,meta] of Object.entries(state.manifest.languages || {})){
         const item=document.createElement('button'); item.type='button'; item.dataset.language=code; item.setAttribute('role','menuitemradio');
         item.title=meta.tooltip || meta.label || code;
-        const img=document.createElement('img'); img.src=meta.flag || ''; img.alt='';
+        const img=document.createElement('img'); img.alt=''; setFlagImage(img,meta.flag);
         const label=document.createElement('span'); label.textContent=meta.label || code;
         item.append(img,label); menu.appendChild(item);
       }
-      // A modal <dialog> makes nodes outside its subtree inert. The popover must
-      // therefore belong to the same modal dialog; otherwise it can be visible
-      // in the top layer while receiving no hover/pointer/click events.
       const modalHost=button.closest('dialog[open]') || button.closest('dialog') || document.body;
       modalHost.appendChild(menu);
-      // Use normal click activation. The popover is top-layer now, so there is no
-      // need to hide it on pointerdown. Keeping it alive through pointerup/click
-      // prevents retargeting and makes mouse, touch and pen selection identical.
       let selecting=false;
       menu.addEventListener('click',async e=>{
         const item=e.target?.closest?.('[data-language]');
@@ -120,8 +132,6 @@
         const code=item.dataset.language;
         if(!state.manifest?.languages?.[code]) return;
         selecting=true;
-        // loadLanguage commits the selected code synchronously before its first await.
-        // Close only after that commit, then let the catalog application finish.
         const switching=loadLanguage(code);
         closeLanguageMenu();
         try { await switching; button.focus(); }
@@ -129,16 +139,29 @@
         finally { selecting=false; }
       });
       document.addEventListener('pointerdown',e=>{ if(!menu.hidden && !menu.contains(e.target) && e.target!==button && !button.contains(e.target)) closeLanguageMenu(); });
-      document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeLanguageMenu(); });
+      window.addEventListener('resize',()=>{ if(!menu.hidden) positionLanguageMenu(menu,button); },{passive:true});
+      document.addEventListener('keydown',e=>{
+        if(e.key==='Escape'){ closeLanguageMenu(); return; }
+        if(menu.hidden || !['ArrowDown','ArrowUp','Home','End'].includes(e.key)) return;
+        const items=Array.from(menu.querySelectorAll('[data-language]:not([disabled])'));
+        if(!items.length) return;
+        const current=items.indexOf(document.activeElement);
+        let next=0;
+        if(e.key==='End') next=items.length-1;
+        else if(e.key==='Home') next=0;
+        else if(e.key==='ArrowDown') next=current<0?0:(current+1)%items.length;
+        else next=current<0?items.length-1:(current-1+items.length)%items.length;
+        e.preventDefault(); items[next].focus(); items[next].scrollIntoView({block:'nearest'});
+      });
     }
     if(!button.dataset.languageBound){ button.dataset.languageBound='1'; button.addEventListener('click',(event)=>{
       event.preventDefault(); event.stopPropagation();
       const open=menu.hidden; if(!open){ closeLanguageMenu(); return; }
-      const r=button.getBoundingClientRect(); menu.hidden=false; try { menu.showPopover(); } catch(_) {}
-      const mw=menu.offsetWidth||170, mh=menu.offsetHeight||80;
-      menu.style.top=`${Math.max(8,Math.min(innerHeight-mh-8,r.bottom+6))}px`;
-      menu.style.left=`${Math.max(8,Math.min(innerWidth-mw-8,r.right-mw))}px`;
+      menu.hidden=false; try { menu.showPopover(); } catch(_) {}
+      positionLanguageMenu(menu,button);
       button.setAttribute('aria-expanded','true');
+      const activeItem=menu.querySelector(`[data-language="${CSS.escape(state.language)}"]`) || menu.querySelector('[data-language]');
+      activeItem?.scrollIntoView({block:'nearest'});
     }); }
     syncLanguageControl();
   }
