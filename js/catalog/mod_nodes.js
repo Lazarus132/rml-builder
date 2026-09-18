@@ -10471,7 +10471,9 @@ attempt ? `\n    ${attempt}();` : ""])
           outputs: resolved.outputs || [],
           variadicInputs: resolved.variadicInputs || null,
           variadicOutputs: resolved.variadicOutputs || null,
-          selectedFamilyOperation: operation
+          selectedFamilyOperation: operation,
+
+          selectedFamilyMemberId: selected(node)[1]
         };
       },
       codegenCollect(api) {

@@ -10540,6 +10540,52 @@ function previewConfigurationValue(
       previewSnapshot?.values?.[
         sourceNode.id
       ];
+
+    if (sourceNode.dynamicSettingKind) {
+      const hasExplicitPreviewValue =
+        previewSnapshot?.values &&
+        Object.prototype.hasOwnProperty.call(
+          previewSnapshot.values,
+          sourceNode.id
+        );
+      const hasExplicitControllerValue =
+        previewSnapshot?.controllers &&
+        Object.prototype.hasOwnProperty.call(
+          previewSnapshot.controllers,
+          sourceNode.id
+        );
+
+      if (
+        currentValue === undefined ||
+        currentValue === null
+      ) {
+        if (
+          !hasExplicitPreviewValue &&
+          !hasExplicitControllerValue
+        ) {
+          window.__RMLPreviewTrace?.push?.({
+            at: Date.now(),
+            stage: "dynamic-value",
+            nodeId: String(sourceNode.id || ""),
+            result: "unknown",
+            reason: "no explicit preview value"
+          });
+          return previewUnknown(
+            type,
+            "Runtime-backed configuration value unavailable"
+          );
+        }
+      }
+
+      window.__RMLPreviewTrace?.push?.({
+        at: Date.now(),
+        stage: "dynamic-value",
+        nodeId: String(sourceNode.id || ""),
+        value: currentValue ?? "",
+        result: "known"
+      });
+    }
+
     const raw =
       currentValue !== undefined &&
       currentValue !== null
@@ -11296,6 +11342,15 @@ function previewMenuItemId(result) {
     );
   }
 
+function previewEffectiveOperatorId(node) {
+    const definition = nodeDefinition(node);
+    return String(
+      definition?.selectedFamilyMemberId ||
+      node?.operatorId ||
+      ""
+    );
+  }
+
 function previewApplyConfigurationAction(
     node,
     statistics
@@ -11312,15 +11367,35 @@ function previewApplyConfigurationAction(
     let action;
     let payload;
 
-    switch (node.operatorId) {
-      case "configuration.setVisibility":
+    const requireKnown = (result, inputId) => {
+      if (result?.known) {
+        return true;
+      }
+
+      statistics.runtimeOnlySkipped += 1;
+      statistics.messages.push(
+        `${node.operatorId || "Configuration action"} skipped because ${inputId} is unavailable in Preview: ${result?.reason || "runtime-only value"}.`
+      );
+      return false;
+    };
+
+    const effectiveOperatorId =
+      previewEffectiveOperatorId(node);
+
+    switch (effectiveOperatorId) {
+      case "configuration.setVisibility": {
+        const visible = input("visible");
+
+        if (!requireKnown(visible, "visible")) {
+          return "done";
+        }
         action = "visibility";
         payload = {
           itemId: itemId(),
-          visible:
-            Boolean(input("visible").value)
+          visible: Boolean(visible.value)
         };
         break;
+      }
 
       case "configuration.setOrder":
         action = "order";
@@ -11345,16 +11420,18 @@ function previewApplyConfigurationAction(
         payload = {};
         break;
 
-      case "configuration.setLayout":
+      case "configuration.setLayout": {
+        const horizontal = input("horizontal");
+        if (!requireKnown(horizontal, "horizontal")) {
+          return "done";
+        }
         action = "layout";
         payload = {
           itemId: itemId(),
-          horizontal:
-            Boolean(
-              input("horizontal").value
-            )
+          horizontal: Boolean(horizontal.value)
         };
         break;
+      }
 
       case "configuration.setWidth":
         action = "width";
@@ -11364,14 +11441,18 @@ function previewApplyConfigurationAction(
         };
         break;
 
-      case "configuration.setLabelVisibility":
+      case "configuration.setLabelVisibility": {
+        const visible = input("visible");
+        if (!requireKnown(visible, "visible")) {
+          return "done";
+        }
         action = "labelVisibility";
         payload = {
           itemId: itemId(),
-          visible:
-            Boolean(input("visible").value)
+          visible: Boolean(visible.value)
         };
         break;
+      }
 
       case "configuration.resetItem":
         action = "resetItem";
@@ -11389,10 +11470,25 @@ function previewApplyConfigurationAction(
         return false;
     }
 
+    window.__RMLPreviewTrace?.push?.({
+      at: Date.now(),
+      stage: "configuration-action",
+      nodeId: String(node.id || ""),
+      operatorId: String(node.operatorId || ""),
+      action,
+      payload: structuredClone(payload || {})
+    });
     const result =
       bridge
         ?.applyPreviewConfigurationMenuAction
         ?.(action, payload);
+    window.__RMLPreviewTrace?.push?.({
+      at: Date.now(),
+      stage: "configuration-action-result",
+      nodeId: String(node.id || ""),
+      action,
+      result: result ? structuredClone(result) : null
+    });
 
     if (result?.applied) {
       statistics.actionsApplied += 1;
@@ -11400,12 +11496,12 @@ function previewApplyConfigurationAction(
       statistics.runtimeOnlySkipped += 1;
       statistics.messages.push(
         result?.message ||
-          `${node.operatorId} had no valid Preview target.`
+          `${effectiveOperatorId || node.operatorId} had no valid Preview target.`
       );
     }
 
     return (
-      node.operatorId ===
+      effectiveOperatorId ===
         "configuration.saveSettings" &&
       !result?.applied
         ? "failed"
@@ -11448,19 +11544,35 @@ function previewConfigurationImpulse(
           )
           .map(node => node.id)
       );
-    const queue = graph.connections
+    const matchingConfigurationConnections = graph.connections
       .filter(connection =>
         configurationIds.has(
           connection.fromNode
         ) &&
         connection.fromPort ===
           outputPort
-      )
+      );
+    const queue = matchingConfigurationConnections
       .map(connection => ({
         nodeId: connection.toNode,
         inputPortId:
           connection.toPort
       }));
+    window.__RMLPreviewTrace?.push?.({
+      at: Date.now(),
+      stage: "impulse-entry",
+      outlineNodeId: String(outlineNodeId || ""),
+      outputPort,
+      configurationNodeIds: [...configurationIds],
+      matchingConnections: matchingConfigurationConnections.map(connection => ({
+        id: String(connection.id || ""),
+        fromNode: String(connection.fromNode || ""),
+        fromPort: String(connection.fromPort || ""),
+        toNode: String(connection.toNode || ""),
+        toPort: String(connection.toPort || "")
+      })),
+      initialQueue: queue.map(item => ({ ...item }))
+    });
 
     if (queue.length === 0) {
       statistics.message =
@@ -11519,6 +11631,17 @@ function previewConfigurationImpulse(
         current.nodeId
       );
 
+      window.__RMLPreviewTrace?.push?.({
+        at: Date.now(),
+        stage: "impulse-step",
+        endpoint,
+        nodeFound: Boolean(node),
+        nodeId: String(current.nodeId || ""),
+        inputPortId: String(current.inputPortId || ""),
+        operatorId: String(node?.operatorId || ""),
+        kind: String(node?.kind || "")
+      });
+
       if (!node) continue;
 
       const configurationOutput =
@@ -11536,8 +11659,10 @@ function previewConfigurationImpulse(
       }
 
       let outputPortIds = [];
+      const effectiveOperatorId =
+        previewEffectiveOperatorId(node);
 
-      switch (node.operatorId) {
+      switch (effectiveOperatorId) {
         case "flow.branch": {
           const condition =
             previewImpulseInputValue(
@@ -11551,7 +11676,22 @@ function previewConfigurationImpulse(
                 ? "true"
                 : "false"
             ];
+            window.__RMLPreviewTrace?.push?.({
+              at: Date.now(),
+              stage: "branch",
+              nodeId: String(node.id || ""),
+              known: true,
+              value: condition.value,
+              output: outputPortIds[0]
+            });
           } else {
+            window.__RMLPreviewTrace?.push?.({
+              at: Date.now(),
+              stage: "branch",
+              nodeId: String(node.id || ""),
+              known: false,
+              reason: condition.reason || "unknown"
+            });
             statistics.runtimeOnlySkipped +=
               1;
             statistics.messages.push(
@@ -11642,7 +11782,7 @@ function previewConfigurationImpulse(
 
           if (
             node.kind === "operator" &&
-            !node.operatorId?.startsWith(
+            !effectiveOperatorId.startsWith(
               "flow."
             )
           ) {
@@ -11724,10 +11864,26 @@ function previewConfigurationPhase(
     const snapshot =
       graph.configSnapshot ||
       snapshotFromBuilder();
-    const sources =
+    const flattenedPhaseSources =
       flattenConfiguration(
         snapshot?.nodes || []
-      )
+      );
+    window.__RMLPreviewTrace?.push?.({
+      at: Date.now(),
+      stage: "phase-snapshot",
+      phase: normalizedPhase,
+      requestedId,
+      packed: hasPackedRuntimeProgram(),
+      configNodeCount: flattenedPhaseSources.length,
+      configNodes: flattenedPhaseSources.map(entry => ({
+        id: String(entry?.node?.id || ""),
+        kind: String(entry?.node?.kind || ""),
+        reaction: String(entry?.node?.reaction || ""),
+        dynamic: Boolean(entry?.node?.dynamicSettingKind)
+      }))
+    });
+    const sources =
+      flattenedPhaseSources
         .map(entry => entry?.node)
         .filter(node =>
           node &&
@@ -11746,11 +11902,29 @@ function previewConfigurationPhase(
           )
         );
 
+    window.__RMLPreviewTrace?.push?.({
+      at: Date.now(),
+      stage: "phase-sources",
+      phase: normalizedPhase,
+      requestedId,
+      matched: sources.map(source => ({
+        id: String(source.id || ""),
+        reaction: String(source.reaction || "")
+      }))
+    });
+
     for (const source of sources) {
       const result =
         previewConfigurationImpulse(
           source.id
         );
+      window.__RMLPreviewTrace?.push?.({
+        at: Date.now(),
+        stage: "phase-impulse-result",
+        phase: normalizedPhase,
+        sourceId: String(source.id || ""),
+        result: structuredClone(result)
+      });
 
       statistics.reactions += 1;
       statistics.started =
@@ -12483,7 +12657,7 @@ function graphPresentationVisible() {
   }
 
 function graphOutlineToggleMarkup() {
-    return `<svg class="rml-pack-outline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch#icon-outline"></use></svg>`;
+    return `<svg class="rml-pack-outline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-outline"></use></svg>`;
   }
 
 function markGraphPackPresentationPending() {
@@ -13025,103 +13199,6 @@ async function togglePackedNodeMode() {
     }
   }
 
-function pruneConnectionsForConfigurationSnapshot(
-    snapshot
-  ) {
-    const validPorts =
-      new Set(
-        flattenConfiguration(
-          snapshot?.nodes || []
-        )
-          .filter(
-            entry =>
-              entry.node?.kind !==
-                "layoutRow"
-          )
-          .map(
-            entry =>
-              `config-${entry.node.id}`
-          )
-      );
-    const configurationNodeIds =
-      new Set(
-        graph.nodes
-          .filter(
-            node =>
-              node.kind ===
-                "configuration"
-          )
-          .map(node => node.id)
-      );
-    const removed = [];
-
-    graph.connections =
-      graph.connections.filter(
-        connection => {
-          const configurationPort =
-            configurationNodeIds.has(
-              connection.fromNode
-            ) &&
-            String(
-              connection.fromPort || ""
-            ).startsWith("config-");
-          const keep =
-            !configurationPort ||
-            validPorts.has(
-              connection.fromPort
-            );
-
-          if (!keep) {
-            removed.push({
-              id: connection.id,
-              fromNode:
-                connection.fromNode,
-              fromPort:
-                connection.fromPort,
-              toNode:
-                connection.toNode,
-              toPort:
-                connection.toPort
-            });
-          }
-
-          return keep;
-        }
-      );
-
-    if (removed.length > 0) {
-      currentAnalysis = null;
-      graphConnectionLookupSource = null;
-      graphConnectionLookupLength = -1;
-      graphIncidentConnectionLookupCache.clear();
-      graphConnectedPortKeysSource = null;
-      graphConnectedPortKeysLength = -1;
-      synchronizeGraphConnectedSocketClasses(
-        new Set(
-          removed.flatMap(connection => [
-            connection.fromNode,
-            connection.toNode
-          ])
-        )
-      );
-
-      normalizeConnectionRouting(
-        graph.connections
-      );
-      graph.selectedConnectionId =
-        graph.connections.some(
-          connection =>
-            connection.id ===
-              graph.selectedConnectionId
-        )
-          ? graph.selectedConnectionId
-          : null;
-      normalizeSelectedWirePoint();
-    }
-
-    return removed;
-  }
-
 function synchronizePackedSnapshot(
     render = true
   ) {
@@ -13146,10 +13223,6 @@ function synchronizePackedSnapshot(
       return false;
     }
 
-    const removedConnections =
-      pruneConnectionsForConfigurationSnapshot(
-        snapshot
-      );
     graph.configSnapshot = snapshot;
     graph.sourceSignature =
       signature;
@@ -13169,13 +13242,6 @@ function synchronizePackedSnapshot(
     });
 
     updateSourceBadge();
-
-    if (removedConnections.length > 0) {
-      showGraphMessage(
-        `${removedConnections.length} connection${removedConnections.length === 1 ? "" : "s"} from removed Configuration Outline items were detached safely.`,
-        "warning"
-      );
-    }
 
     return true;
   }
@@ -13800,7 +13866,7 @@ function restoreGraphPaletteScroll(
 
 function setGraphPanelToggleIcon(button, iconName) {
   if (!button) return;
-  button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch#icon-${iconName}"></use></svg>`;
+  button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-${iconName}"></use></svg>`;
 }
 
 function applyGraphPanelLayout() {
@@ -15458,6 +15524,20 @@ function scheduleGraphPaletteRender() {
       return;
     }
     graphPaletteRenderAfterPreparation = null;
+
+    const focusedPaletteSearch =
+      dom.paletteContent.querySelector(
+        ":scope > .rml-graph-palette .rml-graph-palette-search input"
+      );
+    if (
+      focusedPaletteSearch &&
+      document.activeElement === focusedPaletteSearch
+    ) {
+      refreshGraphPaletteConfigurationAvailability();
+      scheduleVisibleSavedApiCompositePaletteRowsRefresh();
+      return;
+    }
+
     const signature =
       graphPaletteRenderSignature();
     if (
@@ -15794,7 +15874,6 @@ function renderGraphPalette(
 
     const MAX_SEARCH_RESULTS = 240;
     const CATALOG_GROUP_BATCH_SIZE = 120;
-    const SEARCH_SCAN_BATCH_SIZE = 1600;
     let searchFrame = 0;
     let searchTimer = 0;
     let searchSequence = 0;
@@ -16109,11 +16188,32 @@ function renderGraphPalette(
       showAdvanced
     ) => {
       const sequence = ++searchSequence;
-      const matches = [];
       const demandDefinitions =
         graphPaletteDemandIndex().byId;
-      let operatorIds = null;
-      let offset = 0;
+      const operatorIds =
+        graphPaletteDefinitionIndex(
+          showAdvanced
+        ).visibleOperatorIds;
+      const matches = [];
+
+      for (const operatorId of operatorIds) {
+        if (matches.length >= MAX_SEARCH_RESULTS) {
+          break;
+        }
+        const definition =
+          OPERATOR_DEFINITIONS[operatorId] ||
+          demandDefinitions.get(operatorId);
+        if (
+          definition &&
+          searchableText(
+            operatorId,
+            definition
+          ).includes(query)
+        ) {
+          matches.push(operatorId);
+        }
+      }
+
       const current = () =>
         sequence === searchSequence &&
         root.isConnected &&
@@ -16121,9 +16221,34 @@ function renderGraphPalette(
           query &&
         graph.showAdvancedNodes ===
           showAdvanced;
-      const finish = () => {
-        const publish = () => {
-          if (!current()) return;
+
+      if (!current()) {
+        return;
+      }
+
+      const hydratedMatches =
+        matches.filter(operatorId =>
+          Boolean(
+            OPERATOR_DEFINITIONS[
+              operatorId
+            ]
+          )
+        );
+
+      renderEntries({
+        query,
+        matches: hydratedMatches
+      });
+
+      if (hydratedMatches.length === matches.length) {
+        return;
+      }
+
+      ensureGraphPaletteOperators(matches)
+        .then(() => {
+          if (!current()) {
+            return;
+          }
           renderEntries({
             query,
             matches: matches.filter(
@@ -16135,73 +16260,6 @@ function renderGraphPalette(
                 )
             )
           });
-        };
-        if (
-          matches.every(operatorId =>
-            Boolean(
-              OPERATOR_DEFINITIONS[
-                operatorId
-              ]
-            )
-          )
-        ) {
-          publish();
-          return;
-        }
-        ensureGraphPaletteOperators(
-          matches
-        ).then(publish);
-      };
-      const step = () => {
-        searchTimer = 0;
-        if (!current()) return;
-        if (!operatorIds) {
-          operatorIds =
-            graphPaletteDefinitionIndex(
-              showAdvanced
-            ).visibleOperatorIds;
-        }
-        const end = Math.min(
-          operatorIds.length,
-          offset + SEARCH_SCAN_BATCH_SIZE
-        );
-        while (
-          offset < end &&
-          matches.length < MAX_SEARCH_RESULTS
-        ) {
-          const operatorId =
-            operatorIds[offset++];
-          const definition =
-            OPERATOR_DEFINITIONS[operatorId] ||
-            demandDefinitions.get(operatorId);
-          if (
-            definition &&
-            searchableText(
-              operatorId,
-              definition
-            ).includes(query)
-          ) {
-            matches.push(operatorId);
-          }
-        }
-        if (
-          offset >= operatorIds.length ||
-          matches.length >= MAX_SEARCH_RESULTS
-        ) {
-          finish();
-          return;
-        }
-        searchTimer =
-          window.setTimeout(step, 0);
-      };
-      searchFrame =
-        requestProjectAnimationFrame(() => {
-          searchFrame =
-            requestProjectAnimationFrame(() => {
-              searchFrame = 0;
-              searchTimer =
-                window.setTimeout(step, 0);
-            });
         });
     };
 
@@ -16547,26 +16605,15 @@ function renderGraphPalette(
           searchTimer = 0;
         }
 
-        scroll.replaceChildren();
-        appendMessage(
-          search.value.trim().length >= 2
-            ? "Searching the node library…"
-            : "Updating the node library…"
-        );
-        finishEntriesRender();
+        const query = search.value.trim().toLowerCase();
+        const showAdvanced = graph.showAdvancedNodes === true;
 
-        searchFrame =
-          requestProjectAnimationFrame(() => {
-            searchFrame =
-              requestProjectAnimationFrame(() => {
-                searchFrame = 0;
-                searchTimer =
-                  window.setTimeout(() => {
-                    searchTimer = 0;
-                    renderEntries();
-                  }, 0);
-              });
-          });
+        if (query.length >= 2) {
+          scheduleSearchScan(query, showAdvanced);
+          return;
+        }
+
+        renderEntries();
       }
     );
 
@@ -18358,20 +18405,20 @@ function createToolbarButton(
 const GRAPH_TOOLBAR_ICONS =
     Object.freeze({
       center: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch#icon-center"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-center"></use></svg>`,
       clear: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch#icon-delete"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-delete"></use></svg>`,
       zoomOut: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch#icon-zoom-out"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-zoom-out"></use></svg>`,
       zoomIn: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch#icon-zoom-in"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-zoom-in"></use></svg>`,
       editMode: `
-        <svg class="rml-graph-edit-enter-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch#icon-expand"></use></svg>
-        <svg class="rml-graph-edit-exit-icon" viewBox="0 0 24 24" aria-hidden="true" hidden><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch#icon-collapse"></use></svg>`,
+        <svg class="rml-graph-edit-enter-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-expand"></use></svg>
+        <svg class="rml-graph-edit-exit-icon" viewBox="0 0 24 24" aria-hidden="true" hidden><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-collapse"></use></svg>`,
       search: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch#icon-search"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-search"></use></svg>`,
       next: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch#icon-next"></use></svg>`
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-next"></use></svg>`
     });
 
 function createToolbarIconButton(
@@ -18502,11 +18549,35 @@ function focusGraphNodeSearch(query, direction = 1) {
       cancelAnimationFrame(graphRevealAnimationFrame);
       graphRevealAnimationFrame = 0;
     }
+    const searchControlsBeforeSelection = graphNodeSearchControls();
+    const activeSearchInput =
+      document.activeElement === searchControlsBeforeSelection?.toolbarInput
+        ? searchControlsBeforeSelection.toolbarInput
+        : document.activeElement === searchControlsBeforeSelection?.overlayInput
+          ? searchControlsBeforeSelection.overlayInput
+          : null;
+    const searchSelectionStart = activeSearchInput?.selectionStart ?? null;
+    const searchSelectionEnd = activeSearchInput?.selectionEnd ?? null;
+
     graph.selectedNodeId = node.id;
     graph.selectedNodeIds = [node.id];
     graph.selectedConnectionId = null;
     clearSelectedWirePoint();
     renderGraphInspector();
+
+    if (activeSearchInput?.isConnected) {
+      activeSearchInput.focus({ preventScroll: true });
+      if (searchSelectionStart !== null && searchSelectionEnd !== null) {
+        try {
+          activeSearchInput.setSelectionRange(
+            searchSelectionStart,
+            searchSelectionEnd
+          );
+        } catch {
+
+        }
+      }
+    }
 
     if (frameGraphSearchNode(node, preferredScale)) {
       forceGraphNodesRendered(
@@ -18830,7 +18901,7 @@ function renderGraphCanvas() {
       <div class="rml-graph-search-overlay-card" role="dialog" aria-modal="true" aria-label="Find node in graph">
         <div class="rml-graph-search-overlay-head">
           <strong>Find node in graph</strong>
-          <button class="rml-graph-search-overlay-close" type="button" aria-label="Close search"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch#icon-close"></use></svg></button>
+          <button class="rml-graph-search-overlay-close" type="button" aria-label="Close search"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-close"></use></svg></button>
         </div>
         <div class="rml-graph-search-overlay-body">
           <input type="search" autocomplete="off" placeholder="Find node in graph…" aria-label="Find node in graph" aria-keyshortcuts="F3 Shift+F3 Control+G Control+Shift+G Meta+G Meta+Shift+G">
@@ -23543,9 +23614,11 @@ function createPortRow(
 
     const concreteType =
       spec.type ||
-      bindings.get(node.id)?.[
-        spec.typeVar
-      ] || null;
+      (spec.customCSharpUnresolvedType
+        ? null
+        : bindings.get(node.id)?.[
+            spec.typeVar
+          ] || null);
     const info =
       typeInfo(concreteType);
 
@@ -24936,7 +25009,7 @@ function createGraphNodeElementRmlOriginal(
     remove.className =
       "rml-graph-node-delete";
     remove.type = "button";
-    remove.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch#icon-close"></use></svg>`;
+    remove.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7L17 17M17 7L7 17" fill="none" stroke="#aeb9c4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>`;
     remove.title =
       node.kind === "configuration"
         ? "Delete start node (it remains available in the palette)"
@@ -30459,6 +30532,34 @@ function synchronizeGraphNodeMutationElements(
       }
     }
     if (added.size > 0) {
+
+      const addedArticles = [];
+      for (const nodeId of added) {
+        const article =
+          dom.nodesHost?.querySelector(
+            `[data-graph-node-id="${CSS.escape(nodeId)}"]`
+          );
+        if (article) {
+          addedArticles.push(article);
+        }
+      }
+      const geometryChanged =
+        refreshRenderedNodeResizeLimits(
+          added,
+          addedArticles
+        );
+
+      for (const nodeId of added) {
+        invalidateGraphGpuNodeRecord(
+          nodeId
+        );
+      }
+      for (const nodeId of geometryChanged) {
+        invalidateGraphNodeViewportSpatialIndex(
+          nodeId
+        );
+      }
+
       scheduleRenderedNodeResizeLimitRefresh(
         added
       );
@@ -30709,6 +30810,39 @@ function renderGraphMutationDelta({
     ) {
       return true;
     }
+
+    if (nodeContentIdSet.size > 0) {
+      const structuralIds = [...nodeContentIdSet];
+      graphHybridRenderer?.removeNodes?.(structuralIds);
+      for (const nodeId of structuralIds) {
+        graphNodeGeometryCache.delete(nodeId);
+        graphForcedNodeIds.delete(nodeId);
+        invalidateGraphNodeViewportSpatialIndex(nodeId);
+        invalidateGraphGpuNodeRecord(nodeId);
+        const article = dom.nodesHost?.querySelector(
+          `[data-graph-node-id="${CSS.escape(nodeId)}"]`
+        );
+        if (article) {
+          for (const socket of article.querySelectorAll('.rml-graph-socket')) {
+            graphSocketElementCache.delete(
+              `${socket.dataset.direction}:${socket.dataset.nodeId}:${socket.dataset.portId}`
+            );
+          }
+          article.remove();
+        }
+      }
+
+      graphConnectionGeometryCache.clear();
+      graphSvgWirePathCache.clear();
+      graphSvgWirePointCache.clear();
+      graphSocketElementCache.clear();
+      graphNodeViewportSpatialDirty = true;
+      graphNodeViewportSpatialDirtyNodeIds.clear();
+      invalidateGraphGpuNodeRecord();
+      renderGraphNodesAndWires();
+      return true;
+    }
+
     const lookup =
       adoptGraphMutationLookupTails(
         nodeIdSet,
@@ -30775,6 +30909,15 @@ function renderGraphMutationDelta({
       return fullRender();
     }
     rememberCurrentGraphAnalysis();
+
+    const desiredNodes =
+      desiredRenderedGraphNodes();
+
+    synchronizeGraphNodeMutationElements(
+      nodes,
+      desiredNodes,
+      nodeContentIdSet
+    );
     if (
       !synchronizeGpuOverviewNodeMutation(
         nodeIdSet
@@ -30782,14 +30925,6 @@ function renderGraphMutationDelta({
     ) {
       return fullRender();
     }
-
-    const desiredNodes =
-      desiredRenderedGraphNodes();
-    synchronizeGraphNodeMutationElements(
-      nodes,
-      desiredNodes,
-      nodeContentIdSet
-    );
 
     if (connections.length > 0) {
       const records = [];
@@ -33153,7 +33288,7 @@ function renderGraphInspector(options = {}) {
       empty.className =
         "empty-inspector";
       empty.innerHTML =
-        `<span class="empty-inspector-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch#icon-lightning"></use></svg></span>
+        `<span class="empty-inspector-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-lightning"></use></svg></span>
          <h2>Select a graph node, wire or route point</h2>
          <p>Typed ports, wire routing points and connection details appear here.</p>`;
       dom.inspectorContent.appendChild(
@@ -33171,58 +33306,110 @@ function renderGraphInspector(options = {}) {
 
 function installGraphInspectorSearch(root) {
     if (!root || !dom.inspectorContent) return;
-    requestProjectAnimationFrame(() => {
-      if (
-        !root.isConnected ||
-        root.parentElement !== dom.inspectorContent
-      ) {
-        return;
-      }
-      const existing = root.querySelector(":scope > .rml-graph-inspector-search");
-      const entries = root.querySelectorAll(
-        ".rml-graph-inspector-card > p, .rml-graph-inspector-card > label, .rml-graph-inspector-card > fieldset, .rml-graph-inspector-card > small, .rml-graph-inspector-type-row, .rml-graph-display-value, .rml-graph-variadic-controls, .rml-graph-code-editor-actions, .rml-graph-inspector-actions > button"
-      );
-      if (entries.length <= 1) {
-        existing?.remove();
-        return;
-      }
-      if (existing) return;
+    if (
+      !root.isConnected ||
+      root.parentElement !== dom.inspectorContent
+    ) {
+      return;
+    }
 
-      const wrap = document.createElement("label");
-      wrap.className = "rml-graph-inspector-search";
-      wrap.textContent = window.RMLI18n.t("{{i18n:js.presentation.f1b690c9beff}}");
-      const input = document.createElement("input");
-      input.type = "search";
-      input.placeholder = window.RMLI18n.t("{{i18n:js.presentation.7849996d490e}}");
-      input.autocomplete = "off";
-      wrap.appendChild(input);
-      root.insertBefore(wrap, root.firstChild);
+    const existing = root.querySelector(
+      ":scope > .rml-graph-inspector-search"
+    );
+    const entries = root.querySelectorAll(
+      ".rml-graph-inspector-card > p, .rml-graph-inspector-card > label, .rml-graph-inspector-card > fieldset, .rml-graph-inspector-card > small, .rml-graph-inspector-type-row, .rml-graph-display-value, .rml-graph-variadic-controls, .rml-graph-code-editor-actions, .rml-graph-inspector-actions > button"
+    );
+    if (entries.length <= 1) {
+      existing?.remove();
+      return;
+    }
+    if (existing) return;
 
-      const apply = () => {
-        const query = input.value.trim().toLowerCase();
-        for (const entry of entries) {
-          const controlValues = [
-            ...entry.querySelectorAll(
-              "input:not([type='search']), textarea, select"
-            )
-          ].map(control =>
-            control instanceof HTMLSelectElement
-              ? control.selectedOptions[0]?.textContent || control.value
-              : control.value
-          );
-          const searchableText = [
-            entry.innerText || "",
-            ...controlValues
-          ].join(" ").toLowerCase();
-          entry.toggleAttribute(
-            "data-rml-inspector-filtered",
-            Boolean(query) && !searchableText.includes(query)
-          );
-        }
-      };
-      input.addEventListener("input", apply);
-    });
+    const wrap = document.createElement("label");
+    wrap.className = "rml-graph-inspector-search";
+    wrap.textContent = window.RMLI18n.t("{{i18n:js.presentation.f1b690c9beff}}");
+    const input = document.createElement("input");
+    input.type = "search";
+    input.placeholder = window.RMLI18n.t("{{i18n:js.presentation.7849996d490e}}");
+    input.autocomplete = "off";
+    wrap.appendChild(input);
+    root.insertBefore(wrap, root.firstChild);
+
+    const apply = () => {
+      const query = input.value.trim().toLowerCase();
+      for (const entry of entries) {
+        const controlValues = [
+          ...entry.querySelectorAll(
+            "input:not([type='search']), textarea, select"
+          )
+        ].map(control =>
+          control instanceof HTMLSelectElement
+            ? control.selectedOptions[0]?.textContent || control.value
+            : control.value
+        );
+        const searchableText = [
+          entry.innerText || "",
+          ...controlValues
+        ].join(" ").toLowerCase();
+        entry.toggleAttribute(
+          "data-rml-inspector-filtered",
+          Boolean(query) && !searchableText.includes(query)
+        );
+      }
+    };
+    input.addEventListener("input", apply);
   }
+
+function replaceCustomCSharpModeAtomically(node, nextMode) {
+  if (!node) return new Set();
+  const previousMode = String(node.parameters?.mode || "file");
+  const normalizedNextMode = String(nextMode || "file");
+  if (previousMode === normalizedNextMode) return new Set();
+
+  const incidentIds = incidentGraphConnectionIds(node.id);
+  const removedConnectionIds = removeGraphConnectionsFromState(incidentIds);
+
+  resetCustomCSharpModeOwnedEditorState?.(node.id);
+
+  if (previousMode === "file" && !customCSharpEditor) {
+    delete activeGraphCustomCSharpFileRegistry()?.[node.id];
+  }
+
+  node.parameters ??= {};
+
+  const modeOwnedKeys = [
+    "source",
+    "actionCode",
+    "expressionCode",
+    "memberCode",
+    "variadicInputCount",
+    "customCSharpValueInputIds",
+    "customCSharpValueInputTypes",
+    "legacyInlineContent",
+    "fileName",
+    "projectId",
+    "nullable",
+    "autoGeneratedHeader"
+  ];
+  for (const key of modeOwnedKeys) delete node.parameters[key];
+
+  node.parameters.mode = normalizedNextMode;
+  node.parameters.fileName = "VisualProgram.cs";
+  node.parameters.projectId = "main";
+  node.parameters.nullable = "inherit";
+  node.parameters.autoGeneratedHeader = true;
+  node.parameters.source = "";
+  node.parameters.actionCode = "{NEXT}";
+  node.parameters.expressionCode = "default";
+  node.parameters.memberCode = "";
+  node.parameters.variadicInputCount = 0;
+  node.parameters.customCSharpValueInputIds = [];
+  node.parameters.customCSharpValueInputTypes = {};
+
+  graphNodeDefinitionCache = new WeakMap();
+  currentAnalysis = null;
+  return removedConnectionIds;
+}
 
 function searchableSelectWrapper(
     select,
@@ -33275,6 +33462,21 @@ function searchableSelectWrapper(
       "aria-expanded",
       "false"
     );
+    const syncDisabledState = () => {
+      const disabled = select.disabled || select.getAttribute("aria-disabled") === "true";
+      trigger.disabled = disabled;
+      trigger.setAttribute("aria-disabled", disabled ? "true" : "false");
+      wrapper.classList.toggle("disabled", disabled);
+      if (disabled) {
+        closePopup?.(false);
+        const reason = select.title || "This selection is currently locked.";
+        trigger.title = reason;
+        wrapper.title = reason;
+      } else {
+        wrapper.removeAttribute("title");
+      }
+      return disabled;
+    };
 
     const triggerText =
       document.createElement("span");
@@ -33526,6 +33728,7 @@ function searchableSelectWrapper(
     };
 
     const choose = value => {
+      if (syncDisabledState()) return;
       const nextValue =
         String(value ?? "");
       const nextEntry =
@@ -33802,6 +34005,7 @@ function searchableSelectWrapper(
     const openPopup = (
       focusOptions = false
     ) => {
+      if (syncDisabledState()) return;
       if (opened) {
         return;
       }
@@ -33958,10 +34162,22 @@ function searchableSelectWrapper(
 
     select.addEventListener(
       "change",
-      updateTriggerText
+      () => {
+        updateTriggerText();
+        syncDisabledState();
+      }
     );
 
+    select._rmlSyncDisabledState = syncDisabledState;
+
+    const disabledStateObserver = new MutationObserver(syncDisabledState);
+    disabledStateObserver.observe(select, {
+      attributes: true,
+      attributeFilter: ["disabled", "aria-disabled", "title"]
+    });
+    select._rmlDisabledStateObserver = disabledStateObserver;
     updateTriggerText();
+    syncDisabledState();
     wrapper.append(
       select,
       trigger
@@ -36472,10 +36688,12 @@ function nodeInspectorCard(node) {
         }
         const concrete =
           spec.type ||
-          analysis.bindings
-            .get(node.id)?.[
-              spec.typeVar
-            ] || null;
+          (spec.customCSharpUnresolvedType
+            ? null
+            : analysis.bindings
+                .get(node.id)?.[
+                  spec.typeVar
+                ] || null);
         const row =
           document.createElement("div");
         row.className =
@@ -37495,6 +37713,7 @@ function appendParameterControl(
       }
 
       const update = () => {
+
         let value;
         const dropdownChange =
           kind === "bool" ||
@@ -37558,9 +37777,21 @@ function appendParameterControl(
             connectionId
           );
         }
-        node.parameters[
-          specification.key
-        ] = value;
+        if (
+          definition.customCSharpNode === true &&
+          specification.key === "mode" &&
+          kind === "select"
+        ) {
+          const removedConnectionIds =
+            replaceCustomCSharpModeAtomically(node, value);
+          for (const connectionId of removedConnectionIds) {
+            affectedConnectionIds?.add(connectionId);
+          }
+        } else {
+          node.parameters[
+            specification.key
+          ] = value;
+        }
 
         if (
           specification.editorAppearance ===
@@ -37751,7 +37982,7 @@ function appendParameterControl(
 
 function inspectorButtonIconMarkup(text) {
     const label = String(text || "").trim().toLowerCase();
-    const icon = name => `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch#icon-${name}"></use></svg>`;
+    const icon = name => `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-${name}"></use></svg>`;
     if (label === "+") return icon("add");
     if (label === "−" || label === "-") return icon("minus");
     if (label.includes("open code editor")) return icon("code");
@@ -45893,7 +46124,7 @@ Object.defineProperty(
   "RMLNodeGraphViewModuleId",
   {
     value:
-      "1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch",
+      "1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup",
     writable: false,
     enumerable: true,
     configurable: true

@@ -2,7 +2,7 @@
   "use strict";
 
   const STYLE_LOADER_MODULE_ID =
-    "1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch";
+    "1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup";
 
   if (
     Object.hasOwn(
@@ -715,7 +715,7 @@
     setup: "../../styles/features/styles.setup.css?v=5-source-comment-pruning-v776",
     project: "../../styles/features/styles.project.css?v=4-max-graph-performance-v755",
     export: "../../styles/features/styles.export.css?v=2-max-graph-performance-v755",
-    "runtime-graph": "../../styles/features/styles.runtime-graph.css?v=1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch"
+    "runtime-graph": "../../styles/features/styles.runtime-graph.css?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup"
   });
   const bundleOrder = Object.freeze([
     "preview",
@@ -914,8 +914,13 @@
 
   function ensure(name) {
     const state = stateFor(name);
-    if (state.status === "loaded") {
+    if (state.status === "loaded" && state.element?.isConnected) {
       return Promise.resolve(state.element);
+    }
+    if (state.status === "loaded") {
+      state.status = "idle";
+      state.element = null;
+      state.promise = null;
     }
     if (state.promise) return state.promise;
 

@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const VERSION = "1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch";
+  const VERSION = "1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup";
   const STORAGE_KEY = "rml-builder-language-v1";
   const state = { language: localStorage.getItem(STORAGE_KEY) || "en", fallback: {}, active: {}, manifest: null, ready: null, catalogs: new Map() };
   const norm = value => String(value ?? "").replace(/\s+/g, " ").trim();
@@ -8,7 +8,7 @@
   const attrSources = new WeakMap();
   function lookup(value) {
     const raw=String(value ?? "");
-    const explicit=raw.match(/^\{\{i18n:([A-Za-z0-9_.-]+)\}\}$/);
+    const explicit=norm(raw).match(/^\{\{i18n:([A-Za-z0-9_.-]+)\}\}$/);
     if(explicit){ const key=explicit[1]; return state.active[key] ?? state.fallback[key] ?? raw; }
     const key=norm(raw); return state.active[key] ?? state.fallback[key] ?? value;
   }
@@ -19,7 +19,8 @@
   function translateTextNode(node) {
     if (!node || node.nodeType !== Node.TEXT_NODE) return;
     const raw=sourceText(node), key=norm(raw); if (!key || !/[A-Za-z]/.test(key)) return;
-    const translated=lookup(key);
+    const translated=lookup(raw);
+    if (translated === raw) return;
     const lead=(raw.match(/^\s*/) || [""])[0], tail=(raw.match(/\s*$/) || [""])[0];
     node.nodeValue=lead+String(translated)+tail;
   }

@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_CODEGEN_WORKER_MODULE_ID =
-  "1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch";
+  "1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup";
 const GRAPH_CODEGEN_WORKER_FACTORY_VERSION =
   38;
 
@@ -679,7 +679,7 @@ async function ensureRuntime(
       "../compiler/visual_csharp.js?v=83-empty-custom-csharp-ignored"
     );
     importScripts(
-      "../catalog/api_nodes.js?v=1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch"
+      "../catalog/api_nodes.js?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup"
     );
 
     if (
@@ -723,7 +723,7 @@ async function ensureRuntime(
     }
 
     importScripts(
-      "../graph/node_graph_codegen.js?v=1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch"
+      "../graph/node_graph_codegen.js?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup"
     );
 
     if (
@@ -971,54 +971,6 @@ function customCSharpCatalogDefinitions(support) {
   for (const operatorId of Object.keys(registered)) {
     definitions[operatorId] =
       registered[operatorId];
-  }
-
-  const typeNames = Array.isArray(
-    support?.catalogTypeNames
-  )
-    ? support.catalogTypeNames
-    : [];
-  if (typeNames.length === 0) {
-    return definitions;
-  }
-  const verified =
-    (Array.isArray(support?.requirements)
-      ? support.requirements
-      : [])
-      .map(requirement =>
-        requirement?.apiContract
-      )
-      .find(contract =>
-        contract?.catalogSource === "scanner" &&
-        String(
-          contract?.catalogFingerprint || ""
-        ).trim()
-      );
-  if (!verified) {
-    return definitions;
-  }
-
-  for (let index = 0; index < typeNames.length; index += 1) {
-    const typeName = String(
-      typeNames[index] || ""
-    ).trim();
-    if (!typeName) continue;
-    definitions[
-      `__rml_custom_csharp_type_index_${index}`
-    ] = {
-      catalogGenerated: true,
-      customCSharpCatalogNode: true,
-      catalogType: typeName,
-      catalogMember: "",
-      apiMemberKind: "type-index",
-      apiReturnType: "",
-      apiParameters: [],
-      apiVerification: {
-        catalogSource: "scanner",
-        catalogFingerprint:
-          verified.catalogFingerprint
-      }
-    };
   }
   return definitions;
 }

@@ -3372,4 +3372,3 @@ html[data-rml-node-scrollbars="visible"] .rml-graph-node .rml-graph-node-body.rm
 .rml-graph-node-title small { font-size: var(--rml-node-subtitle-font-size, 8px) !important; }
 .rml-graph-port-copy strong { font-size: var(--rml-node-port-title-font-size, 9px) !important; }
 .rml-graph-port-copy small { font-size: var(--rml-node-port-meta-font-size, 7px) !important; }
-

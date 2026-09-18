@@ -42,7 +42,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch";
+  "1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -786,6 +786,7 @@ let dragScrollOriginX = 0;
 let dragScrollOriginY = 0;
 let settingsPreviewDraft = null;
 let settingsPreviewRuntimeMenu = null;
+window.__RMLPreviewTrace = window.__RMLPreviewTrace || [];
 let settingsPreviewPulseCounts = {};
 let settingsPreviewColorSession = null;
 let settingsPreviewStatusTimer = null;
@@ -4329,7 +4330,7 @@ function ensureGraphCodegenWorker() {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch",
+      "../workers/graph_codegen_worker.js?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -6057,9 +6058,18 @@ function effectiveInlineRowWidthPercent(
     return clamp(explicit, 1, 100);
   }
 
-  return context?.children?.length > 0
-    ? 100 / context.children.length
-    : 100;
+  if (context?.children?.length > 0) {
+    const children = context.children;
+    if (children.length === 2) {
+      const buttonIndex = children.findIndex(child => child?.valueType === "button");
+      if (buttonIndex >= 0) {
+        return children[buttonIndex]?.id === node?.id ? 20 : 80;
+      }
+    }
+    return 100 / children.length;
+  }
+
+  return 100;
 }
 
 function inlineRowWidthText(value) {
@@ -6177,7 +6187,9 @@ function settingsPreviewOrderedNodes(nodes) {
         settingsPreviewRuntimeOverride(
           "order",
           node?.id
-        )
+        ),
+      dynamicRank:
+        node?.dynamicSettingKind ? 1 : 0
     }))
     .sort((left, right) => {
       const leftOrder =
@@ -6202,6 +6214,8 @@ function settingsPreviewOrderedNodes(nodes) {
         if (leftValue !== rightValue) {
           return leftValue - rightValue;
         }
+      } else if (left.dynamicRank !== right.dynamicRank) {
+        return left.dynamicRank - right.dynamicRank;
       }
 
       return left.index - right.index;
@@ -6480,6 +6494,89 @@ function updateNode(nodes, id, updater) {
       }))
     };
   });
+}
+
+function collectConfigurationOutlineNodeIds(
+  node,
+  result = new Set()
+) {
+  if (!node || typeof node !== "object") {
+    return result;
+  }
+
+  if (node.kind !== LAYOUT_ROW_KIND && node.id) {
+    result.add(String(node.id));
+  }
+
+  if (node.kind === "controller") {
+    for (const option of Array.isArray(node.options) ? node.options : []) {
+      for (const child of Array.isArray(option.children) ? option.children : []) {
+        collectConfigurationOutlineNodeIds(child, result);
+      }
+    }
+  } else if (node.kind === LAYOUT_ROW_KIND) {
+    for (const child of Array.isArray(node.children) ? node.children : []) {
+      collectConfigurationOutlineNodeIds(child, result);
+    }
+  }
+
+  return result;
+}
+
+function runtimeGraphConnectionsForConfigurationOutlineDeletion(removedNode) {
+  const removedIds = collectConfigurationOutlineNodeIds(removedNode);
+  if (removedIds.size === 0) return [];
+
+  const typedGraph = state.extensions?.typedNodeGraph;
+  if (!Array.isArray(typedGraph?.connections)) return [];
+
+  const graphNodes = Array.isArray(typedGraph.nodes) ? typedGraph.nodes : [];
+  const configurationNodeIds = new Set(
+    graphNodes.filter(node => node?.kind === "configuration")
+      .map(node => String(node.id || "")).filter(Boolean)
+  );
+  const menuInstanceNodeIds = new Set(
+    graphNodes.filter(node =>
+      node?.kind === "operator" && node?.operatorId === "configuration.menuInstance"
+    ).map(node => String(node.id || "")).filter(Boolean)
+  );
+
+  return typedGraph.connections.filter(connection => {
+    const fromNode = String(connection?.fromNode || "");
+    const fromPort = String(connection?.fromPort || "");
+    if (configurationNodeIds.has(fromNode) && fromPort.startsWith("config-")) {
+      return removedIds.has(fromPort.slice("config-".length));
+    }
+    if (menuInstanceNodeIds.has(fromNode) && fromPort.startsWith("item-")) {
+      return removedIds.has(fromPort.slice("item-".length));
+    }
+    return false;
+  });
+}
+
+async function confirmExplicitConfigurationOutlineDeletion(removedNode, label = "item") {
+  const connections = runtimeGraphConnectionsForConfigurationOutlineDeletion(removedNode);
+  if (connections.length === 0) return true;
+
+  return await confirmBuilderAction({
+    tone: "danger",
+    kicker: "Configuration Outline",
+    title: "Delete connected Configuration Outline item?",
+    message: `This ${label} is still connected in the Runtime Graph.`,
+    details: `${connections.length} connected Runtime Graph ${connections.length === 1 ? "wire" : "wires"} will be removed together with the associated Configuration Outline node${collectConfigurationOutlineNodeIds(removedNode).size === 1 ? "" : "s"}. No other Runtime Graph nodes or wires will be changed.`,
+    confirmLabel: "Delete and remove connections"
+  });
+}
+
+function detachRuntimeGraphForExplicitConfigurationOutlineDeletion(removedNode) {
+  const connections = runtimeGraphConnectionsForConfigurationOutlineDeletion(removedNode);
+  if (connections.length === 0) return 0;
+  const typedGraph = state.extensions?.typedNodeGraph;
+  const removedConnections = new Set(connections);
+  typedGraph.connections = typedGraph.connections.filter(connection =>
+    !removedConnections.has(connection)
+  );
+  return connections.length;
 }
 
 function removeNode(nodes, id) {
@@ -9665,6 +9762,63 @@ function isImportRecoveryExportOnlyDiagnostic(
   return false;
 }
 
+function preserveCustomCSharpImportConnectionPorts(extensionState) {
+  let preserved = 0;
+  let canonicalized = 0;
+  for (const view of projectRuntimeGraphViews(extensionState)) {
+    const nodes = Array.isArray(view.graph?.nodes) ? view.graph.nodes : [];
+    const connections = Array.isArray(view.graph?.connections) ? view.graph.connections : [];
+    const byId = new Map(nodes.map(node => [String(node?.id || ""), node]));
+    for (const connection of connections) {
+      const target = byId.get(String(connection?.toNode || ""));
+      if (target?.operatorId !== "csharp.file") continue;
+      const rawPort = String(connection?.toPort || "").trim();
+      if (!rawPort || rawPort === "call" || rawPort === "content") continue;
+      target.parameters = target.parameters && typeof target.parameters === "object"
+        ? target.parameters : {};
+      const reserved = new Set(["NEXT", "MOD", "GRAPH", "NAMESPACE", "NODE"]);
+      const mode = String(target.parameters.mode || "file");
+      const source = String(mode === "action"
+        ? target.parameters.actionCode || ""
+        : mode === "expression"
+          ? target.parameters.expressionCode || ""
+          : "");
+      const sourceIds = [];
+      const sourceSeen = new Set();
+      if (mode === "action" || mode === "expression") {
+        for (const match of source.matchAll(/\{\s*([^{}\r\n]+?)\s*\}/g)) {
+          const id = String(match[1] || "").trim();
+          if (!id || reserved.has(id.toUpperCase()) || sourceSeen.has(id)) continue;
+          sourceSeen.add(id);
+          sourceIds.push(id);
+          if (sourceIds.length >= 64) break;
+        }
+      }
+      const stored = Array.isArray(target.parameters.customCSharpValueInputIds)
+        ? target.parameters.customCSharpValueInputIds.map(value => String(value || "").trim()).filter(Boolean)
+        : [];
+
+      const canonicalIds = sourceIds.length > 0 ? sourceIds : stored;
+      if (sourceIds.length > 0 && JSON.stringify(stored) !== JSON.stringify(sourceIds)) {
+        target.parameters.customCSharpValueInputIds = [...sourceIds];
+        target.parameters.variadicInputCount = sourceIds.length;
+      }
+      if (canonicalIds.includes(rawPort)) continue;
+      const folded = canonicalIds.filter(id => id.toLocaleLowerCase() === rawPort.toLocaleLowerCase());
+      if (folded.length === 1) {
+        connection.toPort = folded[0];
+        canonicalized += 1;
+        continue;
+      }
+
+      target.parameters.customCSharpValueInputIds = [...canonicalIds, rawPort].slice(0, 64);
+      target.parameters.variadicInputCount = target.parameters.customCSharpValueInputIds.length;
+      preserved += 1;
+    }
+  }
+  return { preserved, canonicalized };
+}
+
 function importBlockingDiagnostics(
   diagnostics,
   extensionState
@@ -9680,7 +9834,14 @@ function importBlockingDiagnostics(
         diagnostic,
         extensionState
       )
-    );
+    )
+    .filter(diagnostic => {
+      const text = String(diagnostic || "");
+      return !(
+        text.includes("Internal code-generation error:") ||
+        text.startsWith("Generated C#:")
+      );
+    });
 }
 
 function validationGraphWithoutImportRecovery(
@@ -13419,7 +13580,7 @@ const nextOptionDirection =
         data-delete-node="${escapeHtml(node.id)}"
         title="Delete"
         aria-label="Delete ${escapeHtml(displayName)}">
-        <svg class="delete-node-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="assets/rml-icons.svg#icon-close"></use></svg>
+        <svg class="delete-node-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 7L17 17M17 7L7 17" fill="none" stroke="#aeb9c4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
       </button>
     </div>
     ${body}
@@ -18658,10 +18819,18 @@ function bindCanvasInteractions() {
     });
 
   document.querySelectorAll("[data-delete-node]").forEach(button => {
-    button.addEventListener("click", event => {
+    button.addEventListener("click", async event => {
       event.stopPropagation();
       const id = button.dataset.deleteNode;
+      const candidate = findNode(state.nodes, id);
+      if (!candidate) return;
+      if (!(await confirmExplicitConfigurationOutlineDeletion(candidate))) return;
       const result = removeNode(state.nodes, id);
+      if (result.removed) {
+        detachRuntimeGraphForExplicitConfigurationOutlineDeletion(
+          result.removed
+        );
+      }
       state.nodes = result.nodes;
       if (state.selectedId === id) state.selectedId = null;
       if (
@@ -20882,8 +21051,16 @@ function bindInspectorInteractions() {
 
   form.querySelector("[data-inspector-delete]")?.addEventListener(
     "click",
-    () => {
+    async () => {
+      const candidate = findNode(state.nodes, state.selectedId);
+      if (!candidate) return;
+      if (!(await confirmExplicitConfigurationOutlineDeletion(candidate))) return;
       const result = removeNode(state.nodes, state.selectedId);
+      if (result.removed) {
+        detachRuntimeGraphForExplicitConfigurationOutlineDeletion(
+          result.removed
+        );
+      }
       state.nodes = result.nodes;
       state.selectedId = null;
       state.activeContainerId = ROOT_CONTAINER;
@@ -20939,8 +21116,26 @@ function bindInspectorInteractions() {
     input.addEventListener("change", renderAll);
   });
   form.querySelectorAll("[data-remove-option]").forEach(button => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       const optionId = button.dataset.removeOption;
+      const controllerBeforeRemoval = findNode(
+        state.nodes,
+        state.selectedId
+      );
+      const optionBeforeRemoval =
+        controllerBeforeRemoval?.kind === "controller"
+          ? controllerBeforeRemoval.options?.find(option => option.id === optionId)
+          : null;
+      if (optionBeforeRemoval) {
+        const optionDeletionProxy = {
+          kind: LAYOUT_ROW_KIND,
+          children: Array.isArray(optionBeforeRemoval.children) ? optionBeforeRemoval.children : []
+        };
+        if (!(await confirmExplicitConfigurationOutlineDeletion(optionDeletionProxy, "controller option"))) return;
+        for (const child of optionDeletionProxy.children) {
+          detachRuntimeGraphForExplicitConfigurationOutlineDeletion(child);
+        }
+      }
       state.nodes = updateNode(state.nodes, state.selectedId, current => {
         if (current.kind !== "controller" || current.options.length <= 2) {
           return current;
@@ -21195,6 +21390,23 @@ function ensureUniversalCustomSelect(select) {
   trigger.setAttribute("aria-haspopup", "listbox");
   trigger.setAttribute("aria-expanded", "false");
 
+  const syncUniversalDisabledState = () => {
+    const disabled = select.disabled || select.getAttribute("aria-disabled") === "true";
+    trigger.disabled = disabled;
+    trigger.setAttribute("aria-disabled", disabled ? "true" : "false");
+    wrapper.classList.toggle("disabled", disabled);
+    if (disabled) {
+      closePopup?.(false);
+      const reason = select.title || "This selection is currently locked.";
+      trigger.title = reason;
+      wrapper.title = reason;
+    } else {
+      trigger.removeAttribute("title");
+      wrapper.removeAttribute("title");
+    }
+    return disabled;
+  };
+
   const triggerText = document.createElement("span");
   triggerText.className = "rml-graph-searchable-trigger-text";
   trigger.appendChild(triggerText);
@@ -21247,13 +21459,23 @@ function ensureUniversalCustomSelect(select) {
     const text = entry?.text || "Select…";
     triggerText.textContent = text;
     trigger.title = text;
-    setAlwaysClickableButtonAvailability(
-      trigger,
-      !select.disabled && entries.length > 0,
-      entries.length === 0
-        ? "There are no options available for this selection."
-        : "This selection is currently locked by its owning setting."
-    );
+    const hardDisabled =
+      select.disabled ||
+      select.getAttribute("aria-disabled") === "true";
+    if (hardDisabled) {
+
+      trigger.disabled = true;
+      trigger.setAttribute("aria-disabled", "true");
+      trigger.classList.add("rml-action-unavailable");
+      trigger.dataset.unavailableReason =
+        select.title || "This selection is currently locked.";
+    } else {
+      setAlwaysClickableButtonAvailability(
+        trigger,
+        entries.length > 0,
+        "There are no options available for this selection."
+      );
+    }
   };
 
   const positionPopup = () => {
@@ -21529,10 +21751,20 @@ function ensureUniversalCustomSelect(select) {
     }
   };
 
-  trigger.addEventListener("click", () => {
+  trigger.addEventListener("click", event => {
+    if (syncUniversalDisabledState()) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     opened ? closePopup(true) : openPopup();
   });
   trigger.addEventListener("keydown", event => {
+    if (syncUniversalDisabledState()) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     if (
       event.key === "ArrowDown" ||
       event.key === "ArrowUp" ||
@@ -21548,7 +21780,10 @@ function ensureUniversalCustomSelect(select) {
   optionsHost.addEventListener("keydown", popupKeyDown);
   select.addEventListener("change", updateTrigger);
 
-  const optionObserver = new MutationObserver(updateTrigger);
+  const optionObserver = new MutationObserver(() => {
+    updateTrigger();
+    syncUniversalDisabledState();
+  });
   optionObserver.observe(select, {
     childList: true,
     subtree: true,
@@ -21560,12 +21795,17 @@ function ensureUniversalCustomSelect(select) {
     wrapper,
     trigger,
     popup,
-    refresh: updateTrigger,
+    refresh: () => {
+      updateTrigger();
+      syncUniversalDisabledState();
+    },
+    syncDisabledState: syncUniversalDisabledState,
     close: closePopup
   };
 
   select._rmlUniversalCustomSelect = api;
   updateTrigger();
+  syncUniversalDisabledState();
   return api;
 }
 
@@ -22916,6 +23156,11 @@ function settingsPreviewNodesMarkup(nodes) {
 
   for (const node of
     settingsPreviewOrderedNodes(nodes)) {
+
+    if (rmlRuntimeDisplayIsNode(node)) {
+      continue;
+    }
+
     if (!settingsPreviewNodeVisible(node)) {
       continue;
     }
@@ -23704,6 +23949,10 @@ function renderSettingsPreview(options = {}) {
 
   settingsPreviewRenderDeferred = false;
 
+  if (rmlRuntimeDisplayPreviewChannel) {
+    rmlRuntimeDisplaySyncConfigurationPreview(rmlRuntimeDisplayPreviewChannel);
+  }
+
   const colorNode =
     settingsPreviewColorSession
       ? findNode(
@@ -23736,7 +23985,33 @@ function renderSettingsPreview(options = {}) {
       );
 
     elements.settingsPreviewContent.innerHTML =
-      markup || `<div class="rml-preview-empty">This mod has no visible configuration.</div>`;
+      `<div class="rml-preview-lifecycle-line">Runtime: Active · Mod Builder runtime lifecycle</div>` +
+      (markup || `<div class="rml-preview-empty">This mod has no visible configuration.</div>`);
+  }
+
+  if (!colorPageOpen && elements.settingsPreviewRuntimeActions) {
+    const graphContribution = getTypedNodeGraphContribution();
+    const graphRuntimeActive = Boolean(graphContribution?.active);
+    const reloadSafetyIssues = Array.isArray(graphContribution?.requirements?.reloadSafetyIssues)
+      ? graphContribution.requirements.reloadSafetyIssues
+      : [];
+    const runtimeReloadUnsafe =
+      reloadSafetyIssues.length > 0 ||
+      graphContribution?.requirements?.runtimeReloadUnsafe === true ||
+      graphRequirementsUseHarmony(graphContribution?.requirements);
+    const supportsRuntimeReload = graphRuntimeActive && !runtimeReloadUnsafe;
+    const deactivateButton = elements.settingsPreviewRuntimeActions.querySelector(
+      '[data-preview-runtime-action="deactivate"]'
+    );
+    const reloadButton = elements.settingsPreviewRuntimeActions.querySelector(
+      '[data-preview-runtime-action="reload"]'
+    );
+    const quarantineButton = elements.settingsPreviewRuntimeActions.querySelector(
+      '[data-preview-runtime-action="quarantine"]'
+    );
+    if (deactivateButton) deactivateButton.hidden = !graphRuntimeActive;
+    if (reloadButton) reloadButton.hidden = !supportsRuntimeReload;
+    if (quarantineButton) quarantineButton.hidden = false;
   }
 
   renderSettingsPreviewFooter();
@@ -24857,6 +25132,125 @@ function settingsPreviewApplyRuntimeValue(
   return true;
 }
 
+function settingsPreviewDiagnosticsSnapshot() {
+  const channel =
+    window.RMLRuntimeBridge?.projectChannel?.(
+      state.metadata.namespaceName,
+      state.metadata.className
+    ) || `${state.metadata.namespaceName}.${state.metadata.className}`;
+  const flattened = typeof flattenNodes === "function" ? flattenNodes(state?.nodes || []) : [];
+  const nodes = flattened.map(entry => entry?.node).filter(Boolean).map(node => {
+    const element = document.querySelector(`[data-preview-node-id="${CSS.escape(String(node.id || ""))}"]`);
+    const rect = element?.getBoundingClientRect?.();
+    const computed = element ? getComputedStyle(element) : null;
+    return {
+      id: String(node.id || ""),
+      kind: String(node.kind || ""),
+      valueType: String(node.valueType || ""),
+      fieldName: String(node.fieldName || ""),
+      keyName: String(node.keyName || node.label || ""),
+      hidden: node.hidden === true,
+      previewVisible: settingsPreviewNodeVisible(node),
+      draftValue: node.kind === "controller" ? settingsPreviewDraft?.controllers?.[node.id] : settingsPreviewDraft?.values?.[node.id],
+      runtimeValue: rmlPreviewConfigurationLiveRecord(channel, node.id),
+      runtimeValueSource: window.RMLRuntimeBridge?.getValue?.(channel, `configuration:${String(node.id || "")}`) ? "configuration" : (rmlPreviewDirectConfigurationDisplayRecord(channel, node.id) ? "direct-display" : "missing"),
+      runtimeVisibilityOverride: settingsPreviewRuntimeOverride("visibility", node.id),
+      inlineContext: (() => {
+        const context = window.RMLInlineRowLayout?.findContext?.(node.id);
+        return context?.row ? { rowId: String(context.row.id || ""), horizontal: settingsPreviewNodeHorizontal(context.row), widthPercent: settingsPreviewInlineRowWidthPercent(node, context) } : null;
+      })(),
+      dom: rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height, display: computed?.display, gridTemplateColumns: computed?.gridTemplateColumns, gap: computed?.gap } : null
+    };
+  });
+  return {
+    build: RML_BUILDER_BUILD_ID,
+    channel,
+    connection: window.RMLRuntimeBridge?.getConnectionState?.() || null,
+    bridgeState: window.RMLRuntimeBridge?.getState?.(channel) || null,
+    bridgeRecords: window.RMLRuntimeBridge?.debugSnapshot?.(channel) || [],
+    configurationContract: (() => {
+      const records = window.RMLRuntimeBridge?.debugSnapshot?.(channel) || [];
+      const configurationRecords = records.filter(record => String(record?.monitorId || "").startsWith("configuration:"));
+      return {
+        available: configurationRecords.length > 0,
+        recordCount: configurationRecords.length,
+        status: configurationRecords.length > 0 ? "current" : "stale-generated-mod",
+        message: configurationRecords.length > 0
+          ? "Generated mod publishes direct configuration live records."
+          : "No configuration:* runtime records were published. Re-export/recompile/reload the mod with the current Builder runtime contract for complete live synchronization."
+      };
+    })(),
+    runtimeMenu: structuredClone(settingsPreviewRuntimeMenu || createSettingsPreviewRuntimeMenu()),
+    nodes
+  };
+}
+
+Object.defineProperty(window, "RMLPreviewDiagnostics", {
+  value: Object.freeze({
+    snapshot: settingsPreviewDiagnosticsSnapshot,
+    trace() {
+      const trace = [...(window.__RMLPreviewTrace || [])];
+      console.table(trace);
+      return trace;
+    },
+    clearTrace() {
+      window.__RMLPreviewTrace = [];
+      return true;
+    },
+    dump() {
+      const snapshot = settingsPreviewDiagnosticsSnapshot();
+      console.table(snapshot.nodes.map(node => ({ id: node.id, key: node.keyName, type: node.valueType, hidden: node.hidden, visible: node.previewVisible, draft: node.draftValue, live: node.runtimeValue?.display ?? node.runtimeValue?.value ?? null, liveSource: node.runtimeValueSource, liveVisibility: node.runtimeVisibility?.display ?? node.runtimeVisibility?.value ?? null, row: node.inlineContext?.rowId || "", width: node.inlineContext?.widthPercent ?? "", dom: node.dom ? `${Math.round(node.dom.x)},${Math.round(node.dom.y)} ${Math.round(node.dom.width)}x${Math.round(node.dom.height)}` : "missing" })));
+      return snapshot;
+    },
+    async refresh() {
+      const channel = window.RMLRuntimeBridge?.projectChannel?.(state.metadata.namespaceName, state.metadata.className) || `${state.metadata.namespaceName}.${state.metadata.className}`;
+      window.__RMLPreviewTrace?.push?.({ at: Date.now(), stage: "diagnostic-refresh-start", channel });
+      const bridgeRefresh = await Promise.resolve(window.RMLRuntimeBridge?.refresh?.(channel));
+      const liveSyncChanged = rmlRuntimeDisplaySyncConfigurationPreview(channel);
+      window.__RMLPreviewTrace?.push?.({ at: Date.now(), stage: "diagnostic-refresh-after-sync", channel, liveSyncChanged });
+      renderSettingsPreview({ force: true });
+      return { bridgeRefresh, liveSyncChanged, trace: [...(window.__RMLPreviewTrace || [])], snapshot: settingsPreviewDiagnosticsSnapshot() };
+    },
+    async diagnoseVisibility() {
+      window.__RMLPreviewTrace = [];
+      const channel = window.RMLRuntimeBridge?.projectChannel?.(state.metadata.namespaceName, state.metadata.className) || `${state.metadata.namespaceName}.${state.metadata.className}`;
+      window.__RMLPreviewTrace.push({ at: Date.now(), stage: "diagnose-start", channel, draftOpen: Boolean(settingsPreviewDraft), graphHost: Boolean(window.RMLDynamicGraphHost), phaseFunction: typeof window.RMLDynamicGraphHost?.previewConfigurationPhase === "function" });
+      const bridgeRefresh = await Promise.resolve(window.RMLRuntimeBridge?.refresh?.(channel));
+      window.__RMLPreviewTrace.push({ at: Date.now(), stage: "diagnose-after-bridge-refresh", channel, bridgeRefresh: bridgeRefresh ?? null, records: window.RMLRuntimeBridge?.debugSnapshot?.(channel)?.length ?? 0 });
+      const changed = rmlRuntimeDisplaySyncConfigurationPreview(channel);
+      window.__RMLPreviewTrace.push({ at: Date.now(), stage: "diagnose-after-live-sync", channel, changed, runtimeMenuVisibility: structuredClone(settingsPreviewRuntimeMenu?.visibility || {}) });
+      renderSettingsPreview({ force: true });
+      const snapshot = settingsPreviewDiagnosticsSnapshot();
+      window.__RMLPreviewTrace.push({ at: Date.now(), stage: "diagnose-final", visible: snapshot.nodes.map(n => ({ id: n.id, key: n.keyName, visible: n.previewVisible, draft: n.draftValue })) });
+      const trace = [...window.__RMLPreviewTrace];
+      console.table(trace);
+      return { trace, snapshot };
+    },
+    async probe() {
+      const channel = window.RMLRuntimeBridge?.projectChannel?.(state.metadata.namespaceName, state.metadata.className) || `${state.metadata.namespaceName}.${state.metadata.className}`;
+      const base = await Promise.resolve(window.RMLRuntimeBridge?.discoverScanner?.());
+      const result = { build: RML_BUILDER_BUILD_ID, channel, base, connection: window.RMLRuntimeBridge?.getConnectionState?.() || null };
+      if (!base) return { ...result, error: "No live scanner base URL." };
+      for (const [name, path] of [["health", "/health"], ["snapshot", `/runtime/snapshot?channel=${encodeURIComponent(channel)}`]]) {
+        try {
+          const response = await fetch(`${base}${path}`, { cache: "no-store", headers: { Accept: "application/json" } });
+          result[name] = { status: response.status, ok: response.ok, body: await response.text() };
+        } catch (error) {
+          result[name] = { error: error?.message || String(error) };
+        }
+      }
+      console.log("[RML Preview Diagnostics] scanner probe", result);
+      return result;
+    }
+  }),
+  writable: false,
+  enumerable: true,
+  configurable: true
+});
+
+let settingsPreviewRuntimePhaseDepth = 0;
+let settingsPreviewRuntimeRenderPending = false;
+
 function applySettingsPreviewRuntimeMenuAction(
   action,
   payload = {}
@@ -24886,6 +25280,14 @@ function applySettingsPreviewRuntimeMenuAction(
     return true;
   };
   let applied = false;
+
+  window.__RMLPreviewTrace?.push?.({
+    at: Date.now(),
+    stage: "menu-action-request",
+    action: String(action || ""),
+    itemId,
+    payload: structuredClone(payload || {})
+  });
 
   switch (action) {
     case "visibility":
@@ -24984,8 +25386,24 @@ function applySettingsPreviewRuntimeMenuAction(
       break;
   }
 
+  window.__RMLPreviewTrace?.push?.({
+    at: Date.now(),
+    stage: "menu-action-result",
+    action: String(action || ""),
+    itemId,
+    applied,
+    visibility: itemId
+      ? settingsPreviewRuntimeMenu?.visibility?.[itemId]
+      : undefined
+  });
+
   if (applied) {
-    renderSettingsPreview();
+    if (settingsPreviewRuntimePhaseDepth > 0) {
+
+      settingsPreviewRuntimeRenderPending = true;
+    } else {
+      renderSettingsPreview();
+    }
   }
 
   return {
@@ -25004,19 +25422,61 @@ function runSettingsPreviewRuntimePhase(
     return null;
   }
 
+  if (settingsPreviewRuntimePhaseDepth > 0) {
+    window.__RMLPreviewTrace?.push?.({
+      at: Date.now(),
+      stage: "phase-reentry-suppressed",
+      phase: String(phase || ""),
+      outlineNodeId: String(outlineNodeId || ""),
+      depth: settingsPreviewRuntimePhaseDepth
+    });
+    return {
+      started: false,
+      reentrant: true,
+      suppressed: true
+    };
+  }
+
+  settingsPreviewRuntimePhaseDepth += 1;
+  settingsPreviewRuntimeRenderPending = false;
   try {
-    return (
+    window.__RMLPreviewTrace?.push?.({
+      at: Date.now(),
+      stage: "phase-call",
+      phase: String(phase || ""),
+      outlineNodeId: String(outlineNodeId || ""),
+      hostAvailable: Boolean(window.RMLDynamicGraphHost),
+      phaseFunctionAvailable: typeof window.RMLDynamicGraphHost?.previewConfigurationPhase === "function"
+    });
+    const result =
       window.RMLDynamicGraphHost
         ?.previewConfigurationPhase?.(
           phase,
           outlineNodeId
-        ) || null
-    );
+        ) || null;
+    window.__RMLPreviewTrace?.push?.({
+      at: Date.now(),
+      stage: "phase-result",
+      phase: String(phase || ""),
+      outlineNodeId: String(outlineNodeId || ""),
+      result: result ? structuredClone(result) : null
+    });
+    return result;
   } catch (error) {
-    console.warn(
+
+    console.error(
       `Local Configuration Preview ${phase} phase failed.`,
-      error
+      error,
+      error instanceof Error ? error.stack : undefined
     );
+    window.__RMLPreviewTrace?.push?.({
+      at: Date.now(),
+      stage: "phase-error",
+      phase: String(phase || ""),
+      outlineNodeId: String(outlineNodeId || ""),
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? String(error.stack || "") : ""
+    });
     return {
       started: false,
       error: true,
@@ -25025,6 +25485,10 @@ function runSettingsPreviewRuntimePhase(
           ? error.message
           : String(error)
     };
+  } finally {
+    settingsPreviewRuntimePhaseDepth = Math.max(0, settingsPreviewRuntimePhaseDepth - 1);
+
+    settingsPreviewRuntimeRenderPending = false;
   }
 }
 
@@ -25411,8 +25875,21 @@ async function openSettingsPreview() {
         savedDraft
       );
 
+    await ensureLazyScriptBundle(
+      "runtime-core"
+    );
+
+    if (
+      window.RMLBaseModNodesReady &&
+      typeof window.RMLBaseModNodesReady.then ===
+        "function"
+    ) {
+      await window.RMLBaseModNodesReady;
+    }
+
     settingsPreviewRuntimeMenu =
       createSettingsPreviewRuntimeMenu();
+
     settingsPreviewPulseCounts = {};
     settingsPreviewColorSession = null;
 
@@ -28025,7 +28502,7 @@ function promiseWithBuilderTimeout(
 
 function assertProjectRuntimeModuleCoherence() {
   const expectedModuleId =
-    "1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch";
+    "1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup";
   const requiredFactoryVersion = 38;
   const mismatches = [];
   const requireModuleId = (
@@ -30269,6 +30746,8 @@ async function ensureProjectRuntimePrerequisites(
     }
   }
 
+  preserveCustomCSharpImportConnectionPorts(project.extensions?.typedNodeGraph);
+
   const graphValidation =
     compatibilityMode
       ? null
@@ -32217,7 +32696,7 @@ document.addEventListener("rml-scanner:manual-live-activated", () => {
   void synchronizeRmlBuilderProfileFromScanner();
 });
 
-function installRmlPersonalSettings() { loadRmlPersonalSettings();loadRmlBuilderProfilePresentation();renderRmlBuilderProfilePresentation();synchronizeRmlPersonalSettingsControls();applyRmlPersonalSettings();const panel=document.getElementById("builder-settings-panel"),open=document.getElementById("builder-settings-open"),status=document.getElementById("builder-settings-status"),inspectorBack=document.getElementById("builder-settings-inspector-back");const setSettingsWorkspace=show=>{if(panel)panel.hidden=!show;open?.setAttribute("aria-expanded",String(show));elements.projectDialog?.classList.toggle("builder-settings-workspace",show);const title=document.getElementById("project-dialog-title"),kicker=elements.projectDialog?.querySelector(".export-dialog-header small");if(title)title.textContent=show?"Settings":"Project & Preferences";if(kicker)kicker.textContent=show?"Personal Builder experience":(rmlBuilderProfilePresentation?.displayName||"Builder profile");if(show){synchronizeRmlPersonalSettingsControls();hardSynchronizeRmlEditorSettingsFromActiveEditor();}else{closeRmlEditorDashboardColorPicker();renderRmlBuilderProfilePresentation();}requestAnimationFrame(()=>updateAdaptiveUtilityDialog(elements.projectDialog));};open?.addEventListener("click",()=>{const show=!elements.projectDialog?.classList.contains("builder-settings-workspace");if(!show)closeRmlEditorDashboardColorPicker();setSettingsWorkspace(show);});inspectorBack?.addEventListener("click",()=>closeRmlEditorDashboardColorPicker());document.getElementById("builder-settings-node-scrollbars")?.addEventListener("change",event=>commitRmlPersonalSettings({nodeScrollbars:event.currentTarget.checked===true}));document.getElementById("builder-settings-node-text")?.addEventListener("input",event=>commitRmlPersonalSettings({nodeTextScale:Number(event.currentTarget.value)}));document.getElementById("builder-settings-ux-text")?.addEventListener("input",event=>commitRmlPersonalSettings({uxTextScale:Number(event.currentTarget.value)}));document.getElementById("builder-settings-reset")?.addEventListener("click",()=>{rmlPersonalSettings={...RML_PERSONAL_SETTINGS_DEFAULTS};rmlEditorPersonalSettings={appearance:{...RML_EDITOR_APPEARANCE_DEFAULTS},diagnosticSource:"Roslyn"};saveRmlPersonalSettings();synchronizeRmlPersonalSettingsControls();applyRmlPersonalSettings();for(const [key,value] of Object.entries(RML_EDITOR_APPEARANCE_DEFAULTS)){window.RMLCustomCSharpDetachedEditor?.setActiveAppearanceValue?.(key,value);}window.RMLCustomCSharpDetachedEditor?.setActiveDiagnosticSource?.("Roslyn");synchronizeRmlEditorDashboard();if(status)status.textContent=window.RMLI18n.t("{{i18n:js.presentation.0efcb476e33e}}");});const diagnosticSelect=document.getElementById("builder-settings-editor-diagnostic");diagnosticSelect?.addEventListener("change",event=>commitRmlEditorDiagnostic(event.currentTarget.value));synchronizeRmlEditorDiagnosticSelect(rmlEditorPersonalSettings.diagnosticSource);if(typeof MutationObserver==="function"){new MutationObserver(records=>{let changed=false;for(const record of records){for(const node of Array.from(record.addedNodes||[])){if(node?.tagName==="LINK"){changed=true;node.addEventListener("load",scheduleRmlPersonalSettingsApply,{once:true});}else if(node?.tagName==="STYLE")changed=true;}}if(changed)scheduleRmlPersonalSettingsApply();}).observe(document.head,{childList:true});} }
+function installRmlPersonalSettings() { loadRmlPersonalSettings();loadRmlBuilderProfilePresentation();renderRmlBuilderProfilePresentation();synchronizeRmlPersonalSettingsControls();applyRmlPersonalSettings();const panel=document.getElementById("builder-settings-panel"),open=document.getElementById("builder-settings-open"),status=document.getElementById("builder-settings-status"),inspectorBack=document.getElementById("builder-settings-inspector-back");const setSettingsWorkspace=show=>{if(panel)panel.hidden=!show;open?.setAttribute("aria-expanded",String(show));elements.projectDialog?.classList.toggle("builder-settings-workspace",show);const title=document.getElementById("project-dialog-title"),kicker=elements.projectDialog?.querySelector(".export-dialog-header small");if(title)title.textContent=show?"Settings":"Project & Preferences";if(kicker)kicker.textContent=show?"Personal Builder experience":(rmlBuilderProfilePresentation?.displayName||"Builder profile");if(show){synchronizeRmlPersonalSettingsControls();hardSynchronizeRmlEditorSettingsFromActiveEditor();}else{closeRmlEditorDashboardColorPicker();renderRmlBuilderProfilePresentation();}requestAnimationFrame(()=>updateAdaptiveUtilityDialog(elements.projectDialog));};open?.addEventListener("click",async()=>{const show=!elements.projectDialog?.classList.contains("builder-settings-workspace");if(show){try{await ensureLazyStyleBundle("project");}catch(error){console.error("Project/settings styles could not be loaded.",error);return;}}else closeRmlEditorDashboardColorPicker();setSettingsWorkspace(show);});inspectorBack?.addEventListener("click",()=>closeRmlEditorDashboardColorPicker());document.getElementById("builder-settings-node-scrollbars")?.addEventListener("change",event=>commitRmlPersonalSettings({nodeScrollbars:event.currentTarget.checked===true}));document.getElementById("builder-settings-node-text")?.addEventListener("input",event=>commitRmlPersonalSettings({nodeTextScale:Number(event.currentTarget.value)}));document.getElementById("builder-settings-ux-text")?.addEventListener("input",event=>commitRmlPersonalSettings({uxTextScale:Number(event.currentTarget.value)}));document.getElementById("builder-settings-reset")?.addEventListener("click",()=>{rmlPersonalSettings={...RML_PERSONAL_SETTINGS_DEFAULTS};rmlEditorPersonalSettings={appearance:{...RML_EDITOR_APPEARANCE_DEFAULTS},diagnosticSource:"Roslyn"};saveRmlPersonalSettings();synchronizeRmlPersonalSettingsControls();applyRmlPersonalSettings();for(const [key,value] of Object.entries(RML_EDITOR_APPEARANCE_DEFAULTS)){window.RMLCustomCSharpDetachedEditor?.setActiveAppearanceValue?.(key,value);}window.RMLCustomCSharpDetachedEditor?.setActiveDiagnosticSource?.("Roslyn");synchronizeRmlEditorDashboard();if(status)status.textContent=window.RMLI18n.t("{{i18n:js.presentation.0efcb476e33e}}");});const diagnosticSelect=document.getElementById("builder-settings-editor-diagnostic");diagnosticSelect?.addEventListener("change",event=>commitRmlEditorDiagnostic(event.currentTarget.value));synchronizeRmlEditorDiagnosticSelect(rmlEditorPersonalSettings.diagnosticSource);if(typeof MutationObserver==="function"){new MutationObserver(records=>{let changed=false;for(const record of records){for(const node of Array.from(record.addedNodes||[])){if(node?.tagName==="LINK"){changed=true;node.addEventListener("load",scheduleRmlPersonalSettingsApply,{once:true});}else if(node?.tagName==="STYLE")changed=true;}}if(changed)scheduleRmlPersonalSettingsApply();}).observe(document.head,{childList:true});} }
 
 let projectDialogOpenSequence = 0;
 
@@ -36973,7 +37452,7 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "../../templates/help_template.html?v=1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch"
+    "../../templates/help_template.html?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup"
   )
     .then(markup => {
       const host = document.getElementById("lazy-dialog-host") || document.body;
@@ -43528,6 +44007,10 @@ function rmlRuntimeDisplayRemoveNode(
     );
 
   if (index >= 0) {
+    const removedNode = list[index];
+
+    detachRuntimeGraphForExplicitConfigurationOutlineDeletion(removedNode);
+
     list.splice(index, 1);
     return true;
   }
@@ -43620,17 +44103,8 @@ function rmlRuntimeDisplayGraphBindings() {
     const outlineId =
       String(connection.fromPort)
         .slice("config-".length);
-    const outlineNode =
-      rmlRuntimeDisplayFindNode(
-        outlineId
-      );
 
-    if (
-      !monitor ||
-      !rmlRuntimeDisplayIsNode(
-        outlineNode
-      )
-    ) {
+    if (!monitor) {
       continue;
     }
 
@@ -43724,7 +44198,27 @@ function rmlRuntimeDisplayBindingsFor(
       )
     );
 
-  return [...bindings].sort(
+  const mergedBindings =
+    [...bindings];
+  const knownMonitorIds =
+    new Set(
+      mergedBindings.map(binding =>
+        String(binding?.monitorId || "")
+      )
+    );
+
+  for (const monitorId of order) {
+    if (!knownMonitorIds.has(monitorId)) {
+      mergedBindings.push({
+        monitorId,
+        label: "Display Value",
+        sequence: Number.MAX_SAFE_INTEGER
+      });
+      knownMonitorIds.add(monitorId);
+    }
+  }
+
+  return mergedBindings.sort(
     (left, right) => {
       const leftRank =
         rank.has(left.monitorId)
@@ -43755,24 +44249,17 @@ function rmlRuntimeDisplaySyncOrder(
     return [];
   }
 
-  const available =
-    bindings.map(binding =>
-      String(binding.monitorId || "")
-    ).filter(Boolean);
-  const availableSet =
-    new Set(available);
   const existing =
     Array.isArray(node.runtimeDisplayOrder)
       ? node.runtimeDisplayOrder
-          .map(value =>
-            String(value || "")
-          )
-          .filter(value =>
-            availableSet.has(value)
-          )
+          .map(value => String(value || ""))
+          .filter(Boolean)
       : [];
-  const seen =
-    new Set(existing);
+  const seen = new Set(existing);
+  const available =
+    (Array.isArray(bindings) ? bindings : [])
+      .map(binding => String(binding?.monitorId || ""))
+      .filter(Boolean);
 
   for (const monitorId of available) {
     if (!seen.has(monitorId)) {
@@ -43781,8 +44268,7 @@ function rmlRuntimeDisplaySyncOrder(
     }
   }
 
-  node.runtimeDisplayOrder =
-    existing;
+  node.runtimeDisplayOrder = existing;
   return existing;
 }
 
@@ -44125,18 +44611,7 @@ function rmlRuntimeDisplayInspector() {
   remove.addEventListener(
     "click",
     async () => {
-      if (
-        !(await confirmBuilderAction({
-          tone: "danger",
-          kicker: "Runtime display",
-          title: "Delete this Runtime Display?",
-          message:
-            "The display item and its configured runtime values are removed from the Configuration Outline.",
-          details:
-            "Runtime Graph references to this item may become invalid.",
-          confirmLabel: "Delete Display"
-        }))
-      ) {
+      if (!(await confirmExplicitConfigurationOutlineDeletion(selected, "Runtime Display"))) {
         return;
       }
 
@@ -45094,6 +45569,8 @@ let rmlRuntimeDisplayPreviewUnsubscribe =
   null;
 let rmlRuntimeDisplayPreviewChannel =
   "";
+let rmlRuntimeDisplayMenuInitializedChannel =
+  "";
 
 function rmlRuntimeDisplayReleasePreviewBridge() {
   try {
@@ -45104,6 +45581,8 @@ function rmlRuntimeDisplayReleasePreviewBridge() {
   rmlRuntimeDisplayPreviewUnsubscribe =
     null;
   rmlRuntimeDisplayPreviewChannel =
+    "";
+  rmlRuntimeDisplayMenuInitializedChannel =
     "";
 }
 
@@ -45182,8 +45661,124 @@ function rmlRuntimeDisplayPreviewItems(
 
 function rmlRuntimeDisplayPreviewCopyIcon() {
   return `
-    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch#icon-copy"></use></svg>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-copy"></use></svg>
   `;
+}
+
+function rmlPreviewDirectConfigurationDisplayRecord(channel, nodeId) {
+  const graph = state?.extensions?.typedNodeGraph;
+  if (!graph?.active || !Array.isArray(graph.connections) || !Array.isArray(graph.nodes)) {
+    return null;
+  }
+  const configurationNodeIds = new Set(
+    graph.nodes
+      .filter(node => node?.kind === "configuration")
+      .map(node => String(node.id || ""))
+  );
+  const expectedPort = `config-${String(nodeId || "")}`;
+  const connection = graph.connections.find(item =>
+    configurationNodeIds.has(String(item?.fromNode || "")) &&
+    String(item?.fromPort || "") === expectedPort &&
+    String(item?.toPort || "") === "value"
+  );
+  if (!connection) return null;
+  const target = graph.nodes.find(node => String(node?.id || "") === String(connection.toNode || ""));
+  if (target?.kind !== "operator" || target?.operatorId !== "resonite.displayValue") return null;
+  return window.RMLRuntimeBridge?.getValue?.(channel, String(target.id || "")) || null;
+}
+
+function rmlPreviewConfigurationLiveRecord(channel, nodeId) {
+  return window.RMLRuntimeBridge?.getValue?.(
+    channel,
+    `configuration:${String(nodeId || "")}`
+  ) || rmlPreviewDirectConfigurationDisplayRecord(channel, nodeId);
+}
+
+function rmlRuntimeDisplaySyncConfigurationPreview(channel) {
+  if (!settingsPreviewDraft || !window.RMLRuntimeBridge) {
+    return false;
+  }
+
+  let changed = false;
+  const changedNodeIds = [];
+  const entries =
+    typeof flattenNodes === "function"
+      ? flattenNodes(state?.nodes || [])
+      : [];
+
+  for (const entry of entries) {
+    const node = entry?.node;
+    if (!node || node.kind === LAYOUT_ROW_KIND || node.valueType === "runtimeDisplay" || node.valueType === "button") {
+      continue;
+    }
+
+    const record = rmlPreviewConfigurationLiveRecord(channel, node.id);
+    if (!record) continue;
+
+    let liveValue = record.value ?? record.display;
+    if (
+      node.dynamicSettingKind &&
+      (record.value === undefined || record.value === null) &&
+      String(record.display ?? "").trim() === "(None)"
+    ) {
+      liveValue = "";
+    }
+    window.__RMLPreviewTrace?.push?.({
+      at: Date.now(),
+      stage: "live-value",
+      nodeId: String(node.id || ""),
+      dynamic: Boolean(node.dynamicSettingKind),
+      rawValue: record.value,
+      display: record.display,
+      appliedValue: liveValue
+    });
+    const before = JSON.stringify(
+      node.kind === "controller"
+        ? settingsPreviewDraft.controllers?.[node.id]
+        : settingsPreviewDraft.values?.[node.id]
+    );
+    settingsPreviewApplyRuntimeValue(node.id, liveValue);
+    const after = JSON.stringify(
+      node.kind === "controller"
+        ? settingsPreviewDraft.controllers?.[node.id]
+        : settingsPreviewDraft.values?.[node.id]
+    );
+
+    if (before !== after) {
+      changed = true;
+      changedNodeIds.push(String(node.id));
+    }
+  }
+
+  const receivedNodeIds = [];
+  for (const entry of entries) {
+    const node = entry?.node;
+    if (!node || node.kind === LAYOUT_ROW_KIND || node.valueType === "runtimeDisplay" || node.valueType === "button") {
+      continue;
+    }
+    if (rmlPreviewConfigurationLiveRecord(channel, node.id)) {
+      receivedNodeIds.push(String(node.id));
+    }
+  }
+
+  let runtimePhaseEvaluated = false;
+  const uniqueReceivedNodeIds = [...new Set(receivedNodeIds)];
+  if (uniqueReceivedNodeIds.length > 0) {
+    if (rmlRuntimeDisplayMenuInitializedChannel !== channel) {
+
+      runSettingsPreviewRuntimePhase("startup");
+      rmlRuntimeDisplayMenuInitializedChannel = channel;
+      runtimePhaseEvaluated = true;
+    } else {
+
+      for (const nodeId of [...new Set(changedNodeIds)]) {
+        runSettingsPreviewRuntimePhase("saved", nodeId);
+        runtimePhaseEvaluated = true;
+      }
+    }
+  }
+
+  return changed || runtimePhaseEvaluated;
 }
 
 function rmlRuntimeDisplayEnsurePreviewBridge() {
@@ -45207,6 +45802,12 @@ function rmlRuntimeDisplayEnsurePreviewBridge() {
   rmlRuntimeDisplayPreviewChannel =
     channel;
 
+  const hydratedFromCache =
+    rmlRuntimeDisplaySyncConfigurationPreview(channel);
+  if (hydratedFromCache) {
+    queueMicrotask(() => renderSettingsPreview({ force: true }));
+  }
+
   if (
     window.RMLRuntimeBridge &&
     typeof window.RMLRuntimeBridge
@@ -45217,8 +45818,14 @@ function rmlRuntimeDisplayEnsurePreviewBridge() {
         window.RMLRuntimeBridge
           .subscribe(
             channel,
-            () =>
-              rmlRuntimeDisplayRenderPreviewRows()
+            () => {
+              const changed =
+                rmlRuntimeDisplaySyncConfigurationPreview(channel);
+              if (changed) {
+                renderSettingsPreview({ force: true });
+              }
+              rmlRuntimeDisplayRenderPreviewRows();
+            }
           );
     } catch {
     }
@@ -45454,20 +46061,62 @@ function rmlRuntimeDisplayRenderPreviewRows() {
       node.runtimeDisplayStacked === true
     );
 
-    const bindings =
-      rmlRuntimeDisplayBindingsFor(
-        node
+    const graphBindings =
+      rmlRuntimeDisplayGraphBindings()
+        .get(String(node?.id || "")) ||
+      [];
+    const graphBindingByMonitorId =
+      new Map(
+        graphBindings
+          .filter(binding =>
+            String(binding?.monitorId || "")
+          )
+          .map(binding => [
+            String(binding.monitorId),
+            binding
+          ])
       );
-
-    rmlRuntimeDisplaySyncOrder(
-      node,
-      bindings
+    const configuredMonitorIds =
+      Array.isArray(node.runtimeDisplayOrder)
+        ? [...new Set(
+            node.runtimeDisplayOrder
+              .map(value => String(value || ""))
+              .filter(Boolean)
+          )]
+        : [];
+    const graph = state.extensions?.typedNodeGraph;
+    const graphStructurallyAvailable =
+      Array.isArray(graph?.nodes) &&
+      Array.isArray(graph?.connections) &&
+      graph.nodes.some(candidate =>
+        candidate?.kind === "configuration"
+      );
+    const graphMonitorIds = graphBindings
+      .map(binding => String(binding?.monitorId || ""))
+      .filter(Boolean);
+    const graphMonitorIdSet = new Set(graphMonitorIds);
+    const configuredRank = new Map(
+      configuredMonitorIds.map((monitorId, index) => [monitorId, index])
     );
 
-    const orderedBindings =
-      rmlRuntimeDisplayBindingsFor(
-        node
-      );
+    const authoritativeMonitorIds = graphStructurallyAvailable
+      ? [...new Set(graphMonitorIds)].sort((left, right) => {
+          const lr = configuredRank.has(left)
+            ? configuredRank.get(left)
+            : Number.MAX_SAFE_INTEGER;
+          const rr = configuredRank.has(right)
+            ? configuredRank.get(right)
+            : Number.MAX_SAFE_INTEGER;
+          return lr - rr;
+        })
+      : configuredMonitorIds;
+    const orderedBindings = authoritativeMonitorIds.map(monitorId =>
+      graphBindingByMonitorId.get(monitorId) || {
+        monitorId,
+        label: "Display Value",
+        sequence: Number.MAX_SAFE_INTEGER
+      }
+    );
 
     const fallback =
       node.customValidator ||
@@ -45524,13 +46173,17 @@ function rmlRuntimeDisplayRenderPreviewRows() {
         )
       );
 
+    const runtimeDisplayColumnCount =
+      Math.max(1, columns.length);
+
     output.dataset.rmlRuntimeDisplayColumnCount =
-      String(
-        Math.max(
-          1,
-          columns.length
-        )
-      );
+      String(runtimeDisplayColumnCount);
+    output.style.setProperty(
+      "--rml-runtime-display-column-count",
+      String(runtimeDisplayColumnCount)
+    );
+    section.dataset.rmlRuntimeDisplayColumnCount =
+      String(runtimeDisplayColumnCount);
 
     for (
       let row = 0;
@@ -45677,78 +46330,10 @@ const rmlRuntimeDisplayBasePreviewRenderer =
 
 renderSettingsPreview =
   function (...args) {
-    const originalNodes =
-      state.nodes;
 
-    state.nodes =
-      (function filter(nodes) {
-        return (
-          Array.isArray(nodes)
-            ? nodes
-            : []
-        )
-          .filter(node =>
-            !rmlRuntimeDisplayIsNode(
-              node
-            )
-          )
-          .map(node => {
-            if (node?.kind === LAYOUT_ROW_KIND) {
-              const sourceChildren =
-                Array.isArray(node.children)
-                  ? node.children
-                  : [];
-
-              return {
-                ...node,
-                previewLayoutChildren:
-                  sourceChildren.map(child => ({
-                    id: child?.id,
-                    layoutWidthPercent:
-                      child?.layoutWidthPercent
-                  })),
-                children:
-                  filter(
-                    node.children
-                  )
-              };
-            }
-
-            if (node?.kind !== "controller") {
-              return node;
-            }
-
-            return {
-              ...node,
-              options:
-                (
-                  Array.isArray(node.options)
-                    ? node.options
-                    : []
-                ).map(option => ({
-                  ...option,
-                  children:
-                    filter(
-                      option.children
-                    )
-                }))
-            };
-          });
-      })(originalNodes);
-
-    let result;
-
-    try {
-      result =
-        rmlRuntimeDisplayBasePreviewRenderer
-          .apply(
-            this,
-            args
-          );
-    } finally {
-      state.nodes =
-        originalNodes;
-    }
+    const result =
+      rmlRuntimeDisplayBasePreviewRenderer
+        .apply(this, args);
 
     const finish = value => {
       queueMicrotask(

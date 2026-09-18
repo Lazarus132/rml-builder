@@ -1253,11 +1253,29 @@
     }
 
     const item = items[index];
+    const resolvedValue =
+      String(item?.value ?? "");
+    const selectionChanged =
+      resolvedValue !== requestedSelection;
 
     setDynamicPreviewChoiceValue(
       node,
-      item.value
+      resolvedValue
     );
+
+    if (selectionChanged) {
+      queueMicrotask(() => {
+        if (
+          settingsPreviewDraft?.values?.[node.id] === resolvedValue
+        ) {
+          window.RMLDynamicGraphHost
+            ?.previewConfigurationPhase?.(
+              "saved",
+              node.id
+            );
+        }
+      });
+    }
 
     return {
       index,

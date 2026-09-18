@@ -2,7 +2,7 @@
   "use strict";
 
   const API_FACTORY_MODULE_ID =
-    "1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch";
+    "1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup";
   const FACTORY_VERSION = 38;
   const API_VERIFICATION_SCHEMA_VERSION = 3;
   const CATALOG_PROJECTION_INDEX_VERSION = 1;
@@ -294,12 +294,6 @@
         ),
       indexer:
         source ? [...source.indexer] : [],
-      catalogTypeNames:
-        new Set(
-          source
-            ? source.catalogTypeNames
-            : []
-        ),
       nextOrder:
         source
           ? Math.max(
@@ -341,10 +335,6 @@
             ])
         : [])
     ]) {
-      const value = String(type || "").trim();
-      if (value) {
-        state.catalogTypeNames.add(value);
-      }
     }
 
     const kind = String(
@@ -495,11 +485,7 @@
           Number(definitionRevision) || 0
         ),
       customCSharpByIdentifier:
-        catalogProjectionCustomLookup(state),
-      catalogTypeNames:
-        Object.freeze([
-          ...state.catalogTypeNames
-        ])
+        catalogProjectionCustomLookup(state)
     });
     catalogProjectionCustomStateByIndex.set(
       index,
@@ -2936,10 +2922,8 @@
         typeof stagedCatalogProjectionIndex
           .customCSharpByIdentifier?.get !==
             "function" ||
-        !Array.isArray(
-          stagedCatalogProjectionIndex
-            .catalogTypeNames
-        )
+        typeof stagedCatalogProjectionIndex
+          .typeByName?.has !== "function"
       ) {
         throw new Error(
           "The live API node factory did not prepare a complete definition-scoped Custom C# catalog index."
@@ -3163,10 +3147,8 @@
         typeof stagedCatalogProjectionIndex
           .customCSharpByIdentifier?.select !==
             "function" ||
-        !Object.isFrozen(
-          stagedCatalogProjectionIndex
-            .catalogTypeNames
-        )
+        typeof stagedCatalogProjectionIndex
+          .typeByName?.has !== "function"
       ) {
         throw new Error(
           "The rebuilt API catalog factory failed to publish its prepared graph-codegen index."
@@ -3683,7 +3665,7 @@
         : underlying;
     }
 
-    function catalogTypeNamesInExpression(csType) {
+    function catalogTypesInExpression(csType) {
       const normalized =
         normalizeCsType(csType)
           .replace(/global::/g, "");
@@ -3717,7 +3699,7 @@
       }
 
       for (const typeName of
-        catalogTypeNamesInExpression(csType)) {
+        catalogTypesInExpression(csType)) {
         const information =
           typeByName.get(typeName);
         if (information) rows.push(information);
@@ -7086,7 +7068,7 @@
       const local =
         `_apiTarget${api.token(api.node.id)}`;
 
-      return `((${target}) switch { ${ownerCs} ${local} => ${memberAccess(local)}, _ => default(${valueCs})! })`;
+      return `(((object?)(${target})) is ${ownerCs} ${local} ? ${memberAccess(local)} : default(${valueCs})!)`;
     }
 
     function propertyReadExpression(

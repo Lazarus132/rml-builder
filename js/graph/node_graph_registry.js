@@ -40,7 +40,17 @@ const TYPE_INFO = {
     string: {
       label: "String",
       short: "TXT",
-      color: "#ff83bd"
+      color: "#ff83bd",
+      csType: "System.String",
+      referenceType: true
+    },
+    object: {
+      label: "Object",
+      short: "OBJ",
+      color: "#9da8b4",
+      csType: "System.Object",
+      defaultCs: "null",
+      referenceType: true
     },
     Uri: {
       label: "URI",

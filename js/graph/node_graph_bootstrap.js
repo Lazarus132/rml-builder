@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_BOOTSTRAP_MODULE_ID =
-  "1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch";
+  "1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup";
 
 function assertGraphBootstrapModuleCoherence() {
   const mismatches = [];

@@ -737,8 +737,13 @@
   window.addEventListener("offline", () => { if (mode !== "cached") disconnect("The browser is offline. Click Cached to reconnect."); });
   window.addEventListener("pagehide", () => { if (mode !== "cached") disconnect(); });
 
+  function debugSnapshot(channel) {
+    const state = channels.get(normalizeChannel(channel));
+    return state ? [...state.values.values()].map(record => ({ ...record })) : [];
+  }
+
   Object.defineProperty(window, "RMLRuntimeBridge", {
-    value: Object.freeze({ version: BRIDGE_VERSION, subscribe, getState, getValue, refresh,
+    value: Object.freeze({ version: BRIDGE_VERSION, subscribe, getState, getValue, refresh, debugSnapshot,
       connect, disconnect, toggle, renderStatus, getConnectionState, projectChannel,
       getSessionSignal: () => controller?.signal || null,
       discoverScanner: () => Promise.resolve(mode === "live" ? scannerBaseUrl : "") }),

@@ -201,7 +201,8 @@
 }
 
 .rml-preview-layout-row.horizontal .rml-preview-setting {
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  grid-template-columns: minmax(0, 35fr) minmax(0, 65fr);
+  column-gap: 6px;
 }
 
 .rml-preview-layout-row.horizontal .rml-preview-setting-bool,
@@ -3577,4 +3578,689 @@ dialog.settings-preview-dialog {
 .rml-preview-runtime-display[data-rml-runtime-display-column-count] {
   --rml-runtime-display-column-count:
     var(--rml-attr-rml-runtime-display-column-count, 1);
+}
+
+@media (min-width: 981px) and (min-height: 721px) {
+  .settings-preview-dialog:not(.rml-preview-color-open) {
+    border: 2px solid #17212c;
+    border-radius: 26px;
+    background: #080d13;
+    box-shadow: 0 38px 120px rgba(0,0,0,.78), inset 0 0 0 1px rgba(108,139,166,.08);
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-window {
+    min-height: 0 !important;
+    grid-template-rows: 76px minmax(0,1fr) 64px;
+    background: radial-gradient(circle at 12% -18%,rgba(74,109,137,.16),transparent 34rem),#080d13;
+    font-family: inherit;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-header {
+    min-width: 0;
+    gap: 18px;
+    padding: 12px 22px 10px 26px;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-header h2 {
+    font-size: clamp(24px,3.1vw,38px);
+    font-weight: 500;
+    letter-spacing: -.025em;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-close {
+    width: 44px;
+    height: 44px;
+    padding: 0 0 3px;
+    background: #ff7378;
+    color: #6d252b;
+    font-size: 39px;
+    font-weight: 700;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-content {
+    min-height: 0;
+    margin: 0 24px;
+    overflow: auto;
+    border: 1px solid rgba(72,94,114,.2);
+    border-radius: 9px;
+    background: rgba(6,10,15,.68);
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-settings {
+    min-height: max-content;
+    gap: 4px;
+    padding: 25px 2px 8px;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-setting {
+    min-height: 32px;
+    grid-template-columns: minmax(160px,35fr) minmax(280px,65fr);
+    gap: 8px;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-setting-bool,
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-setting-color {
+    grid-template-columns: minmax(220px,70fr) minmax(104px,30fr);
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-label,
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-editor {
+    min-width: 0;
+    min-height: 32px;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-label {
+    overflow: hidden;
+    padding: 0 11px;
+    border: 1px solid rgba(76,96,114,.38);
+    border-radius: 5px;
+    background: linear-gradient(180deg,#18232d,#111a22);
+    color: #e5ebef;
+    font-size: 14px;
+    font-weight: 400;
+    letter-spacing: normal;
+    text-shadow: none;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-control,
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-save,
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-color-button {
+    border: 1px solid rgba(84,108,127,.58);
+    border-radius: 5px;
+    background: linear-gradient(180deg,#263541,#18242e);
+    color: #edf4f7;
+    box-shadow: inset 0 1px rgba(255,255,255,.06);
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-control:hover:not(:disabled),
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-save:hover,
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-color-button:hover {
+    border-color: #70bada;
+    background: linear-gradient(180deg,#304451,#20313c);
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-text-field {
+    min-height: 32px;
+    padding: 0 9px;
+    border: 1px solid #454b52;
+    border-radius: 5px;
+    background: #30343a;
+    color: #f1f5f7;
+    box-shadow: inset 0 0 0 2px rgba(10, 13, 17, 0.48);
+    font-size: calc(20px * var(--rml-ux-text-scale, 1));
+    font-weight: 700;
+    line-height: 30px;
+    text-align: center;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-vector input {
+    min-height: 32px;
+    padding: 0 9px;
+    border: 1px solid rgba(72,94,112,.55);
+    border-radius: 4px;
+    background: #0d151c;
+    color: #f1f5f7;
+    font-size: 14px;
+    font-weight: 400;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-checkbox {
+    width: 32px;
+    height: 32px;
+    border: 1px solid rgba(84,108,127,.58);
+    border-radius: 5px;
+    background: #0d151c;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-checkbox span {
+    width: auto;
+    height: auto;
+    font-size: 20px;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-enum-value {
+    min-height: 31px;
+    font-size: 14px;
+    font-weight: 400;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-enum-step,
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-copy {
+    width: 42px;
+    height: 31px;
+    flex-basis: 42px;
+    font-size: 15px;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-slider output {
+    font-size: 13px;
+    font-weight: 400;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-runtime-display-heading strong {
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-runtime-display-value {
+    font-size: 13px;
+    font-weight: 400;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-footer {
+    align-items: flex-start;
+    padding: 5px 0 0;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-save-panel {
+    height: 48px;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-save {
+    width: min(544px,50%);
+    height: 46px;
+    font-size: 24px;
+    font-weight: 700;
+  }
+}
+
+@media (min-width: 981px) and (min-height: 721px) {
+  .settings-preview-dialog:not(.rml-preview-color-open) {
+    width: min(1148px, calc(100vw - 2px)) !important;
+    height: min(870px, calc(100vh - 2px)) !important;
+    border: 2px solid #141d28 !important;
+    border-radius: 27px !important;
+    background: #090d13 !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-window {
+    grid-template-rows: 78px minmax(0, 1fr) 75px !important;
+    background: #090d13 !important;
+    font-family: "Trebuchet MS", "Segoe UI", Arial, sans-serif !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-header {
+    padding: 8px 23px 8px 20px !important;
+    gap: 18px !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-header h2 {
+    font-size: calc(36px * var(--rml-ux-text-scale, 1)) !important;
+    font-weight: 700 !important;
+    letter-spacing: -0.035em !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-warning {
+    display: block !important;
+    flex: 0 0 200px !important;
+    padding-left: 20px !important;
+    color: #ffaa66 !important;
+    font-size: calc(12px * var(--rml-ux-text-scale, 1)) !important;
+    line-height: 1.2 !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-runtime-action-quarantine {
+    width: 42px !important;
+    min-width: 42px !important;
+    height: 42px !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 6px !important;
+    background: #30343a !important;
+    color: #f1f1f2 !important;
+    box-shadow: inset 0 1px rgba(255,255,255,.025),0 1px 1px rgba(0,0,0,.35) !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-runtime-action-quarantine svg {
+    width: 26px !important;
+    height: 26px !important;
+    stroke-width: 1.8 !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-close {
+    width: 42px !important;
+    height: 42px !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 50% !important;
+    background: #ff7478 !important;
+    color: #71292d !important;
+    box-shadow: inset 0 -3px 0 rgba(104,26,31,.18),0 2px 11px rgba(255,87,95,.17) !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-close svg {
+    width: 24px !important;
+    height: 24px !important;
+    stroke-width: 2 !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-content {
+    margin: 0 42px !important;
+    padding: 0 !important;
+
+    overflow-x: clip !important;
+    overflow-y: auto !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-settings {
+    min-height: 100% !important;
+    gap: 4px !important;
+    padding: 25px 2px 8px !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-setting,
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-setting-bool,
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-setting-color {
+    min-height: 32px !important;
+    grid-template-columns: minmax(260px, 360px) minmax(0, 1fr) !important;
+    gap: 22px !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-label,
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-editor {
+    min-height: 32px !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-label {
+    overflow: visible !important;
+    width: auto !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    color: #f0f1f3 !important;
+    font-size: calc(24px * var(--rml-ux-text-scale, 1)) !important;
+    font-weight: 700 !important;
+    letter-spacing: -0.015em !important;
+    text-shadow: 0 1px 1px rgba(0,0,0,.75) !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-control,
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-save,
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-color-button,
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-impulse-button {
+    border: 0 !important;
+    border-radius: 6px !important;
+    background: #30343a !important;
+    color: #f1f1f2 !important;
+    box-shadow: inset 0 1px rgba(255,255,255,.025),0 1px 1px rgba(0,0,0,.35) !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-enum,
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-uri,
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-slider,
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-vector {
+    min-height: 32px !important;
+    gap: 8px !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-enum-value {
+    min-height: 31px !important;
+    font-size: calc(22px * var(--rml-ux-text-scale, 1)) !important;
+    font-weight: 700 !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-enum-step,
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-copy {
+    width: 53px !important;
+    height: 31px !important;
+    flex: 0 0 53px !important;
+    padding: 0 !important;
+    font-size: calc(20px * var(--rml-ux-text-scale, 1)) !important;
+    font-weight: 900 !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-checkbox {
+    width: 34px !important;
+    height: 32px !important;
+    margin-left: auto !important;
+    border: 0 !important;
+    border-radius: 5px !important;
+    background: #30343a !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-checkbox span {
+    width: 31px !important;
+    height: 29px !important;
+    border-radius: 4px !important;
+    font-size: calc(25px * var(--rml-ux-text-scale, 1)) !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-slider input[type="range"] {
+    height: 32px !important;
+    min-height: 32px !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-slider output {
+    width: 60px !important;
+    height: 32px !important;
+    flex: 0 0 60px !important;
+    font-size: calc(20px * var(--rml-ux-text-scale, 1)) !important;
+    font-weight: 700 !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-footer {
+    align-items: flex-start !important;
+    padding: 5px 0 0 !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-save-panel {
+    display: flex !important;
+    width: 100% !important;
+    height: 48px !important;
+    justify-content: center !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-save {
+    width: min(544px, 50%) !important;
+    height: 46px !important;
+    font-size: calc(24px * var(--rml-ux-text-scale, 1)) !important;
+    font-weight: 700 !important;
+  }
+}
+
+@media (min-width: 981px) and (min-height: 721px) {
+  .settings-preview-dialog:not(.rml-preview-color-open) {
+    width: min(1145px, calc(100vw - 2px)) !important;
+    height: min(866px, calc(100vh - 2px)) !important;
+    border: 2px solid #141d28 !important;
+    border-radius: 27px !important;
+    background: #090d13 !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-window {
+    grid-template-rows: 88px minmax(0, 1fr) 70px !important;
+    background: #090d13 !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-header {
+    padding: 8px 15px 8px 15px !important;
+    gap: 10px !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-warning {
+    display: none !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-header h2 {
+    margin: 0 !important;
+    min-width: 0 !important;
+    font-size: calc(30px * var(--rml-ux-text-scale, 1)) !important;
+    font-weight: 700 !important;
+    letter-spacing: -0.025em !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-header-tools {
+    margin-left: auto !important;
+    gap: 10px !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-runtime-action-quarantine,
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-close {
+    width: 42px !important;
+    min-width: 42px !important;
+    height: 42px !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-runtime-action-quarantine svg {
+    width: 27px !important;
+    height: 27px !important;
+    fill: none !important;
+    stroke: #f1f1f2 !important;
+    stroke-width: 1.8 !important;
+    stroke-linecap: round !important;
+    stroke-linejoin: round !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-close svg {
+    fill: none !important;
+    stroke: #71292d !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-content {
+    margin: 0 37px !important;
+    padding: 0 !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-settings {
+    gap: 4px !important;
+    padding: 20px 0 8px !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-lifecycle-line {
+    min-height: 29px !important;
+    display: flex !important;
+    align-items: center !important;
+    margin: 0 0 2px !important;
+    color: #f0f1f3 !important;
+    font-size: calc(20px * var(--rml-ux-text-scale, 1)) !important;
+    font-weight: 700 !important;
+    line-height: 1.1 !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-setting,
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-setting-bool,
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-setting-color {
+    min-height: 32px !important;
+    grid-template-columns: minmax(0, 360px) minmax(0, 1fr) !important;
+    gap: 22px !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-layout-row.horizontal {
+    gap: 8px !important;
+    padding: 0 !important;
+    overflow-x: visible !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-layout-row.horizontal .rml-preview-setting {
+    grid-template-columns: minmax(0, 35fr) minmax(0, 65fr) !important;
+    gap: 8px !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-layout-row.horizontal .rml-preview-setting-bool,
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-layout-row.horizontal .rml-preview-setting-color {
+    grid-template-columns: minmax(0, 70fr) minmax(0, 30fr) !important;
+    gap: 8px !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-label {
+    min-height: 32px !important;
+    font-size: calc(20px * var(--rml-ux-text-scale, 1)) !important;
+    font-weight: 700 !important;
+    letter-spacing: -0.01em !important;
+    white-space: nowrap !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-layout-row.horizontal .rml-preview-label {
+    font-size: calc(20px * var(--rml-ux-text-scale, 1)) !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-enum-value {
+    font-size: calc(20px * var(--rml-ux-text-scale, 1)) !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-slider output {
+    font-size: calc(18px * var(--rml-ux-text-scale, 1)) !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-footer {
+    padding: 4px 0 0 !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-save-panel {
+    height: 48px !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-save {
+    width: min(544px, 50%) !important;
+    height: 46px !important;
+    font-size: calc(22px * var(--rml-ux-text-scale, 1)) !important;
+  }
+}
+
+.settings-preview-dialog .rml-preview-runtime-action[hidden] { display: none !important; }
+
+@media (min-width: 541px) {
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-runtime-actions {
+    gap: 6px !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-runtime-action {
+    width: 42px !important;
+    min-width: 42px !important;
+    height: 42px !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 6px !important;
+    background: #30343a !important;
+    color: #f1f1f2 !important;
+    box-shadow: inset 0 1px rgba(255,255,255,.025), 0 1px 1px rgba(0,0,0,.35) !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-runtime-action:hover {
+    background: #3a3e44 !important;
+    border-color: transparent !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-runtime-action svg {
+    width: 25px !important;
+    height: 25px !important;
+    fill: none !important;
+    stroke: currentColor !important;
+    stroke-width: 2.35 !important;
+    stroke-linecap: round !important;
+    stroke-linejoin: round !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-runtime-action-deactivate svg {
+    width: 23px !important;
+    height: 23px !important;
+    stroke-width: 3.1 !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-runtime-action-reload svg {
+    width: 27px !important;
+    height: 27px !important;
+    stroke-width: 2.15 !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-runtime-action-quarantine svg {
+    width: 27px !important;
+    height: 27px !important;
+    stroke-width: 1.8 !important;
+  }
+}
+
+@media (min-width: 981px) and (min-height: 721px) {
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-runtime-action > span[aria-hidden="true"] {
+    display: block !important;
+    width: auto !important;
+    height: auto !important;
+    color: #f1f4f7 !important;
+    font: inherit !important;
+    font-size: 21px !important;
+    font-weight: 400 !important;
+    line-height: 1 !important;
+    transform: none !important;
+  }
+}
+
+@media (min-width: 981px) and (min-height: 721px) {
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-window {
+    grid-template-rows: 96px minmax(0, 1fr) 70px !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-header {
+    align-items: flex-start !important;
+    padding: 9px 14px 6px !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-header h2 {
+    margin-top: 0 !important;
+    font-size: calc(36px * var(--rml-ux-text-scale, 1)) !important;
+    line-height: 1.08 !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-header-tools {
+    align-self: flex-start !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-content {
+    margin: 0 50px !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-settings {
+    gap: 1px !important;
+    padding: 10px 0 8px !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-lifecycle-line {
+    min-height: 30px !important;
+    margin-bottom: 0 !important;
+    font-size: calc(25px * var(--rml-ux-text-scale, 1)) !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-label {
+    min-height: 30px !important;
+    font-size: calc(24px * var(--rml-ux-text-scale, 1)) !important;
+    line-height: 1.08 !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-runtime-display {
+    gap: 2px !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-runtime-display-heading {
+    min-height: 28px !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-runtime-display-heading strong {
+    font-family: inherit !important;
+    font-size: calc(23px * var(--rml-ux-text-scale, 1)) !important;
+    font-weight: 700 !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-runtime-display-values {
+    gap: 0 !important;
+    overflow: hidden !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-runtime-display-row {
+    min-height: 47px !important;
+    gap: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-runtime-display-cell {
+    min-height: 47px !important;
+    grid-template-columns: minmax(0, 1fr) 42px !important;
+    gap: 0 !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-runtime-display-value {
+    padding: 0 8px !important;
+    font-family: inherit !important;
+    font-size: calc(19px * var(--rml-ux-text-scale, 1)) !important;
+    font-weight: 700 !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-runtime-display-value-copy {
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+  }
+}
+
+.settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-layout-row.horizontal
+  .rml-preview-setting {
+  grid-template-columns: minmax(0, 35fr) minmax(0, 65fr) !important;
+  column-gap: 8px !important;
+}
+
+.settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-layout-row.horizontal
+  .rml-preview-setting.label-hidden {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-layout-row.horizontal
+  .rml-preview-setting.label-hidden > .rml-preview-editor {
+  grid-column: 1 / -1 !important;
+  width: 100% !important;
+}
+
+.settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-dynamic-control.rml-preview-dynamic-choice {
+  grid-template-columns: minmax(0, 70fr) minmax(0, 30fr) !important;
+  column-gap: 8px !important;
+}
+
+.settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-dynamic-control.rml-preview-dynamic-choice.label-hidden {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-text-field,
+.settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-impulse-button,
+.settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-enum-value,
+.settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-enum-step {
+  background-color: rgba(48, 52, 58, 0.88) !important;
+}
+
+.settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-impulse-button {
+  padding-inline: 20px !important;
+}
+
+.settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-window {
+  background-color: #0a0d13 !important;
+}
+
+.settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-settings {
+  row-gap: 6px !important;
+}
+
+.settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-runtime-display-row {
+  background-color: #11151d !important;
+}
+
+.settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-text-field,
+.settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-impulse-button,
+.settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-enum-value,
+.settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-enum-step,
+.settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-checkbox {
+  background-color: rgba(48, 52, 58, 0.88) !important;
+}
+
+.settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-layout-row.horizontal {
+  width: calc(100% + 14px) !important;
+  max-width: none !important;
+  box-sizing: border-box;
+  overflow-x: hidden !important;
+  overflow-y: hidden !important;
+}
+
+.settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-layout-row.horizontal > .rml-preview-layout-cell,
+.settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-layout-row.horizontal .rml-preview-setting,
+.settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-layout-row.horizontal .rml-preview-editor {
+  min-width: 0;
+}
+
+.settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-layout-row.horizontal
+  .rml-preview-text-field {
+  background-color: rgb(30, 33, 38) !important;
+}
+
+.settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-layout-row.horizontal
+  .rml-preview-impulse-button {
+  background-color: rgb(43, 47, 53) !important;
 }

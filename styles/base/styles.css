@@ -729,7 +729,7 @@ fieldset legend {
   border: 1px solid transparent;
   border-radius: 6px;
   background: transparent;
-  color: var(--muted);
+  color: #aeb9c4;
   cursor: pointer;
 }
 
@@ -739,7 +739,7 @@ fieldset legend {
   height: 12px;
   fill: none;
   stroke: currentColor;
-  stroke-width: 1.8;
+  stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
   pointer-events: none;
@@ -5124,3 +5124,6 @@ html[data-rml-architecture-gate="blocked"] body > :not(#rml-architecture-gate) {
   pointer-events: none;
 }
 .builder-settings-inspector-back { display: inline-flex; align-items: center; justify-content: center; gap: .35rem; }
+
+.delete-node > .delete-node-icon path { stroke:#aeb9c4 !important; fill:none !important; }
+.delete-node:hover > .delete-node-icon path,.delete-node:focus-visible > .delete-node-icon path { stroke:#ff8a9b !important; }

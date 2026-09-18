@@ -63,13 +63,14 @@
     default: defaultValue,
     help
   });
-  const number = (key, label, defaultValue = 0, help = "") => ({
+  const number = (key, label, defaultValue = 0, help = "", extra = {}) => ({
     key,
     label,
     kind: "number",
     default: defaultValue,
     storeAsNumber: true,
-    help
+    help,
+    ...extra
   });
 
   registerType(SYNTAX_TYPE, {
@@ -387,33 +388,66 @@
 
   const customCSharpAllParameters = () => [
     ...customCSharpFileParameters(),
-    number("variadicInputCount", "Value input count", 2),
-    code("actionCode", "Action code", "{NEXT}", "Use {A}, {B}, … for value inputs and {NEXT} for the connected continuation.", 14),
-    code("expressionCode", "Expression code", "default", "Use {A}, {B}, … for typed value inputs.", 10),
+    number("variadicInputCount", "Value input count", 0, "", { inspectorHidden: true }),
+    code("actionCode", "Action code", "{NEXT}", "Use named {placeholder} references for value inputs and {NEXT} for the connected continuation.", 14),
+    code("expressionCode", "Expression code", "default", "Use named {placeholder} references for typed value inputs.", 10),
     code("memberCode", "Member code", "", "Complete C# member declaration.", 18)
   ];
 
+  function customCSharpReferencedValueInputCount(node) {
+    const mode = String(node?.parameters?.mode || "file");
+    const source = mode === "action"
+      ? node?.parameters?.actionCode
+      : mode === "expression"
+        ? node?.parameters?.expressionCode
+        : "";
+    let highest = 0;
+    const tokenPattern = /\{\s*([A-Za-z]|input\s*\d+)\s*\}/gi;
+    for (const match of String(source || "").matchAll(tokenPattern)) {
+      const token = String(match[1] || "").replace(/\s+/g, "").toLowerCase();
+      let index = 0;
+      if (/^[a-z]$/.test(token)) index = token.charCodeAt(0) - 96;
+      else {
+        const numbered = /^input(\d+)$/.exec(token);
+        if (numbered) index = Number(numbered[1]);
+      }
+      if (Number.isFinite(index) && index >= 1 && index <= 64) highest = Math.max(highest, index);
+    }
+    return highest;
+  }
+
   function legacyRuntimeFileInputIds(node) {
-    const count = Math.max(
-      2,
-      Math.min(
-        64,
-        Math.trunc(
-          Number(
-            node?.parameters
-              ?.variadicInputCount
-          ) || 2
-        )
-      )
-    );
-    return Array.from(
-      { length: count },
-      (_, index) =>
-        index < 26
-          ? String.fromCharCode(
-              97 + index
-            )
-          : `input${index + 1}`
+    const mode = String(node?.parameters?.mode || "file");
+    if (mode === "action" || mode === "expression") {
+      const reserved = new Set(["NEXT", "MOD", "GRAPH", "NAMESPACE", "NODE"]);
+      const storedIds = Array.isArray(node?.parameters?.customCSharpValueInputIds)
+        ? node.parameters.customCSharpValueInputIds
+            .map(value => String(value || "").trim())
+            .filter(id => id && !reserved.has(id.toUpperCase()))
+        : [];
+      if (storedIds.length > 0) return [...new Set(storedIds)].slice(0, 64);
+
+      const source = String(mode === "action"
+        ? node?.parameters?.actionCode || ""
+        : node?.parameters?.expressionCode || "");
+      const result = [];
+      const seen = new Set();
+      for (const match of source.matchAll(/\{\s*([^{}\r\n]+?)\s*\}/g)) {
+        const id = String(match[1] || "").trim();
+        if (!id || reserved.has(id.toUpperCase()) || seen.has(id)) continue;
+        seen.add(id);
+        result.push(id);
+        if (result.length >= 64) break;
+      }
+      return result;
+    }
+
+    const storedRaw = Number(node?.parameters?.variadicInputCount);
+    const count = Number.isFinite(storedRaw)
+      ? Math.max(0, Math.min(64, Math.trunc(storedRaw)))
+      : 0;
+    return Array.from({ length: count }, (_, index) =>
+      index < 26 ? String.fromCharCode(97 + index) : `input${index + 1}`
     );
   }
 
@@ -454,19 +488,103 @@
 
     const inputIds =
       legacyRuntimeFileInputIds(node);
-    const valueInputs =
-      inputIds.map((id, index) =>
-        genericPort(
-          id,
-          index < 26
-            ? String.fromCharCode(
-                65 + index
-              )
-            : `Input ${index + 1}`,
-          `T${index + 1}`,
-          "anyValue"
-        )
+    const typeHints = node?.parameters?.customCSharpValueInputTypes && typeof node.parameters.customCSharpValueInputTypes === "object"
+      ? node.parameters.customCSharpValueInputTypes : {};
+    const typeDefinitions = getTypeDefinitions();
+
+    const primitiveAliases = new Map([
+      ["bool", "bool"], ["System.Boolean", "bool"],
+      ["byte", "byte"], ["System.Byte", "byte"],
+      ["sbyte", "sbyte"], ["System.SByte", "sbyte"],
+      ["short", "short"], ["System.Int16", "short"],
+      ["ushort", "ushort"], ["System.UInt16", "ushort"],
+      ["int", "int"], ["System.Int32", "int"],
+      ["uint", "uint"], ["System.UInt32", "uint"],
+      ["long", "long"], ["System.Int64", "long"],
+      ["ulong", "ulong"], ["System.UInt64", "ulong"],
+      ["float", "float"], ["System.Single", "float"],
+      ["double", "double"], ["System.Double", "double"],
+      ["decimal", "decimal"], ["System.Decimal", "decimal"],
+      ["char", "char"], ["System.Char", "char"],
+      ["string", "string"], ["System.String", "string"],
+      ["object", "object"], ["System.Object", "object"]
+    ]);
+    const normalizeCatalogType = value => String(value || "")
+      .replace(/global::/g, "")
+      .replace(/\s+/g, "")
+      .replace(/\?$/, "")
+      .trim();
+    const catalogProjectionIndex =
+      window.RMLApiCatalogProjectionIndex || null;
+    const catalogHasExactType = raw => {
+      if (!catalogProjectionIndex) return false;
+      if (catalogProjectionIndex.typeByName?.has?.(raw)) return true;
+      if (catalogProjectionIndex.enumByName?.has?.(raw)) return true;
+      const open = raw.indexOf("<");
+      if (open < 0) return false;
+      let depth = 0;
+      let close = -1;
+      let argumentCount = 1;
+      for (let index = open; index < raw.length; index += 1) {
+        const character = raw[index];
+        if (character === "<") depth += 1;
+        else if (character === ">") {
+          depth -= 1;
+          if (depth === 0) { close = index; break; }
+        } else if (character === "," && depth === 1) {
+          argumentCount += 1;
+        }
+      }
+      if (close < 0) return false;
+      const shape = [
+        raw.slice(0, open).replace(/\s+/g, ""),
+        raw.slice(close + 1).replace(/\s+/g, ""),
+        argumentCount
+      ].join("|");
+      return Boolean(
+        shape &&
+        catalogProjectionIndex.genericTypeByShape?.has?.(shape)
       );
+    };
+    const declaredCustomCSharpTypes = new Set(
+      Array.isArray(window.RMLCustomCSharpDeclaredSystemTypes)
+        ? window.RMLCustomCSharpDeclaredSystemTypes.map(normalizeCatalogType).filter(Boolean)
+        : []
+    );
+    const resolveHint = hint => {
+      const raw = normalizeCatalogType(hint);
+      if (!raw) return "";
+      const primitive = primitiveAliases.get(raw);
+      if (primitive) return typeDefinitions?.[primitive] ? primitive : "";
+
+      const provenByScanner = catalogHasExactType(raw);
+      const provenByCustomCSharp = declaredCustomCSharpTypes.has(raw);
+      if (!provenByScanner && !provenByCustomCSharp) return "";
+
+      const canonicalGraphType = typeof graphTypeForCsType === "function"
+        ? graphTypeForCsType(raw)
+        : null;
+      if (canonicalGraphType && typeDefinitions?.[canonicalGraphType]) {
+        return canonicalGraphType;
+      }
+      if (typeDefinitions?.[raw]) return raw;
+      const matches = Object.entries(typeDefinitions || {}).filter(([, definition]) =>
+        normalizeCatalogType(definition?.apiCatalogType || definition?.csType) === raw
+      );
+      if (matches.length === 1) return matches[0][0];
+
+      return provenByCustomCSharp ? raw : "";
+    };
+    const valueInputs = inputIds.map((id, index) => {
+      const label = String(id);
+      const concreteType = resolveHint(typeHints[id]);
+      return concreteType
+        ? port(id, label, concreteType)
+        : genericPort(id, label, `T${index + 1}`, "anyValue", {
+
+            customCSharpUnresolvedType: true
+          });
+    });
     const base = {
       title: "Custom C#",
       group: GROUPS.project,
@@ -489,13 +607,15 @@
           number(
             "variadicInputCount",
             "Value input count",
-            2
+            0,
+            "Derived automatically from named {placeholder} references.",
+            { inspectorHidden: true }
           ),
           code(
             "actionCode",
             "Action code",
             "{NEXT}",
-            "Use {A}, {B}, … for value inputs and {NEXT} for the connected continuation.",
+            "Use named {placeholder} references for value inputs and {NEXT} for the connected continuation.",
             14
           )
         ],
@@ -503,13 +623,13 @@
           port("call", "Call", "impulse"),
           ...valueInputs
         ],
-        outputs: [
-          port("next", "Next", "impulse")
-        ],
+        outputs: /\{\s*NEXT\s*\}/i.test(String(node?.parameters?.actionCode || ""))
+          ? [port("next", "Next", "impulse")]
+          : [],
         codegenAction(api) {
           const replacements = {};
           for (const id of inputIds) {
-            replacements[id.toUpperCase()] =
+            replacements[id] =
               api.input(id).code;
           }
           const next = api.emit?.("next");
@@ -520,6 +640,28 @@
             api.node.parameters?.actionCode,
             api,
             replacements
+          );
+        },
+        codegenCollect(api) {
+
+          if (api.isInputConnected?.("call") || api.isActionReachable?.()) return;
+
+          const replacements = {};
+          for (const id of inputIds) {
+            replacements[id] = api.input(id).code;
+          }
+
+          replacements.NEXT = "";
+          const body = renderLegacyRuntimeCode(
+            api.node.parameters?.actionCode,
+            api,
+            replacements
+          );
+          const methodName =
+            `ValidateCustomCSharpAction${api.identifier(api.node.id)}`;
+          api.addMember(
+            `${api.node.id}.unreachableCustomCSharpAction`,
+            `    private static void ${methodName}()\n    {\n${String(body || "").split("\n").map(line => `        ${line}`).join("\n")}\n    }`
           );
         }
       };
@@ -536,13 +678,15 @@
           number(
             "variadicInputCount",
             "Value input count",
-            2
+            0,
+            "Derived automatically from named {placeholder} references.",
+            { inspectorHidden: true }
           ),
           code(
             "expressionCode",
             "Expression code",
             "default",
-            "Use {A}, {B}, … for typed value inputs.",
+            "Use named {placeholder} references for typed value inputs.",
             10
           )
         ],
@@ -558,7 +702,7 @@
         codegenExpression(api) {
           const replacements = {};
           for (const id of inputIds) {
-            replacements[id.toUpperCase()] =
+            replacements[id] =
               api.input(id).code;
           }
           return renderLegacyRuntimeCode(

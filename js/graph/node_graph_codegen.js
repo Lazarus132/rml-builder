@@ -8072,7 +8072,7 @@ function createGraphAnalysisCertificate(
       schemaVersion:
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION,
       moduleId:
-        "1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch",
+        "1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup",
       semanticToken: token,
       nodeCount: graph.nodes.length,
       connectionCount: connections.length,
@@ -8105,7 +8105,7 @@ function graphAnalysisCertificateEnvelopeValid(
       Number(certificate.schemaVersion) ===
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION &&
       certificate.moduleId ===
-        "1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch" &&
+        "1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup" &&
       certificate.valid === true &&
       typeof certificate.semanticToken ===
         "string" &&
@@ -8553,6 +8553,24 @@ function analyzeConnectionsCore(
       );
 
       if (!fromRef || !toRef) {
+
+        const dormantCustomCSharpTarget = (() => {
+          if (toRef) return false;
+          const targetNode = findGraphNode(connection.toNode);
+          if (targetNode?.operatorId !== "csharp.file") return false;
+          const mode = String(targetNode?.parameters?.mode || "file");
+          if (mode === "action" || mode === "expression") return false;
+          const portId = String(connection.toPort || "").trim();
+          if (!portId || portId === "call" || portId === "content") return false;
+          const storedIds = Array.isArray(targetNode?.parameters?.customCSharpValueInputIds)
+            ? targetNode.parameters.customCSharpValueInputIds.map(value => String(value || "").trim()).filter(Boolean)
+            : [];
+          return storedIds.includes(portId);
+        })();
+        if (dormantCustomCSharpTarget && fromRef) {
+          continue;
+        }
+
         const missing = [];
         const sourceNode =
           findGraphNode(
@@ -10647,65 +10665,15 @@ function pruneConnections(
       return mutationResult();
     }
 
-    const accepted = [];
-
-    for (const connection of graph.connections) {
-      const proposal =
-        connectionProposal(
-          {
-            nodeId:
-              connection.fromNode,
-            portId:
-              connection.fromPort,
-            direction: "output"
-          },
-          {
-            nodeId:
-              connection.toNode,
-            portId:
-              connection.toPort,
-            direction: "input"
-          },
-          accepted
-        );
-
-      if (proposal.valid) {
-        accepted.splice(
-          0,
-          accepted.length,
-          ...proposal.nextConnections.map(
-            candidate =>
-              candidate.id ===
-                proposal.candidate.id
-                ? { ...connection }
-                : candidate
-          )
-        );
-      }
-    }
-
-    graph.connections = accepted;
+    currentAnalysis =
+      synchronizeAutoVectorTypes(
+        graph.connections,
+        wholeGraph.analysis
+      );
     normalizeConnectionRouting(
       graph.connections,
       mutation
     );
-    currentAnalysis =
-      synchronizeAutoVectorTypes(
-        graph.connections,
-        currentAnalysis
-      );
-
-    if (
-      graph.selectedConnectionId &&
-      !graph.connections.some(
-        connection =>
-          connection.id ===
-          graph.selectedConnectionId
-      )
-    ) {
-      graph.selectedConnectionId = null;
-    }
-
     normalizeSelectedWirePoint();
     return mutationResult();
   }
@@ -15705,6 +15673,20 @@ configurationButtonCases.length > 0
         );
       });
 
+    for (const item of configurationFields) {
+      const monitorId =
+        `configuration:${graphCsEscapeString(item.node.id)}`;
+      const label = graphCsEscapeString(
+        item.node.keyName || item.node.fieldName || "Configuration"
+      );
+      displayStatements.push(
+        guardedRuntimeStatement(
+          `Configuration ${item.node.id}`,
+          `PublishRuntimeBridge("${monitorId}", "${label}", "configuration", ${item.getter}());`
+        )
+      );
+    }
+
     const impulseDisplayNodes =
       graph.nodes.filter(
         node =>
@@ -17035,7 +17017,7 @@ Object.defineProperty(
     {
       value: Object.freeze({
         moduleId:
-          "1.20.32-universal-presentation-dev182-mobile-settings-color-picker-state-switch",
+          "1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup",
         build:
           buildTypedNodeGraphCSharpContribution,
         validateDocument:
