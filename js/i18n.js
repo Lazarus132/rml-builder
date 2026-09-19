@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const VERSION = "1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup";
+  const VERSION = "1.20.74-universal-presentation-dev275-node-port-edge-parity";
   const STORAGE_KEY = "rml-builder-language-v1";
   const state = { language: localStorage.getItem(STORAGE_KEY) || "en", fallback: {}, active: {}, manifest: null, ready: null, catalogs: new Map() };
   const norm = value => String(value ?? "").replace(/\s+/g, " ").trim();

@@ -676,7 +676,7 @@ const savedApiCompositeSearchTextCache =
     `${SAVED_API_COMPOSITE_COMPARE_MESSAGE_TYPE}-result`;
 
   const SAVED_API_COMPOSITE_COMPARE_MODULE_ID =
-    "1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup";
+    "1.20.74-universal-presentation-dev275-node-port-edge-parity";
 
   const SAVED_API_COMPOSITE_COMPARE_CANONICAL_SCHEMA_VERSION =
     4;
@@ -934,7 +934,7 @@ const savedApiCompositeSearchTextCache =
       );
     }
     const workerUrl = new URL(
-      "js/workers/saved_api_composite_compare_worker.js?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup&canonical-schema=4",
+      "js/workers/saved_api_composite_compare_worker.js?v=1.20.74-universal-presentation-dev275-node-port-edge-parity&canonical-schema=4",
       document.baseURI
     );
     const workerOptions = {
@@ -16689,7 +16689,7 @@ function synchronizeSavedApiCompositeUpdateAction(
       updateGraphButton =
         document.createElement("button");
       updateGraphButton.type = "button";
-      updateGraphButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-update"></use></svg>`;
+      updateGraphButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.74-universal-presentation-dev275-node-port-edge-parity#icon-update"></use></svg>`;
       updateGraphButton.dataset
         .savedApiCompositeGraphUpdate =
         "true";
@@ -16762,7 +16762,7 @@ function synchronizeSavedApiCompositeUpdateAction(
       updatesOpenComposite
         ? "graph-to-library"
         : "library-to-graph";
-    updateGraphButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-update"></use></svg>`;
+    updateGraphButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.74-universal-presentation-dev275-node-port-edge-parity#icon-update"></use></svg>`;
     updateGraphButton.setAttribute(
       "aria-label",
       updatesOpenComposite
@@ -16940,7 +16940,7 @@ function createSavedApiCompositePaletteItem(
     const exportButton =
       document.createElement("button");
     exportButton.type = "button";
-    exportButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-download"></use></svg>`;
+    exportButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.74-universal-presentation-dev275-node-port-edge-parity#icon-download"></use></svg>`;
     exportButton.title =
       `Export '${record.name}' as compressed JSON`;
     exportButton.addEventListener(
@@ -16999,7 +16999,7 @@ function createSavedApiCompositePaletteItem(
     const deleteButton =
       document.createElement("button");
     deleteButton.type = "button";
-    deleteButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-close"></use></svg>`;
+    deleteButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.74-universal-presentation-dev275-node-port-edge-parity#icon-close"></use></svg>`;
     deleteButton.title =
       `Delete '${record.name}' from Saved API Composites`;
     deleteButton.addEventListener(
@@ -17028,7 +17028,7 @@ function createSavedApiCompositePaletteItem(
     const menuTrigger = document.createElement("button");
     menuTrigger.type = "button";
     menuTrigger.className = "rml-saved-api-composite-menu-trigger";
-    menuTrigger.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-more"></use></svg>`;
+    menuTrigger.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.74-universal-presentation-dev275-node-port-edge-parity#icon-more"></use></svg>`;
     menuTrigger.setAttribute("aria-haspopup", "menu");
     menuTrigger.setAttribute("aria-expanded", "false");
     menuTrigger.setAttribute(
@@ -17134,7 +17134,7 @@ Object.defineProperty(
   "RMLNodeGraphCompositesModuleId",
   {
     value:
-      "1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup",
+      "1.20.74-universal-presentation-dev275-node-port-edge-parity",
     writable: false,
     enumerable: true,
     configurable: true

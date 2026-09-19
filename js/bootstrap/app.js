@@ -42,7 +42,7 @@ const EXAMPLE_PROJECT_FILE_NAME = "Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup";
+  "1.20.74-universal-presentation-dev275-node-port-edge-parity";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -4330,7 +4330,7 @@ function ensureGraphCodegenWorker() {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup",
+      "../workers/graph_codegen_worker.js?v=1.20.74-universal-presentation-dev275-node-port-edge-parity",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -28502,7 +28502,7 @@ function promiseWithBuilderTimeout(
 
 function assertProjectRuntimeModuleCoherence() {
   const expectedModuleId =
-    "1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup";
+    "1.20.74-universal-presentation-dev275-node-port-edge-parity";
   const requiredFactoryVersion = 38;
   const mismatches = [];
   const requireModuleId = (
@@ -37452,7 +37452,7 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "../../templates/help_template.html?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup"
+    "../../templates/help_template.html?v=1.20.74-universal-presentation-dev275-node-port-edge-parity"
   )
     .then(markup => {
       const host = document.getElementById("lazy-dialog-host") || document.body;
@@ -45661,7 +45661,7 @@ function rmlRuntimeDisplayPreviewItems(
 
 function rmlRuntimeDisplayPreviewCopyIcon() {
   return `
-    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-copy"></use></svg>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.74-universal-presentation-dev275-node-port-edge-parity#icon-copy"></use></svg>
   `;
 }
 

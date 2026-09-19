@@ -2,7 +2,7 @@
   "use strict";
 
   const API_FACTORY_MODULE_ID =
-    "1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup";
+    "1.20.74-universal-presentation-dev275-node-port-edge-parity";
   const FACTORY_VERSION = 38;
   const API_VERIFICATION_SCHEMA_VERSION = 3;
   const CATALOG_PROJECTION_INDEX_VERSION = 1;

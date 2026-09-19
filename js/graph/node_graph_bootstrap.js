@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_BOOTSTRAP_MODULE_ID =
-  "1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup";
+  "1.20.74-universal-presentation-dev275-node-port-edge-parity";
 
 function assertGraphBootstrapModuleCoherence() {
   const mismatches = [];

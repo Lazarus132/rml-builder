@@ -5,7 +5,7 @@ function savedApiCompositeCompareWorkerMain(
 ) {
 const self = workerScope;
 const SAVED_API_COMPOSITE_COMPARE_WORKER_MODULE_ID =
-  "1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup";
+  "1.20.74-universal-presentation-dev275-node-port-edge-parity";
 const SAVED_API_COMPOSITE_CANONICAL_SCHEMA_VERSION = 4;
 const MESSAGE_TYPE = "rml-saved-api-composite-compare";
 const RESULT_TYPE = `${MESSAGE_TYPE}-result`;
@@ -1946,7 +1946,7 @@ if (savedApiCompositeCompareWorkerThread) {
     {
       value: Object.freeze({
         moduleId:
-          "1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup",
+          "1.20.74-universal-presentation-dev275-node-port-edge-parity",
         canonicalSchemaVersion:
           4,
         source:

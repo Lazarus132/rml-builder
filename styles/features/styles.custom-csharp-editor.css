@@ -53,7 +53,7 @@ textarea:focus { box-shadow: inset 0 0 0 1px var(--rml-accent); }
 .find-replace-actions button { width: auto; min-width: 72px; padding-inline: 8px; }
 .find-match-count { align-self: center; min-width: 56px; color: #a9a9a9; font-size: 11px; text-align: right; white-space: nowrap; }
 .find-match-count.error { color: #f48771; }
-.settings-overlay { position: fixed; z-index: 8; top: calc(36px + env(safe-area-inset-top)); right: 4px; width: min(300px, calc(100vw - 16px)); max-height: calc(100dvh - 44px - env(safe-area-inset-top)); padding: 10px; overflow: auto; border: 1px solid #454545; border-radius: 0 0 5px 5px; background: var(--rml-overlay-background); box-shadow: 0 7px 22px rgba(0, 0, 0, .52); color: var(--rml-ui-text); }
+.settings-overlay { overscroll-behavior: contain; position: fixed; z-index: 8; top: calc(36px + env(safe-area-inset-top)); right: 4px; width: min(300px, calc(100vw - 16px)); max-height: calc(100dvh - 44px - env(safe-area-inset-top)); padding: 10px; overflow: auto; border: 1px solid #454545; border-radius: 0 0 5px 5px; background: var(--rml-overlay-background); box-shadow: 0 7px 22px rgba(0, 0, 0, .52); color: var(--rml-ui-text); }
 body.separate-window-editor .settings-overlay { top: calc(74px + env(safe-area-inset-top)); max-height: calc(100dvh - 82px - env(safe-area-inset-top)); }
 .settings-overlay[hidden] { display: none; }
 .settings-overlay h2 { margin: 0 0 9px; color: var(--rml-ui-text); font-size: 12px; font-weight: 600; }
@@ -70,7 +70,7 @@ body.separate-window-editor .settings-overlay { top: calc(74px + env(safe-area-i
 .settings-color-trigger { position: absolute; z-index: 2; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; background: transparent; cursor: pointer; }
 .settings-color input[type="color"] { position: fixed; left: -10000px; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; pointer-events: none; }
 .settings-color-line { display: block; height: 4px; border: 1px solid rgba(255, 255, 255, .32); border-radius: 999px; background-color: var(--rml-attr-rml-color, transparent); box-shadow: 0 0 0 1px rgba(0, 0, 0, .42); pointer-events: none; }
-.settings-picker-popover { position: fixed; z-index: 9; top: calc(44px + env(safe-area-inset-top)); right: 308px; width: min(390px, calc(100vw - 324px)); max-height: calc(100dvh - 60px - env(safe-area-inset-top)); padding: 8px; overflow: auto; border: 1px solid #454545; border-radius: 5px; background: var(--rml-overlay-background); box-shadow: 0 9px 28px rgba(0, 0, 0, .58); }
+.settings-picker-popover { overscroll-behavior: contain; position: fixed; z-index: 9; top: calc(44px + env(safe-area-inset-top)); right: 308px; width: min(390px, calc(100vw - 324px)); max-height: calc(100dvh - 60px - env(safe-area-inset-top)); padding: 8px; overflow: auto; border: 1px solid #454545; border-radius: 5px; background: var(--rml-overlay-background); box-shadow: 0 9px 28px rgba(0, 0, 0, .58); }
 body.separate-window-editor .settings-picker-popover { top: calc(82px + env(safe-area-inset-top)); max-height: calc(100dvh - 98px - env(safe-area-inset-top)); }
 .settings-picker-popover[hidden] { display: none; }
 .settings-picker-popover .rml-detached-editor-color-picker { margin: 0; }

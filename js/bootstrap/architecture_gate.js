@@ -2,7 +2,7 @@
   "use strict";
 
   const MODULE_ID =
-    "1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup";
+    "1.20.74-universal-presentation-dev275-node-port-edge-parity";
   const GATE_VERSION = 1;
   const DETECTION_TIMEOUT_MS = 5000;
   const HIGH_ENTROPY_HINTS = Object.freeze([

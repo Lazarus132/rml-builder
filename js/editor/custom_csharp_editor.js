@@ -468,7 +468,7 @@
     heading.textContent = String(options.tabTitle || "Custom C#");
     const headerActions = popupDocument.createElement("div");
     headerActions.className = "editor-header-actions";
-    const iconSpriteUrl = new URL("assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup", window.location.href).href;
+    const iconSpriteUrl = new URL("assets/rml-icons.svg?v=1.20.74-universal-presentation-dev275-node-port-edge-parity", window.location.href).href;
     const createHeaderButton = (label, iconName) => {
       const button = popupDocument.createElement("button");
       button.type = "button";
@@ -2535,6 +2535,22 @@
       const layerDefinition =
         embeddedLayerForTarget(target);
       const layerDetails = embeddedLayerDetails(layerDefinition);
+      const overlayScrollOwner =
+        !settingsOverlay.hidden &&
+        (target === settingsOverlay || settingsOverlay.contains(target))
+          ? settingsOverlay
+          : !pickerPopover.hidden &&
+              (target === pickerPopover || pickerPopover.contains(target))
+            ? pickerPopover
+            : null;
+      if (overlayScrollOwner && !modifier) {
+        const delta = normalizedEditorWheelDelta(event, overlayScrollOwner);
+        overlayScrollOwner.scrollTop += delta.y;
+        overlayScrollOwner.scrollLeft += delta.x;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
       if (separateWindow && modifier) {
         const candidates = localScrollCandidates();
         const starting = !localScrollSession;

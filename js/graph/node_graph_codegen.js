@@ -8072,7 +8072,7 @@ function createGraphAnalysisCertificate(
       schemaVersion:
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION,
       moduleId:
-        "1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup",
+        "1.20.74-universal-presentation-dev275-node-port-edge-parity",
       semanticToken: token,
       nodeCount: graph.nodes.length,
       connectionCount: connections.length,
@@ -8105,7 +8105,7 @@ function graphAnalysisCertificateEnvelopeValid(
       Number(certificate.schemaVersion) ===
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION &&
       certificate.moduleId ===
-        "1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup" &&
+        "1.20.74-universal-presentation-dev275-node-port-edge-parity" &&
       certificate.valid === true &&
       typeof certificate.semanticToken ===
         "string" &&
@@ -17017,7 +17017,7 @@ Object.defineProperty(
     {
       value: Object.freeze({
         moduleId:
-          "1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup",
+          "1.20.74-universal-presentation-dev275-node-port-edge-parity",
         build:
           buildTypedNodeGraphCSharpContribution,
         validateDocument:

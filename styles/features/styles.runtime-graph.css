@@ -1768,12 +1768,12 @@ button.rml-graph-navigation-level:disabled {
 }
 
 .rml-graph-port-row.input {
-  grid-template-columns: 17px minmax(0, 1fr);
+  grid-template-columns: 18px minmax(0, 1fr);
   padding-right: 4px;
 }
 
 .rml-graph-port-row.output {
-  grid-template-columns: minmax(0, 1fr) 17px;
+  grid-template-columns: minmax(0, 1fr) 18px;
   padding-left: 4px;
 }
 
@@ -1810,13 +1810,13 @@ button.rml-graph-navigation-level:disabled {
 }
 
 .rml-graph-port-row.side-left {
-  grid-template-columns: 17px minmax(0, 1fr);
+  grid-template-columns: 18px minmax(0, 1fr);
   padding-left: 0;
   padding-right: 4px;
 }
 
 .rml-graph-port-row.side-right {
-  grid-template-columns: minmax(0, 1fr) 17px;
+  grid-template-columns: minmax(0, 1fr) 18px;
   padding-left: 4px;
   padding-right: 0;
 }
@@ -1839,6 +1839,14 @@ button.rml-graph-navigation-level:disabled {
 
 .rml-graph-port-row.side-right .rml-graph-port-copy {
   text-align: right;
+}
+
+.rml-graph-port-row.side-left > .rml-graph-socket {
+  justify-self: start;
+}
+
+.rml-graph-port-row.side-right > .rml-graph-socket {
+  justify-self: end;
 }
 
 .rml-graph-socket {
@@ -3304,9 +3312,6 @@ body.rml-node-graph-mode.rml-graph-edit-mode #inspector-content {
   display: none;
 }
 
-.rml-graph-port-column.outputs {
-  transform: translateX(2px);
-}
 
 .rml-graph-node.manually-sized-width .rml-graph-node-body {
   overflow-x: hidden;

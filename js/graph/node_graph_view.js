@@ -12657,7 +12657,7 @@ function graphPresentationVisible() {
   }
 
 function graphOutlineToggleMarkup() {
-    return `<svg class="rml-pack-outline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-outline"></use></svg>`;
+    return `<svg class="rml-pack-outline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.74-universal-presentation-dev275-node-port-edge-parity#icon-outline"></use></svg>`;
   }
 
 function markGraphPackPresentationPending() {
@@ -13866,7 +13866,7 @@ function restoreGraphPaletteScroll(
 
 function setGraphPanelToggleIcon(button, iconName) {
   if (!button) return;
-  button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-${iconName}"></use></svg>`;
+  button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.74-universal-presentation-dev275-node-port-edge-parity#icon-${iconName}"></use></svg>`;
 }
 
 function applyGraphPanelLayout() {
@@ -18405,20 +18405,20 @@ function createToolbarButton(
 const GRAPH_TOOLBAR_ICONS =
     Object.freeze({
       center: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-center"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.74-universal-presentation-dev275-node-port-edge-parity#icon-center"></use></svg>`,
       clear: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-delete"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.74-universal-presentation-dev275-node-port-edge-parity#icon-delete"></use></svg>`,
       zoomOut: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-zoom-out"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.74-universal-presentation-dev275-node-port-edge-parity#icon-zoom-out"></use></svg>`,
       zoomIn: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-zoom-in"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.74-universal-presentation-dev275-node-port-edge-parity#icon-zoom-in"></use></svg>`,
       editMode: `
-        <svg class="rml-graph-edit-enter-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-expand"></use></svg>
-        <svg class="rml-graph-edit-exit-icon" viewBox="0 0 24 24" aria-hidden="true" hidden><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-collapse"></use></svg>`,
+        <svg class="rml-graph-edit-enter-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.74-universal-presentation-dev275-node-port-edge-parity#icon-expand"></use></svg>
+        <svg class="rml-graph-edit-exit-icon" viewBox="0 0 24 24" aria-hidden="true" hidden><use href="assets/rml-icons.svg?v=1.20.74-universal-presentation-dev275-node-port-edge-parity#icon-collapse"></use></svg>`,
       search: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-search"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.74-universal-presentation-dev275-node-port-edge-parity#icon-search"></use></svg>`,
       next: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-next"></use></svg>`
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.74-universal-presentation-dev275-node-port-edge-parity#icon-next"></use></svg>`
     });
 
 function createToolbarIconButton(
@@ -18901,7 +18901,7 @@ function renderGraphCanvas() {
       <div class="rml-graph-search-overlay-card" role="dialog" aria-modal="true" aria-label="Find node in graph">
         <div class="rml-graph-search-overlay-head">
           <strong>Find node in graph</strong>
-          <button class="rml-graph-search-overlay-close" type="button" aria-label="Close search"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-close"></use></svg></button>
+          <button class="rml-graph-search-overlay-close" type="button" aria-label="Close search"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.74-universal-presentation-dev275-node-port-edge-parity#icon-close"></use></svg></button>
         </div>
         <div class="rml-graph-search-overlay-body">
           <input type="search" autocomplete="off" placeholder="Find node in graph…" aria-label="Find node in graph" aria-keyshortcuts="F3 Shift+F3 Control+G Control+Shift+G Meta+G Meta+Shift+G">
@@ -33288,7 +33288,7 @@ function renderGraphInspector(options = {}) {
       empty.className =
         "empty-inspector";
       empty.innerHTML =
-        `<span class="empty-inspector-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-lightning"></use></svg></span>
+        `<span class="empty-inspector-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.20.74-universal-presentation-dev275-node-port-edge-parity#icon-lightning"></use></svg></span>
          <h2>Select a graph node, wire or route point</h2>
          <p>Typed ports, wire routing points and connection details appear here.</p>`;
       dom.inspectorContent.appendChild(
@@ -37982,7 +37982,7 @@ function appendParameterControl(
 
 function inspectorButtonIconMarkup(text) {
     const label = String(text || "").trim().toLowerCase();
-    const icon = name => `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup#icon-${name}"></use></svg>`;
+    const icon = name => `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.20.74-universal-presentation-dev275-node-port-edge-parity#icon-${name}"></use></svg>`;
     if (label === "+") return icon("add");
     if (label === "−" || label === "-") return icon("minus");
     if (label.includes("open code editor")) return icon("code");
@@ -46124,7 +46124,7 @@ Object.defineProperty(
   "RMLNodeGraphViewModuleId",
   {
     value:
-      "1.20.70-universal-presentation-dev271-source-comment-whitespace-cleanup",
+      "1.20.74-universal-presentation-dev275-node-port-edge-parity",
     writable: false,
     enumerable: true,
     configurable: true
