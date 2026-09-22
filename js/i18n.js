@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const VERSION = "1.21.01-universal-presentation-dev398-source-comment-cleanup";
+  const VERSION = "1.21.03-universal-presentation-dev400-edit-mode-sidebar-access";
   const STORAGE_KEY = "rml-builder-language-v1";
   const state = { language: localStorage.getItem(STORAGE_KEY) || "en", fallback: {}, active: {}, previousCatalog: {}, manifest: null, ready: null, catalogs: new Map(), reverseCatalogs: new WeakMap() };
   const norm = value => String(value ?? "").replace(/\s+/g, " ").trim();

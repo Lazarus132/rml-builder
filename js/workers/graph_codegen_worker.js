@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_CODEGEN_WORKER_MODULE_ID =
-  "1.21.01-universal-presentation-dev398-source-comment-cleanup";
+  "1.21.03-universal-presentation-dev400-edit-mode-sidebar-access";
 const GRAPH_CODEGEN_WORKER_FACTORY_VERSION =
   38;
 
@@ -724,7 +724,7 @@ async function ensureRuntime(
       "../compiler/visual_csharp.js?v=84-harmony-file-presets"
     );
     importScripts(
-      "../catalog/api_nodes.js?v=1.21.01-universal-presentation-dev398-source-comment-cleanup"
+      "../catalog/api_nodes.js?v=1.21.03-universal-presentation-dev400-edit-mode-sidebar-access"
     );
 
     if (
@@ -768,7 +768,7 @@ async function ensureRuntime(
     }
 
     importScripts(
-      "../graph/node_graph_codegen.js?v=1.21.01-universal-presentation-dev398-source-comment-cleanup"
+      "../graph/node_graph_codegen.js?v=1.21.03-universal-presentation-dev400-edit-mode-sidebar-access"
     );
 
     if (

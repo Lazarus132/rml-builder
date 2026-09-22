@@ -2,7 +2,7 @@
   "use strict";
 
   const CATALOG_LOADER_MODULE_ID =
-    "1.21.01-universal-presentation-dev398-source-comment-cleanup";
+    "1.21.03-universal-presentation-dev400-edit-mode-sidebar-access";
   const LOADER_VERSION = 84;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
@@ -75,7 +75,7 @@
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=1.21.01-universal-presentation-dev398-source-comment-cleanup",
+    "api_nodes.js?v=1.21.03-universal-presentation-dev400-edit-mode-sidebar-access",
     scriptUrl
   ).href;
 

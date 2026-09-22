@@ -2,7 +2,7 @@
   "use strict";
 
   const API_FACTORY_MODULE_ID =
-    "1.21.01-universal-presentation-dev398-source-comment-cleanup";
+    "1.21.03-universal-presentation-dev400-edit-mode-sidebar-access";
   const FACTORY_VERSION = 38;
   const API_VERIFICATION_SCHEMA_VERSION = 3;
   const CATALOG_PROJECTION_INDEX_VERSION = 1;
