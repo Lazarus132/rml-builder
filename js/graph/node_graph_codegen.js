@@ -8132,7 +8132,7 @@ function createGraphAnalysisCertificate(
       schemaVersion:
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION,
       moduleId:
-        "1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe",
+        "1.21.16-universal-presentation-dev415-preview-header-svg-sprite-icons",
       semanticToken: token,
       nodeCount: graph.nodes.length,
       connectionCount: connections.length,
@@ -8165,7 +8165,7 @@ function graphAnalysisCertificateEnvelopeValid(
       Number(certificate.schemaVersion) ===
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION &&
       certificate.moduleId ===
-        "1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe" &&
+        "1.21.16-universal-presentation-dev415-preview-header-svg-sprite-icons" &&
       certificate.valid === true &&
       typeof certificate.semanticToken ===
         "string" &&
@@ -17065,7 +17065,7 @@ Object.defineProperty(
     {
       value: Object.freeze({
         moduleId:
-          "1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe",
+          "1.21.16-universal-presentation-dev415-preview-header-svg-sprite-icons",
         build:
           buildTypedNodeGraphCSharpContribution,
         validateDocument:

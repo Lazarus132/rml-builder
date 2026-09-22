@@ -2,7 +2,7 @@
   "use strict";
 
   const MODULE_ID =
-    "1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe";
+    "1.21.16-universal-presentation-dev415-preview-header-svg-sprite-icons";
   const GATE_VERSION = 1;
 
   

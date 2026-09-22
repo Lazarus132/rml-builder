@@ -66,6 +66,34 @@
   background: #2c3541;
 }
 
+.rml-preview-runtime-action svg {
+  display: block;
+  flex: 0 0 auto;
+  color: #f1f4f7;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.rml-preview-runtime-action-deactivate svg {
+  width: 1em;
+  height: 1em;
+}
+
+.rml-preview-runtime-action-reload svg {
+  width: 0.781738em;
+  height: 1em;
+  transform: translate(-0.5px, 0.5px) scale(1.05, 0.94);
+}
+
+.rml-preview-runtime-action-quarantine svg {
+  width: 1.280762em;
+  height: 1em;
+  transform: translateY(0.5px) scaleY(0.97);
+}
+
 .rml-preview-header h2 {
   overflow: hidden;
   margin: 0;
@@ -4028,33 +4056,22 @@ dialog.settings-preview-dialog {
     stroke-linejoin: round !important;
   }
   .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-runtime-action-deactivate svg {
-    width: 23px !important;
-    height: 23px !important;
-    stroke-width: 3.1 !important;
+    width: 1em !important;
+    height: 1em !important;
   }
   .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-runtime-action-reload svg {
-    width: 27px !important;
-    height: 27px !important;
-    stroke-width: 2.15 !important;
+    width: 0.781738em !important;
+    height: 1em !important;
   }
   .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-runtime-action-quarantine svg {
-    width: 27px !important;
-    height: 27px !important;
-    stroke-width: 1.8 !important;
+    width: 1.280762em !important;
+    height: 1em !important;
   }
 }
 
 @media (min-width: 981px) and (min-height: 721px) {
-  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-runtime-action > span[aria-hidden="true"] {
-    display: block !important;
-    width: auto !important;
-    height: auto !important;
-    color: #f1f4f7 !important;
-    font: inherit !important;
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-runtime-action svg {
     font-size: 26px !important;
-    font-weight: 400 !important;
-    line-height: 1 !important;
-    transform: none !important;
   }
 }
 

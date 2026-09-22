@@ -2,7 +2,7 @@
   "use strict";
 
   const NODE_GRAPH_RELEASE_ID =
-    "1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe";
+    "1.21.16-universal-presentation-dev415-preview-header-svg-sprite-icons";
 
   if (
     window.RMLTypedNodeGraphGenerator?.moduleId ===
@@ -25,7 +25,7 @@
     "../core/code_templates.js?v=794-shared-loader-runtime",
     "../core/guidance.js?v=793",
     "node_graph_registry.js?v=1-physical-modules-v750-offline-core-types",
-    "node_graph_codegen.js?v=1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe"
+    "node_graph_codegen.js?v=1.21.16-universal-presentation-dev415-preview-header-svg-sprite-icons"
   ];
 
   if (
@@ -82,7 +82,7 @@
     const link = document.createElement("link");
     link.rel = "stylesheet";
     link.href = new URL(
-      "../../styles/features/styles.runtime-graph.css?v=1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe",
+      "../../styles/features/styles.runtime-graph.css?v=1.21.16-universal-presentation-dev415-preview-header-svg-sprite-icons",
       scriptUrl
     ).href;
     link.dataset.rmlStyleBundle = "runtime-graph";
@@ -103,19 +103,19 @@
       window.RMLClassStyles
         ? []
         : [
-            "../loaders/style_loader.js?v=1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe"
+            "../loaders/style_loader.js?v=1.21.16-universal-presentation-dev415-preview-header-svg-sprite-icons"
           ]
     ),
     "node_graph_registry.js?v=1-physical-modules-v750-offline-core-types",
-    "node_graph_codegen.js?v=1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe",
+    "node_graph_codegen.js?v=1.21.16-universal-presentation-dev415-preview-header-svg-sprite-icons",
     "runtime_bridge.js?v=1000-live-loss-status",
-    "../workers/saved_api_composite_compare_worker.js?v=1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe",
-    "node_graph_composites.js?v=1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe",
-    "node_graph_custom_csharp.js?v=1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe",
+    "../workers/saved_api_composite_compare_worker.js?v=1.21.16-universal-presentation-dev415-preview-header-svg-sprite-icons",
+    "node_graph_composites.js?v=1.21.16-universal-presentation-dev415-preview-header-svg-sprite-icons",
+    "node_graph_custom_csharp.js?v=1.21.16-universal-presentation-dev415-preview-header-svg-sprite-icons",
     "node_graph_guided.js?v=1-physical-modules-v748",
-    "node_graph_view.js?v=1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe",
+    "node_graph_view.js?v=1.21.16-universal-presentation-dev415-preview-header-svg-sprite-icons",
     "graph_gpu_renderer.js?v=807-webgpu-texture-limits",
-    "node_graph_bootstrap.js?v=1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe"
+    "node_graph_bootstrap.js?v=1.21.16-universal-presentation-dev415-preview-header-svg-sprite-icons"
   ];
 
   const ready = files.reduce(

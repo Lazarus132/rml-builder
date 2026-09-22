@@ -2,7 +2,7 @@
   "use strict";
 
   const API_FACTORY_MODULE_ID =
-    "1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe";
+    "1.21.16-universal-presentation-dev415-preview-header-svg-sprite-icons";
   const FACTORY_VERSION = 38;
   const API_VERIFICATION_SCHEMA_VERSION = 3;
   const CATALOG_PROJECTION_INDEX_VERSION = 1;
