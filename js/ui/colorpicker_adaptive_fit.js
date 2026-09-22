@@ -242,7 +242,12 @@
 
     const warning =
       header.querySelector(
-        ":scope > div"
+        ":scope > .rml-preview-warning"
+      );
+
+    const headerTools =
+      header.querySelector(
+        ":scope > .rml-preview-header-tools"
       );
 
     const title =
@@ -257,6 +262,9 @@
       "rml-adaptive-preview-header"
     );
     warning?.classList.remove(
+      "rml-adaptive-preview-warning"
+    );
+    headerTools?.classList.remove(
       "rml-adaptive-preview-warning"
     );
     title?.classList.remove(
@@ -313,7 +321,7 @@
 
     const warning =
       header.querySelector(
-        ":scope > div"
+        ":scope > .rml-preview-warning"
       );
 
     const title =
@@ -325,7 +333,6 @@
       );
 
     if (
-      !warning ||
       !title ||
       !close
     ) {
@@ -348,12 +355,19 @@
         SIDE_GAP * 2
       );
 
-    const scale =
-      Math.min(
-        1,
-        usableWidth /
-        designWidth
+    const colorPageOpen =
+      dialog.classList.contains(
+        "rml-preview-color-open"
       );
+
+    const scale =
+      colorPageOpen
+        ? Math.min(
+            1,
+            usableWidth /
+            designWidth
+          )
+        : 1;
 
     const safe =
       readSafeAreaInsets();
@@ -423,11 +437,13 @@
     header.dataset.rmlHeaderLeftInset =
       String(leftInset);
 
-    warning.classList.add(
-      "rml-adaptive-preview-warning"
-    );
-    warning.dataset.rmlFontSize =
-      String(warningFontSize);
+    if (warning) {
+      warning.classList.add(
+        "rml-adaptive-preview-warning"
+      );
+      warning.dataset.rmlFontSize =
+        String(warningFontSize);
+    }
 
     title.classList.add(
       "rml-adaptive-preview-title"
@@ -486,12 +502,19 @@
         SIDE_GAP * 2
       );
 
-    const scale =
-      Math.min(
-        1,
-        usableWidth /
-        designWidth
+    const colorPageOpen =
+      dialog.classList.contains(
+        "rml-preview-color-open"
       );
+
+    const scale =
+      colorPageOpen
+        ? Math.min(
+            1,
+            usableWidth /
+            designWidth
+          )
+        : 1;
 
     setStyleProperty(
       dialog,

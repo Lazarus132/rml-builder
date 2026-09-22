@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_BOOTSTRAP_MODULE_ID =
-  "1.21.16-universal-presentation-dev415-preview-header-svg-sprite-icons";
+  "1.21.18-universal-presentation-dev417-preview-color-page-isolation";
 
 function assertGraphBootstrapModuleCoherence() {
   const mismatches = [];

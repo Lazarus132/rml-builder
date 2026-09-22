@@ -831,6 +831,12 @@
 }
 
 .settings-preview-dialog.rml-preview-color-open
+  #settings-preview-content
+  > :not([data-preview-color-page]) {
+  display: none !important;
+}
+
+.settings-preview-dialog.rml-preview-color-open
 .rml-preview-content::-webkit-scrollbar {
   display: none !important;
 }
@@ -4246,4 +4252,329 @@ dialog.settings-preview-dialog {
   .rml-preview-layout-row.horizontal
   .rml-preview-impulse-button {
   background-color: rgb(43, 47, 53) !important;
+}
+
+@media (max-width: 980px), (max-height: 720px) {
+  .settings-preview-dialog.rml-preview-color-open
+    .rml-preview-runtime-action {
+    min-height: 0 !important;
+  }
+}
+
+@media (max-width: 780px), (max-height: 700px) {
+  .settings-preview-dialog:not(.rml-preview-color-open) {
+    --rml-mobile-ui-scale: 1 !important;
+    padding: 0 !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-window {
+    width: 100dvw !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    transform: none !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-footer {
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+}
+
+@media (max-width: 540px) and (orientation: portrait) {
+  .settings-preview-dialog:not(.rml-preview-color-open) {
+    --rml-mobile-ui-scale: 1 !important;
+    width: 100dvw !important;
+    max-width: 100dvw !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-window {
+    width: 100dvw !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    transform: none !important;
+    grid-template-rows:
+      calc(104px + env(safe-area-inset-top))
+      minmax(0, 1fr)
+      calc(58px + env(safe-area-inset-bottom)) !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-header.rml-adaptive-preview-header {
+    left: 0 !important;
+    display: grid !important;
+    width: 100dvw !important;
+    height: calc(104px + env(safe-area-inset-top)) !important;
+    min-height: calc(104px + env(safe-area-inset-top)) !important;
+    grid-template-columns: minmax(0, 1fr) 44px !important;
+    grid-template-rows: 44px 44px !important;
+    grid-template-areas:
+      "title close"
+      "actions actions" !important;
+    align-content: stretch !important;
+    align-items: center !important;
+    justify-content: stretch !important;
+    gap: 4px 8px !important;
+    padding:
+      max(4px, env(safe-area-inset-top))
+      max(12px, env(safe-area-inset-right))
+      4px
+      max(14px, env(safe-area-inset-left)) !important;
+    overflow: hidden !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-header.rml-adaptive-preview-header
+    .rml-adaptive-preview-title {
+    grid-area: title !important;
+    display: -webkit-box !important;
+    width: 100% !important;
+    max-height: 44px !important;
+    margin: 0 !important;
+    overflow-wrap: anywhere !important;
+    font-size: clamp(18px, 5.8vw, 22px) !important;
+    line-height: 1 !important;
+    text-align: left !important;
+    white-space: normal !important;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-header.rml-adaptive-preview-header
+    .rml-preview-header-tools {
+    display: contents !important;
+    width: auto !important;
+    max-width: none !important;
+    overflow: visible !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-header.rml-adaptive-preview-header
+    .rml-preview-runtime-actions {
+    grid-area: actions !important;
+    justify-self: end !important;
+    gap: 5px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-header.rml-adaptive-preview-header
+    .rml-preview-runtime-action {
+    width: 44px !important;
+    min-width: 44px !important;
+    height: 44px !important;
+    min-height: 44px !important;
+    border-radius: 7px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-header.rml-adaptive-preview-header
+    .rml-preview-close.rml-adaptive-preview-close {
+    grid-area: close !important;
+    justify-self: end !important;
+    width: 44px !important;
+    min-width: 44px !important;
+    max-width: 44px !important;
+    height: 44px !important;
+    min-height: 44px !important;
+    max-height: 44px !important;
+    flex-basis: 44px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-content {
+    margin: 0 !important;
+    padding-left: max(14px, env(safe-area-inset-left)) !important;
+    padding-right: max(14px, env(safe-area-inset-right)) !important;
+    scrollbar-width: none !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-content::-webkit-scrollbar,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-settings::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-settings {
+    gap: 9px !important;
+    padding: 10px 0 18px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-control,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-text-field,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-vector input,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-impulse-button,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-enum-value,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-enum-step,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-copy {
+    height: 44px !important;
+    min-height: 44px !important;
+    max-height: 44px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-enum-step,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-copy {
+    width: 44px !important;
+    min-width: 44px !important;
+    flex-basis: 44px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-checkbox {
+    width: 44px !important;
+    min-width: 44px !important;
+    height: 44px !important;
+    min-height: 44px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-checkbox span {
+    width: 41px !important;
+    height: 41px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-color-button {
+    min-width: 52px !important;
+    height: 40px !important;
+    min-height: 40px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-slider,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-slider input[type="range"],
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-slider output {
+    height: 44px !important;
+    min-height: 44px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-text-field,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-vector input {
+    font-size: 16px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-layout-row.horizontal {
+    flex-direction: column !important;
+    gap: 9px !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-layout-row.horizontal
+    > .rml-preview-layout-cell {
+    width: 100% !important;
+    max-width: 100% !important;
+    flex: 0 0 auto !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-layout-row.horizontal
+    .rml-preview-setting:not(.rml-preview-setting-bool):not(.rml-preview-setting-color) {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 5px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-layout-row.horizontal
+    .rml-preview-setting-bool,
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-layout-row.horizontal
+    .rml-preview-setting-color {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-runtime-display {
+    gap: 4px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-runtime-display-heading {
+    min-height: 24px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-runtime-display-heading strong {
+    font-size: calc(14px * var(--rml-ux-text-scale, 1)) !important;
+    line-height: 1.2 !important;
+    white-space: normal !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-runtime-display-values {
+    max-height: none !important;
+    gap: 5px !important;
+    overflow: visible !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-runtime-display-row {
+    min-height: 0 !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 5px !important;
+    padding: 4px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-runtime-display-cell {
+    min-height: 44px !important;
+    grid-template-columns: minmax(0, 1fr) 44px !important;
+    gap: 5px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-runtime-display-value {
+    display: -webkit-box !important;
+    padding: 0 8px !important;
+    overflow-wrap: anywhere !important;
+    font-size: calc(14px * var(--rml-ux-text-scale, 1)) !important;
+    line-height: 1.25 !important;
+    text-align: left !important;
+    white-space: normal !important;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-runtime-display-value-copy {
+    width: 44px !important;
+    min-width: 44px !important;
+    height: 44px !important;
+    min-height: 44px !important;
+  }
+
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-footer {
+    padding:
+      6px
+      max(14px, env(safe-area-inset-right))
+      max(6px, env(safe-area-inset-bottom))
+      max(14px, env(safe-area-inset-left)) !important;
+  }
 }

@@ -2,7 +2,7 @@
   "use strict";
 
   const CATALOG_LOADER_MODULE_ID =
-    "1.21.16-universal-presentation-dev415-preview-header-svg-sprite-icons";
+    "1.21.18-universal-presentation-dev417-preview-color-page-isolation";
   const LOADER_VERSION = 84;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
@@ -75,7 +75,7 @@
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=1.21.16-universal-presentation-dev415-preview-header-svg-sprite-icons",
+    "api_nodes.js?v=1.21.18-universal-presentation-dev417-preview-color-page-isolation",
     scriptUrl
   ).href;
 

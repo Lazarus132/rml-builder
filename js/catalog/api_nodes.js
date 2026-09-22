@@ -2,7 +2,7 @@
   "use strict";
 
   const API_FACTORY_MODULE_ID =
-    "1.21.16-universal-presentation-dev415-preview-header-svg-sprite-icons";
+    "1.21.18-universal-presentation-dev417-preview-color-page-isolation";
   const FACTORY_VERSION = 38;
   const API_VERIFICATION_SCHEMA_VERSION = 3;
   const CATALOG_PROJECTION_INDEX_VERSION = 1;

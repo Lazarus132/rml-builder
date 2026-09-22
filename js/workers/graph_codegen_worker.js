@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_CODEGEN_WORKER_MODULE_ID =
-  "1.21.16-universal-presentation-dev415-preview-header-svg-sprite-icons";
+  "1.21.18-universal-presentation-dev417-preview-color-page-isolation";
 const GRAPH_CODEGEN_WORKER_FACTORY_VERSION =
   38;
 
@@ -724,7 +724,7 @@ async function ensureRuntime(
       "../compiler/visual_csharp.js?v=84-harmony-file-presets"
     );
     importScripts(
-      "../catalog/api_nodes.js?v=1.21.16-universal-presentation-dev415-preview-header-svg-sprite-icons"
+      "../catalog/api_nodes.js?v=1.21.18-universal-presentation-dev417-preview-color-page-isolation"
     );
 
     if (
@@ -768,7 +768,7 @@ async function ensureRuntime(
     }
 
     importScripts(
-      "../graph/node_graph_codegen.js?v=1.21.16-universal-presentation-dev415-preview-header-svg-sprite-icons"
+      "../graph/node_graph_codegen.js?v=1.21.18-universal-presentation-dev417-preview-color-page-isolation"
     );
 
     if (

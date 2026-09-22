@@ -2300,7 +2300,7 @@ function buildCustomCSharpFragmentInWorker(nodeId, source, parseResult, options)
     }
     const worker = new Worker(
       new URL(
-        "js/workers/graph_codegen_worker.js?v=1.21.16-universal-presentation-dev415-preview-header-svg-sprite-icons",
+        "js/workers/graph_codegen_worker.js?v=1.21.18-universal-presentation-dev417-preview-color-page-isolation",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -5109,7 +5109,7 @@ function createCustomCSharpOverlayFrame(
     actions.className =
       "rml-custom-csharp-overlay-window-actions";
     const windowIcon = name =>
-      `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.16-universal-presentation-dev415-preview-header-svg-sprite-icons#icon-${name}"></use></svg>`;
+      `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.18-universal-presentation-dev417-preview-color-page-isolation#icon-${name}"></use></svg>`;
     const returnIcon = windowIcon("back");
     const minimizeIcon = windowIcon("minimize");
     const maximizeIcon = windowIcon("maximize");
@@ -5658,7 +5658,7 @@ function prepareCustomCSharpEditorHost(
       hostWindow.document.createElement("link");
     stylesheet.rel = "stylesheet";
     stylesheet.href = new URL(
-      "styles/features/styles.runtime-graph.css?v=1.21.16-universal-presentation-dev415-preview-header-svg-sprite-icons",
+      "styles/features/styles.runtime-graph.css?v=1.21.18-universal-presentation-dev417-preview-color-page-isolation",
       window.location.href
     ).href;
     hostWindow.document.head.appendChild(
@@ -7148,7 +7148,7 @@ Object.defineProperty(
   "RMLNodeGraphCustomCSharpModuleId",
   {
     value:
-      "1.21.16-universal-presentation-dev415-preview-header-svg-sprite-icons",
+      "1.21.18-universal-presentation-dev417-preview-color-page-isolation",
     writable: false,
     enumerable: true,
     configurable: true
