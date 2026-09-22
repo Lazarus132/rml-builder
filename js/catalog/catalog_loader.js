@@ -2,7 +2,7 @@
   "use strict";
 
   const CATALOG_LOADER_MODULE_ID =
-    "1.21.06-universal-presentation-dev403-node-root-scroll";
+    "1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll";
   const LOADER_VERSION = 84;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
@@ -75,7 +75,7 @@
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=1.21.06-universal-presentation-dev403-node-root-scroll",
+    "api_nodes.js?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll",
     scriptUrl
   ).href;
 

@@ -29,6 +29,10 @@
 
 .export-hint.error {
   color: var(--red);
+  min-width: 0;
+  margin-top: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .export-project-grid {
@@ -179,7 +183,6 @@
 }
 
 .export-hint {
-  min-height: 15px;
   margin: -7px 0 0;
 }
 

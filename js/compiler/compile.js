@@ -268,7 +268,44 @@
     });
   }
 
+  function compilerCancellation(signal) {
+    return signal?.reason || Object.assign(
+      new Error("The compiler operation was cancelled."),
+      { code: "RML_COMPILER_CANCELLED" }
+    );
+  }
+
+  function awaitCompilerStep(promise, signal) {
+    if (!signal) {
+      return Promise.resolve(promise);
+    }
+    return new Promise((resolve, reject) => {
+      const cancelled = () => reject(
+        compilerCancellation(signal)
+      );
+      if (signal.aborted) {
+        cancelled();
+        return;
+      }
+      signal.addEventListener(
+        "abort",
+        cancelled,
+        { once: true }
+      );
+      Promise.resolve(promise)
+        .then(resolve, reject)
+        .finally(() => signal.removeEventListener(
+          "abort",
+          cancelled
+        ));
+    });
+  }
+
   async function compile(files, options = {}) {
+    const signal = options.signal || null;
+    if (signal?.aborted) {
+      throw compilerCancellation(signal);
+    }
     const projects = Array.isArray(options.projects)
       ? options.projects
       : [{
@@ -280,7 +317,10 @@
     const validationFiles = projects.flatMap(project =>
       sourceFiles(project?.sources)
     );
-    const validation = await validate(validationFiles);
+    const validation = await awaitCompilerStep(
+      validate(validationFiles),
+      signal
+    );
     if (validation.phase !== "ready") {
       return Object.freeze({
         ok: false,
@@ -302,7 +342,17 @@
         outputs: Object.freeze([])
       });
     }
-    return backend.compile(projects, options);
+    return awaitCompilerStep(
+      backend.compile(projects, options),
+      signal
+    );
+  }
+
+  function cancelCompilation(reason) {
+    return binaryCompilerBackend()
+      ?.cancelCompilerOperations?.(
+        reason
+      ) === true;
   }
 
   function invalidate() {
@@ -328,6 +378,7 @@
     inspect,
     validate,
     compile,
+    cancelCompilation,
     capabilities,
     diagnosticText,
     getState() {

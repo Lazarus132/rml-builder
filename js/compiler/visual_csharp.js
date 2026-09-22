@@ -1012,7 +1012,7 @@ internal static class EarlyHarmonyPatches
         comma: ",",
         commaSpace: ", "
       }[parameter(ctx.node, "separator", "newline")];
-      const rawValues = ctx.variadic();
+      const rawValues = ctx.variadic(ctx.renderMode);
       if (parameter(ctx.node, "separator", "newline") === "none") {
         return rawValues.join("");
       }
@@ -1655,10 +1655,12 @@ internal static class EarlyHarmonyPatches
   expressionNode("csharp.binary", window.RMLI18n.t("ui.literal.3116d6f1f590"), "A+B", [select("operator", window.RMLI18n.t("ui.auto.47de07e127ff"), ["+", "-", "*", "/", "%", "==", "!=", "<", ">", "<=", ">=", "&&", "||", "&", "|", "^", "<<", ">>", "??", "is", "as", "and", "or", ".."], "+")], [syntaxInput("left", window.RMLI18n.t("ui.literal.8ae1c34bd37f")), syntaxInput("right", window.RMLI18n.t("ui.literal.954daa8b0033"))], ctx => `(${ctx.input("left")} ${parameter(ctx.node, "operator", "+")} ${ctx.input("right")})`);
   expressionNode("csharp.unary", window.RMLI18n.t("ui.literal.ab66f5b52c39"), "!A", [select("operator", window.RMLI18n.t("ui.auto.47de07e127ff"), ["+", "-", "!", "~", "++pre", "--pre", "++post", "--post", "&", "*", "^", "not", "await", "checked", "unchecked"], "!")], [syntaxInput("operand", window.RMLI18n.t("ui.literal.ff04060b9cdf"))], ctx => {
     const op = parameter(ctx.node, "operator", "!");
+    const statementExpression = ctx.renderMode === "statementExpression";
     if (["&", "*"].includes(op)) ctx.requireUnsafe();
-    if (op.endsWith("post")) return `(${ctx.input("operand")}${op.slice(0, 2)})`;
-    if (op.endsWith("pre")) return `(${op.slice(0, 2)}${ctx.input("operand")})`;
-    if (["await", "not"].includes(op)) return `(${op} ${ctx.input("operand")})`;
+    if (op.endsWith("post")) return statementExpression ? `${ctx.input("operand")}${op.slice(0, 2)}` : `(${ctx.input("operand")}${op.slice(0, 2)})`;
+    if (op.endsWith("pre")) return statementExpression ? `${op.slice(0, 2)}${ctx.input("operand")}` : `(${op.slice(0, 2)}${ctx.input("operand")})`;
+    if (op === "await") return statementExpression ? `await ${ctx.input("operand")}` : `(await ${ctx.input("operand")})`;
+    if (op === "not") return `(not ${ctx.input("operand")})`;
     if (["checked", "unchecked"].includes(op)) return `${op}(${ctx.input("operand")})`;
     return `(${op}${ctx.input("operand")})`;
   });
@@ -1681,7 +1683,7 @@ internal static class EarlyHarmonyPatches
     registerSyntaxNode(id, { title, group: GROUPS.statements, symbol, parameters, inputs, syntaxRender: renderer });
 
   statementNode("csharp.block", window.RMLI18n.t("ui.literal.82dd2cdf36f9"), "{}", [], [syntaxInput("statements", window.RMLI18n.t("ui.literal.5653cebc057d"))], ctx => `{\n${indent(ctx.input("statements"))}\n}`);
-  statementNode("csharp.expressionStatement", window.RMLI18n.t("ui.literal.d9c4f2202566"), window.RMLI18n.t("ui.literal.8da01525e240"), [], [syntaxInput("expression", window.RMLI18n.t("ui.auto.0822f96b587d"))], ctx => statement(ctx.input("expression")));
+  statementNode("csharp.expressionStatement", window.RMLI18n.t("ui.literal.d9c4f2202566"), window.RMLI18n.t("ui.literal.8da01525e240"), [], [syntaxInput("expression", window.RMLI18n.t("ui.auto.0822f96b587d"))], ctx => statement(ctx.input("expression", "statementExpression")));
   statementNode("csharp.localDeclaration", window.RMLI18n.t("ui.literal.ac6a378359d9"), window.RMLI18n.t("ui.literal.41fdf9c71f9b"), [text("type", window.RMLI18n.t("ui.auto.c9b8f9dc7b1e"), "var"), text("name", window.RMLI18n.t("ui.auto.8e88786eb305"), "value"), select("modifier", window.RMLI18n.t("ui.auto.e414b0062d6d"), ["none", "const", "using", "await using", "ref", "ref readonly", "scoped", "scoped ref"], "none"), bool("omitSemicolon", window.RMLI18n.t("ui.auto.59dc6598ce8a"), false)], [syntaxInput("initializer", window.RMLI18n.t("ui.auto.bb8835da9f7c"))], ctx => `${parameter(ctx.node, "modifier", "none") === "none" ? "" : `${parameter(ctx.node, "modifier")} `}${parameter(ctx.node, "type", "var") === "var" ? "var" : requireType(ctx, parameter(ctx.node, "type", "object"))} ${requireIdentifier(ctx, parameter(ctx.node, "name", "value"), "local name")}${ctx.input("initializer").trim() ? ` = ${ctx.input("initializer")}` : ""}${parameter(ctx.node, "omitSemicolon", false) ? "" : ";"}`);
   statementNode("csharp.jump", window.RMLI18n.t("ui.literal.9b21187b25dd"), window.RMLI18n.t("ui.literal.bb0d79b578ec"), [select("kind", window.RMLI18n.t("ui.auto.c70e585618c8"), ["return", "yield return", "yield break", "throw", "break", "continue", "goto", "goto case", "goto default"], "return")], [syntaxInput("value", window.RMLI18n.t("ui.literal.f80a3547f8cd"))], ctx => {
     const kind = parameter(ctx.node, "kind", "return");
@@ -1701,7 +1703,7 @@ internal static class EarlyHarmonyPatches
   statementNode("csharp.loop", window.RMLI18n.t("ui.literal.dc7f77b4ccfc"), window.RMLI18n.t("ui.literal.300a061f8ce5"), [select("kind", window.RMLI18n.t("ui.auto.c70e585618c8"), ["while", "do", "for", "foreach", "await foreach"], "while"), text("iterator", window.RMLI18n.t("ui.auto.3f57bf250986"), "item"), text("iteratorType", window.RMLI18n.t("ui.auto.b987338bea18"), "var")], [syntaxInput("initializer", window.RMLI18n.t("ui.literal.f54fe4e82421")), syntaxInput("condition", window.RMLI18n.t("ui.literal.81ad71a77701")), syntaxInput("increment", window.RMLI18n.t("ui.literal.9d9bdee42654")), syntaxInput("body", window.RMLI18n.t("ui.auto.ec672784079b"))], ctx => {
     const kind = parameter(ctx.node, "kind", "while");
     if (kind === "do") return `do${block(ctx.input("body"))}\nwhile (${ctx.input("condition")});`;
-    if (kind === "for") return `for (${ctx.input("initializer")}; ${ctx.input("condition")}; ${ctx.input("increment")})${block(ctx.input("body"))}`;
+    if (kind === "for") return `for (${ctx.input("initializer", "statementExpression")}; ${ctx.input("condition")}; ${ctx.input("increment", "statementExpression")})${block(ctx.input("body"))}`;
     if (kind.includes("foreach")) {
       const type = parameter(ctx.node, "iteratorType", "var") === "var" ? "var" : requireType(ctx, parameter(ctx.node, "iteratorType", "var"));
       return `${kind} (${type} ${requireIdentifier(ctx, parameter(ctx.node, "iterator", "item"), "iterator name")} in ${ctx.input("condition")})${block(ctx.input("body"))}`;
@@ -1733,9 +1735,10 @@ internal static class EarlyHarmonyPatches
     const diagnostics = [];
     const cache = new Map();
     const stack = new Set();
-    const renderNode = nodeId => {
+    const renderNode = (nodeId, renderMode = "") => {
       if (!nodeId) return "";
-      if (cache.has(nodeId)) return cache.get(nodeId);
+      const cacheKey = `${nodeId}\u0000${renderMode}`;
+      if (cache.has(cacheKey)) return cache.get(cacheKey);
       if (stack.has(nodeId)) {
         diagnostics.push(`Visual C# syntax cycle detected at node '${nodeId}'.`);
         return "";
@@ -1747,19 +1750,20 @@ internal static class EarlyHarmonyPatches
         return "";
       }
       stack.add(nodeId);
-      const input = id => {
+      const input = (id, childRenderMode = "") => {
         const connection = incoming.get(`${node.id}:${id}`);
-        return connection ? renderNode(connection.fromNode) : "";
+        return connection ? renderNode(connection.fromNode, childRenderMode) : "";
       };
       const context = {
         node,
         title: definition.title || node.operatorId,
+        renderMode,
         input,
         graphValue(id) {
           diagnostics.push(`${definition.title}: Runtime Graph value input '${id}' is unavailable inside an isolated Custom C# File graph.`);
           return "default";
         },
-        variadic: () => variadicIds(node).map(input),
+        variadic: (childRenderMode = "") => variadicIds(node).map(id => input(id, childRenderMode)),
         diagnostic: message => diagnostics.push(String(message)),
         requireUnsafe() {}
       };
@@ -1770,7 +1774,7 @@ internal static class EarlyHarmonyPatches
         diagnostics.push(`${context.title}: visual C# rendering failed: ${error instanceof Error ? error.message : String(error)}`);
       }
       stack.delete(nodeId);
-      cache.set(nodeId, result);
+      cache.set(cacheKey, result);
       return result;
     };
     if (!outputConnection) {
@@ -1792,9 +1796,10 @@ internal static class EarlyHarmonyPatches
         const localNodeById = new Map(localNodes.map(node => [node.id, node]));
         const cache = new Map();
         const stack = new Set();
-        const renderNode = nodeId => {
+        const renderNode = (nodeId, renderMode = "") => {
           if (!nodeId) return "";
-          if (cache.has(nodeId)) return cache.get(nodeId);
+          const cacheKey = `${nodeId}\u0000${renderMode}`;
+          if (cache.has(cacheKey)) return cache.get(cacheKey);
           if (stack.has(nodeId)) {
             api.diagnostic(`Visual C# syntax cycle detected at node '${nodeId}'.`);
             return "";
@@ -1806,13 +1811,14 @@ internal static class EarlyHarmonyPatches
             return "";
           }
           stack.add(nodeId);
-          const input = id => {
+          const input = (id, childRenderMode = "") => {
             const connection = localIncoming.get(`${node.id}:${id}`);
-            return connection ? renderNode(connection.fromNode) : "";
+            return connection ? renderNode(connection.fromNode, childRenderMode) : "";
           };
           const context = {
             node,
             title: definition.title || node.operatorId,
+            renderMode,
             input,
             graphValue(id) {
               const connection = localIncoming.get(`${node.id}:${id}`);
@@ -1827,7 +1833,7 @@ internal static class EarlyHarmonyPatches
               const expression = api.output(connection.fromNode, connection.fromPort);
               return String(expression?.code || "default");
             },
-            variadic: () => variadicIds(node).map(input),
+            variadic: (childRenderMode = "") => variadicIds(node).map(id => input(id, childRenderMode)),
             diagnostic: message => api.diagnostic(message),
             requireUnsafe() { unsafeRequired = true; }
           };
@@ -1838,7 +1844,7 @@ internal static class EarlyHarmonyPatches
             api.diagnostic(`${context.title}: visual C# rendering failed: ${error instanceof Error ? error.message : String(error)}`);
           }
           stack.delete(nodeId);
-          cache.set(nodeId, result);
+          cache.set(cacheKey, result);
           return result;
         };
         return renderNode;

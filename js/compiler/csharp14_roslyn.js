@@ -145,6 +145,41 @@
     return Object.freeze({ released, busy });
   }
 
+  function cancelCompilerOperations(
+    reason = "The compiler operation was cancelled."
+  ) {
+    const channel = channels.compiler;
+    const active = Boolean(
+      channel.worker ||
+      channelHasPendingRequests(channel)
+    );
+    if (!active) {
+      return false;
+    }
+    if (channel.idleTimer) {
+      globalThis.clearTimeout(
+        channel.idleTimer
+      );
+      channel.idleTimer = 0;
+    }
+    const worker = channel.worker;
+    channel.worker = null;
+    try {
+      worker?.terminate();
+    } catch {}
+    const error = new Error(
+      reason instanceof Error
+        ? reason.message
+        : String(
+            reason ||
+            "The compiler operation was cancelled."
+          )
+    );
+    error.code = "RML_COMPILER_CANCELLED";
+    rejectPending(channel, error);
+    return true;
+  }
+
   function handleMessage(channel, event) {
     const message = event?.data;
     const request = pending.get(message?.id);
@@ -326,17 +361,46 @@
   }
 
   function compile(projects, options = {}) {
+    const signal = options.signal || null;
+    if (signal?.aborted) {
+      return Promise.reject(
+        signal.reason || Object.assign(
+          new Error("The compiler operation was cancelled."),
+          { code: "RML_COMPILER_CANCELLED" }
+        )
+      );
+    }
     const workerOptions = {
       referenceFiles: Array.isArray(options.referenceFiles)
         ? options.referenceFiles
         : [],
       emitPdb: options.emitPdb === true
     };
-    return invoke(
+    const operation = invoke(
       channels.compiler,
       "compile",
       [Array.isArray(projects) ? projects : [], workerOptions],
       { onProgress: options.onProgress }
+    );
+    if (!signal) {
+      return operation;
+    }
+    const cancelled = () => {
+      cancelCompilerOperations(
+        signal.reason ||
+        "The compiler operation was cancelled."
+      );
+    };
+    signal.addEventListener(
+      "abort",
+      cancelled,
+      { once: true }
+    );
+    return operation.finally(() =>
+      signal.removeEventListener(
+        "abort",
+        cancelled
+      )
     );
   }
 
@@ -358,7 +422,7 @@
     "RMLCSharp14Roslyn",
     {
       value: Object.freeze({
-        version: 11,
+        version: 12,
         name: "Roslyn C# 14 isolated browser compiler (.NET 9 host, .NET 10 target)",
         languageVersion: LANGUAGE_VERSION,
         assembly: ASSEMBLY,
@@ -371,6 +435,7 @@
         compile,
         configureReferences,
         resetCompilerReferences,
+        cancelCompilerOperations,
         releaseIdleWorkers,
         capabilities: Object.freeze({
           syntaxValidation: true,

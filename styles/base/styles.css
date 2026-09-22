@@ -4674,6 +4674,16 @@ html[data-rml-architecture-gate="blocked"] body {
   background: #030912;
 }
 
+html:has(dialog[open]),
+html:has(dialog[open]) body {
+  overflow: hidden !important;
+  overscroll-behavior: none !important;
+}
+
+dialog[open] {
+  overscroll-behavior: contain;
+}
+
 html[data-rml-architecture-gate="pending"] body > :not(#rml-architecture-gate),
 html[data-rml-architecture-gate="blocked"] body > :not(#rml-architecture-gate) {
   display: none !important;

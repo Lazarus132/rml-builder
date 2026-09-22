@@ -8132,7 +8132,7 @@ function createGraphAnalysisCertificate(
       schemaVersion:
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION,
       moduleId:
-        "1.21.06-universal-presentation-dev403-node-root-scroll",
+        "1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll",
       semanticToken: token,
       nodeCount: graph.nodes.length,
       connectionCount: connections.length,
@@ -8165,7 +8165,7 @@ function graphAnalysisCertificateEnvelopeValid(
       Number(certificate.schemaVersion) ===
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION &&
       certificate.moduleId ===
-        "1.21.06-universal-presentation-dev403-node-root-scroll" &&
+        "1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll" &&
       certificate.valid === true &&
       typeof certificate.semanticToken ===
         "string" &&
@@ -17065,7 +17065,7 @@ Object.defineProperty(
     {
       value: Object.freeze({
         moduleId:
-          "1.21.06-universal-presentation-dev403-node-root-scroll",
+          "1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll",
         build:
           buildTypedNodeGraphCSharpContribution,
         validateDocument:

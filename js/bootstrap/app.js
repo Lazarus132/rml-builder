@@ -28,7 +28,7 @@ const EXAMPLE_PROJECT_RESOURCE_PATH = "../../assets/data/Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "1.21.06-universal-presentation-dev403-node-root-scroll";
+  "1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -368,7 +368,7 @@ function outlineSymbolMarkup(symbol) {
   const iconIds = { "#": "icon-node-hash", "VEC": "icon-node-vec" };
   const iconId = iconIds[String(symbol || "")];
   if (!iconId) return escapeHtml(String(symbol || "?"));
-  return `<svg class="rml-node-symbol-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll#${iconId}"></use></svg>`;
+  return `<svg class="rml-node-symbol-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll#${iconId}"></use></svg>`;
 }
 
 function outlinePaletteEntriesForGroup(group) {
@@ -857,6 +857,7 @@ let settingsPreviewPulseCounts = {};
 let settingsPreviewColorSession = null;
 let settingsPreviewStatusTimer = null;
 let settingsPreviewRenderDeferred = false;
+let settingsPreviewLabelFitFrame = 0;
 let outlineInspectorRenderDeferred = false;
 let activeDraggedNodeId = null;
 let activeDraggedOptionId = null;
@@ -955,9 +956,12 @@ const browserCompilerReferenceFiles = new Map();
 const browserCompilerAdditionalRequiredReferences =
   new Map();
 let browserCompilerBuildCache = null;
-let browserCompilerBuildSequence = 0;
 let browserCompilerBuilding = false;
 let browserCompilerBuildPromise = null;
+let browserCompilerBuildFingerprint = "";
+let browserCompilerBuildProjectEpoch = 0;
+let browserCompilerBuildSignal = null;
+let browserCompilerReferenceRevision = 0;
 let browserCompilerDirectoryFiles = Object.freeze([]);
 let browserCompilerDirectoryFileCount = 0;
 let browserCompilerDirectoryMatchCount = 0;
@@ -968,6 +972,8 @@ let exportPreflightSequence = 0;
 let exportPreflightRequest = null;
 let exportDialogOpenPromise = null;
 let exportDeliveryBusy = false;
+let exportDeliverySequence = 0;
+let exportDeliveryJob = null;
 let exportReadiness = Object.freeze({
   phase: "idle",
   fingerprint: "",
@@ -1179,6 +1185,104 @@ function exportRequestChanged(message = window.RMLI18n.t("ui.auto.7067cb83da1a")
   const error = new Error(message);
   error.code = "RML_EXPORT_CHANGED";
   return error;
+}
+
+function exportDeliveryCancelled(
+  message = window.RMLI18n.t("ui.auto.8eb305569ec9")
+) {
+  const error = new Error(message);
+  error.code = "RML_EXPORT_CANCELLED";
+  return error;
+}
+
+function expectedExportCancellation(error) {
+  return [
+    "RML_EXPORT_CHANGED",
+    "RML_EXPORT_CANCELLED",
+    "RML_COMPILER_CANCELLED",
+    "RML_COMPILER_BUILD_SUPERSEDED"
+  ].includes(error?.code);
+}
+
+function beginExportDelivery() {
+  const job = {
+    id: ++exportDeliverySequence,
+    projectEpoch: projectApplicationEpoch,
+    controller: new AbortController()
+  };
+  exportDeliveryJob = job;
+  exportDeliveryBusy = true;
+  return job;
+}
+
+function assertExportDeliveryCurrent(job) {
+  if (job.controller.signal.aborted) {
+    throw job.controller.signal.reason ||
+      exportDeliveryCancelled();
+  }
+  if (
+    exportDeliveryJob !== job ||
+    job.projectEpoch !== projectApplicationEpoch
+  ) {
+    throw exportDeliveryCancelled(
+      window.RMLI18n.t("ui.literal.4b1589059ab1")
+    );
+  }
+}
+
+function awaitExportDelivery(job, promise) {
+  const signal = job.controller.signal;
+  return new Promise((resolve, reject) => {
+    const cancelled = () => reject(
+      signal.reason || exportDeliveryCancelled()
+    );
+    if (signal.aborted) {
+      cancelled();
+      return;
+    }
+    signal.addEventListener(
+      "abort",
+      cancelled,
+      { once: true }
+    );
+    Promise.resolve(promise)
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener(
+        "abort",
+        cancelled
+      ));
+  });
+}
+
+function cancelExportDelivery(
+  message = window.RMLI18n.t("ui.auto.8eb305569ec9")
+) {
+  const job = exportDeliveryJob;
+  if (!job || job.controller.signal.aborted) {
+    return false;
+  }
+  job.controller.abort(
+    exportDeliveryCancelled(message)
+  );
+  if (
+    browserCompilerBuilding &&
+    browserCompilerBuildProjectEpoch ===
+      job.projectEpoch
+  ) {
+    window.RMLCompile?.cancelCompilation?.(
+      message
+    );
+  }
+  return true;
+}
+
+function finishExportDelivery(job) {
+  if (exportDeliveryJob !== job) {
+    return false;
+  }
+  exportDeliveryJob = null;
+  exportDeliveryBusy = false;
+  return true;
 }
 
 function assertExportRequestCurrent(request, compareSnapshot = false) {
@@ -1402,15 +1506,12 @@ function requestExportPreflight({ prepareStyles = false } = {}) {
     const diagnostics = getDiagnostics();
     if (diagnostics.length) throw new Error(diagnostics.slice(0, 8).join(" | "));
     const output = generatedCodeForCurrentView();
-    const artifacts = Object.freeze(
-      output.artifacts.map(artifact =>
-        Object.freeze({
-          key: String(artifact.key || ""),
-          content: String(artifact.content ?? "")
-        })
-      )
-    );
-    const files = Object.freeze(generatedCSharpFiles(output.artifacts)
+    const catalog =
+      freezeGeneratedArtifactCatalog(
+        output.catalog
+      );
+    const artifacts = catalog.artifacts;
+    const files = Object.freeze(generatedCSharpFiles(artifacts)
       .map(file => Object.freeze({ ...file })));
     if (!files.length) throw new Error(window.RMLI18n.t("ui.auto.82f2b528a79c"));
     assertExportRequestCurrent(request);
@@ -1431,7 +1532,7 @@ function requestExportPreflight({ prepareStyles = false } = {}) {
     const latestDiagnostics = getDiagnostics();
     if (latestDiagnostics.length) throw new Error(latestDiagnostics.slice(0, 8).join(" | "));
     setExportReadiness("ready", { fingerprint, fileCount: files.length }, []);
-    return Object.freeze({ request, files, artifacts, code: output.code, fingerprint });
+    return Object.freeze({ request, files, artifacts, catalog, code: output.code, fingerprint });
   })().catch(error => {
     if (exportPreflightRequest === request) {
       if (["RML_EXPORT_CHANGED", "RML_EXPORT_CANCELLED"].includes(error?.code)) setExportReadiness("idle", {}, []);
@@ -4410,7 +4511,7 @@ function ensureGraphCodegenWorker() {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=1.21.06-universal-presentation-dev403-node-root-scroll",
+      "../workers/graph_codegen_worker.js?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -12103,6 +12204,12 @@ function parseProjectDocument(
 }
 
 function notifyProjectReplacement(project, reason, projectEpoch = ++projectApplicationEpoch) {
+  const replacementMessage =
+    window.RMLI18n.t("ui.literal.4b1589059ab1");
+  cancelExportDelivery(replacementMessage);
+  retireBrowserCompilerBuildForProjectReplacement(
+    replacementMessage
+  );
   document.dispatchEvent(
     new CustomEvent(
       "rml-builder:project-replacement",
@@ -13334,7 +13441,7 @@ function renderPalette() {
               data-help="${escapeHtml(outlinePaletteHelp(item))}">
               <span>${escapeHtml(item.badge)}</span>
               <strong>${escapeHtml(item.label)}</strong>
-              <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll#icon-add"></use></svg></b>
+              <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll#icon-add"></use></svg></b>
             </button>`;
           }
 
@@ -13349,7 +13456,7 @@ function renderPalette() {
             data-help="${escapeHtml(entry.family.id === "numberConstant" ? window.RMLI18n.t("ui.dev327.outline.number.help") : window.RMLI18n.t("ui.dev327.outline.vector.help"))}">
             <span>${outlineSymbolMarkup(entry.family.symbol)}</span>
             <strong>${escapeHtml(entry.family.title)}</strong>
-            <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll#icon-add"></use></svg></b>
+            <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll#icon-add"></use></svg></b>
           </button>`;
         })
         .join("");
@@ -13368,7 +13475,7 @@ function renderPalette() {
                   data-help="${escapeHtml(window.RMLI18n.t("ui.attr.e126e5850c57"))}">
                   <span>{{i18n:js.presentation.adddc72949b2}}</span>
                   <strong>${escapeHtml(`DYN · ${source.label}`)}</strong>
-                  <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll#icon-add"></use></svg></b>
+                  <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll#icon-add"></use></svg></b>
                 </button>`
               )
               .join("")
@@ -13705,7 +13812,7 @@ const nextOptionDirection =
                       option.children,
                       option.id
                     )
-                  : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll#icon-add"></use></svg></span>{{i18n:ui.text.3f27e6ab79a6}}</div>`
+                  : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll#icon-add"></use></svg></span>{{i18n:ui.text.3f27e6ab79a6}}</div>`
               }
             </div>
           </section>`
@@ -13736,7 +13843,7 @@ const nextOptionDirection =
         ${
           children.length
             ? nodeCardsMarkup(children, node.id)
-            : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll#icon-add"></use></svg></span>{{i18n:ui.text.572874456a9e}}</div>`
+            : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll#icon-add"></use></svg></span>{{i18n:ui.text.572874456a9e}}</div>`
         }
       </div>
     </section>`;
@@ -21303,7 +21410,7 @@ function controllerInspectorMarkup(node) {
       <legend>{{i18n:ui.text.722c20869f7e}}</legend>
       ${options}
       <button class="add-option" type="button" data-add-option>
-        <svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll#icon-add"></use></svg> ${window.RMLI18n.t("ui.outline.addSection")}
+        <svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll#icon-add"></use></svg> ${window.RMLI18n.t("ui.outline.addSection")}
       </button>
     </fieldset>
     <label>
@@ -23332,6 +23439,7 @@ function generatedCodeForCurrentView() {
 
   return {
     graphActive: graphViewActive,
+    catalog,
     artifacts,
     selectedArtifact: selected,
     code:
@@ -24002,7 +24110,6 @@ function updateGeneratedOutput() {
       );
       return;
     }
-    invalidateBrowserCompilerBuild(false);
     errors = getDiagnostics();
     output =
       generatedCodeForCurrentView();
@@ -24371,13 +24478,13 @@ function previewEnumEditorMarkup(
       type="button"
       data-preview-enum-direction="-1"
       data-preview-node="${escapeHtml(node.id)}"
-      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.5caa1fc4e7c2"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll#icon-triangle-left"></use></svg></button>
+      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.5caa1fc4e7c2"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll#icon-triangle-left"></use></svg></button>
     <button
       class="rml-preview-control rml-preview-enum-step"
       type="button"
       data-preview-enum-direction="1"
       data-preview-node="${escapeHtml(node.id)}"
-      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.c400ec237248"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll#icon-triangle-right"></use></svg></button>
+      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.c400ec237248"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll#icon-triangle-right"></use></svg></button>
   </div>`;
 }
 
@@ -24451,7 +24558,7 @@ function previewSettingEditorMarkup(node) {
         data-preview-bool="${escapeHtml(node.id)}"${
           value ? " checked" : ""
         }>
-      <span aria-hidden="true"><svg class="rml-inline-icon" viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll#icon-check"></use></svg></span>
+      <span aria-hidden="true"><svg class="rml-inline-icon" viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll#icon-check"></use></svg></span>
     </label>`;
   }
 
@@ -25395,6 +25502,90 @@ function settingsPreviewHasActiveEditor() {
   );
 }
 
+function fitSettingsPreviewLabels() {
+  settingsPreviewLabelFitFrame = 0;
+
+  if (
+    !elements.settingsPreviewDialog?.open ||
+    elements.settingsPreviewDialog.classList.contains(
+      "rml-preview-color-open"
+    )
+  ) {
+    return;
+  }
+
+  const labels =
+    elements.settingsPreviewContent?.querySelectorAll(
+      ".rml-preview-label, .rml-preview-lifecycle-line"
+    ) || [];
+
+  for (const label of labels) {
+    label.style.removeProperty("font-size");
+
+    if (
+      label.clientWidth <= 0 ||
+      label.clientHeight <= 0
+    ) {
+      continue;
+    }
+
+    const maximum =
+      Number.parseFloat(
+        window.getComputedStyle(label).fontSize
+      ) || 8;
+    const fits = () =>
+      label.scrollWidth <= label.clientWidth &&
+      label.scrollHeight <= label.clientHeight;
+
+    if (fits()) {
+      continue;
+    }
+
+    let lower = 8;
+    let upper = maximum;
+
+    label.style.setProperty(
+      "font-size",
+      `${lower}px`,
+      "important"
+    );
+
+    for (let index = 0; index < 12; index += 1) {
+      const candidate =
+        (lower + upper) / 2;
+
+      label.style.setProperty(
+        "font-size",
+        `${candidate}px`,
+        "important"
+      );
+
+      if (fits()) {
+        lower = candidate;
+      } else {
+        upper = candidate;
+      }
+    }
+
+    label.style.setProperty(
+      "font-size",
+      `${Math.floor(lower * 10) / 10}px`,
+      "important"
+    );
+  }
+}
+
+function scheduleSettingsPreviewLabelFit() {
+  if (settingsPreviewLabelFitFrame) {
+    return;
+  }
+
+  settingsPreviewLabelFitFrame =
+    window.requestAnimationFrame(
+      fitSettingsPreviewLabels
+    );
+}
+
 function renderSettingsPreview(options = {}) {
   if (!settingsPreviewDraft) {
     return;
@@ -25470,13 +25661,14 @@ function renderSettingsPreview(options = {}) {
     const quarantineButton = elements.settingsPreviewRuntimeActions.querySelector(
       '[data-preview-runtime-action="quarantine"]'
     );
-    if (deactivateButton) deactivateButton.hidden = !graphRuntimeActive;
+    if (deactivateButton) deactivateButton.hidden = !supportsRuntimeReload;
     if (reloadButton) reloadButton.hidden = !supportsRuntimeReload;
     if (quarantineButton) quarantineButton.hidden = false;
   }
 
   renderSettingsPreviewFooter();
   window.fitSettingsPreviewColorPicker?.();
+  scheduleSettingsPreviewLabelFit();
 }
 
 function changeSettingsPreviewEnum(
@@ -27557,7 +27749,9 @@ async function copyGeneratedCodeForCurrentView(button) {
     }
     await copyText(artifact.content, button);
   } catch (error) {
-    if (error?.code !== "RML_EXPORT_CANCELLED") void showExportPreparationFailure(error);
+    if (!expectedExportCancellation(error)) {
+      void showExportPreparationFailure(error);
+    }
   } finally {
     if (
       generatedArtifactSelectionLock ===
@@ -28122,7 +28316,7 @@ async function requestBuilderReplacementChoice(
                 ? "!"
                 : "·";
       if (status === "selected") {
-        state.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll#icon-check"></use></svg>`;
+        state.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll#icon-check"></use></svg>`;
       }
       const name =
         document.createElement("span");
@@ -30068,7 +30262,7 @@ function promiseWithBuilderTimeout(
 
 function assertProjectRuntimeModuleCoherence() {
   const expectedModuleId =
-    "1.21.06-universal-presentation-dev403-node-root-scroll";
+    "1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll";
   const requiredFactoryVersion = 38;
   const mismatches = [];
   const requireModuleId = (
@@ -35724,6 +35918,73 @@ function buildGeneratedArtifactCatalog(
   };
 }
 
+function freezeGeneratedArtifactCatalog(
+  catalog
+) {
+  return Object.freeze({
+    multiProject:
+      catalog?.multiProject === true,
+    projects: Object.freeze(
+      (Array.isArray(catalog?.projects)
+        ? catalog.projects
+        : [])
+        .map(project => Object.freeze({
+          ...project
+        }))
+    ),
+    artifacts: Object.freeze(
+      (Array.isArray(catalog?.artifacts)
+        ? catalog.artifacts
+        : [])
+        .map(artifact => Object.freeze({
+          ...artifact,
+          content:
+            artifact?.content ?? ""
+        }))
+    )
+  });
+}
+
+function selectedExportFilesFromCatalog(
+  catalog,
+  includeCs,
+  includeCsproj
+) {
+  const includeAny =
+    includeCs || includeCsproj;
+  const files = catalog.artifacts
+    .filter(artifact => {
+      if (artifact.kind === "source") {
+        return includeCs;
+      }
+      if (
+        artifact.kind === "project" ||
+        artifact.kind === "build"
+      ) {
+        return includeCsproj;
+      }
+      return includeAny;
+    })
+    .map(artifact => ({
+      name: artifact.archivePath,
+      content: artifact.content,
+      type: artifact.type,
+      projectId: artifact.projectId,
+      projectLabel: artifact.projectLabel,
+      deployDirectory:
+        artifact.deployDirectory,
+      projectRole: artifact.projectRole
+    }));
+
+  return {
+    files,
+    multiProject:
+      catalog.multiProject === true,
+    projects: catalog.projects,
+    artifacts: catalog.artifacts
+  };
+}
+
 function browserCompilerReferenceSelectionError(
   message
 ) {
@@ -35976,7 +36237,10 @@ function selectBrowserCompilerFiles(
   return result;
 }
 
-function requestBrowserCompilerInputFiles(input) {
+function requestBrowserCompilerInputFiles(
+  input,
+  signal = null
+) {
   if (!input) return Promise.resolve([]);
 
   return new Promise(resolve => {
@@ -35986,6 +36250,10 @@ function requestBrowserCompilerInputFiles(input) {
       settled = true;
       input.removeEventListener("change", changed);
       input.removeEventListener("cancel", cancelled);
+      signal?.removeEventListener(
+        "abort",
+        cancelled
+      );
       input.value = "";
       resolve(files);
     };
@@ -35997,6 +36265,15 @@ function requestBrowserCompilerInputFiles(input) {
     input.value = "";
     input.addEventListener("change", changed);
     input.addEventListener("cancel", cancelled);
+    signal?.addEventListener(
+      "abort",
+      cancelled,
+      { once: true }
+    );
+    if (signal?.aborted) {
+      cancelled();
+      return;
+    }
     try {
       input.click();
     } catch {
@@ -36005,9 +36282,12 @@ function requestBrowserCompilerInputFiles(input) {
   });
 }
 
-function requestBrowserCompilerDirectoryFiles() {
+function requestBrowserCompilerDirectoryFiles(
+  signal = null
+) {
   return requestBrowserCompilerInputFiles(
-    elements.exportCompilerDirectory
+    elements.exportCompilerDirectory,
+    signal
   );
 }
 
@@ -36249,8 +36529,23 @@ async function browserCompilerReferenceDrop(event) {
 }
 
 async function ensureBrowserCompilerReferences(
-  catalog
+  catalog,
+  request = null,
+  signal = null
 ) {
+  const assertCurrent = () => {
+    if (signal?.aborted) {
+      throw signal.reason ||
+        exportDeliveryCancelled();
+    }
+    if (request) {
+      assertExportRequestCurrent(
+        request,
+        true
+      );
+    }
+  };
+  assertCurrent();
   let missing =
     missingBrowserCompilerReferences(catalog);
   if (missing.length === 0) return;
@@ -36262,6 +36557,7 @@ async function ensureBrowserCompilerReferences(
 
   try {
     if (browserCompilerDirectoryFiles.length > 0) {
+      assertCurrent();
       const cachedResult = selectBrowserCompilerFiles(
         browserCompilerDirectoryFiles,
         missing
@@ -36274,9 +36570,12 @@ async function ensureBrowserCompilerReferences(
 
     if (missing.length > 0) {
       const directoryPromise =
-        requestBrowserCompilerDirectoryFiles();
+        requestBrowserCompilerDirectoryFiles(
+          signal
+        );
       const directoryFiles =
         await directoryPromise;
+      assertCurrent();
       if (directoryFiles.length === 0) {
         throw browserCompilerReferenceSelectionError(
           window.RMLI18n.t("ui.literal.7475400470fe")
@@ -36287,6 +36586,7 @@ async function ensureBrowserCompilerReferences(
         browserCompilerDllCandidates(
           directoryFiles
         );
+      assertCurrent();
       browserCompilerDirectoryFiles =
         directoryDllFiles;
       browserCompilerDirectoryFileCount =
@@ -36389,20 +36689,27 @@ function browserCompilationProjects(
   );
 }
 
-function browserCompilerReferenceFingerprint() {
-  return selectedBrowserCompilerReferences()
-    .map(file => [
-      String(file.name || ""),
-      Number(file.size) || 0,
-      Number(file.lastModified) || 0,
-      String(
-        file.webkitRelativePath || ""
-      )
-    ].join(":"))
-    .join("|");
+function browserCompilerReferenceFingerprint(
+  referenceFiles =
+    selectedBrowserCompilerReferences(),
+  referenceRevision =
+    browserCompilerReferenceRevision
+) {
+  return JSON.stringify({
+    revision:
+      Number(referenceRevision) || 0,
+    files: referenceFiles.map(file => ({
+      name: String(file.name || ""),
+      size: Number(file.size) || 0,
+      lastModified:
+        Number(file.lastModified) || 0,
+      path:
+        browserCompilerReferencePath(file)
+    }))
+  });
 }
 
-function browserCompilationFingerprint(
+function browserCompilationProjectFingerprint(
   projects
 ) {
   const sourceFiles = projects.flatMap(
@@ -36416,20 +36723,44 @@ function browserCompilationFingerprint(
     window.RMLCompile?.fingerprint?.(
       sourceFiles
     ) || "unavailable";
-  const projectOptions = projects
-    .map(project => [
-      project.id,
-      project.assemblyName,
-      project.version,
-      project.allowUnsafe,
-      project.checkOverflow,
-      project.deterministic,
-      project.implicitUsings,
-      project.nullable
-    ].join(":"))
-    .join("|");
+  const projectOptions = projects.map(
+    project => ({
+      id: project.id,
+      assemblyName: project.assemblyName,
+      version: project.version,
+      allowUnsafe: project.allowUnsafe,
+      checkOverflow: project.checkOverflow,
+      deterministic: project.deterministic,
+      implicitUsings: project.implicitUsings,
+      nullable: project.nullable,
+      optimize: project.optimize
+    })
+  );
 
-  return `${sourceFingerprint}|${projectOptions}|${browserCompilerReferenceFingerprint()}`;
+  return JSON.stringify({
+    sourceFingerprint,
+    projectOptions
+  });
+}
+
+function browserCompilationFingerprint(
+  projects,
+  referenceFiles =
+    selectedBrowserCompilerReferences(),
+  referenceRevision =
+    browserCompilerReferenceRevision
+) {
+  return JSON.stringify({
+    project:
+      browserCompilationProjectFingerprint(
+        projects
+      ),
+    references:
+      browserCompilerReferenceFingerprint(
+        referenceFiles,
+        referenceRevision
+      )
+  });
 }
 
 function formatBrowserCompilerDiagnostics(
@@ -36461,15 +36792,25 @@ function compiledBrowserOutputFiles(
   result,
   outputs
 ) {
+  const projects =
+    Array.isArray(result.projects)
+      ? result.projects
+      : generatedProjectDescriptors(
+          result
+        );
+  const baseName = String(
+    projects.find(project =>
+      project.id === "main-mod"
+    )?.assemblyName ||
+    projects[0]?.assemblyName ||
+    generatedBaseName()
+  );
   const root = result.multiProject
     ? safeArchiveSegment(
-        `${generatedBaseName()}-RML-Project`,
+        `${baseName}-RML-Project`,
         window.RMLI18n.t("ui.literal.ede9859c0c93")
       )
     : "";
-  const projects = generatedProjectDescriptors(
-    result
-  );
   const projectMap = new Map(
     projects.map(project => [
       project.id,
@@ -36552,12 +36893,33 @@ function browserCompiledPlaceholderArtifacts(
 function invalidateBrowserCompilerBuild(
   resetReferences = false
 ) {
-  browserCompilerBuildSequence += 1;
   browserCompilerBuildCache = null;
 
   if (resetReferences) {
-    void window.RMLCSharp14Roslyn
-      ?.resetCompilerReferences?.();
+    if (browserCompilerBuilding) {
+      window.RMLCompile
+        ?.cancelCompilation?.(
+          "Compiler references changed."
+        );
+    } else {
+      void window.RMLCSharp14Roslyn
+        ?.resetCompilerReferences?.();
+    }
+  }
+}
+
+function retireBrowserCompilerBuildForProjectReplacement(
+  message
+) {
+  browserCompilerAdditionalRequiredReferences
+    .clear();
+  browserCompilerReferenceRevision += 1;
+  browserCompilerBuildCache = null;
+  browserCompilerBuildFingerprint = "";
+
+  if (browserCompilerBuilding) {
+    window.RMLCompile
+      ?.cancelCompilation?.(message);
   }
 }
 
@@ -36653,26 +37015,92 @@ function updateBrowserCompilerStatus(
   };
 }
 
-async function compileGeneratedBrowserDlls() {
-  if (browserCompilerBuildPromise) {
-    return browserCompilerBuildPromise;
-  }
+function browserCompilerBuildSuperseded(
+  details
+) {
+  const error = new Error(
+    `Compiler build superseded: ${String(
+      details || "the compilation input changed"
+    )}`
+  );
+  error.code =
+    "RML_COMPILER_BUILD_SUPERSEDED";
+  return error;
+}
 
-  const completeCatalog =
-    buildGeneratedArtifactCatalog(
-      true,
-      true
+function assertBrowserCompilerSignal(signal) {
+  if (signal?.aborted) {
+    throw signal.reason ||
+      exportDeliveryCancelled();
+  }
+}
+
+async function compileGeneratedBrowserDlls(
+  catalog = null,
+  request = null,
+  signal = null
+) {
+  assertBrowserCompilerSignal(signal);
+  const completeCatalog = catalog ||
+    freezeGeneratedArtifactCatalog(
+      buildGeneratedArtifactCatalog(
+        true,
+        true
+      )
     );
   const projects =
     browserCompilationProjects(
       completeCatalog
     );
+  const projectEpoch = request?.projectEpoch ??
+    projectApplicationEpoch;
+  const initialReferenceFiles =
+    selectedBrowserCompilerReferences();
   const initialFingerprint =
-    browserCompilationFingerprint(projects);
+    browserCompilationFingerprint(
+      projects,
+      initialReferenceFiles
+    );
+
+  if (browserCompilerBuildPromise) {
+    if (
+      browserCompilerBuildProjectEpoch ===
+        projectEpoch &&
+      browserCompilerBuildFingerprint ===
+        initialFingerprint &&
+      browserCompilerBuildSignal === signal
+    ) {
+      return browserCompilerBuildPromise;
+    }
+    try {
+      await browserCompilerBuildPromise;
+    } catch {}
+    assertBrowserCompilerSignal(signal);
+    if (
+      projectEpoch !== projectApplicationEpoch
+    ) {
+      throw browserCompilerBuildSuperseded(
+        "the project was replaced"
+      );
+    }
+    if (request) {
+      assertExportRequestCurrent(
+        request,
+        true
+      );
+    }
+    return compileGeneratedBrowserDlls(
+      completeCatalog,
+      request,
+      signal
+    );
+  }
 
   if (
     browserCompilerBuildCache
-      ?.fingerprint === initialFingerprint
+      ?.fingerprint === initialFingerprint &&
+    browserCompilerBuildCache
+      ?.projectEpoch === projectEpoch
   ) {
     return browserCompilerBuildCache;
   }
@@ -36698,14 +37126,39 @@ async function compileGeneratedBrowserDlls() {
     );
   }
 
-  const sequence =
-    ++browserCompilerBuildSequence;
   browserCompilerBuilding = true;
+  browserCompilerBuildFingerprint =
+    initialFingerprint;
+  browserCompilerBuildProjectEpoch =
+    projectEpoch;
+  browserCompilerBuildSignal = signal;
   updateExportDialog();
 
-  browserCompilerBuildPromise = (async () => {
+  const buildPromise = (async () => {
     let result = null;
+    let compiledReferenceFiles =
+      initialReferenceFiles;
+    let compiledReferenceRevision =
+      browserCompilerReferenceRevision;
     for (let attempt = 0; attempt < 8; attempt += 1) {
+      assertBrowserCompilerSignal(signal);
+      if (
+        projectEpoch !== projectApplicationEpoch
+      ) {
+        throw browserCompilerBuildSuperseded(
+          "the project was replaced"
+        );
+      }
+      if (request) {
+        assertExportRequestCurrent(
+          request,
+          true
+        );
+      }
+      compiledReferenceFiles =
+        selectedBrowserCompilerReferences();
+      compiledReferenceRevision =
+        browserCompilerReferenceRevision;
       result = await compiler.compile(
         projects.flatMap(project =>
           project.sources
@@ -36713,12 +37166,13 @@ async function compileGeneratedBrowserDlls() {
         {
           projects,
           referenceFiles:
-            selectedBrowserCompilerReferences(),
+            compiledReferenceFiles,
+          signal,
           emitPdb: false,
           onProgress(progress) {
             if (
-              sequence !==
-                browserCompilerBuildSequence ||
+              projectEpoch !==
+                projectApplicationEpoch ||
               !elements.exportCompilerBuildStatus
             ) {
               return;
@@ -36734,6 +37188,34 @@ async function compileGeneratedBrowserDlls() {
           }
         }
       );
+
+      assertBrowserCompilerSignal(signal);
+      if (
+        projectEpoch !== projectApplicationEpoch
+      ) {
+        throw browserCompilerBuildSuperseded(
+          "the project was replaced"
+        );
+      }
+      if (request) {
+        assertExportRequestCurrent(
+          request,
+          true
+        );
+      }
+      if (
+        compiledReferenceRevision !==
+          browserCompilerReferenceRevision ||
+        browserCompilerReferenceFingerprint(
+          compiledReferenceFiles,
+          compiledReferenceRevision
+        ) !==
+          browserCompilerReferenceFingerprint()
+      ) {
+        throw browserCompilerBuildSuperseded(
+          "the selected compiler references changed"
+        );
+      }
 
       if (result?.ok === true) break;
 
@@ -36775,39 +37257,47 @@ async function compileGeneratedBrowserDlls() {
           result
         );
       throw new Error(
-        diagnostics.join(" | ") ||
+        diagnostics.join("\n") ||
         result?.error ||
         window.RMLI18n.t("ui.literal.d4794a7f932b")
       );
     }
 
     const fingerprint =
-      browserCompilationFingerprint(projects);
+      browserCompilationFingerprint(
+        projects,
+        compiledReferenceFiles,
+        compiledReferenceRevision
+      );
     const cache = Object.freeze({
+      projectEpoch,
       fingerprint,
       outputs: result.outputs,
       diagnostics: result.diagnostics
     });
 
-    if (
-      sequence !==
-      browserCompilerBuildSequence
-    ) {
-      throw new Error(
-        window.RMLI18n.t("ui.literal.b957553b85ff")
-      );
-    }
-
     browserCompilerBuildCache = cache;
     return cache;
-  })().finally(() => {
-    retainSelectedBrowserCompilerDirectoryFiles();
-    browserCompilerBuilding = false;
-    browserCompilerBuildPromise = null;
-    if (elements.exportDialog?.open) {
-      updateExportDialog();
-    }
-  });
+  })();
+  const trackedPromise =
+    buildPromise.finally(() => {
+      retainSelectedBrowserCompilerDirectoryFiles();
+      if (
+        browserCompilerBuildPromise ===
+          trackedPromise
+      ) {
+        browserCompilerBuilding = false;
+        browserCompilerBuildPromise = null;
+        browserCompilerBuildFingerprint = "";
+        browserCompilerBuildProjectEpoch = 0;
+        browserCompilerBuildSignal = null;
+        if (elements.exportDialog?.open) {
+          updateExportDialog();
+        }
+      }
+    });
+  browserCompilerBuildPromise =
+    trackedPromise;
 
   return browserCompilerBuildPromise;
 }
@@ -36825,14 +37315,24 @@ function addBrowserCompilerReferenceFiles(
       continue;
     }
 
+    const key =
+      String(file.name).toLowerCase();
+    if (
+      browserCompilerReferenceFiles.get(
+        key
+      ) === file
+    ) {
+      continue;
+    }
     browserCompilerReferenceFiles.set(
-      String(file.name).toLowerCase(),
+      key,
       file
     );
     added += 1;
   }
 
   if (added > 0) {
+    browserCompilerReferenceRevision += 1;
     if (invalidate) {
       invalidateBrowserCompilerBuild(true);
       const completeCatalog =
@@ -36852,12 +37352,20 @@ function addBrowserCompilerReferenceFiles(
 }
 
 function clearBrowserCompilerReferences() {
+  const changed =
+    browserCompilerReferenceFiles.size > 0 ||
+    browserCompilerAdditionalRequiredReferences
+      .size > 0 ||
+    browserCompilerDirectoryFiles.length > 0;
   browserCompilerReferenceFiles.clear();
   browserCompilerAdditionalRequiredReferences.clear();
   browserCompilerDirectoryFiles = Object.freeze([]);
   browserCompilerDirectoryFileCount = 0;
   browserCompilerDirectoryMatchCount = 0;
   browserCompilerReferencePaths = new WeakMap();
+  if (changed) {
+    browserCompilerReferenceRevision += 1;
+  }
   invalidateBrowserCompilerBuild(true);
   updateExportDialog();
 }
@@ -37124,7 +37632,10 @@ function setExportValidationFailure(error) {
       fingerprint:
         exportReadiness.fingerprint,
       diagnostics: [
-        message.startsWith(window.RMLI18n.t("ui.literal.b4580a3d5f8d"))
+        [
+          "Generated C#:",
+          window.RMLI18n.t("ui.literal.b4580a3d5f8d")
+        ].some(prefix => message.startsWith(prefix))
           ? message
           : `Generated C#: ${message}`
       ],
@@ -37147,20 +37658,36 @@ function setExportValidationFailure(error) {
 async function copySelectedExportArtifact(button) {
   if (exportPreflightRequest || exportDeliveryBusy || !exportControlAvailable(button)) return;
   const selectedKey = exportCopyArtifactKey;
-  exportDeliveryBusy = true;
+  const job = beginExportDelivery();
   try {
-    const checked = await requestExportPreflight();
+    const checked = await awaitExportDelivery(
+      job,
+      requestExportPreflight()
+    );
+    assertExportDeliveryCurrent(job);
     assertExportRequestCurrent(checked.request, true);
-    exportCopyArtifactKey = selectedKey;
-    const { artifact } = currentExportCopyArtifact();
+    const artifact = checked.artifacts.find(
+      candidate =>
+        candidate.copyable !== false &&
+        candidate.key === selectedKey
+    );
     if (!artifact) throw new Error(window.RMLI18n.t("ui.literal.6513029b18f3"));
-    await copyText(artifact.content, button);
+    exportCopyArtifactKey = selectedKey;
+    await awaitExportDelivery(
+      job,
+      copyText(artifact.content, button)
+    );
   } catch (error) {
-    setExportValidationFailure(error);
+    if (!expectedExportCancellation(error)) {
+      setExportValidationFailure(error);
+    }
   } finally {
-    exportDeliveryBusy = false;
-    applyPrimaryExportAvailability([]);
-    if (elements.exportDialog?.open) updateExportDialog();
+    if (finishExportDelivery(job)) {
+      applyPrimaryExportAvailability([]);
+      if (elements.exportDialog?.open) {
+        updateExportDialog();
+      }
+    }
   }
 }
 
@@ -37453,7 +37980,7 @@ function updateExportDialog() {
     platformNotes.custom;
 
   if (exportReadiness.phase === "error" && exportReadiness.diagnostics.length) {
-    elements.exportDownloadHint.textContent = exportReadiness.diagnostics.join(" | ");
+    elements.exportDownloadHint.textContent = exportReadiness.diagnostics.join("\n");
     elements.exportDownloadHint.classList.add("error");
     return;
   }
@@ -37613,7 +38140,10 @@ function openExportDialog() {
       });
       return true;
     } catch (error) {
-      if (sequence === exportDialogOpenSequence && error?.code !== "RML_EXPORT_CANCELLED") {
+      if (
+        sequence === exportDialogOpenSequence &&
+        !expectedExportCancellation(error)
+      ) {
         void showExportPreparationFailure(error);
       }
       return false;
@@ -37625,6 +38155,7 @@ function openExportDialog() {
 function closeExportDialog() {
   exportDialogOpenSequence += 1;
   cancelExportPreflight();
+  cancelExportDelivery();
   elements.exportDialog.classList.remove(
     "mobile-full-modal",
     "rml-dialog-loading"
@@ -37640,67 +38171,133 @@ function closeExportDialog() {
 async function downloadSelectedExport() {
   if (exportPreflightRequest || exportDeliveryBusy || !exportControlAvailable(elements.exportDownloadSelected)) return;
   syncExportOptions();
-  exportDeliveryBusy = true;
-  try {
-    const checked = await requestExportPreflight();
-    assertExportRequestCurrent(checked.request, true);
-  const baseName =
-    generatedBaseName();
-  const originalLabel = elements.exportDownloadSelected.textContent;
-  setExportControlAvailability(
-    elements.exportDownloadSelected,
-    false
-  );
-  elements.exportDownloadSelected.textContent = window.RMLI18n.t("{{i18n:js.presentation.820d6004b037}}");
-  elements.exportDownloadHint.classList.remove("error");
-  let result;
+  const job = beginExportDelivery();
+  const originalLabel =
+    elements.exportDownloadSelected.textContent;
   let resolvingReferences = false;
   try {
-    const completeCatalog =
-      buildGeneratedArtifactCatalog(
-        true,
-        true
-      );
-    const complete = buildSelectedExportFiles(true, false);
-    if (state.exportOptions.includeCompiled) {
+    const checked = await awaitExportDelivery(
+      job,
+      requestExportPreflight()
+    );
+    assertExportDeliveryCurrent(job);
+    assertExportRequestCurrent(checked.request, true);
+    const completeCatalog = checked.catalog;
+    const includeCs =
+      state.exportOptions.includeCs === true;
+    const includeCsproj =
+      state.exportOptions.includeCsproj === true;
+    const includeCompiled =
+      state.exportOptions.includeCompiled === true;
+    const baseName = String(
+      completeCatalog.projects.find(project =>
+        project.id === "main-mod"
+      )?.assemblyName ||
+      completeCatalog.projects[0]
+        ?.assemblyName ||
+      generatedBaseName()
+    );
+
+    setExportControlAvailability(
+      elements.exportDownloadSelected,
+      false
+    );
+    elements.exportDownloadSelected.textContent =
+      window.RMLI18n.t("{{i18n:js.presentation.820d6004b037}}");
+    elements.exportDownloadHint.classList.remove("error");
+
+    if (includeCompiled) {
       resolvingReferences = true;
       elements.exportDownloadSelected.textContent =
         window.RMLI18n.t("{{i18n:js.presentation.30ee6a1d77ea}}");
-      const referencePromise =
+      await awaitExportDelivery(
+        job,
         ensureBrowserCompilerReferences(
-          completeCatalog
-        );
-      await referencePromise;
+          completeCatalog,
+          checked.request,
+          job.controller.signal
+        )
+      );
+      assertExportDeliveryCurrent(job);
       assertExportRequestCurrent(checked.request, true);
       resolvingReferences = false;
       elements.exportDownloadSelected.textContent =
         window.RMLI18n.t("{{i18n:js.presentation.820d6004b037}}");
     }
+    assertExportDeliveryCurrent(job);
     assertExportRequestCurrent(checked.request, true);
-    result = buildSelectedExportFiles(
-      state.exportOptions.includeCs,
-      state.exportOptions.includeCsproj
+    const result = selectedExportFilesFromCatalog(
+      completeCatalog,
+      includeCs,
+      includeCsproj
     );
-    if (state.exportOptions.includeCompiled) {
+    if (includeCompiled) {
       elements.exportDownloadSelected.textContent =
         window.RMLI18n.t("{{i18n:js.presentation.7cc766ce5323}}");
-      const compiled =
-        await compileGeneratedBrowserDlls();
+      const compiled = await awaitExportDelivery(
+        job,
+        compileGeneratedBrowserDlls(
+          completeCatalog,
+          checked.request,
+          job.controller.signal
+        )
+      );
+      assertExportDeliveryCurrent(job);
       assertExportRequestCurrent(checked.request, true);
       result.files.push(
         ...compiledBrowserOutputFiles(
-          result,
+          completeCatalog,
           compiled.outputs
         )
       );
     }
-  } catch (error) {
+    assertExportDeliveryCurrent(job);
+    assertExportRequestCurrent(
+      checked.request,
+      true
+    );
+    const files = result.files;
+
+    if (files.length === 0) {
+      return;
+    }
+
     if (
+      files.length === 1 &&
+      !result.multiProject &&
+      !includeCompiled
+    ) {
+      const file = files[0];
+      downloadBlob(
+        new Blob(
+          [file.content],
+          {
+            type:
+              file.type ||
+              "text/plain;charset=utf-8"
+          }
+        ),
+        file.name
+      );
+      return;
+    }
+
+    downloadBlob(
+      createZipBlob(files),
+      `${baseName}-RML-Project.zip`
+    );
+  } catch (error) {
+    if (expectedExportCancellation(error)) {
+      setExportReadiness(
+        "idle",
+        {},
+        getDiagnostics()
+      );
+    } else if (
       resolvingReferences ||
       error?.code ===
         "RML_COMPILER_REFERENCES_REQUIRED"
     ) {
-      updateExportDialog();
       elements.exportDownloadHint.textContent =
         error instanceof Error
           ? error.message
@@ -37708,55 +38305,18 @@ async function downloadSelectedExport() {
       elements.exportDownloadHint.classList.add(
         "error"
       );
-      return;
+    } else {
+      setExportValidationFailure(error);
     }
-    setExportValidationFailure(error);
-    elements.exportDownloadSelected.textContent = originalLabel;
-    return;
-  }
-  const files = result.files;
-
-  if (files.length === 0) {
-    elements.exportDownloadSelected.textContent = originalLabel;
-    updateExportDialog();
-    return;
-  }
-
-  if (
-    files.length === 1 &&
-    !result.multiProject &&
-    !state.exportOptions.includeCompiled
-  ) {
-    const file = files[0];
-
-    downloadBlob(
-      new Blob(
-        [file.content],
-        {
-          type:
-            file.type ||
-            "text/plain;charset=utf-8"
-        }
-      ),
-      file.name
-    );
-    elements.exportDownloadSelected.textContent = originalLabel;
-    updateExportDialog();
-    return;
-  }
-
-  downloadBlob(
-    createZipBlob(files),
-    `${baseName}-RML-Project.zip`
-  );
-  elements.exportDownloadSelected.textContent = originalLabel;
-  updateExportDialog();
-  } catch (error) {
-    setExportValidationFailure(error);
   } finally {
-    exportDeliveryBusy = false;
-    applyPrimaryExportAvailability([]);
-    if (elements.exportDialog?.open) updateExportDialog();
+    if (finishExportDelivery(job)) {
+      elements.exportDownloadSelected.textContent =
+        originalLabel;
+      applyPrimaryExportAvailability([]);
+      if (elements.exportDialog?.open) {
+        updateExportDialog();
+      }
+    }
   }
 }
 async function loadExampleProject() {
@@ -38928,7 +39488,7 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "../../templates/help_template.html?v=1.21.06-universal-presentation-dev403-node-root-scroll"
+    "../../templates/help_template.html?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll"
   )
     .then(markup => {
       const host = document.getElementById("lazy-dialog-host") || document.body;
@@ -44321,6 +44881,11 @@ async function initialize() {
     "input",
     handleSettingsPreviewInput
   );
+  window.addEventListener(
+    "resize",
+    scheduleSettingsPreviewLabelFit,
+    { passive: true }
+  );
   elements.settingsPreviewContent.addEventListener(
     "focusout",
     () => {
@@ -45591,7 +46156,7 @@ function rmlRuntimeDisplayInspector() {
         const up =
           document.createElement("button");
         up.type = "button";
-        up.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll#icon-${selected.runtimeDisplayStacked ? "chevron-up" : "chevron-left"}"></use></svg>`;
+        up.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll#icon-${selected.runtimeDisplayStacked ? "chevron-up" : "chevron-left"}"></use></svg>`;
         up.title =
           selected.runtimeDisplayStacked
             ? window.RMLI18n.t("ui.literal.6f39a4bc0048")
@@ -45609,7 +46174,7 @@ function rmlRuntimeDisplayInspector() {
         const down =
           document.createElement("button");
         down.type = "button";
-        down.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll#icon-${selected.runtimeDisplayStacked ? "chevron-down" : "chevron-right"}"></use></svg>`;
+        down.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll#icon-${selected.runtimeDisplayStacked ? "chevron-down" : "chevron-right"}"></use></svg>`;
         down.title =
           selected.runtimeDisplayStacked
             ? window.RMLI18n.t("ui.literal.6d6a5bc02a98")
@@ -46444,7 +47009,7 @@ function rmlRuntimeDisplayPreviewItems(
 
 function rmlRuntimeDisplayPreviewCopyIcon() {
   return `
-    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll#icon-copy"></use></svg>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll#icon-copy"></use></svg>
   `;
 }
 

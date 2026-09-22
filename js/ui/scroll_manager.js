@@ -47,7 +47,54 @@
     return true;
   }
 
+  function fullscreenOverlays() {
+    const candidates = [
+      ...document.querySelectorAll(
+        "dialog[open], #builder-work-overlay:not([hidden]), #rml-architecture-gate:not([hidden])"
+      )
+    ];
+
+    return candidates.filter(candidate => {
+      const style = window.getComputedStyle(candidate);
+      return (
+        candidate.getClientRects().length > 0 &&
+        style.display !== "none" &&
+        style.visibility !== "hidden"
+      );
+    });
+  }
+
   function routeWheel(event) {
+    const overlays = fullscreenOverlays();
+
+    if (overlays.length > 0) {
+      const path =
+        typeof event.composedPath === "function"
+          ? event.composedPath()
+          : [];
+
+      if (event.ctrlKey || event.metaKey) {
+        if (event.cancelable) {
+          event.preventDefault();
+        }
+        event.stopImmediatePropagation();
+        return;
+      }
+
+      if (
+        path.some(node =>
+          overlays.includes(node)
+        )
+      ) {
+        return;
+      }
+
+      if (event.cancelable) {
+        event.preventDefault();
+      }
+      event.stopImmediatePropagation();
+      return;
+    }
 
     for (const entry of [...handlers]) {
       if (event.cancelBubble || event.defaultPrevented) {
@@ -526,5 +573,6 @@
     configurable: true
   });
 
+  ensureInstalled();
   installMobileViewportSupport();
 })();

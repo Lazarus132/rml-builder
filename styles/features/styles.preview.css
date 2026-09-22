@@ -5,6 +5,7 @@
 }
 
 .settings-preview-dialog {
+  --rml-ux-text-scale: 1 !important;
   padding: 0;
   color: #f6f8fb;
 }
@@ -63,48 +64,6 @@
 .rml-preview-runtime-action:hover {
   border-color: rgba(143, 220, 255, 0.64);
   background: #2c3541;
-}
-
-.rml-preview-runtime-action::after {
-  position: absolute;
-  z-index: 30;
-  top: calc(100% + 8px);
-  right: 0;
-  width: max-content;
-  max-width: min(280px, calc(100vw - 24px));
-  padding: 7px 9px;
-  border: 1px solid rgba(143, 220, 255, 0.28);
-  border-radius: 7px;
-  background: rgba(8, 13, 19, 0.98);
-  color: #eaf7ff;
-  font-size: calc(12px * var(--rml-ux-text-scale, 1));
-  font-weight: 600;
-  line-height: 1.25;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(-3px);
-  transition:
-    opacity 120ms ease,
-    transform 120ms ease;
-  white-space: normal;
-}
-
-.rml-preview-runtime-action-deactivate::after {
-  content: attr(title);
-}
-
-.rml-preview-runtime-action-reload::after {
-  content: attr(title);
-}
-
-.rml-preview-runtime-action-quarantine::after {
-  content: attr(title);
-}
-
-.rml-preview-runtime-action:hover::after,
-.rml-preview-runtime-action:focus-visible::after {
-  opacity: 1;
-  transform: translateY(0);
 }
 
 .rml-preview-header h2 {
@@ -338,7 +297,7 @@
 
 .rml-preview-color-button {
 
-    width: 53px;
+    width: 48px;
     height: 24px;
     margin: auto 0 auto auto;
     padding: 0;
@@ -2738,8 +2697,8 @@ dialog.settings-preview-dialog {
 
 .settings-preview-dialog:not(.rml-preview-color-open)
   .rml-preview-color-button {
-    width: 53px !important;
-    min-width: 53px !important;
+    width: 48px !important;
+    min-width: 48px !important;
     height: 24px !important;
     min-height: 24px !important;
     border-radius: 7px !important;
@@ -3355,12 +3314,6 @@ dialog.settings-preview-dialog {
     font-size: calc(18px * var(--rml-ux-text-scale, 1));
   }
 
-.rml-preview-runtime-action::after {
-    position: fixed;
-    top: max(58px, calc(env(safe-area-inset-top) + 48px));
-    right: max(8px, env(safe-area-inset-right));
-    max-width: calc(100vw - 16px);
-  }
 }
 
 @media (max-width: 540px) {
@@ -4030,7 +3983,7 @@ dialog.settings-preview-dialog {
   .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-save {
     width: min(544px, 50%) !important;
     height: 46px !important;
-    font-size: calc(22px * var(--rml-ux-text-scale, 1)) !important;
+    font-size: calc(24px * var(--rml-ux-text-scale, 1)) !important;
   }
 }
 
@@ -4041,9 +3994,9 @@ dialog.settings-preview-dialog {
     gap: 6px !important;
   }
   .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-runtime-action {
-    width: 42px !important;
-    min-width: 42px !important;
-    height: 42px !important;
+    width: 44px !important;
+    min-width: 44px !important;
+    height: 44px !important;
     padding: 0 !important;
     border: 0 !important;
     border-radius: 6px !important;
@@ -4088,7 +4041,7 @@ dialog.settings-preview-dialog {
     height: auto !important;
     color: #f1f4f7 !important;
     font: inherit !important;
-    font-size: 21px !important;
+    font-size: 26px !important;
     font-weight: 400 !important;
     line-height: 1 !important;
     transform: none !important;
@@ -4097,11 +4050,11 @@ dialog.settings-preview-dialog {
 
 @media (min-width: 981px) and (min-height: 721px) {
   .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-window {
-    grid-template-rows: 96px minmax(0, 1fr) 70px !important;
+    grid-template-rows: 88px minmax(0, 1fr) 70px !important;
   }
   .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-header {
     align-items: flex-start !important;
-    padding: 9px 14px 6px !important;
+    padding: 6px 23px 6px 18px !important;
   }
   .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-header h2 {
     margin-top: 0 !important;
@@ -4110,9 +4063,12 @@ dialog.settings-preview-dialog {
   }
   .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-header-tools {
     align-self: flex-start !important;
+    gap: 16px !important;
   }
   .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-content {
-    margin: 0 50px !important;
+    margin: 0 42px !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
   }
   .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-settings {
     gap: 1px !important;
@@ -4170,7 +4126,7 @@ dialog.settings-preview-dialog {
 
 .settings-preview-dialog:not(.rml-preview-color-open)
   .rml-preview-layout-row.horizontal
-  .rml-preview-setting {
+  .rml-preview-setting:not(.rml-preview-setting-bool):not(.rml-preview-setting-color) {
   grid-template-columns: minmax(0, 35fr) minmax(0, 65fr) !important;
   column-gap: 8px !important;
 }
@@ -4237,7 +4193,7 @@ dialog.settings-preview-dialog {
 
 .settings-preview-dialog:not(.rml-preview-color-open)
   .rml-preview-layout-row.horizontal {
-  width: calc(100% + 14px) !important;
+  width: 100% !important;
   max-width: none !important;
   box-sizing: border-box;
   overflow-x: hidden !important;
