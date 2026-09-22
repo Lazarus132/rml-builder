@@ -4,6 +4,8 @@ const GRAPH_GRID = 12;
 const GRAPH_AUTOPAN_EDGE = 54;
 const GRAPH_AUTOPAN_MAX_SPEED = 24;
 const GRAPH_NODE_MIN_BODY_HEIGHT = 48;
+const GRAPH_NODE_BODY_OVERFLOW_X_TOLERANCE = 12;
+const GRAPH_NODE_BODY_OVERFLOW_Y_TOLERANCE = 1;
 const GRAPH_WIRE_DRAG_THRESHOLD = 4;
 const GRAPH_NODE_DRAG_THRESHOLD = 3;
 const GRAPH_WIRE_POINT_SNAP = 6;
@@ -4298,7 +4300,7 @@ function setRmlNodeSymbolContent(element, symbol) {
   svg.setAttribute("aria-hidden", "true");
   svg.classList.add("rml-node-symbol-svg");
   const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
-  use.setAttribute("href", `assets/rml-icons.svg?v=1.21.03-universal-presentation-dev400-edit-mode-sidebar-access#${iconId}`);
+  use.setAttribute("href", `assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll#${iconId}`);
   svg.appendChild(use);
   element.appendChild(svg);
 }
@@ -13392,7 +13394,7 @@ function graphPresentationVisible() {
   }
 
 function graphOutlineToggleMarkup() {
-    return `<svg class="rml-pack-outline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.03-universal-presentation-dev400-edit-mode-sidebar-access#icon-outline"></use></svg>`;
+    return `<svg class="rml-pack-outline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll#icon-outline"></use></svg>`;
   }
 
 function markGraphPackPresentationPending() {
@@ -14409,7 +14411,9 @@ function graphPanelsAreStacked() {
   }
 
 function graphPanelTogglesAvailable() {
-    return !graphPanelsAreStacked() || graphEditModeActive();
+    return document.body.classList.contains(
+      "rml-node-graph-mode"
+    );
   }
 
 function persistGraphPanelLayout() {
@@ -14600,8 +14604,56 @@ function restoreGraphPaletteScroll(
 
 function setGraphPanelToggleIcon(button, iconName) {
   if (!button) return;
-  button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.03-universal-presentation-dev400-edit-mode-sidebar-access#icon-${iconName}"></use></svg>`;
+  button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll#icon-${iconName}"></use></svg>`;
 }
+
+let graphPanelScrollPreservationSequence = 0;
+
+function preserveGraphPanelViewportPosition(
+    anchor,
+    update
+  ) {
+    if (!anchor?.isConnected) {
+      update();
+      return;
+    }
+
+    graphPanelScrollPreservationSequence += 1;
+    const sequence =
+      graphPanelScrollPreservationSequence;
+    const scrollTarget =
+      graphDocumentScrollElement();
+
+    const anchorTop =
+      anchor.getBoundingClientRect().top;
+    update();
+
+    const restore = () => {
+      if (
+        sequence !==
+          graphPanelScrollPreservationSequence ||
+        !anchor.isConnected ||
+        graphDocumentScrollElement() !==
+          scrollTarget
+      ) {
+        return;
+      }
+      const offset =
+        anchor.getBoundingClientRect().top -
+        anchorTop;
+      if (Math.abs(offset) > .25) {
+        scrollTarget.scrollTop += offset;
+      }
+    };
+
+    restore();
+    requestProjectAnimationFrame(() => {
+      restore();
+      requestProjectAnimationFrame(() => {
+        restore();
+      });
+    });
+  }
 
 function applyGraphPanelLayout() {
     const togglesAvailable =
@@ -14697,10 +14749,15 @@ function ensureGraphPanelToggles() {
         "rml-graph-panel-toggle rml-graph-panel-toggle-left";
       left.addEventListener("click", () => {
         if (!graphPanelTogglesAvailable()) return;
-        graphLeftPanelCollapsed =
-          !graphLeftPanelCollapsed;
-        persistGraphPanelLayout();
-        applyGraphPanelLayout();
+        preserveGraphPanelViewportPosition(
+          left,
+          () => {
+            graphLeftPanelCollapsed =
+              !graphLeftPanelCollapsed;
+            persistGraphPanelLayout();
+            applyGraphPanelLayout();
+          }
+        );
       });
       title.insertBefore(left, title.firstChild);
     }
@@ -14715,10 +14772,15 @@ function ensureGraphPanelToggles() {
         "rml-graph-panel-toggle rml-graph-panel-toggle-right";
       right.addEventListener("click", () => {
         if (!graphPanelTogglesAvailable()) return;
-        graphRightPanelCollapsed =
-          !graphRightPanelCollapsed;
-        persistGraphPanelLayout();
-        applyGraphPanelLayout();
+        preserveGraphPanelViewportPosition(
+          right,
+          () => {
+            graphRightPanelCollapsed =
+              !graphRightPanelCollapsed;
+            persistGraphPanelLayout();
+            applyGraphPanelLayout();
+          }
+        );
       });
       title.appendChild(right);
     }
@@ -15550,7 +15612,7 @@ function createPaletteItem(
 
     const add =
       document.createElement("small");
-    add.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.03-universal-presentation-dev400-edit-mode-sidebar-access#icon-${configurationPresent ? "check" : "add"}"></use></svg>`;
+    add.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll#icon-${configurationPresent ? "check" : "add"}"></use></svg>`;
 
     button.append(
       symbol,
@@ -15632,7 +15694,7 @@ function refreshGraphPaletteConfigurationAvailability() {
     );
     const marker = button.querySelector("small");
     if (marker) {
-      marker.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.03-universal-presentation-dev400-edit-mode-sidebar-access#icon-${configurationPresent ? "check" : "add"}"></use></svg>`;
+      marker.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll#icon-${configurationPresent ? "check" : "add"}"></use></svg>`;
     }
   }
 
@@ -19144,20 +19206,20 @@ function createToolbarButton(
 const GRAPH_TOOLBAR_ICONS =
     Object.freeze({
       center: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.03-universal-presentation-dev400-edit-mode-sidebar-access#icon-center"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll#icon-center"></use></svg>`,
       clear: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.03-universal-presentation-dev400-edit-mode-sidebar-access#icon-delete"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll#icon-delete"></use></svg>`,
       zoomOut: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.03-universal-presentation-dev400-edit-mode-sidebar-access#icon-zoom-out"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll#icon-zoom-out"></use></svg>`,
       zoomIn: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.03-universal-presentation-dev400-edit-mode-sidebar-access#icon-zoom-in"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll#icon-zoom-in"></use></svg>`,
       editMode: `
-        <svg class="rml-graph-edit-enter-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.03-universal-presentation-dev400-edit-mode-sidebar-access#icon-expand"></use></svg>
-        <svg class="rml-graph-edit-exit-icon" viewBox="0 0 24 24" aria-hidden="true" hidden><use href="assets/rml-icons.svg?v=1.21.03-universal-presentation-dev400-edit-mode-sidebar-access#icon-collapse"></use></svg>`,
+        <svg class="rml-graph-edit-enter-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll#icon-expand"></use></svg>
+        <svg class="rml-graph-edit-exit-icon" viewBox="0 0 24 24" aria-hidden="true" hidden><use href="assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll#icon-collapse"></use></svg>`,
       search: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.03-universal-presentation-dev400-edit-mode-sidebar-access#icon-search"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll#icon-search"></use></svg>`,
       next: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.03-universal-presentation-dev400-edit-mode-sidebar-access#icon-next"></use></svg>`
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll#icon-next"></use></svg>`
     });
 
 function createToolbarIconButton(
@@ -19640,7 +19702,7 @@ function renderGraphCanvas() {
       <div class="rml-graph-search-overlay-card" role="dialog" aria-modal="true" aria-label="{{i18n:js.presentation.f0d095db4021}}">
         <div class="rml-graph-search-overlay-head">
           <strong>{{i18n:js.presentation.f0d095db4021}}</strong>
-          <button class="rml-graph-search-overlay-close" type="button" aria-label="{{i18n:ui.attr.0906f923243f}}"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.03-universal-presentation-dev400-edit-mode-sidebar-access#icon-close"></use></svg></button>
+          <button class="rml-graph-search-overlay-close" type="button" aria-label="{{i18n:ui.attr.0906f923243f}}"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll#icon-close"></use></svg></button>
         </div>
         <div class="rml-graph-search-overlay-body">
           <input type="search" autocomplete="off" placeholder="{{i18n:js.presentation.a00d3271edfc}}" aria-label="{{i18n:js.presentation.f0d095db4021}}" aria-keyshortcuts="F3 Shift+F3 Control+G Control+Shift+G Meta+G Meta+Shift+G">
@@ -20944,6 +21006,23 @@ function graphScrollLayerProgrammatic(
     );
   }
 
+function graphScrollLayerOverflowTolerance(
+    element,
+    axis
+  ) {
+    if (
+      !element.matches?.(
+        ".rml-graph-node-body"
+      )
+    ) {
+      return 0;
+    }
+
+    return axis === "x"
+      ? GRAPH_NODE_BODY_OVERFLOW_X_TOLERANCE
+      : GRAPH_NODE_BODY_OVERFLOW_Y_TOLERANCE;
+  }
+
 function graphScrollLayerAxes(element) {
     if (!(element instanceof HTMLElement)) {
       return {
@@ -20967,7 +21046,11 @@ function graphScrollLayerAxes(element) {
     return {
       x:
         element.scrollWidth >
-          element.clientWidth &&
+          element.clientWidth +
+            graphScrollLayerOverflowTolerance(
+              element,
+              "x"
+            ) &&
         (
           scrollableOverflow(
             style.overflowX
@@ -20976,7 +21059,11 @@ function graphScrollLayerAxes(element) {
         ),
       y:
         element.scrollHeight >
-          element.clientHeight &&
+          element.clientHeight +
+            graphScrollLayerOverflowTolerance(
+              element,
+              "y"
+            ) &&
         (
           scrollableOverflow(
             style.overflowY
@@ -24225,9 +24312,13 @@ function measureNodeBodyOverflow(article) {
       scrollLeft: body.scrollLeft,
       scrollTop: body.scrollTop,
       hasY:
-        scrollHeight > clientHeight + 1,
+        scrollHeight >
+          clientHeight +
+            GRAPH_NODE_BODY_OVERFLOW_Y_TOLERANCE,
       hasX:
-        scrollWidth > clientWidth + 1
+        scrollWidth >
+          clientWidth +
+            GRAPH_NODE_BODY_OVERFLOW_X_TOLERANCE
     };
   }
 
@@ -25774,7 +25865,7 @@ function createGraphNodeElementRmlOriginal(
       flip.className =
         "rml-graph-node-flip";
       flip.type = "button";
-      flip.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.03-universal-presentation-dev400-edit-mode-sidebar-access#icon-node-swap"></use></svg>`;
+      flip.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll#icon-node-swap"></use></svg>`;
       flip.title = mirrored
         ? window.RMLI18n.t("ui.literal.9114b1bfc765")
         : window.RMLI18n.t("ui.literal.c8b7ca53198e");
@@ -34167,7 +34258,7 @@ function renderGraphInspector(options = {}) {
       empty.className =
         "empty-inspector";
       empty.innerHTML =
-        `<span class="empty-inspector-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.21.03-universal-presentation-dev400-edit-mode-sidebar-access#icon-lightning"></use></svg></span>
+        `<span class="empty-inspector-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll#icon-lightning"></use></svg></span>
          <h2>{{i18n:ui.text.e02d912b50bb}}</h2>
          <p>{{i18n:ui.text.d19bd2965c4f}}</p>`;
       dom.inspectorContent.appendChild(
@@ -39144,7 +39235,7 @@ const INSPECTOR_ACTION_PRESENTATION = Object.freeze({
 
   function inspectorButtonIconMarkup(actionId) {
     const iconName = INSPECTOR_ACTION_PRESENTATION[actionId]?.[0] || "more";
-    return `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.03-universal-presentation-dev400-edit-mode-sidebar-access#icon-${iconName}"></use></svg>`;
+    return `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll#icon-${iconName}"></use></svg>`;
   }
 
   function inspectorButtonTone(actionId) {
@@ -39210,7 +39301,7 @@ function visualFunctionParameterButton(action, label, handler) {
     svg.setAttribute("viewBox", "0 0 24 24");
     svg.setAttribute("aria-hidden", "true");
     const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
-    use.setAttribute("href", `assets/rml-icons.svg?v=1.21.03-universal-presentation-dev400-edit-mode-sidebar-access#icon-visual-function-parameter-${action}`);
+    use.setAttribute("href", `assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll#icon-visual-function-parameter-${action}`);
     svg.appendChild(use);
     button.appendChild(svg);
     button.addEventListener("click", event => {
@@ -47321,7 +47412,7 @@ Object.defineProperty(
   window.RMLI18n.t("ui.literal.91092bd586bf"),
   {
     value:
-      "1.21.03-universal-presentation-dev400-edit-mode-sidebar-access",
+      "1.21.06-universal-presentation-dev403-node-root-scroll",
     writable: false,
     enumerable: true,
     configurable: true

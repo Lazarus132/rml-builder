@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_BOOTSTRAP_MODULE_ID =
-  "1.21.03-universal-presentation-dev400-edit-mode-sidebar-access";
+  "1.21.06-universal-presentation-dev403-node-root-scroll";
 
 function assertGraphBootstrapModuleCoherence() {
   const mismatches = [];

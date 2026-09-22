@@ -1683,10 +1683,8 @@ button.rml-graph-navigation-level:disabled {
 }
 
 .rml-graph-node.configuration .rml-graph-node-body {
-  max-height: 560px;
-  overflow: auto;
-  overscroll-behavior: contain;
-  touch-action: pan-x pan-y;
+  max-height: none;
+  overflow: hidden;
 }
 
 .rml-graph-node.configuration .rml-graph-node-body-content {
@@ -2619,10 +2617,6 @@ body.rml-node-graph-mode .workspace > .canvas {
 
 body.rml-node-graph-mode.rml-graph-left-collapsed .workspace > .palette,
 body.rml-node-graph-mode.rml-graph-right-collapsed .workspace > .inspector {
-    display: block !important;
-  }
-
-body.rml-node-graph-mode:not(.rml-graph-edit-mode) .rml-graph-panel-toggle {
     display: none !important;
   }
 
@@ -2901,48 +2895,43 @@ body.rml-node-graph-mode.rml-graph-edit-mode .workspace {
     overflow-y: auto;
   }
 
-body.rml-node-graph-mode.rml-graph-edit-mode .workspace > .palette,
-body.rml-node-graph-mode.rml-graph-edit-mode .workspace > .canvas,
-body.rml-node-graph-mode.rml-graph-edit-mode .workspace > .inspector {
+body.rml-node-graph-mode .workspace > .palette,
+body.rml-node-graph-mode .workspace > .canvas,
+body.rml-node-graph-mode .workspace > .inspector {
     grid-row: auto;
   }
 
-body.rml-node-graph-mode.rml-graph-edit-mode.rml-graph-left-collapsed .workspace > .palette,
-body.rml-node-graph-mode.rml-graph-edit-mode.rml-graph-right-collapsed .workspace > .inspector {
-    display: none !important;
-  }
-
-body.rml-node-graph-mode.rml-graph-edit-mode .rml-workspace-toggle-title {
+body.rml-node-graph-mode .rml-workspace-toggle-title {
     grid-template-columns: 44px minmax(0, 1fr) 44px !important;
     grid-template-rows: auto auto;
   }
 
-body.rml-node-graph-mode.rml-graph-edit-mode .rml-workspace-toggle-title > .rml-graph-panel-toggle-left,
-body.rml-node-graph-mode.rml-graph-edit-mode .rml-workspace-toggle-title > .rml-graph-panel-toggle-right {
+body.rml-node-graph-mode .rml-workspace-toggle-title > .rml-graph-panel-toggle-left,
+body.rml-node-graph-mode .rml-workspace-toggle-title > .rml-graph-panel-toggle-right {
     display: grid !important;
     width: 44px;
     height: 44px;
     min-height: 44px;
   }
 
-body.rml-node-graph-mode.rml-graph-edit-mode .rml-workspace-toggle-title > .rml-graph-panel-toggle-left {
+body.rml-node-graph-mode .rml-workspace-toggle-title > .rml-graph-panel-toggle-left {
     grid-column: 1;
     grid-row: 1;
   }
 
-body.rml-node-graph-mode.rml-graph-edit-mode .rml-workspace-toggle-title > span {
+body.rml-node-graph-mode .rml-workspace-toggle-title > span {
     grid-column: 2 !important;
     grid-row: 1;
     width: auto;
     justify-self: start;
   }
 
-body.rml-node-graph-mode.rml-graph-edit-mode .rml-workspace-toggle-title > .rml-graph-panel-toggle-right {
+body.rml-node-graph-mode .rml-workspace-toggle-title > .rml-graph-panel-toggle-right {
     grid-column: 3;
     grid-row: 1;
   }
 
-body.rml-node-graph-mode.rml-graph-edit-mode .rml-workspace-toggle-title > em {
+body.rml-node-graph-mode .rml-workspace-toggle-title > em {
     grid-column: 1 / -1 !important;
     grid-row: 2;
   }

@@ -468,7 +468,7 @@
     heading.textContent = String(options.tabTitle || window.RMLI18n.t("ui.text.ba090b5e07cf"));
     const headerActions = popupDocument.createElement("div");
     headerActions.className = "editor-header-actions";
-    const iconSpriteUrl = new URL("assets/rml-icons.svg?v=1.21.03-universal-presentation-dev400-edit-mode-sidebar-access", window.location.href).href;
+    const iconSpriteUrl = new URL("assets/rml-icons.svg?v=1.21.06-universal-presentation-dev403-node-root-scroll", window.location.href).href;
     const createHeaderButton = (label, iconName) => {
       const button = popupDocument.createElement("button");
       button.type = "button";

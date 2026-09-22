@@ -2,7 +2,7 @@
   "use strict";
 
   const STYLE_LOADER_MODULE_ID =
-    "1.21.03-universal-presentation-dev400-edit-mode-sidebar-access";
+    "1.21.06-universal-presentation-dev403-node-root-scroll";
 
   if (
     Object.hasOwn(
@@ -713,7 +713,7 @@
     information: "../../styles/features/styles.information.css?v=1.10-shortcut-key-groups",
     project: "../../styles/features/styles.project.css?v=4-max-graph-performance-v755",
     export: "../../styles/features/styles.export.css?v=2-max-graph-performance-v755",
-    "runtime-graph": "../../styles/features/styles.runtime-graph.css?v=1.21.03-universal-presentation-dev400-edit-mode-sidebar-access"
+    "runtime-graph": "../../styles/features/styles.runtime-graph.css?v=1.21.06-universal-presentation-dev403-node-root-scroll"
   });
   const bundleOrder = Object.freeze([
     "preview",
