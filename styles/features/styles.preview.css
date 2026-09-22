@@ -644,6 +644,16 @@
   line-height: 1;
 }
 
+.rml-preview-enum-step > .rml-inline-icon {
+  display: inline-block;
+  width: 1.2em;
+  height: 1.2em;
+  min-width: 1.2em;
+  overflow: visible;
+  color: currentColor;
+  vertical-align: -0.16em;
+}
+
 .rml-preview-checkbox {
   width: 34px;
   height: 32px;

@@ -2,7 +2,7 @@
   "use strict";
 
   const SCRIPT_LOADER_MODULE_ID =
-    "1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll";
+    "1.21.12-universal-presentation-dev409-preview-enum-icon-bounds";
 
   if (
     Object.hasOwn(
@@ -182,7 +182,7 @@
       dependencies: Object.freeze([]),
       files: Object.freeze([
         Object.freeze({
-          url: "../catalog/catalog_loader.js?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll",
+          url: "../catalog/catalog_loader.js?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds",
           ready: () =>
             window.RMLCatalogImportGate?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -234,7 +234,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/node_graph_codegen.js?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll",
+          url: "../graph/node_graph_codegen.js?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds",
           ready: () =>
             window.RMLTypedNodeGraphGenerator?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -251,7 +251,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../workers/saved_api_composite_compare_worker.js?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll",
+          url: "../workers/saved_api_composite_compare_worker.js?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds",
           ready: () =>
             window.RMLSavedApiCompositeCompareWorkerBootstrap
               ?.moduleId === SCRIPT_LOADER_MODULE_ID &&
@@ -260,13 +260,13 @@
               ?.source === "string"
         }),
         Object.freeze({
-          url: "../graph/node_graph_composites.js?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll",
+          url: "../graph/node_graph_composites.js?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds",
           ready: () =>
             window.RMLNodeGraphCompositesModuleId ===
               SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_custom_csharp.js?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll",
+          url: "../graph/node_graph_custom_csharp.js?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds",
           ready: () =>
             window.RMLNodeGraphCustomCSharpModuleId ===
               SCRIPT_LOADER_MODULE_ID
@@ -275,13 +275,13 @@
           url: "../graph/node_graph_guided.js?v=1-physical-modules-v748"
         }),
         Object.freeze({
-          url: "../graph/node_graph_view.js?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll",
+          url: "../graph/node_graph_view.js?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds",
           ready: () =>
             window.RMLNodeGraphViewModuleId ===
               SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_bootstrap.js?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll",
+          url: "../graph/node_graph_bootstrap.js?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds",
           ready: () =>
             window.RMLDynamicGraphHost?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&

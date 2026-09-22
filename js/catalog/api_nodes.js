@@ -2,7 +2,7 @@
   "use strict";
 
   const API_FACTORY_MODULE_ID =
-    "1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll";
+    "1.21.12-universal-presentation-dev409-preview-enum-icon-bounds";
   const FACTORY_VERSION = 38;
   const API_VERIFICATION_SCHEMA_VERSION = 3;
   const CATALOG_PROJECTION_INDEX_VERSION = 1;

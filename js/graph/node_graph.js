@@ -2,7 +2,7 @@
   "use strict";
 
   const NODE_GRAPH_RELEASE_ID =
-    "1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll";
+    "1.21.12-universal-presentation-dev409-preview-enum-icon-bounds";
 
   if (
     window.RMLTypedNodeGraphGenerator?.moduleId ===
@@ -25,7 +25,7 @@
     "../core/code_templates.js?v=794-shared-loader-runtime",
     "../core/guidance.js?v=793",
     "node_graph_registry.js?v=1-physical-modules-v750-offline-core-types",
-    "node_graph_codegen.js?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll"
+    "node_graph_codegen.js?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds"
   ];
 
   if (
@@ -82,7 +82,7 @@
     const link = document.createElement("link");
     link.rel = "stylesheet";
     link.href = new URL(
-      "../../styles/features/styles.runtime-graph.css?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll",
+      "../../styles/features/styles.runtime-graph.css?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds",
       scriptUrl
     ).href;
     link.dataset.rmlStyleBundle = "runtime-graph";
@@ -103,19 +103,19 @@
       window.RMLClassStyles
         ? []
         : [
-            "../loaders/style_loader.js?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll"
+            "../loaders/style_loader.js?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds"
           ]
     ),
     "node_graph_registry.js?v=1-physical-modules-v750-offline-core-types",
-    "node_graph_codegen.js?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll",
+    "node_graph_codegen.js?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds",
     "runtime_bridge.js?v=1000-live-loss-status",
-    "../workers/saved_api_composite_compare_worker.js?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll",
-    "node_graph_composites.js?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll",
-    "node_graph_custom_csharp.js?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll",
+    "../workers/saved_api_composite_compare_worker.js?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds",
+    "node_graph_composites.js?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds",
+    "node_graph_custom_csharp.js?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds",
     "node_graph_guided.js?v=1-physical-modules-v748",
-    "node_graph_view.js?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll",
+    "node_graph_view.js?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds",
     "graph_gpu_renderer.js?v=807-webgpu-texture-limits",
-    "node_graph_bootstrap.js?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll"
+    "node_graph_bootstrap.js?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds"
   ];
 
   const ready = files.reduce(

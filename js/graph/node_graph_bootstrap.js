@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_BOOTSTRAP_MODULE_ID =
-  "1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll";
+  "1.21.12-universal-presentation-dev409-preview-enum-icon-bounds";
 
 function assertGraphBootstrapModuleCoherence() {
   const mismatches = [];

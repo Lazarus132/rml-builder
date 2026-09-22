@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_CODEGEN_WORKER_MODULE_ID =
-  "1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll";
+  "1.21.12-universal-presentation-dev409-preview-enum-icon-bounds";
 const GRAPH_CODEGEN_WORKER_FACTORY_VERSION =
   38;
 
@@ -724,7 +724,7 @@ async function ensureRuntime(
       "../compiler/visual_csharp.js?v=84-harmony-file-presets"
     );
     importScripts(
-      "../catalog/api_nodes.js?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll"
+      "../catalog/api_nodes.js?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds"
     );
 
     if (
@@ -768,7 +768,7 @@ async function ensureRuntime(
     }
 
     importScripts(
-      "../graph/node_graph_codegen.js?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll"
+      "../graph/node_graph_codegen.js?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds"
     );
 
     if (

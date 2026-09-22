@@ -2,7 +2,7 @@
   "use strict";
 
   const CATALOG_LOADER_MODULE_ID =
-    "1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll";
+    "1.21.12-universal-presentation-dev409-preview-enum-icon-bounds";
   const LOADER_VERSION = 84;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
@@ -75,7 +75,7 @@
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=1.21.10-universal-presentation-dev407-resonite-preview-overlay-scroll",
+    "api_nodes.js?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds",
     scriptUrl
   ).href;
 
