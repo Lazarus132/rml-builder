@@ -1,0 +1,21 @@
+{
+  "default": "en",
+  "languages": {
+    "en": {
+      "label": "English",
+      "tooltip": "English",
+      "flag": "assets/i18n/flags/en.svg"
+    },
+    "de": {
+      "label": "Deutsch",
+      "tooltip": "Deutsch",
+      "flag": "assets/i18n/flags/de.svg"
+    }
+  },
+  "fallback": "en",
+  "catalogs": [
+    "base",
+    "templates"
+  ],
+  "fallbackFlag": "assets/i18n/flags/fallback.svg"
+}

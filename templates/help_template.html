@@ -1,0 +1,872 @@
+    <dialog
+      id="information-dialog"
+      class="information-dialog"
+      tabindex="-1"
+      aria-labelledby="information-dialog-title">
+      <div class="information-shell">
+        <header class="information-header">
+          <div>
+            <small>{{i18n:template.help.d25ab548f53b}}</small>
+            <h2 id="information-dialog-title">{{i18n:template.help.c47ae15370cf}}</h2>
+          </div>
+          <button
+            id="information-close"
+            class="dialog-close"
+            type="button"
+            aria-label="{{i18n:template.help.d3f4e289c2ab}}"
+            data-help="{{i18n:template.help.862460a09925}}"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.01-universal-presentation-dev398-source-comment-cleanup#icon-close"></use></svg></button>
+        </header>
+
+        <nav class="information-page-tabs" aria-label="{{i18n:template.help.efa775e7aa7e}}">
+          <button
+            class="information-page-tab active"
+            type="button"
+            data-information-page-target="general"
+            aria-selected="true"
+            data-help="{{i18n:template.help.899a98ecf02c}}">
+            <svg class="information-page-tab-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.01-universal-presentation-dev398-source-comment-cleanup#icon-question"></use></svg>
+            <span>{{i18n:template.help.9239ee2cda84}}</span>
+          </button>
+          <button
+            class="information-page-tab"
+            type="button"
+            data-information-page-target="technical"
+            aria-selected="false"
+            data-help="{{i18n:template.help.61d9dedf26bb}}">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.01-universal-presentation-dev398-source-comment-cleanup#icon-help-technical"></use></svg>
+            <span>{{i18n:template.help.41fc0860886a}}</span>
+          </button>
+          <button
+            class="information-page-tab"
+            type="button"
+            data-information-page-target="environment"
+            aria-selected="false"
+            data-help="{{i18n:template.help.17885280ba71}}">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.01-universal-presentation-dev398-source-comment-cleanup#icon-help-environment"></use></svg>
+            <span>{{i18n:template.help.d443a1185575}}</span>
+          </button>
+          <button
+            class="information-page-tab"
+            type="button"
+            data-information-page-target="shortcuts"
+            aria-selected="false"
+            data-help="{{i18n:template.help.78b9154af879}}">
+            <span class="information-page-tab-icon" aria-hidden="true">⌨</span>
+            <span>{{i18n:template.help.90c93523ff95}}</span>
+          </button>
+          <button
+            class="information-page-tab"
+            type="button"
+            data-information-page-target="nodes"
+            aria-selected="false"
+            data-help="{{i18n:template.help.e1fd87ba9af8}}">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.01-universal-presentation-dev398-source-comment-cleanup#icon-help-nodes"></use></svg>
+            <span>{{i18n:template.help.9e325452c654}}</span>
+          </button>
+        </nav>
+
+        <section class="information-page active" data-information-page="general">
+          <div class="information-layout">
+            <nav class="information-nav" aria-label="{{i18n:template.help.1ddab28ca586}}">
+              <button type="button" data-information-section-target="info-outline">{{i18n:template.help.cdd6290b6b28}}</button>
+              <button type="button" data-information-section-target="info-sections">{{i18n:template.help.4abb16dbb712}}</button>
+              <button type="button" data-information-section-target="info-inspector">{{i18n:template.help.bc6c88db2f07}}</button>
+              <button type="button" data-information-section-target="info-graph">{{i18n:template.help.6c7b3f7883c6}}</button>
+              <button type="button" data-information-section-target="info-preview">{{i18n:template.help.f1fbb2b43dca}}</button>
+              <button type="button" data-information-section-target="info-projects">{{i18n:template.help.86352c7e510a}}</button>
+              <button type="button" data-information-section-target="info-export">{{i18n:template.help.cbe47e791a65}}</button>
+              <button type="button" data-information-section-target="info-getting-started">{{i18n:template.help.getting_started_nav}}</button>
+            </nav>
+
+            <article class="information-content">
+              <section id="info-outline" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.449bdeb9f027}}</span>
+                <h3>{{i18n:template.help.2f650fa12ba7}}</h3>
+                <p>
+                  {{i18n:template.help.4f78d945833c}}
+                </p>
+                <p>
+                  {{i18n:template.help.cce97ffaf902}}
+                </p>
+                <p>
+                  <strong>{{i18n:template.help.44f7257be6f4}}</strong> {{i18n:template.help.d607e712ccf7}}
+                </p>
+                <p>
+                  <strong>{{i18n:template.help.e8a6da58d544}}</strong> {{i18n:template.help.81f8ad9be9c9}} <strong>{{i18n:template.help.fafb6a0c5c1e}}</strong> {{i18n:template.help.b3769cba416a}}
+                  <strong>{{i18n:template.help.80767d1de865}}</strong> {{i18n:template.help.2661aadbbad4}}
+                </p>
+              </section>
+
+              <section id="info-sections" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.9482c5d5bfbe}}</span>
+                <h3>{{i18n:template.help.4abb16dbb712}}</h3>
+                <p>
+                  {{i18n:template.help.a3ddb854e85a}}
+                </p>
+              </section>
+
+              <section id="info-inspector" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.bc6c88db2f07}}</span>
+                <h3>{{i18n:template.help.6a33db4c6ffe}}</h3>
+                <p>
+                  {{i18n:template.help.a39ed9fb1c5e}} <strong>{{i18n:template.help.23692d0b186a}}</strong>{{i18n:template.help.3c16660ff3ab}}
+                </p>
+                <p>
+                  {{i18n:template.help.c07ba210cae5}}
+                </p>
+              </section>
+
+              <section id="info-graph" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.286306f7c95f}}</span>
+                <h3>{{i18n:template.help.6c7b3f7883c6}}</h3>
+                <p>
+                  <strong>{{i18n:template.help.6c7b3f7883c6}}</strong> {{i18n:template.help.f0954db9b523}}
+                </p>
+                <p>
+                  {{i18n:template.help.87b7dfc2b83a}}
+                </p>
+                <p>
+                  {{i18n:template.help.372a3c2b0260}}
+                </p>
+                <p>
+                  {{i18n:template.help.c415b6dd0834}}
+                </p>
+                <p>
+                  {{i18n:template.help.e31c64c0e445}}
+                  <code>{{i18n:template.help.4bacf79ba318}}</code> {{i18n:template.help.a5aab0e6a41f}} <code>{{i18n:template.help.e2a46c56a9fd}}</code>,
+                  <code>{{i18n:template.help.fc3eb2b6877d}}</code> {{i18n:template.help.1758356db217}} <code>{{i18n:template.help.8983ada46bd6}}</code> {{i18n:template.help.36c7473da68c}}
+                  <code>{{i18n:template.help.6fb6050d79d1}}</code> {{i18n:template.help.9086b3c5a247}}
+                </p>
+              </section>
+
+              <section id="info-preview" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.24ea55be929a}}</span>
+                <h3>{{i18n:template.help.6745242c2217}}</h3>
+                <p>
+                  {{i18n:template.help.22a3762c16d3}}
+                </p>
+                <p>
+                  {{i18n:template.help.4d6642f52e0f}}
+                </p>
+              </section>
+
+              <section id="info-projects" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.08a33285b8d3}}</span>
+                <h3>{{i18n:template.help.cffc355f3d1a}}</h3>
+                <p>
+                  {{i18n:template.help.d71bca5403f9}}
+                </p>
+              </section>
+
+              <section id="info-export" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.3ab238d024c9}}</span>
+                <h3>{{i18n:template.help.cbe47e791a65}}</h3>
+                <p>
+                  {{i18n:template.help.d1e1c86ddeda}} <strong>{{i18n:template.help.8bf9a6bda136}}</strong> {{i18n:template.help.e9af4091e558}} <code>{{i18n:template.help.7d6071b2f037}}</code>
+                  {{i18n:template.help.f2370a71545f}} <code>{{i18n:template.help.c391dc16087f}}</code> {{i18n:template.help.42ff04992cb3}}
+                </p>
+                <p>
+                  {{i18n:template.help.c11db7b09860}}
+                  <code>{{i18n:template.help.f388dbfb78ec}}</code> {{i18n:template.help.cffa50a32cb1}} <code>{{i18n:template.help.1441985a96b3}}</code> {{i18n:template.help.401040a4e105}}
+                  <code>{{i18n:template.help.23ab2f7e6781}}</code> {{i18n:template.help.cffa50a32cb1}} <code>{{i18n:template.help.b455d2c94fd3}}</code> {{i18n:template.help.f6a3a350dc38}}
+                </p>
+              </section>
+
+              <section id="info-getting-started" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.getting_started_kicker}}</span>
+                <h3>{{i18n:template.help.getting_started_title}}</h3>
+                <p>{{i18n:template.help.getting_started_intro}}</p>
+                <ol class="information-steps">
+                  <li>{{i18n:template.help.getting_started_1}}</li>
+                  <li>{{i18n:template.help.getting_started_2}}</li>
+                  <li>{{i18n:template.help.getting_started_3}}</li>
+                  <li>{{i18n:template.help.getting_started_4}}</li>
+                  <li>{{i18n:template.help.getting_started_5}}</li>
+                  <li>{{i18n:template.help.getting_started_6}}</li>
+                </ol>
+                <p>{{i18n:template.help.getting_started_tip}}</p>
+              </section>
+            </article>
+          </div>
+        </section>
+
+        <section class="information-page" data-information-page="technical" hidden>
+          <div class="information-layout">
+            <nav class="information-nav" aria-label="{{i18n:template.help.d10c128d7bf6}}">
+              <button type="button" data-information-section-target="info-library">{{i18n:template.help.c02314c9748c}}</button>
+              <button type="button" data-information-section-target="info-wires">{{i18n:template.help.5444985328aa}}</button>
+              <button type="button" data-information-section-target="info-runtime">{{i18n:template.help.bd0170fafdee}}</button>
+              <button type="button" data-information-section-target="info-collections">{{i18n:template.help.440ba73aaa16}}</button>
+              <button type="button" data-information-section-target="info-dynamic-controls">{{i18n:template.help.dfcbfaada1ef}}</button>
+              <button type="button" data-information-section-target="info-editing">{{i18n:template.help.b7df32f4f60b}}</button>
+              <button type="button" data-information-section-target="info-api-composites">{{i18n:template.help.6eb77a14e36a}}</button>
+              <button type="button" data-information-section-target="info-code-editor">{{i18n:template.help.8e3be29ddba9}}</button>
+              <button type="button" data-information-section-target="info-code-diagnostics">{{i18n:template.help.3af2279f9e30}}</button>
+              <button type="button" data-information-section-target="info-harmony">{{i18n:template.help.f9fe6c2660a7}}</button>
+              <button type="button" data-information-section-target="info-advanced">{{i18n:template.help.493e463115c3}}</button>
+            </nav>
+
+            <article class="information-content">
+              <section id="info-library" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.c02314c9748c}}</span>
+                <h3>{{i18n:template.help.47fd8e70a285}}</h3>
+                <p>
+                  {{i18n:template.help.30ec206af9d3}}
+                </p>
+              </section>
+
+              <section id="info-wires" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.d22fe24aae20}}</span>
+                <h3>{{i18n:template.help.9c2b9ae70ac3}}</h3>
+                <div class="information-symbol-grid">
+                  <span><b>●</b> {{i18n:template.help.f5a1af1b7d4c}}</span>
+                  <span><b><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.01-universal-presentation-dev398-source-comment-cleanup#icon-triangle-right"></use></svg></b> {{i18n:template.help.79ce33706ca0}}</span>
+                  <span><b>■</b> {{i18n:template.help.c0ae8f6ea841}}</span>
+                  <span><b>◆</b> {{i18n:template.help.44fc8e8d69c8}}</span>
+                  <span><b>⚡</b> {{i18n:template.help.65e0c4a7caf4}}</span>
+                </div>
+                <p>
+                  {{i18n:template.help.0941cc445b6e}}
+                </p>
+                <p>
+                  {{i18n:template.help.b1286f50a744}}
+                </p>
+                <p>
+                  {{i18n:template.help.1d54b74d015e}}
+                </p>
+              </section>
+
+              <section id="info-runtime" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.235ae8006332}}</span>
+                <h3>{{i18n:template.help.c32b53b6eead}}</h3>
+                <p>
+                  {{i18n:template.help.b0b97385ba5e}}
+                </p>
+                <p>
+                  {{i18n:template.help.eaa569700e7a}} <strong>{{i18n:template.help.1a502d64c806}}</strong> {{i18n:template.help.c56ed21eb717}}
+                </p>
+                <p>
+                  {{i18n:template.help.61cc55aa0453}} <strong>{{i18n:template.help.953985f42201}}</strong> {{i18n:template.help.8708754ce0a2}}
+                  <strong>{{i18n:template.help.952f375412e8}}</strong> {{i18n:template.help.f6d50293f76d}} <strong>{{i18n:template.help.e2602a8403c5}}</strong> {{i18n:template.help.f649e38b6b9e}}
+                  <strong>{{i18n:template.help.4e6a91682be2}}</strong> {{i18n:template.help.dcdf72a57f9d}}
+                  <strong>{{i18n:template.help.88fc77e78f48}}</strong> {{i18n:template.help.d3d0815a963a}} <strong>{{i18n:template.help.4e6a91682be2}}</strong> {{i18n:template.help.ef61352036b1}} <strong>{{i18n:template.help.3f4b5ae8712f}}</strong>{{i18n:template.help.302cfd42b6ee}}
+                  <strong>{{i18n:template.help.7348b0f2b33c}}</strong> {{i18n:template.help.4fb3a7ebc1c1}}
+                </p>
+              </section>
+
+              <section id="info-collections" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.868ba06e8e2c}}</span>
+                <h3>{{i18n:template.help.4a37c0bce68f}}</h3>
+                <p>
+                  <strong>{{i18n:template.help.d987360971b1}}</strong> {{i18n:template.help.8d93669a2312}} <code>{{i18n:template.help.9c004451e93e}}</code>{{i18n:template.help.dae27b9dc890}}
+                  <strong>{{i18n:template.help.c2df9b932637}}</strong> {{i18n:template.help.8c2649053414}} <strong>{{i18n:template.help.ecdda59aea5e}}</strong> {{i18n:template.help.e40c44aa13f1}} <strong>{{i18n:template.help.718a7e8a582e}}</strong> {{i18n:template.help.cdab24099196}} <strong>{{i18n:template.help.1798b3ba42ee}}</strong>
+                  {{i18n:template.help.965c34011a6e}}
+                </p>
+                <p>
+                  {{i18n:template.help.c63737abd734}} <code>{{i18n:template.help.9326a9f86306}}</code>{{i18n:template.help.70d4cbc0902e}} <code>{{i18n:template.help.ecdda59aea5e}}</code> {{i18n:template.help.e37484288850}}
+                  <code>{{i18n:template.help.f5c95adb124b}}</code> {{i18n:template.help.1a825eff81fa}}
+                  <code>{{i18n:template.help.718a7e8a582e}}</code>{{i18n:template.help.5a4c69e2ea90}} <code>{{i18n:template.help.99e05d6032c7}}</code>
+                  {{i18n:template.help.f6f4bb466ecc}}
+                </p>
+                <p>
+                  <strong>{{i18n:template.help.1d12dc273862}}</strong> {{i18n:template.help.3cc7e53dd94c}} <code>{{i18n:template.help.59bac3f0ffc9}}</code> {{i18n:template.help.24c5fb14936b}} <code>{{i18n:template.help.9f8a2389a20c}}</code> {{i18n:template.help.cffa50a32cb1}}
+                  <code>{{i18n:template.help.1b4399297461}}</code> {{i18n:template.help.24c5fb14936b}} <code>{{i18n:template.help.ecb252044b5e}}</code>{{i18n:template.help.0effd63b0625}}
+                </p>
+                <p>
+                  <strong>{{i18n:template.help.c068438f7c97}}</strong> {{i18n:template.help.f0054bbd4be9}}
+                  <strong>{{i18n:template.help.44c57abd888a}}</strong> {{i18n:template.help.6a4d736d1d3d}} <code>{{i18n:template.help.c7f559d92989}}</code>,
+                  <strong>{{i18n:template.help.61cc55aa0453}}</strong> {{i18n:template.help.b1b0f36c9ee0}} <strong>{{i18n:template.help.8dce170de238}}</strong>{{i18n:template.help.b3d815d4e6d0}}
+                  <strong>{{i18n:template.help.a1fffaaafb7c}}</strong> {{i18n:template.help.cffa50a32cb1}} <strong>{{i18n:template.help.66e12969c225}}</strong> {{i18n:template.help.32f2030c4070}}
+                  <code>{{i18n:template.help.44c57abd888a}}</code>, <code>{{i18n:template.help.3e4486186b79}}</code> {{i18n:template.help.4374aaee247f}} <code>{{i18n:template.help.6bdc89eff7f5}}</code>,
+                  <code>{{i18n:template.help.88f1cf01bae8}}</code> {{i18n:template.help.4374aaee247f}} <code>{{i18n:template.help.61cc55aa0453}}</code>{{i18n:template.help.fab813bd2d0d}} <code>{{i18n:template.help.8dce170de238}}</code>{{i18n:template.help.a1f0f3fe9773}}
+                </p>
+              </section>
+
+              <section id="info-dynamic-controls" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.f7eea49a72b2}}</span>
+                <h3>{{i18n:template.help.559f70810eb9}}</h3>
+                <p><strong>{{i18n:template.help.e2150a19e6b6}}</strong> {{i18n:template.help.db3d405b1067}} <strong>{{i18n:template.help.c068438f7c97}}</strong> {{i18n:template.help.6c8ac8cf4f6e}} <strong>{{i18n:template.help.7cb6efb98ba5}}</strong>{{i18n:template.help.2c0ac8646f0e}}</p>
+                <p>{{i18n:template.help.38488733741d}}</p>
+              </section>
+
+              <section id="info-editing" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.4439a0a93a1c}}</span>
+                <h3>{{i18n:template.help.31542717267f}}</h3>
+                <p>
+                  {{i18n:template.help.c652e73658c8}}
+                </p>
+                <p>
+                  {{i18n:template.help.b9a8a669973d}} <strong>{{i18n:template.help.c0e172649b4e}}</strong>{{i18n:template.help.09df7dba270c}} <strong>{{i18n:template.help.3bd6b1342ed6}}</strong> {{i18n:template.help.a7f7efe9d4a1}} <strong>{{i18n:template.help.abf9499bf4f0}}</strong> {{i18n:template.help.9a14f49db78c}}
+                </p>
+                <p>
+                  {{i18n:template.help.8d096146879f}} <strong>{{i18n:template.help.dd6a02a553da}}</strong> {{i18n:template.help.dba371b314d3}} <strong>{{i18n:template.help.33b3ce89b4c6}}</strong>{{i18n:template.help.8d5d9f6058f0}}
+                </p>
+                <p>
+                  {{i18n:template.help.9eb0879d9ce6}}
+                  <code>{{i18n:template.help.9f6add410a5b}}</code> {{i18n:template.help.73d712ba5850}} <strong>{{i18n:template.help.70e97ce046ef}}</strong> {{i18n:template.help.90e56c7885cf}}
+                  <code>{{i18n:template.help.9f6add410a5b}}</code>{{i18n:template.help.9ef52803740c}}
+                  <code>{{i18n:template.help.9f6add410a5b}}</code> {{i18n:template.help.63ef7c9a5704}} <code>{{i18n:template.help.e9c617be4453}}</code>{{i18n:template.help.f8fee1e5c052}}
+                  <code>{{i18n:template.help.9f6add410a5b}}</code> {{i18n:template.help.acf5be05e17f}}
+                </p>
+                <p>
+                  {{i18n:template.help.22fce1fda953}}
+                  <code>{{i18n:template.help.a70783def17f}}</code> {{i18n:template.help.7739136dc697}}
+                  <code>{{i18n:template.help.095fe44c7fa8}}</code> {{i18n:template.help.2ea5d56cf714}} <code>{{i18n:template.help.44ecd1fd1222}}</code> {{i18n:template.help.e6848185fc2e}}
+                </p>
+              </section>
+
+              <section id="info-api-composites" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.bf4b9df29f15}}</span>
+                <h3>{{i18n:template.help.e1edafa0f363}}</h3>
+                <p>
+                  {{i18n:template.help.b6bd6af176b5}}
+                  <strong>{{i18n:template.help.e1b1d78113f4}}</strong> {{i18n:template.help.ea1a4f5d47be}}
+                  <strong>{{i18n:template.help.c0e172649b4e}}</strong> {{i18n:template.help.a154b381cc1b}}
+                  <strong>{{i18n:template.help.83100d4a62b2}}</strong> {{i18n:template.help.84085bb6fffb}} <strong>{{i18n:template.help.83100d4a62b2}}</strong> {{i18n:template.help.3b50910c9c06}}
+                  <strong>{{i18n:template.help.ed2c21d7da47}}</strong> {{i18n:template.help.593fc57eaa2c}} <strong>{{i18n:template.help.83100d4a62b2}}</strong> {{i18n:template.help.fbf28387dc60}}
+                </p>
+                <p>
+                  {{i18n:template.help.696108d1b03e}} <strong>{{i18n:template.help.fb91e24fa52d}}</strong> {{i18n:template.help.86a9570de6c4}}
+                </p>
+                <p>
+                  {{i18n:template.help.8cdfc193a701}}
+                  <strong>{{i18n:template.help.ba090b5e07cf}}</strong>, <strong>{{i18n:template.help.f20fea8da243}}</strong> {{i18n:template.help.cffa50a32cb1}}
+                  <strong>{{i18n:template.help.7cfcf9561dcc}}</strong> {{i18n:template.help.bd033ce9d572}}
+                </p>
+                <p>
+                  {{i18n:template.help.1d4d43cc6f3a}} <strong>{{i18n:template.help.a988dcb7fe09}}</strong> {{i18n:template.help.1758356db217}} <strong>{{i18n:template.help.fb91e24fa52d}}</strong> {{i18n:template.help.908ea54f24e6}} <strong>{{i18n:template.help.a988dcb7fe09}}</strong> {{i18n:template.help.560e9d74a85e}} <strong>{{i18n:template.help.fb91e24fa52d}}</strong> {{i18n:template.help.a63730c8595c}} <strong>{{i18n:template.help.83100d4a62b2}}</strong>,
+                  <strong>{{i18n:template.help.ed2c21d7da47}}</strong>{{i18n:template.help.c12b7a7f41fc}}
+                </p>
+              </section>
+
+              <section id="info-code-editor" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.d02d03a4eb6f}}</span>
+                <h3>{{i18n:template.help.ad60caaacac1}}</h3>
+                <p>
+                  {{i18n:template.help.ae9301357b21}}
+                </p>
+                <p>
+                  {{i18n:template.help.6358bc31c6df}}
+                  <strong>{{i18n:template.help.249450cb7225}}</strong> {{i18n:template.help.cffa50a32cb1}} <strong>{{i18n:template.help.83182e9b12ce}}</strong>{{i18n:template.help.31e783594f54}}
+                </p>
+                <p>
+                  {{i18n:template.help.79c89f1e7b49}}
+                </p>
+                <p>
+                  {{i18n:template.help.88dc557f1827}}
+                </p>
+              </section>
+
+              <section id="info-code-diagnostics" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.2d46b6ad6be3}}</span>
+                <h3>{{i18n:template.help.48670247ada6}}</h3>
+                <p>
+                  {{i18n:template.help.611b2989b0eb}} <strong>{{i18n:template.help.4759bf14d7a5}}</strong> {{i18n:template.help.1758356db217}}
+                  <strong>{{i18n:template.help.341d464a8f2c}}</strong>{{i18n:template.help.0cf70cbf2967}}
+                </p>
+                <p>
+                  {{i18n:template.help.7f95e44f8ca6}}
+                </p>
+              </section>
+
+              <section id="info-harmony" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.4e04c7167689}}</span>
+                <h3>{{i18n:template.help.7e54796c528e}}</h3>
+                <p>
+                  <strong>{{i18n:template.help.73c441318c9e}}</strong>{{i18n:template.help.8b96b1b50390}} <code>{{i18n:template.help.e74be5eb3074}}</code>{{i18n:template.help.9a030ff88e83}}
+                </p>
+                <p>
+                  <strong>{{i18n:template.help.39093efbcd5e}}</strong> {{i18n:template.help.42f6e8e2c246}} <code>{{i18n:template.help.f40f8560f1b9}}</code> {{i18n:template.help.3842bf7e2f52}}
+                  <strong>{{i18n:template.help.02a5b1ddeb7f}}</strong> {{i18n:template.help.a257bea2eb42}} <code>{{i18n:template.help.23ab2f7e6781}}</code> {{i18n:template.help.639772402567}} <code>{{i18n:template.help.23ab2f7e6781}}</code> {{i18n:template.help.c103ac503b8b}}
+                </p>
+                <p>
+                  {{i18n:template.help.e9866da21e06}}
+                </p>
+                <p>
+                  {{i18n:template.help.5150c2ab8982}} <code>{{i18n:template.help.da19176f0c0e}}</code> {{i18n:template.help.2ff75d9b8d0f}} <code>{{i18n:template.help.1bac8299b082}}</code> {{i18n:template.help.9501696a28a4}}
+                </p>
+              </section>
+
+              <section id="info-advanced" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.e421b1d2ceab}}</span>
+                <h3>{{i18n:template.help.fd1e51b0e90d}}</h3>
+                <p>
+                  {{i18n:template.help.bc9057b3e07b}}
+                  <strong>{{i18n:template.help.bcf88f61f0db}}</strong> {{i18n:template.help.4a8a02edc066}}
+                </p>
+                <p>
+                  <strong>{{i18n:template.help.ba090b5e07cf}}</strong> {{i18n:template.help.595bd027e4ff}} <strong>{{i18n:template.help.f20fea8da243}}</strong> {{i18n:template.help.8a269069e76c}} <strong>{{i18n:template.help.7cfcf9561dcc}}</strong> {{i18n:template.help.0376ca76c0f4}}
+                </p>
+                <p>
+                  {{i18n:template.help.e2354c76a7f5}}
+                </p>
+              </section>
+            </article>
+          </div>
+        </section>
+
+        <section class="information-page" data-information-page="environment" hidden>
+          <div class="information-layout information-shortcuts-layout">
+            <nav class="information-nav" aria-label="{{i18n:template.help.d52fb583fbf5}}">
+              <button type="button" data-information-section-target="environment-overview">{{i18n:template.help.84364e7048b3}}</button>
+              <button type="button" data-information-section-target="environment-builder">{{i18n:template.help.78ce686d28ed}}</button>
+              <button type="button" data-information-section-target="environment-runtime">{{i18n:template.help.befbb7eadca9}}</button>
+              <button type="button" data-information-section-target="environment-dotnet">{{i18n:template.help.85244b7969b1}}</button>
+              <button type="button" data-information-section-target="environment-catalog">{{i18n:template.help.d1054ef5d61f}}</button>
+              <button type="button" data-information-section-target="environment-tools">{{i18n:template.help.7f0a95234da0}}</button>
+              <button type="button" data-information-section-target="environment-windows">{{i18n:template.help.26d9c28d789c}}</button>
+              <button type="button" data-information-section-target="environment-macos">{{i18n:template.help.cd6fdcbf5a86}}</button>
+              <button type="button" data-information-section-target="environment-linux">{{i18n:template.help.83ad8510bbd3}}</button>
+              <button type="button" data-information-section-target="environment-browser">{{i18n:template.help.54a2cf5e634d}}</button>
+            </nav>
+            <article class="information-content">
+              <section id="environment-overview" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.170f54ca9b37}}</span>
+                <h3>{{i18n:template.help.e29b49180315}}</h3>
+                <p>
+                  {{i18n:template.help.5c6f6f3ed99d}}
+                </p>
+                <div class="shortcut-grid">
+                  <div>
+                    <kbd>{{i18n:template.help.eed6bfb41051}}</kbd>
+                    <span>{{i18n:template.help.40f14a385a6c}}</span>
+                  </div>
+                  <div>
+                    <kbd>{{i18n:template.help.bbd80cf7e2de}}</kbd>
+                    <span>{{i18n:template.help.9cbf4294972d}}</span>
+                  </div>
+                  <div>
+                    <kbd>{{i18n:template.help.c3accb895f00}}</kbd>
+                    <span>{{i18n:template.help.1ac3e56f6272}}</span>
+                  </div>
+                  <div>
+                    <kbd>{{i18n:template.help.0c6c4102d4df}}</kbd>
+                    <span>{{i18n:template.help.5073870b9f86}}</span>
+                  </div>
+                </div>
+              </section>
+
+              <section id="environment-builder" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.8652f6cf8392}}</span>
+                <h3>{{i18n:template.help.a535a7c2bf2c}}</h3>
+                <p>
+                  {{i18n:template.help.5ca7d81daa41}} <strong>{{i18n:template.help.a33cd78cf773}}</strong> {{i18n:template.help.d3e98fe1b4f7}}
+                </p>
+                <div class="shortcut-grid">
+                  <div>
+                    <kbd>{{i18n:template.help.092339f025bf}}</kbd>
+                    <span>{{i18n:template.help.9dfbc339458d}}</span>
+                  </div>
+                  <div>
+                    <kbd>{{i18n:template.help.7c84c2d8f33a}}</kbd>
+                    <span>{{i18n:template.help.e3f4c2a35fc3}}</span>
+                  </div>
+                  <div>
+                    <kbd>{{i18n:template.help.a0dedcbab64e}}</kbd>
+                    <span>{{i18n:template.help.74825de1e766}}</span>
+                  </div>
+                  <div>
+                    <kbd>{{i18n:template.help.50ce4459ff09}}</kbd>
+                    <span>{{i18n:template.help.5f226c2639f8}}</span>
+                  </div>
+                  <div>
+                    <kbd>{{i18n:template.help.3a74738ccdb2}}</kbd>
+                    <span>{{i18n:template.help.33c11b8b4271}}</span>
+                  </div>
+                  <div>
+                    <kbd>{{i18n:template.help.f887901957bf}}</kbd>
+                    <span>{{i18n:template.help.d725e54126ff}}</span>
+                  </div>
+                  <div>
+                    <kbd>{{i18n:template.help.490f4d86834d}}</kbd>
+                    <span>{{i18n:template.help.803ccff73700}}</span>
+                  </div>
+                  <div>
+                    <kbd>{{i18n:template.help.cf6f3c748ae9}}</kbd>
+                    <span>{{i18n:template.help.af69bc6e3f8c}}</span>
+                  </div>
+                  <div>
+                    <kbd>{{i18n:template.help.25058b6b6b38}}</kbd>
+                    <span>{{i18n:template.help.15592fafde18}}</span>
+                  </div>
+                  <div>
+                    <kbd>{{i18n:template.help.1fced4093581}}</kbd>
+                    <span>{{i18n:template.help.246a4e4947ca}}</span>
+                  </div>
+                  <div>
+                    <kbd>{{i18n:template.help.465f2f27d0aa}}</kbd>
+                    <span>{{i18n:template.help.18d42a068c1a}}</span>
+                  </div>
+                  <div>
+                    <kbd>{{i18n:template.help.a509204059e1}}</kbd>
+                    <span>{{i18n:template.help.3c7ed87eec1a}}</span>
+                  </div>
+                  <div>
+                    <kbd>{{i18n:template.help.54a2cf5e634d}}</kbd>
+                    <span>{{i18n:template.help.ccde1a4733d3}}</span>
+                  </div>
+                  <div>
+                    <kbd>{{i18n:template.help.7cf43809b3b5}}</kbd>
+                    <span>{{i18n:template.help.91c482faade3}}</span>
+                  </div>
+                </div>
+                <p>
+                  {{i18n:template.help.829a67ff991a}}
+                </p>
+                <p>
+                  <strong>{{i18n:template.help.061f04c55e8b}}</strong> {{i18n:template.help.f4df63bde41c}}
+                </p>
+                <h4>{{i18n:template.help.14def410dd9c}}</h4>
+                <p>
+                  {{i18n:template.help.36ad1827d8a6}}
+                  <strong>{{i18n:template.help.e2692ac809c7}}</strong>{{i18n:template.help.beab2052a8e1}}
+                </p>
+                <p>
+                  {{i18n:template.help.26234a13d130}}
+                </p>
+              </section>
+
+              <section id="environment-runtime" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.ccae62a782e0}}</span>
+                <h3>{{i18n:template.help.311eaaa3299a}}</h3>
+                <p>
+                  {{i18n:template.help.d193311a1c77}}
+                  <a href="https://store.steampowered.com/app/2519830/Resonite/" target="_blank" rel="noopener noreferrer">{{i18n:template.help.36358bf5ceff}}</a>{{i18n:template.help.0f12ef0e6410}}
+                </p>
+                <p>
+                  {{i18n:template.help.18e32d19fcdc}} <strong>{{i18n:template.help.557f25551671}}</strong> {{i18n:template.help.c8f620343303}}
+                </p>
+                <p>
+                  {{i18n:template.help.6b4555f12180}} <code>{{i18n:template.help.23ab2f7e6781}}</code>{{i18n:template.help.72548b78803e}} <code>{{i18n:template.help.b455d2c94fd3}}</code>{{i18n:template.help.699080836476}}
+                </p>
+                <p>
+                  {{i18n:template.help.b71b07ae2bc6}}
+                </p>
+                <p>
+                  {{i18n:template.help.98197de85d1e}} <strong>{{i18n:template.help.557f25551671}}</strong>
+                  {{i18n:template.help.b414d7789d62}}
+                </p>
+              </section>
+
+              <section id="environment-dotnet" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.ec598e8c4ac4}}</span>
+                <h3>{{i18n:template.help.d85636696a68}}</h3>
+                <p>
+                  {{i18n:template.help.5e2a088df2e0}} <code>{{i18n:template.help.025826f9b1db}}</code> {{i18n:template.help.476f2561a8b5}}
+                  <strong>{{i18n:template.help.072a51fa3674}}</strong>{{i18n:template.help.b40c4fdfc942}}
+                </p>
+                <div class="shortcut-grid">
+                  <div>
+                    <kbd>{{i18n:template.help.26d9c28d789c}}</kbd>
+                    <span>{{i18n:template.help.b1b392607dea}} <code>{{i18n:template.help.a7ad36635977}}</code>{{i18n:template.help.59d803be54aa}} <a href="https://learn.microsoft.com/dotnet/core/install/windows" target="_blank" rel="noopener noreferrer">{{i18n:template.help.e5383360fd58}}</a>.</span>
+                  </div>
+                  <div>
+                    <kbd>{{i18n:template.help.cd6fdcbf5a86}}</kbd>
+                    <span>{{i18n:template.help.d0f716b813df}} <a href="https://learn.microsoft.com/dotnet/core/install/macos" target="_blank" rel="noopener noreferrer">{{i18n:template.help.c91d4c3a6e2b}}</a>.</span>
+                  </div>
+                  <div>
+                    <kbd>{{i18n:template.help.83ad8510bbd3}}</kbd>
+                    <span>{{i18n:template.help.0dd015c89de0}} <a href="https://learn.microsoft.com/dotnet/core/install/linux" target="_blank" rel="noopener noreferrer">{{i18n:template.help.87c69f25505e}}</a>.</span>
+                  </div>
+                  <div>
+                    <kbd>{{i18n:template.help.dda6ac27b9d3}}</kbd>
+                    <span>{{i18n:template.help.7608aebbac59}} <code>{{i18n:template.help.5b36cb5c1882}}</code>{{i18n:template.help.69023721bb98}} <code>10.0.</code>{{i18n:template.help.1f259c030b51}} <code>{{i18n:template.help.d1d44004f70a}}</code> {{i18n:template.help.03e55d8b6efd}}</span>
+                  </div>
+                </div>
+                <p>
+                  {{i18n:template.help.aa68957a1b1d}} <a href="https://dotnet.microsoft.com/download/dotnet/10.0" target="_blank" rel="noopener noreferrer">{{i18n:template.help.65be12148bf5}}</a>.
+                </p>
+                <p>
+                  {{i18n:template.help.75c5fd52ec96}} <code>{{i18n:template.help.23ab2f7e6781}}</code> {{i18n:template.help.cffa50a32cb1}}
+                  <code>{{i18n:template.help.b455d2c94fd3}}</code> {{i18n:template.help.4f13660ffc75}}
+                  <code>{{i18n:template.help.c391dc16087f}}</code> {{i18n:template.help.c46719e4ef6e}} <code>{{i18n:template.help.6d9e2af7c540}}</code>.
+                </p>
+              </section>
+
+              <section id="environment-catalog" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.c830624a61a1}}</span>
+                <h3>{{i18n:template.help.16c1f45d7dd1}}</h3>
+                <p>
+                  {{i18n:template.help.e7858b8f2c74}}
+                </p>
+                <p>
+                  {{i18n:template.help.6c81b5597b80}}
+                </p>
+              </section>
+
+              <section id="environment-tools" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.18a823445e80}}</span>
+                <h3>{{i18n:template.help.82f115a95f94}}</h3>
+                <div class="shortcut-grid">
+                  <div>
+                    <kbd>{{i18n:template.help.6da13addb000}}</kbd>
+                    <span><a href="https://git-scm.com/downloads" target="_blank" rel="noopener noreferrer">{{i18n:template.help.5819778898df}}</a> {{i18n:template.help.7852556820f2}}</span>
+                  </div>
+                  <div>
+                    <kbd>{{i18n:template.help.c7e9fb2ea6c3}}</kbd>
+                    <span><a href="https://code.visualstudio.com/Download" target="_blank" rel="noopener noreferrer">{{i18n:template.help.423f1f3d80c4}}</a>, <a href="https://visualstudio.microsoft.com/downloads/" target="_blank" rel="noopener noreferrer">{{i18n:template.help.91b163a97867}}</a> {{i18n:template.help.1758356db217}} <a href="https://www.jetbrains.com/rider/download/" target="_blank" rel="noopener noreferrer">{{i18n:template.help.67bd91f54794}}</a> {{i18n:template.help.194ef7906f9a}}</span>
+                  </div>
+                  <div>
+                    <kbd>{{i18n:template.help.26d9c28d789c}}</kbd>
+                    <span>{{i18n:template.help.161fbd3e7ee7}}</span>
+                  </div>
+                  <div>
+                    <kbd>{{i18n:template.help.c6046399d234}}</kbd>
+                    <span>{{i18n:template.help.6260ef2d6775}}</span>
+                  </div>
+                </div>
+              </section>
+
+              <section id="environment-windows" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.e7a38f7a5a08}}</span>
+                <h3>{{i18n:template.help.6c1454c1caa2}}</h3>
+                <p>
+                  {{i18n:template.help.5a53e1b2fec3}} <kbd>{{i18n:template.help.4973f4c599d5}}</kbd> + <kbd>{{i18n:template.help.dd6a02a553da}}</kbd> +
+                  <kbd>{{i18n:template.help.c2c53d669482}}</kbd>{{i18n:template.help.4b9f17ab2996}}
+                </p>
+                <p>
+                  <a href="https://learn.microsoft.com/windows/powertoys/always-on-top" target="_blank" rel="noopener noreferrer">{{i18n:template.help.550b6f70b4d6}}</a>
+                </p>
+              </section>
+
+              <section id="environment-macos" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.cd6fdcbf5a86}}</span>
+                <h3>{{i18n:template.help.a13cc7187b79}}</h3>
+                <p>
+                  {{i18n:template.help.de3620291196}}
+                  <a href="https://support.apple.com/guide/mac-help/use-apps-in-split-view-mchl4fbe2921/mac" target="_blank" rel="noopener noreferrer">{{i18n:template.help.fda779503324}}</a>.
+                </p>
+                <p>
+                  {{i18n:template.help.b9179858ab78}}
+                  <a href="https://apps.apple.com/app/windowpin-window-top/id6739672480?mt=12" target="_blank" rel="noopener noreferrer">{{i18n:template.help.e7421763e7ca}}</a>{{i18n:template.help.50ae650be6ea}}
+                </p>
+                <p>
+                  {{i18n:template.help.e96c0a05862d}}
+                </p>
+              </section>
+
+              <section id="environment-linux" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.eef8b1ed73a9}}</span>
+                <h3>{{i18n:template.help.2cab77972ec8}}</h3>
+                <p>
+                  {{i18n:template.help.ff9ca70967c7}} <strong>{{i18n:template.help.3fecd1d0443e}}</strong> {{i18n:template.help.bcc572a6a77d}}
+                  <a href="https://docs.kde.org/stable_kf6/en/kwin/kcontrol/windowspecific/attributes.html" target="_blank" rel="noopener noreferrer">{{i18n:template.help.08661b06a459}}</a>.
+                </p>
+                <p>
+                  {{i18n:template.help.440662f214ed}}
+                  <a href="https://extensions.gnome.org/extension/6619/window-on-top/" target="_blank" rel="noopener noreferrer">{{i18n:template.help.2ebde49333ef}}</a>{{i18n:template.help.18a6ee2e47a5}} <code>{{i18n:template.help.d3792fcec15c}}</code> {{i18n:template.help.531dace1b581}}
+                </p>
+                <p>
+                  {{i18n:template.help.330c310bf184}}
+                </p>
+              </section>
+
+              <section id="environment-browser" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.783f3972d4d3}}</span>
+                <h3>{{i18n:template.help.769b0e4102b3}}</h3>
+                <p>
+                  {{i18n:template.help.7a013e044b56}}
+                </p>
+                <p>
+                  {{i18n:template.help.10e6163fcb47}}
+                </p>
+                <p>
+                  {{i18n:template.help.1c50bb39bb3d}}
+                </p>
+              </section>
+            </article>
+          </div>
+        </section>
+
+        <section class="information-page" data-information-page="shortcuts" hidden>
+          <div class="information-layout information-shortcuts-layout">
+            <nav class="information-nav" aria-label="{{i18n:template.help.66f3ae594df0}}">
+              <button type="button" data-information-section-target="shortcut-global">{{i18n:template.help.5f1184f7df96}}</button>
+              <button type="button" data-information-section-target="shortcut-graph">{{i18n:template.help.5e7d74314e91}}</button>
+              <button type="button" data-information-section-target="shortcut-code-editor">{{i18n:template.help.2faee5210b77}}</button>
+              <button type="button" data-information-section-target="shortcut-search">{{i18n:template.help.ea4ea7f9e8e4}}</button>
+              <button type="button" data-information-section-target="shortcut-color">{{i18n:template.help.91dee962b3da}}</button>
+            </nav>
+            <article class="information-content">
+              <section id="shortcut-global" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.5f1184f7df96}}</span>
+                <h3>{{i18n:template.help.cbf0332b554a}}</h3>
+                <div class="shortcut-grid">
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.1f7a4f9e2f70}}</kbd></span><span>{{i18n:template.help.808dd883e7f6}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.0d972afce858}}</kbd></span><span>{{i18n:template.help.1ae7168f0bff}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.dd6a02a553da}}</kbd><span class="shortcut-plus">+</span><kbd>{{i18n:template.help.0d972afce858}}</kbd></span><span>{{i18n:template.help.6a894ae7aad9}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.469d5b183fdc}}</kbd><span class="shortcut-plus">+</span><kbd>{{i18n:template.help.0d972afce858}}</kbd></span><span>{{i18n:template.help.8f7455094718}}</span></div>
+                </div>
+              </section>
+              <section id="shortcut-graph" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.bb3e8bdab859}}</span>
+                <h3>{{i18n:template.help.b5a67b608fb0}}</h3>
+                <div class="shortcut-grid">
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.e30eff925100}}</kbd><span class="shortcut-plus">+</span><kbd>{{i18n:template.help.0d972afce858}}</kbd></span><span>{{i18n:template.help.c6b4a8346362}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.1f7a4f9e2f70}}</kbd></span><span>{{i18n:template.help.49a2d01bf05e}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.f6fdbe48dc54}}</kbd></span><span>{{i18n:template.help.0ca52ad15550}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.88d130a66de8}}</kbd></span><span>{{i18n:template.help.14233ed05f0d}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.dd6a02a553da}}</kbd><span class="shortcut-plus">+</span><kbd>{{i18n:template.help.79cbc5eb672a}}</kbd></span><span>{{i18n:template.help.5bb529621679}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.dd6a02a553da}}</kbd><span class="shortcut-plus">+</span><kbd>0</kbd></span><span>{{i18n:template.help.df109dd5b956}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.ae533262105d}}</kbd></span><span>{{i18n:template.help.bea32c031f0d}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.1a1729fae475}}</kbd></span><span>{{i18n:template.help.1bd08d80bdd5}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.1a1729fae475}}</kbd></span><span>{{i18n:template.help.94cee37033df}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.dd6a02a553da}}</kbd><span class="shortcut-plus">+</span><kbd>{{i18n:template.help.e69f20e9f683}}</kbd></span><span>{{i18n:template.help.b15df7ad08f8}}</span></div>
+                </div>
+              </section>
+              <section id="shortcut-code-editor" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.8d968112f3ae}}</span>
+                <h3>{{i18n:template.help.6bf5044e5c02}}</h3>
+                <div class="shortcut-grid">
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.dd6a02a553da}}</kbd><span class="shortcut-plus">+</span><kbd>{{i18n:template.help.e69f20e9f683}}</kbd></span><span>{{i18n:template.help.9f283e3781e3}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.dd6a02a553da}}</kbd><span class="shortcut-plus">+</span><kbd>{{i18n:template.help.7cf184f4c67a}}</kbd></span><span>{{i18n:template.help.af97abfa1269}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.be3d820f356c}}</kbd></span><span>{{i18n:template.help.6d9fa23bd306}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.469d5b183fdc}}</kbd><span class="shortcut-plus">+</span><kbd>{{i18n:template.help.be3d820f356c}}</kbd></span><span>{{i18n:template.help.6b0bfe232d5b}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.dd6a02a553da}}</kbd><span class="shortcut-plus">+</span><kbd>{{i18n:template.help.a36a6718f545}}</kbd></span><span>{{i18n:template.help.3593553cdd5f}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.dd6a02a553da}}</kbd><span class="shortcut-plus">+</span><kbd>{{i18n:template.help.469d5b183fdc}}</kbd><span class="shortcut-plus">+</span><kbd>{{i18n:template.help.a36a6718f545}}</kbd></span><span>{{i18n:template.help.67f9c4b3c8bd}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.2b9eceb7a86a}}</kbd></span><span>{{i18n:template.help.bd7d342087e0}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.469d5b183fdc}}</kbd><span class="shortcut-plus">+</span><kbd>{{i18n:template.help.2b9eceb7a86a}}</kbd></span><span>{{i18n:template.help.32db7888b7ef}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.2b9eceb7a86a}}</kbd></span><span>{{i18n:template.help.22f0dd1e2f9c}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.1f7a4f9e2f70}}</kbd></span><span>{{i18n:template.help.18f091fcb7be}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.1a1729fae475}}</kbd></span><span>{{i18n:template.help.5e54e0528882}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.fe06eb6459c8}}</kbd></span><span>{{i18n:template.help.1eafabe2f00b}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.469d5b183fdc}}</kbd><span class="shortcut-plus">+</span><kbd>{{i18n:template.help.fe06eb6459c8}}</kbd></span><span>{{i18n:template.help.fb317a472065}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.6d8c9b124d52}}</kbd></span><span>{{i18n:template.help.2c7f341c1d90}}</span></div>
+                </div>
+              </section>
+              <section id="shortcut-search" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.1dc862f24fb4}}</span>
+                <h3>{{i18n:template.help.e9546caaffbd}}</h3>
+                <div class="shortcut-grid">
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.be3d820f356c}}</kbd></span><span>{{i18n:template.help.45e35c7a16e9}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.469d5b183fdc}}</kbd><span class="shortcut-plus">+</span><kbd>{{i18n:template.help.be3d820f356c}}</kbd></span><span>{{i18n:template.help.da6663067bed}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.dd6a02a553da}}</kbd><span class="shortcut-plus">+</span><kbd>{{i18n:template.help.a36a6718f545}}</kbd></span><span>{{i18n:template.help.0b4552d41e84}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.dd6a02a553da}}</kbd><span class="shortcut-plus">+</span><kbd>{{i18n:template.help.469d5b183fdc}}</kbd><span class="shortcut-plus">+</span><kbd>{{i18n:template.help.a36a6718f545}}</kbd></span><span>{{i18n:template.help.deaf1edfd736}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.2b9eceb7a86a}}</kbd></span><span>{{i18n:template.help.7e376065a237}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.469d5b183fdc}}</kbd><span class="shortcut-plus">+</span><kbd>{{i18n:template.help.2b9eceb7a86a}}</kbd></span><span>{{i18n:template.help.ef8939e4e237}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.1f7a4f9e2f70}}</kbd></span><span>{{i18n:template.help.e2c19843d134}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>↑</kbd><kbd>↓</kbd></span><span>{{i18n:template.help.06a0713bb894}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.70f8bb9a8a53}}</kbd><kbd>{{i18n:template.help.a2bb9d34b8a1}}</kbd></span><span>{{i18n:template.help.84a0058a3b57}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.2b9eceb7a86a}}</kbd><kbd>{{i18n:template.help.6d8c9b124d52}}</kbd></span><span>{{i18n:template.help.09cd74ad962c}}</span></div>
+                </div>
+              </section>
+              <section id="shortcut-color" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.2ae3344d84d5}}</span>
+                <h3>{{i18n:template.help.f72ace64ef88}}</h3>
+                <div class="shortcut-grid">
+                  <div><span class="shortcut-keys"><kbd aria-label="{{i18n:ui.dev327.leftArrow}}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.01-universal-presentation-dev398-source-comment-cleanup#icon-chevron-left"></use></svg></kbd><kbd aria-label="{{i18n:ui.dev327.rightArrow}}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.01-universal-presentation-dev398-source-comment-cleanup#icon-chevron-right"></use></svg></kbd></span><span>{{i18n:template.help.95e2ee303292}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>↓</kbd><kbd>↑</kbd></span><span>{{i18n:template.help.0799ccab97a4}}</span></div>
+                  <div><span class="shortcut-keys"><kbd>{{i18n:template.help.469d5b183fdc}}</kbd><span class="shortcut-plus">+</span><kbd>{{i18n:template.help.3a4758c3cc8d}}</kbd></span><span>{{i18n:template.help.c6e89cbbf72a}}</span></div>
+                </div>
+              </section>
+            </article>
+          </div>
+        </section>
+
+        <section class="information-page information-node-page" data-information-page="nodes" hidden>
+          <div class="information-node-page-layout">
+            <aside class="information-node-page-intro">
+              <span class="information-kicker">{{i18n:template.help.7f979b9e704e}}</span>
+              <h3>{{i18n:template.help.4ce32e3f76d2}}</h3>
+              <nav class="information-node-scope-tabs" aria-label="{{i18n:template.help.13f0f3de98d1}}">
+                <button
+                  class="information-node-scope-tab active"
+                  type="button"
+                  data-information-node-scope-target="outline"
+                  aria-controls="information-outline-node-panel"
+                  aria-selected="true"
+                  data-help="{{i18n:template.help.6d8c43556831}}">
+                  <span aria-hidden="true">▤</span>
+                  <span>{{i18n:template.help.449bdeb9f027}}</span>
+                </button>
+                <button
+                  class="information-node-scope-tab"
+                  type="button"
+                  data-information-node-scope-target="runtime"
+                  aria-controls="information-runtime-node-panel"
+                  aria-selected="false"
+                  data-help="{{i18n:template.help.b04f52d91627}}">
+                  <span aria-hidden="true">◇</span>
+                  <span>{{i18n:template.help.10028eb34d8e}}</span>
+                </button>
+              </nav>
+
+              <div data-information-node-scope-copy="outline">
+                <p>
+                  {{i18n:template.help.96910a34ce7b}}
+                </p>
+                <p class="information-api-note outline">
+                  {{i18n:template.help.3a9b6d50138f}}
+                </p>
+              </div>
+
+              <div data-information-node-scope-copy="runtime" hidden>
+                <p>
+                  {{i18n:template.help.a41aecb9ff1f}}
+                </p>
+                <p>
+                  {{i18n:template.help.5de35c22b4af}}
+                </p>
+                <p class="information-api-note">
+                  {{i18n:template.help.72c0a0de7e4a}}
+                </p>
+              </div>
+            </aside>
+
+            <article
+              id="information-outline-node-panel"
+              class="information-node-page-content"
+              data-information-node-scope-panel="outline">
+              <div
+                id="information-outline-node-reference"
+                class="information-node-reference information-outline-node-reference"
+                aria-live="polite"></div>
+            </article>
+
+            <article
+              id="information-runtime-node-panel"
+              class="information-node-page-content"
+              data-information-node-scope-panel="runtime"
+              hidden>
+              <div id="information-node-reference" class="information-node-reference" aria-live="polite"></div>
+
+              <section id="info-outline-buttons" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.a1fd4d8023ff}}</span>
+                <h3>{{i18n:template.help.27a48647b411}}</h3>
+                <p>
+                  {{i18n:template.help.3560d90b708f}} <strong>{{i18n:template.help.44f7257be6f4}}</strong> {{i18n:template.help.6ccd01e0914d}}
+                </p>
+              </section>
+
+              <section id="info-inline-layout" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.6e9a01ddfdf0}}</span>
+                <h3>{{i18n:template.help.63a000adcdf0}}</h3>
+                <p>
+                  {{i18n:template.help.3560d90b708f}} <strong>{{i18n:template.help.e8a6da58d544}}</strong> {{i18n:template.help.e6c05f795527}}
+                  <strong>{{i18n:template.help.6fc41b1c66ff}}</strong>{{i18n:template.help.30de9dc5c737}}
+                  <strong>{{i18n:template.help.80767d1de865}}</strong> {{i18n:template.help.e407e747dd05}}
+                  <strong>{{i18n:template.help.197021bc6182}}</strong> {{i18n:template.help.587c85ba8590}}
+                  <strong>{{i18n:template.help.db1b653ed4fe}}</strong> {{i18n:template.help.abc1f7bebe83}} <strong>{{i18n:template.help.8182b631c5ad}}</strong> {{i18n:template.help.849f890d4008}}
+                </p>
+                <p>
+                  <strong>{{i18n:template.help.751a251e43fd}}</strong> {{i18n:template.help.3577613d4a2b}}
+                  <strong>{{i18n:template.help.e9b450d14bc2}}</strong>{{i18n:template.help.140ecd24aac4}}
+                  <strong>{{i18n:template.help.09fef5d8d9a3}}</strong> {{i18n:template.help.4936f7217dca}}
+                </p>
+              </section>
+
+              <section id="info-dynamic-settings" class="information-section">
+                <span class="information-kicker">{{i18n:template.help.8c32907f309e}}</span>
+                <h3>{{i18n:template.help.b84121878700}}</h3>
+                <p>
+                  {{i18n:template.help.621dbdb190ed}} <strong>{{i18n:template.help.b91faec0757b}}</strong> {{i18n:template.help.445a00171ec9}}
+                </p>
+                <p>
+                  {{i18n:template.help.9c77c36877e0}}
+                </p>
+              </section>
+            </article>
+          </div>
+        </section>
+      </div>
+    </dialog>
