@@ -2411,7 +2411,6 @@
   "ui.literal.7475400470fe": "Folder selection cancelled. Press Build ZIP to try again.",
   "ui.literal.a1334ef3c0fa": "RML.AssemblyMetadata.g.cs",
   "ui.literal.5aa36d8c50e4": "GeneratedMod",
-  "ui.literal.d9dd6aaa7f88": "Build ZIP will ask for the Resonite folder.",
   "ui.literal.d4794a7f932b": "Roslyn compilation failed.",
   "ui.literal.b957553b85ff": "The generated project changed during compilation. Build it again.",
   "ui.literal.20d50b2f5695": "No generated file is available.",
@@ -3201,5 +3200,15 @@
   "csharp.import.pending": "{file} passed Roslyn C# 14 syntax validation. One Custom C# File node will be added to {target} with the complete persistent file text in its Actions and {count} editable AST, token and trivia elements in its automatically available Node Graph. Nothing has been imported yet.",
   "csharp.import.success": "{action} {file} as one Custom C# File node in {target}{duplicates}. Its Actions contain the complete persistent imported source text, and Open Node Graph directly opens its {count} Roslyn C# 14 syntax nodes. The identical Roslyn roundtrip and lossless token/trivia checks apply in Runtime Root and API Composites. Semantic compile and Resonite runtime validation are still required.",
   "csharp.import.duplicates.one": " and removed {count} obsolete same-name duplicate",
-  "csharp.import.duplicates.other": " and removed {count} obsolete same-name duplicates"
+  "csharp.import.duplicates.other": " and removed {count} obsolete same-name duplicates",
+  "export.api_compatibility_warning.one": "This export uses {count} catalog-generated API node. Export remains fully available, but the node is based on cached or otherwise not currently Live-verified API metadata. Compatibility with the installed Resonite and RML versions cannot be guaranteed; build and test the generated mod against the matching environment.",
+  "export.api_compatibility_warning.other": "This export uses {count} catalog-generated API nodes. Export remains fully available, but the nodes are based on cached or otherwise not currently Live-verified API metadata. Compatibility with the installed Resonite and RML versions cannot be guaranteed; build and test the generated mod against the matching environment.",
+  "export.compiler_references.ready.one": "References ready: {count} DLL. You can also drop DLLs or a Resonite folder here.",
+  "export.compiler_references.ready.other": "References ready: {count} DLLs. You can also drop DLLs or a Resonite folder here.",
+  "export.compiler_references.missing.one": "Missing DLL ({count}): {dlls}. Drop DLLs or a Resonite folder here.",
+  "export.compiler_references.missing.other": "Missing DLLs ({count}): {dlls}. Drop DLLs or a Resonite folder here.",
+  "export.compiler_references.search_missing": "Build ZIP asks for the Resonite folder and searches all subfolders for: {dlls}. You can also drop DLLs or a folder onto the Missing DLLs field.",
+  "export.compiler_references.still_missing": "Still missing: {dlls}. Drop these DLLs or another folder onto the Missing DLLs field.",
+  "export.compiler_references.manifest.one": "The exact ZIP manifest above includes {count} browser-compiled DLL. The target assemblies stay on this device.",
+  "export.compiler_references.manifest.other": "The exact ZIP manifest above includes {count} browser-compiled DLLs. The target assemblies stay on this device."
 }

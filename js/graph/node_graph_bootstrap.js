@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_BOOTSTRAP_MODULE_ID =
-  "1.21.12-universal-presentation-dev409-preview-enum-icon-bounds";
+  "1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe";
 
 function assertGraphBootstrapModuleCoherence() {
   const mismatches = [];

@@ -2408,10 +2408,9 @@
   "ui.literal.d6f371f8684f": "Build und Dokumentation",
   "ui.literal.f5d1551c114c": "Die automatische Suche nach Compiler-Referenzen ist nicht verfügbar.",
   "ui.literal.a43028d3bdea": "Die abgelegte Auswahl enthält keine lesbaren DLL-Dateien.",
-  "ui.literal.7475400470fe": "Ordnerauswahl abgebrochen. Klicke auf Build ZIP, um es erneut zu versuchen.",
+  "ui.literal.7475400470fe": "Ordnerauswahl abgebrochen. Klicke auf „ZIP erstellen“, um es erneut zu versuchen.",
   "ui.literal.a1334ef3c0fa": "RML.AssemblyMetadata.g.cs",
   "ui.literal.5aa36d8c50e4": "GeneratedMod",
-  "ui.literal.d9dd6aaa7f88": "Build ZIP fragt nach dem Resonite-Ordner.",
   "ui.literal.d4794a7f932b": "Die Roslyn-Kompilierung ist fehlgeschlagen.",
   "ui.literal.b957553b85ff": "Das generierte Projekt hat sich während der Kompilierung geändert. Erstelle es erneut.",
   "ui.literal.20d50b2f5695": "Es ist keine generierte Datei verfügbar.",
@@ -3201,5 +3200,15 @@
   "csharp.import.pending": "{file} hat die Roslyn-C#-14-Syntaxprüfung bestanden. In {target} wird ein Custom-C#-Dateiknoten mit dem vollständigen persistenten Dateitext in seinen Aktionen und {count} bearbeitbaren AST-, Token- und Trivia-Elementen in seinem automatisch verfügbaren Node-Graph hinzugefügt. Es wurde noch nichts importiert.",
   "csharp.import.success": "{action} {file} als einen Custom-C#-Dateiknoten in {target}{duplicates}. Seine Aktionen enthalten den vollständigen persistent importierten Quelltext; „Node-Graph öffnen“ öffnet direkt seine {count} Roslyn-C#-14-Syntaxknoten. Dieselben Roslyn-Roundtrip- und verlustfreien Token-/Trivia-Prüfungen gelten im Laufzeitstamm und in API-Composites. Eine semantische Kompilierung und Resonite-Laufzeitvalidierung sind weiterhin erforderlich.",
   "csharp.import.duplicates.one": " und {count} veraltetes gleichnamiges Duplikat wurde entfernt",
-  "csharp.import.duplicates.other": " und {count} veraltete gleichnamige Duplikate wurden entfernt"
+  "csharp.import.duplicates.other": " und {count} veraltete gleichnamige Duplikate wurden entfernt",
+  "export.api_compatibility_warning.one": "Dieser Export verwendet {count} kataloggenerierte API-Node. Der Export bleibt vollständig verfügbar, die Node basiert jedoch auf zwischengespeicherten oder anderweitig derzeit nicht Live-verifizierten API-Metadaten. Die Kompatibilität mit den installierten Resonite- und RML-Versionen kann nicht garantiert werden; erstelle den Mod und teste ihn in der passenden Umgebung.",
+  "export.api_compatibility_warning.other": "Dieser Export verwendet {count} kataloggenerierte API-Nodes. Der Export bleibt vollständig verfügbar, die Nodes basieren jedoch auf zwischengespeicherten oder anderweitig derzeit nicht Live-verifizierten API-Metadaten. Die Kompatibilität mit den installierten Resonite- und RML-Versionen kann nicht garantiert werden; erstelle den Mod und teste ihn in der passenden Umgebung.",
+  "export.compiler_references.ready.one": "Referenz bereit: {count} DLL. Du kannst hier auch DLLs oder einen Resonite-Ordner ablegen.",
+  "export.compiler_references.ready.other": "Referenzen bereit: {count} DLLs. Du kannst hier auch DLLs oder einen Resonite-Ordner ablegen.",
+  "export.compiler_references.missing.one": "Fehlende DLL ({count}): {dlls}. Lege hier DLLs oder einen Resonite-Ordner ab.",
+  "export.compiler_references.missing.other": "Fehlende DLLs ({count}): {dlls}. Lege hier DLLs oder einen Resonite-Ordner ab.",
+  "export.compiler_references.search_missing": "„ZIP erstellen“ fragt nach dem Resonite-Ordner und durchsucht alle Unterordner nach: {dlls}. Du kannst auch DLLs oder einen Ordner auf das Feld „Fehlende DLLs“ ziehen.",
+  "export.compiler_references.still_missing": "Weiterhin fehlend: {dlls}. Ziehe diese DLLs oder einen weiteren Ordner auf das Feld „Fehlende DLLs“.",
+  "export.compiler_references.manifest.one": "Das exakte ZIP-Manifest oben enthält {count} im Browser kompilierte DLL. Die Ziel-Assemblies bleiben auf diesem Gerät.",
+  "export.compiler_references.manifest.other": "Das exakte ZIP-Manifest oben enthält {count} im Browser kompilierte DLLs. Die Ziel-Assemblies bleiben auf diesem Gerät."
 }

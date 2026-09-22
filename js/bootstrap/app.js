@@ -28,7 +28,7 @@ const EXAMPLE_PROJECT_RESOURCE_PATH = "../../assets/data/Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "1.21.12-universal-presentation-dev409-preview-enum-icon-bounds";
+  "1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -368,7 +368,7 @@ function outlineSymbolMarkup(symbol) {
   const iconIds = { "#": "icon-node-hash", "VEC": "icon-node-vec" };
   const iconId = iconIds[String(symbol || "")];
   if (!iconId) return escapeHtml(String(symbol || "?"));
-  return `<svg class="rml-node-symbol-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds#${iconId}"></use></svg>`;
+  return `<svg class="rml-node-symbol-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe#${iconId}"></use></svg>`;
 }
 
 function outlinePaletteEntriesForGroup(group) {
@@ -4511,7 +4511,7 @@ function ensureGraphCodegenWorker() {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds",
+      "../workers/graph_codegen_worker.js?v=1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -13441,7 +13441,7 @@ function renderPalette() {
               data-help="${escapeHtml(outlinePaletteHelp(item))}">
               <span>${escapeHtml(item.badge)}</span>
               <strong>${escapeHtml(item.label)}</strong>
-              <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds#icon-add"></use></svg></b>
+              <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe#icon-add"></use></svg></b>
             </button>`;
           }
 
@@ -13456,7 +13456,7 @@ function renderPalette() {
             data-help="${escapeHtml(entry.family.id === "numberConstant" ? window.RMLI18n.t("ui.dev327.outline.number.help") : window.RMLI18n.t("ui.dev327.outline.vector.help"))}">
             <span>${outlineSymbolMarkup(entry.family.symbol)}</span>
             <strong>${escapeHtml(entry.family.title)}</strong>
-            <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds#icon-add"></use></svg></b>
+            <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe#icon-add"></use></svg></b>
           </button>`;
         })
         .join("");
@@ -13475,7 +13475,7 @@ function renderPalette() {
                   data-help="${escapeHtml(window.RMLI18n.t("ui.attr.e126e5850c57"))}">
                   <span>{{i18n:js.presentation.adddc72949b2}}</span>
                   <strong>${escapeHtml(`DYN · ${source.label}`)}</strong>
-                  <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds#icon-add"></use></svg></b>
+                  <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe#icon-add"></use></svg></b>
                 </button>`
               )
               .join("")
@@ -13812,7 +13812,7 @@ const nextOptionDirection =
                       option.children,
                       option.id
                     )
-                  : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds#icon-add"></use></svg></span>{{i18n:ui.text.3f27e6ab79a6}}</div>`
+                  : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe#icon-add"></use></svg></span>{{i18n:ui.text.3f27e6ab79a6}}</div>`
               }
             </div>
           </section>`
@@ -13843,7 +13843,7 @@ const nextOptionDirection =
         ${
           children.length
             ? nodeCardsMarkup(children, node.id)
-            : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds#icon-add"></use></svg></span>{{i18n:ui.text.572874456a9e}}</div>`
+            : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe#icon-add"></use></svg></span>{{i18n:ui.text.572874456a9e}}</div>`
         }
       </div>
     </section>`;
@@ -21410,7 +21410,7 @@ function controllerInspectorMarkup(node) {
       <legend>{{i18n:ui.text.722c20869f7e}}</legend>
       ${options}
       <button class="add-option" type="button" data-add-option>
-        <svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds#icon-add"></use></svg> ${window.RMLI18n.t("ui.outline.addSection")}
+        <svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe#icon-add"></use></svg> ${window.RMLI18n.t("ui.outline.addSection")}
       </button>
     </fieldset>
     <label>
@@ -24478,13 +24478,13 @@ function previewEnumEditorMarkup(
       type="button"
       data-preview-enum-direction="-1"
       data-preview-node="${escapeHtml(node.id)}"
-      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.5caa1fc4e7c2"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds#icon-triangle-left"></use></svg></button>
+      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.5caa1fc4e7c2"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe#icon-triangle-left"></use></svg></button>
     <button
       class="rml-preview-control rml-preview-enum-step"
       type="button"
       data-preview-enum-direction="1"
       data-preview-node="${escapeHtml(node.id)}"
-      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.c400ec237248"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds#icon-triangle-right"></use></svg></button>
+      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.c400ec237248"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe#icon-triangle-right"></use></svg></button>
   </div>`;
 }
 
@@ -24558,7 +24558,7 @@ function previewSettingEditorMarkup(node) {
         data-preview-bool="${escapeHtml(node.id)}"${
           value ? " checked" : ""
         }>
-      <span aria-hidden="true"><svg class="rml-inline-icon" viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds#icon-check"></use></svg></span>
+      <span aria-hidden="true"><svg class="rml-inline-icon" viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe#icon-check"></use></svg></span>
     </label>`;
   }
 
@@ -28316,7 +28316,7 @@ async function requestBuilderReplacementChoice(
                 ? "!"
                 : "·";
       if (status === "selected") {
-        state.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds#icon-check"></use></svg>`;
+        state.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe#icon-check"></use></svg>`;
       }
       const name =
         document.createElement("span");
@@ -30262,7 +30262,7 @@ function promiseWithBuilderTimeout(
 
 function assertProjectRuntimeModuleCoherence() {
   const expectedModuleId =
-    "1.21.12-universal-presentation-dev409-preview-enum-icon-bounds";
+    "1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe";
   const requiredFactoryVersion = 38;
   const mismatches = [];
   const requireModuleId = (
@@ -36957,12 +36957,22 @@ function updateBrowserCompilerStatus(
 
   if (missing.length > 0) {
     elements.exportCompilerReferenceStatus.textContent =
-      `Missing DLLs (${missing.length}): ${missing.join(", ")}. Drop DLLs or a Resonite folder here.`;
+      window.RMLI18n.format(
+        missing.length === 1
+          ? "export.compiler_references.missing.one"
+          : "export.compiler_references.missing.other",
+        { count: missing.length, dlls: missing.join(", ") }
+      );
     elements.exportCompilerReferenceStatus.dataset.state =
       "missing";
   } else {
     elements.exportCompilerReferenceStatus.textContent =
-      `References ready: ${references.length} DLL${references.length === 1 ? "" : "s"}. You can also drop DLLs or a Resonite folder here.`;
+      window.RMLI18n.format(
+        references.length === 1
+          ? "export.compiler_references.ready.one"
+          : "export.compiler_references.ready.other",
+        { count: references.length }
+      );
     elements.exportCompilerReferenceStatus.dataset.state =
       "ready";
   }
@@ -36984,7 +36994,7 @@ function updateBrowserCompilerStatus(
     elements.exportCompilerBuildStatus.textContent =
       browserCompilerDirectoryFileCount > 0
         ? `Folder checked: ${browserCompilerDirectoryFileCount.toLocaleString()} files · ${browserCompilerDirectoryMatchCount} required DLL${browserCompilerDirectoryMatchCount === 1 ? "" : "s"} found. Drop missing DLLs or another folder above.`
-        : window.RMLI18n.t("ui.literal.d9dd6aaa7f88");
+        : "";
   } else {
     elements.exportCompilerBuildStatus.textContent =
       window.RMLI18n.t("{{i18n:js.presentation.9cb7a5a88476}}");
@@ -37542,7 +37552,9 @@ function currentExportCopyArtifact(
 
     artifact =
       preferredGraphArtifact(
-        catalog.artifacts,
+        catalog.artifacts.filter(candidate =>
+          candidate.copyable !== false
+        ),
         graphFiles
       ) ||
       catalog.artifacts.find(candidate =>
@@ -37607,6 +37619,7 @@ function updateExportCopyButtonState(
     const unavailable =
       !exportReady ||
       !artifact ||
+      artifact.copyable === false ||
       (
         artifact.requiresResonitePath &&
         !pathAvailable
@@ -37808,8 +37821,14 @@ function renderExportApiCompatibilityWarning() {
     return;
   }
 
-  message.textContent =
-    `This export uses ${warning.apiNodeCount.toLocaleString()} catalog-generated API node${warning.apiNodeCount === 1 ? "" : "s"}. Export remains fully available, but the nodes are based on cached or otherwise not currently Live-verified API metadata. Compatibility with the installed Resonite and RML versions cannot be guaranteed; build and test the generated mod against the matching environment.`;
+  const warningKey =
+    warning.apiNodeCount === 1
+      ? "export.api_compatibility_warning.one"
+      : "export.api_compatibility_warning.other";
+
+  message.textContent = window.RMLI18n.format(warningKey, {
+    count: warning.apiNodeCount.toLocaleString()
+  });
 }
 
 function updateExportDialog() {
@@ -38001,11 +38020,20 @@ function updateExportDialog() {
     elements.exportDownloadHint.textContent =
       compilerStatus.missing.length > 0
         ? browserCompilerDirectoryFileCount > 0
-          ? `Still missing: ${compilerStatus.missing.join(", ")}. Drop these DLLs or another folder onto the Missing DLLs field.`
-          : `Build ZIP asks for the Resonite folder and searches all subfolders for: ${compilerStatus.missing.join(", ")}. You can also drop DLLs or a folder onto the Missing DLLs field.`
+          ? window.RMLI18n.format("export.compiler_references.still_missing", {
+              dlls: compilerStatus.missing.join(", ")
+            })
+          : window.RMLI18n.format("export.compiler_references.search_missing", {
+              dlls: compilerStatus.missing.join(", ")
+            })
         : browserCompilerBuilding
           ? window.RMLI18n.t("ui.literal.7dd3200524ef")
-          : `The exact ZIP manifest above includes ${compiledArtifacts.length} browser-compiled DLL${compiledArtifacts.length === 1 ? "" : "s"}. The target assemblies stay on this device.`;
+          : window.RMLI18n.format(
+              compiledArtifacts.length === 1
+                ? "export.compiler_references.manifest.one"
+                : "export.compiler_references.manifest.other",
+              { count: compiledArtifacts.length }
+            );
     return;
   }
 
@@ -39506,7 +39534,7 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "../../templates/help_template.html?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds"
+    "../../templates/help_template.html?v=1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe"
   )
     .then(markup => {
       const host = document.getElementById("lazy-dialog-host") || document.body;
@@ -46174,7 +46202,7 @@ function rmlRuntimeDisplayInspector() {
         const up =
           document.createElement("button");
         up.type = "button";
-        up.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds#icon-${selected.runtimeDisplayStacked ? "chevron-up" : "chevron-left"}"></use></svg>`;
+        up.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe#icon-${selected.runtimeDisplayStacked ? "chevron-up" : "chevron-left"}"></use></svg>`;
         up.title =
           selected.runtimeDisplayStacked
             ? window.RMLI18n.t("ui.literal.6f39a4bc0048")
@@ -46192,7 +46220,7 @@ function rmlRuntimeDisplayInspector() {
         const down =
           document.createElement("button");
         down.type = "button";
-        down.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds#icon-${selected.runtimeDisplayStacked ? "chevron-down" : "chevron-right"}"></use></svg>`;
+        down.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe#icon-${selected.runtimeDisplayStacked ? "chevron-down" : "chevron-right"}"></use></svg>`;
         down.title =
           selected.runtimeDisplayStacked
             ? window.RMLI18n.t("ui.literal.6d6a5bc02a98")
@@ -47027,7 +47055,7 @@ function rmlRuntimeDisplayPreviewItems(
 
 function rmlRuntimeDisplayPreviewCopyIcon() {
   return `
-    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.12-universal-presentation-dev409-preview-enum-icon-bounds#icon-copy"></use></svg>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.15-universal-presentation-dev414-export-compiled-copy-state-dedupe#icon-copy"></use></svg>
   `;
 }
 
