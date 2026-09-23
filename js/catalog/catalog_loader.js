@@ -2,7 +2,7 @@
   "use strict";
 
   const CATALOG_LOADER_MODULE_ID =
-    "1.21.18-universal-presentation-dev417-preview-color-page-isolation";
+    "1.21.19-universal-presentation-dev418-canonical-port-types";
   const LOADER_VERSION = 84;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
@@ -67,7 +67,7 @@
     document.currentScript?.src ||
     window.location.href;
   const modNodesUrl = new URL(
-    "mod_nodes.js?v=800-harmony-source-presets",
+    "mod_nodes.js?v=801-canonical-port-types",
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
@@ -75,7 +75,7 @@
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=1.21.18-universal-presentation-dev417-preview-color-page-isolation",
+    "api_nodes.js?v=1.21.19-universal-presentation-dev418-canonical-port-types",
     scriptUrl
   ).href;
 

@@ -2,7 +2,7 @@
   "use strict";
 
   const SCRIPT_LOADER_MODULE_ID =
-    "1.21.18-universal-presentation-dev417-preview-color-page-isolation";
+    "1.21.19-universal-presentation-dev418-canonical-port-types";
 
   if (
     Object.hasOwn(
@@ -182,7 +182,7 @@
       dependencies: Object.freeze([]),
       files: Object.freeze([
         Object.freeze({
-          url: "../catalog/catalog_loader.js?v=1.21.18-universal-presentation-dev417-preview-color-page-isolation",
+          url: "../catalog/catalog_loader.js?v=1.21.19-universal-presentation-dev418-canonical-port-types",
           ready: () =>
             window.RMLCatalogImportGate?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -200,7 +200,7 @@
             )
         }),
         Object.freeze({
-          url: "../graph/node_graph_registry.js?v=1-physical-modules-v750-offline-core-types",
+          url: "../graph/node_graph_registry.js?v=1-physical-modules-v751-canonical-port-types",
           ready: () =>
             typeof window.RMLModNodeRegistry?.getNodeDefinitions ===
               "function"
@@ -234,7 +234,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/node_graph_codegen.js?v=1.21.18-universal-presentation-dev417-preview-color-page-isolation",
+          url: "../graph/node_graph_codegen.js?v=1.21.19-universal-presentation-dev418-canonical-port-types",
           ready: () =>
             window.RMLTypedNodeGraphGenerator?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -251,7 +251,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../workers/saved_api_composite_compare_worker.js?v=1.21.18-universal-presentation-dev417-preview-color-page-isolation",
+          url: "../workers/saved_api_composite_compare_worker.js?v=1.21.19-universal-presentation-dev418-canonical-port-types",
           ready: () =>
             window.RMLSavedApiCompositeCompareWorkerBootstrap
               ?.moduleId === SCRIPT_LOADER_MODULE_ID &&
@@ -260,13 +260,13 @@
               ?.source === "string"
         }),
         Object.freeze({
-          url: "../graph/node_graph_composites.js?v=1.21.18-universal-presentation-dev417-preview-color-page-isolation",
+          url: "../graph/node_graph_composites.js?v=1.21.19-universal-presentation-dev418-canonical-port-types",
           ready: () =>
             window.RMLNodeGraphCompositesModuleId ===
               SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_custom_csharp.js?v=1.21.18-universal-presentation-dev417-preview-color-page-isolation",
+          url: "../graph/node_graph_custom_csharp.js?v=1.21.19-universal-presentation-dev418-canonical-port-types",
           ready: () =>
             window.RMLNodeGraphCustomCSharpModuleId ===
               SCRIPT_LOADER_MODULE_ID
@@ -275,13 +275,13 @@
           url: "../graph/node_graph_guided.js?v=1-physical-modules-v748"
         }),
         Object.freeze({
-          url: "../graph/node_graph_view.js?v=1.21.18-universal-presentation-dev417-preview-color-page-isolation",
+          url: "../graph/node_graph_view.js?v=1.21.19-universal-presentation-dev418-canonical-port-types",
           ready: () =>
             window.RMLNodeGraphViewModuleId ===
               SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_bootstrap.js?v=1.21.18-universal-presentation-dev417-preview-color-page-isolation",
+          url: "../graph/node_graph_bootstrap.js?v=1.21.19-universal-presentation-dev418-canonical-port-types",
           ready: () =>
             window.RMLDynamicGraphHost?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&

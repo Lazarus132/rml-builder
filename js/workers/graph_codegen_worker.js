@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_CODEGEN_WORKER_MODULE_ID =
-  "1.21.18-universal-presentation-dev417-preview-color-page-isolation";
+  "1.21.19-universal-presentation-dev418-canonical-port-types";
 const GRAPH_CODEGEN_WORKER_FACTORY_VERSION =
   38;
 
@@ -724,7 +724,7 @@ async function ensureRuntime(
       "../compiler/visual_csharp.js?v=84-harmony-file-presets"
     );
     importScripts(
-      "../catalog/api_nodes.js?v=1.21.18-universal-presentation-dev417-preview-color-page-isolation"
+      "../catalog/api_nodes.js?v=1.21.19-universal-presentation-dev418-canonical-port-types"
     );
 
     if (
@@ -768,7 +768,7 @@ async function ensureRuntime(
     }
 
     importScripts(
-      "../graph/node_graph_codegen.js?v=1.21.18-universal-presentation-dev417-preview-color-page-isolation"
+      "../graph/node_graph_codegen.js?v=1.21.19-universal-presentation-dev418-canonical-port-types"
     );
 
     if (

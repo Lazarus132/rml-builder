@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const VERSION = "1.21.18-universal-presentation-dev417-preview-color-page-isolation";
+  const VERSION = "1.21.19-universal-presentation-dev418-canonical-port-types";
   const STORAGE_KEY = "rml-builder-language-v1";
   const state = { language: localStorage.getItem(STORAGE_KEY) || "en", fallback: {}, active: {}, previousCatalog: {}, manifest: null, ready: null, catalogs: new Map(), reverseCatalogs: new WeakMap() };
   const norm = value => String(value ?? "").replace(/\s+/g, " ").trim();

@@ -11,7 +11,9 @@
     "registerCodegenPlugin",
     "getNodeDefinition",
     "getNodeDefinitions",
-    "getTypeDefinitions"
+    "getTypeDefinitions",
+    "canonicalType",
+    "canonicalCsType"
   ];
 
   if (
@@ -2680,7 +2682,7 @@
         const rawName = String(item.name || `arg${index + 1}`).trim();
         const name = /^[A-Za-z_][A-Za-z0-9_]*$/.test(rawName) ? rawName : `arg${index + 1}`;
         const rawType = String(item.type || "object").trim() || "object";
-        const graphType = typeDefinitions[rawType] ? rawType : ensureNormalExactGraphType(rawType);
+        const graphType = visualMethodGraphType(rawType);
         let id = String(item.id || `arg-${index + 1}`).trim() || `arg-${index + 1}`;
         while (used.has(id)) id = `${id}-2`;
         used.add(id);
@@ -2694,7 +2696,7 @@
         const rawName = separator >= 0 ? line.slice(0, separator).trim() : `arg${index + 1}`;
         const rawType = separator >= 0 ? line.slice(separator + 1).trim() : line;
         const name = /^[A-Za-z_][A-Za-z0-9_]*$/.test(rawName) ? rawName : `arg${index + 1}`;
-        const graphType = typeDefinitions[rawType] ? rawType : ensureNormalExactGraphType(rawType || "System.Object");
+        const graphType = visualMethodGraphType(rawType || "System.Object");
         let id = `arg-${name}`; let suffix = 2;
         while (used.has(id)) id = `arg-${name}-${suffix++}`;
         used.add(id);
@@ -2703,7 +2705,17 @@
     }
     const rawReturn = String(node?.parameters?.returnGraphType ?? node?.parameters?.returnType ?? "void").trim();
     const isVoid = !rawReturn || rawReturn.toLowerCase() === "void" || rawReturn === "System.Void";
-    return { parameters, isVoid, returnGraphType: isVoid ? null : (typeDefinitions[rawReturn] ? rawReturn : ensureNormalExactGraphType(rawReturn)) };
+    return { parameters, isVoid, returnGraphType: isVoid ? null : visualMethodGraphType(rawReturn) };
+  }
+
+  function visualMethodGraphType(value) {
+    const canonical = registry.canonicalType(
+      String(value || "System.Object").trim() ||
+      "System.Object"
+    );
+    return registry.getTypeDefinitions()?.[canonical]
+      ? canonical
+      : ensureNormalExactGraphType(value);
   }
 
   function visualMethodSignatureKey(signature) {
@@ -6532,7 +6544,7 @@ faulted ? `\n        ${faulted}();` : ""])
     for (const [graphType, information] of Object.entries(
       definitions
     )) {
-      const csType = normalizedCatalogTypeName(
+      const csType = registry.canonicalCsType(
         information?.csType || ""
       );
       if (csType && !normalGraphTypeByCs.has(csType)) {
@@ -6550,7 +6562,14 @@ faulted ? `\n        ${faulted}();` : ""])
   refreshNormalGraphTypeIndex();
 
   function ensureNormalExactGraphType(csType) {
-    const normalized = normalizedCatalogTypeName(csType)
+    const canonical = registry.canonicalType(csType);
+    if (
+      canonical &&
+      registry.getTypeDefinitions()?.[canonical]
+    ) {
+      return canonical;
+    }
+    const normalized = registry.canonicalCsType(csType)
       .replace(/&$/, "");
     refreshNormalGraphTypeIndex();
     if (normalGraphTypeByCs.has(normalized)) {

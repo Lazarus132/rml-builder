@@ -2,7 +2,7 @@
   "use strict";
 
   const MODULE_ID =
-    "1.21.18-universal-presentation-dev417-preview-color-page-isolation";
+    "1.21.19-universal-presentation-dev418-canonical-port-types";
   const GATE_VERSION = 1;
 
   

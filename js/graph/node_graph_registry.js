@@ -55,7 +55,9 @@ const TYPE_INFO = {
     Uri: {
       label: window.RMLI18n.t("ui.auto.7b7dd4fb8a81"),
       short: "URI",
-      color: "#5be3cf"
+      color: "#5be3cf",
+      csType: "System.Uri",
+      referenceType: true
     },
     enum: {
       label: window.RMLI18n.t("ui.auto.0edf92ad0682"),
@@ -177,7 +179,12 @@ const GRAPH_CSHARP_PRIMITIVE_NAMES =
     char: "System.Char",
     float: "System.Single",
     double: "System.Double",
-    decimal: "System.Decimal"
+    decimal: "System.Decimal",
+    string: "System.String",
+    object: "System.Object",
+    void: "System.Void",
+    nint: "System.IntPtr",
+    nuint: "System.UIntPtr"
   });
 
 const GRAPH_NUMERIC_SCALAR_METADATA =
@@ -328,26 +335,47 @@ const GRAPH_VECTOR_SCALAR_CSHARP_TYPES =
 const GRAPH_TYPE_BY_CSHARP_TYPE =
   new Map();
 
+function graphNormalizeCsTypeExpression(
+    value
+  ) {
+    const aliases = GRAPH_CSHARP_PRIMITIVE_NAMES;
+    return String(value || "")
+      .trim()
+      .replace(/global::/g, "")
+      .replace(/\s+/g, "")
+      .replace(
+        /\b(bool|byte|sbyte|short|ushort|int|uint|long|ulong|half|char|float|double|decimal|string|object|void|nint|nuint)\b/g,
+        alias => aliases[alias] || alias
+      )
+      .replace(/\?(?=$|[>,\]\[])/g, "");
+  }
+
 function graphCanonicalCsType(typeOrCsType) {
   const id = String(typeOrCsType || "").trim();
-  const information = TYPE_INFO[typeBase(id)] || {};
+  const information =
+    TYPE_INFO[id] ||
+    (
+      id.startsWith("enum:")
+        ? TYPE_INFO.enum
+        : null
+    ) ||
+    {};
   const declared = String(
     information.csType || id
   )
     .trim()
     .replace(/^global::/, "");
 
-  return GRAPH_CSHARP_PRIMITIVE_NAMES[declared] || declared;
+  return graphNormalizeCsTypeExpression(
+    declared
+  );
 }
 
 function indexGraphTypeCsType(type, information) {
-  const declared = String(
-    information?.csType || type
-  )
-    .trim()
-    .replace(/^global::/, "");
   const canonical =
-    GRAPH_CSHARP_PRIMITIVE_NAMES[declared] || declared;
+    graphNormalizeCsTypeExpression(
+      information?.csType || type
+    );
 
   if (
     canonical &&
@@ -631,6 +659,30 @@ function graphTypeForCsType(csType) {
     return null;
   }
 
+function canonicalGraphType(typeOrCsType) {
+    const id = String(
+      typeOrCsType || ""
+    ).trim();
+    if (!id) return id;
+    if (id.startsWith("enum:")) {
+      return id;
+    }
+
+    const information = TYPE_INFO[id];
+    if (
+      information &&
+      !id.startsWith("normalExact:")
+    ) {
+      return id;
+    }
+
+    return (
+      graphTypeForCsType(
+        information?.csType || id
+      ) || id
+    );
+  }
+
 function graphNumericScalarDescriptor(type) {
     const csType = graphCanonicalCsType(type);
     const metadata = GRAPH_NUMERIC_SCALAR_METADATA[csType];
@@ -746,7 +798,7 @@ const port = (
   ) => ({
     id,
     label,
-    type,
+    type: canonicalGraphType(type),
     ...extra
   });
 
@@ -1844,6 +1896,12 @@ Object.defineProperty(
             typeBase(type)
           ] || null;
         },
+        canonicalType(type) {
+          return canonicalGraphType(type);
+        },
+        canonicalCsType(type) {
+          return graphCanonicalCsType(type);
+        },
         getNodeDefinitions() {
           return OPERATOR_DEFINITIONS;
         },
@@ -1888,12 +1946,14 @@ window.__rmlResolveNodeRegistryReady?.(
   );
 
 function typeBase(type) {
+    const canonical =
+      canonicalGraphType(type);
     if (
-      typeof type === "string" &&
-      type.startsWith("enum:")
+      typeof canonical === "string" &&
+      canonical.startsWith("enum:")
     ) {
       return "enum";
     }
 
-    return type || "generic";
+    return canonical || "generic";
   }

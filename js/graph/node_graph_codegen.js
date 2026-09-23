@@ -1717,6 +1717,9 @@ function connectionTypesCompatible(
       return false;
     }
 
+    fromType = canonicalGraphType(fromType);
+    toType = canonicalGraphType(toType);
+
     if (fromType === toType) {
       return true;
     }
@@ -7343,30 +7346,32 @@ function graphConcreteTypes() {
       new Set();
 
     const addType = type => {
+      const canonical =
+        canonicalGraphType(type);
       if (
-        !type ||
-        type === "generic" ||
-        type === "auto" ||
-        type === "impulse" ||
-        result.has(type)
+        !canonical ||
+        canonical === "generic" ||
+        canonical === "auto" ||
+        canonical === "impulse" ||
+        result.has(canonical)
       ) {
         return;
       }
 
-      result.add(type);
+      result.add(canonical);
 
-      if (!isCollectListType(type)) {
-        collectorElementTypes.add(type);
+      if (!isCollectListType(canonical)) {
+        collectorElementTypes.add(canonical);
       }
 
       const elementType =
-        TYPE_INFO[typeBase(type)]
+        TYPE_INFO[typeBase(canonical)]
           ?.enumerableElementType;
 
       if (
         typeof elementType === "string" &&
         elementType &&
-        elementType !== type
+        elementType !== canonical
       ) {
         addType(elementType);
       }
@@ -8132,7 +8137,7 @@ function createGraphAnalysisCertificate(
       schemaVersion:
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION,
       moduleId:
-        "1.21.18-universal-presentation-dev417-preview-color-page-isolation",
+        "1.21.19-universal-presentation-dev418-canonical-port-types",
       semanticToken: token,
       nodeCount: graph.nodes.length,
       connectionCount: connections.length,
@@ -8165,7 +8170,7 @@ function graphAnalysisCertificateEnvelopeValid(
       Number(certificate.schemaVersion) ===
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION &&
       certificate.moduleId ===
-        "1.21.18-universal-presentation-dev417-preview-color-page-isolation" &&
+        "1.21.19-universal-presentation-dev418-canonical-port-types" &&
       certificate.valid === true &&
       typeof certificate.semanticToken ===
         "string" &&
@@ -8412,12 +8417,17 @@ function analyzeConnectionsCore(
           ? definition.configurableTypes || VALUE_TYPES
           : concreteTypes;
         const configured = configurable
-          ? node.parameters?.valueType
+          ? canonicalGraphType(
+              node.parameters?.valueType
+            )
           : null;
         const explicitType =
           configured &&
           configured !== "auto" &&
-          allowed.includes(configured)
+          allowed.some(type =>
+            canonicalGraphType(type) ===
+            configured
+          )
             ? configured
             : null;
         const domainKey = [
@@ -8577,7 +8587,9 @@ function analyzeConnectionsCore(
       if (portRef.spec.type) {
         return {
           fixed: true,
-          type: portRef.spec.type,
+          type: canonicalGraphType(
+            portRef.spec.type
+          ),
           portRef
         };
       }
@@ -9413,14 +9425,16 @@ function resolvePortType(
       return null;
     }
     if (portRef.spec.type) {
-      return portRef.spec.type;
+      return canonicalGraphType(
+        portRef.spec.type
+      );
     }
     if (portRef.spec.typeVar) {
-      return (
+      return canonicalGraphType(
         bindings.get(portRef.node.id)?.[
           portRef.spec.typeVar
-        ] || null
-      );
+        ] || ""
+      ) || null;
     }
     return null;
   }
@@ -9451,7 +9465,7 @@ function concretePortTypeForAnalysis(
       null;
 
     if (bound) {
-      return bound;
+      return canonicalGraphType(bound);
     }
 
     if (
@@ -9468,7 +9482,9 @@ function concretePortTypeForAnalysis(
         configured &&
         configured !== "auto"
       ) {
-        return configured;
+        return canonicalGraphType(
+          configured
+        );
       }
 
       if (
@@ -17065,7 +17081,7 @@ Object.defineProperty(
     {
       value: Object.freeze({
         moduleId:
-          "1.21.18-universal-presentation-dev417-preview-color-page-isolation",
+          "1.21.19-universal-presentation-dev418-canonical-port-types",
         build:
           buildTypedNodeGraphCSharpContribution,
         validateDocument:
