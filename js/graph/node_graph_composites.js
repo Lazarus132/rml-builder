@@ -676,7 +676,7 @@ const savedApiCompositeSearchTextCache =
     `${SAVED_API_COMPOSITE_COMPARE_MESSAGE_TYPE}-result`;
 
   const SAVED_API_COMPOSITE_COMPARE_MODULE_ID =
-    "1.21.19-universal-presentation-dev418-canonical-port-types";
+    "1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open";
 
   const SAVED_API_COMPOSITE_COMPARE_CANONICAL_SCHEMA_VERSION =
     4;
@@ -934,7 +934,7 @@ const savedApiCompositeSearchTextCache =
       );
     }
     const workerUrl = new URL(
-      "js/workers/saved_api_composite_compare_worker.js?v=1.21.19-universal-presentation-dev418-canonical-port-types&canonical-schema=4",
+      "js/workers/saved_api_composite_compare_worker.js?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open&canonical-schema=4",
       document.baseURI
     );
     const workerOptions = {
@@ -16546,7 +16546,7 @@ function refreshVisibleSavedApiCompositeUpdateActions() {
           : window.RMLI18n.t("ui.literal.09a0c2770ee7"))
       );
       if (!compatibilityIssue && !currentOpen && available) {
-        marker.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.19-universal-presentation-dev418-canonical-port-types#icon-add"></use></svg>`;
+        marker.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-add"></use></svg>`;
       } else {
         marker.textContent = compatibilityIssue ? "!" : currentOpen ? window.RMLI18n.t("composite.library.status_open") : "·";
       }
@@ -16733,7 +16733,7 @@ function synchronizeSavedApiCompositeUpdateAction(
       updateGraphButton =
         document.createElement("button");
       updateGraphButton.type = "button";
-      updateGraphButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.19-universal-presentation-dev418-canonical-port-types#icon-update"></use></svg>`;
+      updateGraphButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-update"></use></svg>`;
       updateGraphButton.dataset
         .savedApiCompositeGraphUpdate =
         "true";
@@ -16806,7 +16806,7 @@ function synchronizeSavedApiCompositeUpdateAction(
       updatesOpenComposite
         ? "graph-to-library"
         : "library-to-graph";
-    updateGraphButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.19-universal-presentation-dev418-canonical-port-types#icon-update"></use></svg>`;
+    updateGraphButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-update"></use></svg>`;
     updateGraphButton.setAttribute(
       "aria-label",
       updatesOpenComposite
@@ -16917,7 +16917,7 @@ function createSavedApiCompositePaletteItem(
     const add =
       document.createElement("small");
     if (!compatibilityIssue && !currentOpen && savedCompositeAvailable) {
-      add.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.19-universal-presentation-dev418-canonical-port-types#icon-add"></use></svg>`;
+      add.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-add"></use></svg>`;
     } else {
       add.textContent = compatibilityIssue ? "!" : currentOpen ? window.RMLI18n.t("composite.library.status_open") : "·";
     }
@@ -16982,7 +16982,7 @@ function createSavedApiCompositePaletteItem(
     const exportButton =
       document.createElement("button");
     exportButton.type = "button";
-    exportButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.19-universal-presentation-dev418-canonical-port-types#icon-download"></use></svg>`;
+    exportButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-download"></use></svg>`;
     exportButton.title =
       window.RMLI18n.format("composite.actions.export_title", { name: record.name });
     exportButton.addEventListener(
@@ -17041,7 +17041,7 @@ function createSavedApiCompositePaletteItem(
     const deleteButton =
       document.createElement("button");
     deleteButton.type = "button";
-    deleteButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.19-universal-presentation-dev418-canonical-port-types#icon-close"></use></svg>`;
+    deleteButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-close"></use></svg>`;
     deleteButton.title =
       window.RMLI18n.format("composite.actions.delete_title", { name: record.name });
     deleteButton.addEventListener(
@@ -17070,7 +17070,7 @@ function createSavedApiCompositePaletteItem(
     const menuTrigger = document.createElement("button");
     menuTrigger.type = "button";
     menuTrigger.className = "rml-saved-api-composite-menu-trigger";
-    menuTrigger.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.19-universal-presentation-dev418-canonical-port-types#icon-more"></use></svg>`;
+    menuTrigger.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-more"></use></svg>`;
     menuTrigger.setAttribute("aria-haspopup", "menu");
     menuTrigger.setAttribute("aria-expanded", "false");
     menuTrigger.setAttribute(
@@ -17176,7 +17176,7 @@ Object.defineProperty(
   "RMLNodeGraphCompositesModuleId",
   {
     value:
-      "1.21.19-universal-presentation-dev418-canonical-port-types",
+      "1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open",
     writable: false,
     enumerable: true,
     configurable: true

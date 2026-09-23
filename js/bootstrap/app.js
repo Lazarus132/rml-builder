@@ -28,7 +28,7 @@ const EXAMPLE_PROJECT_RESOURCE_PATH = "../../assets/data/Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "1.21.19-universal-presentation-dev418-canonical-port-types";
+  "1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -368,7 +368,7 @@ function outlineSymbolMarkup(symbol) {
   const iconIds = { "#": "icon-node-hash", "VEC": "icon-node-vec" };
   const iconId = iconIds[String(symbol || "")];
   if (!iconId) return escapeHtml(String(symbol || "?"));
-  return `<svg class="rml-node-symbol-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.19-universal-presentation-dev418-canonical-port-types#${iconId}"></use></svg>`;
+  return `<svg class="rml-node-symbol-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#${iconId}"></use></svg>`;
 }
 
 function outlinePaletteEntriesForGroup(group) {
@@ -855,6 +855,7 @@ let settingsPreviewRuntimeMenu = null;
 window.__RMLPreviewTrace = window.__RMLPreviewTrace || [];
 let settingsPreviewPulseCounts = {};
 let settingsPreviewColorSession = null;
+const settingsPreviewLiveValueBackups = new Map();
 let settingsPreviewStatusTimer = null;
 let settingsPreviewRenderDeferred = false;
 let settingsPreviewLabelFitFrame = 0;
@@ -4511,7 +4512,7 @@ function ensureGraphCodegenWorker() {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=1.21.19-universal-presentation-dev418-canonical-port-types",
+      "../workers/graph_codegen_worker.js?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -5506,9 +5507,27 @@ function clamp(value, minimum, maximum) {
 }
 
 function normalizeColorProfile(profile) {
-  return String(profile || "").toLowerCase() === "srgb"
-    ? "srgb"
-    : "linear";
+  const normalized =
+    String(profile || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "");
+
+  if (
+    normalized === "2" ||
+    normalized.includes("srgbalpha")
+  ) {
+    return "srgbalpha";
+  }
+
+  if (
+    normalized === "1" ||
+    normalized.includes("srgb")
+  ) {
+    return "srgb";
+  }
+
+  return "linear";
 }
 
 function srgbChannelToLinear(value) {
@@ -5543,8 +5562,16 @@ function convertColorProfileChannels(
     normalizeColorProfile(sourceProfile);
   const target =
     normalizeColorProfile(targetProfile);
+  const sourceEncoding =
+    source === "linear"
+      ? "linear"
+      : "srgb";
+  const targetEncoding =
+    target === "linear"
+      ? "linear"
+      : "srgb";
 
-  if (source === target) {
+  if (sourceEncoding === targetEncoding) {
     return {
       red,
       green,
@@ -5553,7 +5580,7 @@ function convertColorProfileChannels(
   }
 
   const converter =
-    source === "srgb"
+    sourceEncoding === "srgb"
       ? srgbChannelToLinear
       : linearChannelToSrgb;
 
@@ -5564,8 +5591,71 @@ function convertColorProfileChannels(
   };
 }
 
+function convertColorProfileValue(
+  red,
+  green,
+  blue,
+  alpha,
+  sourceProfile,
+  targetProfile
+) {
+  const source =
+    normalizeColorProfile(sourceProfile);
+  const target =
+    normalizeColorProfile(targetProfile);
+  const converted =
+    convertColorProfileChannels(
+      red,
+      green,
+      blue,
+      source,
+      target
+    );
+
+  let convertedAlpha = alpha;
+
+  if (
+    source === "srgbalpha" &&
+    target !== "srgbalpha"
+  ) {
+    convertedAlpha =
+      srgbChannelToLinear(alpha);
+  } else if (
+    source !== "srgbalpha" &&
+    target === "srgbalpha"
+  ) {
+    convertedAlpha =
+      linearChannelToSrgb(alpha);
+  }
+
+  return {
+    ...converted,
+    alpha: convertedAlpha
+  };
+}
+
+function colorProfileDisplayLabel(profile) {
+  const normalized =
+    normalizeColorProfile(profile);
+
+  if (normalized === "srgbalpha") {
+    return "sRGBAlpha";
+  }
+
+  return normalized === "srgb"
+    ? "sRGB"
+    : window.RMLI18n.t("ui.text.af502f2b37ee");
+}
+
 function colorProfileExpression(profile) {
-  return normalizeColorProfile(profile) === "srgb"
+  const normalized =
+    normalizeColorProfile(profile);
+
+  if (normalized === "srgbalpha") {
+    return "ColorProfile.sRGBAlpha";
+  }
+
+  return normalized === "srgb"
     ? window.RMLI18n.t("ui.literal.ca8a8966723d")
     : window.RMLI18n.t("ui.literal.5c3e04e74a4e");
 }
@@ -5601,8 +5691,10 @@ function colorVisualCss(
   alpha,
   profile = "linear"
 ) {
+  const normalizedProfile =
+    normalizeColorProfile(profile);
   const display =
-    normalizeColorProfile(profile) === "linear"
+    normalizedProfile === "linear"
       ? convertColorProfileChannels(
           red,
           green,
@@ -5611,12 +5703,16 @@ function colorVisualCss(
           "srgb"
         )
       : { red, green, blue };
+  const displayAlpha =
+    normalizedProfile === "srgbalpha"
+      ? srgbChannelToLinear(alpha)
+      : alpha;
 
   return (
     `rgba(${Math.round(clamp(display.red, 0, 1) * 255)}, ` +
     `${Math.round(clamp(display.green, 0, 1) * 255)}, ` +
     `${Math.round(clamp(display.blue, 0, 1) * 255)}, ` +
-    `${clamp(alpha, 0, 1)})`
+    `${clamp(displayAlpha, 0, 1)})`
   );
 }
 
@@ -5699,6 +5795,10 @@ function colorChannelsToPreview(
           "srgb"
         )
       : { red, green, blue };
+  const displayAlpha =
+    normalizedProfile === "srgbalpha"
+      ? srgbChannelToLinear(alpha)
+      : alpha;
   const hex =
     colorBytesToHex(
       display.red * 255,
@@ -5737,7 +5837,7 @@ function colorChannelsToPreview(
       ),
     textColor:
       luminance > 0.62 &&
-      alpha > 0.55
+      displayAlpha > 0.55
         ? "#17131d"
         : "#ffffff",
     label,
@@ -5798,7 +5898,7 @@ function colorXPreview(
   const explicit =
     value.match(
       new RegExp(
-        `^new\\s+colorX\\s*\\(\\s*new\\s+color\\s*\\(\\s*${number}\\s*,\\s*${number}\\s*,\\s*${number}(?:\\s*,\\s*${number})?\\s*\\)\\s*,\\s*ColorProfile\\.(sRGB|Linear)\\s*\\)$`
+        `^new\\s+colorX\\s*\\(\\s*new\\s+color\\s*\\(\\s*${number}\\s*,\\s*${number}\\s*,\\s*${number}(?:\\s*,\\s*${number})?\\s*\\)\\s*,\\s*ColorProfile\\.(sRGBAlpha|sRGB|Linear)\\s*\\)$`
       )
     );
 
@@ -5812,9 +5912,9 @@ function colorXPreview(
         : Number(explicit[4])
     ];
     const profile =
-      explicit[5] === "sRGB"
-        ? "srgb"
-        : "linear";
+      normalizeColorProfile(
+        explicit[5]
+      );
 
     if (
       channels.every(
@@ -6325,6 +6425,13 @@ function settingsPreviewRuntimeOverride(
 }
 
 function settingsPreviewNodeVisible(node) {
+  if (
+    node?.hidden === true ||
+    node?.dynamicInternal === true
+  ) {
+    return false;
+  }
+
   const override =
     settingsPreviewRuntimeOverride(
       "visibility",
@@ -6335,11 +6442,7 @@ function settingsPreviewNodeVisible(node) {
     return override === true;
   }
 
-  if (node?.dynamicSettingKind) {
-    return node.dynamicInternal !== true;
-  }
-
-  return node?.hidden !== true;
+  return true;
 }
 
 function settingsPreviewNodeHorizontal(node) {
@@ -12771,6 +12874,7 @@ async function commitSuccessfulProjectStorage(
   settingsPreviewDraft = null;
   settingsPreviewRuntimeMenu = null;
   settingsPreviewPulseCounts = {};
+  settingsPreviewLiveValueBackups.clear();
 
   retainOnlyJsonPage(
     currentFingerprint,
@@ -13441,7 +13545,7 @@ function renderPalette() {
               data-help="${escapeHtml(outlinePaletteHelp(item))}">
               <span>${escapeHtml(item.badge)}</span>
               <strong>${escapeHtml(item.label)}</strong>
-              <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.19-universal-presentation-dev418-canonical-port-types#icon-add"></use></svg></b>
+              <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-add"></use></svg></b>
             </button>`;
           }
 
@@ -13456,7 +13560,7 @@ function renderPalette() {
             data-help="${escapeHtml(entry.family.id === "numberConstant" ? window.RMLI18n.t("ui.dev327.outline.number.help") : window.RMLI18n.t("ui.dev327.outline.vector.help"))}">
             <span>${outlineSymbolMarkup(entry.family.symbol)}</span>
             <strong>${escapeHtml(entry.family.title)}</strong>
-            <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.19-universal-presentation-dev418-canonical-port-types#icon-add"></use></svg></b>
+            <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-add"></use></svg></b>
           </button>`;
         })
         .join("");
@@ -13475,7 +13579,7 @@ function renderPalette() {
                   data-help="${escapeHtml(window.RMLI18n.t("ui.attr.e126e5850c57"))}">
                   <span>{{i18n:js.presentation.adddc72949b2}}</span>
                   <strong>${escapeHtml(`DYN · ${source.label}`)}</strong>
-                  <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.19-universal-presentation-dev418-canonical-port-types#icon-add"></use></svg></b>
+                  <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-add"></use></svg></b>
                 </button>`
               )
               .join("")
@@ -13812,7 +13916,7 @@ const nextOptionDirection =
                       option.children,
                       option.id
                     )
-                  : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.19-universal-presentation-dev418-canonical-port-types#icon-add"></use></svg></span>{{i18n:ui.text.3f27e6ab79a6}}</div>`
+                  : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-add"></use></svg></span>{{i18n:ui.text.3f27e6ab79a6}}</div>`
               }
             </div>
           </section>`
@@ -13843,7 +13947,7 @@ const nextOptionDirection =
         ${
           children.length
             ? nodeCardsMarkup(children, node.id)
-            : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.19-universal-presentation-dev418-canonical-port-types#icon-add"></use></svg></span>{{i18n:ui.text.572874456a9e}}</div>`
+            : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-add"></use></svg></span>{{i18n:ui.text.572874456a9e}}</div>`
         }
       </div>
     </section>`;
@@ -21101,7 +21205,7 @@ function colorXEditorMarkup(
           <span aria-hidden="true"></span>
           <strong data-color-result-value>${escapeHtml(
             preview.hex.toUpperCase()
-          )} · ${profile === "srgb" ? "sRGB" : window.RMLI18n.t("ui.text.af502f2b37ee")} · ×${previewColorNumber(
+          )} · ${colorProfileDisplayLabel(profile)} · ×${previewColorNumber(
             strength,
             2
           )}</strong>
@@ -21410,7 +21514,7 @@ function controllerInspectorMarkup(node) {
       <legend>{{i18n:ui.text.722c20869f7e}}</legend>
       ${options}
       <button class="add-option" type="button" data-add-option>
-        <svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.19-universal-presentation-dev418-canonical-port-types#icon-add"></use></svg> ${window.RMLI18n.t("ui.outline.addSection")}
+        <svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-add"></use></svg> ${window.RMLI18n.t("ui.outline.addSection")}
       </button>
     </fieldset>
     <label>
@@ -21780,7 +21884,7 @@ function updateCustomColorPicker(
   if (resultValue) {
     resultValue.textContent =
       `${hex} · ` +
-      `${profile === "srgb" ? "sRGB" : window.RMLI18n.t("ui.text.af502f2b37ee")} · ` +
+      `${colorProfileDisplayLabel(profile)} · ` +
       `×${previewColorNumber(strength, 2)}`;
   }
 
@@ -22053,20 +22157,22 @@ function bindCustomColorPickerInteractions(
 
     if (
       safeStrength > 1.000001 &&
-      safeProfile === "srgb"
+      safeProfile !== "linear"
     ) {
       const converted =
-        convertColorProfileChannels(
+        convertColorProfileValue(
           red,
           green,
           blue,
-          "srgb",
+          alpha,
+          safeProfile,
           "linear"
         );
 
       red = converted.red;
       green = converted.green;
       blue = converted.blue;
+      alpha = converted.alpha;
       safeProfile = "linear";
     }
 
@@ -22200,7 +22306,7 @@ function bindCustomColorPickerInteractions(
             currentProfile();
 
           if (
-            targetProfile === "srgb" &&
+            targetProfile !== "linear" &&
             currentStrength() > 1.000001
           ) {
             return;
@@ -22215,10 +22321,11 @@ function bindCustomColorPickerInteractions(
           const base =
             currentBaseRgb();
           const converted =
-            convertColorProfileChannels(
+            convertColorProfileValue(
               base.red,
               base.green,
               base.blue,
+              currentAlpha(),
               sourceProfile,
               targetProfile
             );
@@ -22227,7 +22334,7 @@ function bindCustomColorPickerInteractions(
             converted.red,
             converted.green,
             converted.blue,
-            currentAlpha(),
+            converted.alpha,
             currentStrength(),
             targetProfile
           );
@@ -24449,6 +24556,14 @@ function settingsPreviewValue(node) {
   );
 }
 
+function settingsPreviewLiveDisabledAttributes(
+  nodeId
+) {
+  return settingsPreviewHasLiveValue(nodeId)
+    ? ' disabled aria-disabled="true"'
+    : "";
+}
+
 function previewEnumEditorMarkup(
   node,
   options,
@@ -24469,6 +24584,7 @@ function previewEnumEditorMarkup(
     <button
       class="rml-preview-control rml-preview-enum-value"
       type="button"
+      ${settingsPreviewLiveDisabledAttributes(node.id)}
       tabindex="-1"
       aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.ed2757f1ed21"))}">
       ${escapeHtml(current)}
@@ -24476,15 +24592,17 @@ function previewEnumEditorMarkup(
     <button
       class="rml-preview-control rml-preview-enum-step"
       type="button"
+      ${settingsPreviewLiveDisabledAttributes(node.id)}
       data-preview-enum-direction="-1"
       data-preview-node="${escapeHtml(node.id)}"
-      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.5caa1fc4e7c2"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.19-universal-presentation-dev418-canonical-port-types#icon-triangle-left"></use></svg></button>
+      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.5caa1fc4e7c2"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-triangle-left"></use></svg></button>
     <button
       class="rml-preview-control rml-preview-enum-step"
       type="button"
+      ${settingsPreviewLiveDisabledAttributes(node.id)}
       data-preview-enum-direction="1"
       data-preview-node="${escapeHtml(node.id)}"
-      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.c400ec237248"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.19-universal-presentation-dev418-canonical-port-types#icon-triangle-right"></use></svg></button>
+      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.c400ec237248"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-triangle-right"></use></svg></button>
   </div>`;
 }
 
@@ -24555,10 +24673,11 @@ function previewSettingEditorMarkup(node) {
     return `<label class="rml-preview-checkbox">
       <input
         type="checkbox"
+        ${settingsPreviewLiveDisabledAttributes(node.id)}
         data-preview-bool="${escapeHtml(node.id)}"${
           value ? " checked" : ""
         }>
-      <span aria-hidden="true"><svg class="rml-inline-icon" viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.21.19-universal-presentation-dev418-canonical-port-types#icon-check"></use></svg></span>
+      <span aria-hidden="true"><svg class="rml-inline-icon" viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-check"></use></svg></span>
     </label>`;
   }
 
@@ -24575,6 +24694,7 @@ function previewSettingEditorMarkup(node) {
       <input
         class="rml-preview-text-field"
         type="text"
+        ${settingsPreviewLiveDisabledAttributes(node.id)}
         value="${escapeHtml(value)}"
         data-preview-input="${escapeHtml(node.id)}"
         aria-label="${escapeHtml(node.keyName)}">
@@ -24612,6 +24732,7 @@ function previewSettingEditorMarkup(node) {
     return `<div class="rml-preview-slider">
       <input
         type="range"
+        ${settingsPreviewLiveDisabledAttributes(node.id)}
         min="${bounds.minimum}"
         max="${bounds.maximum}"
         step="${bounds.step}"
@@ -24644,6 +24765,7 @@ function previewSettingEditorMarkup(node) {
             <input
               class="rml-preview-text-field"
               type="number"
+              ${settingsPreviewLiveDisabledAttributes(node.id)}
               step="${componentType === "int" ? "1" : "any"}"
               value="${escapeHtml(component)}"
               data-preview-vector="${escapeHtml(node.id)}"
@@ -24717,6 +24839,7 @@ function previewSettingEditorMarkup(node) {
   return `<input
     class="rml-preview-text-field"
     type="${isScalarNumericType(node.valueType) ? "number" : "text"}"
+    ${settingsPreviewLiveDisabledAttributes(node.id)}
     step="${node.valueType === "int" ? "1" : "any"}"
     value="${escapeHtml(value)}"
     data-preview-input="${escapeHtml(node.id)}"
@@ -25389,6 +25512,9 @@ function settingsPreviewColorMarkup() {
 
       <div class="rml-preview-color-profile-tabs" aria-label="${escapeHtml(window.RMLI18n.t("ui.attr.14a9e3ea9085"))}">
         ${[
+          ...(session.profile === "srgbalpha"
+            ? [["srgbalpha", "sRGBAlpha"]]
+            : []),
           ["srgb", "sRGB"],
           ["linear", window.RMLI18n.t("ui.text.af502f2b37ee")]
         ]
@@ -25401,7 +25527,7 @@ function settingsPreviewColorMarkup() {
               }"
               type="button"
               data-preview-color-profile="${profile}"${
-                profile === "srgb" &&
+                profile !== "linear" &&
                 session.strength > 1.000001
                   ? " disabled"
                   : ""
@@ -25681,7 +25807,11 @@ function changeSettingsPreviewEnum(
       nodeId
     );
 
-  if (!node || !settingsPreviewDraft) {
+  if (
+    !node ||
+    !settingsPreviewDraft ||
+    settingsPreviewHasLiveValue(nodeId)
+  ) {
     return;
   }
 
@@ -25885,7 +26015,11 @@ function openSettingsPreviewColor(nodeId) {
     ...initial,
     originalState: {
       ...initial
-    }
+    },
+    liveAuthoritative:
+      settingsPreviewLiveValueBackups.has(
+        String(nodeId)
+      )
   };
 
   syncSettingsPreviewColorWorking();
@@ -25896,7 +26030,9 @@ function closeSettingsPreviewColor(
   apply
 ) {
   const changedNodeId =
-    apply
+    apply &&
+    settingsPreviewColorSession
+      ?.liveAuthoritative !== true
       ? settingsPreviewColorSession
           ?.nodeId || ""
       : "";
@@ -25904,7 +26040,9 @@ function closeSettingsPreviewColor(
   if (
     apply &&
     settingsPreviewDraft &&
+    settingsPreviewColorSession &&
     settingsPreviewColorSession
+      .liveAuthoritative !== true
   ) {
     if (!settingsPreviewDraft.colorStates) {
       settingsPreviewDraft.colorStates = {};
@@ -26093,7 +26231,7 @@ function refreshSettingsPreviewColorVisuals() {
       setAlwaysClickableButtonAvailability(
         button,
         !(
-          buttonProfile === "srgb" &&
+          buttonProfile !== "linear" &&
           session.strength > 1.000001
         ),
         window.RMLI18n.t("ui.auto.e2c237352424")
@@ -26180,6 +26318,10 @@ function commitSettingsPreviewColor(
     return;
   }
 
+  if (session.liveAuthoritative === true) {
+    return;
+  }
+
   for (const component of [
     "red",
     "green",
@@ -26228,14 +26370,15 @@ function commitSettingsPreviewColor(
 
     if (
       nextStrength > 1.000001 &&
-      session.profile === "srgb"
+      session.profile !== "linear"
     ) {
       const converted =
-        convertColorProfileChannels(
+        convertColorProfileValue(
           session.red,
           session.green,
           session.blue,
-          "srgb",
+          session.alpha,
+          session.profile,
           "linear"
         );
 
@@ -26245,6 +26388,8 @@ function commitSettingsPreviewColor(
         clamp(converted.green, 0, 1);
       session.blue =
         clamp(converted.blue, 0, 1);
+      session.alpha =
+        clamp(converted.alpha, 0, 1);
       session.profile =
         "linear";
     }
@@ -26287,6 +26432,28 @@ function bindSettingsPreviewColorInteractions() {
     !settingsPreviewColorSession
   ) {
     return;
+  }
+
+  if (
+    settingsPreviewColorSession
+      .liveAuthoritative === true
+  ) {
+    root
+      .querySelectorAll(
+        "input, [data-preview-color-profile], [data-preview-color-swatch]"
+      )
+      .forEach(control => {
+        control.disabled = true;
+        control.setAttribute(
+          "aria-disabled",
+          "true"
+        );
+      });
+    surface.tabIndex = -1;
+    surface.setAttribute(
+      "aria-disabled",
+      "true"
+    );
   }
 
   const applyHsv = (
@@ -26455,10 +26622,11 @@ function bindSettingsPreviewColorInteractions() {
 
           if (
             !session ||
+            session.liveAuthoritative === true ||
             targetProfile ===
               session.profile ||
             (
-              targetProfile === "srgb" &&
+              targetProfile !== "linear" &&
               session.strength > 1.000001
             )
           ) {
@@ -26466,10 +26634,11 @@ function bindSettingsPreviewColorInteractions() {
           }
 
           const converted =
-            convertColorProfileChannels(
+            convertColorProfileValue(
               session.red,
               session.green,
               session.blue,
+              session.alpha,
               session.profile,
               targetProfile
             );
@@ -26480,6 +26649,8 @@ function bindSettingsPreviewColorInteractions() {
             clamp(converted.green, 0, 1);
           session.blue =
             clamp(converted.blue, 0, 1);
+          session.alpha =
+            clamp(converted.alpha, 0, 1);
           session.profile =
             targetProfile;
 
@@ -26714,9 +26885,461 @@ function bindSettingsPreviewColorInteractions() {
   );
 }
 
+function settingsPreviewCloneValue(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  try {
+    return structuredClone(value);
+  } catch {
+    return JSON.parse(JSON.stringify(value));
+  }
+}
+
+function settingsPreviewHasLiveValue(nodeId) {
+  return settingsPreviewLiveValueBackups.has(
+    String(nodeId || "")
+  );
+}
+
+function settingsPreviewBackupLiveValue(node) {
+  const nodeId = String(node?.id || "");
+
+  if (
+    !nodeId ||
+    !settingsPreviewDraft ||
+    settingsPreviewLiveValueBackups.has(
+      nodeId
+    )
+  ) {
+    return;
+  }
+
+  const controller =
+    node.kind === "controller";
+  const hasColorState =
+    !controller &&
+    Object.prototype.hasOwnProperty.call(
+      settingsPreviewDraft.colorStates || {},
+      nodeId
+    );
+
+  settingsPreviewLiveValueBackups.set(
+    nodeId,
+    {
+      controller,
+      hasValue:
+        Object.prototype.hasOwnProperty.call(
+          controller
+            ? settingsPreviewDraft.controllers || {}
+            : settingsPreviewDraft.values || {},
+          nodeId
+        ),
+      value:
+        settingsPreviewCloneValue(
+          controller
+            ? settingsPreviewDraft.controllers?.[
+                nodeId
+              ]
+            : settingsPreviewDraft.values?.[
+                nodeId
+              ]
+        ),
+      hasColorState,
+      colorState:
+        hasColorState
+          ? settingsPreviewCloneValue(
+              settingsPreviewDraft.colorStates[
+                nodeId
+              ]
+            )
+          : undefined
+    }
+  );
+}
+
+function settingsPreviewRuntimeColorPayload(
+  node,
+  value,
+  record = null
+) {
+  let source = value;
+  let channels = null;
+  let profileValue =
+    record?.colorProfile ??
+    record?.profile ??
+    null;
+  let profileNumber =
+    record?.colorProfileValue ??
+    record?.profileValue ??
+    null;
+  let strengthValue =
+    record?.colorStrength ??
+    record?.strength ??
+    null;
+
+  if (
+    source &&
+    typeof source === "object" &&
+    !Array.isArray(source)
+  ) {
+    profileValue =
+      source.profile ??
+      source.colorProfile ??
+      profileValue;
+    profileNumber =
+      source.profileValue ??
+      source.colorProfileValue ??
+      profileNumber;
+    strengthValue =
+      source.strength ??
+      source.colorStrength ??
+      strengthValue;
+
+    const baseColor =
+      source.baseColor ??
+      source.channels ??
+      null;
+
+    if (Array.isArray(baseColor)) {
+      channels = baseColor;
+    } else if (
+      baseColor &&
+      typeof baseColor === "object"
+    ) {
+      channels = [
+        baseColor.r ?? baseColor.red,
+        baseColor.g ?? baseColor.green,
+        baseColor.b ?? baseColor.blue,
+        baseColor.a ?? baseColor.alpha
+      ];
+    } else {
+      channels = [
+        source.r ?? source.red,
+        source.g ?? source.green,
+        source.b ?? source.blue,
+        source.a ?? source.alpha
+      ];
+    }
+  } else if (Array.isArray(source)) {
+    channels = source;
+  } else {
+    const text = String(source ?? "").trim();
+    const number =
+      "([+-]?(?:(?:\\d+(?:\\.\\d*)?)|(?:\\.\\d+))(?:[eE][+-]?\\d+)?)";
+    const precise = text.match(
+      new RegExp(
+        `^\\[colorX\\]\\s*${number}\\s*;\\s*${number}\\s*;\\s*${number}\\s*;\\s*${number}\\s*;\\s*${number}\\s*$`,
+        "i"
+      )
+    );
+
+    if (precise) {
+      profileNumber = precise[1];
+      channels = precise
+        .slice(2, 6)
+        .map(Number);
+    } else {
+      const namedProfile = text.match(
+        /sRGBAlpha|sRGB|Linear/i
+      );
+      if (namedProfile) {
+        profileValue = namedProfile[0];
+      }
+      const values = text
+        .match(
+          /[+-]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:[eE][+-]?\d+)?/g
+        )
+        ?.map(Number) || [];
+      if (values.length >= 4) {
+        channels = values.slice(0, 4);
+      }
+    }
+  }
+
+  if (!Array.isArray(channels)) {
+    return null;
+  }
+
+  const raw = [
+    Number(channels[0]),
+    Number(channels[1]),
+    Number(channels[2]),
+    channels[3] === undefined
+      ? 1
+      : Number(channels[3])
+  ];
+
+  if (!raw.every(Number.isFinite)) {
+    return null;
+  }
+
+  if (
+    profileValue === null &&
+    Number.isFinite(Number(profileNumber))
+  ) {
+    profileValue =
+      Number(profileNumber) === 0
+        ? "Linear"
+        : Number(profileNumber) === 2
+          ? "sRGBAlpha"
+          : "sRGB";
+  }
+
+  const exactProfile = String(
+    profileValue ??
+    settingsPreviewDraft?.colorStates?.[
+      node.id
+    ]?.runtimeProfile ??
+    settingsPreviewDraft?.colorStates?.[
+      node.id
+    ]?.profile ??
+    node.colorProfile ??
+    "linear"
+  );
+  let profile =
+    normalizeColorProfile(exactProfile);
+  let strength =
+    Number(strengthValue);
+
+  if (!Number.isFinite(strength)) {
+    strength = Math.max(
+      1,
+      raw[0],
+      raw[1],
+      raw[2]
+    );
+  }
+
+  strength = clamp(strength, 1, 10);
+
+  if (
+    profile !== "linear" &&
+    strength > 1.000001
+  ) {
+    const converted =
+      convertColorProfileValue(
+        raw[0],
+        raw[1],
+        raw[2],
+        raw[3],
+        profile,
+        "linear"
+      );
+    raw[0] = converted.red;
+    raw[1] = converted.green;
+    raw[2] = converted.blue;
+    raw[3] = converted.alpha;
+    profile = "linear";
+    strength = clamp(
+      Math.max(
+        1,
+        raw[0],
+        raw[1],
+        raw[2]
+      ),
+      1,
+      10
+    );
+  }
+
+  const base = [
+    clamp(raw[0] / strength, 0, 1),
+    clamp(raw[1] / strength, 0, 1),
+    clamp(raw[2] / strength, 0, 1),
+    clamp(raw[3], 0, 1)
+  ];
+  const expression =
+    buildColorXExpression(
+      base[0],
+      base[1],
+      base[2],
+      base[3],
+      strength,
+      profile
+    );
+  const colorState =
+    settingsPreviewColorStateFromExpression(
+      expression,
+      {
+        profile,
+        strength
+      }
+    );
+
+  return {
+    expression,
+    colorState: {
+      ...colorState,
+      source: "runtime-preview",
+      runtimeProfile: exactProfile
+    }
+  };
+}
+
+function settingsPreviewHydrateColorSession(
+  nodeId,
+  expression,
+  colorState,
+  liveAuthoritative
+) {
+  if (
+    !settingsPreviewColorSession ||
+    settingsPreviewColorSession.nodeId !==
+      nodeId
+  ) {
+    return;
+  }
+
+  const mode =
+    settingsPreviewColorSession.mode ||
+    "rgb";
+  settingsPreviewColorSession = {
+    nodeId,
+    original: expression,
+    working: expression,
+    mode,
+    ...settingsPreviewCloneValue(colorState),
+    originalState:
+      settingsPreviewCloneValue(colorState),
+    liveAuthoritative:
+      liveAuthoritative === true
+  };
+}
+
+function settingsPreviewRestoreInactiveLiveValues(
+  activeNodeIds
+) {
+  if (!settingsPreviewDraft) {
+    settingsPreviewLiveValueBackups.clear();
+    return false;
+  }
+
+  let changed = false;
+
+  for (const [nodeId, backup] of
+    settingsPreviewLiveValueBackups) {
+    if (activeNodeIds.has(nodeId)) {
+      continue;
+    }
+
+    const target = backup.controller
+      ? settingsPreviewDraft.controllers
+      : settingsPreviewDraft.values;
+
+    if (backup.hasValue) {
+      target[nodeId] =
+        settingsPreviewCloneValue(
+          backup.value
+        );
+    } else {
+      delete target[nodeId];
+    }
+
+    const node = findNode(
+      state.nodes,
+      nodeId
+    );
+
+    if (node?.valueType === "colorX") {
+      if (backup.hasColorState) {
+        settingsPreviewDraft.colorStates[
+          nodeId
+        ] = settingsPreviewCloneValue(
+          backup.colorState
+        );
+      } else {
+        delete settingsPreviewDraft
+          .colorStates[nodeId];
+      }
+
+      const restoredState =
+        settingsPreviewColorStateFromExpression(
+          settingsPreviewDraft.values[
+            nodeId
+          ],
+          settingsPreviewDraft.colorStates[
+            nodeId
+          ] || {
+            profile:
+              normalizeColorProfile(
+                node.colorProfile
+              ),
+            strength:
+              clamp(
+                Number(
+                  node.colorStrength
+                ) || 1,
+                1,
+                10
+              )
+          }
+        );
+      settingsPreviewHydrateColorSession(
+        nodeId,
+        settingsPreviewDraft.values[
+          nodeId
+        ],
+        restoredState,
+        false
+      );
+    }
+    settingsPreviewLiveValueBackups.delete(
+      nodeId
+    );
+    changed = true;
+  }
+
+  return changed;
+}
+
+function settingsPreviewPersistableDraft() {
+  const persistable =
+    settingsPreviewCloneValue(
+      settingsPreviewDraft
+    );
+
+  if (!persistable) {
+    return persistable;
+  }
+
+  for (const [nodeId, backup] of
+    settingsPreviewLiveValueBackups) {
+    const target = backup.controller
+      ? persistable.controllers
+      : persistable.values;
+
+    if (backup.hasValue) {
+      target[nodeId] =
+        settingsPreviewCloneValue(
+          backup.value
+        );
+    } else {
+      delete target[nodeId];
+    }
+
+    if (!backup.controller) {
+      if (backup.hasColorState) {
+        persistable.colorStates[nodeId] =
+          settingsPreviewCloneValue(
+            backup.colorState
+          );
+      } else {
+        delete persistable.colorStates[
+          nodeId
+        ];
+      }
+    }
+  }
+
+  return persistable;
+}
+
 function settingsPreviewApplyRuntimeValue(
   itemId,
-  value
+  value,
+  runtimeRecord = null
 ) {
   const node = findNode(
     state.nodes,
@@ -26731,6 +27354,17 @@ function settingsPreviewApplyRuntimeValue(
     node.valueType === "button"
   ) {
     return false;
+  }
+
+  if (
+    !runtimeRecord &&
+    settingsPreviewHasLiveValue(node.id)
+  ) {
+    return false;
+  }
+
+  if (runtimeRecord) {
+    settingsPreviewBackupLiveValue(node);
   }
 
   if (node.kind === "controller") {
@@ -26750,31 +27384,30 @@ function settingsPreviewApplyRuntimeValue(
   }
 
   if (node.valueType === "colorX") {
-    const channels =
-      Array.isArray(value)
-        ? value
-        : String(value ?? "")
-            .split(",")
-            .map(Number);
+    const colorNodeId =
+      String(node.id);
+    const parsed =
+      settingsPreviewRuntimeColorPayload(
+        node,
+        value,
+        runtimeRecord
+      );
+
+    if (!parsed) {
+      return false;
+    }
 
     settingsPreviewDraft.values[node.id] =
-      channels.join(", ");
+      parsed.expression;
     settingsPreviewDraft.colorStates[
       node.id
-    ] = {
-      red: Number(channels[0]) || 0,
-      green: Number(channels[1]) || 0,
-      blue: Number(channels[2]) || 0,
-      alpha:
-        Number.isFinite(
-          Number(channels[3])
-        )
-          ? Number(channels[3])
-          : 1,
-      profile: "linear",
-      strength: 1,
-      source: "runtime-preview"
-    };
+    ] = parsed.colorState;
+    settingsPreviewHydrateColorSession(
+      colorNodeId,
+      parsed.expression,
+      parsed.colorState,
+      Boolean(runtimeRecord)
+    );
     return true;
   }
 
@@ -26976,7 +27609,7 @@ function applySettingsPreviewRuntimeMenuAction(
         localStorage.setItem(
           ACTIVE_PREVIEW_STORAGE_KEY,
           JSON.stringify(
-            settingsPreviewDraft
+            settingsPreviewPersistableDraft()
           )
         );
         setSettingsPreviewStatus(
@@ -27281,6 +27914,11 @@ function handleSettingsPreviewInput(event) {
   if (target.matches("[data-preview-bool]")) {
     const nodeId =
       target.dataset.previewBool;
+
+    if (settingsPreviewHasLiveValue(nodeId)) {
+      return;
+    }
+
     settingsPreviewDraft.values[nodeId] =
       target.checked;
     runSettingsPreviewRuntimePhase(
@@ -27293,6 +27931,11 @@ function handleSettingsPreviewInput(event) {
   if (target.matches("[data-preview-input]")) {
     const nodeId =
       target.dataset.previewInput;
+
+    if (settingsPreviewHasLiveValue(nodeId)) {
+      return;
+    }
+
     settingsPreviewDraft.values[nodeId] =
       target.value;
     runSettingsPreviewRuntimePhase(
@@ -27305,6 +27948,11 @@ function handleSettingsPreviewInput(event) {
   if (target.matches("[data-preview-range]")) {
     const nodeId =
       target.dataset.previewRange;
+
+    if (settingsPreviewHasLiveValue(nodeId)) {
+      return;
+    }
+
     settingsPreviewDraft.values[nodeId] =
       target.value;
     const output =
@@ -27341,6 +27989,11 @@ function handleSettingsPreviewInput(event) {
   if (target.matches("[data-preview-vector]")) {
     const nodeId =
       target.dataset.previewVector;
+
+    if (settingsPreviewHasLiveValue(nodeId)) {
+      return;
+    }
+
     const values =
       settingsPreviewDraft.values[nodeId];
 
@@ -27365,7 +28018,9 @@ function saveSettingsPreview() {
   try {
     localStorage.setItem(
       ACTIVE_PREVIEW_STORAGE_KEY,
-      JSON.stringify(settingsPreviewDraft)
+      JSON.stringify(
+        settingsPreviewPersistableDraft()
+      )
     );
 
     setSettingsPreviewStatus(
@@ -27475,6 +28130,7 @@ async function openSettingsPreview() {
 
   dialog.classList.remove(
     "rml-overlay-closing",
+    "rml-overlay-opened",
     "rml-overlay-animating"
   );
   elements.settingsPreviewStatus.textContent =
@@ -27488,6 +28144,19 @@ async function openSettingsPreview() {
     </div>`;
 
   dialog.showModal();
+  dialog.classList.add(
+    "rml-overlay-animating"
+  );
+  void dialog.offsetWidth;
+  await nextBuilderVisualFrame();
+
+  if (
+    sequence !== settingsPreviewOpenSequence ||
+    !dialog.open
+  ) {
+    return;
+  }
+
   dialog.classList.add(
     "rml-overlay-opened"
   );
@@ -27527,6 +28196,7 @@ async function openSettingsPreview() {
       mergeSettingsPreviewDraft(
         savedDraft
       );
+    settingsPreviewLiveValueBackups.clear();
 
     await ensureLazyScriptBundle(
       "runtime-core"
@@ -27596,6 +28266,7 @@ function closeSettingsPreview(
       settingsPreviewDraft = null;
       settingsPreviewRuntimeMenu = null;
       settingsPreviewPulseCounts = {};
+      settingsPreviewLiveValueBackups.clear();
 
       if (
         typeof dialog.close ===
@@ -28316,7 +28987,7 @@ async function requestBuilderReplacementChoice(
                 ? "!"
                 : "·";
       if (status === "selected") {
-        state.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.19-universal-presentation-dev418-canonical-port-types#icon-check"></use></svg>`;
+        state.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-check"></use></svg>`;
       }
       const name =
         document.createElement("span");
@@ -30262,7 +30933,7 @@ function promiseWithBuilderTimeout(
 
 function assertProjectRuntimeModuleCoherence() {
   const expectedModuleId =
-    "1.21.19-universal-presentation-dev418-canonical-port-types";
+    "1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open";
   const requiredFactoryVersion = 38;
   const mismatches = [];
   const requireModuleId = (
@@ -39534,7 +40205,7 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "../../templates/help_template.html?v=1.21.19-universal-presentation-dev418-canonical-port-types"
+    "../../templates/help_template.html?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open"
   )
     .then(markup => {
       const host = document.getElementById("lazy-dialog-host") || document.body;
@@ -46202,7 +46873,7 @@ function rmlRuntimeDisplayInspector() {
         const up =
           document.createElement("button");
         up.type = "button";
-        up.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.19-universal-presentation-dev418-canonical-port-types#icon-${selected.runtimeDisplayStacked ? "chevron-up" : "chevron-left"}"></use></svg>`;
+        up.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-${selected.runtimeDisplayStacked ? "chevron-up" : "chevron-left"}"></use></svg>`;
         up.title =
           selected.runtimeDisplayStacked
             ? window.RMLI18n.t("ui.literal.6f39a4bc0048")
@@ -46220,7 +46891,7 @@ function rmlRuntimeDisplayInspector() {
         const down =
           document.createElement("button");
         down.type = "button";
-        down.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.19-universal-presentation-dev418-canonical-port-types#icon-${selected.runtimeDisplayStacked ? "chevron-down" : "chevron-right"}"></use></svg>`;
+        down.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-${selected.runtimeDisplayStacked ? "chevron-down" : "chevron-right"}"></use></svg>`;
         down.title =
           selected.runtimeDisplayStacked
             ? window.RMLI18n.t("ui.literal.6d6a5bc02a98")
@@ -47055,7 +47726,7 @@ function rmlRuntimeDisplayPreviewItems(
 
 function rmlRuntimeDisplayPreviewCopyIcon() {
   return `
-    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.19-universal-presentation-dev418-canonical-port-types#icon-copy"></use></svg>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-copy"></use></svg>
   `;
 }
 
@@ -47095,6 +47766,8 @@ function rmlRuntimeDisplaySyncConfigurationPreview(channel) {
 
   let changed = false;
   const changedNodeIds = [];
+  const activeLiveNodeIds =
+    new Set();
   const entries =
     typeof flattenNodes === "function"
       ? flattenNodes(state?.nodes || [])
@@ -47108,6 +47781,10 @@ function rmlRuntimeDisplaySyncConfigurationPreview(channel) {
 
     const record = rmlPreviewConfigurationLiveRecord(channel, node.id);
     if (!record) continue;
+
+    activeLiveNodeIds.add(
+      String(node.id)
+    );
 
     let liveValue = record.value ?? record.display;
     if (
@@ -47129,19 +47806,53 @@ function rmlRuntimeDisplaySyncConfigurationPreview(channel) {
     const before = JSON.stringify(
       node.kind === "controller"
         ? settingsPreviewDraft.controllers?.[node.id]
-        : settingsPreviewDraft.values?.[node.id]
+        : node.valueType === "colorX"
+          ? {
+              value:
+                settingsPreviewDraft.values?.[
+                  node.id
+                ],
+              colorState:
+                settingsPreviewDraft.colorStates?.[
+                  node.id
+                ]
+            }
+          : settingsPreviewDraft.values?.[node.id]
     );
-    settingsPreviewApplyRuntimeValue(node.id, liveValue);
+    settingsPreviewApplyRuntimeValue(
+      node.id,
+      liveValue,
+      record
+    );
     const after = JSON.stringify(
       node.kind === "controller"
         ? settingsPreviewDraft.controllers?.[node.id]
-        : settingsPreviewDraft.values?.[node.id]
+        : node.valueType === "colorX"
+          ? {
+              value:
+                settingsPreviewDraft.values?.[
+                  node.id
+                ],
+              colorState:
+                settingsPreviewDraft.colorStates?.[
+                  node.id
+                ]
+            }
+          : settingsPreviewDraft.values?.[node.id]
     );
 
     if (before !== after) {
       changed = true;
       changedNodeIds.push(String(node.id));
     }
+  }
+
+  if (
+    settingsPreviewRestoreInactiveLiveValues(
+      activeLiveNodeIds
+    )
+  ) {
+    changed = true;
   }
 
   const receivedNodeIds = [];

@@ -1203,6 +1203,14 @@
     node,
     value
   ) {
+    if (
+      typeof settingsPreviewHasLiveValue ===
+        "function" &&
+      settingsPreviewHasLiveValue(node.id)
+    ) {
+      return false;
+    }
+
     const normalized = String(value ?? "");
 
     previewSelection.set(
@@ -1219,6 +1227,8 @@
         node.id
       ] = normalized;
     }
+
+    return true;
   }
 
   function currentDynamicPreviewChoice(
@@ -1249,6 +1259,20 @@
     );
 
     if (index < 0) {
+      if (
+        typeof settingsPreviewHasLiveValue ===
+          "function" &&
+        settingsPreviewHasLiveValue(node.id)
+      ) {
+        return {
+          index: -1,
+          item: {
+            label: requestedSelection,
+            value: requestedSelection
+          }
+        };
+      }
+
       index = 0;
     }
 
@@ -1409,6 +1433,10 @@
 
       const options =
         controlOptions(node);
+      const liveAuthoritative =
+        typeof settingsPreviewHasLiveValue ===
+          "function" &&
+        settingsPreviewHasLiveValue(node.id);
 
       if (
         node.dynamicSettingKind ===
@@ -1444,7 +1472,7 @@
         previousButton.type = "button";
         previousButton.className =
           "rml-preview-control rml-preview-enum-step";
-        previousButton.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.19-universal-presentation-dev418-canonical-port-types#icon-triangle-left"></use></svg>`;
+        previousButton.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-triangle-left"></use></svg>`;
         previousButton.setAttribute(
           "aria-label",
           window.RMLI18n.t("{{i18n:js.presentation.5caa1fc4e7c2}}")
@@ -1456,7 +1484,7 @@
         nextButton.type = "button";
         nextButton.className =
           "rml-preview-control rml-preview-enum-step";
-        nextButton.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.19-universal-presentation-dev418-canonical-port-types#icon-triangle-right"></use></svg>`;
+        nextButton.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-triangle-right"></use></svg>`;
         nextButton.setAttribute(
           "aria-label",
           window.RMLI18n.t("{{i18n:js.presentation.c400ec237248}}")
@@ -1474,16 +1502,35 @@
             "Runtime options unavailable";
 
           const canStep =
-            items.length > 1;
+            items.length > 1 &&
+            !liveAuthoritative;
 
+          valueButton.disabled =
+            liveAuthoritative;
           previousButton.disabled =
             !canStep;
           nextButton.disabled =
             !canStep;
+
+          for (const button of [
+            valueButton,
+            previousButton,
+            nextButton
+          ]) {
+            if (liveAuthoritative) {
+              button.setAttribute(
+                "aria-disabled",
+                "true"
+              );
+            }
+          }
         };
 
         const step = direction => {
-          if (items.length <= 1) {
+          if (
+            liveAuthoritative ||
+            items.length <= 1
+          ) {
             return;
           }
 
@@ -1544,6 +1591,14 @@
             );
 
           button.type = "button";
+          button.disabled =
+            liveAuthoritative;
+          if (liveAuthoritative) {
+            button.setAttribute(
+              "aria-disabled",
+              "true"
+            );
+          }
           button.className =
             "button secondary";
           button.textContent =
@@ -1574,6 +1629,14 @@
               );
 
             button.type = "button";
+            button.disabled =
+              liveAuthoritative;
+            if (liveAuthoritative) {
+              button.setAttribute(
+                "aria-disabled",
+                "true"
+              );
+            }
             button.className =
               "button secondary";
 
@@ -1588,6 +1651,10 @@
             button.addEventListener(
               "click",
               () => {
+                if (liveAuthoritative) {
+                  return;
+                }
+
                 checked = !checked;
                 button.textContent =
                   `${
@@ -2748,7 +2815,7 @@ csString(graphClass)]);
 
       const plus =
         document.createElement("b");
-      plus.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.19-universal-presentation-dev418-canonical-port-types#icon-add"></use></svg>`;
+      plus.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-add"></use></svg>`;
 
       button.append(
         badge,

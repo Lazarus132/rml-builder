@@ -2,7 +2,7 @@
   "use strict";
 
   const CATALOG_LOADER_MODULE_ID =
-    "1.21.19-universal-presentation-dev418-canonical-port-types";
+    "1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open";
   const LOADER_VERSION = 84;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
@@ -75,7 +75,7 @@
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=1.21.19-universal-presentation-dev418-canonical-port-types",
+    "api_nodes.js?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open",
     scriptUrl
   ).href;
 

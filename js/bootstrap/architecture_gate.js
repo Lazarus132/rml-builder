@@ -2,7 +2,7 @@
   "use strict";
 
   const MODULE_ID =
-    "1.21.19-universal-presentation-dev418-canonical-port-types";
+    "1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open";
   const GATE_VERSION = 1;
 
   

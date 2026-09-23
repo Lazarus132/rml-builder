@@ -8137,7 +8137,7 @@ function createGraphAnalysisCertificate(
       schemaVersion:
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION,
       moduleId:
-        "1.21.19-universal-presentation-dev418-canonical-port-types",
+        "1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open",
       semanticToken: token,
       nodeCount: graph.nodes.length,
       connectionCount: connections.length,
@@ -8170,7 +8170,7 @@ function graphAnalysisCertificateEnvelopeValid(
       Number(certificate.schemaVersion) ===
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION &&
       certificate.moduleId ===
-        "1.21.19-universal-presentation-dev418-canonical-port-types" &&
+        "1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open" &&
       certificate.valid === true &&
       typeof certificate.semanticToken ===
         "string" &&
@@ -15746,7 +15746,9 @@ configurationButtonCases.length > 0
       displayStatements.push(
         guardedRuntimeStatement(
           `Configuration ${item.node.id}`,
-          `PublishRuntimeBridge("${monitorId}", "${label}", "configuration", ${item.getter}());`
+          item.type === "colorX"
+            ? `PublishRuntimeColorBridge("${monitorId}", "${label}", ${item.getter}());`
+            : `PublishRuntimeBridge("${monitorId}", "${label}", "configuration", ${item.getter}());`
         )
       );
     }
@@ -16291,6 +16293,116 @@ item.backing]);
             .join("\n")
         )
         .join("\n\n");
+    const runtimeColorBridgeMembersCode =
+      configurationFields.some(
+        item => item.type === "colorX"
+      )
+        ? `    private static readonly FieldInfo? _runtimeColorProfileField =
+        typeof(colorX)
+            .GetFields(
+                BindingFlags.Instance |
+                BindingFlags.Public |
+                BindingFlags.NonPublic)
+            .FirstOrDefault(field =>
+                field.FieldType == typeof(ColorProfile));
+
+    private static readonly PropertyInfo? _runtimeColorProfileProperty =
+        typeof(colorX)
+            .GetProperties(
+                BindingFlags.Instance |
+                BindingFlags.Public |
+                BindingFlags.NonPublic)
+            .FirstOrDefault(property =>
+                property.PropertyType == typeof(ColorProfile) &&
+                property.GetIndexParameters().Length == 0);
+
+    private static ColorProfile RuntimeColorProfile(colorX value)
+    {
+        try
+        {
+            object boxed = value;
+
+            if (_runtimeColorProfileField?.GetValue(boxed) is ColorProfile fieldProfile)
+            {
+                return fieldProfile;
+            }
+
+            if (_runtimeColorProfileProperty?.GetValue(boxed) is ColorProfile propertyProfile)
+            {
+                return propertyProfile;
+            }
+        }
+        catch
+        {
+        }
+
+        return ColorProfile.Linear;
+    }
+
+    private static object RuntimeColorChannel(float value) =>
+        float.IsNaN(value) || float.IsInfinity(value)
+            ? value.ToString("R", CultureInfo.InvariantCulture)
+            : value;
+
+    private static float RuntimeColorStrength(colorX value)
+    {
+        float red =
+            float.IsNaN(value.r) || float.IsInfinity(value.r)
+                ? 0f
+                : value.r;
+        float green =
+            float.IsNaN(value.g) || float.IsInfinity(value.g)
+                ? 0f
+                : value.g;
+        float blue =
+            float.IsNaN(value.b) || float.IsInfinity(value.b)
+                ? 0f
+                : value.b;
+
+        return Math.Clamp(
+            MathF.Max(
+                red,
+                MathF.Max(
+                    green,
+                    MathF.Max(blue, 1f))),
+            1f,
+            10f);
+    }
+
+    private static void PublishRuntimeColorBridge(
+        string monitorId,
+        string name,
+        colorX value)
+    {
+        ColorProfile profile =
+            RuntimeColorProfile(value);
+
+        PublishRuntimeBridge(
+            monitorId,
+            name,
+            "configuration",
+            new Dictionary<string, object?>
+            {
+                ["$rmlType"] = "colorX",
+                ["red"] = RuntimeColorChannel(value.r),
+                ["green"] = RuntimeColorChannel(value.g),
+                ["blue"] = RuntimeColorChannel(value.b),
+                ["alpha"] = RuntimeColorChannel(value.a),
+                ["profile"] = profile.ToString(),
+                ["profileValue"] = Convert.ToInt32(
+                    profile,
+                    CultureInfo.InvariantCulture),
+                ["strength"] = RuntimeColorStrength(value)
+            });
+    }`
+        : "";
+    const generatedRuntimeMembersCode =
+      [
+        runtimeColorBridgeMembersCode,
+        extensionMembersCode
+      ]
+        .filter(Boolean)
+        .join("\n\n");
     const formatExtensionStatements =
       (statements, sourceName) =>
         statements
@@ -16511,7 +16623,7 @@ inlineImpulseMethods ? `${inlineImpulseMethods}\n\n` : "",
 impulseMethods || generatedGuidance(
   "noImpulseOutputs"
 ),
-extensionMembersCode ? `\n\n${extensionMembersCode}` : ""]);
+generatedRuntimeMembersCode ? `\n\n${generatedRuntimeMembersCode}` : ""]);
     source =
       compactSingleUseQueuedImpulseWrappers(
         source,
@@ -17081,7 +17193,7 @@ Object.defineProperty(
     {
       value: Object.freeze({
         moduleId:
-          "1.21.19-universal-presentation-dev418-canonical-port-types",
+          "1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open",
         build:
           buildTypedNodeGraphCSharpContribution,
         validateDocument:
