@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_BOOTSTRAP_MODULE_ID =
-  "1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open";
+  "1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle";
 
 function assertGraphBootstrapModuleCoherence() {
   const mismatches = [];

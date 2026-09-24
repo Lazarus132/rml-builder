@@ -29,7 +29,7 @@
     compiler: {
       label: window.RMLI18n.t("ui.literal.141c18e0da13"),
       url: new URL(
-        "../workers/compiler_worker.js?v=4-max-graph-performance-v755",
+        "../workers/compiler_worker.js?v=6-reference-transaction",
         document.currentScript?.src || window.location.href
       ).href,
       name: "rml-csharp14-compiler",
@@ -351,11 +351,20 @@
     );
   }
 
-  function configureReferences(files, onProgress) {
+  function configureReferences(
+    files,
+    identities,
+    onProgress
+  ) {
     return invoke(
       channels.compiler,
       "configureReferences",
-      [Array.isArray(files) ? files : []],
+      [
+        Array.isArray(files) ? files : [],
+        Array.isArray(identities)
+          ? identities
+          : []
+      ],
       { onProgress }
     );
   }
@@ -374,6 +383,10 @@
       referenceFiles: Array.isArray(options.referenceFiles)
         ? options.referenceFiles
         : [],
+      referenceIdentities:
+        Array.isArray(options.referenceIdentities)
+          ? options.referenceIdentities
+          : [],
       emitPdb: options.emitPdb === true
     };
     const operation = invoke(
@@ -422,7 +435,7 @@
     "RMLCSharp14Roslyn",
     {
       value: Object.freeze({
-        version: 12,
+        version: 13,
         name: "Roslyn C# 14 isolated browser compiler (.NET 9 host, .NET 10 target)",
         languageVersion: LANGUAGE_VERSION,
         assembly: ASSEMBLY,

@@ -1540,6 +1540,19 @@
     return api.token(api.node.id);
   }
 
+  function visualMethodCSharpName(api, declaration) {
+    const readableName = api.identifier(
+      String(
+        declaration?.parameters?.methodName ||
+          ""
+      ).trim(),
+      "Method"
+    ).slice(0, 96);
+    return `UserMethod_${readableName}_${api.token(
+      declaration?.id || ""
+    )}`;
+  }
+
   function quote(api, value) {
     return `"${api.escapeString(value ?? "")}"`;
   }
@@ -2662,9 +2675,17 @@
     }
   });
 
-  function graphUserMethodEntries(api, requestedName) {
-    const name = String(requestedName || "").trim();
-    return (api.graph?.nodes || []).filter(node =>
+  function graphUserMethodEntries(api, reference) {
+    const nodes = api.graph?.nodes || [];
+    const methodEntryId = String(reference?.parameters?.methodEntryId || "").trim();
+    if (methodEntryId) {
+      return nodes.filter(node =>
+        node?.operatorId === "language.methodEntry" &&
+        node.id === methodEntryId
+      );
+    }
+    const name = String(reference?.parameters?.methodName || "").trim();
+    return nodes.filter(node =>
       node?.operatorId === "language.methodEntry" &&
       String(node?.parameters?.methodName || "").trim() === name
     );
@@ -2689,7 +2710,7 @@
         parameters.push({ id, name, sourceType: rawType, graphType });
       }
     } else {
-      const lines = String(node?.parameters?.signature || "").split(/\\r?\\n/).map(value => value.trim()).filter(Boolean);
+      const lines = String(node?.parameters?.signature || "").split(/\r\n?|\n|\\r\\n|\\n|\\r/).map(value => value.trim()).filter(Boolean);
       for (let index = 0; index < lines.length; index += 1) {
         const line = lines[index];
         const separator = line.indexOf(":");
@@ -2725,10 +2746,10 @@
   function visualMethodParameters(call = false) {
     if (call) {
       return [{
-        key: "methodName",
+        key: "methodEntryId",
         label: window.RMLI18n.t("ui.auto.060d61447a76"),
         kind: "visualFunctionMethod",
-        default: window.RMLI18n.t("ui.auto.138927ca2c78"),
+        default: "",
         help: window.RMLI18n.t("ui.literal.1fff36e957fd"),
         affectsPorts: true,
         affectsNode: true,
@@ -2758,17 +2779,21 @@
     },
     codegenCollect(api) {
       ensureGraphUserMethodRuntime(api);
-      const methodName = String(api.node.parameters?.methodName || window.RMLI18n.t("ui.auto.138927ca2c78")).trim();
-      const matches = graphUserMethodEntries(api, methodName);
-      if (matches.length !== 1) { api.diagnostic(`Visual function '${methodName}' must be declared exactly once; found ${matches.length}.`); return; }
-      const token = nodeToken(api); const body = api.inlineMethod(api.node.id, "body");
-      api.addMember(`${api.node.id}.visual-method`, globalThis.RMLCodeTemplates.text("nodes", "source_024", [token, body ? `\\n        ${body}();` : ""]));
+      const signature = visualMethodSignature(api.node);
+      const csharpMethodName = visualMethodCSharpName(api, api.node); const body = api.inlineMethod(api.node.id, "body");
+      api.addMember(`${api.node.id}.visual-method`, globalThis.RMLCodeTemplates.text("nodes", "source_024", [
+        csharpMethodName,
+        api.escapeString(api.node.id),
+        body ? `\n        ${body}();` : "",
+        signature.isVoid ? "false" : "true"
+      ]));
     },
     codegenExpression(api) {
       const signature = visualMethodSignature(api.node);
       const index = signature.parameters.findIndex(parameter => parameter.id === api.portId);
-      if (index >= 0) { const parameter = signature.parameters[index]; return `GraphUserMethodArgument<${api.csType(parameter.graphType)}>(${index})`; }
-      return "CurrentGraphUserMethodFrame().Arguments";
+      const declarationId = `"${api.escapeString(api.node.id)}"`;
+      if (index >= 0) { const parameter = signature.parameters[index]; return `GraphUserMethodArgument<${api.csType(parameter.graphType)}>(${declarationId}, ${index})`; }
+      return `CurrentGraphUserMethodArguments(${declarationId})`;
     }
   });
 
@@ -2802,11 +2827,12 @@
     codegenCollect(api) { ensureGraphUserMethodRuntime(api); },
     codegenAction(api) {
       const methodName = String(api.node.parameters?.methodName || "").trim();
-      const matches = graphUserMethodEntries(api, methodName);
+      const matches = graphUserMethodEntries(api, api.node);
       if (matches.length !== 1) { api.diagnostic(`Return Visual Function '${methodName}' requires exactly one declaration; found ${matches.length}.`); return ""; }
       const signature = visualMethodSignature(matches[0]);
-      if (signature.isVoid) return "throw new GraphReturnSignal();";
-      return `CurrentGraphUserMethodFrame().Result = ${api.input("value").code};\n        throw new GraphReturnSignal();`;
+      const declarationId = `"${api.escapeString(matches[0].id)}"`;
+      if (signature.isVoid) return `ReturnGraphUserMethod(${declarationId});`;
+      return `ReturnGraphUserMethod(${declarationId}, ${api.input("value").code});`;
     }
   });
 
@@ -2817,10 +2843,10 @@
     codegenCollect(api) { ensureGraphUserMethodRuntime(api); },
     codegenAction(api) {
       const methodName = String(api.node.parameters?.methodName || "").trim();
-      const matches = graphUserMethodEntries(api, methodName);
+      const matches = graphUserMethodEntries(api, api.node);
       if (matches.length !== 1) { api.diagnostic(`Return Visual Function '${methodName}' requires exactly one declaration; found ${matches.length}.`); return ""; }
       if (!visualMethodSignature(matches[0]).isVoid) { api.diagnostic(`Legacy void return '${methodName}' cannot target a function with a value return type.`); return ""; }
-      return "throw new GraphReturnSignal();";
+      return `ReturnGraphUserMethod("${api.escapeString(matches[0].id)}");`;
     }
   });
 
@@ -2851,22 +2877,24 @@
     },
     codegenAction(api) {
       const methodName = String(api.node.parameters?.methodName || window.RMLI18n.t("ui.auto.138927ca2c78")).trim();
-      const matches = graphUserMethodEntries(api, methodName);
+      const matches = graphUserMethodEntries(api, api.node);
       if (matches.length !== 1) { api.diagnostic(`Call Visual Function '${methodName}' requires exactly one declaration; found ${matches.length}.`); return ""; }
       const callSignature = visualMethodSignature(api.node); const declarationSignature = visualMethodSignature(matches[0]);
       if (visualMethodSignatureKey(callSignature) !== visualMethodSignatureKey(declarationSignature)) { api.diagnostic(`Call Visual Function '${methodName}' signature does not match its declaration.`); return ""; }
-      const methodToken = api.token(matches[0].id); const token = nodeToken(api);
+      const csharpMethodName = visualMethodCSharpName(api, matches[0]); const token = nodeToken(api);
       const result = `_visualMethodResult${token}`; const success = `_visualMethodSuccess${token}`; const exception = `_visualMethodException${token}`;
+      const completed = `_visualMethodCallCompleted${token}`;
       const done = api.emit("done"); const faulted = api.emit("faulted");
       const keepResult = !callSignature.isVoid && generatedActionOutputIsUsed(api, "result");
       const keepSuccess = generatedActionOutputIsUsed(api, "success"); const keepException = generatedActionOutputIsUsed(api, "exception");
       const argumentsCode = `new object?[] { ${callSignature.parameters.map(parameter => api.input(parameter.id).code).join(", ")} }`;
-      const rawCall = `UserMethod${methodToken}(${argumentsCode})`;
+      const rawCall = `${csharpMethodName}(${argumentsCode})`;
       const call = callSignature.isVoid ? rawCall : `ConvertGraphValue<${api.csType(callSignature.returnGraphType)}>(${rawCall})`;
-      const successLines = [keepException ? `${exception} = null;` : "", keepResult ? `${result} = ${call};` : `_ = ${call};`, keepSuccess ? `${success} = true;` : ""].filter(Boolean).join("\\n            ");
-      const failureLines = [keepException ? `${exception} = caught;` : "", keepSuccess ? `${success} = false;` : ""].filter(Boolean).join("\\n            ");
+      const resetLines = [keepResult ? `${result} = ${api.csDefault(callSignature.returnGraphType)};` : "", keepSuccess ? `${success} = false;` : "", keepException ? `${exception} = null;` : ""].filter(Boolean).join("\n        ");
+      const successLines = [keepException ? `${exception} = null;` : "", keepResult ? `${result} = ${call};` : `_ = ${call};`, keepSuccess ? `${success} = true;` : ""].filter(Boolean).join("\n            ");
+      const failureLines = [keepException ? `${exception} = caught;` : "", keepSuccess ? `${success} = false;` : ""].filter(Boolean).join("\n            ");
       const catchClause = keepException ? "catch (Exception caught)" : "catch (Exception)";
-      return `try\\n        {\\n            ${successLines}${done ? `\\n            ${done}();` : ""}\\n        }\\n        ${catchClause}\\n        {${failureLines ? `\\n            ${failureLines}` : ""}${faulted ? `\\n            ${faulted}();` : ""}\\n        }`;
+      return `${resetLines ? `${resetLines}\n        ` : ""}bool ${completed} = false;\n        try\n        {\n            ${successLines}\n            ${completed} = true;\n        }\n        ${catchClause}\n        {${failureLines ? `\n            ${failureLines}` : ""}${faulted ? `\n            ${faulted}();` : ""}\n        }${done ? `\n        if (${completed})\n        {\n            ${done}();\n        }` : ""}`;
     }
   });
 

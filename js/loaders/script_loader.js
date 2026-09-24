@@ -2,7 +2,7 @@
   "use strict";
 
   const SCRIPT_LOADER_MODULE_ID =
-    "1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open";
+    "1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle";
 
   if (
     Object.hasOwn(
@@ -146,8 +146,8 @@
     "code-templates": Object.freeze({
       dependencies: Object.freeze([]),
       files: Object.freeze([Object.freeze({
-        url: "../core/code_templates.js?v=794-shared-loader-runtime",
-        ready: () => window.RMLCodeTemplates?.version === 794
+        url: "../core/code_templates.js?v=797-readable-visual-functions-node-index",
+        ready: () => window.RMLCodeTemplates?.version === 797
       })])
     }),
     guidance: Object.freeze({
@@ -161,12 +161,12 @@
       dependencies: Object.freeze([]),
       files: Object.freeze([
         Object.freeze({
-          url: "../compiler/csharp14_roslyn.js?v=13-graph-module-coherence-v788",
+          url: "../compiler/csharp14_roslyn.js?v=15-reference-transaction",
           ready: () =>
             typeof window.RMLCSharp14Roslyn?.validate === "function"
         }),
         Object.freeze({
-          url: "../compiler/compile.js?v=6-physical-modules-v748",
+          url: "../compiler/compile.js?v=9-exact-reference-content",
           ready: () =>
             typeof window.RMLCompile?.validate === "function"
         }),
@@ -182,7 +182,7 @@
       dependencies: Object.freeze([]),
       files: Object.freeze([
         Object.freeze({
-          url: "../catalog/catalog_loader.js?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open",
+          url: "../catalog/catalog_loader.js?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle",
           ready: () =>
             window.RMLCatalogImportGate?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -234,7 +234,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/node_graph_codegen.js?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open",
+          url: "../graph/node_graph_codegen.js?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle",
           ready: () =>
             window.RMLTypedNodeGraphGenerator?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -251,7 +251,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../workers/saved_api_composite_compare_worker.js?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open",
+          url: "../workers/saved_api_composite_compare_worker.js?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle",
           ready: () =>
             window.RMLSavedApiCompositeCompareWorkerBootstrap
               ?.moduleId === SCRIPT_LOADER_MODULE_ID &&
@@ -260,13 +260,13 @@
               ?.source === "string"
         }),
         Object.freeze({
-          url: "../graph/node_graph_composites.js?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open",
+          url: "../graph/node_graph_composites.js?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle",
           ready: () =>
             window.RMLNodeGraphCompositesModuleId ===
               SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_custom_csharp.js?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open",
+          url: "../graph/node_graph_custom_csharp.js?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle",
           ready: () =>
             window.RMLNodeGraphCustomCSharpModuleId ===
               SCRIPT_LOADER_MODULE_ID
@@ -275,13 +275,13 @@
           url: "../graph/node_graph_guided.js?v=1-physical-modules-v748"
         }),
         Object.freeze({
-          url: "../graph/node_graph_view.js?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open",
+          url: "../graph/node_graph_view.js?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle",
           ready: () =>
             window.RMLNodeGraphViewModuleId ===
               SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_bootstrap.js?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open",
+          url: "../graph/node_graph_bootstrap.js?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle",
           ready: () =>
             window.RMLDynamicGraphHost?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&

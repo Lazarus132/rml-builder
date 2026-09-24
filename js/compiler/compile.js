@@ -1,11 +1,12 @@
 (() => {
   "use strict";
 
-  const VERSION = 2;
+  const VERSION = 3;
   const LANGUAGE_VERSION = "14.0";
   const validationCache = new Map();
   let validationSequence = 0;
   let activeValidation = null;
+  let stateSources = Object.freeze([]);
   let state = Object.freeze({
     phase: "idle",
     fingerprint: "",
@@ -79,8 +80,19 @@
     });
   }
 
-  function publish(nextState) {
+  function frozenSources(sources) {
+    return Object.freeze(
+      (Array.isArray(sources) ? sources : [])
+        .map(file => Object.freeze({
+          name: String(file?.name || ""),
+          content: String(file?.content || "")
+        }))
+    );
+  }
+
+  function publish(nextState, sources = []) {
     state = nextState;
+    stateSources = frozenSources(sources);
     document.dispatchEvent(
       new CustomEvent("rml-compile:state-changed", {
         detail: state
@@ -89,8 +101,49 @@
     return state;
   }
 
-  function remember(result) {
-    validationCache.set(result.fingerprint, result);
+  function sameSources(left, right) {
+    if (
+      !Array.isArray(left) ||
+      !Array.isArray(right) ||
+      left.length !== right.length
+    ) {
+      return false;
+    }
+    return left.every((file, index) =>
+      file.name === right[index]?.name &&
+      file.content === right[index]?.content
+    );
+  }
+
+  function cachedValidation(
+    sourceFingerprint,
+    sources
+  ) {
+    const entry =
+      validationCache.get(
+        sourceFingerprint
+      );
+    return entry &&
+      sameSources(entry.sources, sources)
+        ? entry.result
+        : null;
+  }
+
+  function remember(result, sources) {
+    validationCache.set(
+      result.fingerprint,
+      Object.freeze({
+        result,
+        sources: Object.freeze(
+          sources.map(file =>
+            Object.freeze({
+              name: file.name,
+              content: file.content
+            })
+          )
+        )
+      })
+    );
     while (validationCache.size > 12) {
       validationCache.delete(validationCache.keys().next().value);
     }
@@ -119,10 +172,15 @@
   }
 
   function inspect(files) {
+    const sources = sourceFiles(files);
     const sourceFingerprint = fingerprint(files);
-    return validationCache.get(sourceFingerprint) ||
+    return cachedValidation(
+      sourceFingerprint,
+      sources
+    ) ||
       (
-        state.fingerprint === sourceFingerprint
+        state.fingerprint === sourceFingerprint &&
+        sameSources(stateSources, sources)
           ? state
           : resultState(
               "idle",
@@ -136,19 +194,36 @@
   async function validate(files) {
     const sources = sourceFiles(files);
     const sourceFingerprint = fingerprint(sources);
-    const cached = validationCache.get(sourceFingerprint);
+    const cached = cachedValidation(
+      sourceFingerprint,
+      sources
+    );
     if (cached) {
-      if (state.fingerprint !== sourceFingerprint || state.phase !== cached.phase) {
-        publish(cached);
+      if (
+        state.fingerprint !== sourceFingerprint ||
+        state.phase !== cached.phase ||
+        !sameSources(stateSources, sources)
+      ) {
+        publish(cached, sources);
       }
       return cached;
     }
-    if (activeValidation?.fingerprint === sourceFingerprint) {
+    if (
+      activeValidation?.fingerprint ===
+        sourceFingerprint &&
+      sameSources(
+        activeValidation.sources,
+        sources
+      )
+    ) {
       return activeValidation.promise;
     }
 
     const sequence = ++validationSequence;
-    publish(resultState("checking", sourceFingerprint, [], sources.length));
+    publish(
+      resultState("checking", sourceFingerprint, [], sources.length),
+      sources
+    );
     const promise = (async () => {
       if (sources.length === 0) {
         return remember(resultState(
@@ -160,7 +235,7 @@
             message: window.RMLI18n.t("ui.auto.5a8278a8f51e")
           }],
           0
-        ));
+        ), sources);
       }
 
       const parser = window.RMLCSharp14Roslyn;
@@ -177,7 +252,7 @@
             message: window.RMLI18n.t("ui.auto.a45f6588210d")
           }],
           sources.length
-        ));
+        ), sources);
       }
 
       const diagnostics = [];
@@ -219,11 +294,12 @@
         sourceFingerprint,
         diagnostics,
         sources.length
-      ));
+      ), sources);
     })();
 
     activeValidation = {
       fingerprint: sourceFingerprint,
+      sources,
       sequence,
       promise
     };
@@ -238,7 +314,7 @@
       sequence === validationSequence &&
       state.fingerprint === sourceFingerprint
     ) {
-      publish(result);
+      publish(result, sources);
     }
     return result;
   }
@@ -306,6 +382,44 @@
     if (signal?.aborted) {
       throw compilerCancellation(signal);
     }
+    const referenceFiles = Array.isArray(
+      options.referenceFiles
+    )
+      ? options.referenceFiles
+      : [];
+    const referenceIdentities = Array.isArray(
+      options.referenceIdentities
+    )
+      ? options.referenceIdentities
+      : [];
+    if (
+      referenceFiles.length !==
+        referenceIdentities.length ||
+      referenceFiles.some((file, index) => {
+        const identity =
+          referenceIdentities[index];
+        return !identity ||
+          identity.name !==
+            String(file?.name || "") ||
+          identity.size !==
+            (Number(file?.size) || 0) ||
+          identity.byteLength !==
+            (Number(file?.size) || 0) ||
+          identity.lastModified !==
+            (Number(file?.lastModified) || 0) ||
+          !/^sha256:[a-f0-9]{64}$/i.test(
+            String(
+              identity.contentIdentity || ""
+            )
+          );
+      })
+    ) {
+      throw new Error(
+        window.RMLI18n.t(
+          "export.compiler_references.identity_missing"
+        )
+      );
+    }
     const projects = Array.isArray(options.projects)
       ? options.projects
       : [{
@@ -358,14 +472,15 @@
   function invalidate() {
     validationSequence += 1;
     activeValidation = null;
-    publish(resultState("idle", "", [], 0));
+    publish(resultState("idle", "", [], 0), []);
   }
 
   function releaseCaches() {
     validationCache.clear();
     if (!activeValidation) {
       publish(
-        resultState("idle", "", [], 0)
+        resultState("idle", "", [], 0),
+        []
       );
     }
     return true;

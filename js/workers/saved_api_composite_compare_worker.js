@@ -5,7 +5,7 @@ function savedApiCompositeCompareWorkerMain(
 ) {
 const self = workerScope;
 const SAVED_API_COMPOSITE_COMPARE_WORKER_MODULE_ID =
-  "1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open";
+  "1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle";
 const SAVED_API_COMPOSITE_CANONICAL_SCHEMA_VERSION = 4;
 const MESSAGE_TYPE = "rml-saved-api-composite-compare";
 const RESULT_TYPE = `${MESSAGE_TYPE}-result`;
@@ -1946,7 +1946,7 @@ if (savedApiCompositeCompareWorkerThread) {
     {
       value: Object.freeze({
         moduleId:
-          "1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open",
+          "1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle",
         canonicalSchemaVersion:
           4,
         source:

@@ -28,7 +28,7 @@ const EXAMPLE_PROJECT_RESOURCE_PATH = "../../assets/data/Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open";
+  "1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -368,7 +368,7 @@ function outlineSymbolMarkup(symbol) {
   const iconIds = { "#": "icon-node-hash", "VEC": "icon-node-vec" };
   const iconId = iconIds[String(symbol || "")];
   if (!iconId) return escapeHtml(String(symbol || "?"));
-  return `<svg class="rml-node-symbol-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#${iconId}"></use></svg>`;
+  return `<svg class="rml-node-symbol-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#${iconId}"></use></svg>`;
 }
 
 function outlinePaletteEntriesForGroup(group) {
@@ -618,6 +618,7 @@ const DEFAULT_EXPORT_OPTIONS = {
   resonitePath: EXPORT_PLATFORM_PRESETS.windows,
   includeCs: true,
   includeCsproj: true,
+  includeNodeIndex: true,
   includeCompiled: false
 };
 
@@ -702,6 +703,12 @@ function sanitizeBuilderPreferences(
           ? exportSource.includeCsproj
           : DEFAULT_EXPORT_OPTIONS
               .includeCsproj,
+      includeNodeIndex:
+        typeof exportSource
+          .includeNodeIndex === "boolean"
+          ? exportSource.includeNodeIndex
+          : DEFAULT_EXPORT_OPTIONS
+              .includeNodeIndex,
       includeCompiled:
         typeof exportSource
           .includeCompiled === "boolean"
@@ -952,6 +959,7 @@ let typedNodeGraphModulesTrackingStarted = false;
 let generatedOutlineArtifactKey = "";
 let generatedGraphArtifactKey = "";
 let generatedArtifactSelectionLock = null;
+let generatedOutputValidationSequence = 0;
 let exportCopyArtifactKey = "";
 const browserCompilerReferenceFiles = new Map();
 const browserCompilerAdditionalRequiredReferences =
@@ -962,11 +970,16 @@ let browserCompilerBuildPromise = null;
 let browserCompilerBuildFingerprint = "";
 let browserCompilerBuildProjectEpoch = 0;
 let browserCompilerBuildSignal = null;
+let browserCompilerBuildProjectSources = null;
+let browserCompilerBuildReferenceFiles = null;
+let browserCompilerBuildReferenceIdentities = null;
 let browserCompilerReferenceRevision = 0;
 let browserCompilerDirectoryFiles = Object.freeze([]);
 let browserCompilerDirectoryFileCount = 0;
 let browserCompilerDirectoryMatchCount = 0;
 let browserCompilerReferencePaths = new WeakMap();
+let browserCompilerReferenceIdentityPromises = new WeakMap();
+let browserCompilerReferenceIdentityValues = new WeakMap();
 let browserCompilerReferenceSearchRunning = false;
 let browserCompilerReferenceDragDepth = 0;
 let exportPreflightSequence = 0;
@@ -981,6 +994,142 @@ let exportReadiness = Object.freeze({
   diagnostics: Object.freeze([]),
   fileCount: 0
 });
+let validatedGeneratedPublication = null;
+
+function commitValidatedGeneratedPublication({
+  catalog,
+  files,
+  fingerprint,
+  inputSnapshot,
+  projectEpoch = projectApplicationEpoch
+}) {
+  const frozenCatalog =
+    freezeGeneratedArtifactCatalog(
+      catalog
+    );
+  validatedGeneratedPublication =
+    Object.freeze({
+      projectEpoch,
+      inputSnapshot: String(
+        inputSnapshot || ""
+      ),
+      fingerprint: String(
+        fingerprint || ""
+      ),
+      catalog: frozenCatalog,
+      files: Object.freeze(
+        (Array.isArray(files)
+          ? files
+          : generatedCSharpFiles(
+              frozenCatalog.artifacts
+            )
+        ).map(file =>
+          Object.freeze({
+            name: String(
+              file?.name || ""
+            ),
+            content: String(
+              file?.content || ""
+            )
+          })
+        )
+      )
+    });
+  return validatedGeneratedPublication;
+}
+
+function currentValidatedGeneratedPublication() {
+  const snapshot =
+    validatedGeneratedPublication;
+  if (
+    !snapshot ||
+    snapshot.projectEpoch !==
+      projectApplicationEpoch ||
+    snapshot.inputSnapshot !==
+      generatedPublicationInputSnapshot() ||
+    window.RMLDynamicGraphHost
+      ?.hasPendingEditorEdits?.() ||
+    window.RMLDynamicGraphHost
+      ?.hasUncommittedGraphChanges?.()
+  ) {
+    return null;
+  }
+  return snapshot;
+}
+
+function normalizeGeneratedCSharpSource(
+  value
+) {
+  const source = String(value ?? "");
+  const normalize =
+    window.RMLCodeTemplates
+      ?.normalizeCSharpSource;
+  return typeof normalize === "function"
+    ? normalize(source)
+    : source;
+}
+
+function normalizeGeneratedCSharpFile(
+  file
+) {
+  const name = String(
+    file?.name ||
+    file?.archivePath ||
+    file?.relativePath ||
+    file?.fileName ||
+    ""
+  );
+  if (!/\.cs$/i.test(name)) {
+    return file;
+  }
+  const original = String(
+    file?.content || ""
+  );
+  const normalized =
+    normalizeGeneratedCSharpSource(
+      original
+    );
+  if (normalized === original) {
+    return {
+      ...file,
+      content: original
+    };
+  }
+  let offset = 0;
+  const limit = Math.min(
+    original.length,
+    normalized.length
+  );
+  while (
+    offset < limit &&
+    original[offset] === normalized[offset]
+  ) {
+    offset += 1;
+  }
+  const prefix = original.slice(0, offset);
+  const line =
+    prefix.split(/\r\n?|\n/).length;
+  const lastBreak = Math.max(
+    prefix.lastIndexOf("\n"),
+    prefix.lastIndexOf("\r")
+  );
+  const column =
+    offset - lastBreak;
+  return {
+    ...file,
+    content: "",
+    generationFailure: Object.freeze({
+      kind: "invalid-structural-escape",
+      fileName: name,
+      line,
+      column,
+      message:
+        window.RMLI18n.t(
+          "generated.validation.structural_escape"
+        )
+    })
+  };
+}
 
 function generatedCSharpFiles(
   artifacts
@@ -1013,7 +1162,9 @@ function generatedCSharpFiles(
 }
 
 function exportReadinessDiagnostics() {
-  return exportReadiness.phase === "error"
+  return ["blocked", "error"].includes(
+    exportReadiness.phase
+  )
     ? [...exportReadiness.diagnostics]
     : [];
 }
@@ -1071,10 +1222,20 @@ function renderGeneratedDiagnostics(
   synchronousDiagnostics = getDiagnostics()
 ) {
   const diagnostics = [
-    ...(Array.isArray(synchronousDiagnostics)
-      ? synchronousDiagnostics
-      : []),
-    ...exportReadinessDiagnostics()
+    ...new Set(
+      [
+        ...(Array.isArray(
+          synchronousDiagnostics
+        )
+          ? synchronousDiagnostics
+          : []),
+        ...exportReadinessDiagnostics()
+      ]
+        .map(diagnostic =>
+          String(diagnostic || "").trim()
+        )
+        .filter(Boolean)
+    )
   ];
   const blockingDiagnostics =
     diagnostics.filter(
@@ -1097,12 +1258,30 @@ function renderGeneratedDiagnostics(
 }
 
 function applyPrimaryExportAvailability(synchronousDiagnostics = getDiagnostics()) {
-  const busy = Boolean(exportPreflightRequest) || exportDeliveryBusy;
+  const busy =
+    Boolean(exportPreflightRequest) ||
+    exportDeliveryBusy ||
+    exportReadiness.phase === "checking";
+  const blocked =
+    ["blocked", "error"].includes(
+      exportReadiness.phase
+    ) ||
+    (Array.isArray(synchronousDiagnostics)
+      ? synchronousDiagnostics
+      : [])
+      .some(diagnostic =>
+        !isGeneratedSourcePendingDiagnostic(
+          diagnostic
+        )
+      );
   for (const button of [elements.copyCodeBottom, elements.downloadCode]) {
-    setExportControlAvailability(button, !busy);
+    setExportControlAvailability(
+      button,
+      !busy && !blocked
+    );
     if (button) button.setAttribute("aria-busy", String(busy));
   }
-  if (busy) {
+  if (busy || blocked) {
     setExportControlAvailability(elements.exportDownloadSelected, false);
     setExportControlAvailability(elements.exportCopySelectedFile, false);
   }
@@ -1111,24 +1290,237 @@ function applyPrimaryExportAvailability(synchronousDiagnostics = getDiagnostics(
   renderGeneratedDiagnostics(synchronousDiagnostics);
 }
 
-function formatExportPreflightDiagnostics(
-  result
+function normalizedGeneratedDiagnosticPath(
+  value
+) {
+  return String(value || "")
+    .replace(/\\/g, "/")
+    .replace(/^\.\//, "")
+    .toLowerCase();
+}
+
+function generatedArtifactForDiagnostic(
+  diagnostic,
+  artifacts = []
+) {
+  const requested =
+    normalizedGeneratedDiagnosticPath(
+      diagnostic?.fileName
+    );
+  if (!requested) return null;
+  const projectId = String(
+    diagnostic?.projectId || ""
+  ).trim().toLowerCase();
+  const candidates = (Array.isArray(artifacts)
+    ? artifacts
+    : [])
+    .filter(artifact =>
+      /\.cs$/i.test(
+        String(
+          artifact?.archivePath ||
+          artifact?.relativePath ||
+          artifact?.fileName ||
+          ""
+        )
+      )
+    )
+    .filter(artifact =>
+      !projectId ||
+      String(artifact?.projectId || "")
+        .trim().toLowerCase() === projectId
+    );
+  return candidates.find(artifact =>
+    [
+      artifact.archivePath,
+      artifact.relativePath,
+      artifact.fileName
+    ].some(value =>
+      normalizedGeneratedDiagnosticPath(
+        value
+      ) === requested
+    )
+  ) || candidates.find(artifact => {
+    const path =
+      normalizedGeneratedDiagnosticPath(
+        artifact.archivePath ||
+        artifact.relativePath
+      );
+    return path.endsWith(`/${requested}`) ||
+      requested.endsWith(`/${path}`);
+  }) || null;
+}
+
+function generatedSourceOriginForDiagnostic(
+  diagnostic,
+  artifacts = []
+) {
+  const artifact =
+    generatedArtifactForDiagnostic(
+      diagnostic,
+      artifacts
+    );
+  const line =
+    Math.max(
+      0,
+      Number(diagnostic?.startLine) ||
+      Number(diagnostic?.line) ||
+      0
+    );
+  const column = Math.max(
+    0,
+    Number(diagnostic?.startColumn) ||
+    Number(diagnostic?.column) ||
+    0
+  );
+  if (!artifact || line <= 0) {
+    return { artifact, origin: null };
+  }
+  const origin = (Array.isArray(
+    artifact.sourceMap
+  )
+    ? artifact.sourceMap
+    : [])
+    .filter(entry =>
+      line >=
+        Math.max(
+          1,
+          Number(entry?.startLine) || 1
+        ) &&
+      line <=
+        Math.max(
+          Number(entry?.startLine) || 1,
+          Number(entry?.endLine) ||
+            Number.MAX_SAFE_INTEGER
+        ) &&
+      (
+        column <= 0 ||
+        line !== Number(entry?.startLine) ||
+        column >= Math.max(
+          1,
+          Number(entry?.startColumn) || 1
+        )
+      ) &&
+      (
+        column <= 0 ||
+        line !== Number(entry?.endLine) ||
+        column <= Math.max(
+          Number(entry?.startColumn) || 1,
+          Number(entry?.endColumn) ||
+            Number.MAX_SAFE_INTEGER
+        )
+      )
+    )
+    .sort((left, right) =>
+      (
+        (
+          Number(left?.endLine) -
+          Number(left?.startLine)
+        ) -
+        (
+          Number(right?.endLine) -
+          Number(right?.startLine)
+        )
+      ) ||
+      (
+        (
+          Number(left?.endColumn) -
+          Number(left?.startColumn)
+        ) -
+        (
+          Number(right?.endColumn) -
+          Number(right?.startColumn)
+        )
+      )
+    )[0] || null;
+  return { artifact, origin };
+}
+
+function formatGeneratedCSharpDiagnostic(
+  diagnostic,
+  artifacts = [],
+  projectLabel = ""
 ) {
   const formatter =
     window.RMLCompile?.diagnosticText;
+  const detail =
+    typeof formatter === "function"
+      ? formatter(diagnostic)
+      : String(
+          diagnostic?.message ||
+          diagnostic ||
+          window.RMLI18n.t("ui.auto.5d693dcc2c35")
+        );
+  const { origin } =
+    generatedSourceOriginForDiagnostic(
+      diagnostic,
+      artifacts
+    );
+  const owner = origin
+    ? window.RMLI18n.format(
+        "generated.validation.node_error",
+        {
+          label:
+            origin.nodeLabel ||
+            origin.nodeId ||
+            window.RMLI18n.t("ui.literal.79bf95179598"),
+          nodeId:
+            origin.nodeId || "?",
+          operatorId:
+            origin.operatorId || "?",
+          graphPath:
+            origin.graphPath ||
+            window.RMLI18n.t("index.text.6d4a0105e876")
+        }
+      )
+    : "";
+  const project = String(projectLabel || "").trim();
+  return [
+    "Generated C#:",
+    project,
+    owner,
+    detail
+  ].filter(Boolean).join(" ");
+}
+
+function formatGeneratedArtifactFailure(
+  failure,
+  artifacts = []
+) {
+  const diagnostic = {
+    fileName:
+      failure?.archivePath ||
+      failure?.relativePath ||
+      failure?.fileName ||
+      "Generated.cs",
+    id: "RMLG0001",
+    message:
+      failure?.message ||
+      window.RMLI18n.t(
+        "generated.validation.failed"
+      ),
+    startLine:
+      Number(failure?.line) || 0,
+    startColumn:
+      Number(failure?.column) || 0
+  };
+  return formatGeneratedCSharpDiagnostic(
+    diagnostic,
+    artifacts
+  );
+}
+
+function formatExportPreflightDiagnostics(
+  result,
+  artifacts = []
+) {
   return (Array.isArray(result?.diagnostics)
     ? result.diagnostics
     : [])
     .map(diagnostic =>
-      `Generated C#: ${
-        typeof formatter === "function"
-          ? formatter(diagnostic)
-          : String(
-              diagnostic?.message ||
-              diagnostic ||
-              window.RMLI18n.t("ui.auto.5d693dcc2c35")
-            )
-      }`
+      formatGeneratedCSharpDiagnostic(
+        diagnostic,
+        artifacts
+      )
     );
 }
 
@@ -1163,7 +1555,15 @@ function updateExportPreviewStatus(_artifacts, synchronousDiagnostics = []) {
   if (!exportPreflightRequest) {
     exportReadiness = Object.freeze({
       phase: synchronousDiagnostics.length ? "blocked" : "idle",
-      fingerprint: "", diagnostics: Object.freeze([]), fileCount: 0
+      fingerprint: "",
+      diagnostics: Object.freeze([
+        ...(Array.isArray(
+          synchronousDiagnostics
+        )
+          ? synchronousDiagnostics
+          : [])
+      ]),
+      fileCount: 0
     });
   }
   applyPrimaryExportAvailability(synchronousDiagnostics);
@@ -1179,6 +1579,33 @@ function exportInputSnapshot() {
     apiReport: window.RMLApiNodeFactoryReport,
     catalog: graphCodegenCatalogKey(window.RMLResoniteApiCatalog ||
       window.RMLFrooxComponentCatalog || null)
+  });
+}
+
+function generatedPublicationInputSnapshot() {
+  return JSON.stringify({
+    projectId: state.projectId,
+    metadata: state.metadata,
+    resonitePath:
+      state.exportOptions?.resonitePath ||
+      "",
+    nodes: state.nodes,
+    extensions: state.extensions,
+    definitions:
+      Number(
+        window.__RMLNodeDefinitionRevision
+      ) || 0,
+    apiFactory:
+      Number(
+        window.__RMLApiNodeFactoryVersion
+      ) || 0,
+    apiReport:
+      window.RMLApiNodeFactoryReport,
+    catalog: graphCodegenCatalogKey(
+      window.RMLResoniteApiCatalog ||
+      window.RMLFrooxComponentCatalog ||
+      null
+    )
   });
 }
 
@@ -1298,6 +1725,17 @@ function assertExportRequestCurrent(request, compareSnapshot = false) {
   if (compareSnapshot && request.snapshot !== exportInputSnapshot()) {
     throw exportRequestChanged();
   }
+  if (
+    request.semanticReferenceFingerprint &&
+    request.semanticReferenceFingerprint !==
+      browserCompilerReferenceFingerprint()
+  ) {
+    throw exportRequestChanged(
+      window.RMLI18n.t(
+        "export.compiler_references.changed"
+      )
+    );
+  }
 }
 
 function awaitExportStep(request, promise) {
@@ -1336,11 +1774,141 @@ function cancelExportPreflight(message = window.RMLI18n.t("ui.auto.8eb305569ec9"
   return true;
 }
 
-function requestExportPreflight({ prepareStyles = false } = {}) {
-  if (exportPreflightRequest) return exportPreflightRequest.promise;
+async function compileGeneratedPublicationForPreflight(
+  catalog,
+  request
+) {
+  const signal = request.controller.signal;
+  let compiled = null;
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    await awaitExportStep(
+      request,
+      ensureBrowserCompilerReferences(
+        catalog,
+        request,
+        signal
+      )
+    );
+    assertExportRequestCurrent(request, true);
+
+    try {
+      compiled = await awaitExportStep(
+        request,
+        compileGeneratedBrowserDlls(
+          catalog,
+          request,
+          signal
+        )
+      );
+      break;
+    } catch (error) {
+      if (
+        error?.code !==
+          "RML_COMPILER_REFERENCES_REQUIRED" ||
+        attempt === 7
+      ) {
+        throw error;
+      }
+    }
+  }
+
+  if (!compiled) {
+    throw new Error(
+      window.RMLI18n.t(
+        "generated.validation.semantic_failed"
+      )
+    );
+  }
+
+  assertExportRequestCurrent(request, true);
+  const projects =
+    browserCompilationProjects(catalog);
+  const projectSources =
+    browserCompilationProjectSources(projects);
+  const referenceFiles =
+    selectedBrowserCompilerReferences();
+  const referenceRevision =
+    browserCompilerReferenceRevision;
+  const referenceIdentities =
+    await prepareBrowserCompilerReferenceIdentities(
+      referenceFiles,
+      signal
+    );
+  assertExportRequestCurrent(request, true);
+  const fingerprint =
+    browserCompilationFingerprint(
+      projects,
+      referenceFiles,
+      referenceRevision,
+      referenceIdentities
+    );
+  const referenceFingerprint =
+    browserCompilerReferenceFingerprint(
+      referenceFiles,
+      referenceRevision,
+      referenceIdentities
+    );
+
+  if (
+    compiled.projectEpoch !== request.projectEpoch ||
+    compiled.fingerprint !== fingerprint ||
+    !sameBrowserCompilationProjectSources(
+      compiled.projectSources,
+      projectSources
+    ) ||
+    !sameBrowserCompilerReferenceFiles(
+      compiled.referenceFiles,
+      referenceFiles
+    ) ||
+    !sameBrowserCompilerReferenceIdentities(
+      compiled.referenceIdentities,
+      referenceIdentities
+    )
+  ) {
+    throw browserCompilerBuildSuperseded(
+      "the generated sources or compiler references changed before publication"
+    );
+  }
+
+  request.semanticReferenceFingerprint =
+    referenceFingerprint;
+  assertExportRequestCurrent(request, true);
+  return Object.freeze({
+    fingerprint,
+    referenceFingerprint,
+    projectSources,
+    outputs: compiled.outputs,
+    diagnostics: compiled.diagnostics
+  });
+}
+
+function requestExportPreflight({
+  prepareStyles = false,
+  requireSemantic = false
+} = {}) {
+  const semanticRequired = requireSemantic === true;
+  if (exportPreflightRequest) {
+    if (
+      !semanticRequired ||
+      exportPreflightRequest.requireSemantic
+    ) {
+      return exportPreflightRequest.promise;
+    }
+    return exportPreflightRequest.promise.then(() =>
+      requestExportPreflight({
+        prepareStyles,
+        requireSemantic: true
+      })
+    );
+  }
   const request = {
     id: ++exportPreflightSequence, projectEpoch: projectApplicationEpoch,
-    inputRevision: null, snapshot: "", controller: new AbortController(), promise: null
+    inputRevision: null, snapshot: "", semanticReferenceFingerprint: "",
+    sourceFingerprint: "", sourceFileCount: 0,
+    syntaxValidated: false,
+    requireSemantic: semanticRequired,
+    controller: new AbortController(), promise: null
   };
   exportPreflightRequest = request;
   const replaced = () => {
@@ -1512,6 +2080,21 @@ function requestExportPreflight({ prepareStyles = false } = {}) {
         output.catalog
       );
     const artifacts = catalog.artifacts;
+    if (
+      catalog.generationDiagnostics.length > 0
+    ) {
+      throw new Error(
+        catalog.generationDiagnostics
+          .slice(0, 8)
+          .map(diagnostic =>
+            formatGeneratedArtifactFailure(
+              diagnostic,
+              artifacts
+            )
+          )
+          .join(" | ")
+      );
+    }
     const files = Object.freeze(generatedCSharpFiles(artifacts)
       .map(file => Object.freeze({ ...file })));
     if (!files.length) throw new Error(window.RMLI18n.t("ui.auto.82f2b528a79c"));
@@ -1528,15 +2111,67 @@ function requestExportPreflight({ prepareStyles = false } = {}) {
     assertExportRequestCurrent(request, true);
     if (result?.fingerprint !== fingerprint) throw new Error(window.RMLI18n.t("ui.literal.914170737781"));
     if (result?.phase !== "ready") throw new Error(
-      formatExportPreflightDiagnostics(result).slice(0, 8).join(" | ") || "C# 14 export validation failed."
+      formatExportPreflightDiagnostics(result, artifacts).slice(0, 8).join(" | ") || "C# 14 export validation failed."
     );
     const latestDiagnostics = getDiagnostics();
     if (latestDiagnostics.length) throw new Error(latestDiagnostics.slice(0, 8).join(" | "));
-    setExportReadiness("ready", { fingerprint, fileCount: files.length }, []);
-    return Object.freeze({ request, files, artifacts, catalog, code: output.code, fingerprint });
+    request.sourceFingerprint = fingerprint;
+    request.sourceFileCount = files.length;
+    request.syntaxValidated = true;
+    setExportReadiness(
+      "ready",
+      { fingerprint, fileCount: files.length },
+      []
+    );
+    commitValidatedGeneratedPublication({
+      catalog,
+      files,
+      fingerprint,
+      inputSnapshot:
+        generatedPublicationInputSnapshot(),
+      projectEpoch: request.projectEpoch
+    });
+    const semanticCompilation =
+      request.requireSemantic
+        ? await compileGeneratedPublicationForPreflight(
+            catalog,
+            request
+          )
+        : null;
+    assertExportRequestCurrent(request, true);
+    const finalDiagnostics = getDiagnostics();
+    if (finalDiagnostics.length) {
+      throw new Error(
+        finalDiagnostics.slice(0, 8).join(" | ")
+      );
+    }
+    return Object.freeze({
+      request,
+      files,
+      artifacts,
+      catalog,
+      code: output.code,
+      fingerprint,
+      semanticCompilation
+    });
   })().catch(error => {
     if (exportPreflightRequest === request) {
       if (["RML_EXPORT_CHANGED", "RML_EXPORT_CANCELLED"].includes(error?.code)) setExportReadiness("idle", {}, []);
+      else if (
+        request.requireSemantic &&
+        request.syntaxValidated
+      ) {
+        setExportReadiness(
+          "ready",
+          {
+            fingerprint:
+              request.sourceFingerprint,
+            fileCount:
+              request.sourceFileCount
+          },
+          []
+        );
+      }
       else setExportReadiness("error", { diagnostics: [String(error?.message || error)] }, []);
     }
     throw error;
@@ -4512,7 +5147,7 @@ function ensureGraphCodegenWorker() {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open",
+      "../workers/graph_codegen_worker.js?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -8384,9 +9019,18 @@ function getAdditionalGeneratedSourceFiles() {
     .map(file => ({
       name: file.name,
       content: file.content,
+      sourceMap: Array.isArray(
+        file.sourceMap
+      )
+        ? file.sourceMap.map(entry => ({
+            ...entry
+          }))
+        : [],
       type:
         file.type ||
-        "text/plain;charset=utf-8"
+        "text/plain;charset=utf-8",
+      exportCategory:
+        String(file.exportCategory || "")
     }));
 }
 
@@ -12252,6 +12896,11 @@ function parseProjectDocument(
         "boolean"
           ? exportSource.includeCsproj
           : DEFAULT_EXPORT_OPTIONS.includeCsproj,
+      includeNodeIndex:
+        typeof exportSource.includeNodeIndex ===
+        "boolean"
+          ? exportSource.includeNodeIndex
+          : DEFAULT_EXPORT_OPTIONS.includeNodeIndex,
       includeCompiled:
         typeof exportSource.includeCompiled ===
         "boolean"
@@ -13545,7 +14194,7 @@ function renderPalette() {
               data-help="${escapeHtml(outlinePaletteHelp(item))}">
               <span>${escapeHtml(item.badge)}</span>
               <strong>${escapeHtml(item.label)}</strong>
-              <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-add"></use></svg></b>
+              <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-add"></use></svg></b>
             </button>`;
           }
 
@@ -13560,7 +14209,7 @@ function renderPalette() {
             data-help="${escapeHtml(entry.family.id === "numberConstant" ? window.RMLI18n.t("ui.dev327.outline.number.help") : window.RMLI18n.t("ui.dev327.outline.vector.help"))}">
             <span>${outlineSymbolMarkup(entry.family.symbol)}</span>
             <strong>${escapeHtml(entry.family.title)}</strong>
-            <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-add"></use></svg></b>
+            <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-add"></use></svg></b>
           </button>`;
         })
         .join("");
@@ -13579,7 +14228,7 @@ function renderPalette() {
                   data-help="${escapeHtml(window.RMLI18n.t("ui.attr.e126e5850c57"))}">
                   <span>{{i18n:js.presentation.adddc72949b2}}</span>
                   <strong>${escapeHtml(`DYN · ${source.label}`)}</strong>
-                  <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-add"></use></svg></b>
+                  <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-add"></use></svg></b>
                 </button>`
               )
               .join("")
@@ -13916,7 +14565,7 @@ const nextOptionDirection =
                       option.children,
                       option.id
                     )
-                  : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-add"></use></svg></span>{{i18n:ui.text.3f27e6ab79a6}}</div>`
+                  : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-add"></use></svg></span>{{i18n:ui.text.3f27e6ab79a6}}</div>`
               }
             </div>
           </section>`
@@ -13947,7 +14596,7 @@ const nextOptionDirection =
         ${
           children.length
             ? nodeCardsMarkup(children, node.id)
-            : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-add"></use></svg></span>{{i18n:ui.text.572874456a9e}}</div>`
+            : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-add"></use></svg></span>{{i18n:ui.text.572874456a9e}}</div>`
         }
       </div>
     </section>`;
@@ -21514,7 +22163,7 @@ function controllerInspectorMarkup(node) {
       <legend>{{i18n:ui.text.722c20869f7e}}</legend>
       ${options}
       <button class="add-option" type="button" data-add-option>
-        <svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-add"></use></svg> ${window.RMLI18n.t("ui.outline.addSection")}
+        <svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-add"></use></svg> ${window.RMLI18n.t("ui.outline.addSection")}
       </button>
     </fieldset>
     <label>
@@ -24220,6 +24869,62 @@ function updateGeneratedOutput() {
     errors = getDiagnostics();
     output =
       generatedCodeForCurrentView();
+    const frozenCatalog =
+      freezeGeneratedArtifactCatalog(
+        output.catalog
+      );
+    const selectedArtifact =
+      frozenCatalog.artifacts.find(
+        artifact =>
+          artifact.key ===
+            output.selectedArtifact?.key
+      ) || null;
+    output = Object.freeze({
+      ...output,
+      catalog: frozenCatalog,
+      artifacts:
+        frozenCatalog.artifacts,
+      selectedArtifact,
+      code:
+        selectedArtifact?.content ||
+        "// No generated project file is available yet.\n"
+    });
+    const generationErrors =
+      (output.catalog
+        ?.generationDiagnostics || [])
+        .map(diagnostic =>
+          formatGeneratedArtifactFailure(
+            diagnostic,
+            output.artifacts
+          )
+        );
+    if (generationErrors.length > 0) {
+      validatedGeneratedPublication = null;
+      elements.generatedCode.textContent = "";
+      elements.generatedCode.removeAttribute(
+        "aria-busy"
+      );
+      elements.codeSummary.textContent =
+        window.RMLI18n.t(
+          "generated.validation.rejected_preview"
+        );
+      updateExportPreviewStatus(
+        [],
+        generationErrors
+      );
+      setExportControlAvailability(
+        elements.exportCopySelectedFile,
+        false
+      );
+      setExportControlAvailability(
+        elements.exportDownloadSelected,
+        false
+      );
+      if (elements.exportDialog?.open) {
+        updateExportDialog();
+      }
+      return;
+    }
     if (
       generatedArtifactSelectionLock?.projectEpoch ===
         projectApplicationEpoch &&
@@ -24236,6 +24941,7 @@ function updateGeneratedOutput() {
       return;
     }
   } catch (error) {
+    validatedGeneratedPublication = null;
     const message =
       error instanceof Error
         ? error.message
@@ -24256,64 +24962,245 @@ function updateGeneratedOutput() {
     if (elements.exportDialog?.open) updateExportDialog();
     return;
   }
-  elements.generatedCode.removeAttribute("aria-busy");
-  const code = output.code;
-  const selected =
-    output.selectedArtifact;
+  const commitValidatedOutput = () => {
+    elements.generatedCode.removeAttribute("aria-busy");
+    const code = output.code;
+    const selected =
+      output.selectedArtifact;
 
-  elements.generatedCode.textContent = code;
+    elements.generatedCode.textContent = code;
 
-  if (elements.generatedCodeTitle) {
-    elements.generatedCodeTitle.textContent =
-      output.graphActive
-        ? window.RMLI18n.t("index.text.6d4a0105e876")
-        : window.RMLI18n.t("index.text.ffe91f732721");
-  }
+    if (elements.generatedCodeTitle) {
+      elements.generatedCodeTitle.textContent =
+        output.graphActive
+          ? window.RMLI18n.t("index.text.6d4a0105e876")
+          : window.RMLI18n.t("index.text.ffe91f732721");
+    }
 
-  if (elements.generatedFileSwitcher) {
-    elements.generatedFileSwitcher.hidden =
-      output.artifacts.length === 0;
-  }
+    if (elements.generatedFileSwitcher) {
+      elements.generatedFileSwitcher.hidden =
+        output.artifacts.length === 0;
+    }
 
-  populateGeneratedArtifactSelect(
-    elements.generatedFileSelect,
-    output.artifacts,
-    selected?.key || ""
-  );
-
-  if (output.graphActive) {
-    elements.codeSummary.textContent =
-      selected
-        ? `${selected.relativePath} · ${selected.kindLabel} · ${code.split("\n").length} lines · ${output.artifacts.length} generated files`
-        : window.RMLI18n.t("ui.literal.d8922135df3e");
-  } else {
-    elements.codeSummary.textContent =
-      selected
-        ? window.RMLI18n.format("ui.auto.6e7a1b296abb", { path: selected.relativePath, kind: selected.kindLabel, lines: code.split("\n").length, items: window.RMLI18n.format(currentFlattenedNodes().length === 1 ? "ui.auto.51e57b9d9320" : "ui.auto.fc11a3bda35a", { count: currentFlattenedNodes().length }) })
-        : window.RMLI18n.t("ui.literal.d8922135df3e");
-  }
-
-  if (elements.copyCodeBottom) {
-    const path =
-      selected?.relativePath ||
-      `${generatedBaseName()}.cs`;
-
-    elements.copyCodeBottom.setAttribute(
-      "aria-label",
-      `Copy ${path}`
+    populateGeneratedArtifactSelect(
+      elements.generatedFileSelect,
+      output.artifacts,
+      selected?.key || ""
     );
-    elements.copyCodeBottom.dataset.help =
-      `Copy ${path} to the clipboard.`;
+
+    if (output.graphActive) {
+      elements.codeSummary.textContent =
+        selected
+          ? `${selected.relativePath} · ${selected.kindLabel} · ${code.split("\n").length} lines · ${output.artifacts.length} generated files`
+          : window.RMLI18n.t("ui.literal.d8922135df3e");
+    } else {
+      elements.codeSummary.textContent =
+        selected
+          ? window.RMLI18n.format("ui.auto.6e7a1b296abb", { path: selected.relativePath, kind: selected.kindLabel, lines: code.split("\n").length, items: window.RMLI18n.format(currentFlattenedNodes().length === 1 ? "ui.auto.51e57b9d9320" : "ui.auto.fc11a3bda35a", { count: currentFlattenedNodes().length }) })
+          : window.RMLI18n.t("ui.literal.d8922135df3e");
+    }
+
+    if (elements.copyCodeBottom) {
+      const path =
+        selected?.relativePath ||
+        `${generatedBaseName()}.cs`;
+
+      elements.copyCodeBottom.setAttribute(
+        "aria-label",
+        `Copy ${path}`
+      );
+      elements.copyCodeBottom.dataset.help =
+        `Copy ${path} to the clipboard.`;
+    }
+
+    updateExportPreviewStatus(
+      output.artifacts,
+      errors
+    );
+
+    if (elements.exportDialog?.open) {
+      updateExportDialog();
+    }
+  };
+
+  const validationSequence =
+    ++generatedOutputValidationSequence;
+  const validationEpoch =
+    projectApplicationEpoch;
+  const validationSnapshot =
+    generatedPublicationInputSnapshot();
+  const files = Object.freeze(
+    generatedCSharpFiles(
+      output.artifacts
+    ).map(file =>
+      Object.freeze({ ...file })
+    )
+  );
+  const commitIfCurrent = result => {
+    if (
+      validationSequence !==
+        generatedOutputValidationSequence ||
+      validationEpoch !==
+        projectApplicationEpoch ||
+      validationSnapshot !==
+        generatedPublicationInputSnapshot() ||
+      window.RMLDynamicGraphHost
+        ?.hasPendingEditorEdits?.() ||
+      window.RMLDynamicGraphHost
+        ?.hasUncommittedGraphChanges?.()
+    ) {
+      return false;
+    }
+    const compiler = window.RMLCompile;
+    const fingerprint =
+      compiler?.fingerprint?.(files) || "";
+    if (
+      result?.phase !== "ready" ||
+      result?.fingerprint !== fingerprint
+    ) {
+      validatedGeneratedPublication = null;
+      const diagnostics =
+        formatExportPreflightDiagnostics(
+          result,
+          output.artifacts
+        );
+      const messages = diagnostics.length > 0
+        ? diagnostics
+        : [
+            `Generated C#: ${window.RMLI18n.t(
+              "generated.validation.failed"
+            )}`
+          ];
+      elements.generatedCode.textContent = "";
+      elements.generatedCode.removeAttribute(
+        "aria-busy"
+      );
+      elements.codeSummary.textContent =
+        window.RMLI18n.t(
+          "generated.validation.rejected_preview"
+        );
+      setExportReadiness(
+        "error",
+        {
+          fingerprint,
+          diagnostics: messages,
+          fileCount: files.length
+        },
+        errors
+      );
+      if (elements.exportDialog?.open) {
+        updateExportDialog();
+      }
+      return false;
+    }
+    setExportReadiness(
+      "ready",
+      {
+        fingerprint,
+        fileCount: files.length
+      },
+      errors
+    );
+    commitValidatedGeneratedPublication({
+      catalog: output.catalog,
+      files,
+      fingerprint,
+      inputSnapshot: validationSnapshot,
+      projectEpoch: validationEpoch
+    });
+    commitValidatedOutput();
+    return true;
+  };
+
+  if (files.length === 0) {
+    commitValidatedOutput();
+    return;
   }
 
-  updateExportPreviewStatus(
-    output.artifacts,
+  const compiler = window.RMLCompile;
+  const inspected =
+    compiler?.inspect?.(files);
+  if (
+    inspected?.phase === "ready" ||
+    inspected?.phase === "error"
+  ) {
+    commitIfCurrent(inspected);
+    return;
+  }
+
+  elements.generatedCode.textContent = "";
+  elements.generatedCode.setAttribute(
+    "aria-busy",
+    "true"
+  );
+  elements.codeSummary.textContent =
+    window.RMLI18n.t(
+      "generated.validation.in_progress"
+    );
+  setExportReadiness(
+    "checking",
+    { fileCount: files.length },
     errors
   );
-
-  if (elements.exportDialog?.open) {
-    updateExportDialog();
-  }
+  ensureLazyScriptBundle("compiler")
+    .then(() => {
+      if (
+        validationSequence !==
+          generatedOutputValidationSequence
+      ) {
+        return null;
+      }
+      const activeCompiler =
+        window.RMLCompile;
+      if (
+        typeof activeCompiler?.validate !==
+          "function"
+      ) {
+        throw new Error(
+          window.RMLI18n.t(
+            "ui.literal.378af17db851"
+          )
+        );
+      }
+      return activeCompiler.validate(files);
+    })
+    .then(result => {
+      if (result) {
+        commitIfCurrent(result);
+      }
+    })
+    .catch(error => {
+      if (
+        validationSequence !==
+          generatedOutputValidationSequence ||
+        validationEpoch !==
+          projectApplicationEpoch
+      ) {
+        return;
+      }
+      const message = `Generated C#: ${
+        error instanceof Error
+          ? error.message
+          : String(error)
+      }`;
+      validatedGeneratedPublication = null;
+      elements.generatedCode.textContent = "";
+      elements.generatedCode.removeAttribute(
+        "aria-busy"
+      );
+      elements.codeSummary.textContent =
+        window.RMLI18n.t(
+          "generated.validation.rejected_preview"
+        );
+      setExportReadiness(
+        "error",
+        {
+          diagnostics: [message],
+          fileCount: files.length
+        },
+        errors
+      );
+    });
 }
 
 function renderAll() {
@@ -24595,14 +25482,14 @@ function previewEnumEditorMarkup(
       ${settingsPreviewLiveDisabledAttributes(node.id)}
       data-preview-enum-direction="-1"
       data-preview-node="${escapeHtml(node.id)}"
-      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.5caa1fc4e7c2"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-triangle-left"></use></svg></button>
+      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.5caa1fc4e7c2"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-triangle-left"></use></svg></button>
     <button
       class="rml-preview-control rml-preview-enum-step"
       type="button"
       ${settingsPreviewLiveDisabledAttributes(node.id)}
       data-preview-enum-direction="1"
       data-preview-node="${escapeHtml(node.id)}"
-      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.c400ec237248"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-triangle-right"></use></svg></button>
+      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.c400ec237248"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-triangle-right"></use></svg></button>
   </div>`;
 }
 
@@ -24677,7 +25564,7 @@ function previewSettingEditorMarkup(node) {
         data-preview-bool="${escapeHtml(node.id)}"${
           value ? " checked" : ""
         }>
-      <span aria-hidden="true"><svg class="rml-inline-icon" viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-check"></use></svg></span>
+      <span aria-hidden="true"><svg class="rml-inline-icon" viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-check"></use></svg></span>
     </label>`;
   }
 
@@ -28403,7 +29290,9 @@ async function copyGeneratedCodeForCurrentView(button) {
   generatedArtifactSelectionLock =
     selectionLock;
   try {
-    const checked = await requestExportPreflight();
+    const checked = await requestExportPreflight({
+      requireSemantic: false
+    });
     assertExportRequestCurrent(checked.request, true);
     const artifact = checked.artifacts.find(
       candidate => candidate.key === selectedKey
@@ -28455,9 +29344,24 @@ Object.defineProperty(
   window.RMLI18n.t("ui.literal.1b3f926b523f"),
   {
     value: Object.freeze({
-      version: 1,
-      blob: (blob, filename) =>
-        downloadBlob(blob, filename)
+      version: 2,
+      blob: (blob, filename) => {
+        const safeName = String(
+          filename || ""
+        );
+        if (
+          !safeName.endsWith(
+            ".rmlapicomposite.json.gz"
+          )
+        ) {
+          throw new Error(
+            window.RMLI18n.t(
+              "generated.validation.download_bridge_restricted"
+            )
+          );
+        }
+        downloadBlob(blob, safeName);
+      }
     }),
     writable: false,
     enumerable: false,
@@ -28987,7 +29891,7 @@ async function requestBuilderReplacementChoice(
                 ? "!"
                 : "·";
       if (status === "selected") {
-        state.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-check"></use></svg>`;
+        state.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-check"></use></svg>`;
       }
       const name =
         document.createElement("span");
@@ -30933,7 +31837,7 @@ function promiseWithBuilderTimeout(
 
 function assertProjectRuntimeModuleCoherence() {
   const expectedModuleId =
-    "1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open";
+    "1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle";
   const requiredFactoryVersion = 38;
   const mismatches = [];
   const requireModuleId = (
@@ -36143,16 +37047,31 @@ ${projects
 
 function buildSelectedExportFiles(
   includeCs,
-  includeCsproj
+  includeCsproj,
+  includeNodeIndex = true
 ) {
   requireGeneratedGuidance();
   const baseName = generatedBaseName();
   const graphFiles =
     getAdditionalGeneratedSourceFiles();
+  const nodeIndexFiles =
+    graphFiles.filter(file =>
+      file.exportCategory ===
+        "node-index"
+    );
+  const graphSourceFiles =
+    graphFiles.filter(file =>
+      file.exportCategory !==
+        "node-index"
+    );
   const auxiliaryProjects =
     getAdditionalGeneratedProjects();
 
-  if (!includeCs && !includeCsproj) {
+  if (
+    !includeCs &&
+    !includeCsproj &&
+    !includeNodeIndex
+  ) {
     return {
       files: [],
       multiProject:
@@ -36171,7 +37090,11 @@ function buildSelectedExportFiles(
         type:
           "text/plain;charset=utf-8"
       });
-      files.push(...graphFiles);
+      files.push(...graphSourceFiles);
+    }
+
+    if (includeNodeIndex) {
+      files.push(...nodeIndexFiles);
     }
 
     if (includeCsproj) {
@@ -36239,7 +37162,7 @@ function buildSelectedExportFiles(
         "text/plain;charset=utf-8"
     });
 
-    for (const graphFile of graphFiles) {
+    for (const graphFile of graphSourceFiles) {
       addFile({
         ...graphFile,
         name:
@@ -36271,6 +37194,19 @@ function buildSelectedExportFiles(
         }
       }
     );
+  }
+
+  if (includeNodeIndex) {
+    for (const indexFile of nodeIndexFiles) {
+      addFile({
+        ...indexFile,
+        name:
+          `Mod/${safeArchiveRelativePath(
+            indexFile.name,
+            `${baseName}.NodeGraph.Index.md`
+          )}`
+      });
+    }
   }
 
   if (includeCsproj) {
@@ -36330,16 +37266,18 @@ function buildSelectedExportFiles(
     });
   }
 
-  addFile({
-    name: window.RMLI18n.t("ui.literal.8ec9a00bfd09"),
-    content:
-      generateMultiProjectReadme(
-        baseName,
-        auxiliaryProjects
-      ),
-    type:
-      "text/markdown;charset=utf-8"
-  });
+  if (includeCs || includeCsproj) {
+    addFile({
+      name: window.RMLI18n.t("ui.literal.8ec9a00bfd09"),
+      content:
+        generateMultiProjectReadme(
+          baseName,
+          auxiliaryProjects
+        ),
+      type:
+        "text/markdown;charset=utf-8"
+    });
+  }
 
   return {
     files,
@@ -36499,13 +37437,21 @@ function generatedProjectDescriptors(
 
 function buildGeneratedArtifactCatalog(
   includeCs = true,
-  includeCsproj = true
+  includeCsproj = true,
+  includeNodeIndex = true
 ) {
-  const result =
+  const generatedResult =
     buildSelectedExportFiles(
       includeCs,
-      includeCsproj
+      includeCsproj,
+      includeNodeIndex
     );
+  const result = {
+    ...generatedResult,
+    files: generatedResult.files.map(
+      normalizeGeneratedCSharpFile
+    )
+  };
   const projects =
     generatedProjectDescriptors(result);
   const projectFolders = projects
@@ -36560,9 +37506,20 @@ function buildGeneratedArtifactCatalog(
             .pop() ||
           normalizedPath,
         content: file.content ?? "",
+        sourceMap: Array.isArray(
+          file.sourceMap
+        )
+          ? file.sourceMap.map(entry => ({
+              ...entry
+            }))
+          : [],
+        generationFailure:
+          file.generationFailure || null,
         type:
           file.type ||
           "text/plain;charset=utf-8",
+        exportCategory:
+          String(file.exportCategory || ""),
         ...kind,
         projectId:
           project?.id ||
@@ -36581,11 +37538,50 @@ function buildGeneratedArtifactCatalog(
       };
     }
   );
+  const graphContribution =
+    getTypedNodeGraphContribution();
+  const graphGenerationDiagnostics =
+    (Array.isArray(
+      graphContribution?.diagnostics
+    )
+      ? graphContribution.diagnostics
+      : [])
+      .map(diagnostic =>
+        String(diagnostic || "").trim()
+      )
+      .filter(Boolean)
+      .map((message, index) => ({
+        kind:
+          "typed-node-graph-generation",
+        fileName:
+          `${generatedBaseName()}.NodeGraph.cs`,
+        diagnosticIndex: index,
+        message:
+          message.startsWith("Node graph:")
+            ? message
+            : `Node graph: ${message}`
+      }));
 
   return {
     ...result,
     projects,
-    artifacts
+    artifacts,
+    generationDiagnostics:
+      [
+        ...artifacts
+          .filter(artifact =>
+            artifact.generationFailure
+          )
+          .map(artifact => ({
+            artifactKey: artifact.key,
+            archivePath:
+              artifact.archivePath,
+            relativePath:
+              artifact.relativePath,
+            ...artifact.generationFailure
+          })),
+        ...graphGenerationDiagnostics
+      ]
   };
 }
 
@@ -36610,21 +37606,53 @@ function freezeGeneratedArtifactCatalog(
         .map(artifact => Object.freeze({
           ...artifact,
           content:
-            artifact?.content ?? ""
+            artifact?.content ?? "",
+          sourceMap: Object.freeze(
+            (Array.isArray(
+              artifact?.sourceMap
+            )
+              ? artifact.sourceMap
+              : [])
+              .map(entry =>
+                Object.freeze({
+                  ...entry
+                })
+              )
+          )
         }))
-    )
+    ),
+    generationDiagnostics:
+      Object.freeze(
+        (Array.isArray(
+          catalog?.generationDiagnostics
+        )
+          ? catalog.generationDiagnostics
+          : [])
+          .map(diagnostic =>
+            Object.freeze({
+              ...diagnostic
+            })
+          )
+      )
   });
 }
 
 function selectedExportFilesFromCatalog(
   catalog,
   includeCs,
-  includeCsproj
+  includeCsproj,
+  includeNodeIndex
 ) {
   const includeAny =
     includeCs || includeCsproj;
   const files = catalog.artifacts
     .filter(artifact => {
+      if (
+        artifact.exportCategory ===
+        "node-index"
+      ) {
+        return includeNodeIndex;
+      }
       if (artifact.kind === "source") {
         return includeCs;
       }
@@ -36644,7 +37672,9 @@ function selectedExportFilesFromCatalog(
       projectLabel: artifact.projectLabel,
       deployDirectory:
         artifact.deployDirectory,
-      projectRole: artifact.projectRole
+      projectRole: artifact.projectRole,
+      exportCategory:
+        artifact.exportCategory
     }));
 
   return {
@@ -36654,6 +37684,40 @@ function selectedExportFilesFromCatalog(
     projects: catalog.projects,
     artifacts: catalog.artifacts
   };
+}
+
+function filteredGeneratedArtifactCatalog(
+  catalog,
+  includeCs,
+  includeCsproj,
+  includeNodeIndex
+) {
+  const includeAny =
+    includeCs || includeCsproj;
+  return Object.freeze({
+    ...catalog,
+    projects: catalog.projects,
+    artifacts: Object.freeze(
+      catalog.artifacts.filter(artifact => {
+        if (
+          artifact.exportCategory ===
+          "node-index"
+        ) {
+          return includeNodeIndex;
+        }
+        if (artifact.kind === "source") {
+          return includeCs;
+        }
+        if (
+          artifact.kind === "project" ||
+          artifact.kind === "build"
+        ) {
+          return includeCsproj;
+        }
+        return includeAny;
+      })
+    )
+  });
 }
 
 function browserCompilerReferenceSelectionError(
@@ -36691,6 +37755,156 @@ function browserCompilerReferencePath(file) {
     file?.name ||
     ""
   );
+}
+
+function browserCompilerReferenceDigestHex(
+  digest
+) {
+  return [...new Uint8Array(digest)]
+    .map(value =>
+      value.toString(16).padStart(2, "0")
+    )
+    .join("");
+}
+
+async function browserCompilerReferenceContentIdentity(
+  file
+) {
+  const resolved =
+    browserCompilerReferenceIdentityValues.get(
+      file
+    );
+  if (resolved) return resolved;
+
+  const active =
+    browserCompilerReferenceIdentityPromises.get(
+      file
+    );
+  if (active) return active;
+
+  let promise;
+  promise = (async () => {
+    const subtle = globalThis.crypto?.subtle;
+    if (
+      !subtle ||
+      typeof subtle.digest !== "function"
+    ) {
+      throw new Error(
+        window.RMLI18n.t(
+          "export.compiler_references.sha256_unavailable"
+        )
+      );
+    }
+    if (
+      !file ||
+      typeof file.arrayBuffer !== "function"
+    ) {
+      throw new Error(
+        window.RMLI18n.t(
+          "export.compiler_references.identity_missing"
+        )
+      );
+    }
+
+    let bytes = await file.arrayBuffer();
+    const byteLength = bytes.byteLength;
+    const digest = await subtle.digest(
+      "SHA-256",
+      bytes
+    );
+    bytes = null;
+    const identity = Object.freeze({
+      byteLength,
+      contentIdentity:
+        `sha256:${browserCompilerReferenceDigestHex(
+          digest
+        )}`
+    });
+    browserCompilerReferenceIdentityValues.set(
+      file,
+      identity
+    );
+    return identity;
+  })().catch(error => {
+    if (
+      browserCompilerReferenceIdentityPromises.get(
+        file
+      ) === promise
+    ) {
+      browserCompilerReferenceIdentityPromises.delete(
+        file
+      );
+    }
+    throw error;
+  });
+  browserCompilerReferenceIdentityPromises.set(
+    file,
+    promise
+  );
+  return promise;
+}
+
+async function prepareBrowserCompilerReferenceIdentities(
+  referenceFiles,
+  signal = null
+) {
+  const files = Array.isArray(referenceFiles)
+    ? referenceFiles
+    : [];
+  const identities = [];
+  for (const file of files) {
+    assertBrowserCompilerSignal(signal);
+    const content =
+      await browserCompilerReferenceContentIdentity(
+        file
+      );
+    assertBrowserCompilerSignal(signal);
+    identities.push(Object.freeze({
+      name: String(file?.name || ""),
+      size: Number(file?.size) || 0,
+      byteLength:
+        Number(content.byteLength) || 0,
+      lastModified:
+        Number(file?.lastModified) || 0,
+      path: browserCompilerReferencePath(file),
+      contentIdentity:
+        String(content.contentIdentity || "")
+    }));
+  }
+  return Object.freeze(identities);
+}
+
+function sameBrowserCompilerReferenceFiles(
+  left,
+  right
+) {
+  return Array.isArray(left) &&
+    Array.isArray(right) &&
+    left.length === right.length &&
+    left.every((file, index) =>
+      file === right[index]
+    );
+}
+
+function sameBrowserCompilerReferenceIdentities(
+  left,
+  right
+) {
+  return Array.isArray(left) &&
+    Array.isArray(right) &&
+    left.length === right.length &&
+    left.every((identity, index) => {
+      const candidate = right[index];
+      return identity?.name === candidate?.name &&
+        identity?.size === candidate?.size &&
+        identity?.byteLength ===
+          candidate?.byteLength &&
+        identity?.lastModified ===
+          candidate?.lastModified &&
+        identity?.path === candidate?.path &&
+        identity?.contentIdentity ===
+          candidate?.contentIdentity;
+    });
 }
 
 function browserCompilerDllCandidates(files) {
@@ -37159,10 +38373,16 @@ async function browserCompilerReferenceDrop(event) {
       );
     }
 
-    const catalog = buildGeneratedArtifactCatalog(
-      true,
-      true
-    );
+    const catalog =
+      currentValidatedGeneratedPublication()
+        ?.catalog;
+    if (!catalog) {
+      throw new Error(
+        window.RMLI18n.t(
+          "generated.validation.publication_required"
+        )
+      );
+    }
     const missing =
       missingBrowserCompilerReferences(catalog);
 
@@ -37364,19 +38584,36 @@ function browserCompilerReferenceFingerprint(
   referenceFiles =
     selectedBrowserCompilerReferences(),
   referenceRevision =
-    browserCompilerReferenceRevision
+    browserCompilerReferenceRevision,
+  referenceIdentities = null
 ) {
   return JSON.stringify({
     revision:
       Number(referenceRevision) || 0,
-    files: referenceFiles.map(file => ({
-      name: String(file.name || ""),
-      size: Number(file.size) || 0,
-      lastModified:
-        Number(file.lastModified) || 0,
-      path:
-        browserCompilerReferencePath(file)
-    }))
+    files: referenceFiles.map((file, index) => {
+      const resolved =
+        browserCompilerReferenceIdentityValues.get(
+          file
+        );
+      const identity =
+        referenceIdentities?.[index] ||
+        resolved ||
+        null;
+      return {
+        name: String(file.name || ""),
+        size: Number(file.size) || 0,
+        byteLength:
+          Number(identity?.byteLength) || 0,
+        lastModified:
+          Number(file.lastModified) || 0,
+        path:
+          browserCompilerReferencePath(file),
+        contentIdentity:
+          String(
+            identity?.contentIdentity || ""
+          )
+      };
+    })
   });
 }
 
@@ -37414,12 +38651,60 @@ function browserCompilationProjectFingerprint(
   });
 }
 
+function browserCompilationProjectSources(
+  projects
+) {
+  return Object.freeze(
+    (Array.isArray(projects) ? projects : [])
+      .map(project => Object.freeze({
+        id: String(project?.id || ""),
+        sources: Object.freeze(
+          (Array.isArray(project?.sources)
+            ? project.sources
+            : [])
+            .map(source => Object.freeze({
+              name: String(source?.name || ""),
+              content: String(source?.content || "")
+            }))
+        )
+      }))
+  );
+}
+
+function sameBrowserCompilationProjectSources(
+  left,
+  right
+) {
+  if (
+    !Array.isArray(left) ||
+    !Array.isArray(right) ||
+    left.length !== right.length
+  ) {
+    return false;
+  }
+  return left.every((project, index) => {
+    const candidate = right[index];
+    return project?.id === candidate?.id &&
+      Array.isArray(project?.sources) &&
+      Array.isArray(candidate?.sources) &&
+      project.sources.length ===
+        candidate.sources.length &&
+      project.sources.every((source, sourceIndex) =>
+        source?.name ===
+          candidate.sources[sourceIndex]?.name &&
+        source?.content ===
+          candidate.sources[sourceIndex]?.content
+      );
+  });
+}
+
 function browserCompilationFingerprint(
   projects,
   referenceFiles =
     selectedBrowserCompilerReferences(),
   referenceRevision =
-    browserCompilerReferenceRevision
+    browserCompilerReferenceRevision,
+  referenceIdentities = null
 ) {
   return JSON.stringify({
     project:
@@ -37429,13 +38714,15 @@ function browserCompilationFingerprint(
     references:
       browserCompilerReferenceFingerprint(
         referenceFiles,
-        referenceRevision
+        referenceRevision,
+        referenceIdentities
       )
   });
 }
 
 function formatBrowserCompilerDiagnostics(
-  result
+  result,
+  catalog = null
 ) {
   return (Array.isArray(result?.diagnostics)
     ? result.diagnostics
@@ -37446,17 +38733,16 @@ function formatBrowserCompilerDiagnostics(
       ).toLowerCase() === "error"
     )
     .slice(0, 12)
-    .map(diagnostic => {
-      const line =
-        Number(diagnostic?.startLine) || 0;
-      const column =
-        Number(diagnostic?.startColumn) || 0;
-      const location = line > 0
-        ? `:${line}:${Math.max(1, column)}`
-        : "";
-
-      return `Generated C#: ${diagnostic?.projectLabel || window.RMLI18n.t("ui.literal.3ab238d024c9")} · ${diagnostic?.fileName || window.RMLI18n.t("ui.literal.2d4e6341d5cd")}${location} ${diagnostic?.id || "C#"}: ${diagnostic?.message || "Compilation failed."}`;
-    });
+    .map(diagnostic =>
+      formatGeneratedCSharpDiagnostic(
+        diagnostic,
+        catalog?.artifacts || [],
+        diagnostic?.projectLabel ||
+          window.RMLI18n.t(
+            "ui.literal.3ab238d024c9"
+          )
+      )
+    );
 }
 
 function compiledBrowserOutputFiles(
@@ -37570,7 +38856,9 @@ function invalidateBrowserCompilerBuild(
     if (browserCompilerBuilding) {
       window.RMLCompile
         ?.cancelCompilation?.(
-          "Compiler references changed."
+          window.RMLI18n.t(
+            "export.compiler_references.changed"
+          )
         );
     } else {
       void window.RMLCSharp14Roslyn
@@ -37587,6 +38875,9 @@ function retireBrowserCompilerBuildForProjectReplacement(
   browserCompilerReferenceRevision += 1;
   browserCompilerBuildCache = null;
   browserCompilerBuildFingerprint = "";
+  browserCompilerBuildProjectSources = null;
+  browserCompilerBuildReferenceFiles = null;
+  browserCompilerBuildReferenceIdentities = null;
 
   if (browserCompilerBuilding) {
     window.RMLCompile
@@ -37624,7 +38915,12 @@ function updateBrowserCompilerStatus(
     browserCompilationFingerprint(projects);
   const cacheReady =
     browserCompilerBuildCache
-      ?.fingerprint === fingerprint;
+      ?.fingerprint === fingerprint &&
+    sameBrowserCompilationProjectSources(
+      browserCompilerBuildCache
+        ?.projectSources,
+      projects
+    );
 
   if (missing.length > 0) {
     elements.exportCompilerReferenceStatus.textContent =
@@ -37723,12 +39019,15 @@ async function compileGeneratedBrowserDlls(
 ) {
   assertBrowserCompilerSignal(signal);
   const completeCatalog = catalog ||
-    freezeGeneratedArtifactCatalog(
-      buildGeneratedArtifactCatalog(
-        true,
-        true
+    currentValidatedGeneratedPublication()
+      ?.catalog;
+  if (!completeCatalog) {
+    throw new Error(
+      window.RMLI18n.t(
+        "generated.validation.publication_required"
       )
     );
+  }
   const projects =
     browserCompilationProjects(
       completeCatalog
@@ -37737,10 +39036,36 @@ async function compileGeneratedBrowserDlls(
     projectApplicationEpoch;
   const initialReferenceFiles =
     selectedBrowserCompilerReferences();
+  const initialReferenceRevision =
+    browserCompilerReferenceRevision;
+  const initialReferenceIdentities =
+    await prepareBrowserCompilerReferenceIdentities(
+      initialReferenceFiles,
+      signal
+    );
+  assertBrowserCompilerSignal(signal);
+  if (
+    initialReferenceRevision !==
+      browserCompilerReferenceRevision ||
+    !sameBrowserCompilerReferenceFiles(
+      initialReferenceFiles,
+      selectedBrowserCompilerReferences()
+    )
+  ) {
+    throw browserCompilerBuildSuperseded(
+      "the selected compiler references changed while their contents were verified"
+    );
+  }
   const initialFingerprint =
     browserCompilationFingerprint(
       projects,
-      initialReferenceFiles
+      initialReferenceFiles,
+      initialReferenceRevision,
+      initialReferenceIdentities
+    );
+  const initialProjectSources =
+    browserCompilationProjectSources(
+      projects
     );
 
   if (browserCompilerBuildPromise) {
@@ -37749,6 +39074,18 @@ async function compileGeneratedBrowserDlls(
         projectEpoch &&
       browserCompilerBuildFingerprint ===
         initialFingerprint &&
+      sameBrowserCompilationProjectSources(
+        browserCompilerBuildProjectSources,
+        initialProjectSources
+      ) &&
+      sameBrowserCompilerReferenceFiles(
+        browserCompilerBuildReferenceFiles,
+        initialReferenceFiles
+      ) &&
+      sameBrowserCompilerReferenceIdentities(
+        browserCompilerBuildReferenceIdentities,
+        initialReferenceIdentities
+      ) &&
       browserCompilerBuildSignal === signal
     ) {
       return browserCompilerBuildPromise;
@@ -37781,7 +39118,22 @@ async function compileGeneratedBrowserDlls(
     browserCompilerBuildCache
       ?.fingerprint === initialFingerprint &&
     browserCompilerBuildCache
-      ?.projectEpoch === projectEpoch
+      ?.projectEpoch === projectEpoch &&
+    sameBrowserCompilationProjectSources(
+      browserCompilerBuildCache
+        ?.projectSources,
+      initialProjectSources
+    ) &&
+    sameBrowserCompilerReferenceFiles(
+      browserCompilerBuildCache
+        ?.referenceFiles,
+      initialReferenceFiles
+    ) &&
+    sameBrowserCompilerReferenceIdentities(
+      browserCompilerBuildCache
+        ?.referenceIdentities,
+      initialReferenceIdentities
+    )
   ) {
     return browserCompilerBuildCache;
   }
@@ -37813,6 +39165,12 @@ async function compileGeneratedBrowserDlls(
   browserCompilerBuildProjectEpoch =
     projectEpoch;
   browserCompilerBuildSignal = signal;
+  browserCompilerBuildProjectSources =
+    initialProjectSources;
+  browserCompilerBuildReferenceFiles =
+    initialReferenceFiles;
+  browserCompilerBuildReferenceIdentities =
+    initialReferenceIdentities;
   updateExportDialog();
 
   const buildPromise = (async () => {
@@ -37820,7 +39178,9 @@ async function compileGeneratedBrowserDlls(
     let compiledReferenceFiles =
       initialReferenceFiles;
     let compiledReferenceRevision =
-      browserCompilerReferenceRevision;
+      initialReferenceRevision;
+    let compiledReferenceIdentities =
+      initialReferenceIdentities;
     for (let attempt = 0; attempt < 8; attempt += 1) {
       assertBrowserCompilerSignal(signal);
       if (
@@ -37840,6 +39200,24 @@ async function compileGeneratedBrowserDlls(
         selectedBrowserCompilerReferences();
       compiledReferenceRevision =
         browserCompilerReferenceRevision;
+      compiledReferenceIdentities =
+        await prepareBrowserCompilerReferenceIdentities(
+          compiledReferenceFiles,
+          signal
+        );
+      assertBrowserCompilerSignal(signal);
+      if (
+        compiledReferenceRevision !==
+          browserCompilerReferenceRevision ||
+        !sameBrowserCompilerReferenceFiles(
+          compiledReferenceFiles,
+          selectedBrowserCompilerReferences()
+        )
+      ) {
+        throw browserCompilerBuildSuperseded(
+          "the selected compiler references changed while their contents were verified"
+        );
+      }
       result = await compiler.compile(
         projects.flatMap(project =>
           project.sources
@@ -37848,6 +39226,8 @@ async function compileGeneratedBrowserDlls(
           projects,
           referenceFiles:
             compiledReferenceFiles,
+          referenceIdentities:
+            compiledReferenceIdentities,
           signal,
           emitPdb: false,
           onProgress(progress) {
@@ -37889,7 +39269,8 @@ async function compileGeneratedBrowserDlls(
           browserCompilerReferenceRevision ||
         browserCompilerReferenceFingerprint(
           compiledReferenceFiles,
-          compiledReferenceRevision
+          compiledReferenceRevision,
+          compiledReferenceIdentities
         ) !==
           browserCompilerReferenceFingerprint()
       ) {
@@ -37935,7 +39316,8 @@ async function compileGeneratedBrowserDlls(
     if (result?.ok !== true) {
       const diagnostics =
         formatBrowserCompilerDiagnostics(
-          result
+          result,
+          completeCatalog
         );
       throw new Error(
         diagnostics.join("\n") ||
@@ -37948,11 +39330,22 @@ async function compileGeneratedBrowserDlls(
       browserCompilationFingerprint(
         projects,
         compiledReferenceFiles,
-        compiledReferenceRevision
+        compiledReferenceRevision,
+        compiledReferenceIdentities
       );
     const cache = Object.freeze({
       projectEpoch,
       fingerprint,
+      projectSources:
+        initialProjectSources,
+      referenceFiles:
+        Object.freeze([
+          ...compiledReferenceFiles
+        ]),
+      referenceIdentities:
+        Object.freeze([
+          ...compiledReferenceIdentities
+        ]),
       outputs: result.outputs,
       diagnostics: result.diagnostics
     });
@@ -37972,6 +39365,9 @@ async function compileGeneratedBrowserDlls(
         browserCompilerBuildFingerprint = "";
         browserCompilerBuildProjectEpoch = 0;
         browserCompilerBuildSignal = null;
+        browserCompilerBuildProjectSources = null;
+        browserCompilerBuildReferenceFiles = null;
+        browserCompilerBuildReferenceIdentities = null;
         if (elements.exportDialog?.open) {
           updateExportDialog();
         }
@@ -38016,15 +39412,14 @@ function addBrowserCompilerReferenceFiles(
     browserCompilerReferenceRevision += 1;
     if (invalidate) {
       invalidateBrowserCompilerBuild(true);
-      const completeCatalog =
-        buildGeneratedArtifactCatalog(
-          true,
-          true
+      const publication =
+        currentValidatedGeneratedPublication();
+      if (publication) {
+        updateExportPreviewStatus(
+          publication.catalog.artifacts,
+          getDiagnostics()
         );
-      updateExportPreviewStatus(
-        completeCatalog.artifacts,
-        getDiagnostics()
-      );
+      }
     }
   }
 
@@ -38044,6 +39439,8 @@ function clearBrowserCompilerReferences() {
   browserCompilerDirectoryFileCount = 0;
   browserCompilerDirectoryMatchCount = 0;
   browserCompilerReferencePaths = new WeakMap();
+  browserCompilerReferenceIdentityPromises = new WeakMap();
+  browserCompilerReferenceIdentityValues = new WeakMap();
   if (changed) {
     browserCompilerReferenceRevision += 1;
   }
@@ -38206,10 +39603,14 @@ function currentExportCopyArtifact(
 ) {
   const catalog =
     existingCatalog ||
-    buildGeneratedArtifactCatalog(
-      true,
-      true
-    );
+    currentValidatedGeneratedPublication()
+      ?.catalog ||
+    {
+      projects: [],
+      artifacts: [],
+      generationDiagnostics: [],
+      multiProject: false
+    };
   let artifact = catalog.artifacts.find(
     candidate =>
       candidate.copyable !== false &&
@@ -38264,7 +39665,12 @@ function updateExportCopyButtonState(
       ? getDiagnostics().length > 0
       : existingHasDiagnostics;
   const exportReady =
-    !hasDiagnostics && !exportPreflightRequest && !exportDeliveryBusy;
+    !hasDiagnostics &&
+    !exportPreflightRequest &&
+    !exportDeliveryBusy &&
+    !["checking", "error"].includes(
+      exportReadiness.phase
+    );
 
   elements.exportGeneratedFiles
     ?.querySelectorAll(
@@ -38346,7 +39752,9 @@ async function copySelectedExportArtifact(button) {
   try {
     const checked = await awaitExportDelivery(
       job,
-      requestExportPreflight()
+      requestExportPreflight({
+        requireSemantic: false
+      })
     );
     assertExportDeliveryCurrent(job);
     assertExportRequestCurrent(checked.request, true);
@@ -38526,21 +39934,52 @@ function updateExportDialog() {
     elements.exportIncludeCs.checked;
   const includeCsproj =
     elements.exportIncludeCsproj.checked;
+  const includeNodeIndex =
+    elements.exportIncludeNodeIndex.checked;
   const includeCompiled =
     elements.exportIncludeCompiled.checked;
   if (elements.exportCompilerDetails) {
     elements.exportCompilerDetails.hidden =
       !includeCompiled;
   }
-  const catalog =
-    buildGeneratedArtifactCatalog(
-      includeCs,
-      includeCsproj
+  const publication =
+    currentValidatedGeneratedPublication();
+  if (!publication) {
+    elements.exportPackageSummary.textContent =
+      window.RMLI18n.t(
+        "generated.validation.in_progress"
+      );
+    elements.exportPackageMode.textContent =
+      window.RMLI18n.t(
+        "generated.validation.in_progress"
+      );
+    elements.exportProjectSummary.replaceChildren();
+    elements.exportGeneratedFiles.textContent =
+      window.RMLI18n.t(
+        "generated.validation.in_progress"
+      );
+    elements.exportDownloadHint.textContent =
+      window.RMLI18n.t(
+        "generated.validation.in_progress"
+      );
+    setExportControlAvailability(
+      elements.exportDownloadSelected,
+      false
     );
+    setExportControlAvailability(
+      elements.exportCopySelectedFile,
+      false
+    );
+    return;
+  }
   const completeCatalog =
-    buildGeneratedArtifactCatalog(
-      true,
-      true
+    publication.catalog;
+  const catalog =
+    filteredGeneratedArtifactCatalog(
+      completeCatalog,
+      includeCs,
+      includeCsproj,
+      includeNodeIndex
     );
   const compiledArtifacts = includeCompiled
     ? browserCompiledPlaceholderArtifacts(
@@ -38567,7 +40006,12 @@ function updateExportDialog() {
   const hasDiagnostics =
     getDiagnostics().length > 0;
   const exportReady =
-    !hasDiagnostics && !exportPreflightRequest && !exportDeliveryBusy;
+    !hasDiagnostics &&
+    !exportPreflightRequest &&
+    !exportDeliveryBusy &&
+    !["checking", "error"].includes(
+      exportReadiness.phase
+    );
   const compilerStatus =
     updateBrowserCompilerStatus(
       completeCatalog
@@ -38587,8 +40031,16 @@ function updateExportDialog() {
   const projectBuildCount =
     completeCatalog.artifacts.filter(
       artifact =>
-        artifact.kind !== "source"
+        artifact.kind !== "source" &&
+        artifact.exportCategory !==
+          "node-index"
     ).length;
+  const nodeIndexArtifacts =
+    completeCatalog.artifacts.filter(
+      artifact =>
+        artifact.exportCategory ===
+          "node-index"
+    );
   const activeProjectIds = new Set(
     displayCatalog.artifacts
       .map(artifact => artifact.projectId)
@@ -38613,6 +40065,18 @@ function updateExportDialog() {
         ? ""
         : "s"
     }`;
+  if (elements.exportNodeIndexFilename) {
+    elements.exportNodeIndexFilename.textContent =
+      nodeIndexArtifacts.length === 1
+        ? nodeIndexArtifacts[0].fileName
+        : window.RMLI18n.format(
+            "export.node_index.files",
+            {
+              count:
+                nodeIndexArtifacts.length
+            }
+          );
+  }
 
   if (elements.exportPackageSummary) {
     elements.exportPackageSummary.textContent =
@@ -38761,6 +40225,8 @@ function syncExportOptions() {
       elements.exportIncludeCs.checked,
     includeCsproj:
       elements.exportIncludeCsproj.checked,
+    includeNodeIndex:
+      elements.exportIncludeNodeIndex.checked,
     includeCompiled:
       elements.exportIncludeCompiled.checked
   };
@@ -38769,6 +40235,7 @@ function syncExportOptions() {
       state.exportOptions
   });
   persist();
+  requestGeneratedOutputUpdate();
   updateExportDialog();
 }
 
@@ -38818,13 +40285,17 @@ function openExportDialog() {
   const sequence = ++exportDialogOpenSequence;
   exportDialogOpenPromise = (async () => {
     try {
-      const checked = await requestExportPreflight({ prepareStyles: true });
+      const checked = await requestExportPreflight({
+        prepareStyles: true,
+        requireSemantic: false
+      });
       if (sequence !== exportDialogOpenSequence) return false;
       assertExportRequestCurrent(checked.request, true);
       elements.exportPlatform.value = state.exportOptions.platform || inferExportPlatform(state.exportOptions.resonitePath);
       elements.exportResonitePath.value = state.exportOptions.resonitePath;
       elements.exportIncludeCs.checked = Boolean(state.exportOptions.includeCs);
       elements.exportIncludeCsproj.checked = Boolean(state.exportOptions.includeCsproj);
+      elements.exportIncludeNodeIndex.checked = Boolean(state.exportOptions.includeNodeIndex);
       elements.exportIncludeCompiled.checked = Boolean(state.exportOptions.includeCompiled);
       updateExportDialog();
       ensureUniversalCustomSelect(elements.exportPlatform)?.refresh?.();
@@ -38870,14 +40341,18 @@ function closeExportDialog() {
 async function downloadSelectedExport() {
   if (exportPreflightRequest || exportDeliveryBusy || !exportControlAvailable(elements.exportDownloadSelected)) return;
   syncExportOptions();
+  const requireSemantic =
+    state.exportOptions.includeCompiled === true;
   const job = beginExportDelivery();
   const originalLabel =
     elements.exportDownloadSelected.textContent;
-  let resolvingReferences = false;
+  let nonBlockingCompilationFailure = "";
   try {
     const checked = await awaitExportDelivery(
       job,
-      requestExportPreflight()
+      requestExportPreflight({
+        requireSemantic
+      })
     );
     assertExportDeliveryCurrent(job);
     assertExportRequestCurrent(checked.request, true);
@@ -38886,6 +40361,8 @@ async function downloadSelectedExport() {
       state.exportOptions.includeCs === true;
     const includeCsproj =
       state.exportOptions.includeCsproj === true;
+    const includeNodeIndex =
+      state.exportOptions.includeNodeIndex === true;
     const includeCompiled =
       state.exportOptions.includeCompiled === true;
     const baseName = String(
@@ -38905,42 +40382,26 @@ async function downloadSelectedExport() {
       window.RMLI18n.t("{{i18n:js.presentation.820d6004b037}}");
     elements.exportDownloadHint.classList.remove("error");
 
-    if (includeCompiled) {
-      resolvingReferences = true;
-      elements.exportDownloadSelected.textContent =
-        window.RMLI18n.t("{{i18n:js.presentation.30ee6a1d77ea}}");
-      await awaitExportDelivery(
-        job,
-        ensureBrowserCompilerReferences(
-          completeCatalog,
-          checked.request,
-          job.controller.signal
-        )
-      );
-      assertExportDeliveryCurrent(job);
-      assertExportRequestCurrent(checked.request, true);
-      resolvingReferences = false;
-      elements.exportDownloadSelected.textContent =
-        window.RMLI18n.t("{{i18n:js.presentation.820d6004b037}}");
-    }
     assertExportDeliveryCurrent(job);
     assertExportRequestCurrent(checked.request, true);
     const result = selectedExportFilesFromCatalog(
       completeCatalog,
       includeCs,
-      includeCsproj
+      includeCsproj,
+      includeNodeIndex
     );
     if (includeCompiled) {
       elements.exportDownloadSelected.textContent =
         window.RMLI18n.t("{{i18n:js.presentation.7cc766ce5323}}");
-      const compiled = await awaitExportDelivery(
-        job,
-        compileGeneratedBrowserDlls(
-          completeCatalog,
-          checked.request,
-          job.controller.signal
-        )
-      );
+      const compiled =
+        checked.semanticCompilation;
+      if (!compiled) {
+        throw new Error(
+          window.RMLI18n.t(
+            "generated.validation.semantic_failed"
+          )
+        );
+      }
       assertExportDeliveryCurrent(job);
       assertExportRequestCurrent(checked.request, true);
       result.files.push(
@@ -38993,17 +40454,21 @@ async function downloadSelectedExport() {
         getDiagnostics()
       );
     } else if (
-      resolvingReferences ||
       error?.code ===
         "RML_COMPILER_REFERENCES_REQUIRED"
     ) {
-      elements.exportDownloadHint.textContent =
+      nonBlockingCompilationFailure =
         error instanceof Error
           ? error.message
           : String(error);
-      elements.exportDownloadHint.classList.add(
-        "error"
-      );
+    } else if (
+      requireSemantic &&
+      exportReadiness.phase === "ready"
+    ) {
+      nonBlockingCompilationFailure =
+        error instanceof Error
+          ? error.message
+          : String(error);
     } else {
       setExportValidationFailure(error);
     }
@@ -39014,6 +40479,13 @@ async function downloadSelectedExport() {
       applyPrimaryExportAvailability([]);
       if (elements.exportDialog?.open) {
         updateExportDialog();
+        if (nonBlockingCompilationFailure) {
+          elements.exportDownloadHint.textContent =
+            nonBlockingCompilationFailure;
+          elements.exportDownloadHint.classList.add(
+            "error"
+          );
+        }
       }
     }
   }
@@ -40205,7 +41677,7 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "../../templates/help_template.html?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open"
+    "../../templates/help_template.html?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle"
   )
     .then(markup => {
       const host = document.getElementById("lazy-dialog-host") || document.body;
@@ -40537,6 +42009,9 @@ function cacheElements() {
     exportIncludeCsproj: document.getElementById(
       "export-include-csproj"
     ),
+    exportIncludeNodeIndex: document.getElementById(
+      "export-include-node-index"
+    ),
     exportIncludeCompiled: document.getElementById(
       "export-include-compiled"
     ),
@@ -40559,6 +42034,9 @@ function cacheElements() {
       "export-clear-compiler-references"
     ),
     exportCsFilename: document.getElementById("export-cs-filename"),
+    exportNodeIndexFilename: document.getElementById(
+      "export-node-index-filename"
+    ),
     exportCsprojFilename: document.getElementById(
       "export-csproj-filename"
     ),
@@ -45807,6 +47285,10 @@ async function initialize() {
     "change",
     syncExportOptions
   );
+  elements.exportIncludeNodeIndex.addEventListener(
+    "change",
+    syncExportOptions
+  );
   elements.exportIncludeCompiled.addEventListener(
     "change",
     syncExportOptions
@@ -46873,7 +48355,7 @@ function rmlRuntimeDisplayInspector() {
         const up =
           document.createElement("button");
         up.type = "button";
-        up.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-${selected.runtimeDisplayStacked ? "chevron-up" : "chevron-left"}"></use></svg>`;
+        up.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-${selected.runtimeDisplayStacked ? "chevron-up" : "chevron-left"}"></use></svg>`;
         up.title =
           selected.runtimeDisplayStacked
             ? window.RMLI18n.t("ui.literal.6f39a4bc0048")
@@ -46891,7 +48373,7 @@ function rmlRuntimeDisplayInspector() {
         const down =
           document.createElement("button");
         down.type = "button";
-        down.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-${selected.runtimeDisplayStacked ? "chevron-down" : "chevron-right"}"></use></svg>`;
+        down.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-${selected.runtimeDisplayStacked ? "chevron-down" : "chevron-right"}"></use></svg>`;
         down.title =
           selected.runtimeDisplayStacked
             ? window.RMLI18n.t("ui.literal.6d6a5bc02a98")
@@ -47726,7 +49208,7 @@ function rmlRuntimeDisplayPreviewItems(
 
 function rmlRuntimeDisplayPreviewCopyIcon() {
   return `
-    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-copy"></use></svg>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-copy"></use></svg>
   `;
 }
 

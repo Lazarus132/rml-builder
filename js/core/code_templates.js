@@ -1,13 +1,13 @@
 (() => {
   "use strict";
   const root = globalThis;
-  if (root.RMLCodeTemplates?.version === 794) return;
+  if (root.RMLCodeTemplates?.version === 797) return;
   const scriptBase = new URL("./",
     root.document?.currentScript?.src || root.location.href);
   const base = new URL("../../assets/data/code-templates/",
     root.document?.currentScript?.src || root.location.href);
   const staticPayloadBundleUrl = new URL(
-    "static_file_payloads.js?v=794",
+    "static_file_payloads.js?v=797",
     scriptBase
   );
   const sizes = Object.freeze({ configuration: 15, runtime: 7, nodes: 29, api: 1 });
@@ -17,17 +17,166 @@
   const pendingMessage = window.RMLI18n.t("ui.literal.8369277e83c3");
   let outputPending = null;
   let staticPayloadPromise = null;
+  function normalizeCSharpSource(value) {
+    const source = String(value ?? "");
+    if (!source.includes("\\")) return source;
+    let result = "";
+    let index = 0;
+    let mode = "code";
+    let rawQuoteCount = 0;
+    while (index < source.length) {
+      const character = source[index];
+      const next = source[index + 1] || "";
+      if (mode === "line-comment") {
+        result += character;
+        index += 1;
+        if (character === "\r" || character === "\n") mode = "code";
+        continue;
+      }
+      if (mode === "block-comment") {
+        if (character === "*" && next === "/") {
+          result += "*/";
+          index += 2;
+          mode = "code";
+        } else {
+          result += character;
+          index += 1;
+        }
+        continue;
+      }
+      if (mode === "regular-string" || mode === "character") {
+        result += character;
+        index += 1;
+        if (character === "\\" && index < source.length) {
+          result += source[index];
+          index += 1;
+        } else if (
+          (mode === "regular-string" && character === "\"") ||
+          (mode === "character" && character === "'")
+        ) {
+          mode = "code";
+        }
+        continue;
+      }
+      if (mode === "verbatim-string") {
+        result += character;
+        index += 1;
+        if (character === "\"") {
+          if (source[index] === "\"") {
+            result += source[index];
+            index += 1;
+          } else {
+            mode = "code";
+          }
+        }
+        continue;
+      }
+      if (mode === "raw-string") {
+        if (character === "\"") {
+          let quoteCount = 1;
+          while (source[index + quoteCount] === "\"") quoteCount += 1;
+          result += source.slice(index, index + quoteCount);
+          index += quoteCount;
+          if (quoteCount >= rawQuoteCount) mode = "code";
+        } else {
+          result += character;
+          index += 1;
+        }
+        continue;
+      }
+      if (character === "/" && next === "/") {
+        result += "//";
+        index += 2;
+        mode = "line-comment";
+        continue;
+      }
+      if (character === "/" && next === "*") {
+        result += "/*";
+        index += 2;
+        mode = "block-comment";
+        continue;
+      }
+      let rawPrefixLength = 0;
+      while (source[index + rawPrefixLength] === "$") rawPrefixLength += 1;
+      let rawQuoteStart = index + rawPrefixLength;
+      let possibleRawQuoteCount = 0;
+      while (source[rawQuoteStart + possibleRawQuoteCount] === "\"") {
+        possibleRawQuoteCount += 1;
+      }
+      if (possibleRawQuoteCount >= 3) {
+        const length = rawPrefixLength + possibleRawQuoteCount;
+        result += source.slice(index, index + length);
+        index += length;
+        rawQuoteCount = possibleRawQuoteCount;
+        mode = "raw-string";
+        continue;
+      }
+      if (
+        source.startsWith("$@\"", index) ||
+        source.startsWith("@$\"", index)
+      ) {
+        result += source.slice(index, index + 3);
+        index += 3;
+        mode = "verbatim-string";
+        continue;
+      }
+      if (source.startsWith("@\"", index)) {
+        result += "@\"";
+        index += 2;
+        mode = "verbatim-string";
+        continue;
+      }
+      if (source.startsWith("$\"", index)) {
+        result += "$\"";
+        index += 2;
+        mode = "regular-string";
+        continue;
+      }
+      if (character === "\"") {
+        result += character;
+        index += 1;
+        mode = "regular-string";
+        continue;
+      }
+      if (character === "'") {
+        result += character;
+        index += 1;
+        mode = "character";
+        continue;
+      }
+      if (character === "\\") {
+        if (source.startsWith("\\r\\n", index)) {
+          result += "\n";
+          index += 4;
+          continue;
+        }
+        if (next === "r" || next === "n") {
+          result += "\n";
+          index += 2;
+          continue;
+        }
+        if (next === "t") {
+          result += "\t";
+          index += 2;
+          continue;
+        }
+      }
+      result += character;
+      index += 1;
+    }
+    return result;
+  }
   const forState = state => {
     const graph = state?.extensions?.typedNodeGraph?.configSnapshot;
     return graph && Array.isArray(graph.nodes)
       ? ["configuration", "runtime", "nodes", "api"] : ["configuration"];
   };
   function install(name, pack) {
-    if (!packages.has(name) || pack?.schemaVersion !== 1 || pack.version !== 794 ||
+    if (!packages.has(name) || pack?.schemaVersion !== 1 || pack.version !== 797 ||
         pack.package !== name || !pack.templates || Array.isArray(pack.templates) ||
         typeof pack.templates !== "object" || Object.keys(pack.templates).length !== sizes[name] || Object.values(pack.templates).some(parts =>
           !Array.isArray(parts) || !parts.length || parts.some(value => typeof value !== "string"))) {
-      throw new Error(`Invalid C# template package: ${name} (v794 required).`);
+      throw new Error(`Invalid C# template package: ${name} (v797 required).`);
     }
     const templates = Object.create(null);
     for (const [key, parts] of Object.entries(pack.templates)) templates[key] = Object.freeze([...parts]);
@@ -90,7 +239,7 @@
         }
         controller = new AbortController();
         timeout = setTimeout(() => controller.abort(), 20000);
-        const response = await fetch(new URL(`${name}.json?v=794`, base), { signal: controller.signal });
+        const response = await fetch(new URL(`${name}.json?v=797`, base), { signal: controller.signal });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         return install(name, await response.json());
       } catch (cause) {
@@ -105,11 +254,12 @@
   }
   function ensure(names) { return Promise.all([...new Set(names)].map(load)); }
   root.RMLCodeTemplates = Object.freeze({
-    version: 794,
+    version: 797,
     pendingMessage,
     ensure,
     ensureFor: state => ensure(forState(state)),
     ensureStaticPayloads,
+    normalizeCSharpSource,
     ready: names => names.every(name => !!cache.get(name)?.value),
     install,
     retryFailed() { for (const [name, value] of cache) if (value.error) cache.delete(name); },

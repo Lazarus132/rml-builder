@@ -2,7 +2,7 @@
   "use strict";
 
   const API_FACTORY_MODULE_ID =
-    "1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open";
+    "1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle";
   const FACTORY_VERSION = 38;
   const API_VERIFICATION_SCHEMA_VERSION = 3;
   const CATALOG_PROJECTION_INDEX_VERSION = 1;

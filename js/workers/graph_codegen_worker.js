@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_CODEGEN_WORKER_MODULE_ID =
-  "1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open";
+  "1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle";
 const GRAPH_CODEGEN_WORKER_FACTORY_VERSION =
   38;
 
@@ -718,13 +718,13 @@ async function ensureRuntime(
       "../graph/node_graph_registry.js?v=1-physical-modules-v750-offline-core-types"
     );
     importScripts(
-      "../catalog/mod_nodes.js?v=800-harmony-source-presets"
+      "../catalog/mod_nodes.js?v=803-visual-function-semantics"
     );
     importScripts(
       "../compiler/visual_csharp.js?v=84-harmony-file-presets"
     );
     importScripts(
-      "../catalog/api_nodes.js?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open"
+      "../catalog/api_nodes.js?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle"
     );
 
     if (
@@ -768,7 +768,7 @@ async function ensureRuntime(
     }
 
     importScripts(
-      "../graph/node_graph_codegen.js?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open"
+      "../graph/node_graph_codegen.js?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle"
     );
 
     if (
@@ -1128,7 +1128,7 @@ async function executeWorkerRequest(
 
   if (!self.RMLCodeTemplates) {
     importScripts(
-      "../core/code_templates.js?v=794-shared-loader-runtime"
+      "../core/code_templates.js?v=797-readable-visual-functions-node-index"
     );
   }
   for (const pack of request.templates || []) {

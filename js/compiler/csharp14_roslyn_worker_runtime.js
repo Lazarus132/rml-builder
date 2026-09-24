@@ -325,20 +325,54 @@
   }
 
   function referenceFileFingerprint(
-    files
+    files,
+    identities
   ) {
-    return (Array.isArray(files)
+    const sources = Array.isArray(files)
       ? files
-      : [])
-      .map(file => [
+      : [];
+    const exact = Array.isArray(identities)
+      ? identities
+      : [];
+    if (
+      sources.length !== exact.length ||
+      sources.some((file, index) => {
+        const identity = exact[index];
+        const size =
+          Number(file?.size) ||
+          Number(file?.image?.byteLength) ||
+          0;
+        return !identity ||
+          identity.name !==
+            String(file?.name || "") ||
+          identity.size !== size ||
+          identity.byteLength !== size ||
+          identity.lastModified !==
+            (Number(file?.lastModified) || 0) ||
+          !/^sha256:[a-f0-9]{64}$/i.test(
+            String(
+              identity.contentIdentity || ""
+            )
+          );
+      })
+    ) {
+      throw new Error(
+        "Compiler reference content identities are missing or do not match the selected DLL files."
+      );
+    }
+    return sources
+      .map((file, index) => [
         String(file?.name || ""),
         Number(file?.size) ||
           Number(file?.image?.byteLength) ||
           0,
         Number(file?.lastModified) || 0,
         String(
-          file?.webkitRelativePath || ""
-        )
+          exact[index].path ||
+          file?.webkitRelativePath ||
+          ""
+        ),
+        exact[index].contentIdentity
       ].join(":"))
       .sort()
       .join("|");
@@ -381,6 +415,7 @@
 
   async function configureReferences(
     files,
+    identities,
     onProgress
   ) {
     const external = (Array.isArray(files)
@@ -393,7 +428,10 @@
         )
       );
     const fingerprint =
-      referenceFileFingerprint(external);
+      referenceFileFingerprint(
+        external,
+        identities
+      );
     if (
       configuredReferenceFingerprint ===
         fingerprint &&
@@ -405,123 +443,131 @@
     const { compiler } =
       await ensureReady();
     const pack = await loadReferencePack();
-    parseJson(
-      compiler.ClearCompilerReferencesExport(),
-      "Roslyn reference reset"
-    );
-    const loaded = [];
-    const total =
-      pack.manifest.length +
-      external.length;
-    let completed = 0;
+    configuredReferenceFingerprint = "";
+    configuredReferences = Object.freeze([]);
+    try {
+      parseJson(
+        compiler.ClearCompilerReferencesExport(),
+        "Roslyn reference reset"
+      );
+      const loaded = [];
+      const total =
+        pack.manifest.length +
+        external.length;
+      let completed = 0;
 
-    const finishReference = (
-      name,
-      skipped = false
-    ) => {
-      completed += 1;
-      onProgress?.({
-        phase: "references",
-        completed,
-        total,
+      const finishReference = (
         name,
-        skipped
-      });
-    };
-    const add = (
-      name,
-      image,
-      source,
-      allowInvalid = false
-    ) => {
-      const result = parseJson(
-        compiler.AddCompilerReferenceExport(
+        skipped = false
+      ) => {
+        completed += 1;
+        onProgress?.({
+          phase: "references",
+          completed,
+          total,
           name,
-          image
-        ),
-        `Roslyn reference '${name}'`
-      );
-      if (result?.ok !== true) {
-        if (allowInvalid) {
-          finishReference(name, true);
-          return false;
+          skipped
+        });
+      };
+      const add = (
+        name,
+        image,
+        source,
+        allowInvalid = false
+      ) => {
+        const result = parseJson(
+          compiler.AddCompilerReferenceExport(
+            name,
+            image
+          ),
+          `Roslyn reference '${name}'`
+        );
+        if (result?.ok !== true) {
+          if (allowInvalid) {
+            finishReference(name, true);
+            return false;
+          }
+          throw new Error(
+            `${name}: ${
+              result?.error ||
+              "Roslyn rejected this reference assembly."
+            }`
+          );
         }
-        throw new Error(
-          `${name}: ${
-            result?.error ||
-            "Roslyn rejected this reference assembly."
-          }`
-        );
-      }
-      loaded.push(Object.freeze({
-        ...result,
-        source
-      }));
-      finishReference(name);
-      return true;
-    };
+        loaded.push(Object.freeze({
+          ...result,
+          source
+        }));
+        finishReference(name);
+        return true;
+      };
 
-    for (const entry of pack.manifest) {
-      const start =
-        pack.contentOffset +
-        entry.offset;
-      const end = start + entry.length;
-      if (
-        !entry.name ||
-        entry.length <= 0 ||
-        start < pack.contentOffset ||
-        end > pack.bytes.length
-      ) {
-        throw new Error(
-          "The bundled .NET 10 target reference pack contains an invalid entry."
+      for (const entry of pack.manifest) {
+        const start =
+          pack.contentOffset +
+          entry.offset;
+        const end = start + entry.length;
+        if (
+          !entry.name ||
+          entry.length <= 0 ||
+          start < pack.contentOffset ||
+          end > pack.bytes.length
+        ) {
+          throw new Error(
+            "The bundled .NET 10 target reference pack contains an invalid entry."
+          );
+        }
+        add(
+          entry.name,
+          pack.bytes.subarray(start, end),
+          "bundled-net10"
         );
+        if (completed % 8 === 0) {
+          await yieldToBrowser();
+        }
       }
-      add(
-        entry.name,
-        pack.bytes.subarray(start, end),
-        "bundled-net10"
-      );
-      if (completed % 8 === 0) {
-        await yieldToBrowser();
-      }
-    }
 
-    const bundledNames = new Set(
-      pack.manifest.map(entry =>
-        entry.name.toLowerCase()
-      )
-    );
-    for (const file of external) {
-      const name = String(
-        file.name || "Reference.dll"
-      );
-      if (
-        bundledNames.has(
-          name.toLowerCase()
+      const bundledNames = new Set(
+        pack.manifest.map(entry =>
+          entry.name.toLowerCase()
         )
-      ) {
-        finishReference(name, true);
+      );
+      for (const file of external) {
+        const name = String(
+          file.name || "Reference.dll"
+        );
+        if (
+          bundledNames.has(
+            name.toLowerCase()
+          )
+        ) {
+          finishReference(name, true);
+          if (completed % 4 === 0) {
+            await yieldToBrowser();
+          }
+          continue;
+        }
+        add(
+          name,
+          await fileBytes(file),
+          "selected",
+          true
+        );
         if (completed % 4 === 0) {
           await yieldToBrowser();
         }
-        continue;
       }
-      add(
-        name,
-        await fileBytes(file),
-        "selected",
-        true
-      );
-      if (completed % 4 === 0) {
-        await yieldToBrowser();
-      }
-    }
 
-    configuredReferenceFingerprint =
-      fingerprint;
-    configuredReferences =
-      Object.freeze(loaded);
-    return configuredReferences;
+      configuredReferenceFingerprint =
+        fingerprint;
+      configuredReferences =
+        Object.freeze(loaded);
+      return configuredReferences;
+    } catch (error) {
+      configuredReferenceFingerprint = "";
+      configuredReferences = Object.freeze([]);
+      throw error;
+    }
   }
 
   function normalizeDiagnostics(
@@ -604,6 +650,7 @@
       await ensureReady();
     await configureReferences(
       options.referenceFiles,
+      options.referenceIdentities,
       options.onProgress
     );
     const outputs = [];
@@ -790,7 +837,7 @@
     "RMLCSharp14Roslyn",
     {
       value: Object.freeze({
-        version: 9,
+        version: 10,
         name: "Roslyn C# 14 browser compiler (.NET 9 host, .NET 10 target)",
         languageVersion:
           LANGUAGE_VERSION,

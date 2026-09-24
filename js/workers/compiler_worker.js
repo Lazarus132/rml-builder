@@ -3,7 +3,7 @@
 self.window = self;
 
 importScripts(
-  "../compiler/csharp14_roslyn_worker_runtime.js?v=11-max-graph-performance-v755"
+  "../compiler/csharp14_roslyn_worker_runtime.js?v=13-reference-transaction"
 );
 
 function errorPayload(error) {
@@ -62,6 +62,7 @@ async function invokeCompiler(message) {
     case "configureReferences":
       return backend.configureReferences(
         args[0],
+        args[1],
         progress => self.postMessage({
           type: "progress",
           id: message.id,

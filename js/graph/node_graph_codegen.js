@@ -1,7 +1,7 @@
 "use strict";
 
 const EXTENSION_NAME = "typedNodeGraph";
-const GRAPH_SCHEMA_VERSION = 33;
+const GRAPH_SCHEMA_VERSION = 34;
 const GRAPH_STAGE_WIDTH = 5200;
 const GRAPH_STAGE_HEIGHT = 3400;
 const GRAPH_MIN_ZOOM = 0.005;
@@ -5456,6 +5456,395 @@ function normalizeConnectionRouting(
     return list;
   }
 
+const VISUAL_FUNCTION_REFERENCE_OPERATOR_IDS = new Set([
+  "language.callMethod",
+  "language.methodReturn",
+  "language.methodReturnVoid"
+]);
+
+function legacyVisualFunctionParameters(parameters) {
+    if (Array.isArray(parameters?.functionParameters)) {
+      return nodeGraphClone(
+        parameters.functionParameters
+      );
+    }
+    const lines = String(parameters?.signature || "")
+      .split(/\r\n?|\n|\\r\\n|\\n|\\r/)
+      .map(value => value.trim())
+      .filter(Boolean);
+    const usedIds = new Set();
+    return lines.map((line, index) => {
+      const separator = line.indexOf(":");
+      const rawName = separator >= 0
+        ? line.slice(0, separator).trim()
+        : `arg${index + 1}`;
+      const name = /^[A-Za-z_][A-Za-z0-9_]*$/
+        .test(rawName)
+          ? rawName
+          : `arg${index + 1}`;
+      const type = String(
+        separator >= 0
+          ? line.slice(separator + 1).trim()
+          : line
+      ).trim() || "System.Object";
+      let id = `arg-${name}`;
+      let suffix = 2;
+      while (usedIds.has(id)) {
+        id = `arg-${name}-${suffix++}`;
+      }
+      usedIds.add(id);
+      return { id, name, type };
+    });
+  }
+
+function legacyVisualFunctionReturnGraphType(parameters) {
+    const value = String(
+      parameters?.returnGraphType ??
+      parameters?.returnType ??
+      "void"
+    ).trim();
+    return !value ||
+      value.toLowerCase() === "void" ||
+      value === "System.Void"
+        ? "void"
+        : value;
+  }
+
+function migrateLegacyVisualFunctionDeclaration(node) {
+    if (
+      node?.kind !== "operator" ||
+      node.operatorId !== "language.methodEntry"
+    ) {
+      return false;
+    }
+    node.parameters =
+      node.parameters &&
+      typeof node.parameters === "object" &&
+      !Array.isArray(node.parameters)
+        ? node.parameters
+        : {};
+    const before = JSON.stringify({
+      functionParameters:
+        node.parameters.functionParameters,
+      returnGraphType:
+        node.parameters.returnGraphType
+    });
+    if (!Array.isArray(
+      node.parameters.functionParameters
+    )) {
+      node.parameters.functionParameters =
+        legacyVisualFunctionParameters(
+          node.parameters
+        );
+    }
+    node.parameters.returnGraphType =
+      legacyVisualFunctionReturnGraphType(
+        node.parameters
+      );
+    return before !== JSON.stringify({
+      functionParameters:
+        node.parameters.functionParameters,
+      returnGraphType:
+        node.parameters.returnGraphType
+    });
+  }
+
+function isVisualFunctionReferenceNode(node) {
+  return Boolean(
+    node?.kind === "operator" &&
+    VISUAL_FUNCTION_REFERENCE_OPERATOR_IDS.has(
+      node.operatorId
+    )
+  );
+}
+
+function visualFunctionDeclarationForReference(
+    reference,
+    nodes
+  ) {
+    if (!isVisualFunctionReferenceNode(reference)) {
+      return null;
+    }
+
+    const declarations = (Array.isArray(nodes) ? nodes : [])
+      .filter(candidate =>
+        candidate?.kind === "operator" &&
+        candidate.operatorId === "language.methodEntry"
+      );
+    const methodEntryId = String(
+      reference.parameters?.methodEntryId || ""
+    ).trim();
+
+    if (methodEntryId) {
+      return declarations.find(
+        candidate => candidate.id === methodEntryId
+      ) || null;
+    }
+
+    const methodName = String(
+      reference.parameters?.methodName || ""
+    ).trim();
+    if (!methodName) {
+      return null;
+    }
+
+    const legacyMatches = declarations.filter(candidate =>
+      String(candidate.parameters?.methodName || "").trim() === methodName
+    );
+    return legacyMatches.length === 1
+      ? legacyMatches[0]
+      : null;
+  }
+
+function synchronizeVisualFunctionReferenceNode(
+    reference,
+    nodes
+  ) {
+    if (!isVisualFunctionReferenceNode(reference)) {
+      return false;
+    }
+
+    const declaration =
+      visualFunctionDeclarationForReference(
+        reference,
+        nodes
+      );
+    if (!declaration) {
+      return false;
+    }
+    migrateLegacyVisualFunctionDeclaration(
+      declaration
+    );
+
+    reference.parameters =
+      reference.parameters &&
+      typeof reference.parameters === "object" &&
+      !Array.isArray(reference.parameters)
+        ? reference.parameters
+        : {};
+    const before = JSON.stringify({
+      methodEntryId:
+        reference.parameters.methodEntryId,
+      methodName:
+        reference.parameters.methodName,
+      functionParameters:
+        reference.parameters.functionParameters,
+      returnGraphType:
+        reference.parameters.returnGraphType
+    });
+
+    reference.parameters.methodEntryId =
+      declaration.id;
+    reference.parameters.methodName = String(
+      declaration.parameters?.methodName || ""
+    ).trim();
+    reference.parameters.functionParameters =
+      nodeGraphClone(
+        Array.isArray(
+          declaration.parameters?.functionParameters
+        )
+          ? declaration.parameters.functionParameters
+          : []
+      );
+    reference.parameters.returnGraphType = String(
+      declaration.parameters?.returnGraphType || "void"
+    );
+
+    return before !== JSON.stringify({
+      methodEntryId:
+        reference.parameters.methodEntryId,
+      methodName:
+        reference.parameters.methodName,
+      functionParameters:
+        reference.parameters.functionParameters,
+      returnGraphType:
+        reference.parameters.returnGraphType
+    });
+  }
+
+function synchronizeVisualFunctionReferences(nodes) {
+    const changedNodeIds = new Set();
+    for (const node of Array.isArray(nodes) ? nodes : []) {
+      if (
+        migrateLegacyVisualFunctionDeclaration(
+          node
+        )
+      ) {
+        changedNodeIds.add(node.id);
+      }
+    }
+    for (const node of Array.isArray(nodes) ? nodes : []) {
+      if (
+        synchronizeVisualFunctionReferenceNode(
+          node,
+          nodes
+        )
+      ) {
+        changedNodeIds.add(node.id);
+      }
+    }
+    return changedNodeIds;
+  }
+
+function visualFunctionConnectionDefinition(node) {
+    if (!node || node.kind !== "operator") {
+      return null;
+    }
+    const definition =
+      OPERATOR_DEFINITIONS[node.operatorId];
+    if (!definition) {
+      return null;
+    }
+    if (
+      typeof definition.resolveDefinition !==
+        "function"
+    ) {
+      return definition;
+    }
+    try {
+      const resolved =
+        definition.resolveDefinition(node);
+      return resolved &&
+        typeof resolved === "object"
+          ? {
+              ...definition,
+              ...resolved,
+              inputs:
+                resolved.inputs ||
+                definition.inputs || [],
+              outputs:
+                resolved.outputs ||
+                definition.outputs || []
+            }
+          : definition;
+    } catch {
+      return definition;
+    }
+  }
+
+function repairVisualFunctionConnectionsInGraph(
+    targetGraph,
+    affectedNodeIds = null
+  ) {
+    if (
+      !targetGraph ||
+      !Array.isArray(targetGraph.nodes) ||
+      !Array.isArray(targetGraph.connections)
+    ) {
+      return new Set();
+    }
+
+    const requested = affectedNodeIds
+      ? new Set(affectedNodeIds)
+      : null;
+    const structuralNodeIds = new Set(
+      targetGraph.nodes
+        .filter(node =>
+          node?.operatorId ===
+            "language.methodEntry" ||
+          isVisualFunctionReferenceNode(node)
+        )
+        .filter(node =>
+          !requested || requested.has(node.id)
+        )
+        .map(node => node.id)
+    );
+    if (structuralNodeIds.size === 0) {
+      return new Set();
+    }
+
+    const nodesById = new Map(
+      targetGraph.nodes.map(node => [node.id, node])
+    );
+    const definitionsById = new Map();
+    const portFor = (nodeId, portId, direction) => {
+      const node = nodesById.get(nodeId);
+      if (!node) return null;
+      let definition = definitionsById.get(nodeId);
+      if (!definitionsById.has(nodeId)) {
+        definition =
+          visualFunctionConnectionDefinition(node);
+        definitionsById.set(nodeId, definition);
+      }
+      const ports = direction === "input"
+        ? definition?.inputs
+        : definition?.outputs;
+      return Array.isArray(ports)
+        ? ports.find(port => port?.id === portId) || null
+        : null;
+    };
+
+    const removedConnectionIds = new Set();
+    targetGraph.connections =
+      targetGraph.connections.filter(connection => {
+        if (
+          !structuralNodeIds.has(connection.fromNode) &&
+          !structuralNodeIds.has(connection.toNode)
+        ) {
+          return true;
+        }
+
+        const fromPort = portFor(
+          connection.fromNode,
+          connection.fromPort,
+          "output"
+        );
+        const toPort = portFor(
+          connection.toNode,
+          connection.toPort,
+          "input"
+        );
+        const fromIsStructural =
+          structuralNodeIds.has(
+            connection.fromNode
+          );
+        const toIsStructural =
+          structuralNodeIds.has(
+            connection.toNode
+          );
+        const missing =
+          (fromIsStructural && !fromPort) ||
+          (toIsStructural && !toPort);
+        const incompatible =
+          !missing &&
+          fromPort &&
+          toPort &&
+          !fromPort.typeVar &&
+          !toPort.typeVar &&
+          !connectionTypesCompatible(
+            fromPort.type,
+            toPort.type
+          );
+        if (!missing && !incompatible) {
+          return true;
+        }
+        removedConnectionIds.add(connection.id);
+        return false;
+      });
+
+    if (removedConnectionIds.size > 0) {
+      for (const connection of targetGraph.connections) {
+        if (
+          removedConnectionIds.has(
+            connection.branchFrom?.connectionId
+          )
+        ) {
+          connection.branchFrom = null;
+        }
+      }
+      if (
+        removedConnectionIds.has(
+          targetGraph.selectedConnectionId
+        )
+      ) {
+        targetGraph.selectedConnectionId = null;
+        targetGraph.selectedWirePoint = null;
+      }
+    }
+
+    return removedConnectionIds;
+  }
+
 function sanitizeGraphState(
     raw,
     options = {}
@@ -5897,6 +6286,10 @@ function sanitizeGraphState(
       });
     }
 
+    synchronizeVisualFunctionReferences(
+      result.nodes
+    );
+
     const rawConnections =
       Array.isArray(raw.connections)
         ? raw.connections
@@ -5938,6 +6331,10 @@ function sanitizeGraphState(
           )
       });
     }
+
+    repairVisualFunctionConnectionsInGraph(
+      result
+    );
 
     for (const node of result.nodes) {
       if (node.kind !== "operator") continue;
@@ -6986,21 +7383,43 @@ function resolveNodeDefinition(node) {
       return configurationMenuDefinition();
     }
 
-    if (node?.operatorId === "language.callMethod" && typeof graph === "object" && Array.isArray(graph?.nodes)) {
-      const methodName = String(node.parameters?.methodName || "").trim();
-      const declaration = graph.nodes.find(candidate => candidate?.operatorId === "language.methodEntry" && String(candidate.parameters?.methodName || "").trim() === methodName);
-      if (declaration) {
-        node.parameters ||= {};
-        const declarationParameters = Array.isArray(declaration.parameters?.functionParameters) ? declaration.parameters.functionParameters : [];
-        node.parameters.functionParameters = nodeGraphClone(declarationParameters);
-        node.parameters.returnGraphType = String(declaration.parameters?.returnGraphType || "void");
-      }
-    }
-
     let definition =
       OPERATOR_DEFINITIONS[
         node.operatorId
       ];
+    let definitionNode = node;
+    if (
+      isVisualFunctionReferenceNode(node) &&
+      Array.isArray(graph?.nodes)
+    ) {
+      const declaration =
+        visualFunctionDeclarationForReference(
+          node,
+          graph.nodes
+        );
+      if (declaration) {
+        definitionNode = {
+          ...node,
+          parameters: {
+            ...(node.parameters || {}),
+            methodEntryId: declaration.id,
+            methodName: String(
+              declaration.parameters?.methodName || ""
+            ).trim(),
+            functionParameters: nodeGraphClone(
+              Array.isArray(
+                declaration.parameters?.functionParameters
+              )
+                ? declaration.parameters.functionParameters
+                : []
+            ),
+            returnGraphType: String(
+              declaration.parameters?.returnGraphType || "void"
+            )
+          }
+        };
+      }
+    }
 
     if (
       !definition &&
@@ -7074,36 +7493,13 @@ function resolveNodeDefinition(node) {
     }
 
     if (
-      ["language.callMethod", "language.methodReturn", "language.methodReturnVoid"].includes(node?.operatorId)
-    ) {
-      const methodName = String(node?.parameters?.methodName || "").trim();
-      const declaration = Array.isArray(graph?.nodes)
-        ? graph.nodes.find(candidate =>
-            candidate?.operatorId === "language.methodEntry" &&
-            String(candidate?.parameters?.methodName || "").trim() === methodName
-          )
-        : null;
-      if (declaration) {
-        node.parameters ??= {};
-        node.parameters.functionParameters = nodeGraphClone(
-          Array.isArray(declaration.parameters?.functionParameters)
-            ? declaration.parameters.functionParameters
-            : []
-        );
-        node.parameters.returnGraphType = String(
-          declaration.parameters?.returnGraphType || "void"
-        );
-      }
-    }
-
-    if (
       typeof definition?.resolveDefinition ===
         "function"
     ) {
       try {
         const resolved =
           definition.resolveDefinition(
-            node
+            definitionNode
           );
 
         if (
@@ -8137,7 +8533,7 @@ function createGraphAnalysisCertificate(
       schemaVersion:
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION,
       moduleId:
-        "1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open",
+        "1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle",
       semanticToken: token,
       nodeCount: graph.nodes.length,
       connectionCount: connections.length,
@@ -8170,7 +8566,7 @@ function graphAnalysisCertificateEnvelopeValid(
       Number(certificate.schemaVersion) ===
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION &&
       certificate.moduleId ===
-        "1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open" &&
+        "1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle" &&
       certificate.valid === true &&
       typeof certificate.semanticToken ===
         "string" &&
@@ -11266,12 +11662,94 @@ function graphCsColorLiteral(
     return text;
   }
 
+function prepareGraphCsMethodTokens(
+    nodes
+  ) {
+    const nodeIds = [...new Set(
+      (Array.isArray(nodes) ? nodes : [])
+        .map(node =>
+          String(node?.id || "")
+        )
+        .filter(Boolean)
+    )];
+    const idsByBaseToken = new Map();
+
+    for (const nodeId of nodeIds) {
+      const baseToken =
+        `N${hashText(nodeId)}`;
+      const matches =
+        idsByBaseToken.get(baseToken) || [];
+      matches.push(nodeId);
+      idsByBaseToken.set(
+        baseToken,
+        matches
+      );
+    }
+
+    const resolved = new Map();
+    for (const [baseToken, matches] of
+      idsByBaseToken) {
+      if (matches.length === 1) {
+        resolved.set(matches[0], baseToken);
+        continue;
+      }
+
+      const idsBySecondaryToken = new Map();
+      for (const nodeId of matches) {
+        const secondaryToken = hashText(
+          `rml-token-v2\0${nodeId}`
+        );
+        const secondaryMatches =
+          idsBySecondaryToken.get(
+            secondaryToken
+          ) || [];
+        secondaryMatches.push(nodeId);
+        idsBySecondaryToken.set(
+          secondaryToken,
+          secondaryMatches
+        );
+      }
+
+      for (const [secondaryToken, secondaryMatches]
+        of idsBySecondaryToken) {
+        secondaryMatches.sort((left, right) =>
+          left < right
+            ? -1
+            : left > right
+              ? 1
+              : 0
+        );
+        secondaryMatches.forEach(
+          (nodeId, index) => {
+            resolved.set(
+              nodeId,
+              `${baseToken}_${secondaryToken}${
+                secondaryMatches.length > 1
+                  ? `_${index + 1}`
+                  : ""
+              }`
+            );
+          }
+        );
+      }
+    }
+
+    graphCsMethodToken.nodeTokens =
+      resolved;
+    return resolved;
+  }
+
 function graphCsMethodToken(
     nodeId,
     portId = ""
   ) {
+    const normalizedNodeId =
+      String(nodeId);
     const nodeToken =
-      `N${hashText(String(nodeId))}`;
+      graphCsMethodToken.nodeTokens?.get(
+        normalizedNodeId
+      ) ||
+      `N${hashText(normalizedNodeId)}`;
     const portToken =
       graphCsIdentifier(
         portId,
@@ -11501,6 +11979,421 @@ function sanitizeGeneratedCSharp(source) {
     return result;
   }
 
+const GENERATED_NODE_ORIGIN_MARKER =
+  "__RML_NODE_ORIGIN__";
+const GENERATED_NODE_ORIGIN_END_MARKER =
+  "__RML_NODE_ORIGIN_END__";
+
+function invalidGeneratedLayoutEscape(
+    source
+  ) {
+    const input = String(source || "");
+    const sanitized =
+      sanitizeGeneratedCSharp(input);
+    const match =
+      /\\(?:r\\n|[rnt])/.exec(
+        sanitized
+      );
+    if (!match) return null;
+    const prefix = input.slice(
+      0,
+      match.index
+    );
+    const line =
+      prefix.split(/\r\n?|\n/).length;
+    const lastBreak = Math.max(
+      prefix.lastIndexOf("\n"),
+      prefix.lastIndexOf("\r")
+    );
+    return Object.freeze({
+      index: match.index,
+      token: match[0],
+      line,
+      column:
+        match.index - lastBreak
+    });
+  }
+
+function generatedNodeOriginMarker(
+    node,
+    definition,
+    graphPath = "Runtime Graph"
+  ) {
+    const origin = {
+      nodeId: String(node?.id || ""),
+      nodeLabel: String(
+        node?.label ||
+        definition?.title ||
+        node?.id ||
+        "<unnamed>"
+      ),
+      operatorId: String(
+        node?.operatorId || ""
+      ),
+      graphPath: String(
+        graphPath || "Runtime Graph"
+      )
+    };
+    return `/*${GENERATED_NODE_ORIGIN_MARKER}${encodeURIComponent(JSON.stringify(origin))}*/`;
+  }
+
+function generatedNodeOriginEndMarker() {
+    return `/*${GENERATED_NODE_ORIGIN_END_MARKER}*/`;
+  }
+
+function generatedNodeIndexTextValue(value) {
+    return String(value ?? "")
+      .replace(/[\r\n\t]+/g, " ")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+  }
+
+function generatedNodeIndexMarkdownValue(value) {
+    return generatedNodeIndexTextValue(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\\/g, "\\\\")
+      .replace(/\|/g, "\\|")
+      .replace(/`/g, "\\`")
+      .replace(/([*_\[\]#!~])/g, "\\$1");
+  }
+
+function generatedNodeIndexMarkdownCode(value) {
+    const normalized =
+      generatedNodeIndexTextValue(value)
+        .replace(/\|/g, "\\|");
+    const longestRun = Math.max(
+      0,
+      ...(normalized.match(/`+/g) || [])
+        .map(run => run.length)
+    );
+    const fence = "`".repeat(
+      longestRun + 1
+    );
+    const padding =
+      normalized.startsWith("`") ||
+      normalized.endsWith("`")
+        ? " "
+        : "";
+    return `${fence}${padding}${normalized}${padding}${fence}`;
+  }
+
+function generatedGraphNodeIndexFileName(
+    className,
+    additionalFiles = []
+  ) {
+    const base =
+      `${className}.NodeGraph.Index`;
+    const used = new Set(
+      (Array.isArray(additionalFiles)
+        ? additionalFiles
+        : [])
+        .map(file =>
+          String(file?.name || "")
+            .trim()
+            .toLowerCase()
+        )
+        .filter(Boolean)
+    );
+    let candidate = `${base}.md`;
+    let suffix = 2;
+    while (used.has(candidate.toLowerCase())) {
+      candidate = `${base}-${suffix}.md`;
+      suffix += 1;
+    }
+    return candidate;
+  }
+
+function generatedGraphNodeIndexMarkdown(
+    graph,
+    definitionForNode,
+    tokenForNode,
+    graphPath = "Runtime Graph",
+    generatedSourceFile = ""
+  ) {
+    const nodes = Array.isArray(graph?.nodes)
+      ? graph.nodes
+      : [];
+    const connections = Array.isArray(
+      graph?.connections
+    )
+      ? graph.connections
+      : [];
+    const nodeById = new Map(
+      nodes.map(node => [
+        String(node?.id || ""),
+        node
+      ])
+    );
+    const definitionOf = node => {
+      try {
+        return typeof definitionForNode ===
+          "function"
+          ? definitionForNode(node)
+          : null;
+      } catch {
+        return null;
+      }
+    };
+    const tokenOf = node => {
+      try {
+        const token = typeof tokenForNode ===
+          "function"
+          ? tokenForNode(node)
+          : "";
+        if (String(token || "").trim()) {
+          return generatedNodeIndexTextValue(
+            token
+          );
+        }
+      } catch {
+      }
+      return generatedNodeIndexTextValue(
+        node?.id || "?"
+      );
+    };
+    const labelOf = node => {
+      const configuredMethodName =
+        node?.operatorId ===
+          "language.methodEntry"
+          ? String(
+              node?.parameters?.methodName ||
+              ""
+            ).trim()
+          : "";
+      return generatedNodeIndexMarkdownValue(
+        configuredMethodName ||
+        node?.label ||
+        definitionOf(node)?.title ||
+        node?.operatorId ||
+        node?.id ||
+        "<unnamed>"
+      );
+    };
+    const lines = [
+      "# RML Generated Node Index",
+      "",
+      `## ${generatedNodeIndexMarkdownValue(graphPath || "Runtime Graph")}`,
+      "",
+      ...(String(generatedSourceFile || "").trim()
+        ? [
+            `Generated source: ${generatedNodeIndexMarkdownCode(generatedSourceFile)}`,
+            ""
+          ]
+        : []),
+      `### Nodes (${nodes.length})`,
+      "",
+      "| C# token | Node | Type | Node ID | Position |",
+      "| --- | --- | --- | --- | --- |",
+      ...nodes.map(node => {
+        const rawX = node?.x;
+        const rawY = node?.y;
+        const x = Number(rawX);
+        const y = Number(rawY);
+        const position =
+          rawX !== null &&
+          rawX !== undefined &&
+          String(rawX).trim() !== "" &&
+          rawY !== null &&
+          rawY !== undefined &&
+          String(rawY).trim() !== "" &&
+          Number.isFinite(x) &&
+          Number.isFinite(y)
+            ? `${x}, ${y}`
+            : "";
+        return `| ${generatedNodeIndexMarkdownCode(tokenOf(node))} | ${labelOf(node)} | ${generatedNodeIndexMarkdownCode(node?.operatorId || node?.kind || "unknown")} | ${generatedNodeIndexMarkdownCode(node?.id || "?")} | ${position ? generatedNodeIndexMarkdownCode(position) : ""} |`;
+      }),
+      "",
+      `### Connections (${connections.length})`,
+      "",
+      "| From | To |",
+      "| --- | --- |",
+      ...connections.map(connection => {
+        const fromNode = nodeById.get(
+          String(connection?.fromNode || "")
+        );
+        const toNode = nodeById.get(
+          String(connection?.toNode || "")
+        );
+        const fromToken = fromNode
+          ? tokenOf(fromNode)
+          : generatedNodeIndexTextValue(
+              connection?.fromNode || "?"
+            );
+        const toToken = toNode
+          ? tokenOf(toNode)
+          : generatedNodeIndexTextValue(
+              connection?.toNode || "?"
+            );
+        const fromPort = generatedNodeIndexTextValue(
+          connection?.fromPort || "?"
+        );
+        const toPort = generatedNodeIndexTextValue(
+          connection?.toPort || "?"
+        );
+        return `| ${generatedNodeIndexMarkdownCode(`${fromToken}.${fromPort}`)} | ${generatedNodeIndexMarkdownCode(`${toToken}.${toPort}`)} |`;
+      }),
+      ""
+    ];
+    return lines.join("\n");
+  }
+
+function generatedNodeFailureDiagnostic(
+    node,
+    definition,
+    graphPath,
+    stage,
+    error
+  ) {
+    const label = String(
+      node?.label ||
+      definition?.title ||
+      node?.id ||
+      "<unnamed>"
+    );
+    const nodeId = String(node?.id || "?");
+    const operatorId = String(
+      node?.operatorId || "unknown operator"
+    );
+    const path = String(
+      graphPath || "Runtime Graph"
+    );
+    const reason =
+      error instanceof Error
+        ? error.message
+        : String(error);
+    return `Node code generation failed for label '${label}', node ID '${nodeId}', operator ID '${operatorId}', graph path '${path}' during ${stage}: ${reason}`;
+  }
+
+function extractGeneratedNodeSourceMap(
+    source
+  ) {
+    const input = String(source || "");
+    const markerPattern = new RegExp(
+      `\\/\\*(?:${GENERATED_NODE_ORIGIN_MARKER}(.+?)|${GENERATED_NODE_ORIGIN_END_MARKER})\\*\\/`,
+      "g"
+    );
+    const output = [];
+    const sourceMap = [];
+    const active = [];
+    let outputLength = 0;
+    let inputOffset = 0;
+    let match;
+
+    const append = value => {
+      output.push(value);
+      outputLength += value.length;
+    };
+    const closeActive = entry => {
+      if (!entry) return;
+      sourceMap.push({
+        ...entry.origin,
+        startOffset: entry.startOffset,
+        endOffset: outputLength
+      });
+    };
+
+    while ((match = markerPattern.exec(input))) {
+      append(input.slice(inputOffset, match.index));
+      inputOffset = markerPattern.lastIndex;
+      if (!match[1]) {
+        closeActive(active.pop());
+        continue;
+      }
+      try {
+        const origin = JSON.parse(
+          decodeURIComponent(match[1])
+        );
+        active.push({
+          startOffset: outputLength,
+          origin: {
+            nodeId: String(
+              origin?.nodeId || ""
+            ),
+            nodeLabel: String(
+              origin?.nodeLabel ||
+              origin?.nodeId ||
+              "<unnamed>"
+            ),
+            operatorId: String(
+              origin?.operatorId || ""
+            ),
+            graphPath: String(
+              origin?.graphPath ||
+              "Runtime Graph"
+            )
+          }
+        });
+      } catch {
+      }
+    }
+    append(input.slice(inputOffset));
+    while (active.length > 0) {
+      closeActive(active.pop());
+    }
+    const content = output.join("");
+    const lineStarts = [0];
+    for (
+      let index = 0;
+      index < content.length;
+      index += 1
+    ) {
+      if (content[index] === "\n") {
+        lineStarts.push(index + 1);
+      }
+    }
+    const positionAt = offset => {
+      const target = Math.max(
+        0,
+        Math.min(content.length, offset)
+      );
+      let low = 0;
+      let high = lineStarts.length - 1;
+      while (low <= high) {
+        const middle = (low + high) >> 1;
+        if (lineStarts[middle] <= target) {
+          low = middle + 1;
+        } else {
+          high = middle - 1;
+        }
+      }
+      const lineIndex = Math.max(0, high);
+      return {
+        line: lineIndex + 1,
+        column:
+          target - lineStarts[lineIndex] + 1
+      };
+    };
+    const mappedSourceMap = sourceMap
+      .sort((left, right) =>
+        left.startOffset - right.startOffset ||
+        right.endOffset - left.endOffset
+      )
+      .map(entry => {
+      const start = positionAt(entry.startOffset);
+      const end = positionAt(
+        entry.endOffset > entry.startOffset
+          ? entry.endOffset - 1
+          : entry.startOffset
+      );
+      return {
+        nodeId: entry.nodeId,
+        nodeLabel: entry.nodeLabel,
+        operatorId: entry.operatorId,
+        graphPath: entry.graphPath,
+        startLine: start.line,
+        startColumn: start.column,
+        endLine: end.line,
+        endColumn: end.column
+      };
+      });
+    return {
+      content,
+      sourceMap: mappedSourceMap
+    };
+  }
+
 function unresolvedGeneratedMethodCalls(
     source
   ) {
@@ -11605,7 +12498,7 @@ function generatedPrivateFieldLivenessProblems(
         )
         .join("\n");
     const referencePattern =
-      /\b_[A-Za-z_]\w*N[0-9a-f]{8}\b/gi;
+      /\b_[A-Za-z_]\w*N[0-9a-f]{8}(?:_[0-9a-f]{8}(?:_[1-9][0-9]*)?)?\b/gi;
     const referencesByName = new Map();
     for (const reference of
       sanitized.matchAll(referencePattern)) {
@@ -11626,7 +12519,7 @@ function generatedPrivateFieldLivenessProblems(
     );
     const declarations = [];
     const pattern =
-      /^ {4}private\s+static\s+(?:(?:readonly|volatile)\s+)*(?<type>[^\n;{}=]+?)\s+(?<name>_[A-Za-z_]\w*N[0-9a-f]{8})(?<initializer>\s*=\s*[^;\n]+)?\s*;$/gim;
+      /^ {4}private\s+static\s+(?:(?:readonly|volatile)\s+)*(?<type>[^\n;{}=]+?)\s+(?<name>_[A-Za-z_]\w*N[0-9a-f]{8}(?:_[0-9a-f]{8}(?:_[1-9][0-9]*)?)?)(?<initializer>\s*=\s*[^;\n]+)?\s*;$/gim;
 
     for (const match of
       sanitized.matchAll(pattern)) {
@@ -12031,7 +12924,7 @@ function removeUnreferencedGeneratedFields(
     let optimized = String(source || "")
       .replaceAll("\r\n", "\n");
     const declarationPattern =
-      /^    private static (?!readonly\b)([^\n;{}=]+?)\s+(_[A-Za-z_][A-Za-z0-9_]*N[0-9a-f]{8})(\s*=\s*[^;\n]+)?\s*;$/gim;
+      /^    private static (?!readonly\b)([^\n;{}=]+?)\s+(_[A-Za-z_][A-Za-z0-9_]*N[0-9a-f]{8}(?:_[0-9a-f]{8}(?:_[1-9][0-9]*)?)?)(\s*=\s*[^;\n]+)?\s*;$/gim;
     const declarations = [
       ...optimized.matchAll(
         declarationPattern
@@ -12040,7 +12933,7 @@ function removeUnreferencedGeneratedFields(
     const sanitized =
       sanitizeGeneratedCSharp(optimized);
     const referencePattern =
-      /\b_[A-Za-z_]\w*N[0-9a-f]{8}\b/gi;
+      /\b_[A-Za-z_]\w*N[0-9a-f]{8}(?:_[0-9a-f]{8}(?:_[1-9][0-9]*)?)?\b/gi;
     const referencesByName = new Map();
     for (const reference of
       sanitized.matchAll(referencePattern)) {
@@ -13343,6 +14236,10 @@ function buildTypedNodeGraphCSharpContribution(
       };
     }
 
+    prepareGraphCsMethodTokens(
+      graph.nodes
+    );
+
     const stateSnapshot =
       request.state ||
       bridge?.getStateSnapshot?.() ||
@@ -13766,6 +14663,40 @@ function buildTypedNodeGraphCSharpContribution(
       usesHarmony: false,
       runtimeReloadUnsafe:
         reloadSafetyIssues.length > 0
+    };
+    const generatedGraphPath = String(
+      request.graphPath ||
+      request.viewPath ||
+      graph?.path ||
+      graph?.name ||
+      "Runtime Graph"
+    );
+
+    const prepareNodeGeneratedCode = (
+      node,
+      definition,
+      code,
+      fragmentKind = "C#"
+    ) => {
+      const source = String(code || "");
+      if (!source.trim()) return "";
+      const invalid =
+        invalidGeneratedLayoutEscape(
+          source
+        );
+      if (invalid) {
+        const message =
+          `Node '${node?.label || definition?.title || node?.id || "<unnamed>"}' [${node?.id || "?"}] (${node?.operatorId || "unknown operator"}) in ${generatedGraphPath} produced an invalid ${fragmentKind} fragment: structural token '${invalid.token}' at fragment line ${invalid.line}, column ${invalid.column}. No code from this node was emitted.`;
+        if (!diagnostics.includes(message)) {
+          diagnostics.push(message);
+        }
+        return "";
+      }
+      return `${generatedNodeOriginMarker(
+        node,
+        definition,
+        generatedGraphPath
+      )}${source}${generatedNodeOriginEndMarker()}`;
     };
 
     const addNamedBlock = (
@@ -14243,7 +15174,12 @@ function buildTypedNodeGraphCSharpContribution(
         addNamedBlock(
           extensionFields,
           key,
-          code
+          prepareNodeGeneratedCode(
+            node,
+            definition,
+            code,
+            "field"
+          )
         );
       },
       addRuntimeField(
@@ -14259,11 +15195,16 @@ function buildTypedNodeGraphCSharpContribution(
         addNamedBlock(
           extensionFields,
           key,
+          prepareNodeGeneratedCode(
+            node,
+            definition,
 `private static ${csType} ${fieldName}
 {
     get => ReadGraphRuntimeValue<${csType}>("${runtimeKey}", ${defaultCode});
     set => WriteGraphRuntimeValue("${runtimeKey}", value);
-}`
+}`,
+            "runtime field"
+          )
         );
       },
       addPersistentRuntimeField(
@@ -14276,11 +15217,16 @@ function buildTypedNodeGraphCSharpContribution(
         addNamedBlock(
           extensionFields,
           key,
-          graphCsStaticFieldDeclaration(
-            graphType,
-            csType,
-            fieldName,
-            defaultCode
+          prepareNodeGeneratedCode(
+            node,
+            definition,
+            graphCsStaticFieldDeclaration(
+              graphType,
+              csType,
+              fieldName,
+              defaultCode
+            ),
+            "persistent field"
           )
         );
       },
@@ -14288,25 +15234,45 @@ function buildTypedNodeGraphCSharpContribution(
         addNamedBlock(
           extensionMembers,
           key,
-          code
+          prepareNodeGeneratedCode(
+            node,
+            definition,
+            code,
+            "member"
+          )
         );
       },
       addInitialize(code) {
         addStatement(
           extensionInitializeStatements,
-          code
+          prepareNodeGeneratedCode(
+            node,
+            definition,
+            code,
+            "initialization"
+          )
         );
       },
       addEngineInit(code) {
         addStatement(
           extensionEngineInitStatements,
-          code
+          prepareNodeGeneratedCode(
+            node,
+            definition,
+            code,
+            "engine initialization"
+          )
         );
       },
       addRuntimeDrain(code) {
         addStatement(
           extensionRuntimeDrainStatements,
-          code
+          prepareNodeGeneratedCode(
+            node,
+            definition,
+            code,
+            "runtime drain"
+          )
         );
       },
       addFile(file) {
@@ -14319,7 +15285,13 @@ function buildTypedNodeGraphCSharpContribution(
         ) {
           extensionFiles.push({
             name: file.name.trim(),
-            content: file.content,
+            content:
+              prepareNodeGeneratedCode(
+                node,
+                definition,
+                file.content,
+                "source file"
+              ),
             type:
               file.type ||
               "text/plain;charset=utf-8",
@@ -14359,7 +15331,13 @@ function buildTypedNodeGraphCSharpContribution(
               )
               .map(file => ({
                 name: file.name.trim(),
-                content: file.content,
+                content:
+                  prepareNodeGeneratedCode(
+                    node,
+                    definition,
+                    file.content,
+                    "project source file"
+                  ),
                 type:
                   file.type ||
                   "text/plain;charset=utf-8"
@@ -14794,11 +15772,13 @@ function buildTypedNodeGraphCSharpContribution(
                 }
               } catch (error) {
                 diagnostics.push(
-                  `${definition.title}: C# expression generation failed: ${
-                    error instanceof Error
-                      ? error.message
-                      : String(error)
-                  }`
+                  generatedNodeFailureDiagnostic(
+                    node,
+                    definition,
+                    generatedGraphPath,
+                    "C# expression generation",
+                    error
+                  )
                 );
               }
             } else {
@@ -14809,6 +15789,25 @@ function buildTypedNodeGraphCSharpContribution(
         }
       }
 
+      const invalidExpression =
+        invalidGeneratedLayoutEscape(
+          code
+        );
+      if (invalidExpression) {
+        const message =
+          `Node '${node?.label || definition?.title || node?.id || "<unnamed>"}' [${node?.id || "?"}] (${node?.operatorId || "unknown operator"}) in ${generatedGraphPath} produced an invalid expression fragment: structural token '${invalidExpression.token}' at fragment line ${invalidExpression.line}, column ${invalidExpression.column}. The expression was rejected.`;
+        if (!diagnostics.includes(message)) {
+          diagnostics.push(message);
+        }
+        code = graphCsDefault(type);
+      }
+      if (node && definition && outputSpec) {
+        code = `${generatedNodeOriginMarker(
+          node,
+          definition,
+          generatedGraphPath
+        )}${code}${generatedNodeOriginEndMarker()}`;
+      }
       const result = {
         type,
         code
@@ -14989,11 +15988,13 @@ function buildTypedNodeGraphCSharpContribution(
         );
       } catch (error) {
         diagnostics.push(
-          `${definition.title}: C# runtime collection failed: ${
-            error instanceof Error
-              ? error.message
-              : String(error)
-          }`
+          generatedNodeFailureDiagnostic(
+            node,
+            definition,
+            generatedGraphPath,
+            "C# runtime collection",
+            error
+          )
         );
       }
     }
@@ -15409,17 +16410,27 @@ function buildTypedNodeGraphCSharpContribution(
               : generated?.code || "";
           } catch (error) {
             diagnostics.push(
-              `${definition.title}: C# action generation failed: ${
-                error instanceof Error
-                  ? error.message
-                  : String(error)
-              }`
+              generatedNodeFailureDiagnostic(
+                targetNode,
+                definition,
+                generatedGraphPath,
+                "C# action generation",
+                error
+              )
             );
             generatedAction = "";
           }
           break;
         }
       }
+
+      generatedAction =
+        prepareNodeGeneratedCode(
+          targetNode,
+          nodeDefinition(targetNode),
+          generatedAction,
+          "action"
+        );
 
       if (!deferFanOutContinuations) {
         return {
@@ -16488,10 +17499,26 @@ item.backing]);
             .join("\n")}\n */\n`
         : "\n";
 
-    const guideComment =
-      includeGuideComments
+    const guideComment = includeGuideComments
       ? generatedGuidance("header")
       : "";
+    const nodeIndexFile = {
+      name: generatedGraphNodeIndexFileName(
+        className,
+        extensionFiles
+      ),
+      content: generatedGraphNodeIndexMarkdown(
+        graph,
+        nodeDefinition,
+        node => graphCsMethodToken(
+          node?.id
+        ),
+        generatedGraphPath,
+        fileName
+      ),
+      type: "text/markdown;charset=utf-8",
+      exportCategory: "node-index"
+    };
 
     const queuedImpulseMethods =
       impulseOutputs
@@ -16624,27 +17651,102 @@ impulseMethods || generatedGuidance(
   "noImpulseOutputs"
 ),
 generatedRuntimeMembersCode ? `\n\n${generatedRuntimeMembersCode}` : ""]);
-    source =
-      compactSingleUseQueuedImpulseWrappers(
-        source,
-        impulseOutputs,
-        usedQueuedMethods,
-        usedEntryMethods
+    let mainSourceMap = [];
+    const invalidMainLayout =
+      invalidGeneratedLayoutEscape(
+        source
       );
-    source =
-      removeUnreachableGeneratedImpulseMethods(
-        source,
-        extensionFiles.map(
-          file => file?.content || ""
-        )
+    if (invalidMainLayout) {
+      diagnostics.push(
+        `Internal code-generation error: ${fileName} contains structural token '${invalidMainLayout.token}' outside a C# literal at line ${invalidMainLayout.line}, column ${invalidMainLayout.column}. The generated file was rejected before publication.`
       );
-    source =
-      removeUnreferencedGeneratedFields(
-        source,
-        extensionFiles.map(
-          file => file?.content || ""
-        )
-      );
+      source = "";
+    } else {
+      source =
+        compactSingleUseQueuedImpulseWrappers(
+          source,
+          impulseOutputs,
+          usedQueuedMethods,
+          usedEntryMethods
+        );
+      source =
+        removeUnreachableGeneratedImpulseMethods(
+          source,
+          extensionFiles.map(
+            file => file?.content || ""
+          )
+        );
+      source =
+        removeUnreferencedGeneratedFields(
+          source,
+          extensionFiles.map(
+            file => file?.content || ""
+          )
+        );
+      const invalidOptimizedLayout =
+        invalidGeneratedLayoutEscape(
+          source
+        );
+      if (invalidOptimizedLayout) {
+        diagnostics.push(
+          `Internal code-generation error: optimized ${fileName} contains structural token '${invalidOptimizedLayout.token}' outside a C# literal at line ${invalidOptimizedLayout.line}, column ${invalidOptimizedLayout.column}. The generated file was rejected before publication.`
+        );
+        source = "";
+      } else {
+        const mapped =
+          extractGeneratedNodeSourceMap(
+            source
+          );
+        source = mapped.content;
+        mainSourceMap = mapped.sourceMap;
+      }
+    }
+
+    const finalizeGeneratedFile = file => {
+      const name = String(file?.name || "");
+      if (/\.cs$/i.test(name)) {
+        const invalid =
+          invalidGeneratedLayoutEscape(
+            file?.content || ""
+          );
+        if (invalid) {
+          diagnostics.push(
+            `Internal code-generation error: ${name} contains structural token '${invalid.token}' outside a C# literal at line ${invalid.line}, column ${invalid.column}. The generated file was rejected before publication.`
+          );
+          return {
+            ...file,
+            content: "",
+            sourceMap: []
+          };
+        }
+      }
+      const mapped =
+        extractGeneratedNodeSourceMap(
+          file?.content || ""
+        );
+      return {
+        ...file,
+        content: mapped.content,
+        sourceMap: mapped.sourceMap
+      };
+    };
+
+    for (
+      let index = 0;
+      index < extensionFiles.length;
+      index += 1
+    ) {
+      extensionFiles[index] =
+        finalizeGeneratedFile(
+          extensionFiles[index]
+        );
+    }
+    for (const project of extensionProjects) {
+      project.files = (Array.isArray(project.files)
+        ? project.files
+        : [])
+        .map(finalizeGeneratedFile);
+    }
 
     for (const helper of
       extensionRuntimeHelpers) {
@@ -16732,9 +17834,12 @@ generatedRuntimeMembersCode ? `\n\n${generatedRuntimeMembersCode}` : ""]);
           {
             name: fileName,
             content: source,
+            sourceMap:
+              mainSourceMap,
             type:
               "text/plain;charset=utf-8"
           },
+          nodeIndexFile,
           ...extensionFiles
         ];
         const usedNames = new Set();
@@ -17193,7 +18298,7 @@ Object.defineProperty(
     {
       value: Object.freeze({
         moduleId:
-          "1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open",
+          "1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle",
         build:
           buildTypedNodeGraphCSharpContribution,
         validateDocument:

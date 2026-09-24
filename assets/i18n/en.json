@@ -3210,5 +3210,19 @@
   "export.compiler_references.search_missing": "Build ZIP asks for the Resonite folder and searches all subfolders for: {dlls}. You can also drop DLLs or a folder onto the Missing DLLs field.",
   "export.compiler_references.still_missing": "Still missing: {dlls}. Drop these DLLs or another folder onto the Missing DLLs field.",
   "export.compiler_references.manifest.one": "The exact ZIP manifest above includes {count} browser-compiled DLL. The target assemblies stay on this device.",
-  "export.compiler_references.manifest.other": "The exact ZIP manifest above includes {count} browser-compiled DLLs. The target assemblies stay on this device."
+  "export.compiler_references.manifest.other": "The exact ZIP manifest above includes {count} browser-compiled DLLs. The target assemblies stay on this device.",
+  "export.node_index.title": "Node index (.md)",
+  "export.node_index.description": "Separate Markdown map of node names, IDs, types, positions and connections.",
+  "export.node_index.files": "{count} generated node index files",
+  "generated.validation.structural_escape": "The generator produced an escaped line break or tab outside a C# literal. The file was rejected before publication.",
+  "generated.validation.node_error": "Node “{label}” [{nodeId}] ({operatorId}) in {graphPath} cannot generate valid C# code.",
+  "generated.validation.rejected_preview": "Generated C# was rejected. No code was published.",
+  "generated.validation.failed": "C# validation failed. No generated file was published.",
+  "generated.validation.semantic_failed": "The generated project did not pass full C# compilation. No source was copied or exported.",
+  "generated.validation.in_progress": "Generated C# is being validated…",
+  "generated.validation.publication_required": "No validated generation snapshot is available. Generate and validate the project again.",
+  "generated.validation.download_bridge_restricted": "The generic download bridge only accepts Saved API Composite data. Generated project files require a validated publication snapshot.",
+  "export.compiler_references.changed": "Compiler references changed.",
+  "export.compiler_references.sha256_unavailable": "SHA-256 is unavailable, so the selected compiler DLLs cannot be verified byte for byte.",
+  "export.compiler_references.identity_missing": "The compiler reference DLLs were not bound to verified SHA-256 content identities. Compilation was stopped."
 }

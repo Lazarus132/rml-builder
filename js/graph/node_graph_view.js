@@ -4300,7 +4300,7 @@ function setRmlNodeSymbolContent(element, symbol) {
   svg.setAttribute("aria-hidden", "true");
   svg.classList.add("rml-node-symbol-svg");
   const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
-  use.setAttribute("href", `assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#${iconId}`);
+  use.setAttribute("href", `assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#${iconId}`);
   svg.appendChild(use);
   element.appendChild(svg);
 }
@@ -13394,7 +13394,7 @@ function graphPresentationVisible() {
   }
 
 function graphOutlineToggleMarkup() {
-    return `<svg class="rml-pack-outline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-outline"></use></svg>`;
+    return `<svg class="rml-pack-outline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-outline"></use></svg>`;
   }
 
 function markGraphPackPresentationPending() {
@@ -14604,7 +14604,7 @@ function restoreGraphPaletteScroll(
 
 function setGraphPanelToggleIcon(button, iconName) {
   if (!button) return;
-  button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-${iconName}"></use></svg>`;
+  button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-${iconName}"></use></svg>`;
 }
 
 let graphPanelScrollPreservationSequence = 0;
@@ -15543,8 +15543,18 @@ function deactivateGraphMode(
 function createPaletteItem(
     operatorId,
     definition,
-    isConfiguration = false
+    isConfiguration = false,
+    options = {}
   ) {
+    const paletteId = String(
+      options.paletteId || operatorId
+    );
+    const initialParameters =
+      options.initialParameters &&
+      typeof options.initialParameters === "object" &&
+      !Array.isArray(options.initialParameters)
+        ? options.initialParameters
+        : null;
     const icon =
       nodePaletteIconDescriptor(
         definition
@@ -15557,7 +15567,7 @@ function createPaletteItem(
       "rml-graph-palette-item";
     button.type = "button";
     button.dataset.graphOperator =
-      operatorId;
+      paletteId;
 
     if (definition.expertOnly === true) {
       button.classList.add(
@@ -15612,7 +15622,7 @@ function createPaletteItem(
 
     const add =
       document.createElement("small");
-    add.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-${configurationPresent ? "check" : "add"}"></use></svg>`;
+    add.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-${configurationPresent ? "check" : "add"}"></use></svg>`;
 
     button.append(
       symbol,
@@ -15629,7 +15639,7 @@ function createPaletteItem(
       event => {
         const transactionSuppressed = Boolean(
           paletteClickSuppression &&
-          paletteClickSuppression.operatorId === operatorId
+          paletteClickSuppression.operatorId === paletteId
         );
         if (
           !button.isConnected ||
@@ -15645,7 +15655,8 @@ function createPaletteItem(
 
         addPaletteNodeAtCenter(
           operatorId,
-          isConfiguration
+          isConfiguration,
+          initialParameters
         );
       }
     );
@@ -15655,7 +15666,7 @@ function createPaletteItem(
       event => {
         if (
           (event.key === window.RMLI18n.t("ui.literal.2b9eceb7a86a") || event.key === " ") &&
-          paletteClickSuppression?.operatorId === operatorId
+          paletteClickSuppression?.operatorId === paletteId
         ) {
           paletteClickSuppression = null;
           consumedPalettePointerSources.delete(button);
@@ -15670,7 +15681,11 @@ function createPaletteItem(
           event,
           operatorId,
           isConfiguration,
-          definition
+          definition,
+          {
+            paletteId,
+            initialParameters
+          }
         )
     );
 
@@ -15694,7 +15709,7 @@ function refreshGraphPaletteConfigurationAvailability() {
     );
     const marker = button.querySelector("small");
     if (marker) {
-      marker.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-${configurationPresent ? "check" : "add"}"></use></svg>`;
+      marker.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-${configurationPresent ? "check" : "add"}"></use></svg>`;
     }
   }
 
@@ -15719,6 +15734,95 @@ function definitionBelongsToCurrentGraph(definition) {
       definition?.customCSharpSyntaxNode === true ||
       definition?.customCSharpSubgraphOnly === true
     );
+  }
+
+function visualFunctionPaletteEntries(
+    nodes,
+    definitions = OPERATOR_DEFINITIONS
+  ) {
+    const declarations = (
+      Array.isArray(nodes) ? nodes : []
+    ).filter(node =>
+      node?.kind === "operator" &&
+      node.operatorId ===
+        "language.methodEntry" &&
+      String(node.id || "").trim()
+    );
+    const nameCounts = new Map();
+    for (const declaration of declarations) {
+      const name = String(
+        declaration.parameters?.methodName ||
+        "Method"
+      ).trim() || "Method";
+      nameCounts.set(
+        name,
+        (nameCounts.get(name) || 0) + 1
+      );
+    }
+
+    const records = [];
+    for (const declaration of declarations) {
+      const declarationId = String(
+        declaration.id
+      ).trim();
+      const methodName = String(
+        declaration.parameters?.methodName ||
+        "Method"
+      ).trim() || "Method";
+      const displayName =
+        nameCounts.get(methodName) > 1
+          ? `${methodName} · ${declarationId.slice(-8)}`
+          : methodName;
+      const parameters = Array.isArray(
+        declaration.parameters?.functionParameters
+      )
+        ? declaration.parameters.functionParameters
+        : [];
+      const returnType = String(
+        declaration.parameters?.returnGraphType ||
+        "void"
+      ).trim() || "void";
+      const signatureText = parameters
+        .map(parameter =>
+          `${String(parameter?.name || "")} ${String(parameter?.type || "")}`
+        )
+        .join(" ");
+      const searchText =
+        `${methodName} ${declarationId} ${signatureText} ${returnType}`;
+
+      for (const [kind, operatorId] of [
+        ["call", "language.callMethod"],
+        ["return", "language.methodReturn"]
+      ]) {
+        const baseDefinition =
+          definitions?.[operatorId];
+        if (!baseDefinition) continue;
+        records.push({
+          paletteId:
+            `visual-function:${encodeURIComponent(declarationId)}:${kind}`,
+          operatorId,
+          definition: {
+            ...baseDefinition,
+            title:
+              `${baseDefinition.title || kind} · ${displayName}`,
+            apiSearchText:
+              `${baseDefinition.apiSearchText || ""} ${searchText} ${kind}`.trim()
+          },
+          initialParameters: {
+            methodEntryId: declarationId
+          }
+        });
+      }
+    }
+    return records;
+  }
+
+function visualFunctionPaletteRevision(nodes) {
+    return visualFunctionPaletteEntries(nodes)
+      .map(record =>
+        `${record.paletteId}:${record.definition.title}:${record.definition.apiSearchText}`
+      )
+      .join("\u0001");
   }
 
 function graphPaletteDefinitionContextKey() {
@@ -16173,7 +16277,10 @@ function graphPaletteRenderSignature() {
       apiCompositeCatalogAvailable()
         ? "catalog-ready"
         : "catalog-unavailable",
-      String(savedRevision || 0)
+      String(savedRevision || 0),
+      visualFunctionPaletteRevision(
+        graph.nodes
+      )
     ].join("\u0002");
   }
 
@@ -16735,14 +16842,31 @@ function renderGraphPalette(
       list.className =
         "rml-graph-palette-list";
 
-      for (const operatorId of entries) {
-        const definition =
-          OPERATOR_DEFINITIONS[operatorId];
+      for (const entry of entries) {
+        const dynamicEntry =
+          entry && typeof entry === "object"
+            ? entry
+            : null;
+        const operatorId = dynamicEntry
+          ? dynamicEntry.operatorId
+          : entry;
+        const definition = dynamicEntry
+          ? dynamicEntry.definition
+          : OPERATOR_DEFINITIONS[operatorId];
         if (!definition) continue;
         list.appendChild(
           createPaletteItem(
             operatorId,
-            definition
+            definition,
+            false,
+            dynamicEntry
+              ? {
+                  paletteId:
+                    dynamicEntry.paletteId,
+                  initialParameters:
+                    dynamicEntry.initialParameters
+                }
+              : undefined
           )
         );
       }
@@ -17152,6 +17276,42 @@ function renderGraphPalette(
 
       const showAdvanced =
         graph.showAdvancedNodes === true;
+      const visualFunctionRecords =
+        customCSharpEditor
+          ? []
+          : visualFunctionPaletteEntries(
+              graph.nodes
+            );
+      const matchingVisualFunctionRecords =
+        query
+          ? visualFunctionRecords.filter(record =>
+              searchableText(
+                record.paletteId,
+                record.definition
+              ).includes(query)
+            )
+          : visualFunctionRecords;
+      const addVisualFunctionRecords = (
+        groups,
+        records
+      ) => {
+        if (records.length === 0) return;
+        const group = String(
+          OPERATOR_DEFINITIONS[
+            "language.methodEntry"
+          ]?.group ||
+          window.RMLI18n.t(
+            "ui.visualFunctions.group"
+          )
+        );
+        groups.set(
+          group,
+          [
+            ...(groups.get(group) || []),
+            ...records
+          ]
+        );
+      };
 
       if (query.length >= 2) {
         if (
@@ -17182,7 +17342,8 @@ function renderGraphPalette(
 
         if (
           matching.length === 0 &&
-          matchingSavedRecords.length === 0
+          matchingSavedRecords.length === 0 &&
+          matchingVisualFunctionRecords.length === 0
         ) {
           appendMessage(
             window.RMLI18n.t("js.presentation.5d9081058da3")
@@ -17210,6 +17371,10 @@ function renderGraphPalette(
             operatorId
           );
         }
+        addVisualFunctionRecords(
+          grouped,
+          matchingVisualFunctionRecords
+        );
 
         for (
           const group of
@@ -17265,6 +17430,10 @@ function renderGraphPalette(
         definitionIndex.catalogDefinitionCount;
       const visibleCatalogEntries =
         definitionIndex.visibleCatalogEntries;
+      addVisualFunctionRecords(
+        normalGroups,
+        visualFunctionRecords
+      );
 
       appendSavedCompositeGroup(
         savedRecords
@@ -17588,7 +17757,8 @@ function createOperatorNodeRecord(
     x,
     y,
     {
-      exactPosition = false
+      exactPosition = false,
+      initialParameters = null
     } = {}
   ) {
     const definition =
@@ -17625,13 +17795,27 @@ function createOperatorNodeRecord(
       width: null,
       height: null,
       label: "",
-      parameters:
-        nodeDefaultParameters(
+      parameters: {
+        ...nodeDefaultParameters(
           definition
+        ),
+        ...(
+          initialParameters &&
+          typeof initialParameters === "object" &&
+          !Array.isArray(initialParameters)
+            ? nodeGraphClone(
+                initialParameters
+              )
+            : {}
         )
+      }
     };
 
     graph.nodes.push(node);
+    synchronizeVisualFunctionReferenceNode(
+      node,
+      graph.nodes
+    );
     markGraphNodeViewportSpatialStructureMutation(
       graph.nodes,
       true
@@ -17644,7 +17828,8 @@ function addOperatorNode(
     operatorId,
     x,
     y,
-    fitAfter = false
+    fitAfter = false,
+    initialParameters = null
   ) {
     const previousSelection =
       graphMutationSelectionSnapshot();
@@ -17652,7 +17837,8 @@ function addOperatorNode(
       createOperatorNodeRecord(
         operatorId,
         x,
-        y
+        y,
+        { initialParameters }
       );
 
     if (!node) {
@@ -17674,6 +17860,12 @@ function addOperatorNode(
         previousSelection.connectionIds
     });
     renderGraphInspector();
+    if (
+      node.operatorId ===
+      "language.methodEntry"
+    ) {
+      scheduleGraphPaletteRender();
+    }
     refreshGraphPaletteConfigurationAvailability();
     scheduleAcceptedGraphPersistenceAfterPaint({
       refreshGeneratedOutput: true,
@@ -17972,7 +18164,8 @@ function commitPaletteDroppedGraphNode(
 function addPaletteDroppedOperatorNode(
     operatorId,
     x,
-    y
+    y,
+    initialParameters = null
   ) {
     const previousNodeCount =
       graph.nodes.length;
@@ -17982,14 +18175,24 @@ function addPaletteDroppedOperatorNode(
       operatorId,
       x,
       y,
-      { exactPosition: true }
+      {
+        exactPosition: true,
+        initialParameters
+      }
     );
-    return commitPaletteDroppedGraphNode(
+    const committed = commitPaletteDroppedGraphNode(
       node,
       previousNodeCount,
       previousSelection.nodeIds,
       previousSelection.connectionIds
     );
+    if (
+      committed?.operatorId ===
+      "language.methodEntry"
+    ) {
+      scheduleGraphPaletteRender();
+    }
+    return committed;
   }
 
 function graphPortReference(
@@ -19118,7 +19321,8 @@ function addPaletteDroppedConfigurationNode(
 
 function addPaletteNodeAtCenter(
     operatorId,
-    isConfiguration
+    isConfiguration,
+    initialParameters = null
   ) {
     if (!dom.viewport) {
       return;
@@ -19177,7 +19381,8 @@ function addPaletteNodeAtCenter(
         operatorId,
         x,
         y,
-        true
+        true,
+        initialParameters
       );
     }
   }
@@ -19206,20 +19411,20 @@ function createToolbarButton(
 const GRAPH_TOOLBAR_ICONS =
     Object.freeze({
       center: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-center"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-center"></use></svg>`,
       clear: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-delete"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-delete"></use></svg>`,
       zoomOut: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-zoom-out"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-zoom-out"></use></svg>`,
       zoomIn: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-zoom-in"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-zoom-in"></use></svg>`,
       editMode: `
-        <svg class="rml-graph-edit-enter-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-expand"></use></svg>
-        <svg class="rml-graph-edit-exit-icon" viewBox="0 0 24 24" aria-hidden="true" hidden><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-collapse"></use></svg>`,
+        <svg class="rml-graph-edit-enter-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-expand"></use></svg>
+        <svg class="rml-graph-edit-exit-icon" viewBox="0 0 24 24" aria-hidden="true" hidden><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-collapse"></use></svg>`,
       search: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-search"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-search"></use></svg>`,
       next: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-next"></use></svg>`
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-next"></use></svg>`
     });
 
 function createToolbarIconButton(
@@ -19702,7 +19907,7 @@ function renderGraphCanvas() {
       <div class="rml-graph-search-overlay-card" role="dialog" aria-modal="true" aria-label="{{i18n:js.presentation.f0d095db4021}}">
         <div class="rml-graph-search-overlay-head">
           <strong>{{i18n:js.presentation.f0d095db4021}}</strong>
-          <button class="rml-graph-search-overlay-close" type="button" aria-label="{{i18n:ui.attr.0906f923243f}}"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-close"></use></svg></button>
+          <button class="rml-graph-search-overlay-close" type="button" aria-label="{{i18n:ui.attr.0906f923243f}}"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-close"></use></svg></button>
         </div>
         <div class="rml-graph-search-overlay-body">
           <input type="search" autocomplete="off" placeholder="{{i18n:js.presentation.a00d3271edfc}}" aria-label="{{i18n:js.presentation.f0d095db4021}}" aria-keyshortcuts="F3 Shift+F3 Control+G Control+Shift+G Meta+G Meta+Shift+G">
@@ -25865,7 +26070,7 @@ function createGraphNodeElementRmlOriginal(
       flip.className =
         "rml-graph-node-flip";
       flip.type = "button";
-      flip.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-node-swap"></use></svg>`;
+      flip.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-node-swap"></use></svg>`;
       flip.title = mirrored
         ? window.RMLI18n.t("ui.literal.9114b1bfc765")
         : window.RMLI18n.t("ui.literal.c8b7ca53198e");
@@ -33701,6 +33906,12 @@ function deleteGraphNode(nodeId) {
         String(graph.nodes.length);
     }
     renderGraphInspector();
+    if (
+      node.operatorId ===
+      "language.methodEntry"
+    ) {
+      scheduleGraphPaletteRender();
+    }
     scheduleStructuralGraphCommit(true);
     return true;
   }
@@ -34258,7 +34469,7 @@ function renderGraphInspector(options = {}) {
       empty.className =
         "empty-inspector";
       empty.innerHTML =
-        `<span class="empty-inspector-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-lightning"></use></svg></span>
+        `<span class="empty-inspector-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-lightning"></use></svg></span>
          <h2>{{i18n:ui.text.e02d912b50bb}}</h2>
          <p>{{i18n:ui.text.d19bd2965c4f}}</p>`;
       dom.inspectorContent.appendChild(
@@ -38537,24 +38748,66 @@ function appendParameterControl(
       }
     }
 
-    const commitVisualFunctionStructure = () => {
+    const commitVisualFunctionStructure = (
+      previousMethodName = ""
+    ) => {
       const previousSelection = graphMutationSelectionSnapshot();
       const affectedConnectionIds = incidentGraphConnectionIds(node.id);
+      const affectedNodeIds = new Set([
+        ...(previousSelection?.nodeIds || []),
+        node.id
+      ]);
       for (const connectionId of previousSelection?.connectionIds || []) affectedConnectionIds.add(connectionId);
       if (node.operatorId === "language.methodEntry") {
         const methodName = String(node.parameters?.methodName || "").trim();
+        const replacedMethodName = String(previousMethodName || methodName).trim();
+        const legacyNameWasUnique =
+          !replacedMethodName ||
+          !graph.nodes.some(candidate =>
+            candidate?.operatorId === "language.methodEntry" &&
+            candidate.id !== node.id &&
+            String(candidate.parameters?.methodName || "").trim() === replacedMethodName
+          );
         for (const candidate of graph.nodes) {
-          if (!["language.callMethod", "language.methodReturn", "language.methodReturnVoid"].includes(candidate?.operatorId) || String(candidate.parameters?.methodName || "").trim() !== methodName) continue;
-          candidate.parameters.functionParameters = nodeGraphClone(Array.isArray(node.parameters.functionParameters) ? node.parameters.functionParameters : []);
-          candidate.parameters.returnGraphType = String(node.parameters.returnGraphType || "void");
+          if (!["language.callMethod", "language.methodReturn", "language.methodReturnVoid"].includes(candidate?.operatorId)) continue;
+          const boundById = String(candidate.parameters?.methodEntryId || "").trim() === node.id;
+          const migratableLegacyReference =
+            legacyNameWasUnique &&
+            !String(candidate.parameters?.methodEntryId || "").trim() &&
+            String(candidate.parameters?.methodName || "").trim() === replacedMethodName;
+          if (!boundById && !migratableLegacyReference) continue;
+          candidate.parameters ||= {};
+          candidate.parameters.methodEntryId = node.id;
+          synchronizeVisualFunctionReferenceNode(candidate, graph.nodes);
+          affectedNodeIds.add(candidate.id);
           for (const connectionId of incidentGraphConnectionIds(candidate.id)) affectedConnectionIds.add(connectionId);
         }
       }
+      const synchronizedNodeIds =
+        synchronizeVisualFunctionReferences(
+          graph.nodes
+        );
+      for (const nodeId of synchronizedNodeIds) {
+        affectedNodeIds.add(nodeId);
+        for (const connectionId of incidentGraphConnectionIds(nodeId)) affectedConnectionIds.add(connectionId);
+      }
       graphNodeDefinitionCache = new WeakMap();
       currentAnalysis = null;
+      const removedConnectionIds =
+        repairVisualFunctionConnectionsInGraph(
+          graph,
+          affectedNodeIds
+        );
+      for (const connectionId of removedConnectionIds) affectedConnectionIds.add(connectionId);
       pruneConnections();
-      renderGraphMutationDelta({ nodeIds: [...new Set([...(previousSelection?.nodeIds || []), node.id, ...graph.nodes.filter(candidate => ["language.callMethod", "language.methodReturn", "language.methodReturnVoid"].includes(candidate?.operatorId) && String(candidate.parameters?.methodName || "").trim() === String(node.parameters?.methodName || "").trim()).map(candidate => candidate.id)])], connectionIds: affectedConnectionIds, nodeContentIds: [node.id] });
+      renderGraphMutationDelta({ nodeIds: [...affectedNodeIds], connectionIds: affectedConnectionIds, nodeContentIds: [...affectedNodeIds] });
       renderGraphInspector();
+      if (
+        node.operatorId ===
+        "language.methodEntry"
+      ) {
+        scheduleGraphPaletteRender();
+      }
       refreshDisplayValueNodes();
       scheduleAcceptedGraphPersistenceAfterPaint({ refreshGeneratedOutput: true, refreshCompositeActions: true });
     };
@@ -38645,27 +38898,33 @@ function appendParameterControl(
         label.textContent = specification.label || specification.key;
         const select = document.createElement("select");
         const declarations = graph.nodes.filter(candidate => candidate?.operatorId === "language.methodEntry");
-        const options = declarations.map(candidate => ({ value: String(candidate.parameters?.methodName || "").trim(), text: String(candidate.parameters?.methodName || "").trim() })).filter(entry => entry.value);
-        let current = String(node.parameters.methodName || "").trim();
-        let declaration = declarations.find(candidate => String(candidate.parameters?.methodName || "").trim() === current);
-        if (!declaration && declarations.length === 1) {
-          declaration = declarations[0];
-          current = String(declaration.parameters?.methodName || "").trim();
-          node.parameters.methodName = current;
+        const nameCounts = new Map();
+        for (const declaration of declarations) {
+          const name = String(declaration.parameters?.methodName || "").trim() || "Method";
+          nameCounts.set(name, (nameCounts.get(name) || 0) + 1);
         }
-        if (declaration) {
-          node.parameters.functionParameters = nodeGraphClone(Array.isArray(declaration.parameters?.functionParameters) ? declaration.parameters.functionParameters : []);
-          node.parameters.returnGraphType = String(declaration.parameters?.returnGraphType || "void");
+        const options = declarations.map(candidate => {
+          const name = String(candidate.parameters?.methodName || "").trim() || "Method";
+          return {
+            value: candidate.id,
+            text: nameCounts.get(name) > 1
+              ? `${name} · ${candidate.id.slice(-8)}`
+              : name
+          };
+        });
+        const current = String(node.parameters.methodEntryId || "").trim();
+        if (!options.some(entry => entry.value === current)) {
+          options.unshift({
+            value: current,
+            text: String(node.parameters.methodName || "").trim() || current || "—"
+          });
         }
-        if (!options.some(entry => entry.value === current) && current) options.unshift({ value: current, text: current });
         for (const entry of options) { const option = document.createElement("option"); option.value = entry.value; option.textContent = entry.text; option.selected = entry.value === current; select.appendChild(option); }
         select.addEventListener("change", () => {
-          node.parameters.methodName = select.value;
-          const declaration = declarations.find(candidate => String(candidate.parameters?.methodName || "").trim() === select.value);
-          if (declaration) { node.parameters.functionParameters = nodeGraphClone(Array.isArray(declaration.parameters?.functionParameters) ? declaration.parameters.functionParameters : []); node.parameters.returnGraphType = String(declaration.parameters?.returnGraphType || "void"); }
+          node.parameters.methodEntryId = select.value;
           commitVisualFunctionStructure();
         });
-        label.appendChild(searchableSelectWrapper(select, options, () => node.parameters.methodName, window.RMLI18n.t("ui.visualFunctions.searchFunction")));
+        label.appendChild(searchableSelectWrapper(select, options, () => node.parameters.methodEntryId, window.RMLI18n.t("ui.visualFunctions.searchFunction")));
         if (specification.help) { const help = document.createElement("small"); help.textContent = specification.help; label.appendChild(help); }
         card.appendChild(label);
         continue;
@@ -38957,6 +39216,20 @@ function appendParameterControl(
           value = control.value;
         }
 
+        const renamingVisualFunction =
+          node.operatorId === "language.methodEntry" &&
+          specification.key === "methodName";
+        const previousVisualFunctionName =
+          renamingVisualFunction
+            ? String(node.parameters.methodName || "").trim()
+            : "";
+        if (renamingVisualFunction) {
+          value = String(value || "").trim() ||
+            String(specification.default || "Method").trim() ||
+            "Method";
+          control.value = value;
+        }
+
         if (customCSharpCodeControl) {
           commitCustomCSharpEditorValue(node.id, specification, String(value));
           const detached = customCSharpDetachedEditors.get(
@@ -38975,6 +39248,13 @@ function appendParameterControl(
           )
         ) {
           return false;
+        }
+        if (renamingVisualFunction) {
+          node.parameters.methodName = value;
+          commitVisualFunctionStructure(
+            previousVisualFunctionName
+          );
+          return true;
         }
         const structuralChange =
           specification.affectsPorts === true ||
@@ -39235,7 +39515,7 @@ const INSPECTOR_ACTION_PRESENTATION = Object.freeze({
 
   function inspectorButtonIconMarkup(actionId) {
     const iconName = INSPECTOR_ACTION_PRESENTATION[actionId]?.[0] || "more";
-    return `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-${iconName}"></use></svg>`;
+    return `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-${iconName}"></use></svg>`;
   }
 
   function inspectorButtonTone(actionId) {
@@ -39301,7 +39581,7 @@ function visualFunctionParameterButton(action, label, handler) {
     svg.setAttribute("viewBox", "0 0 24 24");
     svg.setAttribute("aria-hidden", "true");
     const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
-    use.setAttribute("href", `assets/rml-icons.svg?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open#icon-visual-function-parameter-${action}`);
+    use.setAttribute("href", `assets/rml-icons.svg?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle#icon-visual-function-parameter-${action}`);
     svg.appendChild(use);
     button.appendChild(svg);
     button.addEventListener("click", event => {
@@ -39397,6 +39677,12 @@ function duplicateGraphNode(node) {
         previousSelection.connectionIds
     });
     renderGraphInspector();
+    if (
+      copy.operatorId ===
+      "language.methodEntry"
+    ) {
+      scheduleGraphPaletteRender();
+    }
     scheduleAcceptedGraphPersistenceAfterPaint({
       refreshGeneratedOutput: true,
       refreshCompositeActions: true
@@ -42719,7 +43005,8 @@ function beginPalettePointerDrag(
     event,
     operatorId,
     isConfiguration,
-    definition
+    definition,
+    options = {}
   ) {
     if (
       event.button !== 0 ||
@@ -42760,6 +43047,15 @@ function beginPalettePointerDrag(
       sourceButton: event.currentTarget,
       pointerId: event.pointerId,
       operatorId,
+      paletteId: String(
+        options.paletteId || operatorId
+      ),
+      initialParameters:
+        options.initialParameters &&
+        typeof options.initialParameters === "object" &&
+        !Array.isArray(options.initialParameters)
+          ? options.initialParameters
+          : null,
       isConfiguration,
       definition,
       startX: event.clientX,
@@ -43099,7 +43395,7 @@ function finishPaletteDrag(
       transactionId:
         interaction.transactionId || 0,
       pointerId: interaction.pointerId,
-      operatorId: interaction.operatorId,
+      operatorId: interaction.paletteId,
       wasDragging,
       committed: false
     };
@@ -43213,7 +43509,8 @@ function finishPaletteDrag(
       }
       addPaletteNodeAtCenter(
         interaction.operatorId,
-        interaction.isConfiguration
+        interaction.isConfiguration,
+        interaction.initialParameters
       );
       paletteDragSuppressClickUntil =
         performance.now() + 300;
@@ -43376,7 +43673,8 @@ function finishPaletteDrag(
         addPaletteDroppedOperatorNode(
           interaction.operatorId,
           position.x,
-          position.y
+          position.y,
+          interaction.initialParameters
         );
     }
 
@@ -47412,7 +47710,7 @@ Object.defineProperty(
   window.RMLI18n.t("ui.literal.91092bd586bf"),
   {
     value:
-      "1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open",
+      "1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle",
     writable: false,
     enumerable: true,
     configurable: true

@@ -3210,5 +3210,19 @@
   "export.compiler_references.search_missing": "„ZIP erstellen“ fragt nach dem Resonite-Ordner und durchsucht alle Unterordner nach: {dlls}. Du kannst auch DLLs oder einen Ordner auf das Feld „Fehlende DLLs“ ziehen.",
   "export.compiler_references.still_missing": "Weiterhin fehlend: {dlls}. Ziehe diese DLLs oder einen weiteren Ordner auf das Feld „Fehlende DLLs“.",
   "export.compiler_references.manifest.one": "Das exakte ZIP-Manifest oben enthält {count} im Browser kompilierte DLL. Die Ziel-Assemblies bleiben auf diesem Gerät.",
-  "export.compiler_references.manifest.other": "Das exakte ZIP-Manifest oben enthält {count} im Browser kompilierte DLLs. Die Ziel-Assemblies bleiben auf diesem Gerät."
+  "export.compiler_references.manifest.other": "Das exakte ZIP-Manifest oben enthält {count} im Browser kompilierte DLLs. Die Ziel-Assemblies bleiben auf diesem Gerät.",
+  "export.node_index.title": "Node-Index (.md)",
+  "export.node_index.description": "Separate Markdown-Übersicht mit Namen, IDs, Typen, Positionen und Verbindungen.",
+  "export.node_index.files": "{count} erzeugte Node-Index-Dateien",
+  "generated.validation.structural_escape": "Der Generator hat einen maskierten Zeilenumbruch oder Tabulator außerhalb eines C#-Literals erzeugt. Die Datei wurde vor der Ausgabe verworfen.",
+  "generated.validation.node_error": "Die Node „{label}“ [{nodeId}] ({operatorId}) in {graphPath} kann keinen gültigen C#-Code erzeugen.",
+  "generated.validation.rejected_preview": "Das erzeugte C# wurde verworfen. Es wurde kein Code veröffentlicht.",
+  "generated.validation.failed": "Die C#-Prüfung ist fehlgeschlagen. Es wurde keine erzeugte Datei veröffentlicht.",
+  "generated.validation.semantic_failed": "Das erzeugte Projekt hat die vollständige C#-Kompilierung nicht bestanden. Es wurde kein Quelltext kopiert oder exportiert.",
+  "generated.validation.in_progress": "Das erzeugte C# wird geprüft…",
+  "generated.validation.publication_required": "Es ist kein geprüfter Generierungsstand verfügbar. Erzeuge und prüfe das Projekt erneut.",
+  "generated.validation.download_bridge_restricted": "Die allgemeine Download-Schnittstelle akzeptiert nur Daten gespeicherter API-Composites. Erzeugte Projektdateien benötigen einen geprüften Generierungsstand.",
+  "export.compiler_references.changed": "Die Compiler-Referenzen wurden geändert.",
+  "export.compiler_references.sha256_unavailable": "SHA-256 ist nicht verfügbar. Daher können die ausgewählten Compiler-DLLs nicht bytegenau geprüft werden.",
+  "export.compiler_references.identity_missing": "Die Compiler-Referenz-DLLs sind nicht an geprüfte SHA-256-Inhaltsidentitäten gebunden. Die Kompilierung wurde abgebrochen."
 }

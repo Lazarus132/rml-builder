@@ -2,7 +2,7 @@
   "use strict";
 
   const CATALOG_LOADER_MODULE_ID =
-    "1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open";
+    "1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle";
   const LOADER_VERSION = 84;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
@@ -67,7 +67,7 @@
     document.currentScript?.src ||
     window.location.href;
   const modNodesUrl = new URL(
-    "mod_nodes.js?v=801-canonical-port-types",
+    "mod_nodes.js?v=803-visual-function-semantics",
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
@@ -75,7 +75,7 @@
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=1.21.20-universal-presentation-dev419-runtime-color-fidelity-overlay-open",
+    "api_nodes.js?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle",
     scriptUrl
   ).href;
 
