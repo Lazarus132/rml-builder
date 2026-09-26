@@ -374,7 +374,7 @@
   "template.help.b04f52d91627": "Die vorhandene vollständige Referenz der Knoten des typisierten Laufzeitgraphen anzeigen.",
   "template.help.b0b97385ba5e": "„Wert anzeigen“ und „Impuls anzeigen“ bevorzugen Werte, die der passende generierte Mod innerhalb von Resonite veröffentlicht. Die generierte Laufzeit findet den Scanner-Mod ohne Kompilierzeitabhängigkeit, und der Scanner überträgt jede Monitoraktualisierung über seine lokale Loopback-SSE-Brücke an diesen Builder.",
   "template.help.b1286f50a744": "Ein Schaltflächenanschluss ist bereits eine Impulsquelle: Jeder Tastendruck auf der RML-Konfigurationsseite gibt genau einen Impuls aus. Dies hängt nicht von „Einstellungen speichern“ ab und verwendet weder den Reaktionsmodus „Beim Start“ noch „Nach dem Speichern“.",
-  "template.help.b15df7ad08f8": "Den Bearbeitungsmodus umschalten, während der Laufzeitgraph oder ein verschachtelter Graph geöffnet ist. Unter macOS Befehlstaste + F verwenden. Textfelder, Code-Editoren und Dialoge behalten ihr eigenes Suchverhalten; Gedrückthalten der Taste schaltet den Modus nicht wiederholt um.",
+  "template.help.b15df7ad08f8": "Den Bearbeitungsmodus umschalten, während der Laufzeitgraph oder ein verschachtelter Graph geöffnet ist. Strg + F bleibt dadurch vollständig für die Suche im Code-Editor reserviert; Gedrückthalten von F2 schaltet den Modus nicht wiederholt um.",
   "template.help.b1b0f36c9ee0": "hängt den aktuellen",
   "template.help.b1b392607dea": "Ausführen",
   "template.help.b3769cba416a": "Eigenschaft blendet standardmäßig die gesamte Gruppe aus, hält sie aber für die Laufzeit",

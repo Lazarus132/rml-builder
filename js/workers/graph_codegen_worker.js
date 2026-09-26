@@ -721,10 +721,10 @@ async function ensureRuntime(
       "../catalog/mod_nodes.js?v=803-visual-function-semantics"
     );
     importScripts(
-      "../compiler/visual_csharp.js?v=84-harmony-file-presets"
+      "../compiler/visual_csharp.js?v=85-contextual-csharp-api"
     );
     importScripts(
-      "../catalog/api_nodes.js?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle"
+      "../catalog/api_nodes.js?v=1.21.24-contextual-csharp-api"
     );
 
     if (

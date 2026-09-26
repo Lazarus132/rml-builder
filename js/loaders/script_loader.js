@@ -182,14 +182,14 @@
       dependencies: Object.freeze([]),
       files: Object.freeze([
         Object.freeze({
-          url: "../catalog/catalog_loader.js?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle",
+          url: "../catalog/catalog_loader.js?v=1.21.24-contextual-csharp-api",
           ready: () =>
             window.RMLCatalogImportGate?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
             Number(
               window.RMLCatalogImportGate
                 ?.loaderVersion
-            ) === 84 &&
+            ) === 85 &&
             Number(
               window.RMLCatalogImportGate
                 ?.requiredApiFactoryVersion
@@ -266,7 +266,7 @@
               SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_custom_csharp.js?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle",
+          url: "../graph/node_graph_custom_csharp.js?v=1.21.24-contextual-csharp-api",
           ready: () =>
             window.RMLNodeGraphCustomCSharpModuleId ===
               SCRIPT_LOADER_MODULE_ID
@@ -275,7 +275,7 @@
           url: "../graph/node_graph_guided.js?v=1-physical-modules-v748"
         }),
         Object.freeze({
-          url: "../graph/node_graph_view.js?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle",
+          url: "../graph/node_graph_view.js?v=1.21.24-contextual-csharp-api",
           ready: () =>
             window.RMLNodeGraphViewModuleId ===
               SCRIPT_LOADER_MODULE_ID

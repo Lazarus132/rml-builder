@@ -514,16 +514,28 @@
       const label = pageAreasHidden
         ? window.RMLI18n.t("ui.literal.967bd3eab90f")
         : window.RMLI18n.t("ui.literal.4e96fc0c9c97");
-      togglePageAreas.title = label;
+      togglePageAreas.title = `${label} (F2)`;
       togglePageAreas.setAttribute(
         "aria-label",
-        label
+        togglePageAreas.title
       );
+      togglePageAreas.setAttribute("aria-keyshortcuts", "F2");
       togglePageAreas.setAttribute(
         "aria-pressed",
         String(pageAreasHidden)
       );
       togglePageAreas.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="${iconSpriteUrl}#icon-${pageAreasIcon(pageAreasHidden)}"></use></svg>`;
+    };
+    const togglePageAreasMode = () => {
+      const requested = !pageAreasHidden;
+      const committed =
+        options.onTogglePageAreas?.(requested);
+      pageAreasHidden =
+        typeof committed === "boolean"
+          ? committed
+          : requested;
+      synchronizePageAreasButton();
+      return pageAreasHidden;
     };
     synchronizePageAreasButton();
     const popupReturnToEmbedded = createHeaderButton(
@@ -2183,6 +2195,10 @@
         key === "f3" ||
         code === "f3" ||
         legacy === 114;
+      const f2 =
+        key === "f2" ||
+        code === "f2" ||
+        legacy === 113;
       const f =
         key === "f" ||
         code === "keyf" ||
@@ -2195,6 +2211,14 @@
         key === "h" ||
         code === "keyh" ||
         legacy === 72;
+      if (
+        f2 &&
+        !command &&
+        !event.altKey &&
+        !event.shiftKey
+      ) {
+        return "edit-mode";
+      }
       if (
         f3 &&
         !command &&
@@ -2278,12 +2302,16 @@
         event.repeat &&
         (
           action === "find" ||
-          action === "replace"
+          action === "replace" ||
+          action === "edit-mode"
         )
       ) {
         return;
       }
-      if (action === "find") {
+      if (action === "edit-mode") {
+        clearEditorScrollForKey(event);
+        togglePageAreasMode();
+      } else if (action === "find") {
         clearEditorScrollForKey(event);
         openFind(false);
       } else if (action === "replace") {
@@ -2734,16 +2762,10 @@
       );
     }
 
-    togglePageAreas.addEventListener("click", () => {
-      const requested = !pageAreasHidden;
-      const committed =
-        options.onTogglePageAreas?.(requested);
-      pageAreasHidden =
-        typeof committed === "boolean"
-          ? committed
-          : requested;
-      synchronizePageAreasButton();
-    });
+    togglePageAreas.addEventListener(
+      "click",
+      togglePageAreasMode
+    );
 
     const record = Object.freeze({
       popup,

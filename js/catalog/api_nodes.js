@@ -5,7 +5,7 @@
     "1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle";
   const FACTORY_VERSION = 38;
   const API_VERIFICATION_SCHEMA_VERSION = 3;
-  const CATALOG_PROJECTION_INDEX_VERSION = 1;
+  const CATALOG_PROJECTION_INDEX_VERSION = 2;
   const ADVANCED_GROUP = "Advanced / Raw C#";
   const UNAVAILABLE_GROUP = "Unavailable API";
   const API_GROUPS = Object.freeze({
@@ -322,21 +322,6 @@
       return false;
     }
 
-    for (const type of [
-      definition.catalogType,
-      definition.apiReturnType,
-      ...(Array.isArray(
-        definition.apiParameters
-      )
-        ? definition.apiParameters
-            .flatMap(parameter => [
-              parameter?.type,
-              parameter?.elementType
-            ])
-        : [])
-    ]) {
-    }
-
     const kind = String(
       definition.apiMemberKind || ""
     );
@@ -347,7 +332,8 @@
       "property-set",
       "field-get",
       "field-set",
-      "type"
+      "type",
+      "enum"
     ].includes(kind)) {
       return true;
     }
@@ -358,6 +344,7 @@
     const identifiers = new Set();
     if (
       kind === "type" ||
+      kind === "enum" ||
       kind === "constructor"
     ) {
       const ownerName =
@@ -4244,7 +4231,7 @@
       const csType = normalizeCsType(row.fullName);
       const id = `api.type.${stableHash(csType)}`;
       registerGeneratedNode(id, withReloadContract({
-        title: `Type · ${displayTypeName(row)}`,
+        title: `${row.kind === "enum" ? "Enum type" : "Type"} · ${displayTypeName(row)}`,
         group: groupForType(row, API_GROUPS.types),
         symbol: "TYPE",
         description: `Exact System.Type constant for ${csType}.`,
@@ -5686,7 +5673,8 @@
         "property-set",
         "field-get",
         "field-set",
-        "type"
+        "type",
+        "enum"
       ]);
       if (!supported.has(kind)) return definition;
 
@@ -5695,8 +5683,23 @@
       const parameters = Array.isArray(definition.apiParameters)
         ? definition.apiParameters
         : [];
+      if (
+        (kind === "method" || kind === "constructor") &&
+        parameters.some(parameter =>
+          parameter?.isOut === true ||
+          parameter?.isByRef === true
+        )
+      ) {
+        return definition;
+      }
       const genericArity = Math.max(0, Number(definition.apiGenericArity) || 0);
-      const input = (context, id) => String(context.input(id) || "").trim();
+      const input = (
+        context,
+        id,
+        renderMode = ""
+      ) => String(
+        context.input(id, renderMode) || ""
+      ).trim();
       const argument = (context, parameter) => {
         const position = Math.max(0, Number(parameter?.position) || 0);
         const value = input(context, `arg${position}`) ||
@@ -5711,7 +5714,11 @@
       const genericSuffix = context => {
         if (genericArity === 0) return "";
         const types = Array.from({ length: genericArity }, (_, index) =>
-          input(context, `generic${index}`) || "object"
+          input(
+            context,
+            `generic${index}`,
+            "type"
+          ) || "object"
         );
         return `<${types.join(", ")}>`;
       };
@@ -5721,10 +5728,27 @@
         kind === "method"
           ? (definition.outputs || []).some(port => port.id === "result") ? "result" : "done"
           : kind === "constructor" ? "result"
-            : kind === "property-get" || kind === "field-get" || kind === "type" ? "value"
+            : kind === "property-get" || kind === "field-get" || kind === "type" || kind === "enum" ? "value"
               : "done";
       definition.syntaxRender = context => {
-        if (kind === "type") return `typeof(${owner})`;
+        if (kind === "type") {
+          return context.renderMode === "type"
+            ? owner
+            : `typeof(${owner})`;
+        }
+        if (kind === "enum") {
+          const defaultValue = String(
+            (definition.parameters || [])
+              .find(parameter =>
+                parameter?.key === "value"
+              )?.default || "_"
+          );
+          const selected = String(
+            context.node?.parameters?.value ||
+            defaultValue
+          );
+          return `${owner}.${escapeCSharpIdentifier(selected)}`;
+        }
         if (kind === "constructor") {
           const type = String(context.node?.parameters?.customCSharpTypeText || owner);
           return `new ${type}(${parameters.filter(parameter => parameter?.isOut !== true).map(parameter => argument(context, parameter)).join(", ")})`;
@@ -5823,15 +5847,27 @@
           )} This scanner-generated node executes as a low-level runtime call in the main mod project. It does not create or deploy an early rml_libs patch assembly automatically.`;
       }
 
-      const dependencyReferences =
-        assemblyReferencesForCsType(
-          definition?.catalogType || "",
-          typeByName.get(
-            normalizeCsType(
-              definition?.catalogType || ""
-            )
-          ) || null
+      const dependencyReferences = [
+        definition?.catalogType,
+        definition?.apiReturnType,
+        ...(Array.isArray(
+          definition?.apiParameters
+        )
+          ? definition.apiParameters
+              .flatMap(parameter => [
+                parameter?.type,
+                parameter?.elementType
+              ])
+          : [])
+      ].flatMap(type => {
+        const normalized =
+          normalizeCsType(type || "");
+        if (!normalized) return [];
+        return assemblyReferencesForCsType(
+          normalized,
+          typeByName.get(normalized) || null
         );
+      });
 
       if (dependencyReferences.length > 0) {
         const references = new Map();

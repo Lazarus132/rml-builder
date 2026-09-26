@@ -1591,7 +1591,7 @@
   "ui.literal.f5bbb704a892": "Knotenbibliothek wird durchsucht…",
   "ui.literal.e454931d0382": "Der Resonite-API-Katalog ist geladen, aber seine Fabrik für typisierte API-Knoten hat keine verwendbaren Knoten erzeugt. Den API-Status auf den genauen Fabrikfehler prüfen.",
   "ui.literal.a96136079e0b": "API-Knoten sind nicht verfügbar, weil weder ein zwischengespeicherter noch ein Live-Resonite-API-Katalog geladen ist. Klicke oben auf den Resonite-API-Status, um einen zu laden.",
-  "ui.literal.f5ff73abd726": "API-Knoten sind geladen, aber durch den aktuellen Filter ausgeblendet. „Erweitert / C#-Rohcode anzeigen“ aktivieren oder nach einem konkreten API-Mitglied suchen.",
+  "ui.literal.f5ff73abd726": "API-Knoten sind geladen, aber durch den aktuellen Filter ausgeblendet. Aktiviere „Erweitert / C#-Rohcode anzeigen“, um sie einzublenden.",
   "ui.literal.660e9d54dad5": "EventName",
   "ui.literal.4dfa6f74f0c2": "MethodName",
   "ui.literal.cf79242323b1": "Der Eingabetyp ist nicht aufgelöst. Verbinde zuerst einen anderen Port oder wähle im Inspektor einen konkreten Typ.",

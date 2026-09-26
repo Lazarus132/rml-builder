@@ -1884,6 +1884,49 @@ internal static class EarlyHarmonyPatches
         hintPath: String(parameter(node, "hintPath", "")).trim(),
         private: parameter(node, "private", false) === true
       })).filter(item => item.include);
+      const mergeAssemblyReferences = (...groups) => {
+        const references = new Map();
+        for (const group of groups) {
+          for (const reference of Array.isArray(group) ? group : []) {
+            const include = String(reference?.include || "").trim();
+            if (!include) continue;
+            const key = include.toLowerCase();
+            const candidate = {
+              include,
+              hintPath: String(reference?.hintPath || "").trim(),
+              private: reference?.private === true
+            };
+            const existing = references.get(key);
+            if (!existing) {
+              references.set(key, candidate);
+            } else if (!existing.hintPath && candidate.hintPath) {
+              references.set(key, { ...existing, hintPath: candidate.hintPath });
+            }
+          }
+        }
+        return [...references.values()];
+      };
+      const requiredReferencesByProject = new Map();
+      const collectCustomGraphReferences = (projectId, customGraph) => {
+        const required = [];
+        for (const graphNode of Array.isArray(customGraph?.nodes) ? customGraph.nodes : []) {
+          const definition = getNodeDefinition(graphNode?.operatorId);
+          if (definition?.catalogGenerated !== true) continue;
+          required.push(...(
+            Array.isArray(definition.requiredAssemblyReferences)
+              ? definition.requiredAssemblyReferences
+              : []
+          ));
+        }
+        requiredReferencesByProject.set(
+          projectId,
+          mergeAssemblyReferences(requiredReferencesByProject.get(projectId), required)
+        );
+      };
+      const projectReferences = projectId => mergeAssemblyReferences(
+        referencesFor(projectId),
+        requiredReferencesByProject.get(projectId)
+      );
       const packagesFor = projectId => resources("csharp.reference").filter(node =>
         resourceFor(node, projectId) &&
         String(parameter(node, "referenceKind", "assembly")) === "package"
@@ -1919,6 +1962,7 @@ internal static class EarlyHarmonyPatches
             `${item.toNode}:${item.toPort}`,
             item
           ]));
+          collectCustomGraphReferences(projectId, customGraph);
           const outputNodeId = String(customGraph.outputNodeId || "");
           connection = customIncoming.get(`${outputNodeId}:content`) || null;
           renderNode = createSyntaxRenderer(customGraph.nodes, customIncoming, false);
@@ -2016,10 +2060,11 @@ internal static class EarlyHarmonyPatches
             useWindowsForms: parameter(mainProject, "useWindowsForms", false) === true,
             usesElements: true,
             usesRenderiteShared: parameter(mainProject, "usesRenderiteShared", false) === true,
-            references: [
-              { include: "0Harmony", hintPath: "$(ResonitePath)rml_libs/0Harmony.dll", private: false },
-              ...referencesFor("main").filter(reference => reference.include !== "0Harmony")
-            ],
+            references: mergeAssemblyReferences(
+              [{ include: "0Harmony", hintPath: "$(ResonitePath)rml_libs/0Harmony.dll", private: false }],
+              referencesFor("main").filter(reference => reference.include.toLowerCase() !== "0harmony"),
+              requiredReferencesByProject.get("__rml_early_harmony_preset__")
+            ),
             packageReferences: packagesFor("main"),
             frameworkReferences: frameworksFor("main")
           }
@@ -2029,7 +2074,7 @@ internal static class EarlyHarmonyPatches
       for (const [projectId, files] of filesByProject) {
         if (projectId === "main") {
           for (const file of files) api.addFile(file);
-          for (const reference of referencesFor(projectId)) api.addReference(reference);
+          for (const reference of projectReferences(projectId)) api.addReference(reference);
           for (const packageReference of packagesFor(projectId)) api.addPackageReference(packageReference);
           for (const framework of frameworksFor(projectId)) api.addFrameworkReference(framework);
           continue;
@@ -2051,7 +2096,7 @@ internal static class EarlyHarmonyPatches
             useWindowsForms: parameter(project, "useWindowsForms", false) === true,
             usesElements: parameter(project, "usesElements", true) === true,
             usesRenderiteShared: parameter(project, "usesRenderiteShared", false) === true,
-            references: referencesFor(projectId),
+            references: projectReferences(projectId),
             packageReferences: packagesFor(projectId),
             frameworkReferences: frameworksFor(projectId)
           }
@@ -2660,14 +2705,36 @@ internal static class EarlyHarmonyPatches
     collectSourceSymbols(parseResult.root);
 
     const catalogByOwnerKindMember = new Map();
+    const catalogEnumsByType = new Map();
+    const catalogEnumValues = definition => {
+      const options = (Array.isArray(definition?.parameters) ? definition.parameters : [])
+        .find(parameter => parameter?.key === "value")?.options;
+      return new Set((Array.isArray(options) ? options : [])
+        .map(option => Array.isArray(option)
+          ? option[0]
+          : option && typeof option === "object"
+            ? option.value
+            : option)
+        .map(value => String(value || "").replace(/^@/, ""))
+        .filter(Boolean));
+    };
     for (const [operatorId, definition] of catalogDefinitions) {
+      const owner = resolveCatalogType(definition.catalogType);
       const key = [
-        resolveCatalogType(definition.catalogType),
+        owner,
         String(definition.apiMemberKind || ""),
         String(definition.catalogMember || "")
       ].join("\0");
       if (!catalogByOwnerKindMember.has(key)) catalogByOwnerKindMember.set(key, []);
       catalogByOwnerKindMember.get(key).push({ operatorId, definition });
+      if (definition.apiMemberKind === "enum" && owner) {
+        if (!catalogEnumsByType.has(owner)) catalogEnumsByType.set(owner, []);
+        catalogEnumsByType.get(owner).push({
+          operatorId,
+          definition,
+          values: catalogEnumValues(definition)
+        });
+      }
     }
     const typeDefinitions = getTypeDefinitions?.() || {};
     const graphTypeByCatalogType = new Map(
@@ -2693,6 +2760,18 @@ internal static class EarlyHarmonyPatches
         if (candidates.length > 0) return candidates;
       }
       return [];
+    };
+    const catalogEnumMember = (receiver, member) => {
+      const receiverText = syntaxCoreText(receiver).trim();
+      const simpleReceiver = /^@?[\p{L}_][\p{L}\p{N}_]*$/u.test(receiverText);
+      if (simpleReceiver && symbolTypes.has(receiverText.replace(/^@/, ""))) return null;
+      const owner = resolveCatalogType(receiverText);
+      const name = String(member || "").trim().replace(/^@/, "");
+      const matches = (catalogEnumsByType.get(owner) || [])
+        .filter(candidate => candidate.values.has(name));
+      const canonical = matches.filter(candidate => candidate.definition?.legacyCatalogAlias !== true);
+      const candidates = canonical.length > 0 ? canonical : matches;
+      return candidates.length === 1 ? { ...candidates[0], value: name } : null;
     };
     const argumentValueNode = argument => {
       const children = directSyntaxChildren(argument);
@@ -2725,13 +2804,20 @@ internal static class EarlyHarmonyPatches
         const collection = inferExpressionType(children[0]);
         result = collection.endsWith("[]") ? collection.slice(0, -2) : "";
       } else if (kind === window.RMLI18n.t("ui.literal.e0d6f8050968")) {
-        const owner = inferExpressionType(children[0]);
         const member = syntaxCoreText(children.at(-1)).replace(/<.*>$/, "");
-        const candidates = [
-          ...catalogMembers(owner, "property-get", member),
-          ...catalogMembers(owner, "field-get", member)
-        ];
-        if (candidates.length === 1) result = resolveCatalogType(candidates[0].definition.apiReturnType);
+        const enumMember = catalogEnumMember(children[0], member);
+        if (enumMember) {
+          result = resolveCatalogType(
+            enumMember.definition.apiReturnType || enumMember.definition.catalogType
+          );
+        } else {
+          const owner = inferExpressionType(children[0]);
+          const candidates = [
+            ...catalogMembers(owner, "property-get", member),
+            ...catalogMembers(owner, "field-get", member)
+          ];
+          if (candidates.length === 1) result = resolveCatalogType(candidates[0].definition.apiReturnType);
+        }
       } else if (kind === window.RMLI18n.t("ui.literal.54d759f30520")) {
         const match = resolveCatalogInvocation(syntaxNode, false);
         if (match) {
@@ -2769,7 +2855,7 @@ internal static class EarlyHarmonyPatches
       const args = directSyntaxChildren(argumentList).filter(child => String(child?.kind || "") === "Argument");
       let candidates = catalogMembers(owner, "method", member).filter(({ definition }) => {
         const parameters = Array.isArray(definition.apiParameters) ? definition.apiParameters : [];
-        if (parameters.some(parameter => parameter?.isOut === true)) return false;
+        if (parameters.some(parameter => parameter?.isOut === true || parameter?.isByRef === true)) return false;
         const required = parameters.filter(parameter => parameter?.isOptional !== true && parameter?.hasDefaultValue !== true).length;
         if (args.length < required || args.length > parameters.length) return false;
         if (Math.max(0, Number(definition.apiGenericArity) || 0) !== genericTypes.length) return false;
@@ -3407,8 +3493,13 @@ internal static class EarlyHarmonyPatches
         const rightText = syntaxCoreText(children[1]);
         if (!significantTrivia && semanticValue.replace(/\s+/g, "") === `${leftText}.${rightText}`.replace(/\s+/g, "")) {
           if (kind === window.RMLI18n.t("ui.literal.e0d6f8050968")) {
-            const owner = inferExpressionType(children[0]);
             const member = rightText.replace(/<.*>$/, "").replace(/^@/, "");
+            const enumMember = catalogEnumMember(children[0], member);
+            if (enumMember) {
+              const { operatorId, definition, value } = enumMember;
+              return addNode(operatorId, { value }, depth, definition.title || kind);
+            }
+            const owner = inferExpressionType(children[0]);
             const candidates = [
               ...catalogMembers(owner, "property-get", member),
               ...catalogMembers(owner, "field-get", member)
@@ -3565,7 +3656,7 @@ internal static class EarlyHarmonyPatches
             const owner = resolveCatalogType(match[1]);
             let constructors = catalogMembers(owner, "constructor", "").filter(({ definition }) => {
               const parameters = Array.isArray(definition.apiParameters) ? definition.apiParameters : [];
-              if (parameters.some(parameter => parameter?.isOut === true)) return false;
+              if (parameters.some(parameter => parameter?.isOut === true || parameter?.isByRef === true)) return false;
               const required = parameters.filter(parameter => parameter?.isOptional !== true && parameter?.hasDefaultValue !== true).length;
               return argumentsList.length >= required && argumentsList.length <= parameters.length &&
                 argumentsList.every((argument, index) => parameterAcceptsType(parameters[index], inferExpressionType(argumentValueNode(argument))));

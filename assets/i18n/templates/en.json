@@ -374,7 +374,7 @@
   "template.help.b04f52d91627": "Show the existing complete Typed Runtime Graph node reference.",
   "template.help.b0b97385ba5e": "Display Value and Display Impulse prefer values published by the matching generated mod running inside Resonite. The generated runtime discovers the scanner mod without a compile-time dependency, and the scanner streams each monitor update to this builder over its local loopback SSE bridge.",
   "template.help.b1286f50a744": "A Button socket is already an Impulse source: each press in the RML configuration page emits exactly one pulse. It does not depend on Save Settings and does not use Startup/Saved reaction modes.",
-  "template.help.b15df7ad08f8": "Toggle Edit Mode while the Runtime Graph or a nested graph is open. On macOS use Command + F. Text fields, code editors and dialogs keep their own Find behavior; holding the key does not repeatedly toggle.",
+  "template.help.b15df7ad08f8": "Toggle Edit Mode while the Runtime Graph or a nested graph is open. This keeps Ctrl/Command + F fully reserved for Find in the code editor; holding F2 does not repeatedly toggle the mode.",
   "template.help.b1b0f36c9ee0": "appends the current",
   "template.help.b1b392607dea": "Run",
   "template.help.b3769cba416a": "property hides the complete group by default while keeping it available to runtime",

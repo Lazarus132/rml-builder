@@ -4305,6 +4305,201 @@ function setRmlNodeSymbolContent(element, symbol) {
   element.appendChild(svg);
 }
 
+const CUSTOM_CSHARP_ADVANCED_SYNTAX_OPERATOR_IDS = new Set([
+  "csharp.trivia",
+  "csharp.token",
+  "csharp.roslynNode",
+  "csharp.roslynToken",
+  "csharp.roslynTrivia",
+  "csharp.delimited"
+]);
+
+function customCSharpCatalogDefinitionAllowed(
+    definition
+  ) {
+    return definition?.customCSharpCatalogNode ===
+      true;
+  }
+
+function customCSharpEssentialPaletteDefinition(
+    operatorId,
+    definition
+  ) {
+    if (
+      definition?.customCSharpSubgraphOnly ===
+        true
+    ) {
+      return true;
+    }
+    if (
+      definition?.customCSharpSyntaxNode !==
+        true
+    ) {
+      return false;
+    }
+    return !CUSTOM_CSHARP_ADVANCED_SYNTAX_OPERATOR_IDS.has(
+      String(operatorId || "")
+    );
+  }
+
+function customCSharpCatalogCanonicalOutputId(
+    definition
+  ) {
+    const outputs = Array.isArray(
+      definition?.outputs
+    )
+      ? definition.outputs
+      : [];
+    const explicit = String(
+      definition?.customCSharpOutputPort || ""
+    );
+    if (
+      explicit &&
+      outputs.some(port =>
+        String(port?.id || "") === explicit
+      )
+    ) {
+      return explicit;
+    }
+
+    const outputIds = new Set(
+      outputs.map(port =>
+        String(port?.id || "")
+      )
+    );
+    const kind = String(
+      definition?.apiMemberKind || ""
+    );
+    if (
+      [
+        "type",
+        "enum",
+        "property-get",
+        "field-get"
+      ].includes(kind) &&
+      outputIds.has("value")
+    ) {
+      return "value";
+    }
+    if (
+      kind === "constructor" &&
+      outputIds.has("result")
+    ) {
+      return "result";
+    }
+    if (kind === "method") {
+      if (outputIds.has("result")) {
+        return "result";
+      }
+      if (outputIds.has("done")) {
+        return "done";
+      }
+    }
+    if (
+      ["property-set", "field-set"].includes(
+        kind
+      ) &&
+      outputIds.has("done")
+    ) {
+      return "done";
+    }
+    return String(outputs[0]?.id || "");
+  }
+
+function customCSharpCatalogPortIsCanonical(
+    definition,
+    portId,
+    direction
+  ) {
+    const normalizedPortId = String(
+      portId || ""
+    );
+    if (direction === "input") {
+      return /^(?:target|value|generic\d+|arg\d+)$/.test(
+        normalizedPortId
+      );
+    }
+    return Boolean(
+      normalizedPortId &&
+      normalizedPortId ===
+        customCSharpCatalogCanonicalOutputId(
+          definition
+        )
+    );
+  }
+
+function graphPortPresentationSpecification(
+    node,
+    specification,
+    direction
+  ) {
+    if (
+      !customCSharpEditor ||
+      !specification ||
+      !customCSharpCatalogDefinitionAllowed(
+        nodeDefinition(node)
+      )
+    ) {
+      return specification;
+    }
+    return {
+      ...specification,
+      label:
+        direction === "output"
+          ? window.RMLI18n.t(
+              "ui.literal.17c7ba7676ad"
+            )
+          : specification.label,
+      type: "csharpSyntax",
+      typeVar: null,
+      constraint: "",
+      detail: "",
+      reaction: "",
+      customCSharpUnresolvedType: false,
+      customCSharpPresentationDirection:
+        direction === "output"
+          ? "output"
+          : "input"
+    };
+  }
+
+function graphPortPresentationReference(reference) {
+    if (!reference?.spec) {
+      return reference;
+    }
+    const specification =
+      graphPortPresentationSpecification(
+        reference.node,
+        reference.spec,
+        reference.direction
+      );
+    return specification === reference.spec
+      ? reference
+      : {
+          ...reference,
+          spec: specification
+        };
+  }
+
+function graphPortPresentationConcreteType(
+    reference,
+    bindings
+  ) {
+    const presented =
+      graphPortPresentationReference(
+        reference
+      );
+    return (
+      resolvePortType(
+        presented,
+        bindings || new Map()
+      ) ||
+      fallbackConcreteTypeForPort(
+        presented
+      )
+    );
+  }
+
 function nodePaletteIconDescriptor(
     definition = {}
   ) {
@@ -4355,7 +4550,13 @@ function nodePaletteIconDescriptor(
       definition?.customCSharpNode === true ||
       definition?.customCSharpSyntaxNode === true ||
       definition?.customCSharpSubgraphOnly === true ||
-      definition?.customCSharpCatalogNode === true
+      definition?.customCSharpCatalogNode === true ||
+      (
+        customCSharpEditor &&
+        customCSharpCatalogDefinitionAllowed(
+          definition
+        )
+      )
     );
     const expert =
       definition?.expertOnly === true;
@@ -14974,8 +15175,8 @@ function updateGraphEditModeButton() {
       (active
         ? window.RMLI18n.t("ui.literal.967bd3eab90f")
         : window.RMLI18n.t("ui.literal.4e96fc0c9c97")) +
-      " (Ctrl/Command + F)";
-    dom.editModeButton.setAttribute("aria-keyshortcuts", "Control+f Meta+f");
+      " (F2)";
+    dom.editModeButton.setAttribute("aria-keyshortcuts", "F2");
     dom.editModeButton.dataset.help =
       dom.editModeButton.title;
     dom.editModeButton.setAttribute(
@@ -15718,7 +15919,9 @@ function definitionBelongsToCurrentGraph(definition) {
       return Boolean(
         definition?.customCSharpSyntaxNode === true ||
         definition?.customCSharpSubgraphOnly === true ||
-        definition?.customCSharpCatalogNode === true
+        customCSharpCatalogDefinitionAllowed(
+          definition
+        )
       );
     }
     if (apiCompositeEditor) {
@@ -15934,15 +16137,6 @@ function graphPaletteDemandIndex() {
 
     const entries = [];
     const byId = new Map();
-    const customCSharpKinds = new Set([
-      "method",
-      "constructor",
-      "property-get",
-      "property-set",
-      "field-get",
-      "field-set",
-      "type"
-    ]);
     for (const row of rows) {
       const compactRow =
         source?.compact === true &&
@@ -16012,10 +16206,7 @@ function graphPaletteDemandIndex() {
             catalogGenerated: true,
             apiMemberKind,
             customCSharpCatalogNode:
-              (flags & 2) !== 0 ||
-              customCSharpKinds.has(
-                apiMemberKind
-              )
+              (flags & 2) !== 0
           }
         : {
         title: String(
@@ -16049,10 +16240,7 @@ function graphPaletteDemandIndex() {
         customCSharpCatalogNode:
           sourceDefinition
             ?.customCSharpCatalogNode ===
-            true ||
-          customCSharpKinds.has(
-            apiMemberKind
-          )
+            true
       };
       entries.push(operatorId);
       byId.set(
@@ -16111,6 +16299,38 @@ function ensureGraphPaletteOperators(
         )
       )
       .catch(() => false);
+  }
+
+function graphPaletteDefinitionVisible(
+    operatorId,
+    definition,
+    showAdvanced
+  ) {
+    if (
+      !definition ||
+      definition.hiddenFromPalette === true ||
+      !definitionBelongsToCurrentGraph(
+        definition
+      )
+    ) {
+      return false;
+    }
+    if (showAdvanced === true) {
+      return true;
+    }
+    if (customCSharpEditor) {
+      return customCSharpEssentialPaletteDefinition(
+        operatorId,
+        definition
+      );
+    }
+    return !(
+      definition.expertOnly === true ||
+      definition.customCSharpNode === true ||
+      definition.customCSharpCatalogNode === true ||
+      String(definition.group || "") ===
+        "Advanced / Raw C#"
+    );
   }
 
 function graphPaletteDefinitionIndex(
@@ -16186,20 +16406,10 @@ function graphPaletteDefinitionIndex(
         OPERATOR_DEFINITIONS[operatorId] ||
         demandIndex.byId.get(operatorId);
       if (
-        !definition ||
-        definition.hiddenFromPalette === true ||
-        !definitionBelongsToCurrentGraph(
-          definition
-        ) ||
-        (
-          showAdvanced !== true &&
-          !customCSharpEditor &&
-          (
-            definition.expertOnly === true ||
-            definition.customCSharpNode === true ||
-            definition.customCSharpCatalogNode === true ||
-            String(definition.group || "") === "Advanced / Raw C#"
-          )
+        !graphPaletteDefinitionVisible(
+          operatorId,
+          definition,
+          showAdvanced
         )
       ) {
         continue;
@@ -16597,7 +16807,6 @@ function renderGraphPalette(
     modeInput.type = "checkbox";
     modeInput.checked =
       graph.showAdvancedNodes === true;
-    modeInput.disabled = Boolean(customCSharpEditor);
 
     const modeCopy =
       document.createElement("span");
@@ -16612,7 +16821,6 @@ function renderGraphPalette(
       modeInput,
       modeCopy
     );
-    modeWrap.hidden = Boolean(customCSharpEditor);
 
     const scroll =
       document.createElement("div");
@@ -16955,7 +17163,16 @@ function renderGraphPalette(
               OPERATOR_DEFINITIONS[
                 operatorId
               ];
-            if (!definition) continue;
+            if (
+              !graphPaletteDefinitionVisible(
+                operatorId,
+                definition,
+                graph.showAdvancedNodes ===
+                  true
+              )
+            ) {
+              continue;
+            }
             fragment.appendChild(
               createPaletteItem(
                 operatorId,
@@ -17153,10 +17370,12 @@ function renderGraphPalette(
 
       const hydratedMatches =
         matches.filter(operatorId =>
-          Boolean(
+          graphPaletteDefinitionVisible(
+            operatorId,
             OPERATOR_DEFINITIONS[
               operatorId
-            ]
+            ],
+            showAdvanced
           )
         );
 
@@ -17178,10 +17397,12 @@ function renderGraphPalette(
             query,
             matches: matches.filter(
               operatorId =>
-                Boolean(
+                graphPaletteDefinitionVisible(
+                  operatorId,
                   OPERATOR_DEFINITIONS[
                     operatorId
-                  ]
+                  ],
+                  showAdvanced
                 )
             )
           });
@@ -18242,13 +18463,10 @@ function interactionConcreteType(
       );
 
     return (
-      resolvePortType(
+      graphPortPresentationConcreteType(
         portRef,
         analysis.bindings ||
           new Map()
-      ) ||
-      fallbackConcreteTypeForPort(
-        portRef
       )
     );
   }
@@ -24095,13 +24313,6 @@ function graphPortVisibleInCurrentEditor(
     connectedKeys = null,
     exposedBoundaryKeys = undefined
   ) {
-    if (
-      !apiCompositeEditor ||
-      customCSharpEditor
-    ) {
-      return true;
-    }
-
     const normalizedDirection =
       direction === "output"
         ? "output"
@@ -24122,6 +24333,26 @@ function graphPortVisibleInCurrentEditor(
         `${normalizedDirection}:${normalizedNodeId}:${normalizedPortId}`
       )
     ) {
+      return true;
+    }
+
+    if (customCSharpEditor) {
+      const node = findGraphNode(
+        normalizedNodeId
+      );
+      const definition = node
+        ? nodeDefinition(node)
+        : null;
+      return !customCSharpCatalogDefinitionAllowed(
+        definition
+      ) || customCSharpCatalogPortIsCanonical(
+        definition,
+        normalizedPortId,
+        normalizedDirection
+      );
+    }
+
+    if (!apiCompositeEditor) {
       return true;
     }
 
@@ -24709,6 +24940,11 @@ function createPortRow(
     bindings,
     connectedKeys
   ) {
+    spec = graphPortPresentationSpecification(
+      node,
+      spec,
+      direction
+    );
     const row =
       document.createElement("div");
     row.className =
@@ -29361,6 +29597,10 @@ function quickWireBranchTargetState(
       return "invalid";
     }
 
+    if (customCSharpEditor) {
+      return "valid";
+    }
+
     const sourcePort =
       findPortSpec(
         source.nodeId,
@@ -29855,7 +30095,7 @@ function indexGraphWireHandles(connectionIds = null, usage = branchPointUsageMap
         )
           ? IMPORT_RECOVERY_BROKEN_WIRE_COLOR
           : typeInfo(
-              resolvePortType(
+              graphPortPresentationConcreteType(
                 spec,
                 currentAnalysis?.bindings ||
                   new Map()
@@ -31008,7 +31248,7 @@ function gpuSegmentsForConnection(
         toRef
       );
     const concreteType =
-      resolvePortType(
+      graphPortPresentationConcreteType(
         fromRef,
         currentAnalysis?.bindings ||
           new Map()
@@ -31486,7 +31726,7 @@ function updateGraphWireConnections(
             )
           : null;
         const concreteType = source
-          ? resolvePortType(
+          ? graphPortPresentationConcreteType(
               source,
               currentAnalysis?.bindings ||
                 new Map()
@@ -32275,7 +32515,7 @@ async function prepareCompleteHybridGraphWires(
           )
             ? IMPORT_RECOVERY_BROKEN_WIRE_COLOR
             : typeInfo(
-                resolvePortType(
+                graphPortPresentationConcreteType(
                   specification,
                   currentAnalysis?.bindings ||
                     new Map()
@@ -32613,7 +32853,7 @@ function renderGraphWires() {
           toRef
         );
       const concreteType =
-        resolvePortType(
+        graphPortPresentationConcreteType(
           fromRef,
           currentAnalysis.bindings
         ) || "generic";
@@ -37881,13 +38121,19 @@ function nodeInspectorCard(node) {
         ) {
           continue;
         }
+        const presentedSpec =
+          graphPortPresentationSpecification(
+            node,
+            spec,
+            connectionDirection
+          );
         const concrete =
-          spec.type ||
-          (spec.customCSharpUnresolvedType
+          presentedSpec.type ||
+          (presentedSpec.customCSharpUnresolvedType
             ? null
             : analysis.bindings
                 .get(node.id)?.[
-                  spec.typeVar
+                  presentedSpec.typeVar
                 ] || null);
         const row =
           document.createElement("div");
@@ -37900,13 +38146,13 @@ function nodeInspectorCard(node) {
         const name =
           document.createElement("span");
         name.textContent =
-          `${direction}: ${spec.label}`;
+          `${direction}: ${presentedSpec.label}`;
         const type =
           document.createElement("b");
         type.textContent =
           concrete
             ? typeLabel(concrete)
-            : `${spec.typeVar || "T"}`;
+            : `${presentedSpec.typeVar || "T"}`;
         row.append(dot, name, type);
         typeList.appendChild(row);
       }
@@ -40820,19 +41066,23 @@ function wirePointInspectorCard(
         connection.toNode
       );
     const fromSpec =
-      findPortSpec(
-        connection.fromNode,
-        connection.fromPort,
-        "output"
+      graphPortPresentationReference(
+        findPortSpec(
+          connection.fromNode,
+          connection.fromPort,
+          "output"
+        )
       );
     const toSpec =
-      findPortSpec(
-        connection.toNode,
-        connection.toPort,
-        "input"
+      graphPortPresentationReference(
+        findPortSpec(
+          connection.toNode,
+          connection.toPort,
+          "input"
+        )
       );
     const concrete =
-      resolvePortType(
+      graphPortPresentationConcreteType(
         fromSpec,
         currentAnalysis?.bindings ||
           new Map()
@@ -40949,19 +41199,23 @@ function connectionInspectorCard(
         connection.toNode
       );
     const fromSpec =
-      findPortSpec(
-        connection.fromNode,
-        connection.fromPort,
-        "output"
+      graphPortPresentationReference(
+        findPortSpec(
+          connection.fromNode,
+          connection.fromPort,
+          "output"
+        )
       );
     const toSpec =
-      findPortSpec(
-        connection.toNode,
-        connection.toPort,
-        "input"
+      graphPortPresentationReference(
+        findPortSpec(
+          connection.toNode,
+          connection.toPort,
+          "input"
+        )
       );
     const concrete =
-      resolvePortType(
+      graphPortPresentationConcreteType(
         fromSpec,
         currentAnalysis?.bindings ||
           new Map()
@@ -41959,13 +42213,10 @@ function beginConnectionDrag(event) {
         startRef.direction
       );
     const startType =
-      resolvePortType(
+      graphPortPresentationConcreteType(
         startPortRef,
         analysisBeforeDetach.bindings ||
           new Map()
-      ) ||
-      fallbackConcreteTypeForPort(
-        startPortRef
       );
 
     let detachedConnection = null;
@@ -42169,7 +42420,7 @@ function renderConnectionPreview(
         interaction.start.direction
       );
     const type =
-      resolvePortType(
+      graphPortPresentationConcreteType(
         startPort,
         currentAnalysis?.bindings ||
           new Map()
@@ -42306,6 +42557,10 @@ function quickConnectionTargetState(
     );
     if (!sourcePort || !targetPort) {
       return "invalid";
+    }
+
+    if (customCSharpEditor) {
+      return "valid";
     }
 
     const bindings =
@@ -44759,12 +45014,20 @@ function handleGraphKeyDown(event) {
     if (graphShortcutHasTextOwner(event)) return;
 
     const command = (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey;
-    const key = String(event.key).toLowerCase();
-    if (command && (key === "f" || key === "0")) {
+    const key = String(event.key || "").toLowerCase();
+    const code = String(event.code || "").toLowerCase();
+    const legacy = Number(event.keyCode) || 0;
+    const editModeShortcut =
+      (key === "f2" || code === "f2" || legacy === 113) &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey &&
+      !event.shiftKey;
+    if (editModeShortcut || (command && key === "0")) {
       claimGraphShortcut(event);
       if (event.repeat || activeInteraction || !graphNavigationShortcutsReady()) return;
       releaseGraphScrollLayerFromInput();
-      if (key === "f") toggleGraphEditMode();
+      if (editModeShortcut) toggleGraphEditMode();
       else centerGraph();
       return;
     }

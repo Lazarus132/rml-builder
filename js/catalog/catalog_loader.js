@@ -3,7 +3,7 @@
 
   const CATALOG_LOADER_MODULE_ID =
     "1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle";
-  const LOADER_VERSION = 84;
+  const LOADER_VERSION = 85;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42729;
   const CATALOG_PATH = "/resonite_api_catalog.json";
@@ -56,8 +56,8 @@
   const DEMAND_CACHE_MANIFEST_KEY =
     "catalog-demand-manifest";
   const DEMAND_CACHE_FORMAT =
-    "rml-catalog-demand-index-v2";
-  const DEMAND_CACHE_SCHEMA_VERSION = 2;
+    "rml-catalog-demand-index-v3";
+  const DEMAND_CACHE_SCHEMA_VERSION = 3;
   const DEMAND_CACHE_MANIFEST_MAX_BYTES =
     32 * 1024 * 1024;
   const REQUIRED_API_FACTORY_VERSION = 38;
@@ -71,11 +71,11 @@
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "../compiler/visual_csharp.js?v=84-harmony-file-presets",
+    "../compiler/visual_csharp.js?v=85-contextual-csharp-api",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle",
+    "api_nodes.js?v=1.21.24-contextual-csharp-api",
     scriptUrl
   ).href;
 
@@ -1955,7 +1955,7 @@
         DEMAND_CACHE_FORMAT &&
       String(
         manifest?.contentHashAlgorithm || ""
-      ) === "sha256-demand-index-v2" &&
+      ) === "sha256-demand-index-v3" &&
       /^[a-f0-9]{64}$/.test(
         String(manifest?.contentHash || "")
           .trim().toLowerCase()
@@ -2312,7 +2312,7 @@
         DEMAND_CACHE_SCHEMA_VERSION,
       format: DEMAND_CACHE_FORMAT,
       contentHashAlgorithm:
-        "sha256-demand-index-v2",
+        "sha256-demand-index-v3",
       contentHash: "",
       createdAtUtc:
         new Date().toISOString(),

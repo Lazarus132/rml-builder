@@ -2300,7 +2300,7 @@ function buildCustomCSharpFragmentInWorker(nodeId, source, parseResult, options)
     }
     const worker = new Worker(
       new URL(
-        "js/workers/graph_codegen_worker.js?v=1.21.22-universal-presentation-dev422-node-index-markdown-export-toggle",
+        "js/workers/graph_codegen_worker.js?v=1.21.24-contextual-csharp-api",
         document.baseURI
       ),
       { name: "rml-custom-csharp-builder" }
@@ -4092,7 +4092,7 @@ function loadCustomCSharpDetachedEditorModule() {
         const script =
           document.createElement("script");
         script.src = new URL(
-          "js/editor/custom_csharp_editor.js?v=1.10-settings-dashboard",
+          "js/editor/custom_csharp_editor.js?v=1.11-distinct-editor-shortcuts",
           document.baseURI
         ).href;
         script.async = true;
