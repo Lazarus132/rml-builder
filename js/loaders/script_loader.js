@@ -2,7 +2,7 @@
   "use strict";
 
   const SCRIPT_LOADER_MODULE_ID =
-    "1.21.83-preview-control-parity";
+    "1.21.85-preview-open-transition";
 
   if (
     window.RMLScriptLoader?.version >= 47 &&
@@ -127,13 +127,13 @@
       dependencies: Object.freeze([]),
       files: Object.freeze([
         Object.freeze({
-          url: "../ui/builder_replacement_dialog.js?v=1.21.83-preview-control-parity",
+          url: "../ui/builder_replacement_dialog.js?v=1.21.85-preview-open-transition",
           ready: () =>
             window.RMLBuilderReplacementDialog
               ?.moduleId === SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../ui/builder_work_controller.js?v=1.21.83-preview-control-parity",
+          url: "../ui/builder_work_controller.js?v=1.21.85-preview-open-transition",
           ready: () =>
             window.RMLBuilderWorkController
               ?.moduleId === SCRIPT_LOADER_MODULE_ID
@@ -143,7 +143,7 @@
     "scanner-connection": Object.freeze({
       dependencies: Object.freeze([]),
       files: Object.freeze([Object.freeze({
-        url: "../graph/runtime_bridge.js?v=1.21.83-preview-control-parity&status-runtime=4",
+        url: "../graph/runtime_bridge.js?v=1.21.85-preview-open-transition&status-runtime=4",
         ready: () => window.RMLRuntimeBridge?.version >= 14 &&
           typeof window.RMLRuntimeBridge?.connect === "function"
       })])
@@ -187,7 +187,7 @@
       dependencies: Object.freeze([]),
       files: Object.freeze([
         Object.freeze({
-          url: "../catalog/catalog_loader.js?v=1.21.83-preview-control-parity&status-catalog=4",
+          url: "../catalog/catalog_loader.js?v=1.21.85-preview-open-transition&status-catalog=4",
           ready: () =>
             window.RMLCatalogImportGate?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -239,7 +239,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/node_graph_codegen.js?v=1.21.83-preview-control-parity",
+          url: "../graph/node_graph_codegen.js?v=1.21.85-preview-open-transition",
           ready: () =>
             window.RMLTypedNodeGraphGenerator?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -256,7 +256,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../workers/saved_api_composite_compare_worker.js?v=1.21.83-preview-control-parity",
+          url: "../workers/saved_api_composite_compare_worker.js?v=1.21.85-preview-open-transition",
           ready: () =>
             window.RMLSavedApiCompositeCompareWorkerBootstrap
               ?.moduleId === SCRIPT_LOADER_MODULE_ID &&
@@ -265,13 +265,13 @@
               ?.source === "string"
         }),
         Object.freeze({
-          url: "../graph/node_graph_composites.js?v=1.21.83-preview-control-parity",
+          url: "../graph/node_graph_composites.js?v=1.21.85-preview-open-transition",
           ready: () =>
             window.RMLNodeGraphCompositesModuleId ===
               SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_custom_csharp.js?v=1.21.83-preview-control-parity",
+          url: "../graph/node_graph_custom_csharp.js?v=1.21.85-preview-open-transition",
           ready: () =>
             window.RMLNodeGraphCustomCSharpModuleId ===
               SCRIPT_LOADER_MODULE_ID
@@ -280,13 +280,13 @@
           url: "../graph/node_graph_guided.js?v=1-physical-modules-v748"
         }),
         Object.freeze({
-          url: "../graph/node_graph_view.js?v=1.21.83-preview-control-parity&status-readiness=4",
+          url: "../graph/node_graph_view.js?v=1.21.85-preview-open-transition&status-readiness=4",
           ready: () =>
             window.RMLNodeGraphViewModuleId ===
               SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_bootstrap.js?v=1.21.83-preview-control-parity",
+          url: "../graph/node_graph_bootstrap.js?v=1.21.85-preview-open-transition",
           ready: () =>
             window.RMLDynamicGraphHost?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -310,7 +310,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/graph_gpu_renderer.js?v=1.21.83-preview-control-parity",
+          url: "../graph/graph_gpu_renderer.js?v=1.21.85-preview-open-transition",
           ready: () =>
             typeof window.RMLGraphHybridRenderer?.create === "function"
         })

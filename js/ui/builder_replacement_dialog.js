@@ -2,7 +2,7 @@
   "use strict";
 
   const MODULE_ID =
-    "1.21.83-preview-control-parity";
+    "1.21.85-preview-open-transition";
 
   if (
     window.RMLBuilderReplacementDialog
@@ -362,7 +362,7 @@
                     ? "!"
                     : "·";
           if (status === "selected") {
-            state.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-check"></use></svg>`;
+            state.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.85-preview-open-transition#icon-check"></use></svg>`;
           }
           const name =
             document.createElement("span");

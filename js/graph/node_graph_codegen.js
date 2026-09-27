@@ -1348,17 +1348,19 @@ function normalizeColorConstantParameters(
       : profileMatch?.[1] === "sRGB"
         ? "srgb"
         : "linear";
+    const rawStrength =
+      parameters.colorStrength;
     const hasStrength =
-      Number.isFinite(
-        Number(
-          parameters.colorStrength
-        )
-      );
+      rawStrength !== null &&
+      rawStrength !== undefined &&
+      !(
+        typeof rawStrength === "string" &&
+        rawStrength.trim() === ""
+      ) &&
+      Number.isFinite(Number(rawStrength));
     let strength = hasStrength
       ? nodeGraphClamp(
-          Number(
-            parameters.colorStrength
-          ),
+          Number(rawStrength),
           1,
           10
         )
@@ -8631,7 +8633,7 @@ function createGraphAnalysisCertificate(
       schemaVersion:
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION,
       moduleId:
-        "1.21.83-preview-control-parity",
+        "1.21.85-preview-open-transition",
       semanticToken: token,
       nodeCount: graph.nodes.length,
       connectionCount: connections.length,
@@ -8664,7 +8666,7 @@ function graphAnalysisCertificateEnvelopeValid(
       Number(certificate.schemaVersion) ===
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION &&
       certificate.moduleId ===
-        "1.21.83-preview-control-parity" &&
+        "1.21.85-preview-open-transition" &&
       certificate.valid === true &&
       typeof certificate.semanticToken ===
         "string" &&
@@ -18413,7 +18415,7 @@ Object.defineProperty(
     {
       value: Object.freeze({
         moduleId:
-          "1.21.83-preview-control-parity",
+          "1.21.85-preview-open-transition",
         build:
           buildTypedNodeGraphCSharpContribution,
         validateDocument:

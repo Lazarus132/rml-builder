@@ -2,7 +2,7 @@
   "use strict";
 
   const STYLE_LOADER_MODULE_ID =
-    "1.21.83-preview-control-parity";
+    "1.21.85-preview-open-transition";
 
   const CLASS_STYLE_VERSION = 3;
 
@@ -698,11 +698,11 @@
     window.location.href;
   const baseUrl = new URL(".", currentScriptUrl);
   const bundleFiles = Object.freeze({
-    preview: "../../styles/features/styles.preview.css?v=6-preview-value-layout-integrity",
+    preview: "../../styles/features/styles.preview.css?v=9-unclipped-hdr-edge-glow",
     information: "../../styles/features/styles.information.css?v=1.10-shortcut-key-groups",
     project: "../../styles/features/styles.project.css?v=4-max-graph-performance-v755",
     export: "../../styles/features/styles.export.css?v=2-max-graph-performance-v755",
-    "runtime-graph": "../../styles/features/styles.runtime-graph.css?v=1.21.83-preview-control-parity"
+    "runtime-graph": "../../styles/features/styles.runtime-graph.css?v=1.21.85-preview-open-transition"
   });
   const bundleOrder = Object.freeze([
     "preview",

@@ -2898,7 +2898,7 @@ dialog.settings-preview-dialog {
 
     padding-right:
       max(
-        22px,
+        42px,
         calc(
           env(safe-area-inset-right) +
           10px
@@ -3839,13 +3839,23 @@ dialog.settings-preview-dialog {
   }
   .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-control,
   .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-save,
-  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-color-button,
   .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-impulse-button {
     border: 0 !important;
     border-radius: 6px !important;
     background: #30343a !important;
     color: #f1f1f2 !important;
     box-shadow: inset 0 1px rgba(255,255,255,.025),0 1px 1px rgba(0,0,0,.35) !important;
+  }
+  .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-color-button {
+    border: 0 !important;
+    border-radius: 6px !important;
+    background: #30343a !important;
+    color: #f1f1f2 !important;
+    box-shadow:
+      inset 0 1px rgba(255,255,255,.025),
+      0 1px 1px rgba(0,0,0,.35),
+      0 0 var(--rml-preview-glow-size,0px) var(--rml-preview-glow,transparent),
+      0 0 calc(var(--rml-preview-glow-size,0px)*.45) var(--rml-preview-glow,transparent) !important;
   }
   .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-enum,
   .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-uri,
@@ -4099,7 +4109,8 @@ dialog.settings-preview-dialog {
     gap: 16px !important;
   }
   .settings-preview-dialog:not(.rml-preview-color-open) .rml-preview-content {
-    margin: 0 42px !important;
+    margin: 0 0 0 42px !important;
+    padding-right: 42px !important;
     overflow-x: hidden !important;
     overflow-y: auto !important;
   }
@@ -4229,8 +4240,7 @@ dialog.settings-preview-dialog {
   width: 100% !important;
   max-width: none !important;
   box-sizing: border-box;
-  overflow-x: hidden !important;
-  overflow-y: hidden !important;
+  overflow: visible !important;
 }
 
 .settings-preview-dialog:not(.rml-preview-color-open)
@@ -4392,7 +4402,7 @@ dialog.settings-preview-dialog {
     .rml-preview-content {
     margin: 0 !important;
     padding-left: max(14px, env(safe-area-inset-left)) !important;
-    padding-right: max(14px, env(safe-area-inset-right)) !important;
+    padding-right: max(42px, env(safe-area-inset-right)) !important;
     scrollbar-width: none !important;
   }
 
