@@ -2,7 +2,7 @@
   "use strict";
 
   const MODULE_ID =
-    "1.21.77-static-live-import-stability";
+    "1.21.83-preview-control-parity";
   const GATE_VERSION = 1;
 
   

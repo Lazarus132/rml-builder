@@ -373,7 +373,6 @@ dialog#project-dialog {
   border-radius: inherit;
   background: linear-gradient(90deg, #39a7ff, #68e4ff, #8b7dff);
   box-shadow: 0 0 16px rgba(66, 190, 255, 0.65);
-  transition: width 180ms ease;
 }
 
 @media (prefers-reduced-motion: reduce) {

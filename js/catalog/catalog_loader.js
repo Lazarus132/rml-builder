@@ -2,7 +2,7 @@
   "use strict";
 
   const CATALOG_LOADER_MODULE_ID =
-    "1.21.77-static-live-import-stability";
+    "1.21.83-preview-control-parity";
   const LOADER_VERSION = 91;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42725;
@@ -148,11 +148,11 @@
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "../compiler/visual_csharp.js?v=1.21.77-static-live-import-stability",
+    "../compiler/visual_csharp.js?v=1.21.83-preview-control-parity",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=1.21.77-static-live-import-stability",
+    "api_nodes.js?v=1.21.83-preview-control-parity",
     scriptUrl
   ).href;
 
@@ -1384,6 +1384,8 @@
   let scannerCheckPresentedSessionKey = "";
   let scannerCheckRejectedSessionKey = "";
   let scannerCheckAbortController = null;
+  const scannerCheckProgressChannels =
+    new Map();
   let activeBuilderCatalogSessionKey = "";
   let catalogHealthSweepSequence = 0;
   let latestCatalogHealthSweepDiagnostics = null;
@@ -4919,6 +4921,7 @@
     url,
     {
       expectedFingerprint = "",
+      expectedRecordCount = 0,
       sourceUrl = "",
       signal = null,
       onProgress = null
@@ -5130,6 +5133,12 @@
         let buffer = "";
         let totalBytes = 0;
         let recordCount = 0;
+        const totalRecordCount = Math.max(
+          0,
+          Math.trunc(
+            Number(expectedRecordCount) || 0
+          )
+        );
         let header = null;
         let headerCounts = null;
         let commitSeen = false;
@@ -5156,7 +5165,8 @@
         let paletteShardCount = 0;
         let paletteRowCount = 0;
         let paletteResidentBytes = 0;
-        let lastProgressBucket = -1;
+        let lastPublishedProgress = -1;
+        let lastPublishedCounters = "";
         const actual = {
           assemblies: 0,
           components: 0,
@@ -5198,11 +5208,25 @@
             0,
             Math.min(1, Number(progress) || 0)
           );
-          const bucket = Math.floor(bounded * 100);
-          if (bucket === lastProgressBucket) {
+          const counters = [
+            recordCount,
+            totalBytes,
+            flushedBatchCount,
+            Number(
+              diagnosticCounts.transactionCount
+            ) || 0,
+            ownerChunkCount,
+            paletteShardCount,
+            Number(detail.ownerCount) || 0
+          ].join(":");
+          if (
+            bounded === lastPublishedProgress &&
+            counters === lastPublishedCounters
+          ) {
             return;
           }
-          lastProgressBucket = bucket;
+          lastPublishedProgress = bounded;
+          lastPublishedCounters = counters;
           diagnosticCounts.recordCount =
             recordCount;
           diagnosticCounts.totalBytes =
@@ -5212,7 +5236,11 @@
               0,
               Number(detail.ownerCount) || 0
             );
-          if (bucket % 10 === 0) {
+          if (
+            recordCount === 0 ||
+            bounded >= 1 ||
+            recordCount % 1024 === 0
+          ) {
             publishDiagnostics();
           }
           if (typeof onProgress !== "function") {
@@ -5223,7 +5251,16 @@
               phase: "stream",
               progress: bounded,
               recordCount,
+              totalRecordCount,
               totalBytes,
+              flushedBatchCount,
+              transactionCount:
+                Number(
+                  diagnosticCounts
+                    .transactionCount
+                ) || 0,
+              ownerChunkCount,
+              paletteShardCount,
               ...detail
             }));
           } catch (error) {
@@ -5876,15 +5913,18 @@
             };
             actual.types += 1;
             publishProgress(
-              (
-                actual.types +
-                actual.enums
-              ) /
-                Math.max(
-                  1,
-                  headerCounts.types +
-                    headerCounts.enums
-                ),
+              totalRecordCount > 0
+                ? recordCount /
+                  totalRecordCount
+                : (
+                    actual.types +
+                    actual.enums
+                  ) /
+                    Math.max(
+                      1,
+                      headerCounts.types +
+                        headerCounts.enums
+                    ),
               {
                 ownerCount:
                   actual.types +
@@ -6018,15 +6058,18 @@
             };
             actual.enums += 1;
             publishProgress(
-              (
-                actual.types +
-                actual.enums
-              ) /
-                Math.max(
-                  1,
-                  headerCounts.types +
-                    headerCounts.enums
-                ),
+              totalRecordCount > 0
+                ? recordCount /
+                  totalRecordCount
+                : (
+                    actual.types +
+                    actual.enums
+                  ) /
+                    Math.max(
+                      1,
+                      headerCounts.types +
+                        headerCounts.enums
+                    ),
               {
                 ownerCount:
                   actual.types +
@@ -6108,6 +6151,11 @@
               record.complete !== true ||
               Number(record.recordCount) !==
                 recordCount ||
+              (
+                totalRecordCount > 0 &&
+                totalRecordCount !==
+                  recordCount
+              ) ||
               String(record.catalogFingerprint || "")
                 .trim().toLowerCase() !==
                 String(header.catalogFingerprint || "")
@@ -6244,6 +6292,23 @@
           } else {
             throw new Error(
               `Unknown scanner demand record '${kind}'.`
+            );
+          }
+
+          if (totalRecordCount > 0) {
+            publishProgress(
+              recordCount /
+                totalRecordCount,
+              {
+                ownerCount:
+                  actual.types +
+                  actual.enums,
+                totalOwnerCount:
+                  headerCounts
+                    ? headerCounts.types +
+                      headerCounts.enums
+                    : 0
+              }
             );
           }
 
@@ -12583,7 +12648,7 @@
             window.RMLI18n.t("ui.auto.ef5bac1920fc"),
           detail:
             window.RMLI18n.t("ui.auto.112240abb0c0"),
-          progress: 8,
+          progress: 1,
           timeout: 120000,
           onTimeout:
             typeof options.onTimeout ===
@@ -12603,12 +12668,184 @@
     );
   }
 
-  function finishScannerCheckWork() {
+  async function finishScannerCheckWork(
+    completed = false
+  ) {
     const session = scannerCheckWorkSession;
     scannerCheckWorkSession = 0;
     if (session) {
-      window.RMLBuilderWork?.finish?.(session);
+      if (
+        completed === true &&
+        typeof window.RMLBuilderWork?.complete ===
+          "function"
+      ) {
+        await window.RMLBuilderWork.complete(
+          session
+        );
+      } else {
+        window.RMLBuilderWork?.finish?.(session);
+      }
     }
+  }
+
+  function resetScannerCheckProgress(
+    sessionKey
+  ) {
+    const channel = {
+      snapshot: null,
+      listeners: new Set()
+    };
+    scannerCheckProgressChannels.set(
+      sessionKey,
+      channel
+    );
+    while (
+      scannerCheckProgressChannels.size > 8
+    ) {
+      const oldest =
+        scannerCheckProgressChannels.keys()
+          .next().value;
+      if (!oldest || oldest === sessionKey) {
+        break;
+      }
+      scannerCheckProgressChannels.delete(
+        oldest
+      );
+    }
+    return channel;
+  }
+
+  function subscribeScannerCheckProgress(
+    sessionKey,
+    callback
+  ) {
+    if (typeof callback !== "function") {
+      return () => {};
+    }
+    const channel =
+      scannerCheckProgressChannels.get(
+        sessionKey
+      ) ||
+      resetScannerCheckProgress(
+        sessionKey
+      );
+    channel.listeners.add(callback);
+    if (channel.snapshot) {
+      notifyCatalogGate(
+        callback,
+        channel.snapshot
+      );
+    }
+    return () => {
+      channel.listeners.delete(callback);
+    };
+  }
+
+  function publishScannerCheckProgress(
+    sessionKey,
+    detail = {}
+  ) {
+    const channel =
+      scannerCheckProgressChannels.get(
+        sessionKey
+      ) ||
+      resetScannerCheckProgress(
+        sessionKey
+      );
+    const requested = Number(
+      detail.progress
+    );
+    const previous = Number(
+      channel.snapshot?.progress
+    ) || 0;
+    const progress = Math.max(
+      previous,
+      Math.max(
+        0,
+        Math.min(
+          1,
+          Number.isFinite(requested)
+            ? requested
+            : previous
+        )
+      )
+    );
+    const snapshot = Object.freeze({
+      version: 1,
+      sessionKey,
+      branch: String(
+        detail.branch || "checking"
+      ),
+      phase: String(
+        detail.phase || "checking"
+      ),
+      ...detail,
+      progress
+    });
+    channel.snapshot = snapshot;
+    for (const listener of [
+      ...channel.listeners
+    ]) {
+      notifyCatalogGate(
+        listener,
+        snapshot
+      );
+    }
+    return snapshot;
+  }
+
+  function observeScannerCheckProgress(
+    sessionKey,
+    callback,
+    promise
+  ) {
+    const unsubscribe =
+      subscribeScannerCheckProgress(
+        sessionKey,
+        callback
+      );
+    return Promise.resolve(promise)
+      .finally(unsubscribe);
+  }
+
+  const SCANNER_DEMAND_RECORD_PROGRESS =
+    Object.freeze([
+      Object.freeze([0, 0.32]),
+      Object.freeze([0.1, 0.33]),
+      Object.freeze([0.25, 0.38]),
+      Object.freeze([0.5, 0.69]),
+      Object.freeze([0.75, 0.86]),
+      Object.freeze([1, 0.985])
+    ]);
+
+  function scannerDemandRecordProgress(
+    fraction
+  ) {
+    const bounded = Math.max(
+      0,
+      Math.min(1, Number(fraction) || 0)
+    );
+    for (
+      let index = 1;
+      index <
+        SCANNER_DEMAND_RECORD_PROGRESS.length;
+      index += 1
+    ) {
+      const left =
+        SCANNER_DEMAND_RECORD_PROGRESS[
+          index - 1
+        ];
+      const right =
+        SCANNER_DEMAND_RECORD_PROGRESS[index];
+      if (bounded > right[0]) continue;
+      const span = right[0] - left[0];
+      const ratio = span > 0
+        ? (bounded - left[0]) / span
+        : 1;
+      return left[1] +
+        (right[1] - left[1]) * ratio;
+    }
+    return 0.985;
   }
 
   async function synchronizeScannerStatus(options = {}) {
@@ -12628,13 +12865,37 @@
       ""
     ).trim().toLowerCase();
 
-    if (session.mode !== "live") return false;
+    if (session.mode !== "live") {
+      notifyCatalogGate(
+        options.onProgress,
+        Object.freeze({
+          version: 1,
+          sessionKey,
+          branch: "fallback",
+          phase: "unavailable",
+          progress: 1,
+          phaseProgress: 1
+        })
+      );
+      return false;
+    }
     if (
       options.forceRetry !== true &&
       scannerCheckRejectedSessionKey ===
         sessionKey
     ) {
       updateStatus();
+      notifyCatalogGate(
+        options.onProgress,
+        Object.freeze({
+          version: 1,
+          sessionKey,
+          branch: "fallback",
+          phase: "latched-failure",
+          progress: 1,
+          phaseProgress: 1
+        })
+      );
       return false;
     }
     if (
@@ -12657,7 +12918,11 @@
           sessionKey
         );
       }
-      return scannerCheckPromise;
+      return observeScannerCheckProgress(
+        sessionKey,
+        options.onProgress,
+        scannerCheckPromise
+      );
     }
     if (
       scannerCheckGeneration === sessionKey &&
@@ -12669,6 +12934,17 @@
       ).trim().toLowerCase() === sessionFingerprint
     ) {
       updateStatus();
+      notifyCatalogGate(
+        options.onProgress,
+        Object.freeze({
+          version: 1,
+          sessionKey,
+          branch: "cache-match",
+          phase: "complete",
+          progress: 1,
+          phaseProgress: 1
+        })
+      );
       return true;
     }
     if (
@@ -12679,6 +12955,17 @@
           session.generation
       )
     ) {
+      notifyCatalogGate(
+        options.onProgress,
+        Object.freeze({
+          version: 1,
+          sessionKey,
+          branch: "fallback",
+          phase: "stale-session",
+          progress: 1,
+          phaseProgress: 1
+        })
+      );
       return false;
     }
     scannerCheckAbortController?.abort();
@@ -12728,6 +13015,21 @@
         throw new Error("Scanner session was closed.");
       }
     };
+    resetScannerCheckProgress(sessionKey);
+    const unsubscribeProgress =
+      subscribeScannerCheckProgress(
+        sessionKey,
+        options.onProgress
+      );
+    publishScannerCheckProgress(
+      sessionKey,
+      {
+        branch: "checking",
+        phase: "cache-read",
+        progress: 0,
+        phaseProgress: 0
+      }
+    );
     scannerCheckGeneration = sessionKey;
     scannerCheckMismatchSessionKey = "";
     const pending = Promise.resolve().then(async () => {
@@ -12771,6 +13073,17 @@
           catalogAvailabilityKnown = true;
           catalogAvailable = Boolean(existing);
           updateStatus();
+          publishScannerCheckProgress(
+            sessionKey,
+            {
+              branch: "fallback",
+              phase: "catalog-unavailable",
+              progress: 1,
+              phaseProgress: 1,
+              cacheAvailable:
+                Boolean(existing)
+            }
+          );
           return Boolean(existing);
         }
         const catalogFetchUrl =
@@ -12819,6 +13132,15 @@
           );
 
         if (!fingerprintMatchedCache) {
+          publishScannerCheckProgress(
+            sessionKey,
+            {
+              branch: "demand-stream",
+              phase: "fingerprint-mismatch",
+              progress: 0.02,
+              phaseProgress: 1
+            }
+          );
           scannerCheckMismatchSessionKey =
             sessionKey;
           ensureScannerCheckWork(
@@ -12836,7 +13158,7 @@
               window.RMLI18n.t("ui.auto.864578600d79"),
             message:
               window.RMLI18n.t("ui.auto.ef5bac1920fc"),
-            progress: 22
+            progress: 5
           });
           notifyCatalogGate(
             options.onCatalogRefresh,
@@ -12859,9 +13181,28 @@
               {
                 expectedFingerprint:
                   live.fingerprint,
+                expectedRecordCount:
+                  Number(
+                    scannerHealth
+                      ?.catalogDemandRecordCount
+                  ) || 0,
                 sourceUrl: live.url,
                 signal,
                 onProgress: progress => {
+                  const phaseProgress =
+                    Math.max(
+                      0,
+                      Math.min(
+                        1,
+                        Number(
+                          progress?.progress
+                        ) || 0
+                      )
+                    );
+                  const weightedProgress =
+                    scannerDemandRecordProgress(
+                      phaseProgress
+                    );
                   const ownerCount = Math.max(
                     0,
                     Number(
@@ -12875,21 +13216,77 @@
                     ) || 0
                   );
                   updateScannerCheckWork({
-                    progress: 22 + Math.floor(
-                      Math.max(
-                        0,
-                        Math.min(
-                          1,
-                          Number(
-                            progress?.progress
-                          ) || 0
-                        )
-                      ) * 42
-                    ),
+                    progress:
+                      2 +
+                      weightedProgress * 96,
                     detail: totalOwnerCount > 0
                       ? `${ownerCount.toLocaleString()} / ${totalOwnerCount.toLocaleString()} catalog owners · ${Math.max(0, Number(progress?.recordCount) || 0).toLocaleString()} records processed`
                       : undefined
                   });
+                  publishScannerCheckProgress(
+                    sessionKey,
+                    {
+                      branch:
+                        "demand-stream",
+                      phase:
+                        "catalog-records",
+                      progress:
+                        weightedProgress,
+                      phaseProgress,
+                      completed:
+                        Number(
+                          progress?.recordCount
+                        ) || ownerCount,
+                      total:
+                        Number(
+                          progress
+                            ?.totalRecordCount
+                        ) ||
+                        totalOwnerCount,
+                      unit:
+                        Number(
+                          progress
+                            ?.totalRecordCount
+                        ) > 0
+                          ? "records"
+                          : "owners",
+                      ownerCount,
+                      totalOwnerCount,
+                      recordCount:
+                        Number(
+                          progress?.recordCount
+                        ) || 0,
+                      totalRecordCount:
+                        Number(
+                          progress
+                            ?.totalRecordCount
+                        ) || 0,
+                      totalBytes:
+                        Number(
+                          progress?.totalBytes
+                        ) || 0,
+                      flushedBatchCount:
+                        Number(
+                          progress
+                            ?.flushedBatchCount
+                        ) || 0,
+                      transactionCount:
+                        Number(
+                          progress
+                            ?.transactionCount
+                        ) || 0,
+                      ownerChunkCount:
+                        Number(
+                          progress
+                            ?.ownerChunkCount
+                        ) || 0,
+                      paletteShardCount:
+                        Number(
+                          progress
+                            ?.paletteShardCount
+                        ) || 0
+                    }
+                  );
                 }
               }
             ),
@@ -12899,8 +13296,17 @@
           updateScannerCheckWork({
             title:
               window.RMLI18n.t("ui.auto.c6e763c4d979"),
-            progress: 66
+            progress: 97
           });
+          publishScannerCheckProgress(
+            sessionKey,
+            {
+              branch: "demand-stream",
+              phase: "stream-committed",
+              progress: 0.99,
+              phaseProgress: 1
+            }
+          );
           assertSession();
           let database;
           let streamed;
@@ -12942,6 +13348,15 @@
             live.fingerprint =
               streamedFingerprint;
           }
+          publishScannerCheckProgress(
+            sessionKey,
+            {
+              branch: "demand-stream",
+              phase: "cache-verified",
+              progress: 0.992,
+              phaseProgress: 1
+            }
+          );
           const confirmedCatalog =
             normalizeCatalog(
               streamed.catalog,
@@ -12953,8 +13368,17 @@
               window.RMLI18n.t("ui.auto.b3eedfd6c481"),
             message:
               window.RMLI18n.t("ui.auto.aeb3813489d0"),
-            progress: 82
+            progress: 99
           });
+          publishScannerCheckProgress(
+            sessionKey,
+            {
+              branch: "demand-stream",
+              phase: "factory-activation",
+              progress: 0.995,
+              phaseProgress: 0
+            }
+          );
           await awaitCatalogSettlement(
             activateCatalogAndFactory(
               confirmedCatalog,
@@ -12964,6 +13388,15 @@
             "The streamed catalog factory activation"
           );
           factoryActivated = true;
+          publishScannerCheckProgress(
+            sessionKey,
+            {
+              branch: "demand-stream",
+              phase: "factory-activated",
+              progress: 0.998,
+              phaseProgress: 1
+            }
+          );
           promoteFactoryReportForCatalog(
             confirmedCatalog,
             {
@@ -13011,19 +13444,48 @@
             live.url
           );
           scannerCheckRejectedSessionKey = "";
+          publishScannerCheckProgress(
+            sessionKey,
+            {
+              branch: "demand-stream",
+              phase: "complete",
+              progress: 1,
+              phaseProgress: 1
+            }
+          );
           return true;
         }
 
         document.documentElement.dataset
           .rmlCatalogDemandOnly = "false";
+        publishScannerCheckProgress(
+          sessionKey,
+          {
+            branch: "cache-match",
+            phase: "verified-cache-match",
+            progress: 0.2,
+            phaseProgress: 1
+          }
+        );
+        await yieldCatalogCacheWork();
+        publishScannerCheckProgress(
+          sessionKey,
+          {
+            branch: "cache-match",
+            phase: "fingerprint-match",
+            progress: 0.4,
+            phaseProgress: 1
+          }
+        );
         notifyCatalogGate(
           options.onFingerprintMatch,
           {
             phase: "fingerprint-match-cache",
             message:
-              window.RMLI18n.t("ui.literal.2e85f456b4d4")
+            window.RMLI18n.t("ui.literal.2e85f456b4d4")
           }
         );
+        await yieldCatalogCacheWork();
         assertSession();
         const activeCacheMatches =
           Boolean(
@@ -13054,6 +13516,15 @@
               window.RMLI18n.t("ui.literal.254549ea6ed6")
           }
         );
+        publishScannerCheckProgress(
+          sessionKey,
+          {
+            branch: "cache-match",
+            phase: "factory-activation",
+            progress: 0.55,
+            phaseProgress: 0
+          }
+        );
         builderWork?.update?.(
           catalogUpdateWork,
           {
@@ -13073,6 +13544,15 @@
           "The cached catalog factory activation"
         );
         factoryActivated = true;
+        publishScannerCheckProgress(
+          sessionKey,
+          {
+            branch: "cache-match",
+            phase: "factory-activated",
+            progress: 0.97,
+            phaseProgress: 1
+          }
+        );
         promoteFactoryReportForCatalog(
           confirmedCatalog,
           {
@@ -13127,6 +13607,16 @@
           live.url
         );
         scannerCheckRejectedSessionKey = "";
+
+        publishScannerCheckProgress(
+          sessionKey,
+          {
+            branch: "cache-match",
+            phase: "complete",
+            progress: 1,
+            phaseProgress: 1
+          }
+        );
 
         return true;
       } catch (error) {
@@ -13210,8 +13700,30 @@
           options.throwOnFailure === true &&
           !factoryActivated
         ) {
+          publishScannerCheckProgress(
+            sessionKey,
+            {
+              branch: "fallback",
+              phase: "failed",
+              progress: 1,
+              phaseProgress: 1,
+              success: false
+            }
+          );
           throw error;
         }
+        publishScannerCheckProgress(
+          sessionKey,
+          {
+            branch: "fallback",
+            phase: factoryActivated
+              ? "factory-preserved"
+              : "cache-fallback",
+            progress: 1,
+            phaseProgress: 1,
+            success: factoryActivated
+          }
+        );
         return factoryActivated;
       } finally {
         if (catalogUpdateWork) {
@@ -13228,7 +13740,9 @@
           ) {
             scannerCheckAbortController = null;
           }
-          finishScannerCheckWork();
+          await finishScannerCheckWork(
+            factoryActivated
+          );
           updateStatus();
         }
         externalSignal?.removeEventListener?.(
@@ -13238,7 +13752,9 @@
       }
     });
     scannerCheckPromise = pending;
-    return pending;
+    return pending.finally(
+      unsubscribeProgress
+    );
   }
 
   function normalizedRequiredApiNodes(
@@ -14078,6 +14594,17 @@
             requirement.catalogScope === "api"
           )
         : [];
+    notifyCatalogGate(
+      options.onContractResolution,
+      {
+        phase: "demand-requirements",
+        progress: 0.15,
+        completed:
+          demandRequirements.length,
+        total:
+          demandRequirements.length
+      }
+    );
     await ensureCatalogDemandOperators(
       demandRequirements.map(
         requirement =>
@@ -14118,7 +14645,27 @@
         )
       }
     );
+    notifyCatalogGate(
+      options.onContractResolution,
+      {
+        phase: "demand-hydration",
+        progress: 0.3,
+        completed:
+          demandRequirements.length,
+        total:
+          demandRequirements.length
+      }
+    );
     const catalog = statusCatalog();
+    notifyCatalogGate(
+      options.onContractResolution,
+      {
+        phase: "catalog-snapshot",
+        progress: 0.35,
+        completed: catalog ? 1 : 0,
+        total: 1
+      }
+    );
     const report =
       window.RMLApiNodeFactoryReport;
     const factoryReady = Boolean(
@@ -14127,6 +14674,15 @@
         catalog,
         report
       )
+    );
+    notifyCatalogGate(
+      options.onContractResolution,
+      {
+        phase: "factory-snapshot",
+        progress: 0.4,
+        completed: factoryReady ? 1 : 0,
+        total: 1
+      }
     );
     const live = Boolean(
       factoryReady &&
@@ -14571,6 +15127,19 @@
     notifyCatalogGate(
       options.onContractResolution,
       {
+        phase: "replacement-catalog",
+        progress: 0.45,
+        completed:
+          replacementCatalog?.available === true
+            ? 1
+            : 0,
+        total: 1
+      }
+    );
+
+    notifyCatalogGate(
+      options.onContractResolution,
+      {
         phase: "required-contract-check",
         title:
           window.RMLI18n.t("ui.auto.c216f5cc29b7"),
@@ -14578,7 +15147,7 @@
           `Checking ${requiredNodes.length} catalog contract famil${requiredNodes.length === 1 ? "y" : "ies"}; only instances with the same portable contract and parameters share a result.`,
         detail:
           window.RMLI18n.t("ui.literal.80f3da7aa6b8"),
-        progress: 51.5
+        progress: 0.5
       }
     );
 
@@ -14610,7 +15179,7 @@
             `Resolving ${scannerResolvableNodes.length} unresolved API contract${scannerResolvableNodes.length === 1 ? "" : "s"} by portable contract or exact stored API node name.`,
           detail:
             window.RMLI18n.t("ui.literal.b4b4122f396f"),
-          progress: 51.75
+          progress: 0.55
         }
       );
       collectMigrations(
@@ -14618,6 +15187,17 @@
           scannerResolvableNodes,
           catalog
         )
+      );
+      notifyCatalogGate(
+        options.onContractResolution,
+        {
+          phase: "legacy-contracts-resolved",
+          progress: 0.7,
+          completed:
+            scannerResolvableNodes.length,
+          total:
+            scannerResolvableNodes.length
+        }
       );
       catalog = statusCatalog() ||
         catalog;
@@ -14924,6 +15504,17 @@
   async function synchronizeAvailableCatalog(
     options = {}
   ) {
+    notifyCatalogGate(
+      options.onProgress,
+      {
+        version: 1,
+        sessionKey: "",
+        branch: "checking",
+        phase: "health-sweep",
+        progress: 0,
+        phaseProgress: 0
+      }
+    );
     const proxySession =
       await discoverBuilderCatalogSession(
         options.signal || null
@@ -15023,6 +15614,19 @@
     } else {
       updateUnavailableStatus();
     }
+    notifyCatalogGate(
+      options.onProgress,
+      {
+        version: 1,
+        sessionKey: "",
+        branch: "fallback",
+        phase: "health-unavailable",
+        progress: 1,
+        phaseProgress: 1,
+        cacheAvailable:
+          Boolean(existing)
+      }
+    );
     return false;
   }
 

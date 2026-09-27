@@ -2448,6 +2448,99 @@ internal static class EarlyHarmonyPatches
       };
     }
 
+    const progressObserver =
+      typeof options.onProgress === "function"
+        ? options.onProgress
+        : null;
+    const syntaxWorkTotal = Math.max(
+      1,
+      countRoslynSyntaxItems(parseResult.root)
+    );
+    const syntaxProgressStride = Math.max(
+      1,
+      Math.ceil(syntaxWorkTotal / 192)
+    );
+    const visitedSyntaxItems = new WeakSet();
+    let syntaxWorkCompleted = 0;
+    let lastSyntaxProgress = -1;
+    const publishSyntaxProgress = force => {
+      if (
+        !progressObserver ||
+        (
+          !force &&
+          syntaxWorkCompleted -
+            lastSyntaxProgress <
+              syntaxProgressStride
+        )
+      ) {
+        return;
+      }
+      lastSyntaxProgress = syntaxWorkCompleted;
+      progressObserver({
+        phase: "syntax",
+        completed: Math.min(
+          syntaxWorkTotal,
+          syntaxWorkCompleted
+        ),
+        total: syntaxWorkTotal
+      });
+    };
+    const markSyntaxItem = item => {
+      if (
+        !item ||
+        typeof item !== "object" ||
+        visitedSyntaxItems.has(item)
+      ) {
+        return false;
+      }
+      visitedSyntaxItems.add(item);
+      syntaxWorkCompleted += 1;
+      publishSyntaxProgress(false);
+      return true;
+    };
+    const markSyntaxSubtree = root => {
+      const stack = [
+        { type: "node", node: root }
+      ];
+      while (stack.length > 0) {
+        const item = stack.pop();
+        if (item?.type === "node" && item.node) {
+          markSyntaxItem(item.node);
+          const children = Array.isArray(
+            item.node.children
+          )
+            ? item.node.children
+            : [];
+          for (
+            let index = children.length - 1;
+            index >= 0;
+            index -= 1
+          ) {
+            stack.push(children[index]);
+          }
+          continue;
+        }
+        if (item?.type !== "token" || !item.token) {
+          continue;
+        }
+        const token = item.token;
+        for (const trivia of token.leading || []) {
+          if (String(trivia?.text || "")) {
+            markSyntaxItem(trivia);
+          }
+        }
+        if (token.isMissing !== true) {
+          markSyntaxItem(token);
+        }
+        for (const trivia of token.trailing || []) {
+          if (String(trivia?.text || "")) {
+            markSyntaxItem(trivia);
+          }
+        }
+      }
+    };
+    publishSyntaxProgress(true);
+
     const fileName = String(options.fileName || window.RMLI18n.t("ui.literal.ee6d86d67877")).trim();
     const projectId = String(options.projectId || "main").trim() || "main";
     const prefix = String(options.prefix || `csharp14-roslyn-${stableHash(`${fileName}\0${normalizedSource}`)}`)
@@ -2531,6 +2624,7 @@ internal static class EarlyHarmonyPatches
     const addTrivia = (trivia, depth) => {
       const value = String(trivia?.text || "");
       if (!value) return null;
+      markSyntaxItem(trivia);
       const kind = String(trivia?.kind || window.RMLI18n.t("ui.literal.d8ed1a9de9f9"));
       return addNode("csharp.roslynTrivia", {
         syntaxKind: kind,
@@ -2546,6 +2640,7 @@ internal static class EarlyHarmonyPatches
         if (id) ids.push(id);
       }
       if (token && token.isMissing !== true) {
+        markSyntaxItem(token);
         const kind = String(token.kind || window.RMLI18n.t("ui.literal.ee4f0c4cf584"));
         const value = String(token.text || "");
         ids.push(addNode("csharp.roslynToken", {
@@ -2563,6 +2658,7 @@ internal static class EarlyHarmonyPatches
 
     let addOptimizedSyntaxNode;
     const addSyntaxNode = (syntaxNode, depth = 0) => {
+      markSyntaxItem(syntaxNode);
       let childIds = [];
       for (const child of syntaxNode?.children || []) {
         if (child?.type === "node" && child.node) childIds.push(addOptimizedSyntaxNode(child.node, depth + 1, true));
@@ -4005,15 +4101,23 @@ internal static class EarlyHarmonyPatches
 
     let preserveWhitespaceContext = 0;
     addOptimizedSyntaxNode = (syntaxNode, depth = 0, preserveExact = false) => {
+      markSyntaxItem(syntaxNode);
       const effectivePreserve = preserveExact || preserveWhitespaceContext > 0;
       if (preserveExact) preserveWhitespaceContext += 1;
       try {
         const semanticId = effectivePreserve
           ? null
           : tryAddSemanticNode(syntaxNode, depth);
-        return semanticId
-          ? wrapSemanticTrivia(syntaxNode, semanticId, depth, effectivePreserve)
-          : addSyntaxNode(syntaxNode, depth);
+        if (semanticId) {
+          markSyntaxSubtree(syntaxNode);
+          return wrapSemanticTrivia(
+            syntaxNode,
+            semanticId,
+            depth,
+            effectivePreserve
+          );
+        }
+        return addSyntaxNode(syntaxNode, depth);
       } finally {
         if (preserveExact) preserveWhitespaceContext -= 1;
       }
@@ -4030,6 +4134,8 @@ internal static class EarlyHarmonyPatches
     } else {
       rootSyntaxNodeId = addOptimizedSyntaxNode(parseResult.root, 0);
     }
+    syntaxWorkCompleted = syntaxWorkTotal;
+    publishSyntaxProgress(true);
     const fileId = addNode("csharp.file", {
       fileName,
       projectId,
@@ -4038,11 +4144,46 @@ internal static class EarlyHarmonyPatches
     }, 0, fileName);
     connect(rootSyntaxNodeId, fileId, "content");
 
+    const layoutWorkTotal = Math.max(
+      1,
+      connections.length + nodes.length * 3
+    );
+    const layoutProgressStride = Math.max(
+      1,
+      Math.ceil(layoutWorkTotal / 192)
+    );
+    let layoutWorkCompleted = 0;
+    let lastLayoutProgress = -1;
+    const publishLayoutProgress = force => {
+      if (
+        !progressObserver ||
+        (
+          !force &&
+          layoutWorkCompleted -
+            lastLayoutProgress <
+              layoutProgressStride
+        )
+      ) {
+        return;
+      }
+      lastLayoutProgress = layoutWorkCompleted;
+      progressObserver({
+        phase: "layout",
+        completed: Math.min(
+          layoutWorkTotal,
+          layoutWorkCompleted
+        ),
+        total: layoutWorkTotal
+      });
+    };
+    publishLayoutProgress(true);
     const childrenByParent = new Map();
     for (const edge of connections) {
       const list = childrenByParent.get(edge.toNode) || [];
       list.push(edge.fromNode);
       childrenByParent.set(edge.toNode, list);
+      layoutWorkCompleted += 1;
+      publishLayoutProgress(false);
     }
     let leafRow = 0;
     const yById = new Map();
@@ -4052,11 +4193,15 @@ internal static class EarlyHarmonyPatches
         const y = 140 + leafRow * 150;
         leafRow += 1;
         yById.set(nodeId, y);
+        layoutWorkCompleted += 1;
+        publishLayoutProgress(false);
         return y;
       }
       const childYs = childIds.map(placeSubtree);
       const y = (childYs[0] + childYs[childYs.length - 1]) / 2;
       yById.set(nodeId, y);
+      layoutWorkCompleted += 1;
+      publishLayoutProgress(false);
       return y;
     };
     placeSubtree(fileId);
@@ -4072,6 +4217,8 @@ internal static class EarlyHarmonyPatches
       const columnNodes = nodesByColumn.get(column) || [];
       columnNodes.push(node);
       nodesByColumn.set(column, columnNodes);
+      layoutWorkCompleted += 1;
+      publishLayoutProgress(false);
     }
 
     for (const columnNodes of nodesByColumn.values()) {
@@ -4084,8 +4231,12 @@ internal static class EarlyHarmonyPatches
           : 150;
         node.y = Math.max(node.y, nextY);
         nextY = node.y + estimatedHeight + 54;
+        layoutWorkCompleted += 1;
+        publishLayoutProgress(false);
       }
     }
+    layoutWorkCompleted = layoutWorkTotal;
+    publishLayoutProgress(true);
     return {
       ok: true,
       diagnostics: [],
@@ -4864,18 +5015,16 @@ internal static class EarlyHarmonyPatches
           );
         localStatus.classList.toggle("success", true);
         localStatus.classList.toggle("error", false);
-        window.RMLBuilderWork?.update?.(
+        await window.RMLBuilderWork?.complete?.(
           workSession,
           {
             title: `Imported ${importedFileName}`,
             message:
               "The complete editable Custom C# graph is ready.",
             detail:
-              `${result.importedSyntaxNodeCount.toLocaleString(window.RMLI18n?.language || undefined)} nodes were constructed automatically.`,
-            progress: 100
+              `${result.importedSyntaxNodeCount.toLocaleString(window.RMLI18n?.language || undefined)} nodes were constructed automatically.`
           }
         );
-        await window.RMLBuilderWork?.paint?.();
       } catch (error) {
         console.error(
           "Custom C# import failed after syntax validation; the previous graph was preserved.",

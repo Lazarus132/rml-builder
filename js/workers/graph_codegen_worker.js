@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_CODEGEN_WORKER_MODULE_ID =
-  "1.21.77-static-live-import-stability";
+  "1.21.83-preview-control-parity";
 
 self.window = self;
 
@@ -414,6 +414,25 @@ function finishStreamDecoder(decoder) {
 }
 
 function resultStreamCursor(value) {
+  const progressItems = new WeakSet();
+  let progressTotal = 0;
+  for (const item of [
+    ...(Array.isArray(value?.nodes)
+      ? value.nodes
+      : []),
+    ...(Array.isArray(value?.connections)
+      ? value.connections
+      : [])
+  ]) {
+    if (
+      item &&
+      typeof item === "object" &&
+      !progressItems.has(item)
+    ) {
+      progressItems.add(item);
+      progressTotal += 1;
+    }
+  }
   return {
     ancestors: new WeakSet(),
     frames: [],
@@ -421,7 +440,11 @@ function resultStreamCursor(value) {
     pendingValue: value,
     pendingLongKeyValue: undefined,
     code: 0,
-    value: undefined
+    value: undefined,
+    progressItems,
+    progressSeen: new WeakSet(),
+    progressCompleted: 0,
+    progressTotal: Math.max(1, progressTotal)
   };
 }
 
@@ -436,6 +459,15 @@ function nextResultStreamToken(cursor) {
       const value = cursor.pendingValue;
       cursor.pending = false;
       cursor.pendingValue = undefined;
+      if (
+        value &&
+        typeof value === "object" &&
+        cursor.progressItems.has(value) &&
+        !cursor.progressSeen.has(value)
+      ) {
+        cursor.progressSeen.add(value);
+        cursor.progressCompleted += 1;
+      }
       if (Array.isArray(value)) {
         if (cursor.ancestors.has(value)) {
           throw new TypeError(
@@ -623,11 +655,21 @@ function nextResultStreamToken(cursor) {
   return false;
 }
 
-function postStreamedBuildResult(id, result) {
+function postStreamedBuildResult(
+  id,
+  result,
+  onProgress = null
+) {
   const cursor = resultStreamCursor(result);
   self.postMessage({
     id,
-    operation: "resultStart"
+    operation: "resultStart",
+    workCompleted: 0,
+    workTotal: cursor.progressTotal
+  });
+  onProgress?.({
+    completed: 0,
+    total: cursor.progressTotal
   });
   let complete = false;
   while (!complete) {
@@ -653,13 +695,29 @@ function postStreamedBuildResult(id, result) {
       self.postMessage({
         id,
         operation: "resultChunk",
-        tokens
+        tokens,
+        workCompleted:
+          cursor.progressCompleted,
+        workTotal: cursor.progressTotal
+      });
+      onProgress?.({
+        completed:
+          cursor.progressCompleted,
+        total: cursor.progressTotal
       });
     }
   }
+  cursor.progressCompleted =
+    cursor.progressTotal;
+  onProgress?.({
+    completed: cursor.progressTotal,
+    total: cursor.progressTotal
+  });
   self.postMessage({
     id,
-    operation: "resultEnd"
+    operation: "resultEnd",
+    workCompleted: cursor.progressTotal,
+    workTotal: cursor.progressTotal
   });
 }
 
@@ -719,10 +777,10 @@ async function ensureRuntime(
       "../catalog/mod_nodes.js?v=803-visual-function-semantics"
     );
     importScripts(
-      "../compiler/visual_csharp.js?v=1.21.77-static-live-import-stability"
+      "../compiler/visual_csharp.js?v=1.21.83-preview-control-parity"
     );
     importScripts(
-      "../catalog/api_nodes.js?v=1.21.77-static-live-import-stability"
+      "../catalog/api_nodes.js?v=1.21.83-preview-control-parity"
     );
 
     if (
@@ -747,7 +805,7 @@ async function ensureRuntime(
     }
 
     importScripts(
-      "../graph/node_graph_codegen.js?v=1.21.77-static-live-import-stability"
+      "../graph/node_graph_codegen.js?v=1.21.83-preview-control-parity"
     );
 
     if (
@@ -1112,9 +1170,75 @@ async function executeWorkerRequest(
     streamResult = false
   } = {}
 ) {
+  const requestedProgressStart = Number(
+    request.options?._rmlProgressStart
+  );
+  const requestedProgressEnd = Number(
+    request.options?._rmlProgressEnd
+  );
+  const customProgressStart =
+    Number.isFinite(requestedProgressStart)
+      ? requestedProgressStart
+      : 18;
+  const customProgressEnd = Math.max(
+    customProgressStart,
+    Number.isFinite(requestedProgressEnd)
+      ? requestedProgressEnd
+      : 35
+  );
+  const publishCustomProgress = (
+    phase,
+    completed,
+    total,
+    message
+  ) => {
+    const normalizedTotal = Math.max(
+      1,
+      Number(total) || 0
+    );
+    const ratio = Math.max(
+      0,
+      Math.min(
+        1,
+        (Number(completed) || 0) /
+          normalizedTotal
+      )
+    );
+    const phaseRange =
+      phase === "transfer"
+        ? [0.9, 1]
+        : phase === "layout"
+          ? [0.68, 0.9]
+          : [0, 0.68];
+    const operationRatio =
+      phaseRange[0] +
+      (phaseRange[1] - phaseRange[0]) *
+        ratio;
+    self.postMessage({
+      id: request.id,
+      progress: true,
+      graphProgress:
+        customProgressStart +
+        (
+          customProgressEnd -
+          customProgressStart
+        ) * operationRatio,
+      workPhase: String(phase || "build"),
+      workCompleted: Math.max(
+        0,
+        Number(completed) || 0
+      ),
+      workTotal: normalizedTotal,
+      message
+    });
+  };
   self.postMessage({
     id: request.id,
     progress: true,
+    graphProgress:
+      request.operation === "buildCustomCSharp"
+        ? customProgressStart
+        : 22,
     message:
       window.RMLI18n.t("ui.auto.36f701593e50")
   });
@@ -1161,37 +1285,58 @@ async function executeWorkerRequest(
   }
 
   if (request.operation === "buildCustomCSharp") {
-    self.postMessage({
-      id: request.id,
-      progress: true,
-      message:
-        window.RMLI18n.t("ui.auto.82a8e160d9b2")
-    });
+    publishCustomProgress(
+      "syntax",
+      0,
+      1,
+      window.RMLI18n.t("ui.auto.82a8e160d9b2")
+    );
     const visualCSharp = self.RMLVisualCSharp;
-    const customOptions = support
-      ? {
-          ...(request.options || {}),
-          catalogDefinitions:
-            customCSharpCatalogDefinitions(
-              support
-            )
-        }
-      : request.options || {};
+    const customOptions = {
+      ...(request.options || {}),
+      ...(
+        support
+          ? {
+              catalogDefinitions:
+                customCSharpCatalogDefinitions(
+                  support
+                )
+            }
+          : {}
+      ),
+      onProgress(detail = {}) {
+        publishCustomProgress(
+          detail.phase,
+          detail.completed,
+          detail.total,
+          detail.phase === "layout"
+            ? window.RMLI18n.t("ui.auto.82f6127f8e01")
+            : window.RMLI18n.t("ui.auto.82a8e160d9b2")
+        );
+      }
+    };
     const fragment = visualCSharp?.createRoslynImportFragment?.(
       String(request.source || ""),
       request.parseResult,
       customOptions
     );
-    self.postMessage({
-      id: request.id,
-      progress: true,
-      message:
-        window.RMLI18n.t("ui.auto.82f6127f8e01")
-    });
+    publishCustomProgress(
+      "layout",
+      1,
+      1,
+      window.RMLI18n.t("ui.auto.82f6127f8e01")
+    );
     if (streamResult) {
       postStreamedBuildResult(
         request.id,
-        fragment
+        fragment,
+        detail =>
+          publishCustomProgress(
+            "transfer",
+            detail.completed,
+            detail.total,
+            window.RMLI18n.t("ui.auto.82f6127f8e01")
+          )
       );
     } else {
       self.postMessage({

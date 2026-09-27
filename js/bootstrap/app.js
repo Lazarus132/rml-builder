@@ -28,7 +28,7 @@ const EXAMPLE_PROJECT_RESOURCE_PATH = "../../assets/data/Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "1.21.77-static-live-import-stability";
+  "1.21.83-preview-control-parity";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -361,7 +361,7 @@ function outlineSymbolMarkup(symbol) {
   const iconIds = { "#": "icon-node-hash", "VEC": "icon-node-vec" };
   const iconId = iconIds[String(symbol || "")];
   if (!iconId) return escapeHtml(String(symbol || "?"));
-  return `<svg class="rml-node-symbol-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#${iconId}"></use></svg>`;
+  return `<svg class="rml-node-symbol-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#${iconId}"></use></svg>`;
 }
 
 function outlinePaletteEntriesForGroup(group) {
@@ -2468,1082 +2468,24 @@ const APP_SCRIPT_BASE_URL =
   document.currentScript?.src ||
   window.location.href;
 
-let projectIoWorker = null;
-let projectIoWorkerGeneration = 0;
-let projectIoRequestSequence = 1;
-const projectIoPendingRequests = new Map();
-let projectIoWorkerIdleTimer = 0;
-const PROJECT_IO_WORKER_IDLE_RELEASE_MS = 1500;
-const PROJECT_IO_REQUEST_TIMEOUT_MS =
-  120000;
-const PROJECT_GZIP_MAGIC_FIRST = 0x1f;
-const PROJECT_GZIP_MAGIC_SECOND = 0x8b;
-let projectGzipFallbackLoadPromise = null;
-
-function projectGzipFallbackCodec() {
-  if (
-    typeof window.RMLGzipCodec
-      ?.compress === "function" &&
-    typeof window.RMLGzipCodec
-      ?.decompress === "function"
-  ) {
-    return Promise.resolve(
-      window.RMLGzipCodec
-    );
-  }
-  if (projectGzipFallbackLoadPromise) {
-    return projectGzipFallbackLoadPromise;
-  }
-
-  projectGzipFallbackLoadPromise =
-    new Promise((resolve, reject) => {
-      const script =
-        document.createElement("script");
-      script.src = new URL(
-        "../core/gzip_codec.js?v=1-own-gzip-fallback-v756",
-        APP_SCRIPT_BASE_URL
-      ).href;
-      script.async = true;
-      script.dataset.rmlGzipFallback =
-        "true";
-      script.addEventListener(
-        "load",
-        () => {
-          if (
-            typeof window.RMLGzipCodec
-              ?.compress !== "function" ||
-            typeof window.RMLGzipCodec
-              ?.decompress !== "function"
-          ) {
-            reject(
-              new Error(
-                window.RMLI18n.t("ui.literal.23c4cdc55cb1")
-              )
-            );
-            return;
-          }
-          resolve(window.RMLGzipCodec);
-        },
-        { once: true }
-      );
-      script.addEventListener(
-        "error",
-        () => reject(
-          new Error(
-            window.RMLI18n.t("ui.literal.6c425c9b9011")
-          )
-        ),
-        { once: true }
-      );
-      (document.body || document.head)
-        .appendChild(script);
-    }).catch(error => {
-      projectGzipFallbackLoadPromise =
-        null;
-      throw error;
-    });
-
-  return projectGzipFallbackLoadPromise;
-}
-
-async function readProjectBlobTextOnMainThread(
-  blob,
-  maximumBytes = PROJECT_FILE_MAX_BYTES
-) {
-  const header = new Uint8Array(
-    await blob.slice(0, 2).arrayBuffer()
-  );
-  const gzip =
-    header.length === 2 &&
-    header[0] ===
-      PROJECT_GZIP_MAGIC_FIRST &&
-    header[1] ===
-      PROJECT_GZIP_MAGIC_SECOND;
-
-  if (!gzip) {
-    if (blob.size > maximumBytes) {
-      throw new RangeError(
-        window.RMLI18n.t("ui.literal.f49a0b29babe")
-      );
-    }
-    return {
-      text: await blob.text(),
-      uncompressedBytes: blob.size,
-      compression: "identity"
-    };
-  }
-
-  if (
-    typeof DecompressionStream !==
-      "function"
-  ) {
-    const codec =
-      await projectGzipFallbackCodec();
-    const decompressed =
-      codec.decompress(
-        new Uint8Array(
-          await blob.arrayBuffer()
-        ),
-        maximumBytes
-      );
-    return {
-      text: new TextDecoder(
-        "utf-8",
-        { fatal: true }
-      ).decode(decompressed),
-      uncompressedBytes:
-        decompressed.byteLength,
-      compression: "gzip"
-    };
-  }
-
-  const reader = blob.stream()
-    .pipeThrough(
-      new DecompressionStream("gzip")
-    )
-    .getReader();
-  const decoder = new TextDecoder(
-    "utf-8",
-    { fatal: true }
-  );
-  const parts = [];
-  let uncompressedBytes = 0;
-
-  try {
-    while (true) {
-      const { done, value } =
-        await reader.read();
-      if (done) {
-        break;
-      }
-      uncompressedBytes +=
-        value.byteLength;
-      if (
-        uncompressedBytes >
-          maximumBytes
-      ) {
-        await reader.cancel();
-        throw new RangeError(
-          window.RMLI18n.t("ui.literal.fafff7553987")
-        );
-      }
-      parts.push(
-        decoder.decode(
-          value,
-          { stream: true }
-        )
-      );
-    }
-    parts.push(decoder.decode());
-  } catch (error) {
-    if (error instanceof RangeError) {
-      throw error;
-    }
-    parts.length = 0;
-    try {
-      const codec =
-        await projectGzipFallbackCodec();
-      const decompressed =
-        codec.decompress(
-          new Uint8Array(
-            await blob.arrayBuffer()
-          ),
-          maximumBytes
-        );
-      return {
-        text: new TextDecoder(
-          "utf-8",
-          { fatal: true }
-        ).decode(decompressed),
-        uncompressedBytes:
-          decompressed.byteLength,
-        compression: "gzip"
-      };
-    } catch (fallbackError) {
-      throw new Error(
-        `The GZIP project data is damaged or incomplete. ${String(fallbackError?.message || window.RMLI18n.t("ui.literal.2c40873d3a65"))}`,
-        { cause: error }
-      );
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  const text = parts.join("");
-  parts.length = 0;
-  return {
-    text,
-    uncompressedBytes,
-    compression: "gzip"
-  };
-}
-
-async function compressProjectJsonOnMainThread(
-  value
-) {
-  const text = JSON.stringify(value);
-  const source = new Blob(
-    [text],
-    {
-      type:
-        "application/json;charset=utf-8"
-    }
-  );
-  if (
-    typeof CompressionStream !==
-      "function"
-  ) {
-    const codec =
-      await projectGzipFallbackCodec();
-    const compressed =
-      codec.compress(
-        new Uint8Array(
-          await source.arrayBuffer()
-        )
-      );
-    return {
-      buffer: compressed.buffer,
-      jsonBytes: source.size,
-      compressedBytes:
-        compressed.byteLength,
-      compression: "gzip"
-    };
-  }
-
-  const buffer = await new Response(
-    source.stream().pipeThrough(
-      new CompressionStream("gzip")
-    )
-  ).arrayBuffer();
-
-  return {
-    buffer,
-    jsonBytes: source.size,
-    compressedBytes: buffer.byteLength,
-    compression: "gzip"
-  };
-}
-
-function projectIoWorkerInstance() {
-  if (projectIoWorkerIdleTimer) {
-    clearTimeout(projectIoWorkerIdleTimer);
-    projectIoWorkerIdleTimer = 0;
-  }
-  if (projectIoWorker) {
-    return projectIoWorker;
-  }
-
-  if (typeof Worker !== "function") {
-    return null;
-  }
-
-  try {
-    const worker = new Worker(
-      new URL(
-        "../workers/project_io_worker.js?v=12-streamed-draft-v758",
-        APP_SCRIPT_BASE_URL
-      ),
-      {
-        name: "rml-project-io"
-      }
-    );
-    const workerGeneration =
-      ++projectIoWorkerGeneration;
-
-    worker.addEventListener(
-      "message",
-      event => {
-        const response = event.data || {};
-        const pending =
-          projectIoPendingRequests.get(
-            response.id
-          );
-
-        if (
-          !pending ||
-          pending.worker !== worker ||
-          pending.workerGeneration !==
-            workerGeneration
-        ) {
-          return;
-        }
-
-        if (
-          response.ok !== true &&
-          pending.streamed === true &&
-          response.error?.recoverable ===
-            true
-        ) {
-          const error = new Error(
-            response.error?.message ||
-            window.RMLI18n.t("ui.literal.49c8cd2697ba")
-          );
-          error.name =
-            response.error?.name ||
-            window.RMLI18n.t("ui.auto.c61dcc959d06");
-          retireFailedProjectIoWorker(
-            worker,
-            workerGeneration,
-            error
-          );
-          return;
-        }
-
-        projectIoPendingRequests.delete(
-          response.id
-        );
-
-        if (response.ok === true) {
-          if (
-            pending.streamed === true &&
-            pending.streamPromise
-          ) {
-            void pending.streamPromise.then(
-              metrics => {
-                completeProjectIoRequest(
-                  pending,
-                  "resolve",
-                  {
-                    ...response,
-                    streamMetrics:
-                      metrics || null
-                  }
-                );
-              }
-            );
-          } else {
-            completeProjectIoRequest(
-              pending,
-              "resolve",
-              response
-            );
-          }
-        } else {
-          const error = new Error(
-            response.error?.message ||
-            window.RMLI18n.t("ui.literal.fc76cd98d8a4")
-          );
-          error.name =
-            response.error?.name ||
-            window.RMLI18n.t("ui.auto.c61dcc959d06");
-          completeProjectIoRequest(
-            pending,
-            "reject",
-            error
-          );
-        }
-      }
-    );
-
-    worker.addEventListener(
-      "error",
-      event => {
-        event.preventDefault?.();
-        const error = new Error(
-          event.message ||
-          event.error?.message ||
-          window.RMLI18n.t("ui.literal.fc76cd98d8a4")
-        );
-        error.name =
-          event.error?.name || window.RMLI18n.t("ui.auto.c61dcc959d06");
-
-        retireFailedProjectIoWorker(
-          worker,
-          workerGeneration,
-          error
-        );
-      }
-    );
-
-    worker.addEventListener(
-      "messageerror",
-      () => {
-        const error = new Error(
-          window.RMLI18n.t("ui.literal.c4787c42729a")
-        );
-        error.name = window.RMLI18n.t("ui.literal.c749561f3732");
-        retireFailedProjectIoWorker(
-          worker,
-          workerGeneration,
-          error
-        );
-      }
-    );
-
-    projectIoWorker = worker;
-    return projectIoWorker;
-  } catch (error) {
-    console.warn(
-      window.RMLI18n.t("ui.literal.72e30aa2c40d"),
-      error
-    );
-    return null;
-  }
-}
-
-function completeProjectIoRequest(
-  pending,
-  completion,
-  value
-) {
-  if (pending.settled) {
-    return false;
-  }
-
-  if (pending.watchdogTimer) {
-    clearTimeout(pending.watchdogTimer);
-    pending.watchdogTimer = 0;
-  }
-  pending.settled = true;
-  pending[completion](value);
-  return true;
-}
-
-function armProjectIoRequestWatchdog(
-  pending,
-  worker,
-  workerGeneration,
-  id
-) {
-  const watchdogEpoch =
-    (Number(pending.watchdogEpoch) || 0) +
-    1;
-  pending.watchdogEpoch = watchdogEpoch;
-  if (pending.watchdogTimer) {
-    clearTimeout(pending.watchdogTimer);
-  }
-  pending.watchdogTimer = setTimeout(
-    () => {
-      if (
-        pending.watchdogEpoch !==
-          watchdogEpoch
-      ) {
-        return;
-      }
-      pending.watchdogTimer = 0;
-      if (
-        pending.settled ||
-        pending.worker !== worker ||
-        pending.workerGeneration !==
-          workerGeneration ||
-        projectIoPendingRequests.get(id) !==
-          pending
-      ) {
-        return;
-      }
-      const error = new Error(
-        window.RMLI18n.t("ui.literal.392e9aa5d496")
-      );
-      error.name = window.RMLI18n.t("ui.literal.22a4ad2c60d9");
-      retireFailedProjectIoWorker(
-        worker,
-        workerGeneration,
-        error
-      );
-    },
-    PROJECT_IO_REQUEST_TIMEOUT_MS
-  );
-}
-
-function runProjectIoRequestOnMainThread(
-  operation,
-  payload
-) {
-  return new Promise((resolve, reject) => {
-    queueMicrotask(() => {
-      void (async () => {
-        if (operation === "parse") {
-          const text =
-            String(payload.text ?? "");
-          const value = JSON.parse(text);
-          return {
-            ok: true,
-            value
-          };
-        }
-
-        if (operation === "parseFile") {
-          if (
-            !payload.file ||
-            typeof payload.file.text !==
-              "function"
-          ) {
-            throw new TypeError(
-              window.RMLI18n.t("ui.literal.7096289f5f79")
-            );
-          }
-
-          const decoded =
-            await readProjectBlobTextOnMainThread(
-              payload.file,
-              Number(
-                payload.maximumBytes
-              ) || PROJECT_FILE_MAX_BYTES
-            );
-          const value =
-            JSON.parse(decoded.text);
-          if (
-            value &&
-            typeof value === "object" &&
-            !Array.isArray(value) &&
-            !(
-              payload.projectFormat &&
-              value.format ===
-                payload.projectFormat
-            ) &&
-            value.schema ===
-              payload.savedCompositeSchema &&
-            decoded.uncompressedBytes >
-              (
-                Number(
-                  payload
-                    .savedCompositeMaximumBytes
-                ) ||
-                SAVED_API_COMPOSITE_IMPORT_MAX_BYTES
-              )
-          ) {
-            throw new RangeError(
-              window.RMLI18n.t("ui.literal.4292dd2d5a90")
-            );
-          }
-          return {
-            ok: true,
-            value,
-            uncompressedBytes:
-              decoded.uncompressedBytes,
-            compressedBytes:
-              payload.file.size,
-            compression:
-              decoded.compression
-          };
-        }
-
-        if (
-          operation ===
-            "stringifyGzip" ||
-          operation ===
-            "streamStringifyGzip"
-        ) {
-          const result =
-            await compressProjectJsonOnMainThread(
-              payload.value
-            );
-          const maximumBytes = Number(
-            payload.maximumBytes
-          );
-          if (
-            Number.isFinite(maximumBytes) &&
-            maximumBytes > 0 &&
-            result.jsonBytes > maximumBytes
-          ) {
-            throw new RangeError(
-              window.RMLI18n.t("ui.literal.39a9ea82588a")
-            );
-          }
-          return {
-            ok: true,
-            ...result,
-            transport:
-              operation ===
-                "streamStringifyGzip"
-                ? "main-thread-fallback"
-                : "main-fallback"
-          };
-        }
-
-        if (operation === "stringify") {
-          return {
-            ok: true,
-            text: JSON.stringify(
-              payload.value,
-              null,
-              Number(payload.space) || 0
-            )
-          };
-        }
-
-        throw new Error(
-          `Unsupported project I/O operation '${operation}'.`
-        );
-      })().then(resolve, reject);
-    });
-  });
-}
-
-function dispatchProjectIoRequestOnMainThread(
-  pending
-) {
-  if (pending.watchdogTimer) {
-    clearTimeout(pending.watchdogTimer);
-    pending.watchdogTimer = 0;
-  }
-  pending.worker = null;
-  pending.workerGeneration = 0;
-  void runProjectIoRequestOnMainThread(
-    pending.operation,
-    pending.payload
-  ).then(
-    response => {
-      completeProjectIoRequest(
-        pending,
-        "resolve",
-        response
-      );
-    },
-    error => {
-      completeProjectIoRequest(
-        pending,
-        "reject",
-        error
-      );
-    }
-  );
-}
-
-function recoverProjectIoRequest(
-  pending,
-  error,
-  {
-    preferMainThread = false
-  } = {}
-) {
-  if (pending.settled) {
-    return;
-  }
-
-  if (pending.watchdogTimer) {
-    clearTimeout(pending.watchdogTimer);
-    pending.watchdogTimer = 0;
-  }
-
-  if (
-    typeof pending.isCurrent ===
-      "function" &&
-    !pending.isCurrent()
-  ) {
-    const staleError = new Error(
-      window.RMLI18n.t("ui.literal.60c57fd74be6")
-    );
-    staleError.code =
-      "RML_PROJECT_DRAFT_STALE";
-    completeProjectIoRequest(
-      pending,
-      "reject",
-      staleError
-    );
-    return;
-  }
-
-  if (pending.recoveryAttempted) {
-
-    dispatchProjectIoRequestOnMainThread(
-      pending
-    );
-    return;
-  }
-
-  pending.recoveryAttempted = true;
-  if (preferMainThread) {
-    dispatchProjectIoRequestOnMainThread(
-      pending
-    );
-    return;
-  }
-
-  dispatchProjectIoRequest(pending);
-}
-
-function retireFailedProjectIoWorker(
-  worker,
-  workerGeneration,
-  error
-) {
-  const ownedRequests = [];
-
-  for (const [id, pending] of
-    projectIoPendingRequests) {
-    if (
-      pending.worker !== worker ||
-      pending.workerGeneration !==
-        workerGeneration
-    ) {
-      continue;
-    }
-
-    projectIoPendingRequests.delete(id);
-    if (pending.watchdogTimer) {
-      clearTimeout(pending.watchdogTimer);
-      pending.watchdogTimer = 0;
-    }
-    ownedRequests.push(pending);
-  }
-
-  worker.terminate();
-  if (projectIoWorker === worker) {
-    projectIoWorker = null;
-  }
-
-  for (const pending of ownedRequests) {
-    recoverProjectIoRequest(
-      pending,
-      error
-    );
-  }
-
-  if (ownedRequests.length === 0) {
-    scheduleProjectIoWorkerIdleRelease();
-  }
-}
-
-function dispatchStreamedProjectIoRequest(
-  pending
-) {
-  if (pending.settled) {
-    return;
-  }
-
-  if (
-    typeof pending.isCurrent ===
-      "function" &&
-    !pending.isCurrent()
-  ) {
-    const error = new Error(
-      window.RMLI18n.t("ui.literal.c2e2b63c3ffe")
-    );
-    error.code =
-      "RML_PROJECT_DRAFT_STALE";
-    completeProjectIoRequest(
-      pending,
-      "reject",
-      error
-    );
-    return;
-  }
-
-  const worker = projectIoWorkerInstance();
-  if (!worker) {
-    dispatchProjectIoRequestOnMainThread(
-      pending
-    );
-    return;
-  }
-
-  const id = projectIoRequestSequence++;
-  const workerGeneration =
-    projectIoWorkerGeneration;
-  pending.worker = worker;
-  pending.workerGeneration =
-    workerGeneration;
-  projectIoPendingRequests.set(id, pending);
-  armProjectIoRequestWatchdog(
-    pending,
-    worker,
-    workerGeneration,
-    id
-  );
-
-  const streamIsCurrent = () =>
-    !pending.settled &&
-    pending.worker === worker &&
-    pending.workerGeneration ===
-      workerGeneration &&
-    projectIoPendingRequests.get(id) ===
-      pending &&
-    (
-      typeof pending.isCurrent !==
-        "function" ||
-      pending.isCurrent()
-    );
-
-  pending.streamPromise =
-    postGraphCodegenTokenStream(
-      worker,
-      id,
-      "project-draft",
-      pending.payload.value,
-      {
-        isCurrent: streamIsCurrent,
-        startFields: {
-          maximumBytes:
-            pending.payload.maximumBytes
-        },
-        onProgress: () => {
-          if (streamIsCurrent()) {
-            armProjectIoRequestWatchdog(
-              pending,
-              worker,
-              workerGeneration,
-              id
-            );
-          }
-        }
-      }
-    ).then(metrics => {
-      if (streamIsCurrent()) {
-        pending.streamMetrics = metrics;
-      }
-      return metrics;
-    }).catch(error => {
-      if (
-        projectIoPendingRequests.get(id) !==
-          pending ||
-        pending.worker !== worker ||
-        pending.workerGeneration !==
-          workerGeneration
-      ) {
-        return;
-      }
-
-      if (
-        error?.code ===
-          "RML_GRAPH_CODEGEN_STALE" ||
-        error instanceof TypeError
-      ) {
-        projectIoPendingRequests.delete(id);
-        if (pending.watchdogTimer) {
-          clearTimeout(
-            pending.watchdogTimer
-          );
-          pending.watchdogTimer = 0;
-        }
-        try {
-          worker.postMessage({
-            id,
-            operation: "streamCancel"
-          });
-        } catch {
-        }
-        if (
-          error?.code ===
-            "RML_GRAPH_CODEGEN_STALE"
-        ) {
-          error.code =
-            "RML_PROJECT_DRAFT_STALE";
-        }
-        completeProjectIoRequest(
-          pending,
-          "reject",
-          error
-        );
-        return;
-      }
-
-      retireFailedProjectIoWorker(
-        worker,
-        workerGeneration,
-        error
-      );
-    });
-}
-
-function dispatchProjectIoRequest(pending) {
-  if (pending.settled) {
-    return;
-  }
-
-  if (pending.streamed === true) {
-    dispatchStreamedProjectIoRequest(
-      pending
-    );
-    return;
-  }
-
-  const worker =
-    projectIoWorkerInstance();
-  if (!worker) {
-    dispatchProjectIoRequestOnMainThread(
-      pending
-    );
-    return;
-  }
-
-  const id =
-    projectIoRequestSequence++;
-  const workerGeneration =
-    projectIoWorkerGeneration;
-
-  pending.worker = worker;
-  pending.workerGeneration =
-    workerGeneration;
-  projectIoPendingRequests.set(id, pending);
-  armProjectIoRequestWatchdog(
-    pending,
-    worker,
-    workerGeneration,
-    id
-  );
-
-  try {
-    worker.postMessage({
-      id,
-      operation: pending.operation,
-      ...pending.payload
-    });
-  } catch (error) {
-    if (
-      projectIoPendingRequests.get(id) !==
-        pending ||
-      pending.worker !== worker ||
-      pending.workerGeneration !==
-        workerGeneration
-    ) {
-      return;
-    }
-
-    if (error?.name === window.RMLI18n.t("ui.literal.c749561f3732")) {
-      projectIoPendingRequests.delete(id);
-      if (pending.watchdogTimer) {
-        clearTimeout(
-          pending.watchdogTimer
-        );
-        pending.watchdogTimer = 0;
-      }
-      recoverProjectIoRequest(
-        pending,
-        error,
-        { preferMainThread: true }
-      );
-      return;
-    }
-
-    retireFailedProjectIoWorker(
-      worker,
-      workerGeneration,
-      error
-    );
-  }
-}
-
-function releaseProjectIoWorkerIfIdle() {
-  if (
-    !projectIoWorker ||
-    projectIoPendingRequests.size > 0
-  ) {
-    return false;
-  }
-
-  projectIoWorker.terminate();
-  projectIoWorker = null;
-  if (projectIoWorkerIdleTimer) {
-    clearTimeout(projectIoWorkerIdleTimer);
-    projectIoWorkerIdleTimer = 0;
-  }
-  return true;
-}
-
-function scheduleProjectIoWorkerIdleRelease() {
-  if (projectIoWorkerIdleTimer) {
-    clearTimeout(projectIoWorkerIdleTimer);
-  }
-  projectIoWorkerIdleTimer = setTimeout(() => {
-    projectIoWorkerIdleTimer = 0;
-    releaseProjectIoWorkerIfIdle();
-  }, PROJECT_IO_WORKER_IDLE_RELEASE_MS);
-}
-
-function projectIoRequest(
-  operation,
-  payload
-) {
-  return new Promise(
-    (resolve, reject) => {
-      const pending = {
-        operation,
-        payload,
-        resolve,
-        reject,
-        worker: null,
-        workerGeneration: 0,
-        recoveryAttempted: false,
-        settled: false,
-        watchdogTimer: 0,
-        watchdogEpoch: 0
-      };
-      dispatchProjectIoRequest(pending);
-    }
-  ).finally(() => {
-    scheduleProjectIoWorkerIdleRelease();
-  });
-}
-
-function projectIoStreamedGzipRequest(
-  value,
-  {
-    maximumBytes =
+const projectIoClient =
+  window.RMLProjectIoClient.create({
+    baseUrl: APP_SCRIPT_BASE_URL,
+    maximumProjectBytes:
       PROJECT_FILE_MAX_BYTES,
-    isCurrent = null
-  } = {}
-) {
-  return new Promise(
-    (resolve, reject) => {
-      const pending = {
-        operation:
-          "streamStringifyGzip",
-        payload: {
-          value,
-          maximumBytes
-        },
-        resolve,
-        reject,
-        worker: null,
-        workerGeneration: 0,
-        recoveryAttempted: false,
-        settled: false,
-        streamed: true,
-        isCurrent:
-          typeof isCurrent ===
-            "function"
-            ? isCurrent
-            : null,
-        streamPromise: null,
-        streamMetrics: null,
-        watchdogTimer: 0,
-        watchdogEpoch: 0
-      };
-      dispatchProjectIoRequest(pending);
-    }
-  ).finally(() => {
-    scheduleProjectIoWorkerIdleRelease();
+    savedCompositeMaximumBytes:
+      SAVED_API_COMPOSITE_IMPORT_MAX_BYTES,
+    postTokenStream:
+      postGraphCodegenTokenStream
   });
-}
-
-async function createCompressedJsonBlob(
-  value
-) {
-  const response =
-    await projectIoRequest(
-      "stringifyGzip",
-      { value }
-    );
-  return {
-    blob: new Blob(
-      [response.buffer],
-      { type: "application/gzip" }
-    ),
-    jsonBytes:
-      Number(response.jsonBytes) || 0,
-    compressedBytes:
-      Number(response.compressedBytes) ||
-      response.buffer?.byteLength ||
-      0,
-    compression: "gzip"
-  };
-}
-
-Object.defineProperty(
-  window,
-  window.RMLI18n.t("ui.literal.f3445f54a383"),
-  {
-    value: Object.freeze({
-      version: 1,
-      compress: value =>
-        createCompressedJsonBlob(value)
-    }),
-    writable: false,
-    enumerable: false,
-    configurable: true
-  }
-);
+const projectIoRequest =
+  projectIoClient.request;
+const projectIoStreamedGzipRequest =
+  projectIoClient.requestStreamedGzip;
+const createCompressedJsonBlob =
+  projectIoClient.createCompressedJsonBlob;
+const releaseProjectIoWorkerIfIdle =
+  projectIoClient.releaseIfIdle;
 
 function formatProjectByteLimit(value) {
   const mebibytes =
@@ -5342,7 +4284,7 @@ function ensureGraphCodegenWorker() {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=1.21.77-static-live-import-stability",
+      "../workers/graph_codegen_worker.js?v=1.21.83-preview-control-parity",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -14581,7 +13523,7 @@ function renderPalette() {
               data-help="${escapeHtml(outlinePaletteHelp(item))}">
               <span>${escapeHtml(item.badge)}</span>
               <strong>${escapeHtml(item.label)}</strong>
-              <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-add"></use></svg></b>
+              <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-add"></use></svg></b>
             </button>`;
           }
 
@@ -14596,7 +13538,7 @@ function renderPalette() {
             data-help="${escapeHtml(entry.family.id === "numberConstant" ? window.RMLI18n.t("ui.dev327.outline.number.help") : window.RMLI18n.t("ui.dev327.outline.vector.help"))}">
             <span>${outlineSymbolMarkup(entry.family.symbol)}</span>
             <strong>${escapeHtml(entry.family.title)}</strong>
-            <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-add"></use></svg></b>
+            <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-add"></use></svg></b>
           </button>`;
         })
         .join("");
@@ -14615,7 +13557,7 @@ function renderPalette() {
                   data-help="${escapeHtml(window.RMLI18n.t("ui.attr.e126e5850c57"))}">
                   <span>{{i18n:js.presentation.adddc72949b2}}</span>
                   <strong>${escapeHtml(`DYN · ${source.label}`)}</strong>
-                  <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-add"></use></svg></b>
+                  <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-add"></use></svg></b>
                 </button>`
               )
               .join("")
@@ -14952,7 +13894,7 @@ const nextOptionDirection =
                       option.children,
                       option.id
                     )
-                  : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-add"></use></svg></span>{{i18n:ui.text.3f27e6ab79a6}}</div>`
+                  : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-add"></use></svg></span>{{i18n:ui.text.3f27e6ab79a6}}</div>`
               }
             </div>
           </section>`
@@ -14983,7 +13925,7 @@ const nextOptionDirection =
         ${
           children.length
             ? nodeCardsMarkup(children, node.id)
-            : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-add"></use></svg></span>{{i18n:ui.text.572874456a9e}}</div>`
+            : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-add"></use></svg></span>{{i18n:ui.text.572874456a9e}}</div>`
         }
       </div>
     </section>`;
@@ -22550,7 +21492,7 @@ function controllerInspectorMarkup(node) {
       <legend>{{i18n:ui.text.722c20869f7e}}</legend>
       ${options}
       <button class="add-option" type="button" data-add-option>
-        <svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-add"></use></svg> ${window.RMLI18n.t("ui.outline.addSection")}
+        <svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-add"></use></svg> ${window.RMLI18n.t("ui.outline.addSection")}
       </button>
     </fieldset>
     <label>
@@ -25869,14 +24811,14 @@ function previewEnumEditorMarkup(
       ${settingsPreviewLiveDisabledAttributes(node.id)}
       data-preview-enum-direction="-1"
       data-preview-node="${escapeHtml(node.id)}"
-      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.5caa1fc4e7c2"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-triangle-left"></use></svg></button>
+      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.5caa1fc4e7c2"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-triangle-left"></use></svg></button>
     <button
       class="rml-preview-control rml-preview-enum-step"
       type="button"
       ${settingsPreviewLiveDisabledAttributes(node.id)}
       data-preview-enum-direction="1"
       data-preview-node="${escapeHtml(node.id)}"
-      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.c400ec237248"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-triangle-right"></use></svg></button>
+      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.c400ec237248"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-triangle-right"></use></svg></button>
   </div>`;
 }
 
@@ -25951,7 +24893,7 @@ function previewSettingEditorMarkup(node) {
         data-preview-bool="${escapeHtml(node.id)}"${
           value ? " checked" : ""
         }>
-      <span aria-hidden="true"><svg class="rml-inline-icon" viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-check"></use></svg></span>
+      <span aria-hidden="true"><svg class="rml-inline-icon" viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-check"></use></svg></span>
     </label>`;
   }
 
@@ -28485,7 +27427,8 @@ function settingsPreviewHydrateColorSession(
 }
 
 function settingsPreviewRestoreInactiveLiveValues(
-  activeNodeIds
+  activeNodeIds,
+  changedNodeIds = null
 ) {
   if (!settingsPreviewDraft) {
     settingsPreviewLiveValueBackups.clear();
@@ -28564,6 +27507,7 @@ function settingsPreviewRestoreInactiveLiveValues(
     settingsPreviewLiveValueBackups.delete(
       nodeId
     );
+    changedNodeIds?.add?.(nodeId);
     changed = true;
   }
 
@@ -28639,11 +27583,10 @@ function settingsPreviewApplyRuntimeValue(
     return false;
   }
 
-  if (runtimeRecord) {
-    settingsPreviewBackupLiveValue(node);
-  }
-
   if (node.kind === "controller") {
+    if (runtimeRecord) {
+      settingsPreviewBackupLiveValue(node);
+    }
     settingsPreviewDraft.controllers[
       node.id
     ] = String(value ?? "");
@@ -28651,6 +27594,9 @@ function settingsPreviewApplyRuntimeValue(
   }
 
   if (node.valueType === "bool") {
+    if (runtimeRecord) {
+      settingsPreviewBackupLiveValue(node);
+    }
     settingsPreviewDraft.values[node.id] =
       typeof value === "string"
         ? value.trim().toLowerCase() ===
@@ -28673,6 +27619,9 @@ function settingsPreviewApplyRuntimeValue(
       return false;
     }
 
+    if (runtimeRecord) {
+      settingsPreviewBackupLiveValue(node);
+    }
     settingsPreviewDraft.values[node.id] =
       parsed.expression;
     settingsPreviewDraft.colorStates[
@@ -28687,6 +27636,9 @@ function settingsPreviewApplyRuntimeValue(
     return true;
   }
 
+  if (runtimeRecord) {
+    settingsPreviewBackupLiveValue(node);
+  }
   settingsPreviewDraft.values[node.id] =
     Array.isArray(value)
       ? [...value]
@@ -29424,19 +28376,6 @@ async function openSettingsPreview() {
 
   dialog.showModal();
   dialog.classList.add(
-    "rml-overlay-animating"
-  );
-  void dialog.offsetWidth;
-  await nextBuilderVisualFrame();
-
-  if (
-    sequence !== settingsPreviewOpenSequence ||
-    !dialog.open
-  ) {
-    return;
-  }
-
-  dialog.classList.add(
     "rml-overlay-opened"
   );
   movePreviewFocusAwayFromCloseButton();
@@ -29778,78 +28717,94 @@ function setProjectFileStatus(
 }
 
 let activeProjectLoadSession = 0;
-let activeBuilderWorkSession = 0;
-let builderWorkSessionSequence = 0;
-const builderWorkSessions = new Set();
-const builderWorkWatchdogs = new Map();
-let activeBuilderReplacementPrompt = 0;
+let builderWorkController = null;
 
-function clearBuilderWorkDeadline(session) {
-  const watchdog =
-    builderWorkWatchdogs.get(session);
-  if (watchdog) {
-    window.clearTimeout(watchdog);
+function requireBuilderWorkController() {
+  if (!builderWorkController) {
+    throw new Error(
+      "[RML BUILDER INTERNAL FAILURE] The Builder work controller is not installed."
+    );
   }
-  builderWorkWatchdogs.delete(session);
+  return builderWorkController;
 }
 
-function nextBuilderVisualFrame() {
+function installBuilderWorkController() {
+  const module =
+    window.RMLBuilderWorkController;
   if (
-    document.visibilityState ===
-      "hidden"
+    !module ||
+    typeof module.install !== "function"
   ) {
-    return yieldBuilderTask();
-  }
-
-  return new Promise(resolve => {
-    let settled = false;
-    let fallback = 0;
-    const finish = () => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      if (fallback) {
-        window.clearTimeout(fallback);
-      }
-      resolve();
-    };
-    fallback = window.setTimeout(
-      finish,
-      100
+    throw new Error(
+      "[RML BUILDER INTERNAL FAILURE] The Builder work controller module is unavailable."
     );
-    window.requestAnimationFrame(finish);
-  });
+  }
+  builderWorkController =
+    module.install({
+      elements,
+      clamp,
+      setAlwaysClickableButtonAvailability,
+      replacementRenderLimit:
+        BUILDER_REPLACEMENT_RENDER_LIMIT
+    });
+  return builderWorkController;
 }
 
 function yieldBuilderTask() {
-  if (
-    typeof globalThis.scheduler?.yield ===
-      "function"
-  ) {
-    return globalThis.scheduler.yield();
-  }
-
-  if (typeof MessageChannel === "function") {
-    return new Promise(resolve => {
-      const channel =
-        new MessageChannel();
-      channel.port1.onmessage = () => {
-        channel.port1.close();
-        channel.port2.close();
-        resolve();
-      };
-      channel.port2.postMessage(0);
-    });
-  }
-
-  return Promise.resolve();
+  return requireBuilderWorkController()
+    .yieldTask();
 }
 
-async function paintBuilderUi() {
-  await nextBuilderVisualFrame();
-  await nextBuilderVisualFrame();
-  await yieldBuilderTask();
+function nextBuilderVisualFrame() {
+  return requireBuilderWorkController()
+    .nextVisualFrame();
+}
+
+function paintBuilderUi() {
+  return requireBuilderWorkController()
+    .paint();
+}
+
+function beginBuilderWork(options = {}) {
+  return requireBuilderWorkController()
+    .begin(options);
+}
+
+function updateBuilderWork(
+  session,
+  changes = {}
+) {
+  return requireBuilderWorkController()
+    .update(session, changes);
+}
+
+function finishBuilderWork(session) {
+  return requireBuilderWorkController()
+    .finish(session);
+}
+
+function clearBuilderWorkDeadline(session) {
+  return requireBuilderWorkController()
+    .clearDeadline(session);
+}
+
+function completeBuilderWork(
+  session,
+  options = {}
+) {
+  return requireBuilderWorkController()
+    .complete(session, options);
+}
+
+function requestBuilderReplacementChoice(
+  workSession,
+  options = {}
+) {
+  return requireBuilderWorkController()
+    .requestReplacementChoice(
+      workSession,
+      options
+    );
 }
 
 function setProjectLoadProgress(
@@ -29894,1095 +28849,6 @@ function cancelActiveProjectLoad() {
   setProjectLoadProgress(false);
 }
 
-let builderWorkVisibleProgress = 0;
-
-function advanceBuilderWorkProgress(
-  requestedProgress
-) {
-  const requested = Number(requestedProgress);
-  if (!Number.isFinite(requested)) {
-    return builderWorkVisibleProgress;
-  }
-
-  return Math.max(
-    builderWorkVisibleProgress,
-    clamp(requested, 0, 100)
-  );
-}
-
-function updateBuilderWork(
-  session,
-  {
-    kicker,
-    title,
-    message,
-    detail,
-    progress
-  } = {}
-) {
-  if (
-    session !== activeBuilderWorkSession ||
-    !elements.builderWorkOverlay
-  ) {
-    return false;
-  }
-
-  if (kicker !== undefined) {
-    elements.builderWorkKicker.textContent =
-      String(kicker);
-  }
-  if (title !== undefined) {
-    elements.builderWorkTitle.textContent =
-      String(title);
-  }
-  if (message !== undefined) {
-    elements.builderWorkMessage.textContent =
-      String(message);
-  }
-  if (detail !== undefined) {
-    elements.builderWorkDetail.textContent =
-      String(detail);
-  }
-
-  if (progress !== undefined) {
-    builderWorkVisibleProgress =
-      advanceBuilderWorkProgress(progress);
-    const normalized = clamp(
-      builderWorkVisibleProgress,
-      0,
-      100
-    );
-    elements.builderWorkProgress.dataset
-      .rmlLoadProgress =
-      `${normalized}%`;
-    elements.builderWorkProgress.setAttribute(
-      "aria-valuenow",
-      String(Math.round(normalized))
-    );
-  }
-
-  return true;
-}
-
-function resetBuilderReplacementUi() {
-  activeBuilderReplacementPrompt += 1;
-
-  if (elements.builderWorkReplacement) {
-    elements.builderWorkReplacement.hidden =
-      true;
-  }
-  if (elements.builderWorkReplacementSearch) {
-    elements.builderWorkReplacementSearch.value =
-      "";
-    elements.builderWorkReplacementSearch.oninput =
-      null;
-    elements.builderWorkReplacementSearch.onsearch =
-      null;
-  }
-  if (elements.builderWorkReplacementList) {
-    elements.builderWorkReplacementList
-      .replaceChildren();
-    elements.builderWorkReplacementList.onclick =
-      null;
-    elements.builderWorkReplacementList.ondblclick =
-      null;
-    elements.builderWorkReplacementList.onkeydown =
-      null;
-  }
-  if (elements.builderWorkReplacementQueue) {
-    elements.builderWorkReplacementQueue
-      .replaceChildren();
-  }
-  if (elements.builderWorkReplacementSummary) {
-    elements.builderWorkReplacementSummary.textContent =
-      "";
-  }
-  if (elements.builderWorkReplacementCancel) {
-    elements.builderWorkReplacementCancel.onclick =
-      null;
-    elements.builderWorkReplacementCancel.onpointerdown =
-      null;
-    elements.builderWorkReplacementCancel.onkeydown =
-      null;
-    elements.builderWorkReplacementCancel.onblur =
-      null;
-  }
-  if (elements.builderWorkReplacementSkip) {
-    elements.builderWorkReplacementSkip.onclick =
-      null;
-
-    elements.builderWorkReplacementSkip.textContent =
-      window.RMLI18n.t("{{i18n:js.presentation.6fc09607aee5}}");
-
-    elements.builderWorkReplacementSkip.hidden =
-      false;
-  }
-  if (elements.builderWorkReplacementConfirm) {
-    elements.builderWorkReplacementConfirm.onclick =
-      null;
-    elements.builderWorkReplacementConfirm.textContent =
-      window.RMLI18n.t("{{i18n:js.presentation.b648584a4eb8}}");
-    setAlwaysClickableButtonAvailability(
-      elements.builderWorkReplacementConfirm,
-      true
-    );
-  }
-  if (elements.builderWorkOverlay) {
-    delete elements.builderWorkOverlay.dataset.mode;
-    elements.builderWorkOverlay.setAttribute(
-      "role",
-      "status"
-    );
-    elements.builderWorkOverlay.setAttribute(
-      "aria-live",
-      "polite"
-    );
-    elements.builderWorkOverlay.setAttribute(
-      "aria-atomic",
-      "true"
-    );
-    elements.builderWorkOverlay.removeAttribute(
-      "aria-modal"
-    );
-  }
-}
-
-function assertReplacementDialogActuallyVisible(
-  { operatorId = "", index = -1, total = 0, candidateCount = 0 } = {}
-) {
-  const dialog = elements.builderWorkReplacement;
-  const confirm = elements.builderWorkReplacementConfirm;
-  const cancel = elements.builderWorkReplacementCancel;
-  const skip = elements.builderWorkReplacementSkip;
-  const style = dialog ? window.getComputedStyle(dialog) : null;
-  const rect = dialog?.getBoundingClientRect?.();
-  const visible = Boolean(
-    dialog &&
-    dialog.isConnected &&
-    dialog.hidden !== true &&
-    style &&
-    style.display !== "none" &&
-    style.visibility !== "hidden" &&
-    Number(style.opacity || "1") > 0 &&
-    rect &&
-    rect.width > 0 &&
-    rect.height > 0
-  );
-
-  if (!dialog || !confirm || !cancel || !skip) {
-    throw new Error(
-      `[HARD REPLACEMENT UI ERROR] Replacement ${Number(index) + 1} of ${Number(total)} for '${String(operatorId || "<unknown>")}' cannot be shown because required replacement-panel controls are missing. dialog=${Boolean(dialog)}, confirm=${Boolean(confirm)}, cancel=${Boolean(cancel)}, skip=${Boolean(skip)}, candidates=${Number(candidateCount) || 0}.`
-    );
-  }
-
-  if (!visible) {
-    throw new Error(
-      `[HARD REPLACEMENT UI ERROR] Replacement ${Number(index) + 1} of ${Number(total)} for '${String(operatorId || "<unknown>")}' was requested but the replacement panel is not visibly rendered. hidden=${String(dialog.hidden)}, display=${String(style?.display)}, visibility=${String(style?.visibility)}, opacity=${String(style?.opacity)}, rect=${Number(rect?.width || 0)}x${Number(rect?.height || 0)}, candidates=${Number(candidateCount) || 0}.`
-    );
-  }
-  return true;
-}
-
-async function requestBuilderReplacementChoice(
-  workSession,
-  {
-    requirement,
-    candidates,
-    index = 0,
-    total = 1,
-    catalogResult = null,
-    nodeLabels = [],
-    replacementQueue = [],
-    initialOperatorId = "",
-    validationDiagnostics = []
-  } = {}
-) {
-  if (
-    workSession !==
-      activeBuilderWorkSession ||
-    !elements.builderWorkReplacement ||
-    !elements.builderWorkReplacementSearch ||
-    !elements.builderWorkReplacementList ||
-    !elements.builderWorkReplacementConfirm ||
-    !elements.builderWorkReplacementCancel
-  ) {
-    throw new Error(
-      window.RMLI18n.t("ui.literal.77d04046b037")
-    );
-  }
-
-  const values =
-    Array.isArray(candidates)
-      ? candidates.filter(candidate =>
-          Boolean(
-            String(
-              candidate?.operatorId || ""
-            ).trim()
-          )
-        )
-      : [];
-
-  clearBuilderWorkDeadline(
-    workSession
-  );
-
-  const prompt =
-    ++activeBuilderReplacementPrompt;
-  const search =
-    elements.builderWorkReplacementSearch;
-  const list =
-    elements.builderWorkReplacementList;
-  const confirm =
-    elements.builderWorkReplacementConfirm;
-  const cancel =
-    elements.builderWorkReplacementCancel;
-  const skip =
-    elements.builderWorkReplacementSkip;
-  const summary =
-    elements.builderWorkReplacementSummary;
-  const queueHost =
-    elements.builderWorkReplacementQueue;
-  const operatorId = String(
-    requirement?.operatorId ||
-    "<unknown>"
-  );
-  const visibleLabels =
-    [...new Set(
-      (Array.isArray(nodeLabels)
-        ? nodeLabels
-        : [])
-        .map(label =>
-          String(label || "").trim()
-        )
-        .filter(Boolean)
-    )];
-  const nodeDescription =
-    visibleLabels.length > 0
-      ? visibleLabels.slice(0, 3).join(", ")
-      : operatorId;
-  const sourceDescription =
-    catalogResult?.live === true
-      ? window.RMLI18n.t("ui.literal.e9adce3048e9")
-      : window.RMLI18n.t("ui.literal.dc0419d30ba4");
-  const previousPlanDiagnostics =
-    (Array.isArray(validationDiagnostics)
-      ? validationDiagnostics
-      : [])
-      .map(value =>
-        String(value || "").trim()
-      )
-      .filter(Boolean);
-
-  updateBuilderWork(
-    workSession,
-    {
-      kicker:
-        window.RMLI18n.format("import.replacement.kicker", {
-          current: Math.min(index + 1, total).toLocaleString(window.RMLI18n?.language || undefined),
-          total: Math.max(1, total).toLocaleString(window.RMLI18n?.language || undefined)
-        }),
-      title:
-        window.RMLI18n.t("ui.auto.1b35e808e3fe"),
-      message:
-        previousPlanDiagnostics.length > 0
-          ? window.RMLI18n.format("import.replacement.invalid_plan_message", { node: nodeDescription })
-          : window.RMLI18n.format("import.replacement.choose_message", {
-              node: nodeDescription,
-              source: sourceDescription
-            }),
-      detail:
-        previousPlanDiagnostics.length > 0
-          ? window.RMLI18n.format("import.replacement.invalid_plan_detail", {
-              diagnostics: previousPlanDiagnostics.slice(0, 3).join(" | "),
-              more: previousPlanDiagnostics.length > 3
-                ? window.RMLI18n.format("import.replacement.more", {
-                    count: (previousPlanDiagnostics.length - 3).toLocaleString(window.RMLI18n?.language || undefined)
-                  })
-                : ""
-            })
-          : window.RMLI18n.format(
-              values.length === 1
-                ? "import.replacement.candidates_detail.one"
-                : "import.replacement.candidates_detail.other",
-              {
-                count: values.length.toLocaleString(window.RMLI18n?.language || undefined),
-                operatorId
-              }
-            ),
-      progress:
-        50 +
-        Math.round(
-          4 *
-          Math.min(index, total) /
-          Math.max(1, total)
-        )
-    }
-  );
-
-  elements.builderWorkOverlay.dataset.mode =
-    "replacement";
-  elements.builderWorkOverlay.setAttribute(
-    "role",
-    "dialog"
-  );
-  elements.builderWorkOverlay.setAttribute(
-    "aria-modal",
-    "true"
-  );
-  elements.builderWorkOverlay.setAttribute(
-    "aria-live",
-    "off"
-  );
-  elements.builderWorkOverlay.setAttribute(
-    "aria-atomic",
-    "false"
-  );
-  elements.builderWorkReplacement.hidden =
-    false;
-  search.value = "";
-  let selectedOperatorId =
-    values.some(candidate =>
-      candidate.operatorId ===
-        String(initialOperatorId || "")
-    )
-      ? String(initialOperatorId)
-      : "";
-  let visibleCandidates = [];
-
-  const renderReplacementQueue = () => {
-    if (!queueHost) {
-      return;
-    }
-    const fragment =
-      document.createDocumentFragment();
-    for (const entry of
-      Array.isArray(replacementQueue)
-        ? replacementQueue
-        : []) {
-      const status = String(
-        entry?.status || "pending"
-      );
-      const row =
-        document.createElement("div");
-      row.className =
-        "builder-work-replacement-queue-item";
-      row.dataset.status = status;
-      row.setAttribute("role", "listitem");
-
-      const state =
-        document.createElement("span");
-      state.className =
-        "builder-work-replacement-queue-state";
-      state.textContent =
-        status === "selected"
-          ? ""
-          : status === "skipped"
-            ? "!"
-            : status === "current"
-              ? "›"
-              : status === "unavailable"
-                ? "!"
-                : "·";
-      if (status === "selected") {
-        state.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-check"></use></svg>`;
-      }
-      const name =
-        document.createElement("span");
-      name.className =
-        "builder-work-replacement-queue-name";
-      name.textContent = String(
-        entry?.operatorId || "<unknown>"
-      );
-      const count =
-        document.createElement("span");
-      count.className =
-        "builder-work-replacement-queue-count";
-      const instances = Math.max(
-        1,
-        Number(entry?.instanceCount) || 0
-      );
-      count.textContent =
-        `${instances.toLocaleString(window.RMLI18n?.language || undefined)}×`;
-      row.append(state, name, count);
-      fragment.appendChild(row);
-    }
-    queueHost.replaceChildren(fragment);
-    queueHost
-      .querySelector(
-        '[data-status="current"]'
-      )
-      ?.scrollIntoView({
-        block: "nearest"
-      });
-  };
-
-  const updateReplacementSummary = () => {
-    if (!summary) {
-      return;
-    }
-    const selected =
-      values.find(candidate =>
-        candidate.operatorId ===
-          selectedOperatorId
-      );
-    const missingInputs =
-      Array.isArray(
-        selected?.unmappedRequiredInputs
-      )
-        ? selected.unmappedRequiredInputs
-        : [];
-    const disconnectedPorts = [
-      ...(selected
-        ?.unmappedReferencedInputs || [])
-        .map(portId =>
-          window.RMLI18n.format(
-            "import.replacement.port.input",
-            { port: String(portId) }
-          )
-        ),
-      ...(selected
-        ?.unmappedReferencedOutputs || [])
-        .map(portId =>
-          window.RMLI18n.format(
-            "import.replacement.port.output",
-            { port: String(portId) }
-          )
-        )
-    ];
-    const matchCount =
-      visibleCandidates.length;
-    const base =
-      window.RMLI18n.format(
-        matchCount === 1
-          ? "import.replacement.summary.base.one"
-          : "import.replacement.summary.base.other",
-        {
-          count: matchCount.toLocaleString(window.RMLI18n?.language || undefined),
-          source: sourceDescription
-        }
-      );
-    if (!selected) {
-      confirm.textContent =
-        window.RMLI18n.t("{{i18n:js.presentation.b648584a4eb8}}");
-      summary.textContent = base;
-      return;
-    }
-    confirm.textContent =
-      disconnectedPorts.length > 0
-        ? window.RMLI18n.t("ui.literal.89ae72606ade")
-        : window.RMLI18n.t("js.presentation.b648584a4eb8");
-    if (disconnectedPorts.length > 0) {
-      summary.textContent =
-        window.RMLI18n.format(
-          "import.replacement.summary.disconnected",
-          {
-            base,
-            ports: disconnectedPorts.join(", "),
-            required:
-              missingInputs.length > 0
-                ? window.RMLI18n.format(
-                    missingInputs.length === 1
-                      ? "import.replacement.summary.disconnected_required.one"
-                      : "import.replacement.summary.disconnected_required.other",
-                    {
-                      count: missingInputs.length.toLocaleString(window.RMLI18n?.language || undefined),
-                      ports: missingInputs.map(port => port.label || port.id).join(", ")
-                    }
-                  )
-                : ""
-          }
-        );
-      return;
-    }
-    if (missingInputs.length > 0) {
-      summary.textContent =
-        window.RMLI18n.format(
-          missingInputs.length === 1
-            ? "import.replacement.summary.required_inputs.one"
-            : "import.replacement.summary.required_inputs.other",
-          {
-            base,
-            count: missingInputs.length.toLocaleString(window.RMLI18n?.language || undefined),
-            ports: missingInputs.map(port => port.label || port.id).join(", ")
-          }
-        );
-      return;
-    }
-    summary.textContent =
-      window.RMLI18n.format(
-        selected.semanticProof ===
-          "exact-contract"
-          ? "import.replacement.summary.exact_contract"
-          : selected.semanticProof ===
-              "exact-name"
-            ? "import.replacement.summary.exact_name"
-            : "import.replacement.summary.manual",
-        { base }
-      );
-  };
-
-  const selectCandidate = (
-    operatorId,
-    {
-      focus = false,
-      scroll = false
-    } = {}
-  ) => {
-    const selected =
-      visibleCandidates.find(candidate =>
-        candidate.operatorId ===
-          operatorId
-      );
-    selectedOperatorId =
-      selected?.operatorId || "";
-
-    for (const item of
-      list.querySelectorAll(
-        ".builder-work-replacement-item"
-      )) {
-      const active =
-        item.dataset.operatorId ===
-          selectedOperatorId;
-      item.setAttribute(
-        "aria-selected",
-        String(active)
-      );
-      item.tabIndex = active
-        ? 0
-        : -1;
-
-      if (active && focus) {
-        item.focus({
-          preventScroll: true
-        });
-      }
-      if (active && scroll) {
-        item.scrollIntoView({
-          block: "nearest"
-        });
-      }
-    }
-
-    setAlwaysClickableButtonAvailability(
-      confirm,
-      Boolean(selectedOperatorId),
-      window.RMLI18n.t("ui.literal.ce96387763e5")
-    );
-    updateReplacementSummary();
-  };
-
-  const renderCandidates = () => {
-    const query = String(
-      search.value || ""
-    ).trim().toLocaleLowerCase();
-    const previous =
-      selectedOperatorId;
-    const matches = query
-      ? values.filter(candidate =>
-          `${candidate.title || ""} ${candidate.operatorId} ${candidate.group || ""} ${candidate.description || ""}`
-            .toLocaleLowerCase()
-            .includes(query)
-        )
-      : values;
-    visibleCandidates = matches.slice(
-      0,
-      BUILDER_REPLACEMENT_RENDER_LIMIT
-    );
-    const fragment =
-      document.createDocumentFragment();
-
-    for (const candidate of
-      visibleCandidates) {
-      const item =
-        document.createElement("button");
-      item.type = "button";
-      item.className =
-        "builder-work-replacement-item";
-      item.dataset.operatorId =
-        candidate.operatorId;
-      item.setAttribute(
-        "role",
-        "option"
-      );
-      item.setAttribute(
-        "aria-selected",
-        "false"
-      );
-
-      const symbol =
-        document.createElement("span");
-      symbol.className =
-        "builder-work-replacement-symbol";
-      const paletteIcon =
-        candidate.paletteIcon &&
-        typeof candidate.paletteIcon ===
-          "object"
-          ? candidate.paletteIcon
-          : {
-              symbol:
-                candidate.symbol ||
-                "API",
-              color: "#8fdcff",
-              tone: "standard"
-            };
-      symbol.textContent = String(
-        paletteIcon.symbol ||
-        candidate.symbol ||
-        "API"
-      );
-      symbol.dataset.iconTone = String(
-        paletteIcon.tone ||
-        "standard"
-      );
-      symbol.dataset.rmlNodeIconColor =
-        String(
-          paletteIcon.color ||
-          "#8fdcff"
-        );
-
-      const copy =
-        document.createElement("span");
-      copy.className =
-        "builder-work-replacement-copy";
-      const title =
-        document.createElement("strong");
-      title.textContent =
-        candidate.title ||
-        candidate.operatorId;
-      const group =
-        document.createElement("small");
-      group.textContent =
-        `${candidate.group || window.RMLI18n.t("ui.literal.924e20a624e5")} · ${candidate.operatorId}`;
-      const match =
-        document.createElement("small");
-      match.className =
-        "builder-work-replacement-match";
-      const missingInputs =
-        Array.isArray(
-          candidate.unmappedRequiredInputs
-        )
-          ? candidate
-              .unmappedRequiredInputs
-          : [];
-      const disconnectedPortCount =
-        (
-          candidate
-            .unmappedReferencedInputs || []
-        ).length +
-        (
-          candidate
-            .unmappedReferencedOutputs || []
-        ).length;
-      match.dataset.warning = String(
-        missingInputs.length > 0 ||
-        disconnectedPortCount > 0
-      );
-      match.textContent =
-        disconnectedPortCount > 0
-          ? `Same operation kind · warning: ${disconnectedPortCount} old used endpoint${disconnectedPortCount === 1 ? "" : "s"} will be disconnected`
-          : candidate.semanticProof ===
-              "exact-contract"
-            ? window.RMLI18n.t("ui.literal.5c4d324a9ea4")
-            : candidate.semanticProof ===
-                "exact-name"
-              ? window.RMLI18n.t("ui.literal.c8ae9a3d5405")
-              : missingInputs.length > 0
-                ? `Same operation kind · ${missingInputs.length} new input${missingInputs.length === 1 ? "" : "s"} to configure`
-                : window.RMLI18n.t("ui.literal.882073eb8847");
-      copy.append(
-        title,
-        group,
-        match
-      );
-      item.append(
-        symbol,
-        copy
-      );
-      item.title =
-        `${candidate.title || candidate.operatorId}\n${candidate.group || window.RMLI18n.t("ui.literal.924e20a624e5")}\n${candidate.operatorId}\n${match.textContent}`;
-      fragment.appendChild(item);
-    }
-
-    if (visibleCandidates.length === 0) {
-      const empty =
-        document.createElement("div");
-      empty.className =
-        "builder-work-replacement-empty";
-      empty.textContent =
-        window.RMLI18n.t("{{i18n:js.presentation.ef10da90616f}}");
-      fragment.appendChild(empty);
-    }
-
-    list.setAttribute(
-      "aria-busy",
-      "true"
-    );
-    list.replaceChildren(fragment);
-    list.setAttribute(
-      "aria-busy",
-      "false"
-    );
-    if (
-      previous &&
-      visibleCandidates.some(candidate =>
-        candidate.operatorId === previous
-      )
-    ) {
-      selectedOperatorId = previous;
-    } else {
-      selectedOperatorId = "";
-    }
-
-    selectCandidate(
-      selectedOperatorId
-    );
-    if (
-      matches.length >
-        visibleCandidates.length
-    ) {
-      summary.textContent =
-        `${matches.length.toLocaleString(window.RMLI18n?.language || undefined)} matches · showing the first ${visibleCandidates.length.toLocaleString(window.RMLI18n?.language || undefined)}. Refine the search to reach later entries.`;
-    } else {
-      updateReplacementSummary();
-    }
-  };
-
-  const choice = new Promise(
-    (resolve, reject) => {
-      let settled = false;
-      let cancelPointerArmed = false;
-      let cancelKeyboardArmed = false;
-      const finish = (
-        callback,
-        value
-      ) => {
-        if (
-          settled ||
-          prompt !==
-            activeBuilderReplacementPrompt
-        ) {
-          return;
-        }
-        settled = true;
-        document.removeEventListener(
-          "keydown",
-          onKeyDown,
-          true
-        );
-        resetBuilderReplacementUi();
-        callback(value);
-      };
-      const accept = () => {
-        const selected =
-          values.find(candidate =>
-            candidate.operatorId ===
-              selectedOperatorId
-          );
-        if (selected) {
-          finish(resolve, selected);
-        }
-      };
-      const skipReplacement = () => {
-        finish(
-          resolve,
-          Object.freeze({
-            skipped: true,
-            operatorId
-          })
-        );
-      };
-      const rejectImport = source => {
-        const error = new Error(
-          `Project import was cancelled by the ${source} before the required API replacement was confirmed. The JSON was not loaded.`
-        );
-        error.code =
-          "RML_PROJECT_IMPORT_CANCELLED";
-        error.cancelSource = source;
-        finish(
-          reject,
-          error
-        );
-      };
-      const onKeyDown = event => {
-        if (event.key === window.RMLI18n.t("ui.literal.b4cfe1f435f0")) {
-          event.preventDefault();
-          event.stopImmediatePropagation();
-          rejectImport(window.RMLI18n.t("ui.literal.b42472fcdcdb"));
-        }
-      };
-
-      search.oninput =
-        renderCandidates;
-      search.onsearch =
-        renderCandidates;
-      list.onclick = event => {
-        const item =
-          event.target.closest(
-            ".builder-work-replacement-item"
-          );
-        if (item) {
-          selectCandidate(
-            item.dataset.operatorId,
-            { focus: true }
-          );
-        }
-      };
-      list.ondblclick = event => {
-        if (
-          event.target.closest(
-            ".builder-work-replacement-item"
-          )
-        ) {
-          accept();
-        }
-      };
-      list.onkeydown = event => {
-        if (
-          ![
-            window.RMLI18n.t("ui.literal.14a67093e73a"),
-            window.RMLI18n.t("ui.literal.e710c17948e9"),
-            window.RMLI18n.t("ui.literal.70f8bb9a8a53"),
-            window.RMLI18n.t("ui.literal.a2bb9d34b8a1")
-          ].includes(event.key) ||
-          visibleCandidates.length === 0
-        ) {
-          return;
-        }
-        event.preventDefault();
-        const currentIndex =
-          visibleCandidates.findIndex(
-            candidate =>
-              candidate.operatorId ===
-                selectedOperatorId
-          );
-        const nextIndex =
-          event.key === window.RMLI18n.t("ui.literal.70f8bb9a8a53")
-            ? 0
-            : event.key === window.RMLI18n.t("ui.literal.a2bb9d34b8a1")
-              ? visibleCandidates.length - 1
-              : event.key === window.RMLI18n.t("ui.literal.14a67093e73a")
-                ? currentIndex < 0
-                  ? 0
-                  : Math.min(
-                      visibleCandidates.length - 1,
-                      currentIndex + 1
-                    )
-                : currentIndex < 0
-                  ? visibleCandidates.length - 1
-                  : Math.max(
-                      0,
-                      currentIndex - 1
-                    );
-        selectCandidate(
-          visibleCandidates[nextIndex]
-            .operatorId,
-          {
-            focus: true,
-            scroll: true
-          }
-        );
-      };
-      confirm.onclick = accept;
-      if (skip) {
-        skip.onclick = skipReplacement;
-      }
-      cancel.onpointerdown = event => {
-        cancelPointerArmed =
-          event.isPrimary !== false &&
-          Number(event.button) === 0;
-      };
-      cancel.onkeydown = event => {
-        cancelKeyboardArmed =
-          event.key === window.RMLI18n.t("ui.literal.2b9eceb7a86a") ||
-          event.key === " ";
-      };
-      cancel.onblur = () => {
-        cancelPointerArmed = false;
-        cancelKeyboardArmed = false;
-      };
-      cancel.onclick = event => {
-        const explicitlyActivated =
-          cancelPointerArmed ||
-          cancelKeyboardArmed ||
-          (
-            event.isTrusted === true &&
-            document.activeElement ===
-              cancel
-          );
-        cancelPointerArmed = false;
-        cancelKeyboardArmed = false;
-
-        if (!explicitlyActivated) {
-          updateBuilderWork(
-            workSession,
-            {
-              detail:
-                window.RMLI18n.t("ui.literal.0200e0e0b92e")
-            }
-          );
-          return;
-        }
-
-        rejectImport(
-          "explicit Cancel import button"
-        );
-      };
-      document.addEventListener(
-        "keydown",
-        onKeyDown,
-        true
-      );
-    }
-  );
-
-  renderReplacementQueue();
-  renderCandidates();
-  await paintBuilderUi();
-
-  await new Promise(resolve =>
-    window.requestAnimationFrame(() =>
-      window.requestAnimationFrame(resolve)
-    )
-  );
-
-  assertReplacementDialogActuallyVisible({
-    operatorId,
-    index,
-    total,
-    candidateCount: values.length
-  });
-
-  search.focus({
-    preventScroll: true
-  });
-  return choice;
-}
-
-function beginBuilderWork(options = {}) {
-  const overlayWasActive =
-    builderWorkSessions.size > 0;
-  const session =
-    ++builderWorkSessionSequence;
-  builderWorkSessions.add(session);
-  activeBuilderWorkSession = session;
-
-  if (
-    !overlayWasActive &&
-    elements.builderWorkOverlay
-  ) {
-    builderWorkVisibleProgress = 0;
-    elements.builderWorkProgress.dataset
-      .rmlLoadProgress = "0%";
-    elements.builderWorkProgress.setAttribute(
-      "aria-valuenow",
-      "0"
-    );
-    resetBuilderReplacementUi();
-    elements.builderWorkOverlay.hidden = false;
-    document.body.classList.add(
-      "rml-builder-work-active"
-    );
-  }
-  updateBuilderWork(session, options);
-
-  const timeout = clamp(
-    Number(options.timeout) || 30000,
-    1000,
-    120000
-  );
-  const watchdog =
-    window.setTimeout(() => {
-      if (
-        builderWorkSessions.has(
-          session
-        )
-      ) {
-        const error = new Error(
-          `A Builder operation exceeded its declared ${timeout} ms completion deadline.`
-        );
-        error.code =
-          "RML_BUILDER_WORK_DEADLINE_EXCEEDED";
-        console.error(
-          "[RML BUILDER INTERNAL FAILURE] A Builder operation exceeded its declared completion deadline.",
-          {
-            session,
-            timeout,
-            activeSessions: [
-              ...builderWorkSessions
-            ],
-            error
-          }
-        );
-        try {
-          options.onTimeout?.(error);
-        } catch (timeoutError) {
-          console.error(
-            "[RML BUILDER INTERNAL FAILURE] A Builder deadline handler failed.",
-            timeoutError
-          );
-        } finally {
-          finishBuilderWork(session);
-        }
-      }
-    }, timeout);
-  builderWorkWatchdogs.set(
-    session,
-    watchdog
-  );
-  return session;
-}
-
-function finishBuilderWork(session) {
-  if (
-    !builderWorkSessions.has(session) ||
-    !elements.builderWorkOverlay
-  ) {
-    return false;
-  }
-
-  builderWorkSessions.delete(session);
-  clearBuilderWorkDeadline(session);
-  if (
-    session !== activeBuilderWorkSession
-  ) {
-    return true;
-  }
-
-  if (builderWorkSessions.size > 0) {
-    activeBuilderWorkSession = Math.max(
-      ...builderWorkSessions
-    );
-    return true;
-  }
-  activeBuilderWorkSession = 0;
-  resetBuilderReplacementUi();
-  elements.builderWorkOverlay.hidden = true;
-  document.body.classList.remove(
-    "rml-builder-work-active"
-  );
-  return true;
-}
-
-Object.defineProperty(
-  window,
-  window.RMLI18n.t("ui.literal.28dc9c1b01c0"),
-  {
-    value: Object.freeze({
-      version: 2,
-      begin: beginBuilderWork,
-      update: updateBuilderWork,
-      paint: paintBuilderUi,
-      finish: finishBuilderWork,
-      active() {
-        return builderWorkSessions.size > 0;
-      }
-    }),
-    writable: false,
-    enumerable: false,
-    configurable: true
-  }
-);
-
 function beginStartupStatus(
   initialText =
     window.RMLI18n.t("ui.literal.975839933e3e")
@@ -31000,7 +28866,7 @@ function beginStartupStatus(
       window.RMLI18n.t("ui.auto.03b92cd86490"),
     detail:
       window.RMLI18n.t("ui.literal.deb232cf6219"),
-    progress: 8,
+    progress: 0,
     timeout: 120000
   });
   let finished = false;
@@ -31054,6 +28920,27 @@ function beginStartupStatus(
       }
       finishBuilderWork(workSession);
       return true;
+    },
+    async complete(changes = {}) {
+      if (finished) {
+        return false;
+      }
+      set(changes);
+      finished = true;
+      const completed =
+        await completeBuilderWork(
+          workSession,
+          changes
+        );
+      if (label) {
+        label.textContent =
+          window.RMLI18n.t("{{i18n:js.presentation.d5839c5ced50}}");
+      }
+      if (container?.dataset) {
+        container.dataset.state =
+          "ready";
+      }
+      return completed;
     },
     get visible() {
       return true;
@@ -31179,8 +29066,104 @@ function irreparableProjectJsonError(
   return error;
 }
 
-function validateProjectStructureForRepair(
+function projectStructureValidationUnitCount(
   project
+) {
+  const root =
+    projectTypedRuntimeGraph(project);
+  const visited = new Set();
+  const countGraph = candidate => {
+    if (
+      !candidate ||
+      typeof candidate !== "object" ||
+      Array.isArray(candidate) ||
+      visited.has(candidate) ||
+      !Array.isArray(candidate.nodes) ||
+      !Array.isArray(candidate.connections)
+    ) {
+      return 1;
+    }
+
+    visited.add(candidate);
+    const customFiles =
+      candidate.customCSharpFiles &&
+      typeof candidate.customCSharpFiles ===
+        "object" &&
+      !Array.isArray(
+        candidate.customCSharpFiles
+      )
+        ? Object.values(
+            candidate.customCSharpFiles
+          )
+        : [];
+    const apiComposites =
+      candidate.apiCompositeGraphs &&
+      typeof candidate.apiCompositeGraphs ===
+        "object" &&
+      !Array.isArray(
+        candidate.apiCompositeGraphs
+      )
+        ? Object.values(
+            candidate.apiCompositeGraphs
+          )
+        : [];
+    const connectionUnits =
+      candidate.connections.reduce(
+        (total, connection) =>
+          total +
+          2 +
+          (
+            Array.isArray(
+              connection?.points
+            )
+              ? connection.points.length
+              : 0
+          ),
+        0
+      );
+    const compositeContractUnits =
+      apiComposites.reduce(
+        (total, graph) =>
+          total +
+          (
+            Array.isArray(
+              graph?.boundaryPorts
+            )
+              ? graph.boundaryPorts.length
+              : 0
+          ) +
+          Object.keys(
+            graph?.branchRouting || {}
+          ).length,
+        0
+      );
+
+    return 1 +
+      candidate.nodes.length +
+      connectionUnits +
+      customFiles.length +
+      apiComposites.length +
+      compositeContractUnits +
+      customFiles.reduce(
+        (total, graph) =>
+          total + countGraph(graph),
+        0
+      ) +
+      apiComposites.reduce(
+        (total, graph) =>
+          total + countGraph(graph),
+        0
+      );
+  };
+
+  return root ? countGraph(root) : 0;
+}
+
+async function validateProjectStructureForRepair(
+  project,
+  {
+    onProgress = null
+  } = {}
 ) {
   const started = performance.now();
   const issues = new Map();
@@ -31207,8 +29190,55 @@ function validateProjectStructureForRepair(
   };
   const graph =
     projectTypedRuntimeGraph(project);
+  const totalUnits =
+    projectStructureValidationUnitCount(
+      project
+    );
+  const progressBatch = Math.max(
+    1,
+    Math.ceil(totalUnits / 100)
+  );
+  let completedUnits = 0;
+  let nextProgressUnit = progressBatch;
+  const reportProgress = force => {
+    if (
+      typeof onProgress !== "function" ||
+      (
+        !force &&
+        completedUnits < nextProgressUnit
+      )
+    ) {
+      return null;
+    }
+    onProgress({
+      completed: Math.min(
+        completedUnits,
+        totalUnits
+      ),
+      total: totalUnits,
+      unit: "graph records"
+    });
+    nextProgressUnit =
+      completedUnits + progressBatch;
+    return yieldBuilderTask();
+  };
+  const completeUnits = async count => {
+    completedUnits += Math.max(
+      0,
+      Number(count) || 0
+    );
+    const cooperativeYield =
+      reportProgress(false);
+    if (cooperativeYield) {
+      await cooperativeYield;
+    }
+  };
 
   if (!graph) {
+    const emptyYield = reportProgress(true);
+    if (emptyYield) {
+      await emptyYield;
+    }
     return Object.freeze({
       valid: true,
       diagnostics: Object.freeze([]),
@@ -31222,7 +29252,15 @@ function validateProjectStructureForRepair(
   let nodeCount = 0;
   let connectionCount = 0;
   const visited = new Set();
-  const inspectGraph = (
+  if (typeof onProgress === "function") {
+    onProgress({
+      completed: 0,
+      total: totalUnits,
+      unit: "graph records"
+    });
+  }
+
+  const inspectGraph = async (
     candidate,
     path,
     depth
@@ -31232,6 +29270,7 @@ function validateProjectStructureForRepair(
       typeof candidate !== "object" ||
       Array.isArray(candidate)
     ) {
+      await completeUnits(1);
       addIssue(
         "invalid graph records",
         `${path}: graph object missing`
@@ -31239,6 +29278,7 @@ function validateProjectStructureForRepair(
       return;
     }
     if (visited.has(candidate)) {
+      await completeUnits(1);
       addIssue(
         "recursive graph records",
         path
@@ -31246,6 +29286,7 @@ function validateProjectStructureForRepair(
       return;
     }
     if (depth > PROJECT_TREE_MAX_DEPTH) {
+      await completeUnits(1);
       addIssue(
         "graph nesting overflow",
         path
@@ -31253,6 +29294,7 @@ function validateProjectStructureForRepair(
       return;
     }
     visited.add(candidate);
+    await completeUnits(1);
 
     if (!Array.isArray(candidate.nodes)) {
       addIssue(
@@ -31271,6 +29313,7 @@ function validateProjectStructureForRepair(
 
     const nodeIds = new Set();
     for (const node of candidate.nodes) {
+      await completeUnits(1);
       nodeCount += 1;
       if (
         !node ||
@@ -31335,6 +29378,7 @@ function validateProjectStructureForRepair(
       new Map();
     for (const connection of
       candidate.connections) {
+      await completeUnits(1);
       connectionCount += 1;
       if (
         !connection ||
@@ -31407,6 +29451,7 @@ function validateProjectStructureForRepair(
       const pointIds = new Set();
       pointIdsByConnection.set(id, pointIds);
       for (const point of points) {
+        await completeUnits(1);
         const pointId = String(
           point?.id || ""
         ).trim();
@@ -31440,6 +29485,7 @@ function validateProjectStructureForRepair(
 
     for (const connection of
       candidate.connections) {
+      await completeUnits(1);
       const branch =
         connection?.branchFrom;
       if (branch == null) {
@@ -31483,13 +29529,14 @@ function validateProjectStructureForRepair(
     }
     for (const [ownerNodeId, customGraph] of
       Object.entries(customFiles || {})) {
+      await completeUnits(1);
       if (!nodeIds.has(ownerNodeId)) {
         addIssue(
           "orphaned Custom C# graphs",
           `${path}:${ownerNodeId}`
         );
       }
-      inspectGraph(
+      await inspectGraph(
         customGraph,
         `${path}/custom-csharp:${ownerNodeId || "<unnamed>"}`,
         depth + 1
@@ -31516,6 +29563,7 @@ function validateProjectStructureForRepair(
       Object.entries(
         apiComposites || {}
       )) {
+      await completeUnits(1);
       const owner = candidate.nodes.find(
         node => node?.id === ownerNodeId
       );
@@ -31581,6 +29629,7 @@ function validateProjectStructureForRepair(
       );
       const proxyIds = new Set();
       for (const boundary of boundaries) {
+        await completeUnits(1);
         const proxyId = String(
           boundary?.id || ""
         );
@@ -31636,6 +29685,7 @@ function validateProjectStructureForRepair(
           compositeGraph?.branchRouting ||
           {}
         )) {
+        await completeUnits(1);
         const parent = combinedById.get(
           String(
             branch?.connectionId || ""
@@ -31662,7 +29712,7 @@ function validateProjectStructureForRepair(
           );
         }
       }
-      inspectGraph(
+      await inspectGraph(
         compositeGraph,
         `${path}/api-composite:${ownerNodeId || "<unnamed>"}`,
         depth + 1
@@ -31670,11 +29720,16 @@ function validateProjectStructureForRepair(
     }
   };
 
-  inspectGraph(
+  await inspectGraph(
     graph,
     "runtime-root",
     0
   );
+  completedUnits = totalUnits;
+  const finalYield = reportProgress(true);
+  if (finalYield) {
+    await finalYield;
+  }
 
   const diagnostics = [...issues]
     .map(([category, issue]) =>
@@ -32437,6 +30492,112 @@ function preserveUnresolvedRequirementsAsUnavailableNodes(
   return preserved;
 }
 
+const IMPORT_PROGRESS_PROFILES =
+  Object.freeze({
+    "demand-stream": Object.freeze({
+      catalogStart: 5,
+      catalogEnd: 95,
+      prerequisitesEnd: 97,
+      apply: Object.freeze([
+        97.5,
+        98,
+        98.8,
+        99.4,
+        100
+      ])
+    }),
+    "cache-match": Object.freeze({
+      catalogStart: 6,
+      catalogEnd: 24,
+      prerequisitesEnd: 40,
+      apply: Object.freeze([
+        52,
+        68,
+        83,
+        96,
+        100
+      ])
+    }),
+    fallback: Object.freeze({
+      catalogStart: 6,
+      catalogEnd: 18,
+      prerequisitesEnd: 38,
+      apply: Object.freeze([
+        50,
+        67,
+        82,
+        96,
+        100
+      ])
+    }),
+    checking: Object.freeze({
+      catalogStart: 4,
+      catalogEnd: 6,
+      prerequisitesEnd: 36,
+      apply: Object.freeze([
+        48,
+        66,
+        82,
+        96,
+        100
+      ])
+    }),
+    none: Object.freeze({
+      catalogStart: 4,
+      catalogEnd: 8,
+      prerequisitesEnd: 36,
+      apply: Object.freeze([
+        48,
+        66,
+        82,
+        96,
+        100
+      ])
+    })
+  });
+
+function importProgressProfile(branch) {
+  return IMPORT_PROGRESS_PROFILES[
+    String(branch || "none")
+  ] || IMPORT_PROGRESS_PROFILES.none;
+}
+
+function importCatalogProgressValue(
+  branch,
+  fraction
+) {
+  const profile =
+    importProgressProfile(branch);
+  const bounded = clamp(
+    Number(fraction) || 0,
+    0,
+    1
+  );
+  return profile.catalogStart +
+    (
+      profile.catalogEnd -
+      profile.catalogStart
+    ) * bounded;
+}
+
+function importPrerequisiteProgressValue(
+  branch,
+  fraction
+) {
+  const profile =
+    importProgressProfile(branch);
+  const bounded = clamp(
+    Number(fraction) || 0,
+    0,
+    1
+  );
+  return profile.catalogEnd +
+    (
+      profile.prerequisitesEnd -
+      profile.catalogEnd
+    ) * bounded;
+}
+
 async function ensureProjectRuntimePrerequisites(
   project,
   workSession,
@@ -32446,9 +30607,31 @@ async function ensureProjectRuntimePrerequisites(
       requestedCatalogPreflight = null,
     allowOfflineCompatibility = true,
     allowAutomaticLiveRetry = false,
-    automaticReplacementOnly = false
+    automaticReplacementOnly = false,
+    progressMapper = null
   } = {}
 ) {
+  const mapPrerequisiteProgress = value =>
+    typeof progressMapper === "function"
+      ? progressMapper(value)
+      : value;
+  const updatePrerequisiteWork = (
+    session,
+    changes = {}
+  ) =>
+    updateBuilderWork(
+      session,
+      typeof changes.progress === "number" &&
+      Number.isFinite(changes.progress)
+        ? {
+            ...changes,
+            progress:
+              mapPrerequisiteProgress(
+                changes.progress
+              )
+          }
+        : changes
+    );
   let catalogPreflight =
     requestedCatalogPreflight;
   const graph =
@@ -32481,7 +30664,7 @@ async function ensureProjectRuntimePrerequisites(
     catalogPreflight = null;
   }
 
-  updateBuilderWork(
+  updatePrerequisiteWork(
     workSession,
     {
       title:
@@ -32490,7 +30673,7 @@ async function ensureProjectRuntimePrerequisites(
         window.RMLI18n.t("ui.auto.919a9a0d214b"),
       detail:
         window.RMLI18n.t("ui.literal.983c4c792f2e"),
-      progress: 34
+      progress: 2
     }
   );
   await paintBuilderUi();
@@ -32498,8 +30681,37 @@ async function ensureProjectRuntimePrerequisites(
   const structuralRepairability =
     catalogPreflight
       ?.structuralRepairability ||
-    validateProjectStructureForRepair(
-      project
+    await validateProjectStructureForRepair(
+      project,
+      {
+        onProgress(detail) {
+          const completed = Math.max(
+            0,
+            Number(detail?.completed) || 0
+          );
+          const total = Math.max(
+            0,
+            Number(detail?.total) || 0
+          );
+          updatePrerequisiteWork(
+            workSession,
+            {
+              detail:
+                `${completed.toLocaleString(window.RMLI18n?.language || undefined)} / ${total.toLocaleString(window.RMLI18n?.language || undefined)} graph records checked.`,
+              progress:
+                total > 0
+                  ? 2 +
+                    2 *
+                    Math.min(
+                      completed,
+                      total
+                    ) /
+                    total
+                  : 4
+            }
+          );
+        }
+      }
     );
   if (!structuralRepairability.valid) {
     throw irreparableProjectJsonError(
@@ -32508,7 +30720,7 @@ async function ensureProjectRuntimePrerequisites(
     );
   }
 
-  updateBuilderWork(
+  updatePrerequisiteWork(
     workSession,
     {
       title:
@@ -32522,7 +30734,7 @@ async function ensureProjectRuntimePrerequisites(
         window.RMLI18n.format("import.work.repairability_detail", {
           milliseconds: Math.max(0.1, structuralRepairability.elapsedMilliseconds).toLocaleString(window.RMLI18n?.language || undefined, { maximumFractionDigits: 1 })
         }),
-      progress: 35
+      progress: 4
     }
   );
   await paintBuilderUi();
@@ -32585,10 +30797,16 @@ async function ensureProjectRuntimePrerequisites(
   let compositeReconciliation =
     catalogPreflight
       ?.compositeReconciliation || null;
+  let catalogProgressBranch = String(
+    catalogPreflight
+      ?.progressProfile
+      ?.catalogBranch ||
+    "none"
+  );
 
   if (!catalogPreflight) {
 
-  updateBuilderWork(
+  updatePrerequisiteWork(
     workSession,
     {
       title:
@@ -32597,7 +30815,7 @@ async function ensureProjectRuntimePrerequisites(
         window.RMLI18n.t("ui.auto.866c60f7858a"),
       detail:
         window.RMLI18n.t("ui.literal.30368cc91119"),
-      progress: 36
+      progress: 4
     }
   );
   await paintBuilderUi();
@@ -32638,7 +30856,7 @@ async function ensureProjectRuntimePrerequisites(
         ?.migratedNodeCount || 0
     ) > 0
   ) {
-    updateBuilderWork(
+    updatePrerequisiteWork(
       workSession,
       {
         title:
@@ -32649,7 +30867,7 @@ async function ensureProjectRuntimePrerequisites(
           }),
         detail:
           window.RMLI18n.t("ui.literal.7dcea19ab900"),
-        progress: 40
+        progress: 5
       }
     );
     await paintBuilderUi();
@@ -32676,8 +30894,9 @@ async function ensureProjectRuntimePrerequisites(
         "[RML BUILDER INTERNAL FAILURE] The import could not start its single scanner health sweep.",
         importCatalogSyncError
       );
+      catalogProgressBranch = "fallback";
     } else {
-      updateBuilderWork(
+      updatePrerequisiteWork(
         workSession,
         {
           title:
@@ -32686,7 +30905,7 @@ async function ensureProjectRuntimePrerequisites(
             window.RMLI18n.t("ui.auto.ef5bac1920fc"),
           detail:
             "Exactly one seven-port health sweep is running for this import.",
-          progress: 42
+          progress: 6
         }
       );
       await paintBuilderUi();
@@ -32696,10 +30915,65 @@ async function ensureProjectRuntimePrerequisites(
             silent: true,
             showWork: false,
             forceRetry: true,
-            trigger: "import"
+            trigger: "import",
+            onProgress(detail) {
+              const branch = String(
+                detail?.branch ||
+                "checking"
+              );
+              if (
+                [
+                  "demand-stream",
+                  "cache-match",
+                  "fallback"
+                ].includes(branch)
+              ) {
+                catalogProgressBranch =
+                  branch;
+              }
+              const completed = Math.max(
+                0,
+                Number(
+                  detail?.completed
+                ) || 0
+              );
+              const total = Math.max(
+                0,
+                Number(detail?.total) || 0
+              );
+              const unit = String(
+                detail?.unit || ""
+              );
+              updatePrerequisiteWork(
+                workSession,
+                {
+                  progress:
+                    importCatalogProgressValue(
+                      branch,
+                      detail?.progress
+                    ),
+                  detail:
+                    total > 0
+                      ? `${completed.toLocaleString(window.RMLI18n?.language || undefined)} / ${total.toLocaleString(window.RMLI18n?.language || undefined)} ${unit || "catalog units"} completed.`
+                      : String(
+                          detail?.phase ||
+                          "Catalog synchronization"
+                        )
+                }
+              );
+            }
           });
       } catch (error) {
         importCatalogSyncError = error;
+        if (
+          catalogProgressBranch ===
+            "none" ||
+          catalogProgressBranch ===
+            "checking"
+        ) {
+          catalogProgressBranch =
+            "fallback";
+        }
         console.error(
           "[RML BUILDER INTERNAL FAILURE] The import-owned scanner synchronization failed.",
           error
@@ -32709,7 +30983,7 @@ async function ensureProjectRuntimePrerequisites(
   }
 
   if (requiredCatalogNodes.length > 0) {
-    updateBuilderWork(
+    updatePrerequisiteWork(
       workSession,
       {
         title:
@@ -32722,7 +30996,11 @@ async function ensureProjectRuntimePrerequisites(
           allowAutomaticLiveRetry === true
             ? window.RMLI18n.t("ui.literal.a5cab49576b0")
             : window.RMLI18n.t("ui.literal.8e4017d8cb91"),
-        progress: 44
+        progress:
+          importPrerequisiteProgressValue(
+            catalogProgressBranch,
+            0.1
+          )
       }
     );
     await paintBuilderUi();
@@ -32742,7 +31020,7 @@ async function ensureProjectRuntimePrerequisites(
           requiredNodes:
             requiredCatalogNodes,
           onLiveLookup(detail) {
-            updateBuilderWork(
+            updatePrerequisiteWork(
               workSession,
               {
                 title:
@@ -32753,12 +31031,16 @@ async function ensureProjectRuntimePrerequisites(
                   allowAutomaticLiveRetry === true
                     ? window.RMLI18n.t("ui.literal.e9d0199ee7de")
                     : window.RMLI18n.t("ui.literal.f12b96ac8fd9"),
-                progress: 48
+                progress:
+                  importPrerequisiteProgressValue(
+                    catalogProgressBranch,
+                    0.2
+                  )
               }
             );
           },
           onFingerprintMatch(detail) {
-            updateBuilderWork(
+            updatePrerequisiteWork(
               workSession,
               {
                 title:
@@ -32770,12 +31052,16 @@ async function ensureProjectRuntimePrerequisites(
                   ),
                 detail:
                   window.RMLI18n.t("ui.literal.427cb9c32532"),
-                progress: 49
+                progress:
+                  importPrerequisiteProgressValue(
+                    catalogProgressBranch,
+                    0.3
+                  )
               }
             );
           },
           onCatalogRefresh(detail) {
-            updateBuilderWork(
+            updatePrerequisiteWork(
               workSession,
               {
                 title:
@@ -32787,12 +31073,16 @@ async function ensureProjectRuntimePrerequisites(
                   ),
                 detail:
                   window.RMLI18n.t("ui.literal.2bdbe12ad442"),
-                progress: 50
+                progress:
+                  importPrerequisiteProgressValue(
+                    catalogProgressBranch,
+                    0.4
+                  )
               }
             );
           },
           onCatalogCacheWrite(detail) {
-            updateBuilderWork(
+            updatePrerequisiteWork(
               workSession,
               {
                 title:
@@ -32804,12 +31094,16 @@ async function ensureProjectRuntimePrerequisites(
                   ),
                 detail:
                   window.RMLI18n.t("ui.literal.c46717b21cbe"),
-                progress: 50.5
+                progress:
+                  importPrerequisiteProgressValue(
+                    catalogProgressBranch,
+                    0.5
+                  )
               }
             );
           },
           onFactoryActivation(detail) {
-            updateBuilderWork(
+            updatePrerequisiteWork(
               workSession,
               {
                 title:
@@ -32821,12 +31115,18 @@ async function ensureProjectRuntimePrerequisites(
                   ),
                 detail:
                   window.RMLI18n.t("ui.literal.8df7e446c755"),
-                progress: 51
+                progress:
+                  importPrerequisiteProgressValue(
+                    catalogProgressBranch,
+                    0.6
+                  )
               }
             );
           },
           onContractResolution(detail) {
-            updateBuilderWork(
+            const reportedProgress =
+              Number(detail?.progress);
+            updatePrerequisiteWork(
               workSession,
               {
                 title:
@@ -32845,14 +31145,23 @@ async function ensureProjectRuntimePrerequisites(
                     window.RMLI18n.t("ui.literal.4882c84c4781")
                   ),
                 progress:
-                  Number(
-                    detail?.progress
-                  ) || 51.5
+                  importPrerequisiteProgressValue(
+                    catalogProgressBranch,
+                    Number.isFinite(
+                      reportedProgress
+                    )
+                      ? clamp(
+                          reportedProgress,
+                          0,
+                          1
+                        )
+                      : 0.7
+                  )
               }
             );
           },
           onCacheFallback(detail) {
-            updateBuilderWork(
+            updatePrerequisiteWork(
               workSession,
               {
                 title:
@@ -32861,7 +31170,11 @@ async function ensureProjectRuntimePrerequisites(
                   String(detail?.message || window.RMLI18n.t("ui.literal.6ca47c0b5a6a")),
                 detail:
                   window.RMLI18n.t("ui.literal.4b4f1b16cfdb"),
-                progress: 49
+                progress:
+                  importPrerequisiteProgressValue(
+                    catalogProgressBranch,
+                    0.3
+                  )
               }
             );
           }
@@ -33078,7 +31391,7 @@ async function ensureProjectRuntimePrerequisites(
                   )
                 : null;
 
-            updateBuilderWork(
+            updatePrerequisiteWork(
               workSession,
               {
                 title:
@@ -33095,7 +31408,11 @@ async function ensureProjectRuntimePrerequisites(
                   ),
                 detail:
                   window.RMLI18n.t("import.unavailable_preserved_detail"),
-                progress: 52.5
+                progress:
+                  importPrerequisiteProgressValue(
+                    catalogProgressBranch,
+                    0.75
+                  )
               }
             );
             await paintBuilderUi();
@@ -33167,7 +31484,7 @@ async function ensureProjectRuntimePrerequisites(
               )
             )
         });
-        updateBuilderWork(
+        updatePrerequisiteWork(
           workSession,
           {
             title:
@@ -33182,7 +31499,11 @@ async function ensureProjectRuntimePrerequisites(
                 : window.RMLI18n.t("import.work.unavailable_preserved_summary"),
             detail:
               window.RMLI18n.t("ui.literal.b0a39d63f1b8"),
-            progress: 53
+            progress:
+              importPrerequisiteProgressValue(
+                catalogProgressBranch,
+                0.8
+              )
           }
         );
         await paintBuilderUi();
@@ -33277,7 +31598,7 @@ async function ensureProjectRuntimePrerequisites(
         const operatorId = String(
           requirement?.operatorId || ""
         );
-        updateBuilderWork(
+        updatePrerequisiteWork(
           workSession,
           {
             title:
@@ -33291,8 +31612,13 @@ async function ensureProjectRuntimePrerequisites(
             detail:
               window.RMLI18n.t("ui.literal.64bda3c5accf"),
             progress:
-              52 + Math.round(
-                8 * index /
+              importPrerequisiteProgressValue(
+                catalogProgressBranch,
+                0.72 +
+                0.18 *
+                (
+                  index + 1
+                ) /
                 Math.max(
                   1,
                   unresolvedRequirements.length
@@ -33565,7 +31891,23 @@ async function ensureProjectRuntimePrerequisites(
                   entry.selectedOperatorId ||
                   "",
                 validationDiagnostics:
-                  selectedPlanDiagnostics
+                  selectedPlanDiagnostics,
+                progressMapper: value =>
+                  mapPrerequisiteProgress(
+                    importPrerequisiteProgressValue(
+                      catalogProgressBranch,
+                      0.75 +
+                        0.25 *
+                          clamp(
+                            (
+                              Number(value) -
+                              50
+                            ) / 4,
+                            0,
+                            1
+                          )
+                    )
+                  )
               }
             );
 
@@ -33852,7 +32194,7 @@ async function ensureProjectRuntimePrerequisites(
               );
             }
           }
-          updateBuilderWork(
+          updatePrerequisiteWork(
             workSession,
             {
               title:
@@ -33861,7 +32203,11 @@ async function ensureProjectRuntimePrerequisites(
                 window.RMLI18n.t("ui.auto.4e0c55c7db9d"),
               detail:
                 `${selectedPlanDiagnostics.slice(0, 3).join(" | ")}${selectedPlanDiagnostics.length > 3 ? ` | and ${selectedPlanDiagnostics.length - 3} more` : ""}`,
-              progress: 61
+              progress:
+                importPrerequisiteProgressValue(
+                  catalogProgressBranch,
+                  0.95
+                )
             }
           );
           await paintBuilderUi();
@@ -34158,6 +32504,23 @@ async function ensureProjectRuntimePrerequisites(
       );
   }
 
+  const progressProfile =
+    Object.freeze({
+      catalogBranch:
+        catalogProgressBranch,
+      ...importProgressProfile(
+        catalogProgressBranch
+      )
+    });
+  updatePrerequisiteWork(
+    workSession,
+    {
+      progress:
+        progressProfile
+          .prerequisitesEnd
+    }
+  );
+
   if (catalogOnly) {
     return {
       graph,
@@ -34176,6 +32539,7 @@ async function ensureProjectRuntimePrerequisites(
       removedUnavailableApiNodes,
       structuralRepairability,
       compositeReconciliation,
+      progressProfile,
       catalogResolutionEpochToken:
         runtimeCatalogResolutionEpochToken(),
       catalogResolutionBatchEpochToken:
@@ -34465,6 +32829,7 @@ async function ensureProjectRuntimePrerequisites(
     compositeReconciliation,
     appliedNodeMigrations,
     removedUnavailableApiNodes,
+    progressProfile,
     importValidationDiagnostics: nonBlockingImportDiagnostics,
     analysisCertificate:
       graphValidation?.analysisCertificate ||
@@ -34475,6 +32840,10 @@ async function ensureProjectRuntimePrerequisites(
       runtimeCatalogResolutionBatchEpochToken()
   };
 }
+
+let activeSavedApiCompositeImportWorkSession = 0;
+let activeSavedApiCompositeImportProgressRange =
+  null;
 
 async function resolveSavedApiCompositeGraph(
   graphDocument,
@@ -34507,20 +32876,51 @@ async function resolveSavedApiCompositeGraph(
         structuredClone(graphDocument)
     }
   };
-  const workSession = beginBuilderWork({
-    kicker:
-      openGraph
-        ? window.RMLI18n.t("ui.literal.482c0ed4a9e7")
-        : window.RMLI18n.t("ui.literal.a534910f1e5b"),
-    title:
-      window.RMLI18n.t("ui.auto.dae4afe5a46d"),
-    message:
-      `Preparing '${String(name || window.RMLI18n.t("ui.literal.8030a124d0bc"))}' without changing the open project.`,
-    detail:
-      window.RMLI18n.t("ui.literal.9bacfb101044"),
-    progress: 32,
-    timeout: 120000
-  });
+  const inheritedWorkSession =
+    importedSavedComposite
+      ? activeSavedApiCompositeImportWorkSession
+      : 0;
+  const ownsWorkSession =
+    !inheritedWorkSession;
+  const workSession =
+    inheritedWorkSession ||
+    beginBuilderWork({
+      kicker:
+        openGraph
+          ? window.RMLI18n.t("ui.literal.482c0ed4a9e7")
+          : window.RMLI18n.t("ui.literal.a534910f1e5b"),
+      title:
+        window.RMLI18n.t("ui.auto.dae4afe5a46d"),
+      message:
+        `Preparing '${String(name || window.RMLI18n.t("ui.literal.8030a124d0bc"))}' without changing the open project.`,
+      detail:
+        window.RMLI18n.t("ui.literal.9bacfb101044"),
+      progress: 4,
+      timeout: 120000
+    });
+  const compositeProgressRange =
+    importedSavedComposite &&
+    activeSavedApiCompositeImportProgressRange
+      ? {
+          ...activeSavedApiCompositeImportProgressRange
+        }
+      : null;
+  const progressMapper =
+    compositeProgressRange
+      ? value => {
+          const fraction =
+            clamp(
+              Number(value) || 0,
+              0,
+              100
+            ) / 100;
+          return compositeProgressRange.start +
+            (
+              compositeProgressRange.end -
+              compositeProgressRange.start
+            ) * fraction;
+        }
+      : null;
   try {
     const result =
       await ensureProjectRuntimePrerequisites(
@@ -34533,38 +32933,10 @@ async function resolveSavedApiCompositeGraph(
           allowAutomaticLiveRetry:
             importedSavedComposite,
           automaticReplacementOnly:
-            openGraph
+            openGraph,
+          progressMapper
         }
       );
-    updateBuilderWork(
-      workSession,
-      {
-        kicker:
-          openGraph
-            ? window.RMLI18n.t("ui.literal.7132555f9192")
-            : window.RMLI18n.t("ui.literal.e74da2484f1b"),
-        title:
-          window.RMLI18n.t("ui.auto.05ab612f3a70"),
-        message:
-          Array.isArray(
-            result
-              .removedUnavailableApiNodes
-          ) &&
-          result
-            .removedUnavailableApiNodes
-            .length > 0
-            ? `${result.removedUnavailableApiNodes.length.toLocaleString(window.RMLI18n?.language || undefined)} unavailable API node${result.removedUnavailableApiNodes.length === 1 ? " was" : "s were"} omitted; the remaining graph is ready.`
-            : result.compatibilityMode
-              ? window.RMLI18n.t("ui.literal.857e7fe07942")
-              : window.RMLI18n.t("ui.literal.67ac68f5b020"),
-        detail:
-          openGraph
-            ? window.RMLI18n.t("ui.literal.8195c4cdf13f")
-            : window.RMLI18n.t("ui.literal.300666c2db7e"),
-        progress: 100
-      }
-    );
-    await paintBuilderUi();
     const resolvedGraph = structuredClone(
       result.graph ||
       project.extensions.typedNodeGraph
@@ -34604,15 +32976,47 @@ async function resolveSavedApiCompositeGraph(
           )
         )
     });
-    finishBuilderWork(workSession);
-    return includeResolutionDetails
+    const resolvedResult =
+      includeResolutionDetails
       ? Object.freeze({
           graph: resolvedGraph,
           resolution
         })
       : resolvedGraph;
+    if (ownsWorkSession) {
+      await completeBuilderWork(
+        workSession,
+        {
+          kicker:
+            openGraph
+              ? window.RMLI18n.t("ui.literal.7132555f9192")
+              : window.RMLI18n.t("ui.literal.e74da2484f1b"),
+          title:
+            window.RMLI18n.t("ui.auto.05ab612f3a70"),
+          message:
+            Array.isArray(
+              result
+                .removedUnavailableApiNodes
+            ) &&
+            result
+              .removedUnavailableApiNodes
+              .length > 0
+              ? `${result.removedUnavailableApiNodes.length.toLocaleString(window.RMLI18n?.language || undefined)} unavailable API node${result.removedUnavailableApiNodes.length === 1 ? " was" : "s were"} omitted; the remaining graph is ready.`
+              : result.compatibilityMode
+                ? window.RMLI18n.t("ui.literal.857e7fe07942")
+                : window.RMLI18n.t("ui.literal.67ac68f5b020"),
+          detail:
+            openGraph
+              ? window.RMLI18n.t("ui.literal.8195c4cdf13f")
+              : window.RMLI18n.t("ui.literal.300666c2db7e")
+        }
+      );
+    }
+    return resolvedResult;
   } catch (error) {
-    finishBuilderWork(workSession);
+    if (ownsWorkSession) {
+      finishBuilderWork(workSession);
+    }
     const message = String(
       error instanceof Error
         ? error.message
@@ -35172,6 +33576,163 @@ function queueImportedCodegen(
   }, 0);
 }
 
+const importedGraphPresentationWork =
+  new Map();
+
+function createImportedGraphPresentationWork(
+  projectEpoch,
+  workSession,
+  {
+    progressStart = 0,
+    progressEnd = 99
+  } = {}
+) {
+  const epoch = Number(projectEpoch) || 0;
+  const start = clamp(
+    Number(progressStart) || 0,
+    0,
+    99
+  );
+  const end = clamp(
+    Number(progressEnd) || 99,
+    start,
+    99
+  );
+  const record = {
+    epoch,
+    workSession,
+    start,
+    end,
+    reporting: false,
+    released: false,
+    latest: null,
+    lease: null
+  };
+  const publish = changes => {
+    if (
+      record.released ||
+      !record.reporting ||
+      !changes ||
+      typeof changes !== "object"
+    ) {
+      return false;
+    }
+    const copy = { ...changes };
+    if (
+      typeof copy.progress === "number" &&
+      Number.isFinite(copy.progress)
+    ) {
+      const fraction = clamp(
+        copy.progress / 100,
+        0,
+        1
+      );
+      copy.progress =
+        record.start +
+        (record.end - record.start) *
+          fraction;
+    } else {
+      delete copy.progress;
+    }
+    return updateBuilderWork(
+      record.workSession,
+      copy
+    );
+  };
+  record.lease = Object.freeze({
+    projectEpoch: epoch,
+    workSession,
+    update(changes = {}) {
+      if (record.released) return false;
+      record.latest = {
+        ...(record.latest || {}),
+        ...changes
+      };
+      return record.reporting
+        ? publish(record.latest)
+        : true;
+    },
+    current() {
+      return !record.released &&
+        importedGraphPresentationWork.get(
+          epoch
+        ) === record;
+    }
+  });
+  importedGraphPresentationWork.set(
+    epoch,
+    record
+  );
+  return record;
+}
+
+function activateImportedGraphPresentationWork(
+  record
+) {
+  if (!record || record.released) {
+    return false;
+  }
+  record.reporting = true;
+  if (record.latest) {
+    record.lease.update({});
+  }
+  return true;
+}
+
+function releaseImportedGraphPresentationWork(
+  record
+) {
+  if (!record || record.released) {
+    return false;
+  }
+  record.released = true;
+  record.reporting = false;
+  record.latest = null;
+  if (
+    importedGraphPresentationWork.get(
+      record.epoch
+    ) === record
+  ) {
+    importedGraphPresentationWork.delete(
+      record.epoch
+    );
+  }
+  document.dispatchEvent(
+    new CustomEvent(
+      "rml-builder:import-presentation-work-released",
+      {
+        detail: Object.freeze({
+          projectEpoch: record.epoch,
+          workSession:
+            record.workSession
+        })
+      }
+    )
+  );
+  return true;
+}
+
+Object.defineProperty(
+  window,
+  "RMLImportPresentationWork",
+  {
+    value: Object.freeze({
+      claim(projectEpoch) {
+        const record =
+          importedGraphPresentationWork.get(
+            Number(projectEpoch) || 0
+          );
+        return record && !record.released
+          ? record.lease
+          : null;
+      }
+    }),
+    writable: false,
+    enumerable: false,
+    configurable: true
+  }
+);
+
 function waitForImportedGraphUi(
   expectedNodes,
   expectedConnections,
@@ -35179,12 +33740,16 @@ function waitForImportedGraphUi(
   {
     strict = false,
     projectEpoch =
-      projectApplicationEpoch
+      projectApplicationEpoch,
+    graphDocument = null,
+    requestedPage: requestedPageOption = null
   } = {}
 ) {
   const graph =
+    graphDocument ||
     state.extensions?.typedNodeGraph;
   const requestedPage =
+    requestedPageOption ||
     state.activePage ||
     graph?.lastOpenPage ||
     "configuration-outline";
@@ -35324,24 +33889,24 @@ function waitForImportedGraphUi(
       const current = hostStateMatches();
       if (
         current.matches &&
-        current.viewFailed
+        (
+          current.viewFailed ||
+          current.renderBlocked
+        )
       ) {
         const message =
-          `The Runtime Graph presentation could not be prepared: ${current.viewError || window.RMLI18n.t("ui.literal.e5fd9aa24c94")}. The validated project remains loaded while presentation recovery continues.`;
+          `The Runtime Graph presentation could not be prepared: ${current.viewError || (current.renderBlocked ? "the active renderer reported a terminal blocked state" : window.RMLI18n.t("ui.literal.e5fd9aa24c94"))}.`;
         console.error(message);
-        finish(false, null, {
-          failed: true,
-          modelReady: true,
-          error: message
-        });
+        finish(false, new Error(message));
         return true;
       }
       if (
         current.matches &&
-        (
-          current.viewReady ||
-          current.renderBlocked
-        )
+        current.requestedGraphView &&
+        current.graphViewActive &&
+        current.viewReady &&
+        !current.viewFailed &&
+        !current.renderBlocked
       ) {
         finish(false);
         return true;
@@ -35362,24 +33927,24 @@ function waitForImportedGraphUi(
       ) {
         return;
       }
-      const current =
-        hostStateMatches();
-
-      if (inspectNow()) {
-        return;
-      }
-      if (
-        strict &&
-        window.RMLDynamicGraphHost &&
-        !current.matches
-      ) {
-        finish(
-          false,
-          new Error(
-            `The Runtime Graph initialized a different project state: expected ${Number(expectedNodes).toLocaleString(window.RMLI18n?.language || undefined)} nodes and ${Number(expectedConnections).toLocaleString(window.RMLI18n?.language || undefined)} connections for project epoch ${expectedProjectEpoch}, but received ${Number(current.nodeCount).toLocaleString(window.RMLI18n?.language || undefined)} and ${Number(current.connectionCount).toLocaleString(window.RMLI18n?.language || undefined)} for epoch ${Number(current.hostProjectEpoch) || 0}. The JSON was not loaded.`
-          )
-        );
-      }
+      queueMicrotask(() => {
+        if (settled || inspectNow()) return;
+        const current = hostStateMatches();
+        if (
+          strict &&
+          window.RMLDynamicGraphHost &&
+          current.hostProjectEpoch ===
+            expectedProjectEpoch &&
+          !current.matches
+        ) {
+          finish(
+            false,
+            new Error(
+              `The Runtime Graph initialized a different project state: expected ${Number(expectedNodes).toLocaleString(window.RMLI18n?.language || undefined)} nodes and ${Number(expectedConnections).toLocaleString(window.RMLI18n?.language || undefined)} connections for project epoch ${expectedProjectEpoch}, but received ${Number(current.nodeCount).toLocaleString(window.RMLI18n?.language || undefined)} and ${Number(current.connectionCount).toLocaleString(window.RMLI18n?.language || undefined)} for epoch ${Number(current.hostProjectEpoch) || 0}. The JSON was not loaded.`
+            )
+          );
+        }
+      });
     };
 
     const handleComplete = event => {
@@ -35421,13 +33986,14 @@ function waitForImportedGraphUi(
     timer = window.setTimeout(() => {
       const current = hostStateMatches();
       const message =
-        `The Runtime Graph presentation did not finish within ${Math.round(effectiveTimeout / 1000)} seconds. The validated project remains loaded and presentation recovery may continue.`;
+        `The Runtime Graph presentation did not become usable within ${Math.round(effectiveTimeout / 1000)} seconds.`;
       console.error(message);
-      finish(true, null, {
-        failed: true,
-        modelReady: current.matches,
-        error: message
-      });
+      finish(
+        true,
+        new Error(
+          `${message} Model identity matched: ${String(current.matches)}.`
+        )
+      );
     }, effectiveTimeout);
 
     document.addEventListener(
@@ -35452,8 +34018,8 @@ function waitForImportedGraphUi(
         settled ||
         (
           expectedProjectEpoch > 0 &&
-          expectedProjectEpoch !==
-            projectApplicationEpoch
+          projectApplicationEpoch >
+            expectedProjectEpoch
         )
       ) {
         return;
@@ -35469,8 +34035,8 @@ function waitForImportedGraphUi(
         settled ||
         (
           expectedProjectEpoch > 0 &&
-          expectedProjectEpoch !==
-            projectApplicationEpoch
+          projectApplicationEpoch >
+            expectedProjectEpoch
         )
       ) {
         return;
@@ -35489,8 +34055,8 @@ function waitForImportedGraphUi(
         settled ||
         (
           expectedProjectEpoch > 0 &&
-          expectedProjectEpoch !==
-            projectApplicationEpoch
+          projectApplicationEpoch >
+            expectedProjectEpoch
         )
       ) {
         return;
@@ -35504,13 +34070,14 @@ function waitForImportedGraphUi(
       }
       const current = hostStateMatches();
       const message =
-        `The Runtime Graph presentation module could not be prepared: ${error instanceof Error ? error.message : String(error)}. The validated project remains loaded while presentation recovery continues.`;
+        `The Runtime Graph presentation module could not be prepared: ${error instanceof Error ? error.message : String(error)}.`;
       console.error(message);
-      finish(false, null, {
-        failed: true,
-        modelReady: current.matches,
-        error: message
-      });
+      finish(
+        false,
+        new Error(
+          `${message} Model identity matched: ${String(current.matches)}.`
+        )
+      );
     });
 
   });
@@ -35534,13 +34101,14 @@ async function applyLoadedProjectWithFeedback(
         window.RMLI18n.t("ui.auto.2c5ca98b3c3c"),
       detail:
         window.RMLI18n.t("ui.literal.48926a56d5e6"),
-      progress: 32,
+      progress: 0,
       timeout: 120000
     });
   let previousProject = null;
   let projectApplicationStarted = false;
   let portableRegistryTransaction =
     null;
+  let importedPresentationWork = null;
 
   try {
     updateBuilderWork(
@@ -35553,7 +34121,7 @@ async function applyLoadedProjectWithFeedback(
           window.RMLI18n.t("ui.auto.2c5ca98b3c3c"),
         detail:
           window.RMLI18n.t("ui.literal.48926a56d5e6"),
-        progress: 32
+        progress: 0
       }
     );
     await paintBuilderUi();
@@ -35580,6 +34148,38 @@ async function applyLoadedProjectWithFeedback(
         : 0;
     const intentionallyDegradedGraph =
       omittedUnavailableNodeCount > 0;
+    const applyProgress =
+      Array.isArray(
+        prerequisites
+          .progressProfile?.apply
+      )
+        ? prerequisites
+            .progressProfile.apply
+        : importProgressProfile(
+            prerequisites
+              .progressProfile
+              ?.catalogBranch
+          ).apply;
+    const preparationStart = Math.min(
+      applyProgress[0],
+      Number(
+        prerequisites.progressProfile
+          ?.prerequisitesEnd
+      ) || 0
+    );
+    const preparationStageProgress =
+      completed =>
+        preparationStart +
+        (
+          applyProgress[0] -
+          preparationStart
+        ) *
+        clamp(
+          Number(completed) || 0,
+          0,
+          4
+        ) /
+        4;
 
     updateBuilderWork(
       session,
@@ -35594,7 +34194,7 @@ async function applyLoadedProjectWithFeedback(
               : window.RMLI18n.t("ui.literal.47e8a252b6d5"),
         detail:
           window.RMLI18n.t("ui.literal.f5871c36b5d6"),
-        progress: 55
+        progress: preparationStart
       }
     );
     await paintBuilderUi();
@@ -35612,6 +34212,16 @@ async function applyLoadedProjectWithFeedback(
         false,
         true
       );
+    updateBuilderWork(
+      session,
+      {
+        detail:
+          "1 / 4 project-installation preparation stages completed: rollback snapshot captured.",
+        progress:
+          preparationStageProgress(1)
+      }
+    );
+    await yieldBuilderTask();
 
     if (prerequisites.compatibilityMode) {
       const createTransaction =
@@ -35646,6 +34256,16 @@ async function applyLoadedProjectWithFeedback(
     }
 
     void installationCatalogEpoch;
+    updateBuilderWork(
+      session,
+      {
+        detail:
+          "2 / 4 project-installation preparation stages completed: compatibility registry settled.",
+        progress:
+          preparationStageProgress(2)
+      }
+    );
+    await yieldBuilderTask();
 
     if (forceConfigurationPage) {
       project.workspace = {
@@ -35667,44 +34287,6 @@ async function applyLoadedProjectWithFeedback(
       }
     }
 
-    projectApplicationStarted = true;
-    const importedProjectEpoch =
-      applyLoadedProject(
-        project,
-        {
-          render: false,
-          useJsonPageAssociation:
-            !forceConfigurationPage
-        }
-      );
-    generatedOutputDeferredImportEpoch =
-      importedProjectEpoch;
-    pendingImportedGraphAnalysisCertificate =
-      prerequisites.analysisCertificate ||
-      null;
-
-    if (prerequisites.graph) {
-      assertImportedGraphDocumentIdentity(
-        prerequisites.graph
-      );
-    }
-
-    updateBuilderWork(
-      session,
-      {
-        title: window.RMLI18n.t("ui.auto.a892aa9c7d02"),
-        message:
-          window.RMLI18n.t("ui.auto.5e89eb0efd95"),
-        detail:
-          window.RMLI18n.t("ui.literal.716ca8adba93"),
-        progress: 64
-      }
-    );
-    renderMetadata();
-    renderPalette();
-
-    await paintBuilderUi();
-
     const typedGraph =
       project.extensions?.typedNodeGraph;
     const expectedNodes =
@@ -35715,6 +34297,31 @@ async function applyLoadedProjectWithFeedback(
       Array.isArray(typedGraph?.connections)
         ? typedGraph.connections.length
         : 0;
+    const requestedPage =
+      forceConfigurationPage
+        ? "configuration-outline"
+        : pageForJsonFingerprint(
+            project?.__rmlJsonFingerprint ||
+              ""
+          ) || "configuration-outline";
+    const expectedImportedProjectEpoch =
+      projectApplicationEpoch + 1;
+    if (
+      typedGraph?.active === true &&
+      requestedPage === "runtime-graph"
+    ) {
+      importedPresentationWork =
+        createImportedGraphPresentationWork(
+          expectedImportedProjectEpoch,
+          session,
+          {
+            progressStart:
+              applyProgress[2],
+            progressEnd:
+              applyProgress[3]
+          }
+        );
+    }
     const graphUiReady =
       waitForImportedGraphUi(
         expectedNodes,
@@ -35723,9 +34330,140 @@ async function applyLoadedProjectWithFeedback(
         {
           strict: true,
           projectEpoch:
-            importedProjectEpoch
+            expectedImportedProjectEpoch,
+          graphDocument: typedGraph,
+          requestedPage
         }
       );
+    updateBuilderWork(
+      session,
+      {
+        detail:
+          "3 / 4 project-installation preparation stages completed: presentation identity registered.",
+        progress:
+          preparationStageProgress(3)
+      }
+    );
+    await yieldBuilderTask();
+
+    projectApplicationStarted = true;
+    updateBuilderWork(
+      session,
+      {
+        detail:
+          "4 / 4 project-installation preparation stages completed: atomic project installation can begin.",
+        progress:
+          preparationStageProgress(4)
+      }
+    );
+    await yieldBuilderTask();
+    const applicationStageProgress =
+      completed =>
+        applyProgress[0] +
+        (
+          applyProgress[2] -
+          applyProgress[0]
+        ) *
+        clamp(
+          Number(completed) || 0,
+          0,
+          7
+        ) /
+        7;
+    const importedProjectEpoch =
+      applyLoadedProject(
+        project,
+        {
+          render: false,
+          useJsonPageAssociation:
+            !forceConfigurationPage
+        }
+      );
+    if (
+      importedProjectEpoch !==
+        expectedImportedProjectEpoch
+    ) {
+      throw new Error(
+        `The imported project epoch changed unexpectedly: expected ${expectedImportedProjectEpoch}, received ${importedProjectEpoch}.`
+      );
+    }
+    updateBuilderWork(
+      session,
+      {
+        title: window.RMLI18n.t("ui.auto.a892aa9c7d02"),
+        message:
+          window.RMLI18n.t("ui.auto.5e89eb0efd95"),
+        detail:
+          `1 / 7 interface construction stages completed. ${window.RMLI18n.t("ui.literal.716ca8adba93")}`,
+        progress:
+          applicationStageProgress(1)
+      }
+    );
+    await yieldBuilderTask();
+    generatedOutputDeferredImportEpoch =
+      importedProjectEpoch;
+    updateBuilderWork(
+      session,
+      {
+        detail:
+          "2 / 7 interface construction stages completed: generated output is bound to the imported project.",
+        progress:
+          applicationStageProgress(2)
+      }
+    );
+    await yieldBuilderTask();
+    pendingImportedGraphAnalysisCertificate =
+      prerequisites.analysisCertificate ||
+      null;
+    updateBuilderWork(
+      session,
+      {
+        detail:
+          "3 / 7 interface construction stages completed: graph analysis certificate installed.",
+        progress:
+          applicationStageProgress(3)
+      }
+    );
+    await yieldBuilderTask();
+
+    if (prerequisites.graph) {
+      assertImportedGraphDocumentIdentity(
+        prerequisites.graph
+      );
+    }
+    updateBuilderWork(
+      session,
+      {
+        detail:
+          "4 / 7 interface construction stages completed: graph document identity matches.",
+        progress:
+          applicationStageProgress(4)
+      }
+    );
+    await yieldBuilderTask();
+    renderMetadata();
+    updateBuilderWork(
+      session,
+      {
+        detail:
+          "5 / 7 interface construction stages completed: project metadata rendered.",
+        progress:
+          applicationStageProgress(5)
+      }
+    );
+    await yieldBuilderTask();
+    renderPalette();
+    updateBuilderWork(
+      session,
+      {
+        detail:
+          "6 / 7 interface construction stages completed: project palette rendered.",
+        progress:
+          applicationStageProgress(6)
+      }
+    );
+
+    await paintBuilderUi();
 
     updateBuilderWork(
       session,
@@ -35738,14 +34476,52 @@ async function applyLoadedProjectWithFeedback(
             : window.RMLI18n.t("ui.literal.ef0705dd3730"),
         detail:
           window.RMLI18n.t("ui.literal.f10fe9059f1f"),
-        progress: 78
+        progress:
+          applicationStageProgress(6)
       }
     );
 
+    activateImportedGraphPresentationWork(
+      importedPresentationWork
+    );
+
     renderAll();
+    updateBuilderWork(
+      session,
+      {
+        detail:
+          `7 / 7 interface construction stages completed. ${expectedNodes.toLocaleString(window.RMLI18n?.language || undefined)} nodes and ${expectedConnections.toLocaleString(window.RMLI18n?.language || undefined)} connections are installed.`,
+        progress:
+          applicationStageProgress(7)
+      }
+    );
+    await yieldBuilderTask();
 
     const graphResult =
       await graphUiReady;
+    const verificationProgress =
+      completed =>
+        applyProgress[2] +
+        (
+          applyProgress[3] -
+          applyProgress[2]
+        ) *
+        clamp(
+          Number(completed) || 0,
+          0,
+          4
+        ) /
+        4;
+    updateBuilderWork(
+      session,
+      {
+        detail:
+          "1 / 4 installed-project verification stages completed: presentation is usable.",
+        progress:
+          verificationProgress(1)
+      }
+    );
+    await yieldBuilderTask();
 
     if (prerequisites.compatibilityMode) {
       const host =
@@ -35782,12 +34558,32 @@ async function applyLoadedProjectWithFeedback(
         );
       }
     }
+    updateBuilderWork(
+      session,
+      {
+        detail:
+          "2 / 4 installed-project verification stages completed: compatibility state is exact.",
+        progress:
+          verificationProgress(2)
+      }
+    );
+    await yieldBuilderTask();
 
     if (prerequisites.graph) {
       assertImportedGraphDocumentIdentity(
         prerequisites.graph
       );
     }
+    updateBuilderWork(
+      session,
+      {
+        detail:
+          "3 / 4 installed-project verification stages completed: graph document identity matches.",
+        progress:
+          verificationProgress(3)
+      }
+    );
+    await yieldBuilderTask();
 
     if (
       prerequisites.graph &&
@@ -35798,6 +34594,15 @@ async function applyLoadedProjectWithFeedback(
         importedProjectEpoch
       );
     }
+    updateBuilderWork(
+      session,
+      {
+        detail:
+          "4 / 4 installed-project verification stages completed: runtime identity matches.",
+        progress:
+          verificationProgress(4)
+      }
+    );
 
     updateBuilderWork(
       session,
@@ -35820,9 +34625,22 @@ async function applyLoadedProjectWithFeedback(
             : intentionallyDegradedGraph
               ? window.RMLI18n.t("ui.literal.96b60209ab59")
               : window.RMLI18n.t("ui.literal.49c2d6338a50"),
-        progress: 88
+        progress: applyProgress[3]
       }
     );
+
+    const finalizationProgress =
+      completed =>
+        applyProgress[3] +
+        (
+          99 - applyProgress[3]
+        ) *
+        clamp(
+          Number(completed) || 0,
+          0,
+          4
+        ) /
+        4;
 
     if (
       !prerequisites.compatibilityMode &&
@@ -35852,6 +34670,17 @@ async function applyLoadedProjectWithFeedback(
       );
     }
 
+    updateBuilderWork(
+      session,
+      {
+        detail:
+          "1 / 4 finalization stages completed: project validation settled.",
+        progress:
+          finalizationProgress(1)
+      }
+    );
+    await yieldBuilderTask();
+
     if (
       portableRegistryTransaction &&
       await Promise.resolve(
@@ -35864,10 +34693,28 @@ async function applyLoadedProjectWithFeedback(
       );
     }
     portableRegistryTransaction = null;
+    updateBuilderWork(
+      session,
+      {
+        detail:
+          "2 / 4 finalization stages completed: compatibility transaction settled.",
+        progress:
+          finalizationProgress(2)
+      }
+    );
 
     await commitSuccessfulProjectStorage(
       previousProject?.projectId,
       `loaded:${displayName}`
+    );
+    updateBuilderWork(
+      session,
+      {
+        detail:
+          "3 / 4 finalization stages completed: project storage committed.",
+        progress:
+          finalizationProgress(3)
+      }
     );
     generatedOutputDeferredImportEpoch = 0;
     queueImportedCodegen(
@@ -35929,6 +34776,17 @@ async function applyLoadedProjectWithFeedback(
     updateBuilderWork(
       session,
       {
+        detail:
+          "4 / 4 finalization stages completed: generated output is queued and the imported project is usable.",
+        progress:
+          finalizationProgress(4)
+      }
+    );
+    await yieldBuilderTask();
+
+    await completeBuilderWork(
+      session,
+      {
         title:
           omittedApiNodes.length > 0
             ? window.RMLI18n.t("ui.literal.6838750bd62e")
@@ -35948,10 +34806,8 @@ async function applyLoadedProjectWithFeedback(
             : prerequisites.graph
               ? window.RMLI18n.t("ui.literal.d7d03823f46b")
               : window.RMLI18n.t("ui.literal.685efa3dd5ad")),
-        progress: 100
       }
     );
-    await paintBuilderUi();
     return graphResult;
   } catch (error) {
     if (projectApplicationStarted) {
@@ -36030,6 +34886,9 @@ async function applyLoadedProjectWithFeedback(
     );
     throw error;
   } finally {
+    releaseImportedGraphPresentationWork(
+      importedPresentationWork
+    );
     finishBuilderWork(session);
   }
 }
@@ -36185,553 +35044,7 @@ window.RMLBuilderEditorPersonalSettingsController=Object.freeze({
   setDiagnosticSource(source){ commitRmlEditorDiagnostic(source); synchronizeRmlEditorDashboard(); return true; },
   getSettings(){ return {appearance:{...rmlEditorPersonalSettings.appearance},diagnosticSource:rmlEditorPersonalSettings.diagnosticSource}; }
 });
-const RML_BUILDER_PROFILE_STORAGE_KEY = "rml-builder-resonite-profile-v1";
-const RML_BUILDER_PROFILE_REQUEST_TIMEOUT_MS = 8000;
-const RML_BUILDER_PROFILE_AVATAR_MAX_BYTES = 384 * 1024;
-const RML_BUILDER_PROFILE_AVATAR_DATA_URL_MAX_CHARACTERS =
-  Math.ceil(RML_BUILDER_PROFILE_AVATAR_MAX_BYTES / 3) * 4 + 96;
-const RML_BUILDER_PROFILE_FETCH_FAILED = Symbol(
-  "rml-builder-profile-fetch-failed"
-);
-let rmlBuilderProfilePresentation = null;
-let rmlBuilderProfileSyncPromise = null;
-let rmlBuilderProfileSyncInstalled = false;
-let rmlBuilderProfileScannerPort = 0;
-let rmlBuilderProfileRequestedPort = 0;
-let rmlBuilderProfileRequestRevision = 0;
-let rmlBuilderProfileRenderRevision = 0;
-
-function normalizeRmlBuilderProfileAvatarDataUrl(value) {
-  const dataUrl =
-    typeof value === "string"
-      ? value.trim()
-      : "";
-  if (
-    !dataUrl ||
-    dataUrl.length >
-      RML_BUILDER_PROFILE_AVATAR_DATA_URL_MAX_CHARACTERS
-  ) {
-    return "";
-  }
-  const match = dataUrl.match(
-    /^data:image\/(?:png|jpe?g|webp|gif|avif);base64,([a-z0-9+/]*={0,2})$/i
-  );
-  if (!match) return "";
-  const payload = match[1];
-  const padding = payload.endsWith("==")
-    ? 2
-    : payload.endsWith("=")
-      ? 1
-      : 0;
-  const byteLength =
-    Math.floor(payload.length * 3 / 4) -
-    padding;
-  return byteLength >= 0 &&
-    byteLength <=
-      RML_BUILDER_PROFILE_AVATAR_MAX_BYTES
-    ? dataUrl
-    : "";
-}
-
-function normalizeRmlBuilderProfile(profile) {
-  if (!profile || typeof profile !== "object") return null;
-  const displayName = typeof profile.displayName === "string" ? profile.displayName.trim() : "";
-  const userId = typeof profile.userId === "string" ? profile.userId.trim() : "";
-  const avatarUrl = typeof profile.avatarUrl === "string" ? profile.avatarUrl.trim() : "";
-  const avatarSource = typeof profile.avatarSource === "string" ? profile.avatarSource.trim() : "";
-  const avatarDataUrl =
-    normalizeRmlBuilderProfileAvatarDataUrl(
-      profile.avatarDataUrl
-    );
-  if (!displayName && !userId && !avatarUrl && !avatarDataUrl) return null;
-  return {
-    displayName: displayName || null,
-    userId: userId || null,
-    avatarUrl: avatarUrl || null,
-    avatarSource: avatarSource || null,
-    avatarDataUrl: avatarDataUrl || null
-  };
-}
-
-function loadRmlBuilderProfilePresentation() {
-  try {
-    rmlBuilderProfilePresentation = normalizeRmlBuilderProfile(
-      JSON.parse(localStorage.getItem(RML_BUILDER_PROFILE_STORAGE_KEY) || "null")
-    );
-  } catch {
-    rmlBuilderProfilePresentation = null;
-  }
-  return rmlBuilderProfilePresentation;
-}
-
-function saveRmlBuilderProfilePresentation(profile) {
-  const normalized = normalizeRmlBuilderProfile(profile);
-  if (!normalized) return false;
-  const before = rmlBuilderProfilePresentation ? JSON.stringify(rmlBuilderProfilePresentation) : "";
-  const after = JSON.stringify(normalized);
-  rmlBuilderProfilePresentation = normalized;
-  if (before === after) return false;
-  try {
-    localStorage.setItem(RML_BUILDER_PROFILE_STORAGE_KEY, after);
-  } catch {}
-  return true;
-}
-
-function renderRmlBuilderProfilePresentation(profile = rmlBuilderProfilePresentation) {
-  const normalized = normalizeRmlBuilderProfile(profile);
-  const kicker = document.getElementById("builder-profile-kicker");
-  const displayName =
-    normalized?.displayName || "";
-  if (kicker) {
-    kicker.textContent =
-      displayName ||
-      window.RMLI18n.t(
-        "index.text.da6bafbab43a"
-      );
-  }
-  const topName = document.getElementById(
-    "top-builder-profile-name"
-  );
-  const topButton = document.getElementById(
-    "project-manager"
-  );
-  const defaultTopName = window.RMLI18n.t(
-    "index.text.a325933df99a"
-  );
-  const defaultTopLabel = window.RMLI18n.t(
-    "index.aria_label.5c7e41ca0332"
-  );
-  if (topName) {
-    topName.textContent =
-      displayName || defaultTopName;
-  }
-  if (topButton) {
-    const accessibleLabel = displayName
-      ? `${displayName}. ${defaultTopLabel}`
-      : defaultTopLabel;
-    topButton.setAttribute(
-      "aria-label",
-      accessibleLabel
-    );
-    topButton.title = accessibleLabel;
-  }
-
-  let url =
-    normalized?.avatarDataUrl ||
-    normalized?.avatarUrl ||
-    "";
-  try {
-    const candidate = new URL(url, window.location.href);
-    if (
-      !normalized?.avatarDataUrl &&
-      (
-        candidate.origin !== window.location.origin ||
-        candidate.pathname !== "/rml-scanner-avatar" ||
-        Number(candidate.searchParams.get("port")) !==
-          rmlBuilderProfileScannerPort
-      )
-    ) {
-      url = "";
-    }
-  } catch {
-    url = "";
-  }
-  const targets = [
-    document.getElementById(
-      "builder-profile-avatar-image"
-    ),
-    document.getElementById(
-      "top-builder-profile-avatar-image"
-    )
-  ].filter(Boolean);
-  const showFallback = target => {
-    const slot = target.parentElement;
-    target.hidden = true;
-    target.removeAttribute("src");
-    slot?.classList.remove("has-profile-image");
-  };
-  const renderRevision =
-    ++rmlBuilderProfileRenderRevision;
-  if (!(url && /^(https?:|data:image\/)/i.test(url))) {
-    for (const target of targets) {
-      showFallback(target);
-    }
-    return;
-  }
-  if (
-    targets.length > 0 &&
-    targets.every(target =>
-      target.getAttribute("src") === url &&
-      !target.hidden &&
-      target.parentElement?.classList.contains(
-        "has-profile-image"
-      )
-    )
-  ) {
-    return;
-  }
-  const preload = new Image();
-  preload.decoding = "async";
-  preload.onload = async () => {
-    try { await preload.decode?.(); } catch {}
-    const current = normalizeRmlBuilderProfile(
-      rmlBuilderProfilePresentation
-    );
-    const currentUrl =
-      current?.avatarDataUrl ||
-      current?.avatarUrl ||
-      "";
-    if (
-      renderRevision !==
-        rmlBuilderProfileRenderRevision ||
-      currentUrl !== url
-    ) {
-      return;
-    }
-    for (const target of targets) {
-      const slot = target.parentElement;
-      target.src = url;
-      target.hidden = false;
-      slot?.classList.add("has-profile-image");
-    }
-  };
-  preload.onerror = () => {};
-  preload.src = url;
-}
-
-async function fetchRmlBuilderProfileJson(
-  url,
-  {
-    optional = false
-  } = {}
-) {
-  const controller = new AbortController();
-  const timeout = window.setTimeout(
-    () => controller.abort(),
-    RML_BUILDER_PROFILE_REQUEST_TIMEOUT_MS
-  );
-  try {
-    const response = await fetch(url, {
-      cache: "no-store",
-      credentials: "omit",
-      headers: { Accept: "application/json" },
-      mode: "cors",
-      redirect: "error",
-      signal: controller.signal
-    });
-    if (!response.ok) {
-      if (!optional) {
-        console.error(
-          `[RML BUILDER INTERNAL FAILURE] The selected scanner profile endpoint returned HTTP ${response.status} ${response.statusText}.`
-        );
-      }
-      return RML_BUILDER_PROFILE_FETCH_FAILED;
-    }
-    return await response.json();
-  } catch (error) {
-    if (!optional) {
-      console.error(
-        "[RML BUILDER INTERNAL FAILURE] A profile request for the scanner selected by the health sweep failed.",
-        error
-      );
-    }
-    return RML_BUILDER_PROFILE_FETCH_FAILED;
-  } finally {
-    window.clearTimeout(timeout);
-  }
-}
-
-async function fetchRmlBuilderProfileAvatarDataUrl(
-  url,
-  scannerPort
-) {
-  let candidate;
-  try {
-    candidate = new URL(url, window.location.href);
-  } catch {
-    return null;
-  }
-  const directScannerOrigin =
-    `http://127.0.0.1:${scannerPort}`;
-  const sameOriginBridge =
-    candidate.origin ===
-      window.location.origin &&
-    candidate.pathname ===
-      "/rml-scanner-avatar" &&
-    Number(
-      candidate.searchParams.get("port")
-    ) === scannerPort;
-  const directScannerAvatar =
-    candidate.origin ===
-      directScannerOrigin &&
-    candidate.pathname ===
-      "/profile/avatar" &&
-    !candidate.search;
-  if (
-    !sameOriginBridge &&
-    !directScannerAvatar
-  ) {
-    console.error(
-      "[RML BUILDER INTERNAL FAILURE] The selected scanner profile returned an avatar outside its same-origin bridge contract."
-    );
-    return null;
-  }
-
-  const controller = new AbortController();
-  const timeout = window.setTimeout(
-    () => controller.abort(),
-    RML_BUILDER_PROFILE_REQUEST_TIMEOUT_MS
-  );
-  try {
-    const response = await fetch(candidate.href, {
-      cache: "no-store",
-      credentials:
-        sameOriginBridge
-          ? "same-origin"
-          : "omit",
-      headers: { Accept: "image/*" },
-      mode:
-        sameOriginBridge
-          ? "same-origin"
-          : "cors",
-      redirect: "error",
-      signal: controller.signal
-    });
-    if (!response.ok) return null;
-    const contentType = String(
-      response.headers.get("content-type") ||
-      ""
-    ).split(";", 1)[0].trim().toLowerCase();
-    if (
-      !/^image\/(?:png|jpe?g|webp|gif|avif)$/.test(
-        contentType
-      )
-    ) {
-      console.error(
-        "[RML BUILDER INTERNAL FAILURE] The selected scanner avatar bridge returned a non-image response."
-      );
-      return null;
-    }
-    const advertisedLength = Number(
-      response.headers.get("content-length") || 0
-    );
-    if (
-      advertisedLength >
-      RML_BUILDER_PROFILE_AVATAR_MAX_BYTES
-    ) {
-      return null;
-    }
-    const blob = await response.blob();
-    if (
-      blob.size < 1 ||
-      blob.size >
-        RML_BUILDER_PROFILE_AVATAR_MAX_BYTES
-    ) {
-      return null;
-    }
-    const dataUrl = await new Promise(resolve => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(
-        typeof reader.result === "string"
-          ? reader.result
-          : ""
-      );
-      reader.onerror = () => resolve("");
-      reader.onabort = () => resolve("");
-      reader.readAsDataURL(blob);
-    });
-    const normalized =
-      normalizeRmlBuilderProfileAvatarDataUrl(
-        dataUrl
-      );
-    if (!normalized) return null;
-    const decoded = await new Promise(resolve => {
-      const image = new Image();
-      image.decoding = "async";
-      image.onload = async () => {
-        try { await image.decode?.(); } catch {}
-        resolve(
-          Number(image.naturalWidth) > 0 &&
-          Number(image.naturalHeight) > 0
-        );
-      };
-      image.onerror = () => resolve(false);
-      image.src = normalized;
-    });
-    return decoded ? normalized : null;
-  } catch {
-    return null;
-  } finally {
-    window.clearTimeout(timeout);
-  }
-}
-
-async function synchronizeOneRmlBuilderProfile(
-  port,
-  revision
-) {
-  const scannerOrigin =
-    `http://127.0.0.1:${port}`;
-  const rawProfileResponse =
-    await fetchRmlBuilderProfileJson(
-      `${scannerOrigin}/profile`,
-      {
-        optional: true
-      }
-    );
-  if (
-    revision !==
-      rmlBuilderProfileRequestRevision ||
-    rawProfileResponse ===
-      RML_BUILDER_PROFILE_FETCH_FAILED
-  ) {
-    return false;
-  }
-  const rawProfile = {
-    ...rawProfileResponse,
-    sourceScannerPort: port,
-    avatarUrl:
-      typeof rawProfileResponse
-        ?.avatarUrl === "string" &&
-      rawProfileResponse.avatarUrl.trim()
-        ? `${scannerOrigin}/profile/avatar`
-        : "",
-    avatarSource:
-      typeof rawProfileResponse
-        ?.avatarUrl === "string" &&
-      rawProfileResponse.avatarUrl.trim()
-        ? "rml-scanner-direct-profile-avatar"
-        : ""
-  };
-  if (rawProfile?.available === false) {
-    return false;
-  }
-  if (
-    Number(rawProfile?.sourceScannerPort) !==
-    port
-  ) {
-    console.error(
-      "[RML BUILDER INTERNAL FAILURE] Health selected a scanner profile, but the profile bridge returned a different scanner port.",
-      {
-        requestedPort: port,
-        response: rawProfile
-      }
-    );
-    return false;
-  }
-  const profile =
-    normalizeRmlBuilderProfile(rawProfile);
-  if (!profile) return false;
-
-  let avatarDataUrl = null;
-  if (profile.avatarUrl) {
-    avatarDataUrl =
-      await fetchRmlBuilderProfileAvatarDataUrl(
-        profile.avatarUrl,
-        port
-      );
-    if (
-      revision !==
-        rmlBuilderProfileRequestRevision ||
-      !avatarDataUrl
-    ) {
-      return false;
-    }
-  }
-  if (
-    revision !==
-    rmlBuilderProfileRequestRevision
-  ) {
-    return false;
-  }
-
-  rmlBuilderProfileScannerPort = port;
-  saveRmlBuilderProfilePresentation({
-    ...profile,
-    avatarDataUrl
-  });
-  renderRmlBuilderProfilePresentation();
-  return true;
-}
-
-function synchronizeRmlBuilderProfileFromScanner(scannerPort) {
-  const port = Number(scannerPort);
-  if (!Number.isInteger(port) || port < 42719 || port > 42725) {
-    return Promise.resolve(false);
-  }
-  rmlBuilderProfileRequestedPort = port;
-  rmlBuilderProfileRequestRevision += 1;
-  if (rmlBuilderProfileSyncPromise) {
-    return rmlBuilderProfileSyncPromise;
-  }
-
-  const pending = (async () => {
-    let applied = false;
-    while (rmlBuilderProfileRequestedPort) {
-      const requestedPort =
-        rmlBuilderProfileRequestedPort;
-      const requestedRevision =
-        rmlBuilderProfileRequestRevision;
-      rmlBuilderProfileRequestedPort = 0;
-      applied =
-        await synchronizeOneRmlBuilderProfile(
-          requestedPort,
-          requestedRevision
-        );
-    }
-    return applied;
-  })()
-    .catch(error => {
-      console.error(
-        "[RML BUILDER INTERNAL FAILURE] The selected scanner profile could not be applied.",
-        error
-      );
-      return false;
-    })
-    .finally(() => {
-      if (rmlBuilderProfileSyncPromise === pending) {
-        rmlBuilderProfileSyncPromise = null;
-      }
-    });
-
-  rmlBuilderProfileSyncPromise = pending;
-  return pending;
-}
-
-function installRmlBuilderProfileSynchronization() {
-  if (rmlBuilderProfileSyncInstalled) return;
-  rmlBuilderProfileSyncInstalled = true;
-
-  const refresh = event => {
-    const detail = event?.detail;
-    const port = Number(detail?.port);
-    if (
-      !Number.isInteger(port) ||
-      port < 42719 ||
-      port > 42725
-    ) {
-      return;
-    }
-    void synchronizeRmlBuilderProfileFromScanner(port);
-  };
-  document.addEventListener("rml-scanner:selected", refresh);
-  document.addEventListener("rml-scanner:unavailable", () => {
-    rmlBuilderProfileRequestedPort = 0;
-    rmlBuilderProfileRequestRevision += 1;
-    rmlBuilderProfileScannerPort = 0;
-  });
-  window.addEventListener("rml-language-changed", () => {
-    renderRmlBuilderProfilePresentation();
-  });
-  if (window.RMLScannerHealthSession) {
-    refresh({
-      detail:
-        window.RMLScannerHealthSession
-    });
-  }
-}
-
-function installRmlPersonalSettings() { loadRmlPersonalSettings();loadRmlBuilderProfilePresentation();renderRmlBuilderProfilePresentation();installRmlBuilderProfileSynchronization();synchronizeRmlPersonalSettingsControls();applyRmlPersonalSettings();const panel=document.getElementById("builder-settings-panel"),open=document.getElementById("builder-settings-open"),status=document.getElementById("builder-settings-status"),inspectorBack=document.getElementById("builder-settings-inspector-back");const setSettingsWorkspace=show=>{if(panel)panel.hidden=!show;open?.setAttribute("aria-expanded",String(show));elements.projectDialog?.classList.toggle("builder-settings-workspace",show);const title=document.getElementById("project-dialog-title"),kicker=elements.projectDialog?.querySelector(".export-dialog-header small");if(title)title.textContent=show?window.RMLI18n.t("index.text.6f4a8553e79d"):window.RMLI18n.t("js.presentation.83e22c2a18d3");if(kicker)kicker.textContent=show?window.RMLI18n.t("index.text.bed77e02fe9a"):(rmlBuilderProfilePresentation?.displayName||window.RMLI18n.t("index.text.da6bafbab43a"));if(show){synchronizeRmlPersonalSettingsControls();hardSynchronizeRmlEditorSettingsFromActiveEditor();}else{closeRmlEditorDashboardColorPicker();renderRmlBuilderProfilePresentation();}requestAnimationFrame(()=>updateAdaptiveUtilityDialog(elements.projectDialog));};open?.addEventListener("click",async()=>{const show=!elements.projectDialog?.classList.contains("builder-settings-workspace");if(show){try{await ensureLazyStyleBundle("project");}catch(error){console.error(window.RMLI18n.t("ui.literal.9419d0b7524c"),error);return;}}else closeRmlEditorDashboardColorPicker();setSettingsWorkspace(show);});inspectorBack?.addEventListener("click",()=>closeRmlEditorDashboardColorPicker());document.getElementById("builder-settings-node-scrollbars")?.addEventListener("change",event=>commitRmlPersonalSettings({nodeScrollbars:event.currentTarget.checked===true}));document.getElementById("builder-settings-node-text")?.addEventListener("input",event=>commitRmlPersonalSettings({nodeTextScale:Number(event.currentTarget.value)}));document.getElementById("builder-settings-ux-text")?.addEventListener("input",event=>commitRmlPersonalSettings({uxTextScale:Number(event.currentTarget.value)}));document.getElementById("builder-settings-reset")?.addEventListener("click",()=>{rmlPersonalSettings={...RML_PERSONAL_SETTINGS_DEFAULTS};rmlEditorPersonalSettings={appearance:{...RML_EDITOR_APPEARANCE_DEFAULTS},diagnosticSource:window.RMLI18n.t("index.text.b5e50a2e9087")};saveRmlPersonalSettings();synchronizeRmlPersonalSettingsControls();applyRmlPersonalSettings();for(const [key,value] of Object.entries(RML_EDITOR_APPEARANCE_DEFAULTS)){window.RMLCustomCSharpDetachedEditor?.setActiveAppearanceValue?.(key,value);}window.RMLCustomCSharpDetachedEditor?.setActiveDiagnosticSource?.(window.RMLI18n.t("index.text.b5e50a2e9087"));synchronizeRmlEditorDashboard();if(status)status.textContent=window.RMLI18n.t("{{i18n:js.presentation.0efcb476e33e}}");});const diagnosticSelect=document.getElementById("builder-settings-editor-diagnostic");diagnosticSelect?.addEventListener("change",event=>commitRmlEditorDiagnostic(event.currentTarget.value));synchronizeRmlEditorDiagnosticSelect(rmlEditorPersonalSettings.diagnosticSource);if(typeof MutationObserver==="function"){new MutationObserver(records=>{let changed=false;for(const record of records){for(const node of Array.from(record.addedNodes||[])){if(node?.tagName===window.RMLI18n.t("ui.literal.c1bbd9d8f7a0")){changed=true;node.addEventListener("load",scheduleRmlPersonalSettingsApply,{once:true});}else if(node?.tagName===window.RMLI18n.t("ui.literal.4afb184e1d11"))changed=true;}}if(changed)scheduleRmlPersonalSettingsApply();}).observe(document.head,{childList:true});} }
+function installRmlPersonalSettings() { loadRmlPersonalSettings();window.RMLBuilderProfilePresentation.install();synchronizeRmlPersonalSettingsControls();applyRmlPersonalSettings();const panel=document.getElementById("builder-settings-panel"),open=document.getElementById("builder-settings-open"),status=document.getElementById("builder-settings-status"),inspectorBack=document.getElementById("builder-settings-inspector-back");const setSettingsWorkspace=show=>{if(panel)panel.hidden=!show;open?.setAttribute("aria-expanded",String(show));elements.projectDialog?.classList.toggle("builder-settings-workspace",show);const title=document.getElementById("project-dialog-title"),kicker=elements.projectDialog?.querySelector(".export-dialog-header small");if(title)title.textContent=show?window.RMLI18n.t("index.text.6f4a8553e79d"):window.RMLI18n.t("js.presentation.83e22c2a18d3");if(kicker)kicker.textContent=show?window.RMLI18n.t("index.text.bed77e02fe9a"):(window.RMLBuilderProfilePresentation.current()?.displayName||window.RMLI18n.t("index.text.da6bafbab43a"));if(show){synchronizeRmlPersonalSettingsControls();hardSynchronizeRmlEditorSettingsFromActiveEditor();}else{closeRmlEditorDashboardColorPicker();window.RMLBuilderProfilePresentation.render();}requestAnimationFrame(()=>updateAdaptiveUtilityDialog(elements.projectDialog));};open?.addEventListener("click",async()=>{const show=!elements.projectDialog?.classList.contains("builder-settings-workspace");if(show){try{await ensureLazyStyleBundle("project");}catch(error){console.error(window.RMLI18n.t("ui.literal.9419d0b7524c"),error);return;}}else closeRmlEditorDashboardColorPicker();setSettingsWorkspace(show);});inspectorBack?.addEventListener("click",()=>closeRmlEditorDashboardColorPicker());document.getElementById("builder-settings-node-scrollbars")?.addEventListener("change",event=>commitRmlPersonalSettings({nodeScrollbars:event.currentTarget.checked===true}));document.getElementById("builder-settings-node-text")?.addEventListener("input",event=>commitRmlPersonalSettings({nodeTextScale:Number(event.currentTarget.value)}));document.getElementById("builder-settings-ux-text")?.addEventListener("input",event=>commitRmlPersonalSettings({uxTextScale:Number(event.currentTarget.value)}));document.getElementById("builder-settings-reset")?.addEventListener("click",()=>{rmlPersonalSettings={...RML_PERSONAL_SETTINGS_DEFAULTS};rmlEditorPersonalSettings={appearance:{...RML_EDITOR_APPEARANCE_DEFAULTS},diagnosticSource:window.RMLI18n.t("index.text.b5e50a2e9087")};saveRmlPersonalSettings();synchronizeRmlPersonalSettingsControls();applyRmlPersonalSettings();for(const [key,value] of Object.entries(RML_EDITOR_APPEARANCE_DEFAULTS)){window.RMLCustomCSharpDetachedEditor?.setActiveAppearanceValue?.(key,value);}window.RMLCustomCSharpDetachedEditor?.setActiveDiagnosticSource?.(window.RMLI18n.t("index.text.b5e50a2e9087"));synchronizeRmlEditorDashboard();if(status)status.textContent=window.RMLI18n.t("{{i18n:js.presentation.0efcb476e33e}}");});const diagnosticSelect=document.getElementById("builder-settings-editor-diagnostic");diagnosticSelect?.addEventListener("change",event=>commitRmlEditorDiagnostic(event.currentTarget.value));synchronizeRmlEditorDiagnosticSelect(rmlEditorPersonalSettings.diagnosticSource);if(typeof MutationObserver==="function"){new MutationObserver(records=>{let changed=false;for(const record of records){for(const node of Array.from(record.addedNodes||[])){if(node?.tagName===window.RMLI18n.t("ui.literal.c1bbd9d8f7a0")){changed=true;node.addEventListener("load",scheduleRmlPersonalSettingsApply,{once:true});}else if(node?.tagName===window.RMLI18n.t("ui.literal.4afb184e1d11"))changed=true;}}if(changed)scheduleRmlPersonalSettingsApply();}).observe(document.head,{childList:true});} }
 
 let projectDialogOpenSequence = 0;
 
@@ -36808,7 +35121,7 @@ function closeProjectDialog() {
   const projectDialogTitle = document.getElementById("project-dialog-title");
   const projectDialogKicker = elements.projectDialog?.querySelector(".export-dialog-header small");
   if (projectDialogTitle) projectDialogTitle.textContent = window.RMLI18n.t("{{i18n:js.presentation.83e22c2a18d3}}");
-  if (projectDialogKicker) projectDialogKicker.textContent = rmlBuilderProfilePresentation?.displayName || window.RMLI18n.t("index.text.da6bafbab43a");
+  if (projectDialogKicker) projectDialogKicker.textContent = window.RMLBuilderProfilePresentation.current()?.displayName || window.RMLI18n.t("index.text.da6bafbab43a");
 
   if (
     typeof elements.projectDialog.close ===
@@ -37124,7 +35437,7 @@ async function loadProjectJsonFile(
   setProjectLoadProgress(
     true,
     {
-      progress: 8,
+      progress: 1,
       stage:
         window.RMLI18n.t("ui.literal.02c189378c61")
     }
@@ -37173,7 +35486,7 @@ async function loadProjectJsonFile(
       setProjectLoadProgress(
         true,
         {
-          progress: 32,
+          progress: 4,
           stage:
             window.RMLI18n.t("ui.literal.6f86883b93f3")
         }
@@ -37190,11 +35503,142 @@ async function loadProjectJsonFile(
             "The complete compatibility check and atomic library update are running.",
           detail:
             "The loading screen remains visible until the Saved Composite is stored or the import reports an error.",
-          progress: 32,
+          progress: 4,
           timeout: 120000
         });
       clearBuilderWorkDeadline(
         compositeImportWorkSession
+      );
+      const handleSavedCompositeImportProgress = event => {
+        const progressDetail =
+          event?.detail || {};
+        const phase = String(
+          progressDetail.phase || "import"
+        );
+        const phaseState = String(
+          progressDetail.state || "complete"
+        );
+        const completed = Math.max(
+          0,
+          Number(progressDetail.completed) || 0
+        );
+        const total = Math.max(
+          0,
+          Number(progressDetail.total) || 0
+        );
+        const phaseCompleted = Math.max(
+          0,
+          Number(
+            progressDetail.phaseCompleted
+          ) || 0
+        );
+        const phaseTotal = Math.max(
+          0,
+          Number(progressDetail.phaseTotal) || 0
+        );
+        const progressForUnits = units =>
+          total > 0
+            ? Math.min(
+                99,
+                4 +
+                95 *
+                clamp(
+                  Number(units) || 0,
+                  0,
+                  total
+                ) /
+                total
+              )
+            : 4;
+        if (
+          phase === "resolve" &&
+          phaseState === "start" &&
+          total > 0
+        ) {
+          activeSavedApiCompositeImportProgressRange = {
+            start:
+              progressForUnits(completed),
+            end:
+              progressForUnits(
+                Math.min(
+                  total,
+                  completed + 1
+                )
+              )
+          };
+        } else if (phase === "resolve") {
+          activeSavedApiCompositeImportProgressRange =
+            null;
+        }
+        const phaseCopy =
+          phase === "library"
+            ? {
+                title:
+                  "Loading the Saved Composite library…",
+                message:
+                  "The existing library is being prepared before imported records are compared.",
+                unit: "library steps"
+              }
+            : phase === "parse"
+              ? {
+                  title:
+                    "Reading Saved Composite records…",
+                  message:
+                    "The complete imported record set has been decoded.",
+                  unit: "records decoded"
+                }
+              : phase === "resolve"
+                ? {
+                    title:
+                      "Resolving Saved Composite API contracts…",
+                    message:
+                      "Each imported graph is being checked against the available API catalog.",
+                    unit: "records resolved"
+                  }
+                : phase === "merge"
+                  ? {
+                      title:
+                        "Merging Saved Composite records…",
+                      message:
+                        "Imported records are being compared with the current library.",
+                      unit: "records merged"
+                    }
+                  : phase === "persist"
+                    ? {
+                        title:
+                          "Saving the Saved Composite library…",
+                        message:
+                          "The complete library update is being committed atomically.",
+                        unit:
+                          "storage transactions"
+                      }
+                    : {
+                        title:
+                          "Updating placed Saved Composite instances…",
+                        message:
+                          "Every affected placed instance is being reconciled with the stored record.",
+                        unit:
+                          "instance records reconciled"
+                      };
+        updateBuilderWork(
+          compositeImportWorkSession,
+          {
+            title: phaseCopy.title,
+            message: phaseCopy.message,
+            detail:
+              `${phaseCompleted.toLocaleString(window.RMLI18n?.language || undefined)} / ${phaseTotal.toLocaleString(window.RMLI18n?.language || undefined)} ${phaseCopy.unit}${total > 0 ? ` · ${completed.toLocaleString(window.RMLI18n?.language || undefined)} / ${total.toLocaleString(window.RMLI18n?.language || undefined)} total work units` : ""}`,
+            progress:
+              progressForUnits(completed)
+          }
+        );
+      };
+      activeSavedApiCompositeImportWorkSession =
+        compositeImportWorkSession;
+      activeSavedApiCompositeImportProgressRange =
+        null;
+      document.addEventListener(
+        "rml-builder:saved-composite-import-progress",
+        handleSavedCompositeImportProgress
       );
       try {
         await ensureLazyScriptBundle(
@@ -37335,7 +35779,7 @@ async function loadProjectJsonFile(
         offlinePreservedApiNodes > 0
           ? "warning"
           : "success";
-      updateBuilderWork(
+      await completeBuilderWork(
         compositeImportWorkSession,
         {
           title:
@@ -37343,13 +35787,8 @@ async function loadProjectJsonFile(
           message:
             "The compatibility result and library transaction have both completed.",
           detail:
-            "The completed result is now being shown.",
-          progress: 100
+            "The completed result is now being shown."
         }
-      );
-      await paintBuilderUi();
-      finishBuilderWork(
-        compositeImportWorkSession
       );
       if (omittedApiNodes > 0) {
         await showBuilderNotice({
@@ -37390,6 +35829,18 @@ async function loadProjectJsonFile(
       );
       return;
       } finally {
+        document.removeEventListener(
+          "rml-builder:saved-composite-import-progress",
+          handleSavedCompositeImportProgress
+        );
+        if (
+          activeSavedApiCompositeImportWorkSession ===
+            compositeImportWorkSession
+        ) {
+          activeSavedApiCompositeImportWorkSession = 0;
+          activeSavedApiCompositeImportProgressRange =
+            null;
+        }
         finishBuilderWork(
           compositeImportWorkSession
         );
@@ -37403,7 +35854,7 @@ async function loadProjectJsonFile(
     setProjectLoadProgress(
       true,
       {
-        progress: 28,
+        progress: 3,
         stage:
           window.RMLI18n.t("ui.literal.a7fbe1ad6ce2")
       }
@@ -37456,7 +35907,7 @@ async function loadProjectJsonFile(
           window.RMLI18n.t("ui.auto.cfae88deac09"),
         detail:
           window.RMLI18n.t("ui.literal.8242f7ce08d0"),
-        progress: 32,
+        progress: 0,
         timeout: 120000
       });
 
@@ -37484,7 +35935,9 @@ async function loadProjectJsonFile(
               : window.RMLI18n.t("ui.literal.afc4f665c6b9"),
           detail:
             window.RMLI18n.t("ui.literal.24a8fc950f72"),
-          progress: 54
+          progress:
+            prerequisites.progressProfile
+              ?.prerequisitesEnd ?? 36
         }
       );
       await paintBuilderUi();
@@ -41354,7 +39807,7 @@ async function loadExampleProject() {
       `${EXAMPLE_PROJECT_FILE_NAME} is being read and validated in the background worker.`,
     detail:
       window.RMLI18n.t("ui.literal.990d38479c92"),
-    progress: 10
+    progress: 1
   });
 
   try {
@@ -41368,7 +39821,7 @@ async function loadExampleProject() {
         title: window.RMLI18n.t("ui.auto.c7df949865e9"),
         message:
           window.RMLI18n.t("ui.auto.71435da2b315"),
-        progress: 30
+        progress: 4
       }
     );
 
@@ -41494,16 +39947,14 @@ async function newBlank() {
       "new-blank"
     );
 
-    updateBuilderWork(
+    await completeBuilderWork(
       workSession,
       {
         title: window.RMLI18n.t("ui.auto.75fc43939579"),
         message:
-          window.RMLI18n.t("ui.auto.5ce62cbacf2f"),
-        progress: 100
+          window.RMLI18n.t("ui.auto.5ce62cbacf2f")
       }
     );
-    await paintBuilderUi();
   } finally {
     finishBuilderWork(workSession);
   }
@@ -42532,7 +40983,7 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "../../templates/help_template.html?v=1.21.77-static-live-import-stability"
+    "../../templates/help_template.html?v=1.21.83-preview-control-parity"
   )
     .then(markup => {
       const host = document.getElementById("lazy-dialog-host") || document.body;
@@ -42657,17 +41108,14 @@ async function openInformationDialog() {
     );
     setInformationPage("general");
 
-    updateBuilderWork(
+    await completeBuilderWork(
       workSession,
       {
         title: window.RMLI18n.t("ui.auto.5e8c303cce60"),
         message:
-          window.RMLI18n.t("ui.auto.829d9fdee292"),
-        progress: 100
+          window.RMLI18n.t("ui.auto.829d9fdee292")
       }
     );
-    await paintBuilderUi();
-    finishBuilderWork(workSession);
 
     if (!dialog?.open) {
       dialog.showModal();
@@ -47036,6 +45484,18 @@ async function initialize() {
     return;
   }
 
+  if (
+    typeof window.RMLScriptLoader?.ensure !==
+      "function"
+  ) {
+    throw new Error(
+      "[RML BUILDER INTERNAL FAILURE] The deferred script loader cannot prepare the Builder work controller."
+    );
+  }
+  await window.RMLScriptLoader.ensure(
+    "builder-work"
+  );
+
   document.documentElement.dataset
     .rmlBuilderInitialized = "true";
   exposeRmlBuilderBuildId();
@@ -47045,6 +45505,7 @@ async function initialize() {
   installPalettePointerDragBridge();
 
   cacheElements();
+  installBuilderWorkController();
   installRmlPersonalSettings();
   flushGeneratedOutputRefreshAfterDomReady();
   exposeBuilderDialogBridge();
@@ -47053,10 +45514,40 @@ async function initialize() {
     beginStartupStatus(
       window.RMLI18n.t("ui.literal.975839933e3e")
     );
+  const startupStageTotal = 19;
+  let startupStageCompleted = 0;
+  const completeStartupStage = async (
+    detail,
+    copy = {}
+  ) => {
+    startupStageCompleted = Math.min(
+      startupStageTotal,
+      startupStageCompleted + 1
+    );
+    startupWork.update({
+      ...copy,
+      detail:
+        `${startupStageCompleted.toLocaleString(window.RMLI18n?.language || undefined)} / ${startupStageTotal.toLocaleString(window.RMLI18n?.language || undefined)} startup stages completed · ${String(detail || "")}`,
+      progress:
+        99 *
+        startupStageCompleted /
+        startupStageTotal
+    });
+    await yieldBuilderTask();
+  };
   await paintBuilderUi();
 
   preventGlobalDoubleSelection();
   await restore();
+  await completeStartupStage(
+    "The saved project source has been restored.",
+    {
+      title:
+        window.RMLI18n.t("ui.auto.7f6e03f3041b"),
+      message:
+        window.RMLI18n.t("ui.auto.2ce80cb28a48")
+    }
+  );
   const startupGraph =
     state.extensions?.typedNodeGraph;
   const startupRuntimeGraphRequested =
@@ -47065,14 +45556,14 @@ async function initialize() {
       state.activePage ||
       startupGraph.lastOpenPage
     ) === "runtime-graph";
-  startupWork.update({
-      title: window.RMLI18n.t("ui.auto.7f6e03f3041b"),
-      message:
-        window.RMLI18n.t("ui.auto.2ce80cb28a48"),
-      progress: 46
-    });
   renderMetadata();
+  await completeStartupStage(
+    "Project metadata controls are ready."
+  );
   renderPalette();
+  await completeStartupStage(
+    "The node palette has been rendered."
+  );
 
   document
     .querySelectorAll(
@@ -47118,6 +45609,10 @@ async function initialize() {
         structureButton.addEventListener("dragend", finishDragInteraction);
       }
     });
+
+  await completeStartupStage(
+    "Palette pointer and drag bindings are ready."
+  );
 
   document.addEventListener(
     "dragover",
@@ -47285,6 +45780,10 @@ async function initialize() {
     }
   );
 
+  await completeStartupStage(
+    "Global drag-over and pointer-move routing are ready."
+  );
+
   document.addEventListener(
     "pointerup",
     event => {
@@ -47391,6 +45890,10 @@ async function initialize() {
     }
   );
 
+  await completeStartupStage(
+    "Pointer-release routing is ready."
+  );
+
   document.addEventListener(
     "pointercancel",
     event => {
@@ -47470,6 +45973,10 @@ async function initialize() {
     }
   );
 
+  await completeStartupStage(
+    "Pointer-cancellation recovery is ready."
+  );
+
   document.addEventListener(
     "keydown",
     event => {
@@ -47532,6 +46039,10 @@ async function initialize() {
     {
       capture: true
     }
+  );
+
+  await completeStartupStage(
+    "Keyboard drag cancellation is ready."
   );
 
   document.addEventListener(
@@ -47757,6 +46268,10 @@ async function initialize() {
     true
   );
 
+  await completeStartupStage(
+    "Wheel, drop and drag-end routing are ready."
+  );
+
   document
     .getElementById("load-example")
     .addEventListener(
@@ -47880,6 +46395,10 @@ async function initialize() {
 
   installDelayedButtonHelp();
 
+  await completeStartupStage(
+    "Primary project, output and navigation actions are ready."
+  );
+
   elements.informationOpen.addEventListener(
     "click",
     () => void openInformationDialog()
@@ -47950,6 +46469,10 @@ async function initialize() {
       });
     }
   );
+
+  await completeStartupStage(
+    "Information and live settings-preview inputs are ready."
+  );
   elements.settingsPreviewSavePanel.addEventListener(
     "click",
     event => {
@@ -48002,6 +46525,10 @@ async function initialize() {
         closeSettingsPreview();
       }
     }
+  );
+
+  await completeStartupStage(
+    "Settings-preview save and dialog controls are ready."
   );
   elements.projectManager.addEventListener(
     "click",
@@ -48057,6 +46584,10 @@ async function initialize() {
     "cancel",
     cancelActiveProjectLoad
   );
+
+  await completeStartupStage(
+    "Project import and project-dialog controls are ready."
+  );
   elements.builderMessageCancel.addEventListener(
     "click",
     () => resolveBuilderMessage(false)
@@ -48098,6 +46629,10 @@ async function initialize() {
       }
     }
   );
+
+  await completeStartupStage(
+    "Builder confirmation-dialog controls are ready."
+  );
   elements.downloadCode.addEventListener("click", openExportDialog);
   installLazyStyleWarmup(
     elements.downloadCode,
@@ -48114,6 +46649,10 @@ async function initialize() {
   installLazyStyleWarmup(
     elements.setupGuideOpen,
     "setup"
+  );
+
+  await completeStartupStage(
+    "Export entry points and lazy interface bundles are ready."
   );
   elements.exportClose.addEventListener("click", closeExportDialog);
   elements.exportCancel.addEventListener("click", closeExportDialog);
@@ -48187,6 +46726,10 @@ async function initialize() {
     }
   });
 
+  await completeStartupStage(
+    "Export options, references and artifact actions are ready."
+  );
+
   window.addEventListener(
     "resize",
     scheduleAdaptiveUtilityDialogs,
@@ -48216,6 +46759,10 @@ async function initialize() {
   );
   startUniversalCustomSelectObserver();
 
+  await completeStartupStage(
+    "Adaptive dialogs and custom-select controls are ready."
+  );
+
   renderAll();
   if (startupRuntimeGraphRequested) {
     startupWork.update({
@@ -48226,6 +46773,9 @@ async function initialize() {
 
   exposeBuilderBridge();
   beginTypedNodeGraphModulesTracking();
+  await completeStartupStage(
+    "The first workspace frame and public Builder bridge are ready."
+  );
 
   const startupExpectedNodes =
     Array.isArray(startupGraph?.nodes)
@@ -48246,8 +46796,7 @@ async function initialize() {
         startupExpectedNodes > 1000 ||
         startupExpectedConnections > 2000
           ? `Preparing the complete ${startupExpectedNodes.toLocaleString()}-node and ${startupExpectedConnections.toLocaleString()}-connection scene.`
-          : window.RMLI18n.t("ui.literal.56b1bbdd5ba5"),
-      progress: 76
+          : window.RMLI18n.t("ui.literal.56b1bbdd5ba5")
     });
   if (startupWork.visible) {
     await paintBuilderUi();
@@ -48255,18 +46804,18 @@ async function initialize() {
 
   const startupGraphResult =
     await startupGraphReady;
-  startupWork.update({
+  await completeStartupStage(
+    `${startupExpectedNodes.toLocaleString(window.RMLI18n?.language || undefined)} nodes and ${startupExpectedConnections.toLocaleString(window.RMLI18n?.language || undefined)} connections reached their required presentation state.`
+  );
+  await startupWork.complete({
       title: window.RMLI18n.t("ui.auto.228428151f64"),
       message:
         window.RMLI18n.t("ui.auto.23f4bfd57160"),
       detail:
         startupGraphResult.timedOut
           ? window.RMLI18n.t("ui.literal.ad4a3aa8c7c7")
-          : window.RMLI18n.t("ui.literal.1d0f8c614529"),
-      progress: 100
+          : window.RMLI18n.t("ui.literal.1d0f8c614529")
     });
-  await paintBuilderUi();
-  startupWork.finish();
 
   document.documentElement.dataset
     .rmlBuilderReady = "true";
@@ -49210,7 +47759,7 @@ function rmlRuntimeDisplayInspector() {
         const up =
           document.createElement("button");
         up.type = "button";
-        up.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-${selected.runtimeDisplayStacked ? "chevron-up" : "chevron-left"}"></use></svg>`;
+        up.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-${selected.runtimeDisplayStacked ? "chevron-up" : "chevron-left"}"></use></svg>`;
         up.title =
           selected.runtimeDisplayStacked
             ? window.RMLI18n.t("ui.literal.6f39a4bc0048")
@@ -49228,7 +47777,7 @@ function rmlRuntimeDisplayInspector() {
         const down =
           document.createElement("button");
         down.type = "button";
-        down.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-${selected.runtimeDisplayStacked ? "chevron-down" : "chevron-right"}"></use></svg>`;
+        down.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-${selected.runtimeDisplayStacked ? "chevron-down" : "chevron-right"}"></use></svg>`;
         down.title =
           selected.runtimeDisplayStacked
             ? window.RMLI18n.t("ui.literal.6d6a5bc02a98")
@@ -49971,7 +48520,7 @@ let rmlRuntimeDisplayPreviewUnsubscribe =
   null;
 let rmlRuntimeDisplayPreviewChannel =
   "";
-let rmlRuntimeDisplayMenuInitializedChannel =
+let rmlRuntimeDisplayPreviewSessionId =
   "";
 
 function rmlRuntimeDisplayReleasePreviewBridge() {
@@ -49984,7 +48533,7 @@ function rmlRuntimeDisplayReleasePreviewBridge() {
     null;
   rmlRuntimeDisplayPreviewChannel =
     "";
-  rmlRuntimeDisplayMenuInitializedChannel =
+  rmlRuntimeDisplayPreviewSessionId =
     "";
 }
 
@@ -50063,7 +48612,7 @@ function rmlRuntimeDisplayPreviewItems(
 
 function rmlRuntimeDisplayPreviewCopyIcon() {
   return `
-    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-copy"></use></svg>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-copy"></use></svg>
   `;
 }
 
@@ -50096,19 +48645,150 @@ function rmlPreviewConfigurationLiveRecord(channel, nodeId) {
   ) || rmlPreviewDirectConfigurationDisplayRecord(channel, nodeId);
 }
 
-function rmlRuntimeDisplaySyncConfigurationPreview(channel) {
+function rmlPreviewConfigurationNodeIdsForRecord(
+  record
+) {
+  const monitorId = String(
+    record?.monitorId || ""
+  );
+  const configurationPrefix =
+    "configuration:";
+
+  if (
+    monitorId.startsWith(
+      configurationPrefix
+    )
+  ) {
+    const nodeId = monitorId.slice(
+      configurationPrefix.length
+    );
+    return nodeId ? [nodeId] : [];
+  }
+
+  if (
+    !monitorId ||
+    monitorId.startsWith(
+      "configuration-"
+    ) ||
+    monitorId.startsWith(
+      "dynamic-source:"
+    )
+  ) {
+    return [];
+  }
+
+  const graph =
+    state?.extensions?.typedNodeGraph;
+  const target =
+    Array.isArray(graph?.nodes)
+      ? graph.nodes.find(node =>
+          String(node?.id || "") ===
+            monitorId
+        )
+      : null;
+
+  if (
+    target?.kind !== "operator" ||
+    target?.operatorId !==
+      "resonite.displayValue"
+  ) {
+    return [];
+  }
+
+  const configurationNodeIds =
+    new Set(
+      graph.nodes
+        .filter(node =>
+          node?.kind ===
+            "configuration"
+        )
+        .map(node =>
+          String(node.id || "")
+        )
+    );
+
+  return [
+    ...new Set(
+      (
+        Array.isArray(graph.connections)
+          ? graph.connections
+          : []
+      )
+        .filter(connection =>
+          String(connection?.toNode || "") ===
+            monitorId &&
+          String(connection?.toPort || "") ===
+            "value" &&
+          configurationNodeIds.has(
+            String(
+              connection?.fromNode || ""
+            )
+          ) &&
+          String(
+            connection?.fromPort || ""
+          ).startsWith("config-")
+        )
+        .map(connection =>
+          String(
+            connection.fromPort
+          ).slice("config-".length)
+        )
+        .filter(Boolean)
+    )
+  ];
+}
+
+function rmlRuntimeDisplaySyncConfigurationPreview(
+  channel,
+  bridgeDetail = null,
+  changedNodeIds = null
+) {
   if (!settingsPreviewDraft || !window.RMLRuntimeBridge) {
     return false;
   }
 
   let changed = false;
-  const changedNodeIds = [];
+  const markChanged = nodeId => {
+    changed = true;
+    changedNodeIds?.add?.(
+      String(nodeId || "")
+    );
+  };
   const activeLiveNodeIds =
     new Set();
-  const entries =
+  const allEntries =
     typeof flattenNodes === "function"
       ? flattenNodes(state?.nodes || [])
       : [];
+  const sessionId = String(
+    bridgeDetail?.state?.sessionId ??
+    window.RMLRuntimeBridge
+      ?.getState?.(channel)
+      ?.sessionId ??
+    ""
+  );
+  const eventRecord =
+    bridgeDetail?.kind === "display"
+      ? bridgeDetail.record
+      : null;
+  const incrementalNodeIds =
+    eventRecord &&
+    sessionId &&
+    sessionId ===
+      rmlRuntimeDisplayPreviewSessionId
+      ? new Set(
+          rmlPreviewConfigurationNodeIdsForRecord(
+            eventRecord
+          )
+        )
+      : null;
+  const entries = incrementalNodeIds
+    ? allEntries.filter(entry =>
+        incrementalNodeIds.has(
+          String(entry?.node?.id || "")
+        )
+      )
+    : allEntries;
 
   for (const entry of entries) {
     const node = entry?.node;
@@ -50122,6 +48802,10 @@ function rmlRuntimeDisplaySyncConfigurationPreview(channel) {
     activeLiveNodeIds.add(
       String(node.id)
     );
+    const wasLive =
+      settingsPreviewHasLiveValue(
+        node.id
+      );
 
     let liveValue = record.value ?? record.display;
     if (
@@ -50156,11 +48840,15 @@ function rmlRuntimeDisplaySyncConfigurationPreview(channel) {
             }
           : settingsPreviewDraft.values?.[node.id]
     );
-    settingsPreviewApplyRuntimeValue(
+    const applied =
+      settingsPreviewApplyRuntimeValue(
       node.id,
       liveValue,
       record
     );
+    if (!applied) {
+      continue;
+    }
     const after = JSON.stringify(
       node.kind === "controller"
         ? settingsPreviewDraft.controllers?.[node.id]
@@ -50178,49 +48866,445 @@ function rmlRuntimeDisplaySyncConfigurationPreview(channel) {
           : settingsPreviewDraft.values?.[node.id]
     );
 
-    if (before !== after) {
-      changed = true;
-      changedNodeIds.push(String(node.id));
+    if (
+      before !== after ||
+      !wasLive
+    ) {
+      markChanged(node.id);
     }
   }
 
   if (
+    !incrementalNodeIds &&
     settingsPreviewRestoreInactiveLiveValues(
-      activeLiveNodeIds
+      activeLiveNodeIds,
+      changedNodeIds
     )
   ) {
     changed = true;
   }
 
-  const receivedNodeIds = [];
-  for (const entry of entries) {
-    const node = entry?.node;
-    if (!node || node.kind === LAYOUT_ROW_KIND || node.valueType === "runtimeDisplay" || node.valueType === "button") {
-      continue;
-    }
-    if (rmlPreviewConfigurationLiveRecord(channel, node.id)) {
-      receivedNodeIds.push(String(node.id));
-    }
+  rmlRuntimeDisplayPreviewSessionId =
+    sessionId;
+
+  return changed;
+}
+
+function rmlRuntimeDisplayPatchConfigurationControl(
+  nodeId
+) {
+  const node = findNode(
+    state.nodes,
+    nodeId
+  );
+  const host =
+    elements.settingsPreviewContent;
+
+  if (!node || !host) {
+    return false;
   }
 
-  let runtimePhaseEvaluated = false;
-  const uniqueReceivedNodeIds = [...new Set(receivedNodeIds)];
-  if (uniqueReceivedNodeIds.length > 0) {
-    if (rmlRuntimeDisplayMenuInitializedChannel !== channel) {
+  if (
+    settingsPreviewColorSession
+      ?.nodeId === String(node.id) &&
+    host.querySelector(
+      "[data-preview-color-page]"
+    )
+  ) {
+    refreshSettingsPreviewColorVisuals();
+    return true;
+  }
 
-      runSettingsPreviewRuntimePhase("startup");
-      rmlRuntimeDisplayMenuInitializedChannel = channel;
-      runtimePhaseEvaluated = true;
-    } else {
+  const matches = [
+    ...host.querySelectorAll(
+      `[data-preview-node-id="${CSS.escape(
+        String(node.id)
+      )}"]`
+    )
+  ];
+  const row =
+    matches.find(element =>
+      element.matches?.(
+        ".rml-preview-setting"
+      )
+    ) || matches[0];
 
-      for (const nodeId of [...new Set(changedNodeIds)]) {
-        runSettingsPreviewRuntimePhase("saved", nodeId);
-        runtimePhaseEvaluated = true;
+  if (!row) {
+    return false;
+  }
+
+  if (node.dynamicSettingKind) {
+    const live =
+      settingsPreviewHasLiveValue(
+        node.id
+      );
+    const valueButton =
+      row.querySelector(
+        ".rml-preview-enum-value"
+      );
+
+    if (valueButton) {
+      valueButton.textContent = String(
+        settingsPreviewValue(node) ?? ""
+      );
+    }
+
+    row.querySelectorAll("button")
+      .forEach(button => {
+        button.disabled = live;
+        button.toggleAttribute(
+          "aria-disabled",
+          live
+        );
+      });
+    return true;
+  }
+
+  const editor = [
+    ...row.children
+  ].find(element =>
+    element.classList?.contains(
+      "rml-preview-editor"
+    )
+  ) || row.querySelector(
+    ".rml-preview-editor"
+  );
+
+  if (!editor) {
+    return false;
+  }
+
+  const value =
+    settingsPreviewValue(node);
+  const live =
+    settingsPreviewHasLiveValue(
+      node.id
+    );
+  const setLiveState = control => {
+    if (!control) {
+      return;
+    }
+
+    if (control.disabled !== live) {
+      control.disabled = live;
+    }
+
+    if (live) {
+      if (
+        control.getAttribute(
+          "aria-disabled"
+        ) !== "true"
+      ) {
+        control.setAttribute(
+          "aria-disabled",
+          "true"
+        );
+      }
+    } else if (
+      control.hasAttribute(
+        "aria-disabled"
+      )
+    ) {
+      control.removeAttribute(
+        "aria-disabled"
+      );
+    }
+  };
+
+  if (
+    node.kind === "controller" ||
+    node.valueType === "enum"
+  ) {
+    const options =
+      node.kind === "controller"
+        ? node.options.map(option =>
+            option.name
+          )
+        : node.enumOptions;
+    const safeOptions =
+      options.length > 0
+        ? options
+        : [""];
+    const current =
+      safeOptions.includes(value)
+        ? value
+        : safeOptions[0];
+    const valueButton =
+      editor.querySelector(
+        ".rml-preview-enum-value"
+      );
+
+    if (
+      valueButton &&
+      valueButton.textContent !==
+        String(current)
+    ) {
+      valueButton.textContent =
+        String(current);
+    }
+
+    editor
+      .querySelectorAll(
+        ".rml-preview-enum-value, .rml-preview-enum-step"
+      )
+      .forEach(setLiveState);
+    return true;
+  }
+
+  if (node.valueType === "bool") {
+    const input =
+      editor.querySelector(
+        "[data-preview-bool]"
+      );
+
+    if (input) {
+      const checked = Boolean(value);
+      if (input.checked !== checked) {
+        input.checked = checked;
+      }
+      setLiveState(input);
+    }
+    return true;
+  }
+
+  if (
+    isScalarNumericType(node.valueType) &&
+    usesSlider(node)
+  ) {
+    const bounds =
+      previewNumericBounds(node);
+    const numericValue = clamp(
+      Number(value),
+      bounds.minimum,
+      bounds.maximum
+    );
+    const safeNumericValue =
+      Number.isFinite(numericValue)
+        ? numericValue
+        : bounds.minimum;
+    const input =
+      editor.querySelector(
+        "[data-preview-range]"
+      );
+    const output =
+      editor.querySelector(
+        "[data-preview-range-output]"
+      );
+
+    if (input) {
+      const nextValue =
+        String(safeNumericValue);
+      if (input.value !== nextValue) {
+        input.value = nextValue;
+      }
+      const progress =
+        `${settingsPreviewRangeProgress(
+          safeNumericValue,
+          bounds.minimum,
+          bounds.maximum
+        )}%`;
+      if (
+        input.dataset.rmlRangeProgress !==
+          progress
+      ) {
+        input.dataset.rmlRangeProgress =
+          progress;
+      }
+      setLiveState(input);
+    }
+
+    if (output) {
+      const nextOutput = String(value);
+      if (output.value !== nextOutput) {
+        output.value = nextOutput;
+      }
+      if (
+        output.textContent !== nextOutput
+      ) {
+        output.textContent = nextOutput;
       }
     }
+    return true;
   }
 
-  return changed || runtimePhaseEvaluated;
+  if (isVectorType(node.valueType)) {
+    const values = Array.isArray(value)
+      ? value
+      : vectorComponentValues(
+          value,
+          componentCount(
+            node.valueType
+          )
+        );
+
+    editor
+      .querySelectorAll(
+        "[data-preview-vector]"
+      )
+      .forEach((input, index) => {
+        const nextValue = String(
+          values[index] ?? ""
+        );
+        if (input.value !== nextValue) {
+          input.value = nextValue;
+        }
+        setLiveState(input);
+      });
+    return true;
+  }
+
+  if (node.valueType === "colorX") {
+    const colorState =
+      settingsPreviewDraft
+        ?.colorStates?.[node.id] ||
+      settingsPreviewColorStateFromExpression(
+        value,
+        {
+          profile:
+            normalizeColorProfile(
+              node.colorProfile
+            ),
+          strength: clamp(
+            Number(
+              node.colorStrength
+            ) || 1,
+            1,
+            10
+          )
+        }
+      );
+    const preview =
+      colorChannelsToPreview(
+        [
+          colorState.red *
+            colorState.strength,
+          colorState.green *
+            colorState.strength,
+          colorState.blue *
+            colorState.strength,
+          colorState.alpha
+        ],
+        window.RMLI18n.t(
+          "ui.literal.e1b1bf04bd0f"
+        ),
+        colorState.profile,
+        colorState.strength
+      );
+    const glowStrength = clamp(
+      colorState.strength,
+      1,
+      10
+    );
+    const glowSize =
+      glowStrength <= 1.000001
+        ? 0
+        : 8 +
+          (glowStrength - 1) *
+            3.2;
+    const button =
+      editor.querySelector(
+        "[data-preview-color]"
+      );
+
+    if (button) {
+      if (
+        button.dataset.rmlPreviewColor !==
+          preview.cssColor
+      ) {
+        button.dataset.rmlPreviewColor =
+          preview.cssColor;
+      }
+      if (
+        button.dataset.rmlPreviewGlow !==
+          preview.cssColor
+      ) {
+        button.dataset.rmlPreviewGlow =
+          preview.cssColor;
+      }
+      if (
+        button.dataset.rmlPreviewGlowSize !==
+          String(glowSize)
+      ) {
+        button.dataset.rmlPreviewGlowSize =
+          String(glowSize);
+      }
+    }
+    return true;
+  }
+
+  const input =
+    editor.querySelector(
+      "[data-preview-input]"
+    );
+
+  if (input) {
+    const nextValue = String(
+      value ?? ""
+    );
+    if (input.value !== nextValue) {
+      input.value = nextValue;
+    }
+    setLiveState(input);
+  }
+
+  return true;
+}
+
+function rmlRuntimeDisplayApplyConfigurationPreviewChanges(
+  changedNodeIds
+) {
+  const nodeIds = [
+    ...(
+      changedNodeIds instanceof Set
+        ? changedNodeIds
+        : []
+    )
+  ];
+  const needsStructuralRender =
+    !settingsPreviewColorSession &&
+    nodeIds.some(nodeId =>
+      findNode(state.nodes, nodeId)
+        ?.kind === "controller"
+    );
+
+  if (needsStructuralRender) {
+    renderSettingsPreview({
+      force: true
+    });
+    return true;
+  }
+
+  for (const nodeId of nodeIds) {
+    rmlRuntimeDisplayPatchConfigurationControl(
+      nodeId
+    );
+  }
+
+  return false;
+}
+
+function rmlRuntimeDisplayBridgeDetailAffectsRows(
+  detail
+) {
+  if (detail?.kind !== "display") {
+    return true;
+  }
+
+  const monitorId = String(
+    detail.record?.monitorId || ""
+  );
+
+  return !(
+    monitorId.startsWith(
+      "configuration:"
+    ) ||
+    monitorId.startsWith(
+      "configuration-"
+    ) ||
+    monitorId.startsWith(
+      "dynamic-source:"
+    )
+  );
 }
 
 function rmlRuntimeDisplayEnsurePreviewBridge() {
@@ -50244,10 +49328,19 @@ function rmlRuntimeDisplayEnsurePreviewBridge() {
   rmlRuntimeDisplayPreviewChannel =
     channel;
 
+  const hydratedNodeIds = new Set();
   const hydratedFromCache =
-    rmlRuntimeDisplaySyncConfigurationPreview(channel);
+    rmlRuntimeDisplaySyncConfigurationPreview(
+      channel,
+      null,
+      hydratedNodeIds
+    );
   if (hydratedFromCache) {
-    queueMicrotask(() => renderSettingsPreview({ force: true }));
+    queueMicrotask(() =>
+      rmlRuntimeDisplayApplyConfigurationPreviewChanges(
+        hydratedNodeIds
+      )
+    );
   }
 
   if (
@@ -50260,13 +49353,31 @@ function rmlRuntimeDisplayEnsurePreviewBridge() {
         window.RMLRuntimeBridge
           .subscribe(
             channel,
-            () => {
+            detail => {
+              const changedNodeIds =
+                new Set();
               const changed =
-                rmlRuntimeDisplaySyncConfigurationPreview(channel);
+                rmlRuntimeDisplaySyncConfigurationPreview(
+                  channel,
+                  detail,
+                  changedNodeIds
+                );
+              let structurallyRendered =
+                false;
               if (changed) {
-                renderSettingsPreview({ force: true });
+                structurallyRendered =
+                  rmlRuntimeDisplayApplyConfigurationPreviewChanges(
+                    changedNodeIds
+                  );
               }
-              rmlRuntimeDisplayRenderPreviewRows();
+              if (
+                !structurallyRendered &&
+                rmlRuntimeDisplayBridgeDetailAffectsRows(
+                  detail
+                )
+              ) {
+                rmlRuntimeDisplayRenderPreviewRows();
+              }
             }
           );
     } catch {
@@ -50427,12 +49538,11 @@ function rmlRuntimeDisplayRenderPreviewRows() {
     rmlRuntimeDisplayWalk()
       .map(rmlRuntimeDisplayNormalizeNode);
 
+  rmlRuntimeDisplayEnsurePreviewBridge();
+
   if (displays.length === 0) {
-    rmlRuntimeDisplayReleasePreviewBridge();
     return;
   }
-
-  rmlRuntimeDisplayEnsurePreviewBridge();
 
   const channel =
     `${state.metadata.namespaceName}.${state.metadata.className}`;

@@ -8631,7 +8631,7 @@ function createGraphAnalysisCertificate(
       schemaVersion:
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION,
       moduleId:
-        "1.21.77-static-live-import-stability",
+        "1.21.83-preview-control-parity",
       semanticToken: token,
       nodeCount: graph.nodes.length,
       connectionCount: connections.length,
@@ -8664,7 +8664,7 @@ function graphAnalysisCertificateEnvelopeValid(
       Number(certificate.schemaVersion) ===
         GRAPH_ANALYSIS_CERTIFICATE_SCHEMA_VERSION &&
       certificate.moduleId ===
-        "1.21.77-static-live-import-stability" &&
+        "1.21.83-preview-control-parity" &&
       certificate.valid === true &&
       typeof certificate.semanticToken ===
         "string" &&
@@ -18413,7 +18413,7 @@ Object.defineProperty(
     {
       value: Object.freeze({
         moduleId:
-          "1.21.77-static-live-import-stability",
+          "1.21.83-preview-control-parity",
         build:
           buildTypedNodeGraphCSharpContribution,
         validateDocument:

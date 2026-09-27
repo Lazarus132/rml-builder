@@ -4578,3 +4578,45 @@ dialog.settings-preview-dialog {
       max(14px, env(safe-area-inset-left)) !important;
   }
 }
+
+.settings-preview-dialog:not(.rml-preview-color-open) {
+  --rml-preview-row-control-height: 32px;
+}
+
+@media (max-width: 540px) and (orientation: portrait) {
+  .settings-preview-dialog:not(.rml-preview-color-open) {
+    --rml-preview-row-control-height: 44px;
+  }
+}
+
+.settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-control,
+.settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-checkbox,
+.settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-color-button {
+  box-sizing: border-box !important;
+  height: var(--rml-preview-row-control-height) !important;
+  min-height: var(--rml-preview-row-control-height) !important;
+  max-height: var(--rml-preview-row-control-height) !important;
+}
+
+@media (min-width: 981px) and (min-height: 721px) {
+  .settings-preview-dialog:not(.rml-preview-color-open)
+    .rml-preview-setting-button:not(.label-hidden) {
+    grid-template-columns: minmax(0, 7fr) minmax(0, 3fr) !important;
+  }
+}
+
+.settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-impulse-button {
+  max-width: 100%;
+}
+
+.settings-preview-dialog:not(.rml-preview-color-open)
+  .rml-preview-impulse-button > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -676,7 +676,7 @@ const savedApiCompositeSearchTextCache =
     `${SAVED_API_COMPOSITE_COMPARE_MESSAGE_TYPE}-result`;
 
   const SAVED_API_COMPOSITE_COMPARE_MODULE_ID =
-    "1.21.77-static-live-import-stability";
+    "1.21.83-preview-control-parity";
 
   const SAVED_API_COMPOSITE_COMPARE_CANONICAL_SCHEMA_VERSION =
     4;
@@ -934,7 +934,7 @@ const savedApiCompositeSearchTextCache =
       );
     }
     const workerUrl = new URL(
-      "js/workers/saved_api_composite_compare_worker.js?v=1.21.77-static-live-import-stability&canonical-schema=4",
+      "js/workers/saved_api_composite_compare_worker.js?v=1.21.83-preview-control-parity&canonical-schema=4",
       document.baseURI
     );
     const workerOptions = {
@@ -1189,10 +1189,65 @@ const savedApiCompositeSearchTextCache =
     });
   }
 
-  function savedApiCompositeCompareTokenCursor(
+  function savedApiCompositeCompareGraphWorkItems(
     value
   ) {
-    return {
+    const items = new WeakSet();
+    const visitedGraphs = new WeakSet();
+    const stack = [value];
+    let total = 0;
+    while (stack.length > 0) {
+      const graph = stack.pop();
+      if (
+        !graph ||
+        typeof graph !== "object" ||
+        visitedGraphs.has(graph)
+      ) {
+        continue;
+      }
+      visitedGraphs.add(graph);
+      for (const item of [
+        ...(Array.isArray(graph.nodes)
+          ? graph.nodes
+          : []),
+        ...(Array.isArray(graph.connections)
+          ? graph.connections
+          : [])
+      ]) {
+        if (
+          item &&
+          typeof item === "object" &&
+          !items.has(item)
+        ) {
+          items.add(item);
+          total += 1;
+        }
+      }
+      for (const registry of [
+        graph.apiCompositeGraphs,
+        graph.customCSharpFiles
+      ]) {
+        if (
+          registry &&
+          typeof registry === "object" &&
+          !Array.isArray(registry)
+        ) {
+          stack.push(...Object.values(registry));
+        }
+      }
+    }
+    return { items, total: Math.max(1, total) };
+  }
+
+  function savedApiCompositeCompareTokenCursor(
+    value,
+    onProgress = null
+  ) {
+    const graphWork =
+      savedApiCompositeCompareGraphWorkItems(
+        value
+      );
+    const cursor = {
       ancestors: new WeakSet(),
       frames: [],
       recycledFrames: [],
@@ -1203,8 +1258,62 @@ const savedApiCompositeSearchTextCache =
       pendingValue: value,
       pendingLongKeyValue: undefined,
       code: 0,
-      value: undefined
+      value: undefined,
+      progressItems: graphWork.items,
+      progressSeen: new WeakSet(),
+      progressCompleted: 0,
+      progressTotal: graphWork.total,
+      progressStride: Math.max(
+        1,
+        Math.ceil(graphWork.total / 192)
+      ),
+      progressLastPublished: -1,
+      progressObserver:
+        typeof onProgress === "function"
+          ? onProgress
+          : null
     };
+    cursor.progressObserver?.({
+      completed: 0,
+      total: cursor.progressTotal
+    });
+    return cursor;
+  }
+
+  function savedApiCompositeCompareMarkCursorWork(
+    cursor,
+    value,
+    force = false
+  ) {
+    if (
+      value &&
+      typeof value === "object" &&
+      cursor.progressItems.has(value) &&
+      !cursor.progressSeen.has(value)
+    ) {
+      cursor.progressSeen.add(value);
+      cursor.progressCompleted += 1;
+    }
+    if (
+      !cursor.progressObserver ||
+      (
+        !force &&
+        cursor.progressCompleted -
+          cursor.progressLastPublished <
+            cursor.progressStride
+      )
+    ) {
+      return;
+    }
+    cursor.progressLastPublished =
+      cursor.progressCompleted;
+    cursor.progressObserver({
+      completed: Math.min(
+        cursor.progressTotal,
+        cursor.progressCompleted
+      ),
+      total: cursor.progressTotal
+    });
   }
 
   function savedApiCompositeCompareAcquireCursorFrame(
@@ -1388,6 +1497,10 @@ const savedApiCompositeSearchTextCache =
         const value = cursor.pendingValue;
         cursor.pendingValue = undefined;
         cursor.hasPendingValue = false;
+        savedApiCompositeCompareMarkCursorWork(
+          cursor,
+          value
+        );
         if (Array.isArray(value)) {
           if (cursor.ancestors.has(value)) {
             throw new TypeError(
@@ -1629,6 +1742,13 @@ const savedApiCompositeSearchTextCache =
     }
     cursor.code = 0;
     cursor.value = undefined;
+    cursor.progressCompleted =
+      cursor.progressTotal;
+    savedApiCompositeCompareMarkCursorWork(
+      cursor,
+      null,
+      true
+    );
     return false;
   }
 
@@ -1774,7 +1894,8 @@ const savedApiCompositeSearchTextCache =
     baselineIdentity,
     revision =
       nextSavedApiCompositeCompareProtocolRevision(),
-    isCurrent = () => true
+    isCurrent = () => true,
+    onProgress = null
   }) {
     const projectEpoch =
       savedApiCompositeCompareProjectEpoch();
@@ -1850,7 +1971,10 @@ const savedApiCompositeSearchTextCache =
       return begun || null;
     }
     const tokenCursor =
-      savedApiCompositeCompareTokenCursor(value);
+      savedApiCompositeCompareTokenCursor(
+        value,
+        onProgress
+      );
     const availablePageBuffers = Array.from(
       {
         length:
@@ -2285,7 +2409,8 @@ const savedApiCompositeSearchTextCache =
   async function savedApiCompositeRecordsExactlyEquivalent(
     leftRecord,
     rightRecord,
-    label = "record-compare"
+    label = "record-compare",
+    { onProgress = null } = {}
   ) {
     const projectEpoch =
       savedApiCompositeCompareProjectEpoch();
@@ -2309,7 +2434,14 @@ const savedApiCompositeSearchTextCache =
         baselineIdentity,
         revision:
           nextSavedApiCompositeCompareProtocolRevision(),
-        isCurrent
+        isCurrent,
+        onProgress:
+          typeof onProgress === "function"
+            ? detail => onProgress({
+                ...detail,
+                stage: "baseline"
+              })
+            : null
       });
     try {
       let installed = await install();
@@ -2332,7 +2464,14 @@ const savedApiCompositeSearchTextCache =
           baselineIdentity,
           revision:
             nextSavedApiCompositeCompareProtocolRevision(),
-          isCurrent
+          isCurrent,
+          onProgress:
+            typeof onProgress === "function"
+              ? detail => onProgress({
+                  ...detail,
+                  stage: "candidate"
+                })
+              : null
         });
       if (
         result &&
@@ -2363,7 +2502,14 @@ const savedApiCompositeSearchTextCache =
             baselineIdentity,
             revision:
               nextSavedApiCompositeCompareProtocolRevision(),
-            isCurrent
+            isCurrent,
+            onProgress:
+              typeof onProgress === "function"
+                ? detail => onProgress({
+                    ...detail,
+                    stage: "candidate"
+                  })
+                : null
           });
       }
       if (!result?.ok || result.stale) {
@@ -10854,7 +11000,52 @@ function scheduleSavedApiCompositeCatalogReconciliation() {
     return savedApiCompositeReconciliationPromise;
   }
 
-async function importSavedApiCompositePayload(
+  function publishSavedApiCompositeImportProgress(
+    detail = {}
+  ) {
+    document.dispatchEvent(
+      new CustomEvent(
+        "rml-builder:saved-composite-import-progress",
+        {
+          detail: Object.freeze({
+            phase: String(
+              detail.phase || "import"
+            ),
+            state: String(
+              detail.state || "complete"
+            ),
+            completed: Math.max(
+              0,
+              Number(detail.completed) || 0
+            ),
+            total: Math.max(
+              0,
+              Number(detail.total) || 0
+            ),
+            phaseCompleted: Math.max(
+              0,
+              Number(
+                detail.phaseCompleted
+              ) || 0
+            ),
+            phaseTotal: Math.max(
+              0,
+              Number(detail.phaseTotal) || 0
+            ),
+            recordIndex: Math.max(
+              0,
+              Number(detail.recordIndex) || 0
+            ),
+            recordName: String(
+              detail.recordName || ""
+            )
+          })
+        }
+      )
+    );
+  }
+
+  async function importSavedApiCompositePayload(
     payload
   ) {
     if (
@@ -10882,12 +11073,30 @@ async function importSavedApiCompositePayload(
     );
     scheduleGraphPaletteRender();
     try {
+      publishSavedApiCompositeImportProgress({
+        phase: "library",
+        state: "start",
+        phaseCompleted: 0,
+        phaseTotal: 1
+      });
       await loadSavedApiCompositeLibrary();
       const records =
         savedApiCompositeRecordsFromJson(
           payload
         );
       payload = null;
+      const totalRecordCount =
+        records.length;
+      const totalWorkUnits =
+        totalRecordCount * 3 + 3;
+      let completedWorkUnits = 2;
+      publishSavedApiCompositeImportProgress({
+        phase: "parse",
+        completed: completedWorkUnits,
+        total: totalWorkUnits,
+        phaseCompleted: totalRecordCount,
+        phaseTotal: totalRecordCount
+      });
       const resolved = [];
       const resolutionOmissions = [];
       const resolutionPreservations = [];
@@ -10898,6 +11107,16 @@ async function importSavedApiCompositePayload(
         recordIndex += 1
       ) {
         const record = records[recordIndex];
+        publishSavedApiCompositeImportProgress({
+          phase: "resolve",
+          state: "start",
+          completed: completedWorkUnits,
+          total: totalWorkUnits,
+          phaseCompleted: recordIndex,
+          phaseTotal: totalRecordCount,
+          recordIndex,
+          recordName: record?.name
+        });
         const outcome =
           await resolveSavedApiCompositeForCurrentCatalog(
             record,
@@ -11026,6 +11245,16 @@ async function importSavedApiCompositePayload(
         }
         resolved.push(resolvedRecord);
         records[recordIndex] = null;
+        completedWorkUnits += 1;
+        publishSavedApiCompositeImportProgress({
+          phase: "resolve",
+          completed: completedWorkUnits,
+          total: totalWorkUnits,
+          phaseCompleted: recordIndex + 1,
+          phaseTotal: totalRecordCount,
+          recordIndex,
+          recordName: record?.name
+        });
       }
       const knownById = new Map(
         savedApiCompositeTemplates
@@ -11094,6 +11323,21 @@ async function importSavedApiCompositePayload(
                 })
             )
           )
+      };
+      let mergedRecordCount = 0;
+      const publishMergedRecord = incoming => {
+        mergedRecordCount += 1;
+        completedWorkUnits += 1;
+        publishSavedApiCompositeImportProgress({
+          phase: "merge",
+          completed: completedWorkUnits,
+          total: totalWorkUnits,
+          phaseCompleted: mergedRecordCount,
+          phaseTotal: totalRecordCount,
+          recordIndex:
+            mergedRecordCount - 1,
+          recordName: incoming?.name
+        });
       };
       for (const incoming of resolved) {
         const legacyFingerprint =
@@ -11178,14 +11422,76 @@ async function importSavedApiCompositePayload(
               linkToSaved: true
             });
           }
+          publishMergedRecord(incoming);
           continue;
         }
 
+        const baselineCompareWork =
+          savedApiCompositeCompareGraphWorkItems(
+            existing?.composite || {}
+          ).total;
+        const candidateCompareWork =
+          savedApiCompositeCompareGraphWorkItems(
+            incoming?.composite || {}
+          ).total;
+        const comparisonWorkTotal = Math.max(
+          1,
+          baselineCompareWork +
+            candidateCompareWork
+        );
+        let comparisonProgressFraction = 0;
         const exactContentMatch =
           await savedApiCompositeRecordsExactlyEquivalent(
             existing,
             incoming,
-            `import:${existing.id}`
+            `import:${existing.id}`,
+            {
+              onProgress(detail = {}) {
+                const stageOffset =
+                  detail.stage === "candidate"
+                    ? baselineCompareWork
+                    : 0;
+                const stageCompleted = Math.min(
+                  Math.max(
+                    1,
+                    Number(detail.total) || 0
+                  ),
+                  Math.max(
+                    0,
+                    Number(detail.completed) || 0
+                  )
+                );
+                comparisonProgressFraction =
+                  Math.max(
+                    comparisonProgressFraction,
+                    Math.min(
+                      0.98,
+                      (
+                        stageOffset +
+                        stageCompleted
+                      ) / comparisonWorkTotal
+                    )
+                  );
+                const fraction =
+                  comparisonProgressFraction;
+                publishSavedApiCompositeImportProgress({
+                  phase: "merge",
+                  state: "progress",
+                  completed:
+                    completedWorkUnits +
+                    fraction,
+                  total: totalWorkUnits,
+                  phaseCompleted:
+                    mergedRecordCount +
+                    fraction,
+                  phaseTotal:
+                    totalRecordCount,
+                  recordIndex:
+                    mergedRecordCount,
+                  recordName: incoming?.name
+                });
+              }
+            }
           );
         if (
           exactContentMatch &&
@@ -11200,6 +11506,7 @@ async function importSavedApiCompositePayload(
               linkToSaved: true
             });
           }
+          publishMergedRecord(incoming);
           continue;
         }
         const confirmed =
@@ -11215,6 +11522,7 @@ async function importSavedApiCompositePayload(
           );
         if (!confirmed) {
           summary.discarded += 1;
+          publishMergedRecord(incoming);
           continue;
         }
 
@@ -11258,7 +11566,16 @@ async function importSavedApiCompositePayload(
             linkToSaved: true
           });
         }
+        publishMergedRecord(incoming);
       }
+      publishSavedApiCompositeImportProgress({
+        phase: "persist",
+        state: "start",
+        completed: completedWorkUnits,
+        total: totalWorkUnits,
+        phaseCompleted: 0,
+        phaseTotal: 1
+      });
       const committed =
         pending.length > 0 ||
         deletionIds.size > 0
@@ -11279,6 +11596,14 @@ async function importSavedApiCompositePayload(
               updates: [],
               deletionIds: []
             };
+      completedWorkUnits += 1;
+      publishSavedApiCompositeImportProgress({
+        phase: "persist",
+        completed: completedWorkUnits,
+        total: totalWorkUnits,
+        phaseCompleted: 1,
+        phaseTotal: 1
+      });
       const stored = committed.updates;
       summary.instancesReplaced = 0;
       summary.instanceUpdatesDeclined = 0;
@@ -11308,6 +11633,26 @@ async function importSavedApiCompositePayload(
         ).values()
       ];
       summary.instancesLinkedByName = 0;
+      let completedInstanceRecords =
+        Math.max(
+          0,
+          totalRecordCount -
+            uniqueInstanceUpdatePlans.length
+        );
+      completedWorkUnits +=
+        completedInstanceRecords;
+      publishSavedApiCompositeImportProgress({
+        phase: "instances",
+        state:
+          uniqueInstanceUpdatePlans.length > 0
+            ? "start"
+            : "complete",
+        completed: completedWorkUnits,
+        total: totalWorkUnits,
+        phaseCompleted:
+          completedInstanceRecords,
+        phaseTotal: totalRecordCount
+      });
       for (const plan of
         uniqueInstanceUpdatePlans) {
         const record = plan.record;
@@ -11358,6 +11703,18 @@ async function importSavedApiCompositePayload(
               : String(error),
             "error"
           );
+        } finally {
+          completedInstanceRecords += 1;
+          completedWorkUnits += 1;
+          publishSavedApiCompositeImportProgress({
+            phase: "instances",
+            completed: completedWorkUnits,
+            total: totalWorkUnits,
+            phaseCompleted:
+              completedInstanceRecords,
+            phaseTotal: totalRecordCount,
+            recordName: record?.name
+          });
         }
       }
       Object.defineProperty(
@@ -16676,7 +17033,7 @@ function setSavedApiCompositeIcon(
     const namespace =
       "http://www.w3.org/2000/svg";
     const href =
-      `assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-${normalizedIconName}`;
+      `assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-${normalizedIconName}`;
     const existingSvg =
       element.firstElementChild;
     const existingUse =
@@ -17269,7 +17626,7 @@ function createSavedApiCompositePaletteItem(
     const add =
       document.createElement("small");
     if (!compatibilityIssue && !currentOpen && savedCompositeAvailable) {
-      add.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-add"></use></svg>`;
+      add.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-add"></use></svg>`;
     } else {
       add.textContent = compatibilityIssue ? "!" : currentOpen ? window.RMLI18n.t("composite.library.status_open") : "·";
     }
@@ -17334,7 +17691,7 @@ function createSavedApiCompositePaletteItem(
     const exportButton =
       document.createElement("button");
     exportButton.type = "button";
-    exportButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-download"></use></svg>`;
+    exportButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-download"></use></svg>`;
     exportButton.title =
       window.RMLI18n.format("composite.actions.export_title", { name: record.name });
     exportButton.addEventListener(
@@ -17393,7 +17750,7 @@ function createSavedApiCompositePaletteItem(
     const deleteButton =
       document.createElement("button");
     deleteButton.type = "button";
-    deleteButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-close"></use></svg>`;
+    deleteButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-close"></use></svg>`;
     deleteButton.title =
       window.RMLI18n.format("composite.actions.delete_title", { name: record.name });
     deleteButton.addEventListener(
@@ -17422,7 +17779,7 @@ function createSavedApiCompositePaletteItem(
     const menuTrigger = document.createElement("button");
     menuTrigger.type = "button";
     menuTrigger.className = "rml-saved-api-composite-menu-trigger";
-    menuTrigger.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-more"></use></svg>`;
+    menuTrigger.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-more"></use></svg>`;
     menuTrigger.setAttribute("aria-haspopup", "menu");
     menuTrigger.setAttribute("aria-expanded", "false");
     menuTrigger.setAttribute(
@@ -17528,7 +17885,7 @@ Object.defineProperty(
   "RMLNodeGraphCompositesModuleId",
   {
     value:
-      "1.21.77-static-live-import-stability",
+      "1.21.83-preview-control-parity",
     writable: false,
     enumerable: true,
     configurable: true

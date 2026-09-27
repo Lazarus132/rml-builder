@@ -131,6 +131,32 @@ const GRAPH_GPU_NODE_PREPARATION_BATCH_SIZE = 640;
 const GRAPH_DOM_NODE_PREPARATION_BATCH_SIZE = 16;
 const GRAPH_DOM_MEASUREMENT_BATCH_SIZE = 24;
 const GRAPH_WIRE_PREPARATION_BATCH_SIZE = 256;
+const GRAPH_PREPARATION_TARGET_PROGRESS_STEPS = 32;
+
+function graphPreparationBatchSize(
+  total,
+  maximumBatchSize
+) {
+  const normalizedTotal = Math.max(
+    0,
+    Math.floor(Number(total) || 0)
+  );
+  const normalizedMaximum = Math.max(
+    1,
+    Math.floor(Number(maximumBatchSize) || 1)
+  );
+  if (normalizedTotal <= 1) return 1;
+  return Math.min(
+    normalizedMaximum,
+    Math.max(
+      1,
+      Math.ceil(
+        normalizedTotal /
+          GRAPH_PREPARATION_TARGET_PROGRESS_STEPS
+      )
+    )
+  );
+}
 const GRAPH_PRESENTATION_HEADER_HEIGHT = 45;
 const GRAPH_PRESENTATION_FULL_ENTER_NODE_COUNT = 160;
 const GRAPH_PRESENTATION_FULL_EXIT_NODE_COUNT = 240;
@@ -861,7 +887,8 @@ function nextGraphViewTask(preparation) {
 
 function updateGraphPreparationStatus(
     preparation,
-    message
+    message,
+    progress = null
   ) {
     if (
       graphViewPreparationCurrent(
@@ -872,9 +899,24 @@ function updateGraphPreparationStatus(
         preparation.status.textContent =
           message;
       }
-      window.RMLBuilderWork?.update?.(
+      updateGraphTransitionWork(
         graphTransitionWorkSession,
-        { detail: message, progress: true }
+        {
+          detail: message,
+          ...(
+            progress &&
+            typeof progress === "object"
+              ? {
+                  progress:
+                    graphTransitionProgressValue(
+                      progress.phase,
+                      progress.completed,
+                      progress.total
+                    )
+                }
+              : {}
+          )
+        }
       );
     }
   }
@@ -1379,7 +1421,15 @@ async function recoverGraphPreparation(
 
 async function prepareGraphView(preparation) {
     try {
-
+      updateGraphPreparationStatus(
+        preparation,
+        window.RMLI18n.t("ui.literal.356c9e23044a"),
+        {
+          phase: "bootstrap",
+          completed: 0,
+          total: 1
+        }
+      );
       const painted =
         await waitForGraphPaintOpportunity();
       if (
@@ -1390,6 +1440,15 @@ async function prepareGraphView(preparation) {
       }
       await awaitGraphViewWork(window.RMLGraphHybridRenderer?.ready, preparation);
       if (!graphViewPreparationCurrent(preparation)) return preparation.blocked === true;
+      updateGraphPreparationStatus(
+        preparation,
+        window.RMLI18n.t("ui.literal.356c9e23044a"),
+        {
+          phase: "bootstrap",
+          completed: 1,
+          total: 1
+        }
+      );
       showGraphSvgFallbackWarning();
       if (enforceGraphSvgSafety()) return true;
       await prepareGraphAnalysisForView(
@@ -1434,9 +1493,37 @@ async function prepareGraphView(preparation) {
             await centerGraphForPreparation(
               preparation
             );
+            updateGraphPreparationStatus(
+              preparation,
+              window.RMLI18n.t("ui.literal.356c9e23044a"),
+              {
+                phase: "center",
+                completed: 1,
+                total: 1
+              }
+            );
           } else {
             viewportRequest.callback();
+            updateGraphPreparationStatus(
+              preparation,
+              window.RMLI18n.t("ui.literal.356c9e23044a"),
+              {
+                phase: "center",
+                completed: 1,
+                total: 1
+              }
+            );
           }
+        } else {
+          updateGraphPreparationStatus(
+            preparation,
+            window.RMLI18n.t("ui.literal.356c9e23044a"),
+            {
+              phase: "center",
+              completed: 1,
+              total: 1
+            }
+          );
         }
         if (preparation.rebuildNodes) {
           preparation.rebuildNodes = false;
@@ -1497,6 +1584,15 @@ async function prepareGraphView(preparation) {
         }
         const renderer = graphHybridRenderer;
         const rendererWasAvailable = renderer?.available === true;
+        updateGraphPreparationStatus(
+          preparation,
+          window.RMLI18n.t("ui.literal.356c9e23044a"),
+          {
+            phase: "renderer",
+            completed: 0,
+            total: 1
+          }
+        );
         try {
           const rendererReady =
             graphCompactSvgFallbackActive()
@@ -1534,6 +1630,15 @@ async function prepareGraphView(preparation) {
               error
             );
           }
+          updateGraphPreparationStatus(
+            preparation,
+            window.RMLI18n.t("ui.literal.356c9e23044a"),
+            {
+              phase: "renderer",
+              completed: 1,
+              total: 1
+            }
+          );
         } catch (error) {
           if (
             error?.name !== window.RMLI18n.t("ui.literal.324cefd2fcd2") &&
@@ -1549,6 +1654,15 @@ async function prepareGraphView(preparation) {
           }
           throw error;
         }
+        updateGraphPreparationStatus(
+          preparation,
+          window.RMLI18n.t("ui.literal.356c9e23044a"),
+          {
+            phase: "settle",
+            completed: 0,
+            total: 1
+          }
+        );
         await nextGraphViewLayout(preparation);
         if (!graphViewPreparationCurrent(preparation)) return false;
         if (preparation.rebuildNodes || preparation.geometryDirty ||
@@ -1559,6 +1673,15 @@ async function prepareGraphView(preparation) {
           continue;
         }
         preparation.pending = false;
+        updateGraphPreparationStatus(
+          preparation,
+          window.RMLI18n.t("ui.literal.356c9e23044a"),
+          {
+            phase: "settle",
+            completed: 1,
+            total: 1
+          }
+        );
         refreshGraphViewportPresentation();
         preparation.root.dataset.rmlGraphPhase = "ready";
         preparation.viewport.inert = false;
@@ -1600,6 +1723,69 @@ function whenGraphViewReady() {
 
 let graphTransitionWorkSession = 0;
 let graphTransitionWorkTarget = "";
+let graphTransitionWorkCompletionSession = 0;
+let graphTransitionWorkCompletionSequence = 0;
+let graphTransitionWorkLease = null;
+
+const GRAPH_TRANSITION_PROGRESS_PHASES =
+  Object.freeze({
+    bootstrap: Object.freeze([1, 6]),
+    analysis: Object.freeze([6, 18]),
+    ports: Object.freeze([18, 27]),
+    spatial: Object.freeze([27, 38]),
+    gpu: Object.freeze([38, 47]),
+    nodes: Object.freeze([47, 68]),
+    center: Object.freeze([68, 74]),
+    measurement: Object.freeze([74, 84]),
+    wires: Object.freeze([84, 96]),
+    renderer: Object.freeze([96, 98]),
+    settle: Object.freeze([98, 99])
+  });
+
+function graphTransitionProgressValue(
+    phase,
+    completed = 0,
+    total = 1
+  ) {
+    const range =
+      GRAPH_TRANSITION_PROGRESS_PHASES[
+        String(phase || "")
+      ];
+    if (!range) return undefined;
+    const normalizedTotal = Math.max(
+      1,
+      Number(total) || 0
+    );
+    const ratio = nodeGraphClamp(
+      (Number(completed) || 0) /
+        normalizedTotal,
+      0,
+      1
+    );
+    return range[0] +
+      (range[1] - range[0]) * ratio;
+  }
+
+function graphTransitionPresentationSucceeded(
+    detail = {}
+  ) {
+    const presentation = String(
+      detail.presentation || ""
+    );
+    return Boolean(
+      detail.renderBlocked !== true &&
+      detail.renderingBlocked !== true &&
+      !detail.recoveredError &&
+      ![
+        "svg-blocked",
+        "svg-capacity-blocked",
+        "cpu-recovered",
+        "model-preserved-retryable"
+      ].includes(presentation) &&
+      dom.root?.dataset.rmlGraphPhase ===
+        "ready"
+    );
+  }
 
 function graphPresentationIdentity(
     detail = {}
@@ -1616,11 +1802,37 @@ function graphPresentationIdentity(
     ]);
   }
 
-  function beginGraphTransitionWork(
+function updateGraphTransitionWork(
+    session,
+    changes = {}
+  ) {
+    if (
+      !session ||
+      session !== graphTransitionWorkSession
+    ) {
+      return false;
+    }
+    if (graphTransitionWorkLease) {
+      return graphTransitionWorkLease
+        .current?.() === true
+        ? graphTransitionWorkLease.update?.(
+            changes
+          ) === true
+        : false;
+    }
+    return window.RMLBuilderWork
+      ?.update?.(session, changes) === true;
+  }
+
+function beginGraphTransitionWork(
     options = {}
   ) {
-    const work = window.RMLBuilderWork;
-    if (!work?.begin) return 0;
+    graphTransitionWorkCompletionSequence += 1;
+    graphTransitionWorkCompletionSession = 0;
+    const {
+      progress: _ignoredProgress,
+      ...workOptions
+    } = options;
     for (const status of
       dom.root?.querySelectorAll?.(
         ":scope > .rml-graph-preparation-status:not(.rml-graph-safety-blocker)"
@@ -1634,13 +1846,33 @@ function graphPresentationIdentity(
       graphViewPreparation.status = null;
     }
     if (graphTransitionWorkSession) {
-      work.update?.(
+      updateGraphTransitionWork(
         graphTransitionWorkSession,
-        options
+        workOptions
       );
       return graphTransitionWorkSession;
     }
     graphTransitionWorkTarget = "";
+    const importedWork =
+      window.RMLImportPresentationWork
+        ?.claim?.(builderProjectEpoch);
+    if (
+      importedWork?.current?.() === true &&
+      Number(importedWork.workSession) > 0
+    ) {
+      graphTransitionWorkLease =
+        importedWork;
+      graphTransitionWorkSession =
+        Number(importedWork.workSession);
+      updateGraphTransitionWork(
+        graphTransitionWorkSession,
+        workOptions
+      );
+      return graphTransitionWorkSession;
+    }
+    const work = window.RMLBuilderWork;
+    if (!work?.begin) return 0;
+    graphTransitionWorkLease = null;
     graphTransitionWorkSession =
       work.begin({
         kicker: window.RMLI18n.t("index.aria_label.755f023e2cc7"),
@@ -1649,9 +1881,9 @@ function graphPresentationIdentity(
           window.RMLI18n.t("ui.auto.9e683eca2e0d"),
         detail:
           window.RMLI18n.t("ui.literal.356c9e23044a"),
-        progress: 24,
+        progress: 1,
         timeout: 120000,
-        ...options
+        ...workOptions
       });
     return graphTransitionWorkSession;
   }
@@ -1668,7 +1900,8 @@ function bindGraphTransitionWorkTarget() {
   }
 
 function finishGraphTransitionWork(
-    session = graphTransitionWorkSession
+    session = graphTransitionWorkSession,
+    { force = false } = {}
   ) {
     if (
       !session ||
@@ -1676,8 +1909,23 @@ function finishGraphTransitionWork(
     ) {
       return false;
     }
+    if (
+      !force &&
+      session ===
+        graphTransitionWorkCompletionSession
+    ) {
+      return true;
+    }
+    graphTransitionWorkCompletionSequence += 1;
+    graphTransitionWorkCompletionSession = 0;
+    const importedWork =
+      graphTransitionWorkLease;
+    graphTransitionWorkLease = null;
     graphTransitionWorkSession = 0;
     graphTransitionWorkTarget = "";
+    if (importedWork) {
+      return true;
+    }
     return Boolean(
       window.RMLBuilderWork?.finish?.(
         session
@@ -1688,15 +1936,98 @@ function finishGraphTransitionWork(
 function handleGraphTransitionPresentationComplete(
     event
   ) {
+    const detail = event?.detail || {};
     if (
       graphTransitionWorkSession &&
       graphTransitionWorkTarget &&
       graphPresentationIdentity(
-        event?.detail || {}
+        detail
       ) === graphTransitionWorkTarget
     ) {
-      finishGraphTransitionWork();
+      const session =
+        graphTransitionWorkSession;
+      graphTransitionWorkTarget = "";
+      if (
+        !graphTransitionPresentationSucceeded(
+          detail
+        )
+      ) {
+        finishGraphTransitionWork(
+          session,
+          { force: true }
+        );
+        return;
+      }
+      if (graphTransitionWorkLease) {
+        finishGraphTransitionWork(
+          session,
+          { force: true }
+        );
+        return;
+      }
+      graphTransitionWorkCompletionSession =
+        session;
+      const completionSequence =
+        ++graphTransitionWorkCompletionSequence;
+      const work = window.RMLBuilderWork;
+      const completion =
+        typeof work?.complete === "function"
+          ? work.complete(session)
+          : Promise.resolve()
+              .then(() => {
+                work?.update?.(
+                  session,
+                  { progress: 100 }
+                );
+                return work?.paint?.();
+              })
+              .then(() =>
+                work?.finish?.(session)
+              );
+      Promise.resolve(
+        completion
+      )
+        .catch(error => {
+          console.error(
+            "The completed graph transition could not paint its final progress state.",
+            error
+          );
+        })
+        .finally(() => {
+          if (
+            completionSequence !==
+              graphTransitionWorkCompletionSequence ||
+            session !==
+              graphTransitionWorkSession
+          ) {
+            return;
+          }
+          finishGraphTransitionWork(
+            session,
+            { force: true }
+          );
+        });
     }
+  }
+
+function handleImportedGraphPresentationWorkReleased(
+    event
+  ) {
+    if (
+      !graphTransitionWorkLease ||
+      Number(event?.detail?.projectEpoch) !==
+        Number(
+          graphTransitionWorkLease.projectEpoch
+        ) ||
+      Number(event?.detail?.workSession) !==
+        graphTransitionWorkSession
+    ) {
+      return;
+    }
+    finishGraphTransitionWork(
+      graphTransitionWorkSession,
+      { force: true }
+    );
   }
 
 let graphCatalogReadiness = "ready";
@@ -1937,11 +2268,25 @@ async function prepareGraphAnalysisForView(
     preparation
   ) {
     if (restoreCurrentGraphAnalysis()) {
+      updateGraphPreparationStatus(
+        preparation,
+        window.RMLI18n.t("ui.literal.942b3cdefdc7"),
+        {
+          phase: "analysis",
+          completed: 1,
+          total: 1
+        }
+      );
       return true;
     }
     updateGraphPreparationStatus(
       preparation,
-      window.RMLI18n.t("ui.literal.942b3cdefdc7")
+      window.RMLI18n.t("ui.literal.942b3cdefdc7"),
+      {
+        phase: "analysis",
+        completed: 0,
+        total: 1
+      }
     );
     const requestedGraph = graph;
     const requestedConnections =
@@ -1975,7 +2320,19 @@ async function prepareGraphAnalysisForView(
                   : "";
               updateGraphPreparationStatus(
                 preparation,
-                `Validating graph connections…${suffix}`
+                `Validating graph connections…${suffix}`,
+                {
+                  phase: "analysis",
+                  completed:
+                    Number.isFinite(completed)
+                      ? completed
+                      : 0,
+                  total:
+                    Number.isFinite(total) &&
+                    total > 0
+                      ? total
+                      : 1
+                }
               );
             }
           }
@@ -2014,6 +2371,15 @@ async function prepareGraphAnalysisForView(
       );
     }
     rememberCurrentGraphAnalysis();
+    updateGraphPreparationStatus(
+      preparation,
+      window.RMLI18n.t("ui.literal.942b3cdefdc7"),
+      {
+        phase: "analysis",
+        completed: 1,
+        total: 1
+      }
+    );
     return true;
   }
 
@@ -4380,7 +4746,7 @@ function setRmlNodeSymbolContent(element, symbol) {
   svg.setAttribute("aria-hidden", "true");
   svg.classList.add("rml-node-symbol-svg");
   const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
-  use.setAttribute("href", `assets/rml-icons.svg?v=1.21.77-static-live-import-stability#${iconId}`);
+  use.setAttribute("href", `assets/rml-icons.svg?v=1.21.83-preview-control-parity#${iconId}`);
   svg.appendChild(use);
   element.appendChild(svg);
 }
@@ -13875,7 +14241,7 @@ function graphPresentationVisible() {
   }
 
 function graphOutlineToggleMarkup() {
-    return `<svg class="rml-pack-outline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-outline"></use></svg>`;
+    return `<svg class="rml-pack-outline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-outline"></use></svg>`;
   }
 
 function markGraphPackPresentationPending() {
@@ -14339,7 +14705,7 @@ async function togglePackedNodeMode() {
     try {
       await window.RMLBuilderWork?.paint?.();
       if (!runtimeGraphStylesLoaded()) {
-        window.RMLBuilderWork?.update?.(
+        updateGraphTransitionWork(
           workSession,
           workOptions
         );
@@ -14411,7 +14777,7 @@ async function togglePackedNodeMode() {
           ) &&
           graphViewPreparing()
         ) {
-          window.RMLBuilderWork?.update?.(
+          updateGraphTransitionWork(
             workSession,
             workOptions
           );
@@ -15095,7 +15461,7 @@ function restoreGraphPaletteScroll(
 
 function setGraphPanelToggleIcon(button, iconName) {
   if (!button) return;
-  button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-${iconName}"></use></svg>`;
+  button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-${iconName}"></use></svg>`;
 }
 
 let graphPanelScrollPreservationSequence = 0;
@@ -15617,7 +15983,7 @@ function markRestoredGraphCatalogCheckPending() {
     graphCatalogReadiness = "pending";
     graphCatalogReadinessMessage =
       window.RMLI18n.t("ui.literal.c8d02f6075b7");
-    window.RMLBuilderWork?.update?.(
+    updateGraphTransitionWork(
       graphTransitionWorkSession,
       {
         detail:
@@ -15745,7 +16111,7 @@ function presentRuntimeGraphRestoreShell() {
       existing.querySelector(
         ":scope > .rml-graph-preparation-status"
       )?.remove();
-      window.RMLBuilderWork?.update?.(
+      updateGraphTransitionWork(
         workSession,
         {
           detail:
@@ -16195,7 +16561,7 @@ function createPaletteItem(
 
     const add =
       document.createElement("small");
-    add.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-${configurationPresent ? "check" : "add"}"></use></svg>`;
+    add.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-${configurationPresent ? "check" : "add"}"></use></svg>`;
 
     button.append(
       symbol,
@@ -16497,7 +16863,7 @@ function refreshGraphPaletteConfigurationAvailability() {
     );
     const marker = button.querySelector("small");
     if (marker) {
-      marker.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-${configurationPresent ? "check" : "add"}"></use></svg>`;
+      marker.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-${configurationPresent ? "check" : "add"}"></use></svg>`;
     }
   }
 
@@ -21138,20 +21504,20 @@ function createToolbarButton(
 const GRAPH_TOOLBAR_ICONS =
     Object.freeze({
       center: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-center"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-center"></use></svg>`,
       clear: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-delete"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-delete"></use></svg>`,
       zoomOut: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-zoom-out"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-zoom-out"></use></svg>`,
       zoomIn: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-zoom-in"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-zoom-in"></use></svg>`,
       editMode: `
-        <svg class="rml-graph-edit-enter-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-expand"></use></svg>
-        <svg class="rml-graph-edit-exit-icon" viewBox="0 0 24 24" aria-hidden="true" hidden><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-collapse"></use></svg>`,
+        <svg class="rml-graph-edit-enter-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-expand"></use></svg>
+        <svg class="rml-graph-edit-exit-icon" viewBox="0 0 24 24" aria-hidden="true" hidden><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-collapse"></use></svg>`,
       search: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-search"></use></svg>`,
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-search"></use></svg>`,
       next: `
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-next"></use></svg>`
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-next"></use></svg>`
     });
 
 function createToolbarIconButton(
@@ -21634,7 +22000,7 @@ function renderGraphCanvas() {
       <div class="rml-graph-search-overlay-card" role="dialog" aria-modal="true" aria-label="{{i18n:js.presentation.f0d095db4021}}">
         <div class="rml-graph-search-overlay-head">
           <strong>{{i18n:js.presentation.f0d095db4021}}</strong>
-          <button class="rml-graph-search-overlay-close" type="button" aria-label="{{i18n:ui.attr.0906f923243f}}"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-close"></use></svg></button>
+          <button class="rml-graph-search-overlay-close" type="button" aria-label="{{i18n:ui.attr.0906f923243f}}"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-close"></use></svg></button>
         </div>
         <div class="rml-graph-search-overlay-body">
           <input type="search" autocomplete="off" placeholder="{{i18n:js.presentation.a00d3271edfc}}" aria-label="{{i18n:js.presentation.f0d095db4021}}" aria-keyshortcuts="F3 Shift+F3 Control+G Control+Shift+G Meta+G Meta+Shift+G">
@@ -25500,17 +25866,29 @@ async function centerGraphForPreparation(
     let minimumY = Infinity;
     let maximumX = -Infinity;
     let maximumY = -Infinity;
+    const totalWork = Math.max(
+      1,
+      nodes.length + connections.length
+    );
+    const nodeBatchSize =
+      graphPreparationBatchSize(
+        nodes.length,
+        GRAPH_NODE_SPATIAL_PREPARATION_BATCH_SIZE
+      );
+    const connectionBatchSize =
+      graphPreparationBatchSize(
+        connections.length,
+        GRAPH_WIRE_PREPARATION_BATCH_SIZE
+      );
 
     for (
       let start = 0;
       start < nodes.length;
-      start +=
-        GRAPH_NODE_SPATIAL_PREPARATION_BATCH_SIZE
+      start += nodeBatchSize
     ) {
       const end = Math.min(
         nodes.length,
-        start +
-          GRAPH_NODE_SPATIAL_PREPARATION_BATCH_SIZE
+        start + nodeBatchSize
       );
       for (let index = start; index < end; index += 1) {
         const node = nodes[index];
@@ -25529,7 +25907,12 @@ async function centerGraphForPreparation(
       }
       updateGraphPreparationStatus(
         preparation,
-        window.RMLI18n.format("ui.externalized.318948a79dcb", { current: end.toLocaleString(window.RMLI18n.language), total: nodes.length.toLocaleString(window.RMLI18n.language) })
+        window.RMLI18n.format("ui.externalized.318948a79dcb", { current: end.toLocaleString(window.RMLI18n.language), total: nodes.length.toLocaleString(window.RMLI18n.language) }),
+        {
+          phase: "center",
+          completed: end,
+          total: totalWork
+        }
       );
       if (end < nodes.length) {
         await nextGraphViewTask(
@@ -25549,13 +25932,11 @@ async function centerGraphForPreparation(
     for (
       let start = 0;
       start < connections.length;
-      start +=
-        GRAPH_WIRE_PREPARATION_BATCH_SIZE
+      start += connectionBatchSize
     ) {
       const end = Math.min(
         connections.length,
-        start +
-          GRAPH_WIRE_PREPARATION_BATCH_SIZE
+        start + connectionBatchSize
       );
       for (let index = start; index < end; index += 1) {
         for (const point of
@@ -25566,6 +25947,15 @@ async function centerGraphForPreparation(
           maximumY = Math.max(maximumY, point.y);
         }
       }
+      updateGraphPreparationStatus(
+        preparation,
+        window.RMLI18n.format("ui.externalized.82cc12bc30b3", { current: end.toLocaleString(window.RMLI18n.language), total: connections.length.toLocaleString(window.RMLI18n.language) }),
+        {
+          phase: "center",
+          completed: nodes.length + end,
+          total: totalWork
+        }
+      );
       if (end < connections.length) {
         await nextGraphViewTask(
           preparation
@@ -25623,6 +26013,15 @@ async function centerGraphForPreparation(
         contentHeight * scale) / 2 -
       minimumY * scale;
     applyViewportTransform();
+    updateGraphPreparationStatus(
+      preparation,
+      window.RMLI18n.t("ui.literal.356c9e23044a"),
+      {
+        phase: "center",
+        completed: totalWork,
+        total: totalWork
+      }
+    );
     return true;
   }
 
@@ -25710,6 +26109,15 @@ async function prepareGraphConnectedPortKeys(
       graphConnectionLookupCache.size ===
         connections.length
     ) {
+      updateGraphPreparationStatus(
+        preparation,
+        window.RMLI18n.t("ui.literal.356c9e23044a"),
+        {
+          phase: "ports",
+          completed: 1,
+          total: 1
+        }
+      );
       return true;
     }
 
@@ -25717,16 +26125,18 @@ async function prepareGraphConnectedPortKeys(
     const connectionLookup = new Map();
     const incidentConnectionLookup =
       new Map();
+    const batchSize = graphPreparationBatchSize(
+      connections.length,
+      GRAPH_CONNECTION_PREPARATION_BATCH_SIZE
+    );
     for (
       let start = 0;
       start < connections.length;
-      start +=
-        GRAPH_CONNECTION_PREPARATION_BATCH_SIZE
+      start += batchSize
     ) {
       const end = Math.min(
         connections.length,
-        start +
-          GRAPH_CONNECTION_PREPARATION_BATCH_SIZE
+        start + batchSize
       );
       for (let index = start; index < end; index += 1) {
         const connection = connections[index];
@@ -25760,7 +26170,15 @@ async function prepareGraphConnectedPortKeys(
       }
       updateGraphPreparationStatus(
         preparation,
-        window.RMLI18n.format("ui.externalized.71d49435cdb8", { current: end.toLocaleString(window.RMLI18n.language), total: connections.length.toLocaleString(window.RMLI18n.language) })
+        window.RMLI18n.format("ui.externalized.71d49435cdb8", { current: end.toLocaleString(window.RMLI18n.language), total: connections.length.toLocaleString(window.RMLI18n.language) }),
+        {
+          phase: "ports",
+          completed: end,
+          total: Math.max(
+            1,
+            connections.length
+          )
+        }
       );
       if (end < connections.length) {
         await nextGraphViewTask(
@@ -25799,6 +26217,17 @@ async function prepareGraphConnectedPortKeys(
       connectionLookup;
     graphIncidentConnectionLookupCache =
       incidentConnectionLookup;
+    if (connections.length === 0) {
+      updateGraphPreparationStatus(
+        preparation,
+        window.RMLI18n.t("ui.literal.356c9e23044a"),
+        {
+          phase: "ports",
+          completed: 1,
+          total: 1
+        }
+      );
+    }
     return true;
   }
 
@@ -27866,7 +28295,7 @@ function createGraphNodeElementRmlOriginal(
       flip.className =
         "rml-graph-node-flip";
       flip.type = "button";
-      flip.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-node-swap"></use></svg>`;
+      flip.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-node-swap"></use></svg>`;
       flip.title = mirrored
         ? window.RMLI18n.t("ui.literal.9114b1bfc765")
         : window.RMLI18n.t("ui.literal.c8b7ca53198e");
@@ -29010,6 +29439,15 @@ async function prepareGraphNodeViewportSpatialIndex(
         GRAPH_NODE_SPATIAL_PREPARATION_BATCH_SIZE
     ) {
       if (updateDirtyGraphNodeSpatialRecords()) {
+        updateGraphPreparationStatus(
+          preparation,
+          window.RMLI18n.t("ui.literal.356c9e23044a"),
+          {
+            phase: "spatial",
+            completed: 1,
+            total: 1
+          }
+        );
         return true;
       }
       rebuild = true;
@@ -29021,16 +29459,18 @@ async function prepareGraphNodeViewportSpatialIndex(
 
     const index = new Map();
     const byId = new Map();
+    const batchSize = graphPreparationBatchSize(
+      nodes.length,
+      GRAPH_NODE_SPATIAL_PREPARATION_BATCH_SIZE
+    );
     for (
       let start = 0;
       start < nodes.length;
-      start +=
-        GRAPH_NODE_SPATIAL_PREPARATION_BATCH_SIZE
+      start += batchSize
     ) {
       const end = Math.min(
         nodes.length,
-        start +
-          GRAPH_NODE_SPATIAL_PREPARATION_BATCH_SIZE
+        start + batchSize
       );
       for (let order = start; order < end; order += 1) {
         const node = nodes[order];
@@ -29053,7 +29493,12 @@ async function prepareGraphNodeViewportSpatialIndex(
       }
       updateGraphPreparationStatus(
         preparation,
-        window.RMLI18n.format("ui.externalized.2aad6b7c6969", { current: end.toLocaleString(window.RMLI18n.language), total: nodes.length.toLocaleString(window.RMLI18n.language) })
+        window.RMLI18n.format("ui.externalized.2aad6b7c6969", { current: end.toLocaleString(window.RMLI18n.language), total: nodes.length.toLocaleString(window.RMLI18n.language) }),
+        {
+          phase: "spatial",
+          completed: end,
+          total: Math.max(1, nodes.length)
+        }
       );
       if (end < nodes.length) {
         await nextGraphViewTask(
@@ -29095,6 +29540,17 @@ async function prepareGraphNodeViewportSpatialIndex(
       sourceRevision;
     graphNodeViewportSpatialDirty = false;
     graphNodeViewportSpatialDirtyNodeIds.clear();
+    if (nodes.length === 0) {
+      updateGraphPreparationStatus(
+        preparation,
+        window.RMLI18n.t("ui.literal.356c9e23044a"),
+        {
+          phase: "spatial",
+          completed: 1,
+          total: 1
+        }
+      );
+    }
     return true;
   }
 
@@ -30288,17 +30744,19 @@ async function populateGraphNodeHostForPreparation(
     captureRenderedNodeBodyScrolls();
     nodesHost.replaceChildren();
     graphSocketElementCache.clear();
+    const batchSize = graphPreparationBatchSize(
+      nodes.length,
+      GRAPH_DOM_NODE_PREPARATION_BATCH_SIZE
+    );
 
     for (
       let start = 0;
       start < nodes.length;
-      start +=
-        GRAPH_DOM_NODE_PREPARATION_BATCH_SIZE
+      start += batchSize
     ) {
       const end = Math.min(
         nodes.length,
-        start +
-          GRAPH_DOM_NODE_PREPARATION_BATCH_SIZE
+        start + batchSize
       );
       const fragment =
         document.createDocumentFragment();
@@ -30336,7 +30794,12 @@ async function populateGraphNodeHostForPreparation(
       }
       updateGraphPreparationStatus(
         preparation,
-        window.RMLI18n.format("ui.externalized.d09a9de4ab65", { current: end.toLocaleString(window.RMLI18n.language), total: nodes.length.toLocaleString(window.RMLI18n.language) })
+        window.RMLI18n.format("ui.externalized.d09a9de4ab65", { current: end.toLocaleString(window.RMLI18n.language), total: nodes.length.toLocaleString(window.RMLI18n.language) }),
+        {
+          phase: "nodes",
+          completed: end,
+          total: Math.max(1, nodes.length)
+        }
       );
       if (end < nodes.length) {
         await nextGraphViewTask(
@@ -30359,6 +30822,17 @@ async function populateGraphNodeHostForPreparation(
       renderedGraphNodeSignature(nodes);
     recordGraphNodeVirtualizationAnchor();
     preparation.geometryDirty = true;
+    if (nodes.length === 0) {
+      updateGraphPreparationStatus(
+        preparation,
+        window.RMLI18n.t("ui.literal.356c9e23044a"),
+        {
+          phase: "nodes",
+          completed: 1,
+          total: 1
+        }
+      );
+    }
     return true;
   }
 
@@ -30368,18 +30842,20 @@ async function refreshGraphPreparationNodeMeasurements(
     const articles = [
       ...preparation.nodesHost.children
     ];
+    const batchSize = graphPreparationBatchSize(
+      articles.length,
+      GRAPH_DOM_MEASUREMENT_BATCH_SIZE
+    );
     preparation.measuring = true;
     try {
       for (
         let start = 0;
         start < articles.length;
-        start +=
-          GRAPH_DOM_MEASUREMENT_BATCH_SIZE
+        start += batchSize
       ) {
         const batch = articles.slice(
           start,
-          start +
-            GRAPH_DOM_MEASUREMENT_BATCH_SIZE
+          start + batchSize
         );
         const ids = new Set();
         for (const article of batch) {
@@ -30401,12 +30877,19 @@ async function refreshGraphPreparationNodeMeasurements(
         );
         const end = Math.min(
           articles.length,
-          start +
-            GRAPH_DOM_MEASUREMENT_BATCH_SIZE
+          start + batchSize
         );
         updateGraphPreparationStatus(
           preparation,
-          window.RMLI18n.format("ui.externalized.82dfe33a8128", { current: end.toLocaleString(window.RMLI18n.language), total: articles.length.toLocaleString(window.RMLI18n.language) })
+          window.RMLI18n.format("ui.externalized.82dfe33a8128", { current: end.toLocaleString(window.RMLI18n.language), total: articles.length.toLocaleString(window.RMLI18n.language) }),
+          {
+            phase: "measurement",
+            completed: end,
+            total: Math.max(
+              1,
+              articles.length
+            )
+          }
         );
         if (end < articles.length) {
           await nextGraphViewTask(
@@ -30422,6 +30905,17 @@ async function refreshGraphPreparationNodeMeasurements(
       }
     } finally {
       preparation.measuring = false;
+    }
+    if (articles.length === 0) {
+      updateGraphPreparationStatus(
+        preparation,
+        window.RMLI18n.t("ui.literal.356c9e23044a"),
+        {
+          phase: "measurement",
+          completed: 1,
+          total: 1
+        }
+      );
     }
     return true;
   }
@@ -32538,6 +33032,15 @@ async function prepareGraphGpuNodeRecords(
   ) {
     synchronizeGraphGpuSelection();
     if (!graphGpuSimplifiedNodesActive()) {
+      updateGraphPreparationStatus(
+        preparation,
+        window.RMLI18n.t("ui.literal.356c9e23044a"),
+        {
+          phase: "gpu",
+          completed: 1,
+          total: 1
+        }
+      );
       return true;
     }
     const nodes = graph?.nodes || [];
@@ -32552,22 +33055,33 @@ async function prepareGraphGpuNodeRecords(
           GRAPH_GPU_NODE_PREPARATION_BATCH_SIZE
       ) {
         ensureGraphGpuNodeRecords();
+        updateGraphPreparationStatus(
+          preparation,
+          window.RMLI18n.t("ui.literal.356c9e23044a"),
+          {
+            phase: "gpu",
+            completed: 1,
+            total: 1
+          }
+        );
         return true;
       }
     }
 
     const records = [];
     const byId = new Map();
+    const batchSize = graphPreparationBatchSize(
+      nodes.length,
+      GRAPH_GPU_NODE_PREPARATION_BATCH_SIZE
+    );
     for (
       let start = 0;
       start < nodes.length;
-      start +=
-        GRAPH_GPU_NODE_PREPARATION_BATCH_SIZE
+      start += batchSize
     ) {
       const end = Math.min(
         nodes.length,
-        start +
-          GRAPH_GPU_NODE_PREPARATION_BATCH_SIZE
+        start + batchSize
       );
       for (let index = start; index < end; index += 1) {
         const node = nodes[index];
@@ -32590,7 +33104,12 @@ async function prepareGraphGpuNodeRecords(
       }
       updateGraphPreparationStatus(
         preparation,
-        window.RMLI18n.format("ui.externalized.fec87ee7eed4", { current: end.toLocaleString(window.RMLI18n.language), total: nodes.length.toLocaleString(window.RMLI18n.language) })
+        window.RMLI18n.format("ui.externalized.fec87ee7eed4", { current: end.toLocaleString(window.RMLI18n.language), total: nodes.length.toLocaleString(window.RMLI18n.language) }),
+        {
+          phase: "gpu",
+          completed: end,
+          total: Math.max(1, nodes.length)
+        }
       );
       if (end < nodes.length) {
         await nextGraphViewTask(
@@ -32628,6 +33147,17 @@ async function prepareGraphGpuNodeRecords(
     graphGpuNodeRecordLength = nodes.length;
     graphGpuNodeRecordsDirty = false;
     graphGpuNodeDirtyIds.clear();
+    if (nodes.length === 0) {
+      updateGraphPreparationStatus(
+        preparation,
+        window.RMLI18n.t("ui.literal.356c9e23044a"),
+        {
+          phase: "gpu",
+          completed: 1,
+          total: 1
+        }
+      );
+    }
     return true;
   }
 
@@ -34092,6 +34622,14 @@ async function prepareCompleteHybridGraphWires(
     const connections = graph.connections;
     const renderer = graphHybridRenderer;
     const wires = dom.wires;
+    const totalWireWork = Math.max(
+      1,
+      connections.length * 2
+    );
+    const batchSize = graphPreparationBatchSize(
+      connections.length,
+      GRAPH_WIRE_PREPARATION_BATCH_SIZE
+    );
 
     graphWireFullRenderPending = false;
     graphWirePartialConnectionIds.clear();
@@ -34100,13 +34638,11 @@ async function prepareCompleteHybridGraphWires(
     for (
       let start = 0;
       start < connections.length;
-      start +=
-        GRAPH_WIRE_PREPARATION_BATCH_SIZE
+      start += batchSize
     ) {
       const end = Math.min(
         connections.length,
-        start +
-          GRAPH_WIRE_PREPARATION_BATCH_SIZE
+        start + batchSize
       );
       for (let index = start; index < end; index += 1) {
         const branch =
@@ -34116,6 +34652,15 @@ async function prepareCompleteHybridGraphWires(
           `${branch.connectionId}\u0000${branch.pointId}`;
         usage.set(key, (usage.get(key) || 0) + 1);
       }
+      updateGraphPreparationStatus(
+        preparation,
+        window.RMLI18n.format("ui.externalized.82cc12bc30b3", { current: end.toLocaleString(window.RMLI18n.language), total: connections.length.toLocaleString(window.RMLI18n.language) }),
+        {
+          phase: "wires",
+          completed: end,
+          total: totalWireWork
+        }
+      );
       if (end < connections.length) {
         await nextGraphViewTask(
           preparation
@@ -34144,13 +34689,11 @@ async function prepareCompleteHybridGraphWires(
     for (
       let start = 0;
       start < connections.length;
-      start +=
-        GRAPH_WIRE_PREPARATION_BATCH_SIZE
+      start += batchSize
     ) {
       const end = Math.min(
         connections.length,
-        start +
-          GRAPH_WIRE_PREPARATION_BATCH_SIZE
+        start + batchSize
       );
       for (let index = start; index < end; index += 1) {
         const connection = connections[index];
@@ -34219,7 +34762,12 @@ async function prepareCompleteHybridGraphWires(
       }
       updateGraphPreparationStatus(
         preparation,
-        window.RMLI18n.format("ui.externalized.82cc12bc30b3", { current: end.toLocaleString(window.RMLI18n.language), total: connections.length.toLocaleString(window.RMLI18n.language) })
+        window.RMLI18n.format("ui.externalized.82cc12bc30b3", { current: end.toLocaleString(window.RMLI18n.language), total: connections.length.toLocaleString(window.RMLI18n.language) }),
+        {
+          phase: "wires",
+          completed: connections.length + end,
+          total: totalWireWork
+        }
       );
       if (end < connections.length) {
         await nextGraphViewTask(
@@ -34303,6 +34851,17 @@ async function prepareCompleteHybridGraphWires(
 
     renderer?.setCamera?.(graph.viewport);
     renderer?.drawNow?.();
+    if (connections.length === 0) {
+      updateGraphPreparationStatus(
+        preparation,
+        window.RMLI18n.t("ui.literal.356c9e23044a"),
+        {
+          phase: "wires",
+          completed: 1,
+          total: 1
+        }
+      );
+    }
     notifyGraphRenderComplete();
     return true;
   }
@@ -34325,12 +34884,30 @@ async function renderGraphWiresForPreparation(
         preparation
       );
     } else {
+      updateGraphPreparationStatus(
+        preparation,
+        window.RMLI18n.t("ui.literal.356c9e23044a"),
+        {
+          phase: "wires",
+          completed: 0,
+          total: 1
+        }
+      );
       preparation.allowWireBuild = true;
       try {
         renderGraphWires();
       } finally {
         preparation.allowWireBuild = false;
       }
+      updateGraphPreparationStatus(
+        preparation,
+        window.RMLI18n.t("ui.literal.356c9e23044a"),
+        {
+          phase: "wires",
+          completed: 1,
+          total: 1
+        }
+      );
     }
     const plan = graphPresentationPlanForRecords(
       graphNodeSpatialRecordsInBounds(
@@ -36368,7 +36945,7 @@ function renderGraphInspector(options = {}) {
       empty.className =
         "empty-inspector";
       empty.innerHTML =
-        `<span class="empty-inspector-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-lightning"></use></svg></span>
+        `<span class="empty-inspector-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-lightning"></use></svg></span>
          <h2>{{i18n:ui.text.e02d912b50bb}}</h2>
          <p>{{i18n:ui.text.d19bd2965c4f}}</p>`;
       dom.inspectorContent.appendChild(
@@ -41609,7 +42186,7 @@ const INSPECTOR_ACTION_PRESENTATION = Object.freeze({
 
   function inspectorButtonIconMarkup(actionId) {
     const iconName = INSPECTOR_ACTION_PRESENTATION[actionId]?.[0] || "more";
-    return `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-${iconName}"></use></svg>`;
+    return `<svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-${iconName}"></use></svg>`;
   }
 
   function inspectorButtonTone(actionId) {
@@ -41675,7 +42252,7 @@ function visualFunctionParameterButton(action, label, handler) {
     svg.setAttribute("viewBox", "0 0 24 24");
     svg.setAttribute("aria-hidden", "true");
     const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
-    use.setAttribute("href", `assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-visual-function-parameter-${action}`);
+    use.setAttribute("href", `assets/rml-icons.svg?v=1.21.83-preview-control-parity#icon-visual-function-parameter-${action}`);
     svg.appendChild(use);
     button.appendChild(svg);
     button.addEventListener("click", event => {
@@ -50054,13 +50631,17 @@ document.addEventListener(
   "rml-graph:presentation-complete",
   handleGraphTransitionPresentationComplete
 );
+document.addEventListener(
+  "rml-builder:import-presentation-work-released",
+  handleImportedGraphPresentationWorkReleased
+);
 
 Object.defineProperty(
   window,
   window.RMLI18n.t("ui.literal.91092bd586bf"),
   {
     value:
-      "1.21.77-static-live-import-stability",
+      "1.21.83-preview-control-parity",
     writable: false,
     enumerable: true,
     configurable: true

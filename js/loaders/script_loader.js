@@ -2,7 +2,7 @@
   "use strict";
 
   const SCRIPT_LOADER_MODULE_ID =
-    "1.21.77-static-live-import-stability";
+    "1.21.83-preview-control-parity";
 
   if (
     window.RMLScriptLoader?.version >= 47 &&
@@ -123,10 +123,27 @@
   );
 
   const bundles = Object.freeze({
+    "builder-work": Object.freeze({
+      dependencies: Object.freeze([]),
+      files: Object.freeze([
+        Object.freeze({
+          url: "../ui/builder_replacement_dialog.js?v=1.21.83-preview-control-parity",
+          ready: () =>
+            window.RMLBuilderReplacementDialog
+              ?.moduleId === SCRIPT_LOADER_MODULE_ID
+        }),
+        Object.freeze({
+          url: "../ui/builder_work_controller.js?v=1.21.83-preview-control-parity",
+          ready: () =>
+            window.RMLBuilderWorkController
+              ?.moduleId === SCRIPT_LOADER_MODULE_ID
+        })
+      ])
+    }),
     "scanner-connection": Object.freeze({
       dependencies: Object.freeze([]),
       files: Object.freeze([Object.freeze({
-        url: "../graph/runtime_bridge.js?v=1.21.77-static-live-import-stability&status-runtime=4",
+        url: "../graph/runtime_bridge.js?v=1.21.83-preview-control-parity&status-runtime=4",
         ready: () => window.RMLRuntimeBridge?.version >= 14 &&
           typeof window.RMLRuntimeBridge?.connect === "function"
       })])
@@ -170,7 +187,7 @@
       dependencies: Object.freeze([]),
       files: Object.freeze([
         Object.freeze({
-          url: "../catalog/catalog_loader.js?v=1.21.77-static-live-import-stability&status-catalog=4",
+          url: "../catalog/catalog_loader.js?v=1.21.83-preview-control-parity&status-catalog=4",
           ready: () =>
             window.RMLCatalogImportGate?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -222,7 +239,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/node_graph_codegen.js?v=1.21.77-static-live-import-stability",
+          url: "../graph/node_graph_codegen.js?v=1.21.83-preview-control-parity",
           ready: () =>
             window.RMLTypedNodeGraphGenerator?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -239,7 +256,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../workers/saved_api_composite_compare_worker.js?v=1.21.77-static-live-import-stability",
+          url: "../workers/saved_api_composite_compare_worker.js?v=1.21.83-preview-control-parity",
           ready: () =>
             window.RMLSavedApiCompositeCompareWorkerBootstrap
               ?.moduleId === SCRIPT_LOADER_MODULE_ID &&
@@ -248,13 +265,13 @@
               ?.source === "string"
         }),
         Object.freeze({
-          url: "../graph/node_graph_composites.js?v=1.21.77-static-live-import-stability",
+          url: "../graph/node_graph_composites.js?v=1.21.83-preview-control-parity",
           ready: () =>
             window.RMLNodeGraphCompositesModuleId ===
               SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_custom_csharp.js?v=1.21.77-static-live-import-stability",
+          url: "../graph/node_graph_custom_csharp.js?v=1.21.83-preview-control-parity",
           ready: () =>
             window.RMLNodeGraphCustomCSharpModuleId ===
               SCRIPT_LOADER_MODULE_ID
@@ -263,13 +280,13 @@
           url: "../graph/node_graph_guided.js?v=1-physical-modules-v748"
         }),
         Object.freeze({
-          url: "../graph/node_graph_view.js?v=1.21.77-static-live-import-stability&status-readiness=4",
+          url: "../graph/node_graph_view.js?v=1.21.83-preview-control-parity&status-readiness=4",
           ready: () =>
             window.RMLNodeGraphViewModuleId ===
               SCRIPT_LOADER_MODULE_ID
         }),
         Object.freeze({
-          url: "../graph/node_graph_bootstrap.js?v=1.21.77-static-live-import-stability",
+          url: "../graph/node_graph_bootstrap.js?v=1.21.83-preview-control-parity",
           ready: () =>
             window.RMLDynamicGraphHost?.moduleId ===
               SCRIPT_LOADER_MODULE_ID &&
@@ -293,7 +310,7 @@
       ]),
       files: Object.freeze([
         Object.freeze({
-          url: "../graph/graph_gpu_renderer.js?v=1.21.77-static-live-import-stability",
+          url: "../graph/graph_gpu_renderer.js?v=1.21.83-preview-control-parity",
           ready: () =>
             typeof window.RMLGraphHybridRenderer?.create === "function"
         })
