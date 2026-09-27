@@ -2,7 +2,7 @@
   "use strict";
 
   const CATALOG_LOADER_MODULE_ID =
-    "1.21.76-custom-csharp-catalog-provenance";
+    "1.21.77-static-live-import-stability";
   const LOADER_VERSION = 91;
   const DEFAULT_PORT_FIRST = 42719;
   const DEFAULT_PORT_LAST = 42725;
@@ -148,11 +148,11 @@
     scriptUrl
   ).href;
   const visualCSharpUrl = new URL(
-    "../compiler/visual_csharp.js?v=1.21.76-custom-csharp-catalog-provenance",
+    "../compiler/visual_csharp.js?v=1.21.77-static-live-import-stability",
     scriptUrl
   ).href;
   const apiNodesUrl = new URL(
-    "api_nodes.js?v=1.21.76-custom-csharp-catalog-provenance",
+    "api_nodes.js?v=1.21.77-static-live-import-stability",
     scriptUrl
   ).href;
 
@@ -12408,7 +12408,7 @@
           )
         });
     console.info(
-      "[RML API Catalog] Completed a single seven-port sweep.",
+      "[RML API Catalog] Completed a single ordered health sweep.",
       diagnostics
     );
     return diagnostics;
@@ -12417,81 +12417,64 @@
   async function discoverBuilderCatalogSession(
     signal = null
   ) {
-    const probes = [];
+    const outcomes = [];
+    let selected = null;
     for (
       let port = DEFAULT_PORT_FIRST;
       port <= DEFAULT_PORT_LAST;
       port += 1
     ) {
-      probes.push(
-        fetchJson(
+      if (signal?.aborted === true) {
+        break;
+      }
+      let outcome;
+      try {
+        const health = await fetchJson(
           `http://127.0.0.1:${port}/health`,
           SCANNER_HEALTH_SWEEP_TIMEOUT_MS,
           signal
-        )
-          .then(health => Object.freeze({
-            port,
-            outcome:
-              health?.ok === true
-                ? "healthy"
-                : "unhealthy",
-            http: Object.freeze({
-              status: 200,
-              statusText: "OK"
-            }),
-            health: Object.freeze({
-              ...health
-            })
-          }))
-          .catch(error => Object.freeze({
-            port,
-            ...catalogHealthSweepFailure(
-              error,
-              {
-                aborted:
-                  signal?.aborted === true
-              }
-            )
-          }))
-      );
-    }
-    const outcomes =
-      await Promise.all(probes);
-    const candidates = outcomes
-      .filter(candidate =>
-        Boolean(candidate?.health)
-      )
-      .map(candidate => ({
-        ...candidate,
-        fingerprint: String(
-          scannerFingerprintContract(
-            candidate.health
-          )?.fingerprint ||
-          legacyScannerFingerprint(
-            candidate.health
-          ) ||
+        );
+        outcome = Object.freeze({
+          port,
+          outcome:
+            health?.ok === true
+              ? "healthy"
+              : "unhealthy",
+          http: Object.freeze({
+            status: 200,
+            statusText: "OK"
+          }),
+          health: Object.freeze({
+            ...health
+          }),
+          fingerprint: String(
+            scannerFingerprintContract(
+              health
+            )?.fingerprint ||
+            legacyScannerFingerprint(
+              health
+            ) ||
             ""
-        ).trim().toLowerCase()
-      }))
-      .filter(candidate =>
-        candidate.health?.ok === true
-      );
-    const catalogIsReady = candidate =>
-      candidate.health?.catalogReady === true &&
-      candidate.health?.catalogAvailable === true;
-    const selected =
-      candidates.find(candidate =>
-        catalogIsReady(candidate) &&
-        candidate.health
-          ?.engineContextAvailable === true
-      ) ||
-      candidates.find(catalogIsReady) ||
-      candidates.find(candidate =>
-        candidate.health
-          ?.engineContextAvailable === true
-      ) ||
-       candidates[0] ||
-       null;
+          ).trim().toLowerCase()
+        });
+      } catch (error) {
+        outcome = Object.freeze({
+          port,
+          ...catalogHealthSweepFailure(
+            error,
+            {
+              aborted:
+                signal?.aborted === true
+            }
+          )
+        });
+      }
+      outcomes.push(outcome);
+      if (outcome.health?.ok === true) {
+        selected = outcome;
+        break;
+      }
+    }
     publishCatalogHealthSweepDiagnostics({
       outcome:
         signal?.aborted === true
@@ -12504,7 +12487,7 @@
           ? 0
           : selected?.port || 0,
       candidateCount:
-        candidates.length,
+        selected ? 1 : 0,
       timeoutMs:
         SCANNER_HEALTH_SWEEP_TIMEOUT_MS,
       probes: outcomes

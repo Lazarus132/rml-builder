@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const VERSION = "1.21.76-custom-csharp-catalog-provenance";
+  const VERSION = "1.21.77-static-live-import-stability";
   const STORAGE_KEY = "rml-builder-language-v1";
   const state = { language: localStorage.getItem(STORAGE_KEY) || "en", fallback: {}, active: {}, previousCatalog: {}, manifest: null, ready: null, catalogs: new Map(), reverseCatalogs: new WeakMap() };
   const norm = value => String(value ?? "").replace(/\s+/g, " ").trim();

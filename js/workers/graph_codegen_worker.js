@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_CODEGEN_WORKER_MODULE_ID =
-  "1.21.76-custom-csharp-catalog-provenance";
+  "1.21.77-static-live-import-stability";
 
 self.window = self;
 
@@ -719,10 +719,10 @@ async function ensureRuntime(
       "../catalog/mod_nodes.js?v=803-visual-function-semantics"
     );
     importScripts(
-      "../compiler/visual_csharp.js?v=1.21.76-custom-csharp-catalog-provenance"
+      "../compiler/visual_csharp.js?v=1.21.77-static-live-import-stability"
     );
     importScripts(
-      "../catalog/api_nodes.js?v=1.21.76-custom-csharp-catalog-provenance"
+      "../catalog/api_nodes.js?v=1.21.77-static-live-import-stability"
     );
 
     if (
@@ -747,7 +747,7 @@ async function ensureRuntime(
     }
 
     importScripts(
-      "../graph/node_graph_codegen.js?v=1.21.76-custom-csharp-catalog-provenance"
+      "../graph/node_graph_codegen.js?v=1.21.77-static-live-import-stability"
     );
 
     if (

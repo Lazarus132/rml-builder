@@ -28,7 +28,7 @@ const EXAMPLE_PROJECT_RESOURCE_PATH = "../../assets/data/Load Example.json";
 const ROOT_CONTAINER = "root";
 const LAYOUT_ROW_KIND = "layoutRow";
 const RML_BUILDER_BUILD_ID =
-  "1.21.76-custom-csharp-catalog-provenance";
+  "1.21.77-static-live-import-stability";
 const BUILDER_REPLACEMENT_RENDER_LIMIT =
   200;
 
@@ -361,7 +361,7 @@ function outlineSymbolMarkup(symbol) {
   const iconIds = { "#": "icon-node-hash", "VEC": "icon-node-vec" };
   const iconId = iconIds[String(symbol || "")];
   if (!iconId) return escapeHtml(String(symbol || "?"));
-  return `<svg class="rml-node-symbol-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#${iconId}"></use></svg>`;
+  return `<svg class="rml-node-symbol-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#${iconId}"></use></svg>`;
 }
 
 function outlinePaletteEntriesForGroup(group) {
@@ -5342,7 +5342,7 @@ function ensureGraphCodegenWorker() {
 
   const worker = new Worker(
     new URL(
-      "../workers/graph_codegen_worker.js?v=1.21.76-custom-csharp-catalog-provenance",
+      "../workers/graph_codegen_worker.js?v=1.21.77-static-live-import-stability",
       APP_SCRIPT_BASE_URL
     ),
     {
@@ -14581,7 +14581,7 @@ function renderPalette() {
               data-help="${escapeHtml(outlinePaletteHelp(item))}">
               <span>${escapeHtml(item.badge)}</span>
               <strong>${escapeHtml(item.label)}</strong>
-              <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#icon-add"></use></svg></b>
+              <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-add"></use></svg></b>
             </button>`;
           }
 
@@ -14596,7 +14596,7 @@ function renderPalette() {
             data-help="${escapeHtml(entry.family.id === "numberConstant" ? window.RMLI18n.t("ui.dev327.outline.number.help") : window.RMLI18n.t("ui.dev327.outline.vector.help"))}">
             <span>${outlineSymbolMarkup(entry.family.symbol)}</span>
             <strong>${escapeHtml(entry.family.title)}</strong>
-            <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#icon-add"></use></svg></b>
+            <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-add"></use></svg></b>
           </button>`;
         })
         .join("");
@@ -14615,7 +14615,7 @@ function renderPalette() {
                   data-help="${escapeHtml(window.RMLI18n.t("ui.attr.e126e5850c57"))}">
                   <span>{{i18n:js.presentation.adddc72949b2}}</span>
                   <strong>${escapeHtml(`DYN · ${source.label}`)}</strong>
-                  <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#icon-add"></use></svg></b>
+                  <b><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-add"></use></svg></b>
                 </button>`
               )
               .join("")
@@ -14952,7 +14952,7 @@ const nextOptionDirection =
                       option.children,
                       option.id
                     )
-                  : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#icon-add"></use></svg></span>{{i18n:ui.text.3f27e6ab79a6}}</div>`
+                  : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-add"></use></svg></span>{{i18n:ui.text.3f27e6ab79a6}}</div>`
               }
             </div>
           </section>`
@@ -14983,7 +14983,7 @@ const nextOptionDirection =
         ${
           children.length
             ? nodeCardsMarkup(children, node.id)
-            : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#icon-add"></use></svg></span>{{i18n:ui.text.572874456a9e}}</div>`
+            : `<div class="empty-drop"><span><svg class="palette-action-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-add"></use></svg></span>{{i18n:ui.text.572874456a9e}}</div>`
         }
       </div>
     </section>`;
@@ -22550,7 +22550,7 @@ function controllerInspectorMarkup(node) {
       <legend>{{i18n:ui.text.722c20869f7e}}</legend>
       ${options}
       <button class="add-option" type="button" data-add-option>
-        <svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#icon-add"></use></svg> ${window.RMLI18n.t("ui.outline.addSection")}
+        <svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-add"></use></svg> ${window.RMLI18n.t("ui.outline.addSection")}
       </button>
     </fieldset>
     <label>
@@ -25869,14 +25869,14 @@ function previewEnumEditorMarkup(
       ${settingsPreviewLiveDisabledAttributes(node.id)}
       data-preview-enum-direction="-1"
       data-preview-node="${escapeHtml(node.id)}"
-      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.5caa1fc4e7c2"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#icon-triangle-left"></use></svg></button>
+      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.5caa1fc4e7c2"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-triangle-left"></use></svg></button>
     <button
       class="rml-preview-control rml-preview-enum-step"
       type="button"
       ${settingsPreviewLiveDisabledAttributes(node.id)}
       data-preview-enum-direction="1"
       data-preview-node="${escapeHtml(node.id)}"
-      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.c400ec237248"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#icon-triangle-right"></use></svg></button>
+      aria-label="${escapeHtml(window.RMLI18n.t("js.presentation.c400ec237248"))}"><svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-triangle-right"></use></svg></button>
   </div>`;
 }
 
@@ -25951,7 +25951,7 @@ function previewSettingEditorMarkup(node) {
         data-preview-bool="${escapeHtml(node.id)}"${
           value ? " checked" : ""
         }>
-      <span aria-hidden="true"><svg class="rml-inline-icon" viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#icon-check"></use></svg></span>
+      <span aria-hidden="true"><svg class="rml-inline-icon" viewBox="0 0 24 24"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-check"></use></svg></span>
     </label>`;
   }
 
@@ -30284,7 +30284,7 @@ async function requestBuilderReplacementChoice(
                 ? "!"
                 : "·";
       if (status === "selected") {
-        state.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#icon-check"></use></svg>`;
+        state.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-check"></use></svg>`;
       }
       const name =
         document.createElement("span");
@@ -36399,7 +36399,12 @@ function renderRmlBuilderProfilePresentation(profile = rmlBuilderProfilePresenta
   preload.src = url;
 }
 
-async function fetchRmlBuilderProfileJson(url) {
+async function fetchRmlBuilderProfileJson(
+  url,
+  {
+    optional = false
+  } = {}
+) {
   const controller = new AbortController();
   const timeout = window.setTimeout(
     () => controller.abort(),
@@ -36408,22 +36413,28 @@ async function fetchRmlBuilderProfileJson(url) {
   try {
     const response = await fetch(url, {
       cache: "no-store",
-      credentials: "same-origin",
+      credentials: "omit",
       headers: { Accept: "application/json" },
+      mode: "cors",
+      redirect: "error",
       signal: controller.signal
     });
     if (!response.ok) {
-      console.error(
-        `[RML BUILDER INTERNAL FAILURE] The selected scanner profile bridge returned HTTP ${response.status} ${response.statusText}.`
-      );
+      if (!optional) {
+        console.error(
+          `[RML BUILDER INTERNAL FAILURE] The selected scanner profile endpoint returned HTTP ${response.status} ${response.statusText}.`
+        );
+      }
       return RML_BUILDER_PROFILE_FETCH_FAILED;
     }
     return await response.json();
   } catch (error) {
-    console.error(
-      "[RML BUILDER INTERNAL FAILURE] A profile request for the scanner selected by the health sweep failed.",
-      error
-    );
+    if (!optional) {
+      console.error(
+        "[RML BUILDER INTERNAL FAILURE] A profile request for the scanner selected by the health sweep failed.",
+        error
+      );
+    }
     return RML_BUILDER_PROFILE_FETCH_FAILED;
   } finally {
     window.clearTimeout(timeout);
@@ -36440,11 +36451,25 @@ async function fetchRmlBuilderProfileAvatarDataUrl(
   } catch {
     return null;
   }
+  const directScannerOrigin =
+    `http://127.0.0.1:${scannerPort}`;
+  const sameOriginBridge =
+    candidate.origin ===
+      window.location.origin &&
+    candidate.pathname ===
+      "/rml-scanner-avatar" &&
+    Number(
+      candidate.searchParams.get("port")
+    ) === scannerPort;
+  const directScannerAvatar =
+    candidate.origin ===
+      directScannerOrigin &&
+    candidate.pathname ===
+      "/profile/avatar" &&
+    !candidate.search;
   if (
-    candidate.origin !== window.location.origin ||
-    candidate.pathname !== "/rml-scanner-avatar" ||
-    Number(candidate.searchParams.get("port")) !==
-      scannerPort
+    !sameOriginBridge &&
+    !directScannerAvatar
   ) {
     console.error(
       "[RML BUILDER INTERNAL FAILURE] The selected scanner profile returned an avatar outside its same-origin bridge contract."
@@ -36460,8 +36485,16 @@ async function fetchRmlBuilderProfileAvatarDataUrl(
   try {
     const response = await fetch(candidate.href, {
       cache: "no-store",
-      credentials: "same-origin",
+      credentials:
+        sameOriginBridge
+          ? "same-origin"
+          : "omit",
       headers: { Accept: "image/*" },
+      mode:
+        sameOriginBridge
+          ? "same-origin"
+          : "cors",
+      redirect: "error",
       signal: controller.signal
     });
     if (!response.ok) return null;
@@ -36537,26 +36570,39 @@ async function synchronizeOneRmlBuilderProfile(
   port,
   revision
 ) {
-  const profileUrl = new URL(
-    "/rml-scanner-profile",
-    window.location.origin
-  );
-  profileUrl.searchParams.set(
-    "port",
-    String(port)
-  );
-  const rawProfile =
+  const scannerOrigin =
+    `http://127.0.0.1:${port}`;
+  const rawProfileResponse =
     await fetchRmlBuilderProfileJson(
-      profileUrl.href
+      `${scannerOrigin}/profile`,
+      {
+        optional: true
+      }
     );
   if (
     revision !==
       rmlBuilderProfileRequestRevision ||
-    rawProfile ===
+    rawProfileResponse ===
       RML_BUILDER_PROFILE_FETCH_FAILED
   ) {
     return false;
   }
+  const rawProfile = {
+    ...rawProfileResponse,
+    sourceScannerPort: port,
+    avatarUrl:
+      typeof rawProfileResponse
+        ?.avatarUrl === "string" &&
+      rawProfileResponse.avatarUrl.trim()
+        ? `${scannerOrigin}/profile/avatar`
+        : "",
+    avatarSource:
+      typeof rawProfileResponse
+        ?.avatarUrl === "string" &&
+      rawProfileResponse.avatarUrl.trim()
+        ? "rml-scanner-direct-profile-avatar"
+        : ""
+  };
   if (rawProfile?.available === false) {
     return false;
   }
@@ -42486,7 +42532,7 @@ async function ensureInformationDialogLoaded() {
   }
 
   informationTemplateLoadPromise = loadLazyHtmlTemplate(
-    "../../templates/help_template.html?v=1.21.76-custom-csharp-catalog-provenance"
+    "../../templates/help_template.html?v=1.21.77-static-live-import-stability"
   )
     .then(markup => {
       const host = document.getElementById("lazy-dialog-host") || document.body;
@@ -49164,7 +49210,7 @@ function rmlRuntimeDisplayInspector() {
         const up =
           document.createElement("button");
         up.type = "button";
-        up.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#icon-${selected.runtimeDisplayStacked ? "chevron-up" : "chevron-left"}"></use></svg>`;
+        up.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-${selected.runtimeDisplayStacked ? "chevron-up" : "chevron-left"}"></use></svg>`;
         up.title =
           selected.runtimeDisplayStacked
             ? window.RMLI18n.t("ui.literal.6f39a4bc0048")
@@ -49182,7 +49228,7 @@ function rmlRuntimeDisplayInspector() {
         const down =
           document.createElement("button");
         down.type = "button";
-        down.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#icon-${selected.runtimeDisplayStacked ? "chevron-down" : "chevron-right"}"></use></svg>`;
+        down.innerHTML = `<svg class="rml-inline-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-${selected.runtimeDisplayStacked ? "chevron-down" : "chevron-right"}"></use></svg>`;
         down.title =
           selected.runtimeDisplayStacked
             ? window.RMLI18n.t("ui.literal.6d6a5bc02a98")
@@ -50017,7 +50063,7 @@ function rmlRuntimeDisplayPreviewItems(
 
 function rmlRuntimeDisplayPreviewCopyIcon() {
   return `
-    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.76-custom-csharp-catalog-provenance#icon-copy"></use></svg>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/rml-icons.svg?v=1.21.77-static-live-import-stability#icon-copy"></use></svg>
   `;
 }
 

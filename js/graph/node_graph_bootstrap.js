@@ -1,7 +1,7 @@
 "use strict";
 
 const GRAPH_BOOTSTRAP_MODULE_ID =
-  "1.21.76-custom-csharp-catalog-provenance";
+  "1.21.77-static-live-import-stability";
 
 function assertGraphBootstrapModuleCoherence() {
   const mismatches = [];
@@ -377,6 +377,12 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
           graphNormalizationChanged = false
         } = {}
       ) {
+        if (
+          !graphHostInitialized &&
+          !initializeNodeGraphHost()
+        ) {
+          return false;
+        }
         const requestedProjectEpoch =
           Number(projectEpoch) || 0;
         const currentProjectEpoch =
@@ -1329,7 +1335,20 @@ Object.defineProperty(window, "RMLDynamicGraphHost", {
         };
       },
       isReady() {
+        const activeBridge =
+          window.RMLBuilderBridge;
+        const activeProjectEpoch =
+          Number(
+            activeBridge
+              ?.getProjectEpoch?.()
+          ) || 0;
         return Boolean(
+          graphHostInitialized &&
+          activeBridge &&
+          bridge === activeBridge &&
+          activeProjectEpoch > 0 &&
+          builderProjectEpoch ===
+            activeProjectEpoch &&
           graph &&
           Array.isArray(graph.nodes) &&
           Array.isArray(graph.connections)

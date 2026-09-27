@@ -2,7 +2,7 @@
   "use strict";
 
   const API_FACTORY_MODULE_ID =
-    "1.21.76-custom-csharp-catalog-provenance";
+    "1.21.77-static-live-import-stability";
   const FACTORY_VERSION = 38;
   const API_VERIFICATION_SCHEMA_VERSION = 3;
   const CATALOG_PROJECTION_INDEX_VERSION = 2;

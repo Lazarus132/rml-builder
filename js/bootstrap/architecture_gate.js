@@ -2,7 +2,7 @@
   "use strict";
 
   const MODULE_ID =
-    "1.21.76-custom-csharp-catalog-provenance";
+    "1.21.77-static-live-import-stability";
   const GATE_VERSION = 1;
 
   
